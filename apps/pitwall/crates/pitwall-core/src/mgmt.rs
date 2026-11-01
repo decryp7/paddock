@@ -57,14 +57,14 @@ pub enum ErrorCode {
     BadRequest,
     /// The state doesn't allow it now.
     Conflict,
-    /// Offline mode.
-    Offline,
     /// Not enough memory.
     InsufficientMemory,
     /// Busy.
     Busy,
     /// Not available on this machine.
     NotAvailable,
+    /// An outside host (Hugging Face, GitHub) could not be reached, refused, or sent bad data; try again later.
+    Upstream,
     /// Not built yet.
     NotImplemented,
     /// A bug.
@@ -77,12 +77,13 @@ impl ErrorCode {
         match self {
             ErrorCode::ServerUnavailable => 503,
             ErrorCode::Unauthorized => 401,
-            ErrorCode::Forbidden | ErrorCode::Offline => 403,
+            ErrorCode::Forbidden => 403,
             ErrorCode::NotFound => 404,
             ErrorCode::BadRequest => 400,
             ErrorCode::Conflict => 409,
             ErrorCode::InsufficientMemory | ErrorCode::Busy => 503,
             ErrorCode::NotAvailable | ErrorCode::NotImplemented => 501,
+            ErrorCode::Upstream => 502,
             ErrorCode::Internal => 500,
         }
     }
@@ -129,8 +130,6 @@ pub struct ServerInfo {
     pub started_at: Millis,
     /// Serving or paused.
     pub serving: ServingState,
-    /// Offline mode.
-    pub offline: bool,
     /// LAN exposure.
     pub lan: LanStatus,
 }
@@ -1285,8 +1284,6 @@ pub enum LiveUpdate {
 pub enum UpdateCheckOutcome {
     /// Hugging Face was asked and the notices are up to date.
     Checked,
-    /// Offline mode is on: nothing was asked.
-    Offline,
     /// Another check ran moments ago.
     RateLimited,
     /// A check is running already.
@@ -1325,10 +1322,8 @@ pub struct UpdateCheckStatus {
     pub last_attempt_at: Option<Millis>,
     /// How the last attempt went.
     pub last_message: Option<String>,
-    /// When the next scheduled check is due (`None`: the schedule is off or offline mode is on).
+    /// When the next scheduled check is due (`None`: the schedule is off).
     pub next_check_at: Option<Millis>,
-    /// Offline mode is on (no check can run).
-    pub offline: bool,
     /// A check is running.
     pub running: bool,
     /// Notices shown now.
@@ -1359,7 +1354,6 @@ mod tests {
         assert_eq!(serde_json::from_value::<UpdateCheckResult>(v).unwrap(), r);
         for (o, w) in [
             (UpdateCheckOutcome::Checked, "checked"),
-            (UpdateCheckOutcome::Offline, "offline"),
             (UpdateCheckOutcome::Busy, "busy"),
             (UpdateCheckOutcome::NothingToCheck, "nothingToCheck"),
             (UpdateCheckOutcome::Failed, "failed"),
@@ -1372,7 +1366,6 @@ mod tests {
             last_attempt_at: Some(5),
             last_message: None,
             next_check_at: None,
-            offline: false,
             running: false,
             notices: 0,
             host: "huggingface.co".into(),
@@ -1455,13 +1448,13 @@ mod tests {
             (ErrorCode::ServerUnavailable, 503),
             (ErrorCode::Unauthorized, 401),
             (ErrorCode::Forbidden, 403),
-            (ErrorCode::Offline, 403),
             (ErrorCode::NotFound, 404),
             (ErrorCode::BadRequest, 400),
             (ErrorCode::Conflict, 409),
             (ErrorCode::InsufficientMemory, 503),
             (ErrorCode::Busy, 503),
             (ErrorCode::NotAvailable, 501),
+            (ErrorCode::Upstream, 502),
             (ErrorCode::NotImplemented, 501),
             (ErrorCode::Internal, 500),
         ];

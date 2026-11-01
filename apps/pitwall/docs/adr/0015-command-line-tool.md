@@ -20,7 +20,7 @@ CLI that adds no server surface.
 - **No new server surface.** Management commands call the existing `POST /mgmt/v1/rpc/{method}` methods with the admin key;
   `chat` calls the standard `/v1/chat/completions` with a per-app key, so a script's key keeps the app's permissions and
   limits and the request shows up in Requests and Usage like any other app's. `pull` asks the server to download (host shown,
-  offline mode honoured, resumable) and polls `downloads` for progress.
+  resumable) and polls `downloads` for progress.
 - **Keys never travel on the command line.** The admin key comes from `--key-file`, `PITWALL_ADMIN_KEY`, the OS credential
   store (the entry the window keeps) or `admin.key`, in that order; the app key from `PITWALL_API_KEY`. `--key` is refused
   with an explanation. Keys are never printed except a just-created secret, once, alone on stdout.
@@ -28,7 +28,7 @@ CLI that adds no server surface.
   says what to fix; a parser of about 200 lines that is a pure function is easier to keep exact than configuring a framework,
   and it adds no dependency. (`keyring` is the only new dependency, already used by the app.)
 - **Stable exit codes**: 0 ok, 1 error, 2 usage, 3 server not running (with the next step), 4 refused (insufficient memory,
-  offline mode, busy, conflict, a limit). The mapping from `mgmt::ErrorCode` is a pure function with a test per code.
+  busy, conflict, a limit). The mapping from `mgmt::ErrorCode` is a pure function with a test per code.
 - **Pure core, thin edge.** `args`, `exit`, `format`, `sse` and the decisions in `discover` are pure and unit tested (above
   96 % of lines); `api` and `run` are the I/O edge, tested by `tests/cli.rs` which runs the built binary against a fake local
   server on an ephemeral port.

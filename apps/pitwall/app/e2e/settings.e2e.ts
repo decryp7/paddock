@@ -13,18 +13,18 @@ test.describe('settings', () => {
     for (const name of ['Pitwall', 'Appearance']) await expect(settings.getByText(name, { exact: true }).first()).toBeVisible();
   });
 
-  test('turns offline mode on; it is saved by itself and still on when Settings opens again', async ({ page }) => {
+  test('turns a switch on; it is saved by itself and still on when Settings opens again', async ({ page }) => {
     await openSettings(page);
     const settings = settingsDialog(page);
     await expect(settings.getByText(/when you save|unsaved changes/i)).toHaveCount(0);
-    await settings.getByRole('switch', { name: 'Offline mode' }).click();
+    await settings.getByRole('switch', { name: 'Serve other devices on your network' }).click();
     await expect(settings.getByTestId('save-state')).toHaveText('');
     await expect(settings.getByRole('button', { name: /Save changes/ })).toHaveCount(0);
     // Closing right away loses nothing: the page saves what waits when it goes.
     await settings.getByRole('button', { name: 'Close' }).last().click();
     await expect(settings).toHaveCount(0);
     await pressMod(page, 'Mod+Comma');
-    await expect(settingsDialog(page).getByRole('switch', { name: 'Offline mode' })).toBeChecked();
+    await expect(settingsDialog(page).getByRole('switch', { name: 'Serve other devices on your network' })).toBeChecked();
   });
 
   test('switches the theme on the shell’s Appearance page', async ({ page }) => {
@@ -69,8 +69,8 @@ test.describe('settings', () => {
   for (const [what, edit, check] of [
     [
       'a switch',
-      async (d: Locator) => d.getByRole('switch', { name: 'Offline mode' }).click(),
-      async (d: Locator) => expect(d.getByRole('switch', { name: 'Offline mode' })).toBeChecked(),
+      async (d: Locator) => d.getByRole('switch', { name: 'Serve other devices on your network' }).click(),
+      async (d: Locator) => expect(d.getByRole('switch', { name: 'Serve other devices on your network' })).toBeChecked(),
     ],
     [
       'a typed number',
@@ -91,11 +91,11 @@ test.describe('settings', () => {
   test('closing Settings with a refused change says which and why, and closes only when told', async ({ page }) => {
     await openSettings(page, 'mock-fast&mock-static&mock-fail=saveSettings');
     const settings = settingsDialog(page);
-    await settings.getByRole('switch', { name: 'Offline mode' }).click();
-    await expect(settings.getByTestId('save-error')).toContainText('Offline mode could not be saved:');
+    await settings.getByRole('switch', { name: 'Serve other devices on your network' }).click();
+    await expect(settings.getByTestId('save-error')).toContainText('Serve other devices on your network could not be saved:');
     await page.keyboard.press('Escape');
     const warning = settings.getByTestId('settings-not-saved');
-    await expect(warning).toContainText('Offline mode was not saved:');
+    await expect(warning).toContainText('Serve other devices on your network was not saved:');
     await warning.getByRole('button', { name: 'Keep editing' }).click();
     await expect(warning).toHaveCount(0);
     await settings.getByRole('button', { name: 'Close' }).last().click();

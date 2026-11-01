@@ -20,9 +20,6 @@ pub struct Health {
     /// `serving`, `paused` or `stopped`.
     #[serde(default)]
     pub serving: String,
-    /// Pitwall's offline mode is on (no downloads).
-    #[serde(default)]
-    pub offline: bool,
     /// Models in memory now.
     #[serde(default)]
     pub loaded_models: u32,
@@ -245,10 +242,10 @@ mod tests {
 
     #[test]
     fn health_pairing_and_models_ignore_unknown_fields_and_default_missing_ones() {
-        let h: Health = serde_json::from_str(r#"{"ok":true,"name":"pitwall","version":"1.0.4","apiVersion":1,"serving":"paused","future":1}"#).unwrap();
+        let h: Health = serde_json::from_str(r#"{"ok":true,"name":"pitwall","version":"1.0.4","apiVersion":1,"serving":"paused","offline":true,"future":1}"#).unwrap();
         assert_eq!(
-            (h.api_version, h.is_serving(), h.loaded_models, h.offline),
-            (1, false, 0, false)
+            (h.api_version, h.is_serving(), h.loaded_models),
+            (1, false, 0)
         );
         assert!(
             serde_json::from_str::<Health>(r#"{"version":"1"}"#).is_err(),

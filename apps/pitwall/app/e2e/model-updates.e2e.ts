@@ -50,7 +50,7 @@ test.describe('model updates', () => {
     await expect(page.locator('pw-library-tab tbody mat-icon.upd')).toHaveCount(0);
   });
 
-  test('turns the schedule on and off, and offline mode stops the check', async ({ page }) => {
+  test('turns the schedule on and off', async ({ page }) => {
     await openSettings(page);
     const panel = settingsDialog(page).locator('#set-model-updates');
     const toggle = panel.getByRole('switch', { name: 'Check for model updates' });
@@ -63,9 +63,5 @@ test.describe('model updates', () => {
     await toggle.click();
     await expect(toggle).not.toBeChecked();
     await expect(panel.getByRole('combobox', { name: /^How often/ })).toBeDisabled();
-
-    await settingsDialog(page).getByRole('switch', { name: 'Offline mode' }).click();
-    await expect(panel.getByRole('button', { name: 'Check now' })).toBeDisabled();
-    await expect(panel).toContainText('Offline mode is on, so no check can run.');
   });
 });

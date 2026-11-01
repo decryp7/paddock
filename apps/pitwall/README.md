@@ -16,8 +16,7 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 
 
 > **Local only.** Nothing you ask and nothing the model answers ever leaves your computer. No cloud models, no
-> telemetry, no crash upload. The only network traffic is downloading engines and models you asked for, and offline
-> mode turns even that off. This is the first architecture decision and is enforced in code and tests:
+> telemetry, no crash upload. The only network traffic is downloading engines and models you asked for. This is the first architecture decision and is enforced in code and tests:
 > [ADR 0001](docs/adr/0001-local-only.md).
 
 **Status: 1.1.0 in progress** (the latest release is 1.0.x, until the `pitwall-v1.1.0` tag exists). The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
@@ -100,7 +99,7 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
   clear buttons ([ADR 0019](docs/adr/0019-caching.md), [user guide](docs/user-guide.md#caching)).
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
-- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app), an offline mode.
+- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app).
 - **Model catalog packs.** Add model lists with a TOML file, no code ([user guide](docs/user-guide.md#packs-add-a-model-list)).
 - **The app.** Dashboard, models, llama.cpp, apps, requests, playground, benchmarks, settings, tray. Choose what Quit does about serving.
 

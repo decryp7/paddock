@@ -377,8 +377,7 @@ async fn repair_job(
 }
 
 /// Asks Hugging Face about the downloaded models in the background (`check_updates_now` as a job). Up to 40 repositories
-/// are asked one after another; Cancel stops the check and writes nothing. In offline mode the server answers the outcome
-/// `offline` without a request.
+/// are asked one after another; Cancel stops the check and writes nothing.
 #[tauri::command]
 pub async fn start_check_updates(
     client: State<'_, SharedClient>,

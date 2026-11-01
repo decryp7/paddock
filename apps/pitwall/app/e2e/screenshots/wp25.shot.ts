@@ -83,7 +83,7 @@ test.describe('WP-2.5 screenshots', () => {
             await expect(page.locator('#set-general')).toBeVisible();
           }
           if (name === 'save-refused') {
-            await page.getByRole('switch', { name: 'Offline mode' }).click();
+            await page.getByRole('switch', { name: 'Serve other devices on your network' }).click();
             await expect(page.getByTestId('save-error')).toBeVisible();
             // The section starts under the sticky error, not behind it.
             await page.locator('#set-network').evaluate((e) => {

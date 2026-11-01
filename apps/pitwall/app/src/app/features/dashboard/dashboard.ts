@@ -66,9 +66,6 @@ export class PerfMeter {
           <p class="sub">
             @if (live.server(); as s) {
               Pitwall {{ s.version }} · up {{ uptime() }} · {{ connectedApps() }} apps connected
-              @if (s.offline) {
-                · <span class="offline">Offline mode</span>
-              }
             } @else {
               Connecting to the server…
             }
@@ -190,10 +187,6 @@ export class PerfMeter {
     }
     .page-head {
       margin-bottom: var(--pd-space-2);
-    }
-    .offline {
-      color: var(--pd-warning);
-      font-weight: var(--pd-weight-medium);
     }
     .grid {
       display: grid;

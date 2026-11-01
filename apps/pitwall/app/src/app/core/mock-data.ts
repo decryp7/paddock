@@ -327,7 +327,7 @@ export function demoSettings(): Settings {
       yieldToForeground: true,
       notifyOnRelease: true,
     },
-    network: { offline: false, lanEnabled: false, lanPort: 11501 },
+    network: { lanEnabled: false, lanPort: 11501 },
     privacy: { keepRequestContent: false, metricsRetentionDays: 30 },
     cache: {
       prefixAffinity: true,

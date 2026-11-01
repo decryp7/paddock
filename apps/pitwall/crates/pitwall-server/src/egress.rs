@@ -1,10 +1,10 @@
 //! The only outbound HTTP client (ADR 0001): downloads engines and models the user asked for, and Hugging Face
 //! search/listing. Every URL is a [`DownloadUrl`] (https, allow-listed host), every redirect is checked against the
-//! same list, offline mode refuses before any socket opens, and request handlers have no way to reach this module
+//! same list, and request handlers have no way to reach this module
 //! (they get the library/engine managers, which call it from their own tasks).
 
 use futures_util::StreamExt;
-use pitwall_core::privacy::{check_online, DownloadUrl, EgressError};
+use pitwall_core::privacy::{DownloadUrl, EgressError};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,7 +15,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 /// Why a download failed.
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
-    /// Not allowed (offline, wrong host).
+    /// Not allowed (wrong scheme or host).
     #[error("{0}")]
     Egress(#[from] EgressError),
     /// The network failed.
@@ -59,7 +59,6 @@ impl CancelFlag {
 #[derive(Clone)]
 pub struct Egress {
     client: reqwest::Client,
-    offline: Arc<AtomicBool>,
 }
 
 fn hint(status: u16) -> &'static str {
@@ -71,10 +70,27 @@ fn hint(status: u16) -> &'static str {
     }
 }
 
+impl Default for Egress {
+    fn default() -> Egress {
+        Egress::new()
+    }
+}
+
 impl Egress {
-    /// A client; `offline` is shared with the settings so toggling takes effect immediately.
+    /// A client.
+    pub fn new() -> Egress {
+        Egress::build(&[])
+    }
+
+    /// A client whose allow-listed hosts all resolve to a closed local port, so a test's request fails at once without
+    /// leaving the machine.
+    #[cfg(test)]
+    pub fn unreachable() -> Egress {
+        Egress::build(pitwall_core::privacy::DOWNLOAD_HOSTS)
+    }
+
     #[allow(clippy::disallowed_methods)] // the single allowed place (ADR 0001)
-    pub fn new(offline: Arc<AtomicBool>) -> Egress {
+    fn build(closed_hosts: &[(&str, &str)]) -> Egress {
         let policy = reqwest::redirect::Policy::custom(|a| {
             if a.previous().len() >= 6 {
                 return a.error("too many redirects");
@@ -84,7 +100,11 @@ impl Egress {
                 Err(e) => a.error(e.to_string()),
             }
         });
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder();
+        for (host, _) in closed_hosts {
+            builder = builder.resolve(host, std::net::SocketAddr::from(([127, 0, 0, 1], 1)));
+        }
+        let client = builder
             .redirect(policy)
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(60))
@@ -93,17 +113,11 @@ impl Egress {
             .no_proxy()
             .build()
             .unwrap_or_default();
-        Egress { client, offline }
-    }
-
-    /// Whether offline mode is on.
-    pub fn offline(&self) -> bool {
-        self.offline.load(Ordering::SeqCst)
+        Egress { client }
     }
 
     /// GET a small JSON document (Hugging Face API), at most `max` bytes.
     pub async fn get_json(&self, url: &DownloadUrl, max: usize) -> Result<serde_json::Value, DownloadError> {
-        check_online(self.offline())?;
         let r = self
             .client
             .get(url.as_str())
@@ -136,7 +150,6 @@ impl Egress {
         cancel: &CancelFlag,
         mut progress: impl FnMut(u64, Option<u64>) + Send,
     ) -> Result<String, DownloadError> {
-        check_online(self.offline())?;
         if let Some(d) = dest.parent() {
             tokio::fs::create_dir_all(d).await.map_err(|e| DownloadError::Io(e.to_string()))?;
         }
@@ -226,16 +239,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn offline_refuses_before_any_connection() {
-        let e = Egress::new(Arc::new(AtomicBool::new(true)));
-        let u = DownloadUrl::parse("https://huggingface.co/x").unwrap();
-        assert!(matches!(e.get_json(&u, 10).await, Err(DownloadError::Egress(EgressError::Offline))));
-        let d = tempfile::tempdir().unwrap();
-        let r = e.download(&u, &d.path().join("f"), None, &CancelFlag::default(), |_, _| {}).await;
-        assert!(matches!(r, Err(DownloadError::Egress(EgressError::Offline))));
-    }
-
-    #[tokio::test]
     async fn checksum_of_a_file() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("f");
@@ -253,5 +256,18 @@ mod tests {
         c.clone().cancel();
         assert!(c.is_cancelled());
         assert!(hint(403).contains("gated") && hint(500).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_host_is_named_in_the_error() {
+        let url = DownloadUrl::parse("https://huggingface.co/api/models?search=x").unwrap();
+        let e = Egress::unreachable().get_json(&url, 1 << 10).await.unwrap_err();
+        assert!(matches!(&e, DownloadError::Network(m) if m.contains("huggingface.co")), "{e}");
+        let d = tempfile::tempdir().unwrap();
+        let e = Egress::unreachable()
+            .download(&url, &d.path().join("f.part"), None, &CancelFlag::default(), |_, _| {})
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("huggingface.co"), "{e}");
     }
 }

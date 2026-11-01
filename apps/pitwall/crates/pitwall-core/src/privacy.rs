@@ -1,6 +1,6 @@
 //! Local only (ADR 0001). Pitwall's only outbound traffic is downloading engines and models the user asked for, from
 //! the hosts listed here, over HTTPS, and the check-only model update queries the user turned on (ADR 0017: the file
-//! lists of repositories already downloaded from); offline mode stops even that. Requests to the API never cause outbound traffic:
+//! lists of repositories already downloaded from). Requests to the API never cause outbound traffic:
 //! images must be inline, tools run locally, and the request path has no HTTP client (enforced in the server).
 //!
 //! This module decides which URLs a download may touch (every redirect hop is checked again) and which `Host` and
@@ -42,9 +42,6 @@ pub fn host_is_allowed(host: &str) -> bool {
 /// Why a URL may not be fetched.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EgressError {
-    /// Offline mode is on.
-    #[error("Pitwall is in offline mode: downloads are off. Turn offline mode off in Settings ▸ Network to download.")]
-    Offline,
     /// The URL is not one Pitwall downloads from.
     #[error("Pitwall only downloads from Hugging Face and GitHub over HTTPS; {0} is not allowed")]
     NotAllowed(String),
@@ -119,15 +116,6 @@ fn shorten(s: &str) -> String {
         format!("{t}…")
     } else {
         t
-    }
-}
-
-/// Whether downloads may run: `Ok` online, the typed error offline.
-pub fn check_online(offline: bool) -> Result<(), EgressError> {
-    if offline {
-        Err(EgressError::Offline)
-    } else {
-        Ok(())
     }
 }
 
@@ -218,12 +206,6 @@ mod tests {
         assert_eq!(serde_json::from_str::<DownloadUrl>(&json).unwrap(), u);
         assert!(serde_json::from_str::<DownloadUrl>("\"https://evil.com\"").is_err());
         assert!(DOWNLOAD_HOSTS.iter().all(|(_, why)| !why.is_empty()));
-    }
-
-    #[test]
-    fn offline_mode() {
-        assert!(check_online(false).is_ok());
-        assert!(check_online(true).unwrap_err().to_string().contains("offline mode"));
     }
 
     #[test]

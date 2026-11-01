@@ -5,7 +5,7 @@
 //! What a check sends: the file-list and info URLs of the repository ids you downloaded from (`GET
 //! /api/models/<repo>/tree/main` and `/api/models/<repo>`), nothing else; no request body, no model names beyond the
 //! repository id, no usage. It is bounded ([`MAX_REPOS`] repositories, a timeout per repository, a pause between
-//! them, three failures in a row stop it), skipped entirely in offline mode, and a refusal from Hugging Face
+//! them, three failures in a row stop it), and a refusal from Hugging Face
 //! (HTTP 429) ends it at once.
 
 use crate::app::AppState;
@@ -18,7 +18,6 @@ use pitwall_core::fit::Room;
 use pitwall_core::hf::{self, RepoId};
 use pitwall_core::mgmt::UpdateCheckStatus;
 use pitwall_core::mgmt::{UpdateCheckOutcome, UpdateCheckResult};
-use pitwall_core::privacy::EgressError;
 use pitwall_core::time::Millis;
 use pitwall_core::update_state::UpdateCheckSettings;
 use pitwall_core::update_state::{DismissError, Finished, UpdateState};
@@ -39,7 +38,7 @@ pub const MAX_FAILURES_IN_A_ROW: usize = 3;
 const MAX_JSON: usize = 8 * 1024 * 1024;
 
 /// Where repository listings come from: Hugging Face in production, a fake in tests. Implementations ask only about
-/// the repository they are given and must honour offline mode (an `Egress(Offline)` error before any socket opens).
+/// the repository they are given.
 pub trait RepoSource: Send + Sync {
     /// The repository's GGUF files and current commit.
     fn snapshot<'a>(&'a self, repo: &'a RepoId) -> BoxFuture<'a, Result<RepoSnapshot, DownloadError>>;
@@ -75,8 +74,6 @@ impl RepoSource for HfSource {
 
 /// What a check needs from the app.
 pub struct Request<'a> {
-    /// Offline mode is on.
-    pub offline: bool,
     /// The installed models (those without a repository are ignored).
     pub installed: Vec<Installed>,
     /// The context models are judged at.
@@ -188,14 +185,8 @@ impl Updates {
         }
     }
 
-    /// Runs one check. Offline mode, a rate limit or a running check answer at once without a single request.
+    /// Runs one check. A rate limit or a running check answer at once without a single request.
     pub async fn check(&self, source: &dyn RepoSource, req: Request<'_>) -> Report {
-        if req.offline {
-            return quick(
-                UpdateCheckOutcome::Offline,
-                "Offline mode is on, so Pitwall did not ask Hugging Face about your models. Turn offline mode off in Settings > Network to check.",
-            );
-        }
         if let Err(secs) = self.lock().manual_allowed(req.now) {
             let mut r = quick(
                 UpdateCheckOutcome::RateLimited,
@@ -248,9 +239,6 @@ impl Updates {
                 Ok(Ok(s)) => {
                     in_a_row = 0;
                     snapshots.insert(name.clone(), s);
-                }
-                Ok(Err(DownloadError::Egress(EgressError::Offline))) => {
-                    return quick(UpdateCheckOutcome::Offline, "Offline mode was turned on; the check stopped.");
                 }
                 Ok(Err(DownloadError::Status(429, _))) => {
                     stopped =
@@ -361,11 +349,7 @@ impl AppState {
     /// Runs a check now and raises one event per new finding. Never downloads anything.
     pub async fn run_update_check(self: &Arc<Self>) -> Report {
         let cfg = self.cfg();
-        let offline = self.offline.load(Ordering::SeqCst);
-        // Offline mode is answered before the library is even scanned.
-        let installed = if offline {
-            vec![]
-        } else {
+        let installed = {
             let lib = self.library.clone();
             tokio::task::spawn_blocking(move || lib.installed()).await.unwrap_or_default()
         };
@@ -375,7 +359,6 @@ impl AppState {
             .check(
                 self.update_source().as_ref(),
                 Request {
-                    offline,
                     installed,
                     context: cfg.models.default_context,
                     room: &room,
@@ -399,7 +382,7 @@ impl AppState {
     /// One look at the schedule: runs a check when one is due and allowed. Returns it when it ran.
     pub async fn scheduled_update_tick(self: &Arc<Self>) -> Option<Report> {
         let settings = self.cfg().models.update_check;
-        let due = !self.offline.load(Ordering::SeqCst) && self.updates.read(|s| s.due(&settings, now_ms()));
+        let due = self.updates.read(|s| s.due(&settings, now_ms()));
         if due {
             Some(self.run_update_check().await)
         } else {
@@ -423,15 +406,13 @@ impl AppState {
     /// The state of the checks for the UI.
     pub fn update_status(&self) -> UpdateCheckStatus {
         let settings: UpdateCheckSettings = self.cfg().models.update_check;
-        let offline = self.offline.load(Ordering::SeqCst);
         let now = now_ms();
         self.updates.read(|s| UpdateCheckStatus {
             settings,
             last_checked_at: s.last_checked_at,
             last_attempt_at: s.last_attempt_at,
             last_message: s.last_message.clone(),
-            next_check_at: if offline { None } else { s.next_due(&settings, now) },
-            offline,
+            next_check_at: s.next_due(&settings, now),
             running: self.updates.running(),
             notices: s.visible(now).len() as u32,
             host: "huggingface.co".into(),
@@ -552,43 +533,13 @@ mod tests {
         Updates::open(&Dirs::at(dir)).0.with_pace(Duration::ZERO)
     }
 
-    fn req<'a>(room: &'a Room, installed: Vec<Installed>, now: Millis, offline: bool) -> Request<'a> {
+    fn req<'a>(room: &'a Room, installed: Vec<Installed>, now: Millis) -> Request<'a> {
         Request {
-            offline,
             installed,
             context: 8192,
             room,
             now,
         }
-    }
-
-    #[tokio::test]
-    async fn the_real_source_refuses_in_offline_mode_before_any_socket() {
-        let e = Egress::new(std::sync::Arc::new(AtomicBool::new(true)));
-        let r = HfSource::new(e).snapshot(&RepoId::parse("a/b").unwrap()).await;
-        assert!(matches!(r, Err(DownloadError::Egress(EgressError::Offline))));
-    }
-
-    #[tokio::test]
-    async fn offline_mode_makes_no_request_at_all() {
-        let d = tempfile::tempdir().unwrap();
-        let u = updates(d.path());
-        let fake = FakeHf::with("acme/Tiny-GGUF", snap(vec![]));
-        let r = room();
-        let rep = u
-            .check(
-                &fake,
-                req(&r, vec![have("acme/Tiny-GGUF", "t-Q4_K_M.gguf", 1, None)], 1_000_000, true),
-            )
-            .await;
-        assert_eq!(rep.result.outcome, UpdateCheckOutcome::Offline);
-        assert!(rep.result.message.contains("Offline mode is on"));
-        assert_eq!(fake.calls(), 0, "zero requests while offline");
-        assert!(
-            u.read(|s| s.last_attempt_at.is_none() && s.last_checked_at.is_none()),
-            "an offline refusal is not an attempt"
-        );
-        assert!(!d.path().join("model-updates.json").exists());
     }
 
     #[tokio::test]
@@ -603,12 +554,7 @@ mod tests {
         let rep = u
             .check(
                 &fake,
-                req(
-                    &r,
-                    vec![have("acme/Tiny-GGUF", "Tiny-Q4_K_M.gguf", 4 * GIB, Some('a'))],
-                    5_000_000,
-                    false,
-                ),
+                req(&r, vec![have("acme/Tiny-GGUF", "Tiny-Q4_K_M.gguf", 4 * GIB, Some('a'))], 5_000_000),
             )
             .await;
         assert_eq!(
@@ -632,12 +578,7 @@ mod tests {
         let rep2 = u
             .check(
                 &fake,
-                req(
-                    &r,
-                    vec![have("acme/Tiny-GGUF", "Tiny-Q4_K_M.gguf", 4 * GIB, Some('a'))],
-                    6_000_000,
-                    false,
-                ),
+                req(&r, vec![have("acme/Tiny-GGUF", "Tiny-Q4_K_M.gguf", 4 * GIB, Some('a'))], 6_000_000),
             )
             .await;
         assert!(rep2.fresh.is_empty());
@@ -652,10 +593,10 @@ mod tests {
         let fake = FakeHf::with("acme/Tiny-GGUF", snap(vec![]));
         let m = || vec![have("acme/Tiny-GGUF", "t-Q4_K_M.gguf", 1, None)];
         assert_eq!(
-            u.check(&fake, req(&r, m(), 1_000_000, false)).await.result.outcome,
+            u.check(&fake, req(&r, m(), 1_000_000)).await.result.outcome,
             UpdateCheckOutcome::Checked
         );
-        let again = u.check(&fake, req(&r, m(), 1_020_000, false)).await;
+        let again = u.check(&fake, req(&r, m(), 1_020_000)).await;
         assert_eq!(
             (again.result.outcome, again.result.retry_in_secs),
             (UpdateCheckOutcome::RateLimited, Some(40))
@@ -663,12 +604,12 @@ mod tests {
         assert_eq!(fake.calls(), 1, "the refused check asked nothing");
         // A check that is still running turns the next one away.
         u.running.store(true, Ordering::SeqCst);
-        let busy = u.check(&fake, req(&r, m(), 9_000_000, false)).await;
+        let busy = u.check(&fake, req(&r, m(), 9_000_000)).await;
         assert_eq!(busy.result.outcome, UpdateCheckOutcome::Busy);
         u.running.store(false, Ordering::SeqCst);
         assert!(!u.running());
         assert_eq!(
-            u.check(&fake, req(&r, m(), 9_000_000, false)).await.result.outcome,
+            u.check(&fake, req(&r, m(), 9_000_000)).await.result.outcome,
             UpdateCheckOutcome::Checked
         );
     }
@@ -679,7 +620,7 @@ mod tests {
         let u = updates(d.path());
         let r = room();
         let fake = FakeHf::default();
-        let rep = u.check(&fake, req(&r, vec![], 1_000_000, false)).await;
+        let rep = u.check(&fake, req(&r, vec![], 1_000_000)).await;
         assert_eq!(rep.result.outcome, UpdateCheckOutcome::NothingToCheck);
         assert_eq!(fake.calls(), 0);
         assert!(u.read(|s| s.last_checked_at.is_some()));
@@ -699,7 +640,7 @@ mod tests {
             have("good/Repo", "g-Q4_K_M.gguf", 100, Some('a')),
             have("bad/Repo", "b-Q4_K_M.gguf", 100, Some('a')),
         ];
-        let rep = u.check(&fake, req(&r, installed.clone(), 1_000_000, false)).await;
+        let rep = u.check(&fake, req(&r, installed.clone(), 1_000_000)).await;
         assert_eq!(
             (rep.result.outcome, rep.result.repos_checked, rep.result.notices),
             (UpdateCheckOutcome::Checked, 1, 1)
@@ -707,7 +648,7 @@ mod tests {
         assert!(rep.result.message.contains("1 could not be read"), "{}", rep.result.message);
         // Everything failing is a failed attempt, remembered, and the old notices stay.
         let all_bad = FakeHf::default();
-        let rep = u.check(&all_bad, req(&r, installed, 2_000_000, false)).await;
+        let rep = u.check(&all_bad, req(&r, installed, 2_000_000)).await;
         assert_eq!(rep.result.outcome, UpdateCheckOutcome::Failed);
         assert!(u.read(|s| s.last_message.clone().unwrap().contains("could not be reached")));
         assert_eq!(
@@ -732,7 +673,7 @@ mod tests {
             .iter()
             .map(|r| have(r, "m-Q4_K_M.gguf", 1, None))
             .collect();
-        let rep = u.check(&fake, req(&r, installed, 1_000_000, false)).await;
+        let rep = u.check(&fake, req(&r, installed, 1_000_000)).await;
         assert_eq!(fake.calls(), 2, "nothing is asked after the 429");
         assert_eq!((rep.result.outcome, rep.result.repos_checked), (UpdateCheckOutcome::Checked, 1));
         assert!(rep.result.message.contains("slow down"));
@@ -747,7 +688,7 @@ mod tests {
         let installed: Vec<Installed> = (0..MAX_REPOS + 5)
             .map(|i| have(&format!("o/R{i:02}"), "m-Q4_K_M.gguf", 1, None))
             .collect();
-        let rep = u.check(&fake, req(&r, installed, 1_000_000, false)).await;
+        let rep = u.check(&fake, req(&r, installed, 1_000_000)).await;
         assert_eq!(rep.result.outcome, UpdateCheckOutcome::Failed);
         assert_eq!(fake.calls(), MAX_FAILURES_IN_A_ROW);
         // With answers, at most MAX_REPOS repositories are asked and the message says how many are left.
@@ -758,30 +699,13 @@ mod tests {
         for i in &installed {
             ok.repos.lock().unwrap().insert(i.repo.as_str().into(), Answer::Repo(snap(vec![])));
         }
-        let rep = u.check(&ok, req(&r, installed, 9_000_000, false)).await;
+        let rep = u.check(&ok, req(&r, installed, 9_000_000)).await;
         assert_eq!(ok.calls(), MAX_REPOS);
         assert!(
             rep.result.message.contains("5 more will be asked at the next check"),
             "{}",
             rep.result.message
         );
-    }
-
-    #[tokio::test]
-    async fn a_check_that_finds_offline_mode_mid_way_stops_quietly() {
-        let d = tempfile::tempdir().unwrap();
-        let u = updates(d.path());
-        let r = room();
-        let fake = FakeHf::default();
-        fake.repos
-            .lock()
-            .unwrap()
-            .insert("a/One".into(), Answer::Fail(|| DownloadError::Egress(EgressError::Offline)));
-        let rep = u
-            .check(&fake, req(&r, vec![have("a/One", "m-Q4_K_M.gguf", 1, None)], 1_000_000, false))
-            .await;
-        assert_eq!(rep.result.outcome, UpdateCheckOutcome::Offline);
-        assert!(u.read(|s| s.last_checked_at.is_none()));
     }
 
     #[tokio::test]
@@ -796,7 +720,7 @@ mod tests {
         let u = updates(d.path()).with_timeout(Duration::from_millis(30));
         let r = room();
         let rep = u
-            .check(&Hang, req(&r, vec![have("a/One", "m-Q4_K_M.gguf", 1, None)], 1_000_000, false))
+            .check(&Hang, req(&r, vec![have("a/One", "m-Q4_K_M.gguf", 1, None)], 1_000_000))
             .await;
         assert_eq!(rep.result.outcome, UpdateCheckOutcome::Failed);
     }
@@ -809,12 +733,7 @@ mod tests {
         let fake = FakeHf::with("acme/Tiny-GGUF", snap(vec![var("Tiny-Q4_K_M.gguf", 4 * GIB, 'b')]));
         u.check(
             &fake,
-            req(
-                &r,
-                vec![have("acme/Tiny-GGUF", "Tiny-Q4_K_M.gguf", 4 * GIB, Some('a'))],
-                1_000_000,
-                false,
-            ),
+            req(&r, vec![have("acme/Tiny-GGUF", "Tiny-Q4_K_M.gguf", 4 * GIB, Some('a'))], 1_000_000),
         )
         .await;
         assert_eq!(u.read(|s| s.all().len()), 1);

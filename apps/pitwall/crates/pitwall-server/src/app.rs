@@ -23,7 +23,6 @@ use pitwall_core::scheduler::{JobKind, Priority};
 use pitwall_core::select::Capability;
 use pitwall_core::usage::{Usage, UsageEvent};
 use std::collections::{HashSet, VecDeque};
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -44,8 +43,6 @@ pub struct AppState {
     pub dirs: Dirs,
     /// Live settings.
     pub settings: Arc<RwLock<Settings>>,
-    /// Offline switch shared with the egress client.
-    pub offline: Arc<AtomicBool>,
     /// The only outbound client.
     pub egress: Egress,
     /// llama.cpp installs.
@@ -114,8 +111,7 @@ impl AppState {
         let (p, b) = paths::read_with_backup(&dirs.settings(), config::MAX_SETTINGS_BYTES);
         let (settings, loaded) = config::load(p.as_deref(), b.as_deref());
         let hardware = system::detect_hardware().await;
-        let offline = Arc::new(AtomicBool::new(settings.network.offline));
-        let egress = Egress::new(offline.clone());
+        let egress = Egress::new();
         let llama = LlamaCpp::new(
             dirs.clone(),
             egress.clone(),
@@ -161,7 +157,6 @@ impl AppState {
         let st = Arc::new(AppState {
             dirs,
             settings,
-            offline,
             egress,
             llama,
             engine,
@@ -311,7 +306,6 @@ impl AppState {
     pub fn save_settings(&self, s: Settings) -> Result<Settings, String> {
         s.validate()?;
         paths::write_atomic(&self.dirs.settings(), s.to_toml().as_bytes()).map_err(|e| format!("cannot save the settings: {e}"))?;
-        self.offline.store(s.network.offline, std::sync::atomic::Ordering::SeqCst);
         self.llama.set_choice(BuildChoice::parse(&s.engines.build_choice));
         if let Ok(mut g) = self.settings.write() {
             *g = s.clone();

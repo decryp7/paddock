@@ -44,8 +44,8 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - **The only outbound traffic is a download you asked for**, over HTTPS, from the allow-listed hosts in
   `pitwall_core::privacy`: Hugging Face (and its CDN and Xet storage hosts) for models and GitHub releases for engines. Every
   redirect hop is checked again; each download shows its host in the UI. Works.
-- **Offline mode** turns even that off: every download path answers "Pitwall is in offline mode: downloads are off." Works,
-  tested end to end.
+- There is no Offline mode: it was removed in 1.1 ("local first" means the AI models run locally). A 1.0 settings file that
+  still has it loads normally; the key is ignored and dropped on the next save.
 - **The request path has no HTTP client.** A test fails if a request handler can open an outbound connection, and a script
   (`scripts/ci/privacy-check.sh`) fails the build if the one outbound client (`egress.rs`) is used from anywhere else. Works.
 
@@ -55,7 +55,7 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
   llama.cpp serves GGUF everywhere. Engine packs, llamafile and the placeholder engines (MLX, vLLM, whisper.cpp) are gone. Works.
 - **It installs itself.** On start, and whenever a model needs a build and none is installed, Pitwall installs the suggested
   build in the background (checksum and self-test as below). Model loads and model downloads wait for it ("Installing
-  llama.cpp...", downloads stay queued); the Dashboard and the llama.cpp page show the progress; offline mode or a network
+  llama.cpp...", downloads stay queued); the Dashboard and the llama.cpp page show the progress; a network
   error ends in a message with **Retry**. You can still install, pick or pin another build. Works (tested with a fake installer,
   no network).
 - Pitwall installs official prebuilt `llama-server` builds from a pinned catalog
@@ -149,7 +149,7 @@ against the official SDKs' documented objects.
 
 Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR 0009](adr/0009-app-integration-contract.md)).
 
-- **Health**: `GET /x/v1/health` (name, version, `apiVersion`, serving or paused, offline, loaded models). Works.
+- **Health**: `GET /x/v1/health` (name, version, `apiVersion`, serving or paused, loaded models). Works.
 - **Pairing**: `POST /x/v1/pair` and `GET /x/v1/pair/{id}`. Works; see [Apps, keys and pairing](#apps-keys-and-pairing).
 - **Model by capability**: `model: "auto:vision,8k,fast"` in any chat request, or `POST /x/v1/select` to ask first.
   Capabilities `chat`, `vision`, `tools`, `json`, `embeddings`, `rerank`; a context such as `8k`; and a preference
@@ -169,7 +169,7 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   requests beyond the slots wait in the queue; a change applies on the next load and never interrupts a busy model. Works.
 - **Model update notices** ([ADR 0017](adr/0017-model-update-notices.md)): off until you turn it on in Settings > Model updates (weekly or
   daily; Check now always works). A check asks `huggingface.co` for the file lists of the repositories you downloaded from, and
-  nothing else, through the one egress client; offline mode makes no request at all. It finds a newer revision of a file you have
+  nothing else, through the one egress client; until you turn the schedule on, no request is made. It finds a newer revision of a file you have
   (by the SHA-256 recorded at download, or by size for older downloads), a better quantisation of the same model that fits this
   machine, or an imatrix build. Notices appear as a banner on Models, a note on the library row, a line on the Dashboard and an
   entry in the tray; Dismiss hides an offer until it changes, Remind me in a week snoozes it. Get it asks for confirmation with
@@ -232,7 +232,7 @@ Everything cached stays on this computer.
 ## Command line
 
 `pitwall` (crate `pitwall-cli`) controls the local server from a terminal or script: `status`, `ps`, `models`, `load`,
-`unload`, `pull` (a download job with progress, resumable, shows the host, honours offline mode), `keys`
+`unload`, `pull` (a download job with progress, resumable, shows the host), `keys`
 (list, create, revoke; a new key is shown once), `presets`, `chat` (streams over the standard OpenAI endpoint with a per-app
 key from `PITWALL_API_KEY`) and `bench`. `--json` on every read command, a time limit on every call, stable exit codes
 (0 ok, 1 error, 2 usage, 3 server not running, 4 refused) and error messages that say what to fix. The admin key comes from
@@ -368,7 +368,7 @@ is saved when the window closes.
 - **Server**: port (default 11435), largest request, request timeout, requests at once, allow keyless local access.
 - **Memory**: the preset and every value of it (idle release, deep idle, pressure threshold, always keep free, hot models at once,
   memory limit for hot models, yield to foreground, notify on release).
-- **Network**: offline mode. The LAN switch and port are stored but sharing on the local network is **planned** and does nothing
+- **Network**: the LAN switch and port are stored but sharing on the local network is **planned** and does nothing
   yet.
 - **Privacy**: keep request content (off), how long metrics and history are kept (30 days).
 - **Caching**: the three caches (embeddings on, response cache off), sizes, storage (memory or disk), expiry, the oldest entry, when
@@ -387,7 +387,7 @@ falls back to the backup and then the defaults. Works.
 - **Discovery**: a running server writes `discovery.json` (version, API version, pid, port, base URL, start time) and removes it
   on a clean stop. Works.
 - **Updates** are the shell's (Help > Check for updates…): the signed `latest.json` of the `pitwall-latest` release, checked
-  only when you ask or, if you turn it on, once a day; never while Offline mode is on or has not been confirmed off. Builds
+  only when you ask or, if you turn it on, once a day. Builds
   without the signing key report that updates are not available; see [releasing](releasing.md).
 
 ## Security and privacy

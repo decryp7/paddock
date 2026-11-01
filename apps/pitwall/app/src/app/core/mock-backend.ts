@@ -243,7 +243,6 @@ export class MockBackend implements PitwallBackend {
       port: this.settings_.server.port,
       startedAt: now - 5 * 3_600_000 - 12 * 60_000,
       serving: 'serving',
-      offline: false,
       lan: { enabled: false, url: null, certFingerprint: null },
     };
     this.library = empty ? [] : demoLocalModels(now);
@@ -642,7 +641,6 @@ export class MockBackend implements PitwallBackend {
 
   searchModels(query: string): Promise<HfModel[]> {
     return this.reply('searchModels', () => {
-      if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall makes no network requests. Turn it off in Settings ▸ Network.');
       return demoSearch(query, this.now());
     });
   }
@@ -798,7 +796,6 @@ export class MockBackend implements PitwallBackend {
 
   installBuild(buildId: string): Promise<Download> {
     return this.reply('installBuild', () => {
-      if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall downloads nothing.');
       const engine = this.engineOfBuild(buildId) ?? this.fail('notFound', `No build ${buildId} in the catalog.`);
       const cat = engine.catalog.find((c) => c.id === buildId)!;
       const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: buildDownloadName(engine.name, cat), host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
@@ -1042,8 +1039,7 @@ export class MockBackend implements PitwallBackend {
       lastCheckedAt: this.updateChecked_?.at ?? null,
       lastAttemptAt: this.updateChecked_?.at ?? null,
       lastMessage: this.updateChecked_?.message ?? null,
-      nextCheckAt: this.server.offline || !this.updateCheck_.enabled ? null : (this.updateChecked_?.at ?? this.now()) + week,
-      offline: this.server.offline,
+      nextCheckAt: !this.updateCheck_.enabled ? null : (this.updateChecked_?.at ?? this.now()) + week,
       running: false,
       notices: this.visibleUpdates().length,
       host: 'huggingface.co',
@@ -1065,9 +1061,6 @@ export class MockBackend implements PitwallBackend {
 
   checkUpdatesNow(): Promise<UpdateCheckResult> {
     return this.reply('checkUpdatesNow', () => {
-      if (this.server.offline) {
-        return { outcome: 'offline', message: 'Offline mode is on, so Pitwall did not ask Hugging Face about your models. Turn offline mode off in Settings > Network to check.', reposChecked: 0, notices: 0, retryInSecs: null };
-      }
       const now = this.now();
       if (this.updateChecked_ && now - this.updateChecked_.at < 60_000) {
         const wait = Math.ceil((60_000 - (now - this.updateChecked_.at)) / 1000);
@@ -1268,7 +1261,6 @@ export class MockBackend implements PitwallBackend {
     return this.reply('saveSettings', () => {
       if (settings.server.port < 1024 || settings.server.port > 65535) this.fail('badRequest', 'The port must be between 1024 and 65535.');
       this.settings_ = clone(settings);
-      this.server.offline = settings.network.offline;
       this.server.port = settings.server.port;
       this.server.lan = settings.network.lanEnabled
         ? { enabled: true, url: `https://192.168.1.42:${settings.network.lanPort}`, certFingerprint: '4F:9A:21:C0:7E:55:B3:18:9D:02:6A:F1:3C:88:E4:57:0B:A9:D6:12:7F:C3:45:8E:91:2D:B0:66:EA:73:19:5C' }

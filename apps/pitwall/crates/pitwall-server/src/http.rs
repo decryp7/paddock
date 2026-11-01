@@ -840,14 +840,12 @@ async fn x_health(State(st): S, h: HeaderMap) -> Response {
     if !privacy::host_allowed(header_str(&h, "host"), &[]) {
         return fail(&ApiError::new(ErrorKind::Permission, "not a local address"), ApiFamily::Extended);
     }
-    let cfg = st.cfg();
     axum::Json(json!({
         "ok": true,
         "name": "pitwall",
         "version": env!("CARGO_PKG_VERSION"),
         "apiVersion": pitwall_core::API_VERSION,
         "serving": if st.serving.stopped() { "stopped" } else if st.serving.paused() { "paused" } else { "serving" },
-        "offline": cfg.network.offline,
         "loadedModels": st.serving.loaded().len(),
     }))
     .into_response()

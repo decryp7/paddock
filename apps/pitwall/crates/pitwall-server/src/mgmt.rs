@@ -238,13 +238,17 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         }
         "search_models" => {
             let q: String = arg(a, "query")?;
-            ok(st.library.search(&q).await.map_err(offline_or)?)
+            ok(st.library.search(&q).await.map_err(download_failed)?)
         }
         "repo_files" => {
             let repo: String = arg(a, "repo")?;
             let s = st.cfg();
             let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
-            ok(st.library.repo(&repo, s.models.default_context, &room).await.map_err(offline_or)?)
+            ok(st
+                .library
+                .repo(&repo, s.models.default_context, &room)
+                .await
+                .map_err(download_failed)?)
         }
         "download_model" => {
             let repo: String = arg(a, "repo")?;
@@ -608,21 +612,28 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let ui: UiSettings = arg(a, "settings")?;
             let s = st.cfg().with_ui(ui).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
             let saved = st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui();
-            // Every window (the app's Offline gate among them) hears the new server state at once, not at the next read.
-            st.push(&LiveUpdate::Server {
-                server: overview(st).server,
-            });
             ok(saved)
         }
         _ => Err(err(mgmt::ErrorCode::NotImplemented, format!("unknown call \"{method}\""))),
     }
 }
 
-fn offline_or(e: crate::egress::DownloadError) -> CommandError {
-    match e {
-        crate::egress::DownloadError::Egress(pitwall_core::privacy::EgressError::Offline) => err(mgmt::ErrorCode::Offline, e.to_string()),
-        other => err(mgmt::ErrorCode::ServerUnavailable, other.to_string()),
-    }
+/// A failed outbound call is never "the local server is not running": an unreachable or failing host is "upstream"
+/// (the CLI exits 4), a blocked URL is a bad request, and a local write failure is ours.
+fn download_failed(e: crate::egress::DownloadError) -> CommandError {
+    use crate::egress::DownloadError as D;
+    let code = match &e {
+        D::Egress(_) => mgmt::ErrorCode::BadRequest,
+        D::Network(_) | D::Status(..) | D::Checksum { .. } => mgmt::ErrorCode::Upstream,
+        D::Io(_) => mgmt::ErrorCode::Internal,
+        D::Cancelled => mgmt::ErrorCode::Conflict,
+    };
+    let hint = if matches!(e, D::Egress(_)) {
+        " Use a huggingface.co or github.com address."
+    } else {
+        ""
+    };
+    err(code, format!("{}.{hint}", e.to_string().trim_end_matches('.')))
 }
 
 fn update_prefs(st: &AppState, id: &ModelId, f: impl FnOnce(&mut pitwall_core::config::ModelPrefs)) -> R<()> {
@@ -643,7 +654,11 @@ fn downloads(st: &AppState) -> Vec<Download> {
 async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: Option<&str>) -> R<Value> {
     let s = st.cfg();
     let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
-    let r = st.library.repo(repo, s.models.default_context, &room).await.map_err(offline_or)?;
+    let r = st
+        .library
+        .repo(repo, s.models.default_context, &room)
+        .await
+        .map_err(download_failed)?;
     let q = r
         .variants
         .iter()
@@ -663,9 +678,9 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
     // Rebuild the core variant (parts/sha) from the tree again: the DTO carries only the first file.
     let tree = {
         let id = pitwall_core::hf::RepoId::parse(repo).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-        let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::Offline, e.to_string()))?;
-        pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(offline_or)?)
-            .map_err(|e| err(mgmt::ErrorCode::ServerUnavailable, e))?
+        let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))?;
+        pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(download_failed)?)
+            .map_err(|e| err(mgmt::ErrorCode::Upstream, e))?
     };
     let mut want: Vec<&pitwall_core::hf::Variant> = tree.variants.iter().filter(|v| v.file == file).collect();
     if let Some(p) = projector {
@@ -691,7 +706,7 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
                     st2.updates.downloaded(&repo_name, &file_name);
                 }
             })
-            .map_err(offline_or)?;
+            .map_err(download_failed)?;
         if first.is_none() {
             first = st.library.downloads().into_iter().find(|d| d.id == id);
         }
@@ -785,12 +800,6 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
 }
 
 fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
-    if st.offline.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err(err(
-            mgmt::ErrorCode::Offline,
-            pitwall_core::privacy::EgressError::Offline.to_string(),
-        ));
-    }
     let platform = st.llama.platform();
     if st.llama.catalog().find(&platform, id).is_none() {
         return Err(err(mgmt::ErrorCode::NotFound, format!("there is no build \"{id}\" for {platform}")));
@@ -822,7 +831,6 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
             } else {
                 mgmt::ServingState::Serving
             },
-            offline: cfg.network.offline,
             lan: mgmt::LanStatus {
                 enabled: false,
                 url: None,
@@ -1114,4 +1122,33 @@ fn preview_preset(st: &AppState, draft: mgmt::PresetDraft, editing: Option<&str>
             .map(|e| e.to_string());
     }
     mgmt::PresetPreview { problem, status }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::egress::DownloadError;
+    use pitwall_core::mgmt::ErrorCode;
+
+    #[test]
+    fn download_failures_are_not_reported_as_a_stopped_server() {
+        let net = download_failed(DownloadError::Network("cannot reach huggingface.co: down".into()));
+        assert_eq!(net.code, ErrorCode::Upstream);
+        assert!(net.message.contains("huggingface.co"));
+        assert_eq!(download_failed(DownloadError::Status(503, "")).code, ErrorCode::Upstream);
+        let sum = DownloadError::Checksum {
+            expected: "a".into(),
+            actual: "b".into(),
+        };
+        assert_eq!(download_failed(sum).code, ErrorCode::Upstream);
+        assert_eq!(download_failed(DownloadError::Io("disk".into())).code, ErrorCode::Internal);
+        assert_eq!(download_failed(DownloadError::Cancelled).code, ErrorCode::Conflict);
+        let blocked = download_failed(DownloadError::Egress(pitwall_core::privacy::EgressError::NotAllowed("x".into())));
+        assert_eq!(blocked.code, ErrorCode::BadRequest);
+        assert!(
+            blocked.message.contains("x is not allowed") && blocked.message.contains("huggingface.co"),
+            "{}",
+            blocked.message
+        );
+    }
 }

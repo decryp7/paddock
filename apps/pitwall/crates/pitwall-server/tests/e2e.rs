@@ -317,31 +317,6 @@ async fn pause_release_and_job_queue() {
 }
 
 #[tokio::test]
-async fn offline_mode_blocks_every_download_path() {
-    let h = harness(false).await;
-    let mut ui = h.rpc("settings", json!({})).await.json();
-    ui["network"]["offline"] = json!(true);
-    assert_eq!(h.rpc("save_settings", json!({"settings": ui})).await.status, 200);
-    for (m, a) in [
-        ("search_models", json!({"query": "qwen"})),
-        ("repo_files", json!({"repo": "a/b"})),
-        ("install_build", json!({"buildId": "cpu"})),
-    ] {
-        let r = h.rpc(m, a).await;
-        assert_eq!(r.status, 403, "{m}: {}", r.body);
-        assert_eq!(r.json()["code"], "offline");
-    }
-    // Serving local models still works offline.
-    let key = h.make_key("Offline").await;
-    assert_eq!(
-        h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
-            .await
-            .status,
-        200
-    );
-}
-
-#[tokio::test]
 async fn embeddings_need_an_embedding_model() {
     let h = harness(false).await;
     let key = h.make_key("Embedder").await;
@@ -851,21 +826,21 @@ async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resu
     h.st.serving.release_all();
 }
 
-/// Saving the settings tells every window at once (a `server` frame on the live feed carries the new Offline mode), so the
-/// app's Offline gate for its own updates does not wait for the next read.
+/// Offline mode was removed in 1.1: settings saved by 1.0 still carry `network.offline`. Saving them works, the key is
+/// ignored and gone from what is read back, and downloads are not refused.
 #[tokio::test]
-async fn saving_the_settings_pushes_the_new_server_state_to_the_live_feed() {
+async fn the_removed_offline_key_is_ignored_and_dropped_on_save() {
     let h = harness(false).await;
-    let mut rx = h.st.live.subscribe();
     let mut ui = h.rpc("settings", json!({})).await.json();
+    assert!(ui["network"].get("offline").is_none(), "{ui}");
     ui["network"]["offline"] = json!(true);
     assert_eq!(h.rpc("save_settings", json!({"settings": ui})).await.status, 200);
-    let frame = loop {
-        let text = rx.try_recv().expect("a server frame was pushed when the settings were saved");
-        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-        if v["kind"] == "server" {
-            break v;
-        }
-    };
-    assert_eq!(frame["server"]["offline"], json!(true), "{frame}");
+    let back = h.rpc("settings", json!({})).await.json();
+    assert!(back["network"].get("offline").is_none(), "{back}");
+    let on_disk = std::fs::read_to_string(h.st.dirs.settings()).unwrap();
+    assert!(!on_disk.contains("offline"), "{on_disk}");
+    assert_ne!(
+        h.rpc("install_build", json!({"buildId": "no-such-build"})).await.json()["code"],
+        "offline"
+    );
 }

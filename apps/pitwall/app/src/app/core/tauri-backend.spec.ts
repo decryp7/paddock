@@ -147,8 +147,8 @@ describe('TauriBackend', () => {
   });
 
   it('turns rejections into typed errors', async () => {
-    const { bridge } = fakeBridge(() => Promise.reject({ code: 'offline', message: 'Offline mode is on.' }));
-    await expect(new TauriBackend(bridge).searchModels('x')).rejects.toEqual({ code: 'offline', message: 'Offline mode is on.' });
+    const { bridge } = fakeBridge(() => Promise.reject({ code: 'busy', message: 'Try again.' }));
+    await expect(new TauriBackend(bridge).searchModels('x')).rejects.toEqual({ code: 'busy', message: 'Try again.' });
     const odd = fakeBridge(() => Promise.reject(new Error('boom')));
     await expect(new TauriBackend(odd.bridge).overview()).rejects.toEqual({ code: 'internal', message: 'boom' });
   });
@@ -286,9 +286,9 @@ describe('TauriBackend', () => {
       await expect(c).rejects.toMatchObject({ code: 'cancelled', message: expect.stringContaining('may still be working') });
     });
 
-    it('rejects when the job cannot start (for example offline mode refuses a model update check)', async () => {
-      const { bridge } = fakeBridge(() => Promise.reject({ code: 'offline', message: 'Offline mode is on.' }));
-      await expect(new TauriBackend(bridge).checkUpdatesNow()).rejects.toEqual({ code: 'offline', message: 'Offline mode is on.' });
+    it('rejects when the job cannot start (for example another check is running)', async () => {
+      const { bridge } = fakeBridge(() => Promise.reject({ code: 'busy', message: 'A check is running.' }));
+      await expect(new TauriBackend(bridge).checkUpdatesNow()).rejects.toEqual({ code: 'busy', message: 'A check is running.' });
     });
 
     it('drops events of an unknown shape, survives a throwing listener and ignores events of another job', async () => {

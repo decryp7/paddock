@@ -59,7 +59,6 @@ const SWITCH_LABEL: Readonly<Record<string, string>> = {
   notifyOnRelease: 'Notify when memory is released',
   prefixAffinity: 'Keep a conversation on one slot',
   embeddings: 'Cache embeddings',
-  offline: 'Offline mode',
   lanEnabled: 'Serve other devices on your network',
   keepRequestContent: 'Keep request content',
 };

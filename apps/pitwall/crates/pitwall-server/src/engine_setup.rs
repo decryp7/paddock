@@ -35,15 +35,10 @@ fn publish(st: &AppState, s: Setup) {
     st.push(&LiveUpdate::EngineSetup { setup: dto(st) });
 }
 
-/// Starts the automatic install of the suggested build unless one is running. Offline mode and a machine without a
-/// pinned build end in a `Failed` state with the next step. Returns at once; the work runs in the background.
+/// Starts the automatic install of the suggested build unless one is running. A machine without a
+/// pinned build ends in a `Failed` state with the next step. Returns at once; the work runs in the background.
 pub fn auto_install(st: &Arc<AppState>, installer: Arc<dyn BuildInstaller>) {
     if st.llama.setup() == Setup::Installing {
-        return;
-    }
-    if st.offline.load(std::sync::atomic::Ordering::SeqCst) {
-        let m = format!("{} Then press Retry.", pitwall_core::privacy::EgressError::Offline);
-        publish(st, Setup::Failed(m));
         return;
     }
     let Some(id) = installer.suggested() else {
@@ -262,22 +257,5 @@ mod tests {
         fake.fail.store(false, Ordering::SeqCst);
         auto_install(&st, fake);
         assert_eq!(settled(&st).await.state, EngineSetupState::Idle);
-    }
-
-    #[tokio::test]
-    async fn offline_mode_fails_at_once_with_the_next_step() {
-        let (_d, st) = state().await;
-        st.offline.store(true, Ordering::SeqCst);
-        auto_install(
-            &st,
-            Arc::new(Fake {
-                fail: AtomicBool::new(false),
-            }),
-        );
-        let d = dto(&st);
-        assert_eq!(d.state, EngineSetupState::Failed);
-        let m = d.error.unwrap();
-        assert!(m.contains("offline mode") && m.contains("Retry"), "{m}");
-        assert!(lock(&st.installs).is_empty());
     }
 }

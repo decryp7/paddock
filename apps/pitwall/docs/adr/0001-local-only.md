@@ -20,8 +20,9 @@ computer. This is the product's first promise, so it is recorded before any othe
   local memory.
 - **The only outbound traffic is downloads the user asked for**: engine releases (GitHub) and models (Hugging Face),
   over HTTPS, from the hosts listed in `pitwall_core::privacy::DOWNLOAD_HOSTS`. Every redirect hop is checked again
-  against that list. The UI shows each download (host, size, progress). **Offline mode** turns even that off and is
-  honoured by every code path that could reach the network.
+  against that list. The UI shows each download (host, size, progress).
+  Offline mode (a global switch that turned all of it off) existed in 1.0 and was removed in 1.1: "local first" means the AI
+  models run locally, not a network switch.
 - **The request path has no HTTP client.** Requests to the API never cause outbound traffic: images must be inline,
   tools run locally, and nothing is fetched on a request's behalf. This is enforced, not just intended:
   - outbound HTTP lives in one `egress` module of the server; `clippy.toml` disallows HTTP clients and raw process

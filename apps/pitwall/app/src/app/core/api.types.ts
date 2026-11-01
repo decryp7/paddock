@@ -15,10 +15,10 @@ export type ErrorCode =
   | 'notFound'
   | 'badRequest'
   | 'conflict'
-  | 'offline'
   | 'insufficientMemory'
   | 'busy'
   | 'notAvailable'
+  | 'upstream'
   | 'notImplemented'
   | 'cancelled'
   | 'internal';
@@ -53,7 +53,6 @@ export interface ServerInfo {
   port: number;
   startedAt: number;
   serving: ServingState;
-  offline: boolean;
   lan: LanStatus;
 }
 
@@ -823,8 +822,6 @@ export interface ServerSettings {
 }
 
 export interface NetworkSettings {
-  /** No downloads at all. */
-  offline: boolean;
   lanEnabled: boolean;
   lanPort: number;
 }
@@ -997,7 +994,7 @@ export interface UpdateNotice {
   targetSha256: string | null;
 }
 
-export type UpdateCheckOutcome = 'checked' | 'offline' | 'rateLimited' | 'busy' | 'nothingToCheck' | 'failed';
+export type UpdateCheckOutcome = 'checked' | 'rateLimited' | 'busy' | 'nothingToCheck' | 'failed';
 
 export interface UpdateCheckResult {
   outcome: UpdateCheckOutcome;
@@ -1014,9 +1011,8 @@ export interface UpdateCheckStatus {
   lastCheckedAt: number | null;
   lastAttemptAt: number | null;
   lastMessage: string | null;
-  /** Null when the schedule is off or offline mode is on. */
+  /** Null when the schedule is off. */
   nextCheckAt: number | null;
-  offline: boolean;
   running: boolean;
   notices: number;
   /** The only host a check talks to. */

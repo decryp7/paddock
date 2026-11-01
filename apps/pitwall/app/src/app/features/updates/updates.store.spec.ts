@@ -22,7 +22,6 @@ describe('resultToast', () => {
     expect(resultToast({ ...r, outcome: 'checked' })).toEqual({ tone: 'ok', text: 'Checked: your models are up to date.' });
     expect(resultToast({ ...r, outcome: 'checked', notices: 1 }).text).toBe('Checked: 1 update available.');
     expect(resultToast({ ...r, outcome: 'checked', notices: 2 }).text).toBe('Checked: 2 updates available.');
-    expect(resultToast({ ...r, outcome: 'offline', message: 'Offline mode is on' })).toEqual({ tone: 'info', text: 'Offline mode is on' });
   });
 });
 
@@ -68,19 +67,6 @@ describe('UpdatesStore', () => {
     await store.checkNow();
     expect(store.lastResult()?.outcome).toBe('rateLimited');
     expect(toasts.toasts().at(-1)?.message).toContain('moments ago');
-  });
-
-  it('says offline mode stopped the check', async () => {
-    const mock = new MockBackend();
-    const s = await mock.settings();
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
-    const { store, toasts } = setup(mock);
-    await store.load();
-    expect(store.status()?.offline).toBe(true);
-    await store.checkNow();
-    expect(store.lastResult()?.outcome).toBe('offline');
-    expect(toasts.toasts().at(-1)?.message).toContain('Offline mode is on');
-    expect(store.count()).toBe(0);
   });
 
   it('reports a failing check as an error toast and does not stay busy', async () => {
@@ -170,7 +156,7 @@ describe('UpdatesStore', () => {
     expect(asked[0]!.inputs['message']).not.toContain('replaces');
   });
 
-  it('shows the error when a download is refused (offline mode)', async () => {
+  it('shows the error when a download is refused', async () => {
     const { store, toasts } = setup(failing('downloadModel'));
     await store.load();
     expect(await store.get(store.notices()[0]!)).toBe(false);

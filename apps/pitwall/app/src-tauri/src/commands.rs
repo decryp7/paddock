@@ -171,7 +171,7 @@ rpc!(
     /// One app in detail: usage, limits and its latest requests.
     app_detail => "app_detail", app_id: String = "appId");
 rpc!(
-    /// The state of the model update checks (schedule, last check, next check, offline).
+    /// The state of the model update checks (schedule, last check, next check).
     update_check_status => "update_check_status");
 rpc!(
     /// The model updates on offer (newer revisions, better quantisations), not dismissed.

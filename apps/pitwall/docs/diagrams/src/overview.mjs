@@ -92,7 +92,7 @@ for (const [r, label] of [['external', 'Outside'], ['accent', 'Pitwall'], ['ui',
 }
 out.push(`<rect x="${lx + 4}" y="${ly - 8}" width="28" height="16" rx="4" class="n pl exts"/>`);
 text(lx + 40, ly + 4, 'Planned (tagged)', 'm');
-text(1280, ly + 4, 'Pitwall · updated 2026-10-23', 'foot');
+text(1280, ly + 4, 'Pitwall · updated 2026-10-31', 'foot');
 text(48, 1112, 'The window and CLI reach the server only on 127.0.0.1: management calls with the admin key, standard APIs with an app key.', 'desc');
 const H = 1136;
 

@@ -59,9 +59,9 @@ The test model is **Qwen3.5 2B Q4_K_M** (about 1.3 GB), from the starter catalog
 |---|-------|----------|
 | 24 | Install a second build (for example CPU next to the GPU one) and select it, then Roll back. | The active build changes each time and chat requests keep working. |
 | 25 | Disconnect the network midway through a model download, reconnect, start it again. | The message says the part is kept; the download resumes (same `.part` file) and ends verified. |
-| 26 | Start an install with offline mode on. | "Pitwall is in offline mode: downloads are off. ..." No file is created. Turn it off. |
+| 26 | Start an install with the network disconnected. | The install fails with a message naming the network. No finished file is left behind. Reconnect. |
 | 27 | Put a broken `bad.models.toml` (for example no `id`), an old `x.engine.toml` and a valid `*.models.toml` in `packs/`; restart the server. | Models > Discover shows the problems for the two bad files naming what to fix; the valid pack still loads. |
-| 28 | Fresh data folder, offline mode on: start Pitwall. | The Dashboard and the llama.cpp page say llama.cpp could not be installed because Pitwall is offline, with **Retry**. Turn offline mode off and press Retry: it installs. |
+| 28 | Fresh data folder, network disconnected: start Pitwall. | The Dashboard and the llama.cpp page say llama.cpp could not be installed because the network is unreachable, with **Retry**. Reconnect and press Retry: it installs. |
 | 28f | Put a folder `engines/pack-llamafile/` with any file in the data folder and open the llama.cpp page. | "Left over from an older version" lists llamafile with its size; nothing is deleted until you press **Remove llamafile**. |
 | 28g | Settings > General > When you quit Pitwall: choose *Stop serving*, load a model, then choose Quit in the tray menu. | The engine process ends, the service stays registered, and after opening Pitwall again the Dashboard says Serving. *Ask each time* shows the dialog with Remember my choice. **Quit and stop serving** does it whatever the setting says. |
 
@@ -172,13 +172,6 @@ Pitwall 1.0.x updates do not look at the new feed, so this is the path every exi
 | U13 | While the service runs, start the updater install (U9). Watch `sc.exe query Pitwall` during the install. | The NSIS pre-install hook stops the service (`pitwall-server.exe uninstall`), the files are replaced without a "file in use" error, the post-install hook registers and starts the service again, and the server runs in the logged-on user's session. |
 | U14 | Run the installer silently (`/S`) over a running install. | Same result; no dialog; a failed registration is silent but visible in Settings > Service. |
 
-### D. Offline mode
-
-| # | Steps | Expected |
-|---|-------|----------|
-| U15 | Turn on offline mode (Settings > Network), turn on automatic update checks, restart the app, and choose Help > Check for updates…. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
-| U15b | Offline mode on, then stop the Pitwall server (quit the service), and choose Help > Check for updates…. Watch the feed log. | No request reaches the feed. With the server down the app cannot ask it whether offline is on, so it refuses unless it knows from a last-known value that offline is off; it says why. |
-
 ### E. Uninstall leaves nothing behind
 
 | # | Platform | Steps | Expected |
@@ -198,7 +191,7 @@ Record the platform, build versions and each result in the release notes' verifi
 | 46 | Run a chat in the Playground, cancel it midway. | Generation stops; the job leaves the queue. |
 | 47 | Benchmarks > Run on the test model, then quit and start Pitwall again. | A tokens-per-second figure appears and is still listed after the restart (`benchmarks.json` in the data folder). |
 | 47a | Settings > Privacy > Keep request content on, make a request that contains a fake key (`pw_` followed by 30 letters), open it in Requests. | The prompt and the answer show; the key is shown as `[redacted]`; turning the setting off keeps no new content; restarting Pitwall empties the list. |
-| 47aa | Settings > Pitwall: switch **Offline mode** and press ⌘W (Ctrl+W) within 500 ms. Open Settings again (⌘, / Ctrl+,). Repeat with **Requests at once**: type a new number without pressing Enter or Tab, then ⌘W within 500 ms. Repeat both once more and quit the app (tray > Quit) instead of ⌘W, then start it and open Settings. | The switch and the number show the new values each time; `GET /x/v1/health` (or the Dashboard) agrees. After a quit the next Settings window sends the edit it found unsent (it is never older than ten minutes). |
+| 47aa | Settings > Pitwall: switch **Serve other devices on your network** and press ⌘W (Ctrl+W) within 500 ms. Open Settings again (⌘, / Ctrl+,). Repeat with **Requests at once**: type a new number without pressing Enter or Tab, then ⌘W within 500 ms. Repeat both once more and quit the app (tray > Quit) instead of ⌘W, then start it and open Settings. | The switch and the number show the new values each time; `GET /x/v1/health` (or the Dashboard) agrees. After a quit the next Settings window sends the edit it found unsent (it is never older than ten minutes). |
 | 47ab | Make Settings refuse one change: stop the server (`launchctl kill`/`sc.exe stop`/`systemctl --user stop`, before the OS restarts it) and change **Port**. Start the server again, change **When you quit Pitwall**, then press ⌘W (Ctrl+W). | The banner says "Port could not be saved: <the server's reason>" with **Undo port change** and Retry. Once the server is back the quit choice saves while the port stays refused (not sent again until Retry or a new edit). ⌘W does not close at once: the window says "Port was not saved: <reason>" with Close anyway and Keep editing. |
 | 47b | Help > Check for updates… (the Updates window) (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
 | 47c | Make a few requests with an app's key, then Apps & keys > that app > Usage over time. Switch 24h, 7d, 30d and Tokens, Requests, Peak memory. | Totals match the requests made; the chart has one bar per period; peak memory equals the size of the model that served them (Models shows its memory); the Dashboard's Usage by app chart shows the same app, and its legend link opens the app. |
@@ -214,7 +207,6 @@ Record the platform, build versions and each result in the release notes' verifi
 | 47m | Download a small model from a Hugging Face repository, then (with a copy of its file listing changed, or after the repository publishes a new file) press Check now; on a machine where nothing changed press it twice. | Unchanged: "Checked: your models are up to date." and a second press within a minute says to wait N seconds. With a newer file or a higher quantisation that fits: a banner on Models, "Update available: ..." on the row, a line on the Dashboard and an entry in the tray. |
 | 47n | Press Get it on a notice, then Cancel; press it again and Download. | The dialog names the file, its size and `huggingface.co`; Cancel downloads nothing (Downloads stays empty); Download starts the normal download and the notice goes. A newer revision replaces the file only after verification. |
 | 47o | Dismiss one notice and Remind me in a week on another; restart Pitwall; Check now. | Both stay hidden; the dismissed one comes back only if Hugging Face offers something different. |
-| 47p | Turn offline mode on, press Check now, watch the network (for example `lsof -i` or a proxy). | "Offline mode is on, so Pitwall did not ask Hugging Face..."; the button is disabled in Settings; no connection is opened. |
 | 47q | Quit Pitwall, damage `model-updates.json` (write `{ not json`), start it; also delete one model's `.origin.json`. | It starts; an event says the notices file was damaged and started empty (or it is restored from `.bak`); Check now rebuilds it; the model without a record is compared by size. |
 | 48 | Reduced-motion and large-text settings of the OS. | Animations are off; layouts survive. |
 
@@ -223,7 +215,7 @@ Record the platform, build versions and each result in the release notes' verifi
 | # | Steps | Expected |
 |---|-------|----------|
 | 29 | With Pitwall running run `pitwall status`, `pitwall ps`, `pitwall models`, each also with `--json`. | Tables for people, the server's JSON with `--json`; no key appears in any output. |
-| 30 | `pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With offline mode on: exit code 4 and the offline message. |
+| 30 | `pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With the network disconnected: exit code 4 and a message naming `huggingface.co` (not "server not running"). |
 | 31 | `pitwall load <model>`, `pitwall ps`, `pitwall unload <model>`; load a model larger than the free memory. | Loaded, listed, released; the oversized load exits with 4 and says to unload another model. |
 | 32 | `pitwall keys create cli-test --new`, then `export PITWALL_API_KEY=...; pitwall chat <model> "Say hi"`. | The key is printed once on stdout; the answer streams to stdout. `pitwall keys` shows only the id and prefix. |
 | 33 | `pitwall keys revoke cli-test <key-id>`, then chat again. | The chat fails with exit 1 and a message about the key. |

@@ -93,13 +93,12 @@ pub fn status(o: &Overview, now: Millis) -> String {
     let s = &o.server;
     let m = &o.memory;
     let mut out = format!(
-        "Pitwall {} on 127.0.0.1:{} (pid {}, up {})\nServing:   {}{}\nMemory:    {} free of {} ({} pressure)\nLoaded:    {}\nQueue:     {} running, {} waiting\nSpeed:     {:.0} tokens/s generated, {:.1} requests/min\nPreset:    {}",
+        "Pitwall {} on 127.0.0.1:{} (pid {}, up {})\nServing:   {}\nMemory:    {} free of {} ({} pressure)\nLoaded:    {}\nQueue:     {} running, {} waiting\nSpeed:     {:.0} tokens/s generated, {:.1} requests/min\nPreset:    {}",
         s.version,
         s.port,
         s.pid,
         human_duration(now.saturating_sub(s.started_at)),
         label(&s.serving),
-        if s.offline { " (offline mode)" } else { "" },
         human_bytes(m.ram_available),
         human_bytes(m.ram_total),
         label(&m.pressure),
@@ -477,7 +476,7 @@ mod tests {
     #[test]
     fn status_text() {
         let o: Overview = from_json(serde_json::json!({
-            "server": {"version": "0.1.0", "apiVersion": 1, "pid": 7, "port": 11435, "startedAt": 0, "serving": "paused", "offline": true,
+            "server": {"version": "0.1.0", "apiVersion": 1, "pid": 7, "port": 11435, "startedAt": 0, "serving": "paused",
                        "lan": {"enabled": false, "url": null, "certFingerprint": null}},
             "memory": {"at": 1, "ramTotal": 32_000_000_000u64, "ramAvailable": 8_000_000_000u64, "commitUsed": null, "commitLimit": null,
                        "swapUsed": 0, "pressure": "elevated", "cpuPercent": 3.0,
@@ -494,7 +493,7 @@ mod tests {
         let t = status(&o, 3_661_000);
         for want in [
             "up 1h 1m",
-            "paused (offline mode)",
+            "paused",
             "8.0 GB free of 32.0 GB (elevated pressure)",
             "no models",
             "42 tokens/s",

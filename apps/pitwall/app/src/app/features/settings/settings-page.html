@@ -235,10 +235,6 @@
         <!-- Network -->
         <pw-panel id="set-network" heading="Network" icon="globe">
           <div class="row">
-            <div class="lbl"><span class="name" id="lbl-offline">Offline mode</span><p class="hint">No network requests at all: no model search, downloads or engine updates.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-offline" [checked]="s.network.offline" (change)="toggle('network', 'offline', $event.checked)" />
-          </div>
-          <div class="row">
             <div class="lbl"><span class="name" id="lbl-lan">Serve other devices on your network</span><p class="hint">Off by default. Pitwall only listens on this computer.</p></div>
             <mat-slide-toggle hideIcon aria-labelledby="lbl-lan" [checked]="s.network.lanEnabled" (change)="toggle('network', 'lanEnabled', $event.checked)" />
           </div>
@@ -284,7 +280,7 @@
             </div>
             <div class="row">
               <div class="lbl"><span class="name">Status</span><p class="hint" aria-live="polite">{{ updateSummary() }}</p></div>
-              <button type="button" matButton="outlined" [disabled]="updates.checking() || u.offline" (click)="updates.checkNow()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />{{ updates.checking() ? 'Checking…' : 'Check now' }}</button>
+              <button type="button" matButton="outlined" [disabled]="updates.checking()" (click)="updates.checkNow()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />{{ updates.checking() ? 'Checking…' : 'Check now' }}</button>
             </div>
             @if (updates.lastResult(); as r) {
               <p class="hint pad" role="status">{{ r.message }}</p>
@@ -293,7 +289,7 @@
               <mat-icon svgIcon="pw:shield" aria-hidden="true" />
               <span>
                 A check sends {{ u.host }} only the repository ids (like <code>owner/name</code>) of models you already downloaded, in the address of an ordinary file-list request:
-                no prompts, file contents, usage or identifiers, and at most {{ u.maxRepos }} repositories per check. Offline mode stops it completely.
+                no prompts, file contents, usage or identifiers, and at most {{ u.maxRepos }} repositories per check.
               </span>
             </div>
           }

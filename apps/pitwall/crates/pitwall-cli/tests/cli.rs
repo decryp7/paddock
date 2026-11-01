@@ -121,7 +121,7 @@ fn text(b: &[u8]) -> String {
 
 fn overview() -> Value {
     json!({
-        "server": {"version": "0.1.0", "apiVersion": 1, "pid": 4242, "port": 11435, "startedAt": 1, "serving": "serving", "offline": true,
+        "server": {"version": "0.1.0", "apiVersion": 1, "pid": 4242, "port": 11435, "startedAt": 1, "serving": "serving",
                    "lan": {"enabled": false, "url": null, "certFingerprint": null}},
         "memory": {"at": 1, "ramTotal": 32_000_000_000u64, "ramAvailable": 12_500_000_000u64, "commitUsed": null, "commitLimit": null,
                    "swapUsed": 0, "pressure": "normal", "cpuPercent": 3.0, "gpus": [{"name": "Test GPU", "vramTotal": 8_000_000_000u64,
@@ -175,10 +175,7 @@ fn status_text_and_json_authenticate_with_the_admin_key() {
     let out = pitwall(h.path(), &["status", "--port", &port]);
     let s = text(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert!(
-        s.contains("127.0.0.1:11435") && s.contains("(offline mode)") && s.contains("12.5 GB free of 32.0 GB"),
-        "{s}"
-    );
+    assert!(s.contains("127.0.0.1:11435") && s.contains("12.5 GB free of 32.0 GB"), "{s}");
     assert!(s.contains("acme--tiny--q4") && s.contains("Test GPU"), "{s}");
     let out = pitwall(h.path(), &["--json", "status", "--port", &port]);
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -247,7 +244,7 @@ fn exit_codes() {
             json_reply(401, json!({"code": "unauthorized", "message": "wrong key"}))
         }),
         route(rpc("download_model"), |_| {
-            json_reply(403, json!({"code": "offline", "message": "offline mode is on"}))
+            json_reply(503, json!({"code": "busy", "message": "another download is running"}))
         }),
     ]);
     let h = home();
@@ -260,7 +257,7 @@ fn exit_codes() {
     assert!(text(&out.stderr).contains("PITWALL_ADMIN_KEY") && !text(&out.stderr).contains(ADMIN));
     let out = pitwall(h.path(), &["pull", "a/b/c.gguf", "--port", &port]);
     assert_eq!(out.status.code(), Some(4));
-    assert!(text(&out.stderr).contains("offline"));
+    assert!(text(&out.stderr).contains("Try again"));
     // usage
     assert_eq!(pitwall(h.path(), &["frobnicate"]).status.code(), Some(2));
     let out = pitwall(h.path(), &["status", "--key", "abc"]);

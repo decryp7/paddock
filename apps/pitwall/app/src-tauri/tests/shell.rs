@@ -233,43 +233,6 @@ fn every_command_is_async() {
     }
 }
 
-/// Pitwall wires its Offline gate into the shell's updater: before the server ever answered, a check is refused as
-/// "could not be confirmed" without touching the network; after a live `server` frame says Offline mode is off, it passes
-/// the gate (begun, not run: no network in a test); after one says it is on, it is refused as Offline mode.
-#[test]
-fn the_updater_is_gated_by_what_the_server_said_about_offline_mode() {
-    use paddock_updater::{tauri::Updates, UpdateError};
-    use pitwall_app_lib::offline::OfflineKnown;
-    use std::sync::Arc;
-    let dir = tempfile::tempdir().unwrap();
-    let app = composed(
-        dir.path(),
-        LaunchArgs {
-            hidden: true,
-            ..Default::default()
-        },
-    )
-    .build(tauri::test::mock_context(tauri::test::noop_assets()))
-    .unwrap();
-    let updates = app.state::<Arc<Updates>>().inner().clone();
-    let known = app.state::<Arc<OfflineKnown>>().inner().clone();
-    assert_eq!(
-        updates.updater.begin_check().unwrap_err(),
-        UpdateError::OfflineUnknown,
-        "first run: not confirmed"
-    );
-    known.observe_frame(r#"{"kind":"server","server":{"offline":false}}"#);
-    // Past the gate: a test build has no signing key, so the next answer is "not available in this build" (or, with a key,
-    // a started check, abandoned before it runs).
-    match updates.updater.begin_check() {
-        Ok((_, ticket)) => updates.updater.abandon(ticket),
-        Err(e) => assert_eq!(e, UpdateError::NotAvailable, "the offline gate let it through"),
-    }
-    known.observe_frame(r#"{"kind":"server","server":{"offline":true}}"#);
-    assert_eq!(updates.updater.begin_check().unwrap_err(), UpdateError::OfflineMode);
-    assert!(dir.path().join("offline-known.json").is_file(), "the last confirmed value is kept");
-}
-
 /// Nothing is drawn: the menu bar of the test shows nothing (macOS builds native menus on the main thread only).
 struct NoBar;
 
