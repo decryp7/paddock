@@ -11,6 +11,12 @@ test.describe('forced colours', () => {
     await page.emulateMedia({ forcedColors: 'active' });
     await page.addInitScript(() => localStorage.clear());
     await openApp(page);
+    // The snapshot below is taken once: wait for everything it reads. The filter bar is a deferred block of its own
+    // and can render after the grid and the lanes openApp waits for (run 7339).
+    await expect(page.locator('debrief-filter-bar .lvl[data-level="Error"] .dot')).toBeVisible();
+    await expect(page.locator('debrief-events-grid .lvl[data-level="Information"] .dot').first()).toBeVisible();
+    await expect(page.locator('debrief-events-grid .lvl .sr').first()).toBeAttached();
+    await expect(page.locator('debrief-timeline-lanes .lane-label').first()).toBeAttached();
     const info = await page.evaluate(() => {
       const canvas = getComputedStyle(document.body).backgroundColor;
       const dot = (sel: string) => {
@@ -30,6 +36,8 @@ test.describe('forced colours', () => {
         laneBar: bar ? getComputedStyle(bar, '::before').backgroundColor : null,
       };
     });
+    expect(info.gridDot).not.toBeNull();
+    expect(info.chipDot).not.toBeNull();
     expect(info.gridDot?.bg).not.toBe(info.canvas);
     expect(info.chipDot?.bg).not.toBe(info.canvas);
     expect(info.chipDot?.w).toBeGreaterThan(0);
