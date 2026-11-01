@@ -6,6 +6,15 @@ export function prefersReducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** Whether `doc` can give a canvas a 2D context, which ECharts' canvas renderer needs. */
+function hasCanvas2d(doc: Document): boolean {
+  try {
+    return doc.createElement('canvas').getContext('2d') !== null;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * An Apache ECharts chart. ECharts loads on first use; the chart follows its container's size and re-renders when
  * `options` change (build them from `ThemeService.chart()` so both themes look right). A failure to render is
@@ -48,12 +57,22 @@ export class Chart {
       destroyRef.onDestroy(() => {
         disposed = true;
         observer?.disconnect();
-        this.chart?.dispose();
+        // ECharts throws here when its canvas lost the 2D context after drawing; closing the page must not fail with it.
+        try {
+          this.chart?.dispose();
+        } catch (e) {
+          console.error('Chart failed to close', e);
+        }
         this.chart = null;
       });
       import('./echarts-setup')
         .then(({ init }) => {
           if (disposed) return;
+          // Without a 2D context (WebKit out of canvas memory, jsdom) ECharts throws in its frame loop and on dispose.
+          if (!hasCanvas2d(this.host().nativeElement.ownerDocument)) {
+            this.failed.set(true);
+            return;
+          }
           this.chart = init(this.host().nativeElement, null, { renderer: 'canvas' });
           this.chart.on('datazoom', () => this.zoomed.emit());
           this.chart.on('click', (p) => this.itemClick.emit(p as { name?: string; data?: unknown; seriesName?: string }));

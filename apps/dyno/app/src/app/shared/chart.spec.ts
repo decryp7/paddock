@@ -82,4 +82,36 @@ describe('Chart', () => {
     f.detectChanges();
     expect(() => f.destroy()).not.toThrow();
   });
+
+  // A canvas without a 2D context (jsdom always; WebKit when canvas memory runs out): ECharts would throw in its frame
+  // loop and, once it has drawn, on dispose, so the board's teardown failed. The chart says it cannot draw instead.
+  it('shows the inline failure, and destroys cleanly, when the canvas has no 2D context', async () => {
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
+    const f = TestBed.createComponent(Host);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect((f.nativeElement as HTMLElement).querySelector('.failed')?.textContent).toContain('could not be drawn');
+    });
+    expect((f.nativeElement as HTMLElement).querySelector('dy-chart canvas')).toBeNull();
+    expect(() => f.destroy()).not.toThrow();
+  });
+
+  it('closes cleanly when ECharts throws on dispose after drawing (the context was lost)', async () => {
+    let lost = false;
+    const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+      get: (_t, k) => (k === 'measureText' ? () => ({ width: 10 }) : k === 'createLinearGradient' ? () => ({ addColorStop: () => undefined }) : k === 'clearRect' && lost ? () => { throw new TypeError('context lost'); } : () => undefined),
+      set: () => true,
+    });
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(ctx as never);
+    const f = TestBed.createComponent(Host);
+    f.componentInstance.opts.set({ xAxis: { type: 'category', data: ['a', 'b'] }, yAxis: { type: 'value' }, series: [{ type: 'line', data: [1, 2] }] });
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect((f.nativeElement as HTMLElement).querySelector('dy-chart canvas')).not.toBeNull();
+    });
+    lost = true;
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(() => f.destroy()).not.toThrow();
+    expect(logged).toHaveBeenCalledWith('Chart failed to close', expect.any(TypeError));
+  });
 });
