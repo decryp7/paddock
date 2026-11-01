@@ -1,0 +1,10 @@
+exit 1
+exit-strict 1
+error cases/log-lines/wiki/log.md:10: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:11: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:14: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:16: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:5: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:6: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:8: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-lines/wiki/log.md:9: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`

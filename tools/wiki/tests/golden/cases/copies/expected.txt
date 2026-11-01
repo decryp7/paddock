@@ -1,0 +1,7 @@
+exit 1
+exit-strict 1
+error cases/copies/wiki/one.md: copies rule text (8+ words shared with cases/rules.txt): "the coordinator watches load and free disk continuously..."; link the rule instead
+error cases/copies/wiki/one.md:11: broken link: x.md does not exist
+error cases/copies/wiki/three.md: copies rule text (8+ words shared with cases/rules2.txt): "never wait on a fixed number of event..."; link the rule instead
+error cases/copies/wiki/three.md: orphan: no other page links to it
+error cases/copies/wiki/two.md: copies rule text (8+ words shared with cases/rules2.txt): "specs never wait on a fixed number of..."; link the rule instead

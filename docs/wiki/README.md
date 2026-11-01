@@ -3,7 +3,7 @@
 A small, sourced summary of how things work **today**, so an agent can read a page instead of re-deriving the state from
 the lessons, the ADRs and the hand-off logs. It started on 2026-10-31 as a two-week pilot of the LLM Wiki pattern; the user
 concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-rules `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
-The tooling is to become one Rust `wiki` CLI (branch `tools/wiki`); this schema and `scripts/wiki-lint.mjs` hold until it has parity. The
+The tooling is one Rust `wiki` CLI, [tools/wiki](../../tools/wiki/README.md), which replaced `scripts/wiki-lint.mjs`. The
 design and the evaluation plan are in the research note `research-llm-wiki-2026-10-31.md` (hand-off folder, outside this
 repository), and the pattern's primary source is Karpathy's
 [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (read as data, adapted, not adopted as
@@ -57,11 +57,11 @@ Summary in three to five lines.
 
 - **Ingest** (after a merged batch, an incident, a decision of the user): collect the "Wiki notes:" of the agents'
   hand-offs and the sources; for each affected page change the claim, set its source, set `verified`; update `index.md`;
-  append a line to `log.md` (`## [YYYY-MM-DD] ingest | page | subject`, date from `date +%F`); run
-  `node scripts/wiki-lint.mjs`; commit `docs(wiki): ...` as its own commit.
+  append a line to `log.md` (`wiki log ingest "page | subject"` writes `## [YYYY-MM-DD] ingest | page | subject` with the
+  clock's date); run `wiki lint`; commit `docs(wiki): ...` as its own commit.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
   missing or wrong, leave a wiki note for the next ingest.
-- **Lint**: `node scripts/wiki-lint.mjs` (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
+- **Lint**: `wiki lint` (the [wiki tool](../../tools/wiki/README.md), installed with `cargo install --path tools/wiki --locked`; settings in `wiki-lint.json`; `wiki new <slug> --title ...` creates a page and its index line) (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
   page has `verified:` and `sources:`; every bullet names a source; pages with an old `verified:` date draw a warning; no run of 8 or more
   words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
   `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they

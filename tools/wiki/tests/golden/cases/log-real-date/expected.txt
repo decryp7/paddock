@@ -1,0 +1,5 @@
+exit 1
+exit-strict 1
+error cases/log-real-date/wiki/log.md:3: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-real-date/wiki/log.md:4: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
+error cases/log-real-date/wiki/log.md:5: log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`
