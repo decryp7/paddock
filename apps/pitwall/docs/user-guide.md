@@ -10,7 +10,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 ## Contents
 
 - [First run](#first-run)
-- [llama.cpp](#llama-cpp-the-engine-installed-for-you)
+- [llama.cpp](#llamacpp-the-engine-installed-for-you)
 - [Get a model](#get-a-model)
 - [Will this fit?](#will-this-fit)
 - [Connect an app: pairing](#connect-an-app-pairing)
@@ -24,7 +24,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [Model update notices](#model-update-notices)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
 - [Offline mode](#offline-mode)
-- [Packs: add an engine or a model list](#packs-add-an-engine-or-a-model-list)
+- [Packs: add an engine or a model list](#packs-add-a-model-list)
 - [Where Pitwall keeps its files](#where-pitwall-keeps-its-files)
 - [Troubleshooting](#troubleshooting)
 
@@ -34,7 +34,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
    opens on the **Dashboard**. The server is a separate, windowless process that keeps serving when you close the window; the
    tray (menu bar) icon is how you get the window back.
 2. On a fresh machine Pitwall installs llama.cpp by itself (the dashboard shows the progress; see
-   [llama.cpp](#llama-cpp-the-engine-installed-for-you)), and the dashboard says there is no model yet. Follow
+   [llama.cpp](#llamacpp-the-engine-installed-for-you)), and the dashboard says there is no model yet. Follow
    [Get a model](#get-a-model).
 3. **Check the server is up**:
 

@@ -122,7 +122,7 @@ launched child (each plugin process) has a socket folder of its own.
 | Squatting | the first instance is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so a pipe someone created earlier makes it fail | `windows.rs:150`, `windows.rs:177` |
 | Remote clients | refused (`PIPE_REJECT_REMOTE_CLIENTS`) | `windows.rs:186` |
 | Buffers | 64 KiB each way, byte mode, overlapped I/O (one thread reads while another writes) | `windows.rs:38`, `windows.rs:175` |
-| Client | opens with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`, so the server cannot act as the client | `windows.rs:300` |
+| Client | opens with `SECURITY_SQOS_PRESENT \| SECURITY_IDENTIFICATION`, so the server cannot act as the client | `windows.rs:300` |
 | Peer pid | `GetNamedPipeClientProcessId` | `windows.rs:257` |
 
 A service that serves the logged-on user's app (Pitcrew) uses a fixed endpoint with

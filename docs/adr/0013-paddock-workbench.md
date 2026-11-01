@@ -89,7 +89,7 @@ provideContributions<PacenotesContext>({
 |---|---|---|
 | `paddock-panels` | pop-out panel windows (create, place on any display, clamp to a work area, close with host), the drag ghost window, UI-state forwarding between a host and its pop-outs and dialogs | Debrief `panel_windows.rs`, `drag_ghost/`, `ui_dispatch.rs` |
 | `paddock-assistant` | the `LlmProvider` port, the prompted tool protocol (Hermes `<tool_call>`, think-block filter, JSON-schema mode, image limits), the tool loop with budgets and cancel, conversation persistence (versioned), and the Pitwall adapter on `paddock-pitwall` (ADR 0004: discovery, pairing, priorities, typed errors) | `debrief_ai::llm::prompted`, `debrief_ai::engine` (Pitwall half), Debrief chat persistence |
-| `paddock-workbench` | the Tauri plugin (`plugin:paddock-workbench|...`): panel and assistant commands and events (`paddock://panels`, `paddock://assistant`), built with the `paddock-commands` macro like the shell plugin | new (thin) |
+| `paddock-workbench` | the Tauri plugin (`plugin:paddock-workbench\|...`): panel and assistant commands and events (`paddock://panels`, `paddock://assistant`), built with the `paddock-commands` macro like the shell plugin | new (thin) |
 
 Engine choice is the app's: an app may register another `LlmProvider` behind the same port (Debrief keeps its built-in
 llama.cpp engine as its own adapter and its selection rules of Debrief ADR 0059); the assistant pane does not know which

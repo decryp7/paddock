@@ -348,7 +348,7 @@ snapshots* (manual test 24 in [testing-manual.md](testing-manual.md)).
 
 ## CI/CD
 
-Gitea Actions workflows live in [`.gitea/workflows/`](../.gitea/workflows/):
+Gitea Actions workflows live in [`.gitea/workflows/`](../../../.gitea/workflows/):
 
 - **`build.yml`** runs on pushes to `main`, pull requests, `v*` tags, nightly (00:30 UTC, on `main`) and on
   demand (`workflow_dispatch`):

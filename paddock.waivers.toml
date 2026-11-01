@@ -296,3 +296,10 @@ check = "C54"
 path = "apps/shell-demo/src-tauri/macos/agent.plist"
 reason = "shell demo: the heartbeat agent's plist (ProcessType Background, LowPriorityIO) as paddock-service renders it; follows the ADR 0020 helper"
 expires = "2026-12-31"
+
+# docs/research/2026-10-embeddings-for-logs.md lands with branch docs/embeddings-for-logs; the link in shared-next.md works once it is on main.
+[[waiver]]
+check = "C66"
+path = "docs/plans/shared-next.md"
+reason = "links to docs/research/2026-10-embeddings-for-logs.md, which is still on branch docs/embeddings-for-logs"
+expires = "2026-11-30"
