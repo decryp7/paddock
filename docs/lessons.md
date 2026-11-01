@@ -1130,3 +1130,14 @@ canvas memory runs out), where ECharts also throws from its frame loop. The char
 starts ECharts (otherwise it shows "This chart could not be drawn") and logs, instead of throwing, a failed dispose.
 **Lesson:** a component's destroy never throws; specs that render a real third-party renderer depend on module warmth and
 load under `isolate: false`, so the renderer's missing-platform path must be a designed state (rule 49, ER-29).
+
+## A test that copies the current status inherits whichever state the race left (2026-11-01, Dyno)
+
+Dyno's disk-map ghost test failed now and then in full shuffled runs under load (seeds 207 and 221 of 22): the "Not counted
+yet" arc was drawn, but so was "Hidden space". The test pushed `{ ...store.status(), seq: 70, state: 'running' }`, and only a
+finished scan carries `hiddenBytes`, so the copy was of the finished status: the mock's step timers (faked) had already run
+when it was taken. Whether they had depended on timing, not on the code. Letting the scan finish first made it fail every
+time with the same message; pushing a complete running status (no hidden space, no scan time) made it pass in both orders.
+The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
+**Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
+current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
