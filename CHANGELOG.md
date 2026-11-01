@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc` and `paddock-cli` 0.2.0; tools publish from `<tool>-v*` tags
+- `paddock-proc` and `paddock-cli` are 0.2.0. The registry's 0.1.0 copies predate `ProcessId` and `Report::with_message` (v0.2.0 and v0.3.0
+  were tagged without bumping them), so `tools/heavy` and `tools/wiki`, which need those, require `version = "0.2"` with `registry = "decryp7"`.
+  Apps use both by path and are unaffected; their lockfiles carry the new version.
+- `scripts/publish.mjs --tool <name>` and `.gitea/workflows/publish-tools.yml` publish one `tools/<name>` crate (`heavy-v*`, `wiki-v*`); `tools/wiki`
+  is `publish = ["decryp7"]`. Release order: the shared-crates `v*` tag, then the tool tags.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

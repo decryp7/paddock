@@ -23,8 +23,8 @@ clap = { version = "4", default-features = false, features = ["std", "derive", "
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-paddock-cli = { version = "0.1", path = "../../crates/paddock-cli", registry = "decryp7" }
-paddock-proc = { version = "0.1", path = "../../crates/paddock-proc", registry = "decryp7" }
+paddock-cli = { version = "0.2", path = "../../crates/paddock-cli", registry = "decryp7" }
+paddock-proc = { version = "0.2", path = "../../crates/paddock-proc", registry = "decryp7" }
 
 [dev-dependencies]
 tempfile = "3"

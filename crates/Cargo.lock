@@ -3297,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "paddock-testkit",
@@ -3712,7 +3712,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-proc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libc",
  "log",

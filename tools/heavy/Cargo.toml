@@ -23,7 +23,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Process identity (pid + OS start time, rule 53 / ADR 0033), kill_tree, lower_priority: shared, not copied (ER-22).
-paddock-proc = { version = "0.1", path = "../../crates/paddock-proc", registry = "decryp7" }
+paddock-proc = { version = "0.2", path = "../../crates/paddock-proc", registry = "decryp7" }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 serde_json = "1"
 

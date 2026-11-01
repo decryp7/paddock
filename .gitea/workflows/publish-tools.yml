@@ -2,31 +2,158 @@
 # (rule 9; ADR 0022's accepted amendment, G.4): `heavy-v*` publishes paddock-heavy, `wiki-v*` paddock-wiki. Each tool is its
 # own Cargo workspace, so a tag publishes that tool alone (scripts/publish.mjs --tool <tool>); the crates and npm packages
 # belong to publish.yml and its v* tags. A new publishable tool adds its `<tool>-v*` line here (scripts/publish.test.mjs
-# fails when a publishable tool has no trigger). Nothing is published from a workstation: `node scripts/publish.mjs --tool
-# heavy` is the dry run.
+# fails when a publishable tool has no trigger).
 #
-# The tool's gates run again here on the tagged commit before anything is uploaded (a workflow cannot wait for ci.yml).
+# Release order: the shared-crates `v*` tag first (it publishes paddock-proc and paddock-cli, which the tools need at the
+# versions in their Cargo.toml), then `heavy-v*` and `wiki-v*`.
+#
+# The first run is the safe one: Actions > publish-tools > Run workflow, with the tool name. It runs the gates and the
+# verifying dry run (`cargo package --registry decryp7`) and publishes nothing. A tag runs the same gates, then publishes.
 # Secrets: DOCKER_USERNAME / DOCKER_PASSWORD (basic auth for the registry), the job token for the release.
+#
+# Actions are named by tag like the rest of this repository's workflows: it holds no digest for actions/checkout.
 
 name: publish-tools
 
 on:
   push:
     tags: ["heavy-v*", "wiki-v*"]
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: "Tool folder below tools/ (heavy or wiki); runs the gates and the dry run, publishes nothing"
+        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: publish (tool, cargo registry, release)
+  plan:
+    name: plan (tool)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      tool: ${{ steps.plan.outputs.tool }}
+    steps:
+      - name: Tool and platforms
+        id: plan
+        shell: bash
+        env:
+          INPUT_TOOL: ${{ inputs.tool }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then tool="$INPUT_TOOL"; else tool="${GITHUB_REF_NAME%-v*}"; fi
+          case "$tool" in
+            heavy | wiki) ;;
+            *) echo "::error::'$tool' is not a publishable tool (ref $GITHUB_REF_NAME); next step: tag heavy-vX.Y.Z or wiki-vX.Y.Z, or pass heavy or wiki to the manual run"; exit 1 ;;
+          esac
+          echo "tool=$tool" >> "$GITHUB_OUTPUT"
+          echo "- tool \`$tool\` from \`$GITHUB_REF_NAME\` ($GITHUB_EVENT_NAME)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+  gates-heavy:
+    name: gates (heavy, ${{ matrix.os }})
+    needs: [plan]
+    if: needs.plan.outputs.tool == 'heavy'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        working-directory: tools/heavy
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo ::error::Git for Windows is not installed on this runner; next step: install it & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: paddock-publish-tools-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/heavy
+          name: paddock-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+
+      - name: Lockfile is current
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/heavy
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/heavy/Cargo.lock is stale; next step: cargo update -w in that folder and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/heavy
+        run: |
+          cargo fmt --check || { echo "::error::cargo fmt --check failed; next step: rustfmt the tool's files and commit"; exit 1; }
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/heavy
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings || { echo "::error::clippy found warnings; next step: fix them locally with the same command"; exit 1; }
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/heavy
+        run: |
+          cargo nextest run --profile ci --locked --no-fail-fast || { echo "::error::tool tests failed on ${{ runner.os }}; next step: rerun the failed tests locally"; exit 1; }
+
+      # Licences, advisories, sources; only the Linux image has cargo-deny.
+      - name: Deny
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/heavy
+        run: |
+          cargo deny check || { echo "::error::cargo deny failed; next step: read the advisory or licence above and fix or document it"; exit 1; }
+
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  gates-wiki:
+    name: gates (wiki, ${{ matrix.os }})
+    needs: [plan]
+    if: needs.plan.outputs.tool == 'wiki'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        working-directory: tools/wiki
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -35,32 +162,132 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The engineering rules, one more rules source for the wiki lint. Optional: soft-fails when the token cannot read it.
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: decryp7/engineering-rules
+          path: engineering-rules
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo ::error::Git for Windows is not installed on this runner; next step: install it & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          node-version: 24
+          name: paddock-publish-tools-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
+          name: paddock-${{ github.job }}
 
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
 
-      - name: Tool from the tag
-        id: tool
-        run: |
-          tool="${GITHUB_REF_NAME%-v*}"
-          [ -f "tools/$tool/Cargo.toml" ] || { echo "::error::tag $GITHUB_REF_NAME names no tool: tools/$tool/Cargo.toml is missing; next step: tag <tool>-vX.Y.Z"; exit 1; }
-          echo "tool=$tool" >> "$GITHUB_OUTPUT"
-          echo "- publishing tool \`$tool\` from tag \`$GITHUB_REF_NAME\`" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+      - uses: ./.gitea/actions/host-tools
 
-      - name: Gates (lockfile, fmt, clippy, tests)
-        working-directory: tools/${{ steps.tool.outputs.tool }}
+      - name: Lockfile is current
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
         run: |
           cargo metadata --locked --format-version 1 > /dev/null || {
-            echo "::error::tools/${{ steps.tool.outputs.tool }}/Cargo.lock is stale, run cargo update -w there and commit it"; exit 1; }
-          cargo fmt --check
-          cargo clippy --all-targets --locked -- -D warnings
-          cargo nextest run --profile ci --locked --no-fail-fast
+            echo "::error::tools/wiki/Cargo.lock is stale; next step: cargo update -w in that folder and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
+        run: |
+          cargo fmt --check || { echo "::error::cargo fmt --check failed; next step: rustfmt the tool's files and commit"; exit 1; }
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings || { echo "::error::clippy found warnings; next step: fix them locally with the same command"; exit 1; }
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
+        run: |
+          cargo nextest run --profile ci --locked --no-fail-fast || { echo "::error::tool tests failed on ${{ runner.os }}; next step: rerun the failed tests locally"; exit 1; }
+
+      # Licences, advisories, sources; only the Linux image has cargo-deny.
+      - name: Deny
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
+        run: |
+          cargo deny check || { echo "::error::cargo deny failed; next step: read the advisory or licence above and fix or document it"; exit 1; }
+
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  # Manual run: the verifying dry run, read-only. It needs the shared crates at the versions in the tool's Cargo.toml in the
+  # registry (publish them with the v* tag first), else cargo package fails to resolve them: that is the answer to read.
+  dry-run:
+    name: dry run (${{ needs.plan.outputs.tool }})
+    needs: [plan, gates-heavy, gates-wiki]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/build-jobs
+      - uses: ./.gitea/actions/setup-node
+        with:
+          app-dir: .
+      - uses: ./.gitea/actions/setup-rust
+      - name: Verifying dry run (cargo package, nothing is uploaded)
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          DOCKER_USERNAME=$(printf '%s' "$DOCKER_USERNAME" | tr -d '[:space:]')
+          DOCKER_PASSWORD=$(printf '%s' "$DOCKER_PASSWORD" | tr -d '[:space:]')
+          PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
+          echo "::add-mask::$PACKAGE_AUTH"
+          export PACKAGE_AUTH
+          node scripts/publish.mjs --tool "${{ needs.plan.outputs.tool }}" || {
+            echo "::error::the dry run of tools/${{ needs.plan.outputs.tool }} failed; next step: read the cargo error above (an unresolved paddock-proc or paddock-cli means the shared-crates v* tag has not published them yet)"; exit 1; }
+
+  publish:
+    name: publish (${{ needs.plan.outputs.tool }}, cargo registry, release)
+    needs: [plan, gates-heavy, gates-wiki]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/setup-node
+        with:
+          app-dir: .
+
+      - uses: ./.gitea/actions/setup-rust
 
       - name: Publish the tool, create the release
         env:
@@ -75,4 +302,5 @@ jobs:
           PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
           echo "::add-mask::$PACKAGE_AUTH"
           export PACKAGE_AUTH
-          node scripts/publish.mjs --tool "${{ steps.tool.outputs.tool }}" --publish
+          node scripts/publish.mjs --tool "${{ needs.plan.outputs.tool }}" --publish || {
+            echo "::error::publishing tools/${{ needs.plan.outputs.tool }} failed; next step: read the line above (credential, a version the registry has, or an unpublished shared crate), fix it and tag the next patch version"; exit 1; }

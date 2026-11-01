@@ -217,7 +217,10 @@ export function toolTagProblems(env, tool, version) {
   const problems = [];
   if (env.CI !== 'true' && env.GITEA_ACTIONS !== 'true') problems.push('--publish runs only in CI (publish-tools.yml on a tool tag), never on a workstation');
   const ref = env.GITHUB_REF ?? '';
-  if (ref !== `refs/tags/${tool}-v${version}`) problems.push(`--publish needs the tag ${tool}-v${version} (GITHUB_REF is "${ref}")`);
+  const tag = parseToolTag(ref);
+  if (!tag) problems.push(`--publish needs the tag ${tool}-v${version}, and GITHUB_REF "${ref}" is not a tool tag`);
+  else if (tag.tool !== tool) problems.push(`--publish of tools/${tool} needs the tag ${tool}-v${version}, not the tag of tool ${tag.tool}`);
+  else if (tag.version !== version) problems.push(`the tag says ${tag.version} but tools/${tool} is ${version}; next step: bump the tool or tag ${tool}-v${version}`);
   return problems;
 }
 
@@ -450,6 +453,10 @@ async function mainTool(opts, env) {
   if (problems.length) throw new Error(`refusing to continue:\n  ${problems.join('\n  ')}`);
 
   listCrate(list[0], dir);
+  // The verifying build: cargo packages the crate and compiles it against the registry's copies of its dependencies, which is
+  // what the publish does. It needs the registry, so --offline (no network) skips it and says so.
+  if (opts.offline) console.log('\nskipped the verifying `cargo package` (--offline)');
+  else run('cargo', ['package', '-p', list[0].name, '--locked', '--allow-dirty', '--registry', REGISTRY_NAME], dir);
   const published = opts.offline ? null : await registryVersions(list, [], opts.publish);
   const rows = planRows(list, [], published);
   console.log(`\n${opts.publish ? 'Publishing' : 'Dry run (nothing is published)'} tool ${opts.tool}:\n${formatTable(rows)}`);

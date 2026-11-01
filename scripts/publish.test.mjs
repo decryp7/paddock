@@ -415,6 +415,30 @@ describe('publishing a tool from its tag (ADR 0022 amendment)', () => {
     assert.match(plan('nosuchtool').err, /no tools\/nosuchtool/);
   });
 
+  test('--tool --publish refuses before anything is uploaded: no CI, and CI on the wrong tag', () => {
+    const publish = (extra) => {
+      const env = { ...process.env, ...extra };
+      for (const k of ['CI', 'GITEA_ACTIONS', 'GITHUB_REF', 'PACKAGE_AUTH', 'PACKAGE_TOKEN', 'CARGO_REGISTRIES_DECRYP7_TOKEN']) if (!(k in extra)) delete env[k];
+      try {
+        execFileSync('node', [join(root, 'scripts/publish.mjs'), '--tool', 'heavy', '--publish'], { cwd: root, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+        return { status: 0 };
+      } catch (e) {
+        return { status: e.status, err: String(e.stderr) };
+      }
+    };
+    const none = publish({});
+    assert.equal(none.status, 1);
+    assert.match(none.err, /only in CI/);
+    const wrongTool = publish({ CI: 'true', GITHUB_REF: 'refs/tags/wiki-v0.1.0' });
+    assert.equal(wrongTool.status, 1);
+    assert.match(wrongTool.err, /not the tag of tool wiki/);
+    const wrongVersion = publish({ CI: 'true', GITHUB_REF: 'refs/tags/heavy-v9.9.9' });
+    assert.equal(wrongVersion.status, 1);
+    assert.match(wrongVersion.err, /tag says 9\.9\.9/);
+    const appTag = publish({ CI: 'true', GITHUB_REF: 'refs/tags/v0.3.0' });
+    assert.match(appTag.err, /is not a tool tag/);
+  });
+
   test('every publishable tool passes toolProblems and has its tag trigger in publish-tools.yml', () => {
     const workflow = readFileSync(join(root, '.gitea/workflows/publish-tools.yml'), 'utf8');
     const publishable = [];
