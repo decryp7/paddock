@@ -672,6 +672,17 @@ describe('dialogs as windows', () => {
     expect(loadDialogBounds()['t.viewer']).toEqual({ dx: 1, dy: 2, width: 800, height: 600 });
   });
 
+  it('opens the window it opened itself again with the new inputs, so the window system points it at them (Customize widgets… while Settings is open)', async () => {
+    const { io, service } = setup();
+    service.open(VIEWER, { inputs: { page: 'appearance' } });
+    await tick();
+    io.shown('d-main-1', 't.viewer');
+    await tick();
+    service.open(VIEWER, { inputs: { page: 'popup-widgets' } });
+    await vi.waitFor(() => expect(io.opened).toHaveLength(2));
+    expect(io.opened[1]!.input, 'the open window was only focused, with the inputs it was first opened with').toEqual({ page: 'popup-widgets' });
+  });
+
   it('points a window another window opened at the new inputs', async () => {
     const { io, service } = setup();
     await io.open({ dialogId: 't.viewer', title: 'x', input: {}, theme: 'light' });

@@ -100,8 +100,11 @@ export interface DialogSession {
   readonly shown?: Promise<void>;
   /** False once the dialog is gone, before `closed` has been observed. */
   isOpen(): boolean;
-  /** Brings the dialog to the front. */
-  focus(): void;
+  /**
+   * Brings the dialog to the front. `inputs`: what it was opened again with (the window system is asked with them, so its log
+   * names them); the content itself gets them through `sendDialogInputs`.
+   */
+  focus(inputs?: Readonly<Record<string, unknown>>): void;
   /** Asks the dialog to close without an answer; it may refuse (unsaved edits, a required choice, busy work). */
   dismiss(): void;
 }
