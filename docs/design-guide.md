@@ -170,6 +170,7 @@ Increase Contrast / Reduce Transparency).
 
 ### Categorical chart palette (CVD-safe; Okabe-Ito derived, tuned per scheme; 8 max, 5 recommended)
 Order matters: adjacent series differ in hue AND lightness. Assign by series identity (stable), not by index.
+
 | # | Name | Dark | Light |
 |---|---|---|---|
 | 1 | sky blue | #60AEEB | #0C6DBE |
@@ -180,6 +181,7 @@ Order matters: adjacent series differ in hue AND lightness. Assign by series ide
 | 6 | periwinkle | #7A70FF | #494FDB |
 | 7 | yellow | #E8DC5A | #816A1D |
 | 8 | grey | #A2ACB1 | #6F737D |
+
 Sequential ramp (one hue, 6 steps, for heatmaps): from surface-2 to accent-500 in OKLCH lightness steps (dark: light
 increases; light: dark increases). Diverging: series 1 - neutral - series 2 (never red/green). Event/level colours in
 Debrief (fatal/error/warn/info/debug) use the status set + shape, not this palette. Validate with the dataviz skill's

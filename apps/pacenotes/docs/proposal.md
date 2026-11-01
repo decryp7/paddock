@@ -258,7 +258,7 @@ The v1 set is large and is staged in milestones (section 19).
 | Markdown and SARIF export; CI mode via Pitcrew with exit codes | v1 | Qodana, reviewdog |
 | Import external linter results (clippy, eslint, Sonar/Qodana SARIF) and merge them into one list, deduplicated | v1 (SARIF, rdjson), Later (more) | reviewdog |
 | Review a whole repository (index-based, budgeted, paged), not only a diff | v1 | SonarQube, Qodana |
-| Rule sets in the repo (`.pacenotes/rules/*.md|*.yml`) and per user; scope globs, severity, good/bad examples; **tests for rules** (`pacenotes rules test`) | v1 | Semgrep, ast-grep, CodeRabbit |
+| Rule sets in the repo (`.pacenotes/rules/*.md\|*.yml`) and per user; scope globs, severity, good/bad examples; **tests for rules** (`pacenotes rules test`) | v1 | Semgrep, ast-grep, CodeRabbit |
 | Findings with evidence, explanation and a suggested fix as a diff (never applied) | v1 | CodeRabbit, PR-Agent |
 | Suppressions with a required reason; **baseline for legacy code** so only new findings fail | v1 | SonarQube, Qodana |
 | Learn from accepted/dismissed findings, local only (few-shot examples, hygiene report) | v1.1 | CodeRabbit learnings |

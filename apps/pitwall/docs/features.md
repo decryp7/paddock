@@ -12,7 +12,7 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 ## Contents
 
 - [Local only](#local-only)
-- [llama.cpp, the engine](#llama-cpp-the-engine)
+- [llama.cpp, the engine](#llamacpp-the-engine)
 - [Model library](#model-library)
 - [Will this fit?](#will-this-fit)
 - [Serving: load on first use and release](#serving-load-on-first-use-and-release)

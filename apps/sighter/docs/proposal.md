@@ -204,6 +204,7 @@ crops), hard-cases gallery, held-out session test (different theme/scale/OS), si
 "current for this app", roll back. Scripts can pin a version (section 7).
 
 **Training runtime decision**:
+
 | Option | Verdict |
 |---|---|
 | Rust-native (burn, candle) | Not for v1: no maintained RT-DETR/D-FINE recipe with augmentation, EMA, matcher losses, mAP tooling. Revisit for a tiny YOLOX-style detector later. |
