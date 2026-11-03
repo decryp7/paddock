@@ -1,6 +1,6 @@
 # 32. Power: keep awake, Wake-on-LAN, idle and timed actions, scheduled wake and an energy report
 
-- Status: Proposed (2026-11-03). Decisions D1 to D11 below wait for the user; claims marked [V] wait for WP-0's VM checks.
+- Status: Accepted (user 2026-11-03: D1–D10 accepted; D11 changed: all features in 1.1.0, landing order unchanged). Claims marked [V] wait for WP-0's VM checks.
 - Date: 2026-11-03
 - Trigger: the user's decision of 2026-11-03 to add power features to Dyno 1.1.0, inspired by Enviprot's ASDM
   ([enviprot.com](https://www.enviprot.com/en/)) without its enterprise parts (console, policies, AD portals, WOL proxy
@@ -285,7 +285,7 @@ the design, as rule 51 asks).
 | D8 | Relay through another Dyno on the far subnet? | **Not in 1.1.0**: it needs an authenticated LAN listener Dyno does not have; directed broadcast covers routed LANs that allow it |
 | D9 | Scheduled wake does: stay awake N min, wake chosen devices, run a fixed Dyno job; never an arbitrary command? | **Yes** |
 | D10 | Energy: measured only from whole-system figures; CPU energy apart; else the user's watts, labelled; tariff cost; CO₂ only with a factor; unknown spans shown? | **Yes** |
-| D11 | Landing order within 1.1.0: keep awake → WOL → energy → idle/timed → scheduled wake; if 1.1.0's date slips, the last two move to 1.1.x? | **Yes** |
+| D11 | Landing order within 1.1.0: keep awake → WOL → energy → idle/timed → scheduled wake; if 1.1.0's date slips, the last two move to 1.1.x? | **Changed by the user 2026-11-03:** order kept, but all features ship in 1.1.0; nothing moves to 1.1.x |
 
 ## Work packages
 
