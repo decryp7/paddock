@@ -777,7 +777,7 @@ export class MockBackend implements DynoBackend {
     return this.reply('health', () => {
       const reasons = healthReasons();
       const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
-      return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', reasons };
+      return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', performanceScore: score, cappedBy: null, reasons };
     });
   }
 

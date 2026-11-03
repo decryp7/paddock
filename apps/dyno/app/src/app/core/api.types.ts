@@ -675,12 +675,19 @@ export interface HealthReason {
   /** Points this costs the score. */
   impact: number;
   severity: Severity;
+  /** For an active alarm: when its condition first appeared; null for performance reasons. */
+  since: Timestamp | null;
 }
 
 export interface HealthReport {
   at: Timestamp;
+  /** The score after active alarms cap it. */
   score: number;
   grade: Grade;
+  /** What performance alone scores, before alarms cap it. */
+  performanceScore: number;
+  /** Set when an active alarm of this severity lowered the score (warning caps at Fair, critical at Poor). */
+  cappedBy: Severity | null;
   reasons: HealthReason[];
 }
 

@@ -23,6 +23,7 @@ export function healthReasons(): HealthReason[] {
       detail: '210 GB free of 953 GB, and build output fills about 5 GB a day: full in about 41 days. 63 GB can be freed safely.',
       impact: 8,
       severity: 'warning',
+      since: null,
     },
     {
       id: 'uptime',
@@ -30,6 +31,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
       impact: 6,
       severity: 'warning',
+      since: null,
     },
     {
       id: 'startup-apps',
@@ -37,6 +39,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'Teams, VirtualBox and Spotify have high impact: the desktop takes 48 s to settle after sign-in.',
       impact: 4,
       severity: 'info',
+      since: null,
     },
     {
       id: 'battery-wear',
@@ -44,6 +47,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'Full charge holds 87% of the design capacity after 412 cycles. Normal for a two-year-old laptop.',
       impact: 2,
       severity: 'info',
+      since: null,
     },
   ];
 }

@@ -515,6 +515,16 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         .collect();
     let system_disk = sample.disks.first().map(|d| d.id.clone()).unwrap_or_default();
     let lifespans = shared.hardware.lifespan_overview(&core.store, t).forecasts;
+    // Shelved alarms are listed too; `assess` leaves them out of the cap.
+    let alarms = core.alarms.list(
+        &dyno_core::alarms::AlarmFilter {
+            states: vec![dyno_core::alarms::AlarmState::Active],
+            include_shelved: true,
+            limit: 500,
+            ..Default::default()
+        },
+        t,
+    );
     let report = assess(&HealthInput {
         now: t,
         sample: &sample,
@@ -528,6 +538,7 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
             .count_issues(dyno_core::issues::IssueKind::AppCrash, t.minus(7 * DAY), t)
             .unwrap_or(0),
         lifespans: &lifespans,
+        alarms: &alarms,
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
     let _ = core.store.put_score(t, report.score);

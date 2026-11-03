@@ -189,8 +189,12 @@ const reason = (id: string, impact: number): HealthReason => ({
   detail: `Detail ${id}`,
   impact,
   severity: 'warn' as HealthReason['severity'],
+  since: null,
 });
-const report = (reasons: HealthReason[]): HealthReport => ({ at: NOW, score: 100 - reasons.reduce((a, r) => a + r.impact, 0), grade: 'good', reasons });
+const report = (reasons: HealthReason[]): HealthReport => {
+  const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
+  return { at: NOW, score, grade: 'good', performanceScore: score, cappedBy: null, reasons };
+};
 
 describe('HealthHero', () => {
   afterEach(() => TestBed.inject(Dialog).closeAll());
@@ -205,6 +209,23 @@ describe('HealthHero', () => {
     await settle(f);
     expect(el.querySelector('.num')?.textContent).toBe('77');
     expect([...el.querySelectorAll('li .t')].map((t) => /Reason (\w)/.exec(t.textContent ?? '')?.[1])).toEqual(['b', 'd', 'c']);
+    expect(el.querySelector('.clear')).toBeNull();
+  });
+
+  it('names each active alarm with its severity and start, ahead of performance reasons, and says when alarms cap the grade', async () => {
+    const { mock } = env();
+    const alarm: HealthReason = { id: 'alarm:7', title: 'Disk is failing', detail: 'Back up now.', impact: 0, severity: 'critical', since: NOW - 2 * 3_600_000 };
+    vi.spyOn(mock, 'health').mockResolvedValue({ at: NOW, score: 59, grade: 'poor', performanceScore: 100, cappedBy: 'critical', reasons: [alarm] });
+    const f = TestBed.createComponent(HealthHero);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.num')?.textContent).toBe('59');
+    const row = el.querySelector('li')!;
+    expect(row.textContent).toContain('Critical');
+    expect(row.textContent).toContain('Disk is failing');
+    expect(row.textContent).toContain('Active alarm since');
+    expect(row.querySelector('.imp')).toBeNull();
+    expect(el.querySelector('.trend')?.textContent).toContain('held at Poor by an active Critical alarm (performance alone: 100)');
     expect(el.querySelector('.clear')).toBeNull();
   });
 

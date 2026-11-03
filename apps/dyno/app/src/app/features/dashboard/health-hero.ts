@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import type { HealthReason } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { formatSigned } from '../../shared/format';
+import { formatAgo, formatSigned } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE, SEVERITY_LABEL, SEVERITY_TONE } from '../../shared/labels';
 import { Ring } from '../../shared/ring';
@@ -40,9 +40,15 @@ import { MatTooltip } from '@angular/material/tooltip';
               <li>
                 <div class="txt">
                   <span class="t"><span class="badge" [attr.data-tone]="sevTone(x)">{{ sevLabel(x) }}</span> {{ x.title }}</span>
-                  <span class="d">{{ x.detail }}</span>
+                  @if (x.since !== null) {
+                    <span class="d">Active alarm since {{ sinceText(x.since) }}. {{ x.detail }}</span>
+                  } @else {
+                    <span class="d">{{ x.detail }}</span>
+                  }
                 </div>
-                <span class="imp num" [matTooltip]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
+                @if (x.since === null) {
+                  <span class="imp num" [matTooltip]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
+                }
               </li>
             }
           </ul>
@@ -101,11 +107,20 @@ export class HealthHero implements OnInit {
     const r = this.store.report();
     return r ? GRADE_TONE[r.grade] : 'accent';
   });
-  protected readonly top = computed(() => [...(this.store.report()?.reasons ?? [])].sort((a, b) => b.impact - a.impact).slice(0, 3));
+  /** Every active alarm (the engine puts them first), then the three costliest performance reasons. */
+  protected readonly top = computed(() => {
+    const all = this.store.report()?.reasons ?? [];
+    return [...all.filter((x) => x.since !== null), ...all.filter((x) => x.since === null).sort((a, b) => b.impact - a.impact).slice(0, 3)];
+  });
   protected readonly trend = computed(() => {
     const w = this.store.weekly();
-    return w && w.score !== null ? `${formatSigned(w.scoreChange)} vs last week` : null;
+    const r = this.store.report();
+    const change = w && w.score !== null ? `${formatSigned(w.scoreChange)} vs last week` : null;
+    if (!r || r.cappedBy === null) return change;
+    const held = `held at ${GRADE_LABEL[r.grade]} by an active ${SEVERITY_LABEL[r.cappedBy]} alarm (performance alone: ${Math.round(r.performanceScore)})`;
+    return change ? `${change}, ${held}` : held.charAt(0).toUpperCase() + held.slice(1);
   });
+  protected readonly sinceText = (at: number) => formatAgo(at, Date.now());
   protected readonly hint = computed(() => {
     const e = this.store.reportError();
     return e ? errorHint(e.code) : null;
