@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { GuiCheck, runGui } from './gui.mjs';
+import { GuiCheck, offParent, runGui } from './gui.mjs';
 import { parseGateway, parseVncUrl, vncDoubleClickCommands, vncDragCommands } from './run.mjs';
 
 const config = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
@@ -291,4 +291,10 @@ test('a log that rotated in place over the reboot is read from its start, not fr
   const r = await run('rotated');
   const s = r.by['Reboot as a login item (app quit first): hidden, one agent'];
   assert.equal(s.status, 'pass', JSON.stringify(s));
+});
+
+test("the login-off summary names who runs the helper: launchd's job for a helper with launchd labels, else the app", () => {
+  const dyno = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
+  assert.equal(offParent(dyno), "the helper runs as launchd's job net.decryptology.dyno.agent.ondemand");
+  assert.equal(offParent({ processes: [{ name: 'h', role: 'helper', parents: ['app'] }] }), "the helper is the app's child again");
 });

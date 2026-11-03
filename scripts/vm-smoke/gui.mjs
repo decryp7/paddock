@@ -8,6 +8,12 @@ import { describeTree, instancesOf, parseLaunchctlPrint, parsePs } from './judge
 import { appWindows, btmItem, judgeLoginItems, judgeLoginStart, parseBtmDump, parseLoginItems, parseQuarantine, parseWindows } from './gui-judge.mjs';
 import { makeSteps } from './steplog.mjs';
 
+/** Who runs the helper once Launch at login is off, as the step's summary says it (the parent check itself is judge.mjs's). */
+export function offParent(config) {
+  const off = config.processes.find((x) => x.role === 'helper' && x.launchdLabels?.off)?.launchdLabels.off;
+  return off ? `the helper runs as launchd's job ${off}` : 'the helper is the app\'s child again';
+}
+
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 /** Background rows the GUI test image has of its own (cirruslabs' guest agent; its limit.maxfiles daemon shows as "launchctl"). */
 export const IMAGE_BACKGROUND_ROWS = ['Cirrus Labs, Inc.', 'launchctl'];
@@ -442,7 +448,7 @@ export class GuiCheck {
       { ok: off, detail: off ? 'switched off in the app\'s Settings' : 'the switch did not turn off' },
       { ok: gone.ok, detail: gone.ok ? `launchd no longer has ${l.label}` : `launchd still has ${l.label}` },
       ...w.checks,
-    ], { evidence: describeTree(w.snaps.at(-1), this.config, this.bundle), passSummary: 'job removed; the helper is the app\'s child again, one of each' });
+    ], { evidence: describeTree(w.snaps.at(-1), this.config, this.bundle), passSummary: `job removed; ${offParent(this.config)}, one of each` });
   }
 
   /** Copies of the guest's screenshots are taken by the caller; this lists them as evidence. */

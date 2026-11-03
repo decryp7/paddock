@@ -72,7 +72,7 @@ scripts/vm-smoke/vm-smoke.sh --app dyno --run <id> --gui
 | Reboot as a login item | the app is **quit first** (a running app is restored by loginwindow instead, with a different open event: the next row), then a reboot inside the guest; the image logs in again. The app's log since the reboot must have the hidden-start line and not the window line (`gui.loginStart`), no window may be shown, and the helper must run once with the parent `helperParentAfterLogin`, judged over the settle window |
 | Reboot with the app running | the case people meet (restart with a tray app running, "Reopen windows"): judged against `gui.loginStart.restore` (`hidden` or `window`); `null` while the product decision is open, and the step then reports (INFO) what happened |
 | Finder double-click | from the app running without a window (after the login start, else the `--hidden` tray start, else not running): a double-click on the app in Applications through VNC must show the window with its content, one app process |
-| Launch at login off, Quit | the job goes, the helper is the app's child again; then Quit leaves nothing |
+| Launch at login off, Quit | the job goes, the helper is the app's child again (Dyno: launchd's job `net.decryptology.dyno.agent.ondemand`, matched by pid); then Quit leaves nothing |
 
 Screenshots are taken **inside** the guest (`screencapture`) and copied next to the result file (`<result>-screens/`). The steps
 after Gatekeeper depend on it, so the run stops at the first failing step of download, drag or Gatekeeper.
