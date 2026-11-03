@@ -103,9 +103,15 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
       }
     }
     // A long error arrives late too: the loop follows it, and the review sees it.
-    await page.getByTestId('fixture-error').click();
+    // (The fixture's Save is refused: the frame draws the refusal in its alert slot, with an icon, the danger tint and Try again.)
+    await page.getByTestId('dialog-action-save').click();
+    const alert = page.getByTestId('dialog-alert');
+    await expect(alert, `${where}: the refusal is not shown`).toBeVisible();
+    expect(await alert.getAttribute('role')).toBe('alert');
+    await expect(page.getByTestId('dialog-try-again')).toBeVisible();
     const withError = await quiet();
-    expect(withError.seq - later.seq, `${where}: an error sent ${withError.seq - later.seq} measures (at most two)`).toBeLessThanOrEqual(2);
+    // Two changes (busy, then the refusal) and one follow-up at most.
+    expect(withError.seq - later.seq, `${where}: a refused action sent ${withError.seq - later.seq} measures (at most three)`).toBeLessThanOrEqual(3);
     await shot('error', withError.height);
     // Content taller than the screen allows: the window stops at the cap, the body scrolls and the footer stays in view.
     if (contract.kind !== 'tool') {
@@ -121,6 +127,15 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
         return el ? { scroll: el.scrollHeight, client: el.clientHeight } : null;
       });
       expect(body && body.scroll > body.client + 1, `${where}: at the cap the body must scroll`).toBe(true);
+      // The cue: the body says it overflows and draws a scroll-edge shadow, and the footer has its divider (also for a decision).
+      await expect(page.getByTestId('dialog-body'), `${where}: no overflow cue on the body`).toHaveAttribute('data-overflow', 'true');
+      const cue = await page.evaluate(() => ({
+        shadow: getComputedStyle(document.querySelector('[data-testid=dialog-body]') as Element).boxShadow,
+        divider: parseFloat(getComputedStyle(document.querySelector('[data-testid=dialog-footer]') as Element).borderTopWidth),
+      }));
+      expect(cue.shadow, `${where}: no scroll-edge shadow`).not.toBe('none');
+      // (1 CSS px is 0.67 device px at 1.5x in WebKit.)
+      expect(cue.divider, `${where}: no footer divider while the body scrolls`).toBeGreaterThanOrEqual(0.5);
       const foot = await page.locator('[data-testid=dialog-footer] button').first().boundingBox();
       expect(foot && foot.y + foot.height <= cap + 0.5, `${where}: the footer is cut off at the cap`).toBe(true);
     }

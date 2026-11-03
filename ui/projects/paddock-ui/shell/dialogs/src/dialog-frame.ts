@@ -65,7 +65,7 @@ export const FRAME_STYLES = `
     .pd-frame-alert-icon { flex: none; display: inline-grid; color: var(--pd-danger); }
     /* Try again gets the focus by script after a refusal: its ring shows then too, not only after a key press. */
     .pd-frame-alert .pd-frame-btn:focus { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+    .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; max-width: 72ch; overflow-wrap: anywhere; }
     .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
     .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: var(--pd-space-4, 16px); outline: none; }
     .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
@@ -77,6 +77,9 @@ export const FRAME_STYLES = `
     :host([data-kind='decision']) .pd-frame-heading { color: var(--pd-text); }
     /* A decision is one continuous surface: no divider or band under its question (ADR 0026 mockups). */
     :host([data-kind='decision']) .pd-frame-foot { border-top: 0; background: transparent; padding-block-start: var(--pd-space-2, 8px); padding-block-end: var(--pd-space-4, 16px); }
+    /* Content taller than the window: the body scrolls, and that must show: a shadow on its lower edge and the footer's divider (also for a decision, so cut-off text never runs into the buttons). */
+    .pd-frame-body[data-overflow='true'] { box-shadow: inset 0 -10px 8px -8px var(--pd-border-strong); }
+    :host(.pd-frame--overflow[data-kind='decision']) .pd-frame-foot { border-top: 1px solid var(--pd-hairline); }
     :host([data-kind='tool']) .pd-frame-content { height: 100%; }
     :host([data-kind='tool']) .pd-frame-content > :not(.pd-frame-loading):not(.pd-frame-failed) { flex: 1 1 auto; min-height: 0; }
     .pd-frame-loading { margin: var(--pd-space-4, 16px) auto; color: var(--pd-text-muted); }
@@ -110,6 +113,7 @@ export const FRAME_STYLES = `
     '[attr.data-kind]': 'kind()',
     '[attr.data-state]': 'state()',
     '[attr.aria-busy]': 'busy() !== null || state() === "loading"',
+    '[class.pd-frame--overflow]': 'overflowing()',
   },
   template: `
     @if (rejected(); as r) {
@@ -128,6 +132,7 @@ export const FRAME_STYLES = `
       class="pd-frame-body"
       #body
       data-testid="dialog-body"
+      [attr.data-overflow]="overflowing() ? 'true' : null"
       [class.pd-frame-body--decision]="decision()"
       [attr.inert]="busy() !== null ? '' : null"
       [attr.role]="ownsRole() && kind() === 'decision' ? 'alertdialog' : null"
@@ -254,6 +259,8 @@ export class DialogFrame {
   /** The action whose work is running. */
   protected readonly busy = signal<string | null>(null);
   protected readonly rejected = signal<Rejection | null>(null);
+  /** The body scrolls (its content is taller than the window): the cue is a scroll-edge shadow and the footer's divider. */
+  protected readonly overflowing = signal(false);
   /** A dismissal waits for a non-abortable action to settle (the signal draws "Finishing…"; the field is read after awaits). */
   private readonly finishing = signal(false);
   private finishingNow = false;
@@ -475,8 +482,16 @@ export class DialogFrame {
       minContent: { width: Math.ceil(Math.max(buttons, DIALOG_MIN.width)), height: Math.ceil(Math.min(content, chrome + minBody)) },
       viewportHeight: typeof window === 'undefined' ? undefined : window.innerHeight || undefined,
       devicePixelRatio: typeof window === 'undefined' ? undefined : window.devicePixelRatio || undefined,
-      overflow: body.scrollHeight > body.clientHeight + 1,
+      overflow: this.updateOverflow(),
     };
+  }
+
+  /** Reads whether the body scrolls and keeps the cue in step with it; returns it. */
+  private updateOverflow(): boolean {
+    const body = this.bodyEl().nativeElement;
+    const over = body.scrollHeight > body.clientHeight + 1;
+    if (over !== this.overflowing()) this.overflowing.set(over);
+    return over;
   }
 
   /**
@@ -510,9 +525,13 @@ export class DialogFrame {
     this.requestFit = fit.ask;
     const observers: { disconnect(): void }[] = [];
     if (typeof ResizeObserver !== 'undefined') {
-      const resize = new ResizeObserver(fit.ask);
+      const resize = new ResizeObserver(() => {
+        this.updateOverflow();
+        fit.ask();
+      });
       resize.observe(this.contentEl().nativeElement);
       resize.observe(this.footEl().nativeElement);
+      resize.observe(this.bodyEl().nativeElement);
       observers.push(resize);
     }
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
