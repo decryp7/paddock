@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
 import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdRowTree, type PdSort } from './model';
@@ -360,6 +361,26 @@ describe('pd-table', () => {
     f.componentInstance.groupBy.set(null);
     await settle(f);
     expect(groups()).toHaveLength(0);
+  });
+
+  it('folds and opens every group at once, and does nothing without groupBy', async () => {
+    const f = await setup();
+    const table = f.debugElement.query(By.directive(PdTable)).componentInstance as PdTable<unknown>;
+    table.collapseAllGroups();
+    table.expandAllGroups();
+    await settle(f);
+    expect(rowEls(f)).toHaveLength(3);
+    f.componentInstance.groupBy.set('kind');
+    await settle(f);
+    const folded = () => [...el(f).querySelectorAll<HTMLElement>('.pd-group button')].map((b) => b.getAttribute('aria-expanded'));
+    table.collapseAllGroups();
+    await settle(f);
+    expect(folded()).toEqual(['false', 'false']);
+    expect(rowEls(f)).toHaveLength(2);
+    table.expandAllGroups();
+    await settle(f);
+    expect(folded()).toEqual(['true', 'true']);
+    expect(rowEls(f)).toHaveLength(5);
   });
 
   it('draws a group row\'s own cells in the columns beneath its heading, names the count in the app\'s noun and sets group names in mono', async () => {

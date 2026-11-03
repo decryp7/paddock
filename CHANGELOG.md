@@ -31,6 +31,19 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
 - `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
   calls `write`, so other implementations of the port are unchanged.
+### `paddock-health` and `@decryp7/paddock-ui/shell/notify`: delete selected or all notifications
+- New commands `notifications_dismiss_many` (`ids`, at most 1000; returns how many were removed) and `notifications_dismiss_all` (`upTo`: removes the messages up to the newest id the user saw, so one that arrived meanwhile stays; returns the count; no change event when nothing was removed) remove the
+  calling window's messages (its project's and the app's list; an app list is saved again, so a deleted message does not return after a restart). Ids the
+  window cannot see are ignored. The log line carries counts only. `NotificationCentre::dismiss_many` / `dismiss_all`, `Centre::dismiss_many` / `clear`.
+- `NotificationsBackend` gains the abstract `dismissMany(ids)` and `dismissAll()` (Tauri and in-memory backends), `NotificationsStore.dismissMany` / `dismissAll`.
+  `pd-notifications-panel` has a checkbox per message (Shift-click selects a range), Select all, "Delete selected (n)" and "Delete all", which asks first in the
+  shared `pd.confirm` decision dialog. `shell-commands.ts`, `health-commands.ts`, the permission files and the window-class sets are regenerated.
+
+### Follow-up: Dyno's `dy-tree-actions`
+- The Expand all / Collapse all control lives in Dyno (`apps/dyno/app/src/app/shared/tree-actions.ts`). Move it to `@decryp7/paddock-ui/table` once a second app needs it (rule 42, rule of three). Dyno's Processes folds are not persisted (they never were); Network's are, up to 500 groups.
+
+### `@decryp7/paddock-ui/table`: `PdTable.expandAllGroups()` and `collapseAllGroups()`
+- Public methods for an app's toolbar on a `groupBy` table (the table kept the fold state to itself); `groupKeys(rows, column)` is exported next to `groupItems`.
 
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,

@@ -3,7 +3,7 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import type { AppGroup, CommandError, Locker, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { type Row, type Sort, type ViewMode, buildRows } from '../features/processes/process-rows';
+import { type Row, type Sort, type ViewMode, buildRows, collapseAllKeys, expandAllKeys } from '../features/processes/process-rows';
 
 interface ProcessesState {
   processes: ProcessSample[];
@@ -80,6 +80,14 @@ export const ProcessesStore = signalStore(
           if (row.expanded) return { expanded: st.mode === 'tree' ? [...rest, `-${row.key}`] : rest };
           return { expanded: [...rest, row.key] };
         });
+      },
+      /** Opens every group (Apps view) or every process with children (Tree view). */
+      expandAll(): void {
+        patchState(store, (st) => ({ expanded: expandAllKeys(st.mode, st.processes, st.groups) }));
+      },
+      /** Folds everything down to the top level. */
+      collapseAll(): void {
+        patchState(store, (st) => ({ expanded: collapseAllKeys(st.mode, st.processes) }));
       },
       dismissError(): void {
         patchState(store, { actionError: null });

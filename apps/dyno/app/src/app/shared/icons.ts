@@ -47,6 +47,8 @@ export const ICONS = {
   more: line('<circle cx="5.5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="18.5" cy="12" r="1" fill="currentColor"/>'),
   'chevron-down': line('<path d="m6 9 6 6 6-6"/>'),
   'chevron-right': line('<path d="m9 6 6 6-6 6"/>'),
+  'expand-all': line('<path d="m7 8 5-4.5L17 8M7 16l5 4.5 5-4.5"/>'),
+  'collapse-all': line('<path d="m7 3.5 5 4.5 5-4.5M7 20.5l5-4.5 5 4.5"/>'),
   'chevron-left': line('<path d="m15 6-6 6 6 6"/>'),
   'arrow-up': line('<path d="M12 19V5M6 11l6-6 6 6"/>'),
   'arrow-down': line('<path d="M12 5v14M6 13l6 6 6-6"/>'),

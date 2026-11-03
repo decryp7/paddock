@@ -12,6 +12,7 @@ import {
   filterRows,
   fromControl,
   groupItems,
+  groupKeys,
   inlineActions,
   menuActions,
   nextIndex,
@@ -103,6 +104,12 @@ describe('table model', () => {
     const summed = groupItems(rows, columns[2], new Set(), (list) => ({ n: String(list.length) }));
     expect(summed.filter((i) => i.kind === 'group').map((g) => (g.kind === 'group' ? g.cells?.['n'] : ''))).toEqual(['2', '2']);
     expect(open.every((i) => i.kind === 'row' || i.cells === undefined)).toBe(true);
+  });
+
+  it('lists the group keys in order of first appearance, none without a column', () => {
+    expect(groupKeys(rows, columns[2])).toEqual(['log', 'zip']);
+    expect(groupKeys(rows, undefined)).toEqual([]);
+    expect(groupKeys([], columns[2])).toEqual([]);
   });
 
   it('moves between lines for the navigation keys and nothing else', () => {

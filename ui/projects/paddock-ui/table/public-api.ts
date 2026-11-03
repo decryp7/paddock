@@ -15,6 +15,7 @@ export {
   filterRows,
   fromControl,
   groupItems,
+  groupKeys,
   inlineActions,
   menuActions,
   nextIndex,

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-notifications-dismiss-all"
+description = "Enables the notifications_dismiss_all command without any pre-configured scope."
+commands.allow = ["notifications_dismiss_all"]
+
+[[permission]]
+identifier = "deny-notifications-dismiss-all"
+description = "Denies the notifications_dismiss_all command without any pre-configured scope."
+commands.deny = ["notifications_dismiss_all"]

@@ -17,6 +17,13 @@
 - Windows: the log tells each tray icon: its static image and size, created or why not, and the first drawn image (size, or the refusal). A new icon of an app that was never pinned sits in the taskbar's overflow (the `^` at the right) on Windows 11 until the user turns it on in Settings > Personalization > Taskbar > Other system tray icons; the registry showed Dyno's icon registered there (`NotifyIconSettings`, tooltip `Dyno`).
 - Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
 - macOS: the Network page lists every program's sockets also when Start at login is off. The agent the app starts itself was its child process, and macOS 27 shows a child of an ad-hoc signed app only its own sockets; the app now starts it as a launchd job of the user's session (`launchctl bootstrap`, label `net.decryptology.dyno.agent.ondemand`, its definition in Dyno's data folder, not in `~/Library/LaunchAgents`, so nothing starts it at login), and ends it through launchd on Quit. Linux and Windows are unchanged. The log says which way the agent was started (`Via`) and the agent logs what macOS shows it (Dyno ADR 0026).
+## Unreleased
+
+### Added
+
+- Notifications: select messages (checkboxes, Shift-click for a range) and delete the selected ones, or delete all after a confirmation. Deleted messages stay gone after a restart (shared `paddock-health` commands).
+- Expand all and Collapse all (icon buttons with tooltips) in the toolbars of Network (programs or remote hosts), Processes (Apps and Tree views), and the grouped lists of What changed (days) and Files (groups). Interaction state only; Network keeps its fold in the same saved list as a single fold.
+- Processes: the Tree view no longer searches the whole process list for every row it draws (a map lookup), so opening a tree of thousands of processes is quick.
 
 ## [1.0.0] - 2026-10-29
 
