@@ -83,8 +83,8 @@ impl InstallPorts for FsPorts {
         Ok(Box::new(file))
     }
 
-    fn run(&mut self, tool: &Tool, _timeout: Duration) -> Result<ToolOutput, PlatformError> {
-        self.runner.run(tool)
+    fn run(&mut self, tool: &Tool, timeout: Duration) -> Result<ToolOutput, PlatformError> {
+        self.runner.run_tool(tool, timeout)
     }
 
     fn exists(&self, path: &str) -> bool {

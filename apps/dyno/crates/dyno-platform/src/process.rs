@@ -6,9 +6,9 @@ use dyno_core::ports::PlatformError;
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Output, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Most bytes kept from each of a tool's output streams.
 pub const MAX_TOOL_OUTPUT: usize = 4 * 1024 * 1024;
@@ -55,42 +55,24 @@ fn program_name(cmd: &Command) -> String {
 }
 
 /// Runs `cmd` to completion with stdin closed and stdout/stderr captured (each at most [`MAX_TOOL_OUTPUT`] bytes),
-/// killing it after `timeout`. A non-zero exit is not an error: callers look at [`Output::status`].
-pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Output, PlatformError> {
+/// ending its whole process tree after `timeout` (`paddock_proc::run_bounded`, the family's one implementation). A non-zero exit
+/// is not an error: callers look at [`Output::status`].
+pub fn run_with_timeout(cmd: Command, timeout: Duration) -> Result<Output, PlatformError> {
+    use paddock_proc::{Limits, Outcome, RunError};
     let program = program_name(&cmd);
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => PlatformError::Unsupported(format!("{program} is not available on this computer.")),
-        std::io::ErrorKind::PermissionDenied => PlatformError::AccessDenied(format!("Not allowed to run {program}.")),
-        _ => PlatformError::Failed(format!("Could not run {program}: {e}")),
+    let out = paddock_proc::run_bounded(cmd, Limits::new(timeout).max_output(MAX_TOOL_OUTPUT)).map_err(|e| match e {
+        RunError::NotFound(_) => PlatformError::Unsupported(format!("{program} is not available on this computer.")),
+        RunError::PermissionDenied(_) => PlatformError::AccessDenied(format!("Not allowed to run {program}.")),
+        RunError::Spawn(_, e) => PlatformError::Failed(format!("Could not run {program}: {e}")),
+        RunError::Wait(_, e) => PlatformError::Failed(format!("Waiting for {program} failed: {e}")),
     })?;
-    let out = drain(child.stdout.take());
-    let err = drain(child.stderr.take());
-    let started = Instant::now();
-    let status: ExitStatus = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(PlatformError::Timeout(format!(
-                    "{program} did not finish within {} s.",
-                    timeout.as_secs_f32().max(0.1)
-                )));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-            Err(e) => {
-                let _ = child.kill();
-                return Err(PlatformError::Failed(format!("Waiting for {program} failed: {e}")));
-            }
-        }
-    };
-    let bytes = |h: Drain| h.and_then(|h| h.join().ok()).unwrap_or_default();
-    Ok(Output {
-        status,
-        stdout: bytes(out),
-        stderr: bytes(err),
-    })
+    match out.outcome {
+        Outcome::Exited(status) => Ok(Output { status, stdout: out.stdout, stderr: out.stderr }),
+        Outcome::TimedOut | Outcome::OutputCap => Err(PlatformError::Timeout(format!(
+            "{program} did not finish within {} s.",
+            timeout.as_secs_f32().max(0.1)
+        ))),
+    }
 }
 
 /// The pid of a running tool that Cancel and the timeout may signal, until the tool has been reaped. Both take the lock; so does
@@ -292,6 +274,7 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
 pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
+    use std::time::Instant;
 
     pub(crate) fn shell(script: &str) -> Command {
         if cfg!(windows) {

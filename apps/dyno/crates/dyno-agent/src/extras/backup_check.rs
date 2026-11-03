@@ -5,7 +5,7 @@ use super::ExtrasCentre;
 use crate::agent::{lock, now, Shared};
 use dyno_core::backup::{observation, BackupReport, BackupSettings, BackupStatus, BackupTool};
 use dyno_platform::extras::{backup_status_of, backup_tools_present, BackupEnv};
-use dyno_platform::issues::ToolRunner;
+use dyno_platform::runner::ToolRunner;
 use dyno_platform::toolpath::{PathResolver, PathRunner};
 use paddock_jobs::{JobContext, JobError, Phase};
 use std::sync::Arc;
@@ -28,8 +28,12 @@ struct Env<'a> {
 struct Shared2(Arc<dyn ToolRunner>);
 
 impl ToolRunner for Shared2 {
-    fn run(&self, program: &str, args: &[String], timeout: std::time::Duration) -> Result<String, dyno_core::ports::PlatformError> {
-        self.0.run(program, args, timeout)
+    fn run_tool(
+        &self,
+        tool: &dyno_platform::runner::Tool,
+        timeout: std::time::Duration,
+    ) -> Result<dyno_platform::runner::ToolOutput, dyno_core::ports::PlatformError> {
+        self.0.run_tool(tool, timeout)
     }
 }
 

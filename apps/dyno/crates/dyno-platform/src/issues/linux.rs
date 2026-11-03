@@ -330,8 +330,8 @@ mod tests {
         let s = std::sync::Arc::new(Scripted::new(answers));
         struct Shared(std::sync::Arc<Scripted>);
         impl ToolRunner for Shared {
-            fn run(&self, p: &str, a: &[String], t: std::time::Duration) -> Result<String, PlatformError> {
-                self.0.run(p, a, t)
+            fn run_tool(&self, tool: &crate::runner::Tool, t: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                self.0.run_tool(tool, t)
             }
         }
         (Box::new(Shared(s.clone())), s)

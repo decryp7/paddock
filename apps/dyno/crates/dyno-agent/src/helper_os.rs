@@ -10,7 +10,7 @@ use dyno_core::helper_wire::HelperUser;
 use dyno_platform::runner::{tool, SystemRunner, ToolRunner};
 use paddock_env::Os;
 use paddock_jobs::time::SystemClock;
-use paddock_service::{Elevator, RealSystem, RegisterError};
+use paddock_service::{Elevator, RealSystem};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -52,10 +52,10 @@ pub fn owner_from_id(text: &str) -> Option<HelperUser> {
 }
 
 /// The account that turns the helper on (the owner, ADR 0027 section 2), read from the OS.
-pub fn current_owner(host: HelperHost, runner: &mut dyn ToolRunner) -> Result<HelperUser, String> {
+pub fn current_owner(host: HelperHost, runner: &dyn ToolRunner) -> Result<HelperUser, String> {
     let out = match host {
-        HelperHost::Windows => runner.run(&tool("whoami", &["/user", "/fo", "csv", "/nh"])),
-        _ => runner.run(&tool("/usr/bin/id", &["-u"])),
+        HelperHost::Windows => runner.run_tool(&tool("whoami", &["/user", "/fo", "csv", "/nh"]), Duration::from_secs(10)),
+        _ => runner.run_tool(&tool("/usr/bin/id", &["-u"]), Duration::from_secs(10)),
     }
     .map_err(|e| e.to_string())?;
     let owner = if host == HelperHost::Windows {
@@ -97,6 +97,7 @@ fn elevator() -> Box<dyn Elevator> {
 /// macOS and Linux elevate through `osascript` and `pkexec` run by `paddock-service`; this port is never asked there.
 #[cfg(not(windows))]
 fn elevator() -> Box<dyn Elevator> {
+    use paddock_service::RegisterError;
     struct Unused;
     impl Elevator for Unused {
         fn run_elevated(&mut self, _: &Path, _: &[&str], _: Duration) -> Result<i32, RegisterError> {
@@ -150,7 +151,7 @@ pub fn centre() -> HelperCentre<PeerTransport> {
         let p = installed_path.clone();
         move || p.exists()
     });
-    let owner = current_owner(host, &mut SystemRunner);
+    let owner = current_owner(host, &SystemRunner);
     let installer = OsInstaller {
         host,
         bundled,
@@ -185,7 +186,7 @@ mod tests {
 
     struct Says(String);
     impl ToolRunner for Says {
-        fn run(&mut self, t: &Tool) -> Result<ToolOutput, dyno_core::ports::PlatformError> {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, dyno_core::ports::PlatformError> {
             assert!(
                 t.program == "whoami" || t.program == "/usr/bin/id",
                 "only fixed programs: {}",
@@ -201,9 +202,9 @@ mod tests {
 
     #[test]
     fn the_current_owner_uses_the_tool_of_the_system() {
-        assert_eq!(current_owner(HelperHost::Macos, &mut Says("501".into())), Ok(HelperUser::Uid(501)));
-        assert!(current_owner(HelperHost::Windows, &mut Says("\"a\",\"S-1-5-21-9\"".into())).is_ok());
-        assert!(current_owner(HelperHost::Linux, &mut Says("nope".into()))
+        assert_eq!(current_owner(HelperHost::Macos, &Says("501".into())), Ok(HelperUser::Uid(501)));
+        assert!(current_owner(HelperHost::Windows, &Says("\"a\",\"S-1-5-21-9\"".into())).is_ok());
+        assert!(current_owner(HelperHost::Linux, &Says("nope".into()))
             .unwrap_err()
             .contains("which account"));
     }

@@ -4,16 +4,19 @@
 
 use crate::parse::btm::parse_view;
 use crate::runner::{tool, ToolRunner};
+use std::time::Duration;
 use dyno_core::btm::{LoginItemsReader, LoginItemsReply, MAX_BTM_ITEMS};
 use dyno_core::ports::PlatformError;
 use paddock_jobs::time::Clock;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 const SFLTOOL: &str = "/usr/bin/sfltool";
+/// How long `sfltool dumpbtm` may take (ADR 0027 section 5).
+const TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Reads login items with `sfltool`.
 pub struct SfltoolReader {
-    runner: Mutex<Box<dyn ToolRunner>>,
+    runner: Box<dyn ToolRunner>,
     clock: Arc<dyn Clock>,
 }
 
@@ -21,7 +24,7 @@ impl SfltoolReader {
     /// A reader over `runner`.
     pub fn new(runner: Box<dyn ToolRunner>, clock: Arc<dyn Clock>) -> Self {
         SfltoolReader {
-            runner: Mutex::new(runner),
+            runner,
             clock,
         }
     }
@@ -30,11 +33,7 @@ impl SfltoolReader {
 impl LoginItemsReader for SfltoolReader {
     fn read(&self, uid: u32) -> Result<LoginItemsReply, PlatformError> {
         let started = self.clock.monotonic();
-        let ran = {
-            // A panic in an earlier run must not make every later read panic.
-            let mut runner = self.runner.lock().unwrap_or_else(|p| p.into_inner());
-            runner.run(&tool(SFLTOOL, &["dumpbtm"]))
-        };
+        let ran = self.runner.run_tool(&tool(SFLTOOL, &["dumpbtm"]), TIMEOUT);
         let ms = self.clock.monotonic().saturating_sub(started).as_millis() as u64;
         let out = match ran {
             Ok(o) => o,
@@ -73,6 +72,7 @@ impl LoginItemsReader for SfltoolReader {
 mod tests {
     use super::*;
     use crate::runner::{Tool, ToolOutput};
+    use std::sync::Mutex;
     use paddock_jobs::time::FakeClock;
     use std::time::Duration;
 
@@ -83,7 +83,7 @@ mod tests {
         seen: Arc<Mutex<Vec<Tool>>>,
     }
     impl ToolRunner for Script {
-        fn run(&mut self, t: &Tool) -> Result<ToolOutput, PlatformError> {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
             self.seen.lock().unwrap().push(t.clone());
             self.clock.advance(self.took);
             self.answer.clone()
