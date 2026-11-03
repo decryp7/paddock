@@ -89,6 +89,9 @@ pub struct OpenDialog {
     /// The user resized the window by hand: its size is theirs from then on and a fit never changes it
     /// ([`Dialogs::note_resized`]).
     pub user_sized: bool,
+    /// Page loads of this window so far (ADR 0043 §2): raised by every `dialog_take_input`, so a reloaded page's measures
+    /// (`seq` from 1) are told from the old page's.
+    pub epoch: u64,
 }
 
 /// An inner size this layer set on a dialog window: physical px, at a scale factor.
@@ -134,6 +137,7 @@ impl OpenDialog {
             pending_sizes: Vec::new(),
             settled_size: None,
             user_sized: false,
+            epoch: 0,
         }
     }
 }
@@ -506,6 +510,14 @@ impl Dialogs {
     /// Whether the user resized the window `label` by hand.
     pub fn is_user_sized(&self, label: &str) -> bool {
         self.lock().get(label).is_some_and(|e| e.user_sized)
+    }
+
+    /// A page of `label` loaded: the window's next epoch (1 for the first load), or `None` for an unknown window.
+    pub fn next_epoch(&self, label: &str) -> Option<u64> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        e.epoch += 1;
+        Some(e.epoch)
     }
 
     /// Records the last measure the page of `label` reported.
