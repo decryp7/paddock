@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{ChildStdin, Stdio};
+use std::process::{ChildStdin, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -53,6 +53,8 @@ pub struct ChildSpec {
     pub current_dir: Option<PathBuf>,
     /// End its process tree when it uses more than this many bytes (proportional memory, `paddock-proc`).
     pub memory_limit: Option<u64>,
+    /// Windows: also make `memory_limit` a hard commit limit of the job object (see `MemoryCap::hard_commit`); ignored elsewhere.
+    pub memory_hard: bool,
     /// Pass its stderr through to ours (default: discarded; an app that keeps child logs captures it itself).
     pub inherit_stderr: bool,
     /// The frame limit of the connection.
@@ -83,6 +85,7 @@ impl ChildSpec {
             lower_priority: false,
             current_dir: None,
             memory_limit: None,
+            memory_hard: false,
             inherit_stderr: false,
             limit: FrameLimit::default(),
             protocol: ProtocolVersion::UNVERSIONED,
@@ -115,6 +118,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Child {
     process: Mutex<Supervised>,
     stdin: Mutex<Option<ChildStdin>>,
+    status: Mutex<Option<ExitStatus>>,
     pid: u32,
     peer: Peer,
     /// Kept so the private socket folder lives as long as the connection.
@@ -141,6 +145,24 @@ impl Child {
     /// Whether the process has exited.
     pub fn exited(&self) -> bool {
         !lock(&self.process).is_running()
+    }
+
+    /// How it ended: waits up to `wait` for the OS to report the exit, then returns the status (`None` while it still runs,
+    /// or when its tree was already ended by [`Child::kill`] / [`Child::stop`], which reap it).
+    pub fn exit_status(&self, wait: Duration) -> Option<ExitStatus> {
+        let end = Instant::now().checked_add(wait);
+        let mut process = lock(&self.process);
+        while process.is_running() && end.is_some_and(|e| Instant::now() < e) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if process.is_running() {
+            return None;
+        }
+        let mut status = lock(&self.status);
+        if status.is_none() {
+            *status = process.wait();
+        }
+        *status
     }
 
     /// The most memory its watcher saw, in bytes (0 without a memory limit).
@@ -208,7 +230,15 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     }
     let spawned = match spec.memory_limit {
         Some(limit) => {
-            Supervised::spawn_capped(cmd, MemoryCap::new(limit, spec.peer.label.clone()))
+            let cap = MemoryCap::new(limit, spec.peer.label.clone());
+            Supervised::spawn_capped(
+                cmd,
+                if spec.memory_hard {
+                    cap.hard_commit()
+                } else {
+                    cap
+                },
+            )
         }
         None => Supervised::spawn(cmd),
     };
@@ -258,6 +288,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     Ok(Child {
         process: Mutex::new(process),
         stdin: Mutex::new(stdin),
+        status: Mutex::new(None),
         pid,
         peer,
         _host: host,

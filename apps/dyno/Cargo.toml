@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/dyno-core",
-    "crates/dyno-ipc",
     "crates/dyno-helper-service",
     "crates/dyno-helper",
     "crates/dyno-plugin-api",
@@ -26,7 +25,7 @@ version = "1.0.0"
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
 dyno-core = { path = "crates/dyno-core" }
-dyno-ipc = { path = "crates/dyno-ipc" }
+paddock-ipc = { path = "../../crates/paddock-ipc" }
 dyno-plugin-api = { path = "crates/dyno-plugin-api" }
 dyno-plugin-host = { path = "crates/dyno-plugin-host" }
 dyno-platform = { path = "crates/dyno-platform" }

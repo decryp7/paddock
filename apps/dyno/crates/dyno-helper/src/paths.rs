@@ -2,7 +2,7 @@
 
 pub use dyno_core::helper_paths::*;
 
-use dyno_ipc::Access;
+use paddock_ipc::Access;
 
 /// Who may open the endpoint: any local user may connect to the socket (the daemon refuses all but the authorised
 /// uid after the kernel tells it who connected); on Windows only `SYSTEM` and the authorised account's SID may open

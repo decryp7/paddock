@@ -1,7 +1,7 @@
 //! What the agent and the privileged helper say to each other (ADR 0016), and what the app is told about the helper.
 //! Pure types and decisions: the helper crate and the agent do the I/O.
 //!
-//! The wire body is [`HelperMessage`] (postcard inside `dyno-ipc` frames). The helper accepts only
+//! The wire body is [`HelperMessage`] (postcard inside `paddock-ipc` frames). The helper accepts only
 //! [`HelperRequest`]s, only from its authorised user. None of them changes a setting of the machine.
 
 use crate::helper::HelperHost;
@@ -10,6 +10,12 @@ use serde::{Deserialize, Serialize};
 
 /// The version of the helper's request set. A different value is refused by the agent with "update the helper".
 pub const HELPER_API: u32 = 1;
+
+/// The major version the IPC handshake carries between the agent and the helper (the minor is 0).
+pub const WIRE_MAJOR: u16 = 1;
+
+/// The largest frame between the agent and the helper, in bytes.
+pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 
 /// The most audit entries one reply carries.
 pub const MAX_AUDIT_REPLY: u32 = 100;
@@ -43,7 +49,7 @@ pub enum HelperReply {
     Bye,
 }
 
-/// The IPC body: one type for both directions (`dyno-ipc` frames carry a single body type).
+/// The IPC body: one type for both directions (`paddock_ipc::BodyPeer` carries a single body type).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HelperMessage {
     /// A request.

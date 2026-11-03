@@ -1,4 +1,4 @@
-//! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in dyno-ipc frames
+//! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in `paddock-ipc` frames
 //! between the processes, and as camelCase JSON between the Tauri shell and the webview (`api.types.ts` mirrors it).
 //! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`].
 
@@ -25,6 +25,18 @@ use serde::{Deserialize, Serialize};
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
 pub const PROTOCOL_VERSION: u32 = 3;
+
+/// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
+/// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the
+/// end of the enums and need no check).
+pub const WIRE_MAJOR: u16 = {
+    assert!(PROTOCOL_VERSION <= u16::MAX as u32);
+    PROTOCOL_VERSION as u16
+};
+
+/// The largest frame between the app and the agent, in bytes. A reply over it fails that one call (disk-map pages and history
+/// are paged to stay far below).
+pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

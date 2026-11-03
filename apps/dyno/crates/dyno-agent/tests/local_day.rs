@@ -16,9 +16,9 @@ use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
 use dyno_core::time::{day_start, local_minute, next_day_start, to_local, FixedZone, Timestamp, DAY, HOUR, MINUTE, SECOND};
-use dyno_ipc::Peer;
 use dyno_platform::fake::{process, quiet_sample, Fake};
 use dyno_platform::issues::ToolRunner;
+use paddock_ipc::BodyPeer;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,7 +56,7 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
@@ -82,14 +82,14 @@ fn either(before: Timestamp, after: Timestamp, f: impl Fn(Timestamp) -> Timestam
     [f(before), f(after)]
 }
 
-fn settings(peer: &Peer<Message>) -> dyno_core::settings::Settings {
+fn settings(peer: &BodyPeer<Message>) -> dyno_core::settings::Settings {
     let Reply::Settings(s) = ask(peer, Request::Settings).unwrap() else {
         panic!("settings")
     };
     *s
 }
 
-fn save(peer: &Peer<Message>, s: dyno_core::settings::Settings) {
+fn save(peer: &BodyPeer<Message>, s: dyno_core::settings::Settings) {
     ask(peer, Request::SaveSettings { settings: Box::new(s) }).unwrap();
 }
 

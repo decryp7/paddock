@@ -31,6 +31,35 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
 - `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
   calls `write`, so other implementations of the port are unchanged.
+### Dyno moves from `dyno-ipc` to `paddock-ipc`; `paddock-ipc` gains `BodyPeer` (Dyno ADR 0027, WP-1b)
+- New `body` module: `BodyPeer<B>`, `BodyOptions<B>`, `BodyHandler<B>` and `body_handler`, a typed view over `Peer` for apps whose wire is one postcard enum
+  (calls, answers and pushes are all `B`). The frames on the wire are the same as any peer's; a body that does not decode is `invalid` (a call) or counted in
+  `undecodable_pushes` (a push), never a closed connection. `BodyPeer::wrap` views a peer that was started elsewhere (a `Child`'s).
+- `Child::exit_status(wait)` (how a launched child ended, read once from the OS and kept) and `Connection::stream_mut` (the raw stream, for tests that must break the protocol).
+- Dyno's agent, command line, plugin API and host, helper and app now use `paddock-ipc`; `apps/dyno/crates/dyno-ipc` and its three `known-copies.toml` entries are deleted.
+  The one change users of Dyno's wire can see: the IPC handshake carries the app protocol (or the plugin / helper protocol) as its major version, so a peer of
+  another protocol is refused with which side to update. Everything else is kept: calls over the concurrency limit wait in order, a plugin's memory cap is still
+  a hard Windows job-object commit limit.
+- `PeerOptions::call_queue` (and `BodyOptions::calls`): opt-in bounded FIFO for calls over `max_concurrent_calls` (default 0: refused with `busy`, as before).
+- `MemoryCap::hard_commit` / `ChildSpec::memory_hard` (`paddock-proc`, `paddock-ipc`): also set `JOB_OBJECT_LIMIT_PROCESS_MEMORY` on the child's job object (Windows).
+
+### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
+- New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
+  `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through
+  `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
+  `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
+  administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
+  connection (`PeerError`); on Windows the OS may refuse before the client's first bytes arrive (`PeerError::NotReady`; Windows 11 build 26300 identified a client that had sent nothing).
+- New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
+  anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
+  no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
+  checks the same folder rule on the serving side.
+- `Access::system_for_all_users()` (mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+  starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
+  refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
+  `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
+- New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
+  frees its slot on drop and reports `held()` on the injected `Clock`).
 
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
