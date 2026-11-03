@@ -111,8 +111,12 @@ const SHELL_PLUGIN: &str = "paddock-shell";
 /// without it still compiles and runs the ordinary tests).
 const CAPABILITY: &str = "../../apps/shell-demo/src-tauri/capabilities/dialog.json";
 
+/// Relative to this crate's folder; `PADDOCK_PROBE_CRATE_DIR` names another copy of it (a run on a machine that did not
+/// build the probe, with `../paddock-shell/permissions` and the app's capability laid out the same way beside it).
 fn manifest_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
+    let crate_dir = std::env::var("PADDOCK_PROBE_CRATE_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+    PathBuf::from(crate_dir).join(relative)
 }
 
 /// Every permission file of the shell plugin: Tauri's per-command ones and the generated sets.
@@ -450,6 +454,14 @@ fn main() {
                 }
                 Err(_) => 1,
             };
+            // A run that takes screenshots names a file; the window stays up until it exists (or 30 s pass).
+            if let Ok(file) = std::env::var("PADDOCK_PROBE_HOLD") {
+                let end = std::time::Instant::now() + Duration::from_secs(30);
+                while !std::path::Path::new(&file).exists() && std::time::Instant::now() < end {
+                    std::thread::yield_now();
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
             let _ = done_tx.send(());
             handle.exit(code);
         }
@@ -506,11 +518,14 @@ fn check(
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole
     // footer is inside it.
     // A frame shorter than the dialog floor (`DIALOG_MIN`) is shown at the floor: the content never needs more.
-    let floor = match spec().expect {
-        Expect::Viewer => paddock_dialogs::contract::VIEWER_MIN.height,
-        _ => paddock_dialogs::contract::DIALOG_MIN.height,
+    // ADR 0043: every kind has the 200 px floor; a viewer opens at min(content, preferred) (preferred 560).
+    let floor = paddock_dialogs::contract::DIALOG_MIN.height;
+    let expected = match spec().expect {
+        Expect::Viewer => measured
+            .min(paddock_dialogs::contract::VIEWER_MIN.height)
+            .max(floor),
+        _ => measured.max(floor),
     };
-    let expected = measured.max(floor);
     let wrong = match spec().expect {
         Expect::Tool => r.inner < floor,
         _ => (r.inner - expected).abs() >= 1.0,
@@ -538,8 +553,33 @@ fn check(
             "show_probe: ok on the {} report ({r:?}, measured {measured} px)",
             r.phase
         );
+        eprintln!("show_probe: window {}", geometry(app, &label));
     }
     failures
+}
+
+/// The window as the OS has it (physical px, and the logical size from its scale), for the run record.
+fn geometry(app: &tauri::AppHandle<Wry>, label: &str) -> String {
+    let Some(w) = app.get_webview_window(label) else {
+        return "gone".into();
+    };
+    let scale = w.scale_factor().unwrap_or(0.0);
+    let inner = w.inner_size().unwrap_or_default();
+    let outer = w.outer_size().unwrap_or_default();
+    let at = w.outer_position().unwrap_or_default();
+    let work = w.current_monitor().ok().flatten().map(|m| *m.work_area());
+    format!(
+        "scale {scale} inner {}x{} physical = {:.1}x{:.1} logical, outer {}x{} at {},{}, work area {:?}",
+        inner.width,
+        inner.height,
+        f64::from(inner.width) / scale,
+        f64::from(inner.height) / scale,
+        outer.width,
+        outer.height,
+        at.x,
+        at.y,
+        work.map(|a| (a.position.x, a.position.y, a.size.width, a.size.height)),
+    )
 }
 
 /// The exit code for the failures found.

@@ -418,7 +418,7 @@ pub(super) fn install_edge<R: Runtime>(app: &AppHandle<R>, window: Window<R>) {
         }
         impl<R: Runtime> Events<R> {
             fn window(&self) -> Option<Window<R>> {
-                self.app.get_window(&self.label)
+                self.app.get_webview_window(&self.label).map(|w| w.as_ref().window())
             }
         }
         impl<R: Runtime> crate::edge::windows::WindowEvents for Events<R> {
