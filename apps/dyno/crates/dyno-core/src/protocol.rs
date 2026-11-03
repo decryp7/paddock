@@ -1,6 +1,8 @@
 //! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in dyno-ipc frames
 //! between the processes, and as camelCase JSON between the Tauri shell and the webview (`api.types.ts` mirrors it).
-//! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`].
+//! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`]. An appended value inside a request (a new
+//! `LiveDetail` in `Subscribe`) still makes an older agent lose the whole request ("could not read that request"), so the
+//! sender needs a fallback for it (the link asks for `Summary` when `Tray` is refused).
 
 use crate::activity::ActivityEntry;
 use crate::alerts::Alert;

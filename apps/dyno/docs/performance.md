@@ -88,15 +88,18 @@ Trigger: the user's report on Dyno 1.0.0, "High CPU use".
     process table every 2 s: `dyno-agent bench 60` none 0.38-0.39 %, summary 0.72-0.74 % (two runs each, interleaved).
     Fixed: a `tray` level with the process table at the unwatched pace.
   - The menu bar items: WS is 0.0 with no Dyno and 2.1-3.3 with Dyno closed to the tray, so the icon redraws are the
-    largest cost of an idle Dyno in this VM. Each update called `set_icon` then `set_icon_as_template` (two redraws) and
+    largest cost of an idle Dyno in this VM (inferred: nothing else draws then). Each update called `set_icon` then `set_icon_as_template` (two redraws) and
     the tooltip. Fixed: only changed parts, pixels and template in one call. Most of the WS cost remains: one redraw per
     item per second (follow-up below).
   - Ruled out: the Network page (agent 0.9, web 0.4) and the Disk map page after a scan are cheap; the 2 s network poll
     and its `nettop` read do not show above the noise. A disk scan costs the agent about 16 % of one core while it runs,
     bounded and started by the user. ECharts on the dashboard's history panels does not redraw per tick (no poll).
 - **Memory measure:** not measured (CPU only)
-- **Notes:** a VM's window server and GPU process draw in software, so their numbers overstate a real Mac's; the shares
-  between states and the before/after hold. The user's own Mac shows about 1.4 % of one core for Dyno 1.0.0. Follow-ups,
+- **Notes:** every number here is from the VM, which renders in software: the window server and the GPU process cost
+  much more than on a real Mac, so read the shares between states and the before/after, not the absolute values. The
+  menu bar fix was measured only together with the tray level (window closed: WS 2.6-3.3 → 2.1-2.5, app 0.36 → 0.21);
+  the double draw was found in the code (`tray-icon` 0.25.1 `set_icon_as_template` sets the image again), not measured on
+  its own. The user's own Mac shows about 1.4 % of one core for Dyno 1.0.0. Follow-ups,
   not done (each under 2 % here): a menu bar refresh setting with an Auto default (the remaining WS 2.1-2.5 with the
   window closed), the agent's unwatched floor (0.4 %; `roll_up` reads three `meta` rows from SQLite every tick, and the
   sampler thread spent about 2 % of its samples in `pread`), and the Counters page re-reading the whole 5-minute history
