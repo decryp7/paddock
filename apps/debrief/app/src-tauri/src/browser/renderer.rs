@@ -635,6 +635,24 @@ mod tests {
             assert_eq!(r.renderers.kept_profile_status().size_bytes, 0);
         }
 
+        /// The browser watcher holds the session for a moment on every tick: the profile is free as soon as its browser
+        /// closed, not when the last holder lets go of the session (run 7339 cleared it while a tick still held it).
+        #[test]
+        fn the_kept_profile_is_free_once_its_browser_closed_while_the_session_is_still_held() {
+            let r = rig(Mode::Obey, 1);
+            let kept = r._dir.path().join("research-profile");
+            r.renderers
+                .set_kept_profile(Some(kept.clone()), true, crate::browser::profile::DEFAULT_MAX_BYTES);
+            research_step(&r);
+            let held = r.renderers.current("main").unwrap();
+            assert_eq!(r.renderers.finish("main"), Finish::Closed);
+            assert!(!r.renderers.kept_profile_status().in_use, "free once the browser closed");
+            r.renderers.clear_kept_profile().unwrap();
+            assert!(!kept.exists());
+            drop(held);
+            assert!(!r.renderers.kept_profile_status().in_use);
+        }
+
         #[test]
         fn a_damaged_kept_profile_falls_back_to_a_throwaway_one_and_says_so_once() {
             let r = rig(Mode::Obey, 1);
