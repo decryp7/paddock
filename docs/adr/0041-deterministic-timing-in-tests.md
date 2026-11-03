@@ -1,7 +1,8 @@
 # 41. Deterministic timing in tests: injected clocks, paces and seams, one check over every test, and a nightly starved run
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 4). No work starts
-  before it is accepted.
+- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 4).
+  The user decided its open points on 2026-11-03 (Decisions of the user); it is accepted after a delta review. No
+  work starts before then.
 - Date: 2026-11-03
 - Related: ER-12 / rule 5 (no sleeps or raised timeouts; one retry at most, flaky is red), ER-14 / rule 7, ER-21 / rule 40,
   ER-24 / rule 41 (machine load), ER-28 / rule 57 and ER-29 / rule 58 (a cause confirmed by a run without it; shuffled
@@ -84,8 +85,11 @@ Playwright clock that was never paused, a whole test over its budget under conte
 > point the code reaches and the test opens), or a scripted child or server that finishes when the test says. A test
 > never asserts on elapsed time, on a count of ticks, turns or polls that host speed sets, on a product timeout or grace,
 > or on the state left by whichever side of a race won; it never sleeps to let something happen and never copies the
-> current state to build the next one. Real time in a test is only a hang guard (at least 10 s, under the runner's kill,
-> failing with what it saw), written through the test kit. Speed is measured in benchmarks (rule 16). A test that fails
+> current state to build the next one. Real time in a test is only (a) a hang guard (at least 10 s, scaled by the run's
+> starvation factor, under the runner's kill, failing with what it saw), written through the test kit, which stops a
+> test that would never end and never decides a verdict; or (b) in a harness that drives a real OS (`vm-smoke`, a
+> real-app smoke), a declared observation window: watching for a time, with its reason in the config, for an event that
+> must **not** happen (a window closing, a second process starting), never proving that something happened in time. Speed is measured in benchmarks (rule 16). A test that fails
 > only in the starved nightly run is a bug of this rule, fixed before the app's next tag. Load is reproduced by starving
 > the test, never by loading the machine (§5). Checked by C71. *Why:* about fifteen tests failed only under load in eight
 > days (ADR 0041), and a researcher's CPU burners failed a release run.
@@ -98,8 +102,10 @@ replace them. They live where the clock lives today, `paddock_jobs::time`:
 - `Pace`, a tick source for loops that count iterations (Spotter's self-test, Dyno's looks, monitor intervals): `RealPace`
   in production (an interval on the clock), `ManualPace` in tests (a tick happens when the test calls `tick()`; the test can
   wait until the code is blocked on it, like `wait_for_waiters`);
-- `Seams`, named checkpoints: `seams.reach("disk.retry.reply")`. In production it is a zero-sized no-op that compiles away;
-  in tests `TestSeams` can hold a thread at a point until released, or record the order points were reached. Dyno's
+- `Seams`, named checkpoints: `seams.reach("disk.retry.reply")`. A component that has seams takes them as a **generic
+  parameter** with a default, `struct DiskCentre<S: Seams = NoSeams>`; `NoSeams` is a zero-sized type whose `reach` is an
+  empty `#[inline]` function, so production code pays nothing (a `dyn Seams` would cost a virtual call and an allocation
+  per component and could not compile away). In tests `TestSeams` can hold a thread at a point until released, or record the order points were reached. Dyno's
   "hold the retried pass at a gate" (`5cc23de88`) and "hold the issue read at its last moment" (`310be6d41`) become this.
 
 Product code keeps no `#[cfg(test)]` timing branches; the seam is a constructor argument or a field with a production
@@ -109,12 +115,20 @@ default, as `Clock` is today.
 
 **Rust, `paddock-testkit::time`** (re-exports the above, adds):
 - `wait_until(what, cond)`: polls a condition on the event the code under test publishes (or a short real-time backoff for
-  external state), with the one hang guard (`HangGuard::DEFAULT`, 40 s: over 10 s, under nextest's 60 s CI kill; C30's
-  numbers), and on expiry panics with `what` and the last value it saw (ER-27);
+  external state), with the one hang guard, and on expiry panics with `what` and the last value it saw (ER-27). The
+  guard is `HangGuard::DEFAULT` (40 s: over 10 s, under nextest's 60 s CI kill, C30's numbers) **times the starvation
+  scale** `PADDOCK_TEST_TIME_SCALE` (1 unless set; the `starved` profile sets it, §5). This is a hang guard, not a
+  verdict: no test passes or fails on it, it only stops a hung test with a message. Scaling it is therefore not the
+  "raised timeout" ER-12 forbids, which is raising a limit that decides a verdict;
 - `ScriptedChild` on top of `FakeRunner`: a fake process that exits, writes or hangs when the test releases it, never
   after a real `sleep N` (the Pitcrew and Spotter lessons);
 - `FakeServer` handshake rules (a seconds-long handshake bound, then the polling timeout) as one helper, not per copy;
-- a nextest profile `starved` in every workspace's `.config/nextest.toml` (§5) and the flaky-as-failure retry of ER-12
+- a nextest profile `starved` in every workspace's `.config/nextest.toml` (§5) with its **own kill**: `slow-timeout = {
+  period = "60s", terminate-after = 16 }` and the environment `PADDOCK_TEST_TIME_SCALE=16`. At a one-CPU quota with four
+  test threads a 4 s test takes about 64 s, so the normal CI kill (60 s, `terminate-after = 2` on a 30 s period) would
+  kill correct tests; the starved profile keeps kill and hang guard in the same ratio as the normal one. The scale is
+  measured in WP-5 (the slowest correct test at the quota) and recorded (rule 48) before it is fixed;
+- the flaky-as-failure retry of ER-12
   (`retries = 1`, `flaky-result = "fail"`, from `ci/flaky-is-red`; <https://nexte.st/docs/features/retries/>, read, not
   re-checked today).
 
@@ -131,20 +145,28 @@ default, as `Clock` is today.
 
 C71 replaces C30 (C30's grace-assertion and hang-guard logic moves into it). It runs over **every** test file in
 `crates/`, `apps/*`, `ui/`, `tools/` and `scripts/`: Rust test regions as counted above, and spec, test, e2e and shot files.
+A harness that drives a real OS (`scripts/vm-smoke/**`, ADR 0037's real-app smoke) declares its observation windows
+through the kit's `observe(window, reason)` helper (or the config's `observeSec`/`settleSec` with a `why`), which C71
+accepts as rule 60 (b); any other real-time call in those harnesses is flagged like everywhere else.
+
+Exemptions are **per call**: a waiver comment on the line or the line above, or the call taking a seam
+(`FakeClock`/`ManualPace`/`TestSeams`) as an argument. A file that merely mentions a fake clock exempts nothing.
 
 | Flagged in tests | Allowed when |
 |---|---|
-| Rust `thread::sleep`, `tokio::time::sleep`, `Instant::now()`, `SystemTime::now()`, `recv_timeout(`, `wait_timeout(`, `Deadline::after(` | the call is inside `paddock-testkit` (the one place that owns real time), or the line carries `// conformance: hang-guard — <why>` with a bound of at least 10 s, or the file passes a `FakeClock`/`ManualPace`/`TestSeams` to the call that uses it |
+| Rust `thread::sleep`, `tokio::time::sleep`, `Instant::now()`, `SystemTime::now()`, `recv_timeout(`, `wait_timeout(`, `Deadline::after(` | the call is inside `paddock-testkit` (the one place that owns real time), or the line carries `// conformance: hang-guard — <why>` with a bound of at least 10 s, or that call takes a `FakeClock`/`ManualPace`/`TestSeams` |
 | Rust asserts over elapsed time, product graces (C30's rules) | as in C30 |
-| TS `setTimeout(`, `new Promise(r => setTimeout`, `waitForTimeout(`, `Date.now()`, `performance.now()` | inside the kit, or the spec uses `useTestClock`/`frozenClock`, or a hang-guard waiver |
+| TS `setTimeout(`, `new Promise(r => setTimeout`, `waitForTimeout(`, `Date.now()`, `performance.now()` | inside the kit, or that call runs under `useTestClock`/`frozenClock` (the enclosing `describe` or test installs it), or a hang-guard waiver on the line |
 | TS `page.clock.install(` without `pauseAt`/`setFixedTime`/`frozenClock` | never |
 | TS `vi.waitFor` in a spec with fake timers on | never (use `untilState`) |
 | A spread of a live status into a pushed status (`{ ...store.status(), …}`) | never (build it from scratch) |
 
-**Ratchet, not a big bang.** `conformance/baselines/C71.json` holds today's count per file. A file's count may only
-fall; a new file starts at zero; C71 is an **error** for anything over the baseline from the day it lands, so no new site
-appears while the old ones are migrated. The baseline file changes only downwards (the check fails on an increase of the
-baseline itself, as C51's waiver list may only shrink).
+**Ratchet, not a big bang.** `conformance/baselines/C71.json` holds today's sites as **hashes of the flagged line's
+normalised text** (whitespace collapsed) with the file path, so a site is known by what it says, not by a per-file
+count that a new site could hide behind after an old one is fixed. A site whose hash is in the baseline passes; any other
+is an **error** from the day C71 lands, so no new site appears while the old ones are migrated. Moving a line keeps its
+hash; editing it makes it new, so a touched site is migrated when it is touched. The baseline file may only lose entries
+(the check fails when it gains one, as C51's waiver list may only shrink).
 
 ### 5. The starved nightly run
 
@@ -152,9 +174,9 @@ A run that makes the tests themselves slow, not the machine busy:
 
 | OS | How the tests are starved | Bound |
 |---|---|---|
-| Linux (CI, nightly.yml) | the test step runs in a cgroup with a CPU quota (`docker run --cpus=1`, or `systemd-run --scope -p CPUQuota=100%`; <https://docs.docker.com/engine/containers/resource_constraints/#cpu>, <https://docs.kernel.org/admin-guide/cgroup-v2.html>, read, not re-checked today), with nextest's `starved` profile running more test threads than the quota allows (4 per CPU) | the job's own container; nothing else on the host slows down |
+| Linux (CI nightly.yml; locally `./dev test --starved --os linux` in a local Docker container with `--cpus=1`, the reproducible local form) | the test step runs in a cgroup with a CPU quota (`docker run --cpus=1`, or `systemd-run --scope -p CPUQuota=100%`; <https://docs.docker.com/engine/containers/resource_constraints/#cpu>, <https://docs.kernel.org/admin-guide/cgroup-v2.html>, read, not re-checked today), with nextest's `starved` profile running more test threads than the quota allows (4 per CPU) | the job's own container; nothing else on the host slows down |
 | Windows (CI, nightly.yml) | a job object with a hard CPU-rate cap around the test process (`JOBOBJECT_CPU_RATE_CONTROL_INFORMATION`, <https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information>, read, not re-checked today), the same `starved` profile | the job's own processes |
-| macOS (local, `./dev test --starved`, before a tag) | the test process at `PRIO_DARWIN_BG` (`taskpolicy -b`, man page read on this Mac), the same profile. Measured: fixed work took 9× to 73× longer than at normal priority at load 16-26 ([benchmarks](../benchmarks.md#2026-11-03-starving-a-test-process-by-os-priority-on-macos)); the variance is the point, it is a loaded runner | the process itself; never on the CI Mac, which is this machine |
+| macOS (local, `./dev test --starved --os macos`, **advisory**) | the test process at `PRIO_DARWIN_BG` (`taskpolicy -b`, man page read on this Mac), the same profile. Measured: fixed work took 9× to 73× longer than at normal priority at load 16-26 (3.0-24.7 s for one fixed loop; [benchmarks](../benchmarks.md#2026-11-03-starving-a-test-process-by-os-priority-on-macos)). That spread is not reproducible, so a macOS starved failure is a lead to reproduce under the Linux Docker form or with a seam, not a verdict, and the tag check does not read it | the process itself; this Mac is also the macOS CI runner, so the run starts only while no CI job runs on it (`./dev` asks Gitea first) |
 
 Vitest suites with shared state run shuffled with a printed seed in the same job (rule 58, ER-29;
 <https://vitest.dev/config/#sequence-shuffle>, read, not re-checked today).
@@ -170,7 +192,8 @@ skips with a `::notice::` and a summary line (ER-27). It runs at night after the
 priority, and never on a branch (rule 50: one run per night, `main` only).
 
 **Triage.** A test that fails only in the starved run is red in the nightly summary with the starvation mode and the
-seed; it is a rule-60 bug, fixed before the next tag of its app, through §2-§3, with the failing starved run as its
+seed; it is a rule-60 bug, fixed through §2-§3 (before the next tag of its app once the hang-guard scaling has landed,
+decision D3), with the failing starved run as its
 reproduction (ER-11) and a run without the cause green (rule 57). No retry turns it green (ER-12).
 
 ## Checks that make the class detected
@@ -181,7 +204,7 @@ reproduction (ER-11) and a run without the cause green (rule 57). No retry turns
 | `paddock/no-real-time-in-specs` (ESLint) | the same in the editor for TypeScript | as C71 |
 | The starved nightly run | every test of every workspace, starved, shuffled where state is shared | the open Debrief `context.spec` and Pitcrew Windows hang, if they are this class |
 | nextest and Playwright flaky-as-failure (ER-12) | every retried test | a test green only on its retry |
-| Tag checklist | the last starved nightly of the app's tests has no open failure, or each is waived by the user | – |
+| Tag checklist | once the hang-guard scaling (WP-2 and WP-5) is on `main`: the last Linux and Windows starved nightly of the app's tests has no open failure, or each is waived by the user; before that, the open failures are listed in the tag's checklist (D3). The macOS local run is advisory and not read | – |
 
 ## Rollout and order
 
@@ -195,8 +218,12 @@ reproduction (ER-11) and a run without the cause green (rule 57). No retry turns
 6. **WP-6:** migrate the open instances and the files with the most sites, app by app, the release app first (ER-1):
    Dyno, then Spotter, Pitwall, Pitcrew, Debrief (152 of the 203 C30 sites). The baseline falls with each.
 
-WP-1 to WP-5 are about 7 agent-days and come first. WP-6 runs alongside the release work, inside each app's own batches,
-because it touches only that app's tests.
+**Release windows (ADR 0022 G.7).** WP-2 changes `crates/` (`paddock-jobs`, `paddock-testkit`) and WP-3 changes
+`ui/` (`@decryp7/paddock-ui/testing`, `@decryp7/paddock-e2e`), which every app's release builds from, so both land
+**outside release windows**: after the Dyno 1.1.0 tag and between the Pitwall 1.1 and Spotter windows, or in the first
+gap the coordinator names, and with at most two tooling agents while a release is in flight. WP-1, WP-4 and WP-5 touch
+only docs, `conformance/` and nightly jobs that no release path runs, and may go first. WP-6 runs inside each app's own
+batches, because it touches only that app's tests, and only once WP-2 and WP-3 are on `main`.
 
 **Rollback.** C71 can go back to warnings by one line; the starved jobs are separate nightly jobs that can be switched off.
 
@@ -209,9 +236,11 @@ because it touches only that app's tests.
 | WP-3 TypeScript kit and ESLint rule | 1.5 |
 | WP-4 C71, ratchet, C30 folded in | 1.5 |
 | WP-5 starved runner and nightly jobs | 2 |
-| **Subtotal (mechanism)** | **7.5** |
-| WP-6 migration: the two open instances (1 each) and about 300 flagged sites, mostly mechanical (`thread::sleep` loops → `wait_until`) at about 40 per day for an implementer, with harder seams by a researcher | 2 + 7.5 |
-| **Total** | **17** |
+| WP-5 addition: the starvation scale, its measurement and the `starved` profile's kill | 0.25 |
+| **Subtotal (mechanism)** | **7.75** |
+| WP-6 migration, open instances: the two open failures (1 each) | 2 |
+| WP-6 migration, the baseline: about 1,100 flagged Rust lines (299 `thread::sleep`, 516 `Instant::now()`, 165 `recv_timeout(` and the rest, from the counts above) and about 300 TypeScript lines. Most are mechanical (a sleep loop or a deadline becomes `wait_until`) at about 60 lines a day for an implementer; seams in product code need a researcher. About 23 agent-days if done at once. The ratchet makes it **open-ended by design**: sites are migrated when their file is touched or by budgeted sweeps, release app first, and nothing waits for the baseline to reach zero | (about 23, open-ended) |
+| **Total committed** (mechanism plus the open instances) | **9.75** |
 
 The migration figure is a planning estimate from the counts above, not a measurement.
 
@@ -237,9 +266,10 @@ The migration figure is a planning estimate from the counts above, not a measure
 - **Run the whole suite under a deterministic simulator** (loom, shuttle) everywhere. Valuable for a few lock-heavy
   modules (the store-duck sink deadlock), far too costly as the default. Kept as a per-module choice.
 
-## Decisions for the user
+## Decisions of the user (2026-11-03)
 
-- **D1:** C71 as an error over a ratchet baseline from day one (recommended), or a warning for a release first?
-- **D2:** the starved run in CI nightly on Linux and Windows plus locally on macOS before a tag (recommended), or local
-  only on all three OSes (no CI cost, but it depends on someone running it)?
-- **D3:** does an open starved-run failure block the app's tag (recommended), or only get listed in the release notes?
+The user accepted the reviewer's recommendations on 2026-11-03. The status stays Proposed until the delta review.
+- **D1:** C71 is an **error** over the ratchet baseline from the day it lands (§4).
+- **D2:** the starved run is **nightly in CI on Linux and Windows**; the macOS local run is **advisory** (§5).
+- **D3:** a starved-run failure **blocks the app's tag only after the hang-guard scaling has landed** (WP-2's scaled
+  `HangGuard` and WP-5's `starved` profile); until then the open failures are listed in the tag checklist.
