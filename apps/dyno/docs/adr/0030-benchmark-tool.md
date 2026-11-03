@@ -1,7 +1,8 @@
 # 0030. The benchmark tool: per-drive disk, CPU with a sustained run, memory bandwidth and latency, GPU through wgpu
 
 - Status: Proposed (2026-11-03). Numbered 0030: 0029 is left for the parallel cached-views ADR (README: numbers are
-  allocated at merge time; renumber on a clash).
+  allocated at merge time; renumber on a clash). Revised 2026-11-03 after an independent review (verdict: changes; the
+  six findings confirmed; two P1 and eight P2 taken into the text, marked "review").
 - Date: 2026-11-03
 - Related: amends ADR 0015 (benchmarks on click: the process model, the disk test's size and cleanup, "GPU reported
   unavailable"); ADR 0007 (tier 3 plugins; 0015 already chose a first-party child process over a plugin, kept here);
@@ -122,6 +123,14 @@ deterministic) and a **timing driver** that repeats it against an injected clock
 (section 5).
 
 **Disk (per drive).**
+- *macOS permission (review):* writing under `/Volumes/*` needs the Removable Volumes or Network Volumes privacy
+  permission (TCC), which is granted per process. The child `dyno-bench` is started by the agent, so the agent's
+  identity is the one asked [I: which process TCC attributes a sidecar's access to is checked in WP-B3 on a clean VM].
+  Dyno never triggers the prompt in the middle of a run: the pre-flight probes the chosen folder (create and remove an
+  empty file in Dyno's own folder) before the run starts, so a prompt appears while the person is at the picker. A
+  denial ends that drive's test before anything is written, as Unavailable: "macOS did not allow Dyno to write to
+  <volume>. Allow Dyno in System Settings > Privacy & Security > Files and Folders, then run again", with a button that
+  opens that pane; the other drives still run.
 - *Where:* the user picks drives from Dyno's volume list (`dyno_platform::volumes`). The agent makes its own folder
   `<volume>/.dyno-bench-<run-id>` (or, on the system drive, under the temp directory; on a drive where the root is not
   writable, a folder the user picks through the shell's folder dialog, canonicalised and checked to be on that volume by
@@ -143,14 +152,22 @@ deterministic) and a **timing driver** that repeats it against an injected clock
   with 8 threads, random 4 KiB with 1 thread and with 32 threads (each thread one outstanding I/O with `pread`/`pwrite`
   on its own offsets: portable, labelled "8 threads", never "queue depth 8", since macOS has no usable async file I/O).
   Each pattern: read and write. Data is random bytes from a fixed-seed generator (incompressible).
-- *Ramp and budget:* each pattern has 1 s of ramp that is not counted (fio `ramp_time`), then measures for up to 5 s or
-  until it has moved the file's size, whichever comes first.
-- *Wear:* default file 1 GiB, 3 repetitions. A default run writes at most 1 GiB per write pattern per repetition, 4 write
-  patterns: **at most 12 GiB per drive**, shown in the picker before the run ("This writes up to 12 GB to Macintosh HD").
-  For scale, a consumer 1 TB TLC SSD is commonly rated a few hundred TBW [U: typical datasheet figures, not checked per
-  model], so one run is on the order of 0.002 %. Choices: 256 MiB (quick), 1 GiB (default), 4 GiB. A **sustained write**
-  test (writes past the drive's SLC cache, up to the smaller of 25 % of free space and 64 GiB) is off by default and
-  needs its own confirmation that names the amount. Hard disks (rotational, from media traits) get 2 s random patterns.
+- *Ramp and budget (review):* each pattern starts with a ramp that is not counted (fio `ramp_time`), limited by **bytes
+  and time, whichever ends first**: at most 1/8 of the file size or 1 s. A time-only ramp would write about 7 GB per
+  pass on a fast NVMe drive. The measured part then runs for up to 5 s or until it has moved the file's size, whichever
+  comes first. Every byte limit is enforced in the child's loop, never derived from a speed.
+- *Wear (review):* default file 1 GiB, 3 repetitions, 4 write patterns. Bytes written per drive and run are counted in
+  full by a pure function, `dyno_core::bench::disk_write_budget(plan) -> u64`: the **fill** (one pass of the file size,
+  so the read patterns read real data), plus per write pattern and repetition the **ramp** (at most 1/8 file) and the
+  **measured part** (at most one file). Default: 1 GiB fill + 12 x 1.125 GiB = **14.5 GiB at most per drive**. The
+  picker's "This writes up to 15 GB to Macintosh HD" is that function's result rounded up, and the child enforces the
+  same budget (it stops a pattern that would exceed it, logged), so the shown number is an upper bound by construction.
+  Unit tests pin the estimate for each preset and size, and a property test checks that a scripted child that writes
+  as fast as allowed never exceeds it. For scale, a consumer 1 TB TLC SSD is commonly rated a few hundred TBW [U:
+  typical datasheet figures, not checked per model], so one run is on the order of 0.003 %. Choices: 256 MiB (quick),
+  1 GiB (default), 4 GiB. A **sustained write** test (past the drive's SLC cache, up to the smaller of 25 % of free
+  space and 64 GiB) is off by default and needs its own confirmation that names the amount; it is counted by the same
+  function. Hard disks (rotational, from media traits) get 2 s random patterns.
 - *Reported:* MB/s for sequential, IOPS and MB/s for random, plus the drive model, bus, file system and free space.
 
 **CPU.**
@@ -173,6 +190,10 @@ deterministic) and a **timing driver** that repeats it against an injected clock
 - *Thermal safety stop:* the run stops (state Stopped, reason named) when the hottest sensor is within the throttle
   tracker's hot margin of its critical value for 10 s, when macOS reports `critical`, or when the machine switches to
   battery without consent. A stop keeps the trace so far.
+- *No readable sensor (review):* where Dyno reads no temperature and no OS thermal state (many Windows desktops without
+  the helper, some Linux machines, VMs), Dyno cannot stop on heat; the protection is then the firmware's own throttling
+  and shutdown. In that case the picker says so ("Dyno cannot read this computer's temperature; the hardware protects
+  itself") and the sustained run is limited to 5 minutes (the 10 and 20 minute choices are disabled with that reason).
 
 **Memory.**
 - *Bandwidth:* STREAM-style Copy, Scale, Add and Triad on `f64` arrays, single thread and all threads (each thread a
@@ -193,8 +214,13 @@ deterministic) and a **timing driver** that repeats it against an injected clock
   `max_storage_buffer_binding_size`).
 - *Graphics:* off-screen 3840x2160 RGBA8: fill rate (full-screen triangles with blending, Gpixel/s) and geometry
   (instanced small triangles, Mtri/s). Nothing is shown on screen.
-- *Timing:* timestamp queries where the adapter supports them, else wall-clock around submit and the queue's completion
-  over at least 200 ms of work. The first dispatch (shader compile, clocks ramping) is warm-up and not counted.
+- *Dispatch length (review):* every submission is sized to take about 100 ms and never more than 250 ms, and a
+  measurement repeats submissions instead of making one long one. Windows resets a GPU whose work runs past the TDR
+  limit (about 2 s by default), and macOS has its own GPU watchdog; a reset would take the user's display with it. The
+  size is found from a short calibration submission and halved whenever one takes over 250 ms.
+- *Timing:* timestamp queries where the adapter supports them, else wall-clock around submit and the queue's completion,
+  summed over submissions until at least 1 s of work is measured. The first submissions (shader compile, clocks
+  ramping) are warm-up and not counted.
 - *Honesty:* an adapter of type CPU (llvmpipe, WARP, any software rasteriser) is reported as "software renderer, not a
   GPU", never compared with hardware runs; no adapter gives Unavailable with the reason.
 
@@ -214,16 +240,38 @@ deterministic) and a **timing driver** that repeats it against an injected clock
 - **Cancel in every phase.** The child runs under `paddock_proc::Supervised`; Cancel ends its process tree at once, the
   kind is Stopped, the rest are "Cancelled before it started", the scratch file vanishes with the descriptor and the
   agent removes the folder.
-- **No UI timeout (ER-19).** The fixed 60 s / 180 s kill is replaced by a heartbeat: the agent ends a child that has
-  sent no line for 60 s (a hang), and by a plan bound (the sum of the phase budgets plus margin); the UI shows "Still
-  working" and never gives up on its own.
-- **Priority: normal, by rule 52.** A benchmark is work the person waits for and its job is to measure the machine;
-  background levels would measure the scheduler (on Apple silicon, likely the efficiency cores). The brief's "background
-  priority" is met instead by: start only on a click, never scheduled; a pre-flight that warns when other programs use
-  more than 15 points of CPU (the existing `LOAD_WARNING_POINTS`) and offers to wait; one run at a time. On Linux the
-  child is started outside the agent's cgroup and nice value with `systemd-run --user --wait --pipe --collect` as a
-  transient service of the user manager (nice 0, no `MemoryHigh`) [I: to be confirmed by a spike in WP-B2]; without a
-  user manager it runs inside, and the run records "limited: nice 10, memory limit 256 MiB" and is marked low confidence.
+- **No UI timeout, no quiet kill (ER-19, review).** The fixed 60 s / 180 s kill is replaced by two signals, neither of
+  which ends the child by itself:
+  - a **heartbeat** written by a separate thread in the child every second (independent of the measuring threads, so a
+    long kernel step or a slow I/O never looks like a hang, and a stuck process does stop beating);
+  - a **plan bound**: the sum of each phase's budget, with disk phases sized by their byte budget at a pessimistic
+    10 MB/s (a slow USB stick) and GPU phases by their submission count at the 250 ms cap, plus 50 %.
+  When the heartbeat stops for 30 s or the bound passes, the job shows "Not responding" with Cancel (and "Still
+  working" while the heartbeat continues past the bound); the person decides. The only automatic end is the safety
+  stop (heat, unplugged without consent), which is named as such.
+- **Linux: a named unit, stopped on Cancel (review P1).** On Linux the child is started outside the agent's cgroup and
+  nice value as a transient service of the user manager:
+  `systemd-run --user --unit=dyno-bench-<run-id> --collect --wait --pipe --service-type=exec -- <runner> ...` (nice 0, no
+  `MemoryHigh`). Killing the `systemd-run` client does not stop the unit, so Cancel, the "Not responding" Cancel, a safety
+  stop and the agent's shutdown all run `systemctl --user stop dyno-bench-<run-id>.service` and wait for the unit to be
+  inactive. The agent records the unit's `InvocationID` (from `systemctl --user show -p InvocationID`) with the run
+  before measuring starts; on its next start it stops any `dyno-bench-*` unit whose invocation id matches a record, and
+  only those (rule 53: never by the name alone, a reused name could be someone else's). The WP-B2 spike proves, before
+  any kernel work: the unit gets nice 0 and no memory limit; Cancel stops an all-core burner within 2 s; killing the
+  agent mid-run and restarting it stops the leftover unit; a unit with a matching name but a foreign invocation id is
+  left alone. Without a user manager the child runs inside the agent's cgroup as an ordinary supervised child, and the
+  run records "limited: nice 10, memory limit 256 MiB" and is marked low confidence [I: the unit's nice value and
+  limits are to be confirmed by that spike].
+- **Priority: normal, an explicit exception to rule 52's gentle default (review).** Rule 52 and `ThreadRole::Bulk` run
+  bulk work gently; a benchmark is the one bulk-sized job that must not, because its result *is* the speed of the
+  machine, and a lowered thread measures the scheduler instead (on Apple silicon, likely the efficiency cores). It is
+  also work the person started and waits for, which rule 52 already treats as not starvable. The exception is narrow:
+  only `dyno-bench` and `dyno-bench-gpu`'s measuring threads, only after a click, never scheduled; the agent's
+  orchestration thread stays at its normal role. In exchange: a pre-flight warns when other programs use more than 15
+  points of CPU (the existing `LOAD_WARNING_POINTS`) and offers to wait; one run at a time; Cancel always works. The
+  exception is recorded where conformance can see it: a `// rule 52 exception: ADR 0030` marker on the one place the
+  runners set their priority, and a conformance note listing it as the only allowed exception (the check flags any
+  other process started by the agent at normal priority for bulk work).
 - **Battery and power.** Before the run: on battery, a dialog (shell dialog API, ADR 0023) "On battery. Results will be
   lower and the battery drains faster. Run anyway?" with consent for this run only; Low Power Mode or a power-saving mode
   is shown in the same pre-flight. During the run: a switch to battery without consent stops the run.
@@ -236,8 +284,11 @@ deterministic) and a **timing driver** that repeats it against an injected clock
 - **Warm-up and repeats.** CPU and memory: 1 s warm-up not counted, then 5 repetitions with a 2 s gap between kernels
   (Geekbench's reason: limit heat carried from one test into the next). Disk: ramp as above, 3 repetitions. GPU: warm-up
   dispatch, 5 repetitions.
-- **Median and spread.** Every metric stores all repetitions; the headline is the median, the spread is min to max and
-  the coefficient of variation. A metric with a CV over 10 % is marked "unsteady".
+- **Median and spread, shared (ER-22, review).** Every metric stores all repetitions; the headline is the median, the
+  spread is min to max and the coefficient of variation. A metric with a CV over 10 % is marked "unsteady". The
+  statistics come from `paddock-bench` (`stats::Samples` and its `Summary`: n, min, median, p95, max; NaN and infinite
+  samples ignored), extended there with the standard deviation and CV and tested once there; the timing drivers use
+  `paddock_bench::Clock` (`ManualClock` in tests). Dyno adds no statistics code of its own.
 - **State recorded with each run** (extends `LoadAtRun`): power source and charge, power mode (macOS Low Power Mode,
   Windows power mode or plan, Linux power profile when readable), thermal state and hottest temperature at start and end,
   other programs' CPU during the run (the agent's sampler, excluding Dyno's own processes), memory pressure, machine
@@ -266,9 +317,17 @@ deterministic) and a **timing driver** that repeats it against an injected clock
 ### 5. Tests (rule 60) and VM limits
 
 - **Pure core, no real time:** kernels' fixed-work functions are tested for exact checksums at tiny sizes; timing
-  drivers take `paddock_jobs::time::Clock` and a `Pace`, so "stops at the budget", "ramp not counted" and "the gap is
-  kept" are tested with `FakeClock`; statistics (median, spread, CV, spread-aware verdict), plan validation, the wear
-  estimate, free-space policy and the wire parser (limits, malformed lines, never panics; a fuzz target) are pure.
+  drivers take `paddock_bench::Clock` and a `Pace`, so "stops at the budget", "ramp not counted", "the ramp stops at its
+  byte limit" and "the gap is kept" are tested with `ManualClock`; the spread-aware verdict, plan validation, the plan
+  bound, `disk_write_budget` (pinned per preset and size, and a property test that a scripted child writing as fast as
+  allowed never exceeds it), the GPU submission sizing (halves after a slow submission, never plans one over 250 ms),
+  free-space policy and the wire parser (limits, malformed lines, never panics; a fuzz target) are pure. Median, spread
+  and CV are tested in `paddock-bench`, not again here.
+- **Linux unit (WP-B2 spike, then a Linux CI test with a scripted runner):** the unit name and stop command are built by
+  a pure function; Cancel, "Not responding" Cancel and agent shutdown each stop the unit; restart cleanup stops only
+  units whose invocation id matches a record.
+- **Heartbeat:** a scripted child that keeps beating but sends no progress shows "Still working"; one that stops beating
+  shows "Not responding"; neither is ended without Cancel.
 - **Disk safety with real files, never timed:** `create_new` refuses an existing file; the unlink-on-open (Unix) and
   delete-on-close (Windows) file is gone after the child is killed (a scripted child that is killed by the test);
   free-space refusal through a fake volume reader; network and read-only volumes refused; the agent's crash cleanup
@@ -321,34 +380,45 @@ test('every executable the agent starts is bundled', () => {
 
 | WP | Scope | Agent | Days |
 |---|---|---|---|
-| B0 | Ship the runners: the failing test above, `externalBin`, `check-shipped`, `check-bundle`, signing ids; one launcher-name list | implementer | 0.5 |
-| B1 | Core: method versions, repetitions with median/spread/CV, the state record, spread-aware comparison, history v2, export JSON/CSV, wire types and parser | implementer | 1.5 |
-| B2 | Process model: JSON-lines protocol, `paddock-jobs` job and relay, `Supervised` Cancel, heartbeat and plan bound, pre-flight (load, battery consent, power mode), thermal stop, Linux `systemd-run` spike and fallback, logs | designer review, implementer | 2.5 |
-| B3 | Disk: drive picker data, scratch folder and identity record, unlink/delete-on-close, free space and refusals, direct I/O per OS with alignment, the four patterns read and write, threads, random data, wear estimate, sustained write | implementer (Opus review) | 3 |
+| B0 | Ship the runners: the failing test above, `externalBin`, `check-shipped`, `check-bundle`, signing ids; one launcher-name list. **Lands in 1.1.0 only, together with B3 (or with Disk turned off in the build); the 1.0 disk test is never shipped** | implementer | 0.5 |
+| B1 | Core: method versions, repetitions through `paddock-bench` stats (add standard deviation and CV there, tested there), the state record, spread-aware comparison, history v2, export JSON/CSV, wire types and parser, `disk_write_budget`, plan bound | implementer | 2 |
+| B2 | Process model: JSON-lines protocol with the child's heartbeat thread, `paddock-jobs` job and relay, `Supervised` Cancel, "Still working" / "Not responding", pre-flight (load, battery consent, power mode, TCC probe), thermal stop and the no-sensor limit, the rule 52 exception marker and conformance note, logs; **the Linux spike first** (named unit, `systemctl --user stop`, invocation-id cleanup) | designer review, implementer | 3.5 |
+| B3 | Disk: drive picker data, scratch folder and identity record, unlink/delete-on-close, free space and refusals, macOS TCC handling, direct I/O per OS with alignment (checked on the Windows and Linux runners), the four patterns read and write with byte-bounded ramps, threads, random data, enforced write budget, sustained write | implementer (Opus review) | 4 |
 | B4 | CPU: integer, float, SIMD kernels with dispatch, single and all cores, sustained run with throttle tracker and safety stop | implementer | 2.5 |
 | B5 | Memory: cache-size discovery per OS, STREAM-style four kernels single and all threads, latency sweep | implementer | 1.5 |
-| B6 | GPU: `dyno-bench-gpu`, adapters, compute FMA and bandwidth, fill rate and geometry, timestamps or wall clock, software detection; bundle size measured | implementer (Opus review) | 3.5 |
-| B7 | UI: presets and custom picker with estimates, consent dialogs, live phases and sustained chart, results with spread and last run, history columns, compare, export | implementer | 3 |
+| B6 | GPU: `dyno-bench-gpu`, adapters, compute FMA and bandwidth, fill rate and geometry, 100 ms submissions with calibration, timestamps or wall clock, software detection; runs on the Windows (DX12) and Linux (Vulkan) runners; bundle size measured | implementer (Opus review) | 4.5 |
+| B6a | Signing and packaging of the new sidecar on three OSes: macOS signing ids, hardened runtime and notarization of the bundle with `dyno-bench-gpu`, Windows signing, Linux packages; `check-bundle.sh` and the release workflow; one release dry run per OS | implementer | 2 |
+| B7 | UI: presets and custom picker with the estimator's numbers, consent and TCC messages, live phases, "Still working" / "Not responding", sustained chart, results with spread and last run, history columns, compare, export | implementer | 3 |
 | B8 | Tests not covered above, `vm-smoke` plan, user guide, features, screenshots with independent review (ER-23), roadmap | implementer, reviewer | 1.5 |
 
-Total about 19.5 agent-days. Order: B0 first (independent, can also go into a 1.0.x, D10); B1 and B2 before the kinds;
-B3 to B6 in parallel; B7 after B1/B2; B8 last.
+Total about **25 agent-days** (re-estimated after review: the third-OS signing and notarizing of a new sidecar, direct
+I/O and GPU on the Windows and Linux runners, the Linux unit handling). Order: B2's Linux spike and B1 first; B3 to B6
+in parallel; B0 and B6a with the kinds they ship; B7 after B1/B2; B8 last.
 
 ## Decisions for the user (with recommendations)
 
-- **D1 Priority.** Measure at normal priority under rule 52, with the pre-flight load warning, rather than the brief's
-  background priority. *Recommended:* normal.
-- **D2 GPU in its own runner** `dyno-bench-gpu`. *Recommended:* yes (crash isolation, size, build time).
-- **D3 Disk defaults:** 1 GiB file, 3 repetitions, at most 12 GiB written per drive per run, sustained write off unless
-  confirmed. *Recommended:* yes; alternative 5 repetitions like CrystalDiskMark (20 GiB).
+Each recommendation below is the author's after the independent review; where the review changed or qualified it, the
+line says "review".
+
+- **D1 Priority.** Measure at normal priority as a named, narrow exception to rule 52's gentle default for bulk work,
+  with the marker and conformance note of section 2, rather than the brief's background priority. *Recommended
+  (review):* normal, recorded as the exception.
+- **D2 GPU in its own runner** `dyno-bench-gpu`. *Recommended:* yes (crash isolation, size, build time); its signing
+  and notarizing cost is WP-B6a.
+- **D3 Disk defaults:** 1 GiB file, 3 repetitions, at most 14.5 GiB written per drive per run as counted by
+  `disk_write_budget` (fill, ramps and measured parts), sustained write off unless confirmed. *Recommended (review):*
+  yes; alternative 5 repetitions like CrystalDiskMark (at most 23.5 GiB).
 - **D4 No composite score.** *Recommended:* none; per-metric numbers with spread only.
-- **D5 Linux:** start the runners through `systemd-run --user` outside the agent's limits, after a spike.
-  *Recommended:* yes, fallback marked low confidence.
+- **D5 Linux:** start the runners as a named transient unit through `systemd-run --user`, stopped with `systemctl --user
+  stop` on Cancel, and cleaned up by invocation id; spike first. *Recommended (review):* yes, fallback marked low
+  confidence.
 - **D6 Battery:** consent per run; stop on unplugging without consent. *Recommended:* yes.
-- **D7 Sustained length:** 5 minutes default (2, 10, 20 offered). *Recommended:* 5.
+- **D7 Sustained length:** 5 minutes default (2, 10, 20 offered where a temperature is readable; 5 at most where none
+  is). *Recommended (review):* 5, with the no-sensor limit.
 - **D8 SIMD dispatch** through `multiversion` rather than hand-written `std::arch`. *Recommended:* `multiversion`, if
   cargo-deny accepts its licence.
 - **D9 1.0 history:** keep and mark "measured the old way". *Recommended:* keep (cheap; 1.0 never produced real runs in
   an install, finding 1, so it is likely empty).
-- **D10 Dyno 1.0.x:** do not ship the 1.0 runner as it is (its disk reads measure RAM); change the missing-runner text
-  from "reinstall Dyno" to "Benchmarks arrive in Dyno 1.1" in a 1.0.x if one is cut. *Recommended:* yes.
+- **D10 Shipping the runner.** WP-B0 lands in 1.1.0, bundled only together with the fixed disk test (B3) or with Disk
+  turned off; the 1.0 disk test is never shipped. If a 1.0.x is cut, it only changes the missing-runner text from
+  "reinstall Dyno" to "Benchmarks arrive in Dyno 1.1". *Recommended (review):* yes.
