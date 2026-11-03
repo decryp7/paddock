@@ -12,7 +12,7 @@ use serde_json::Value;
 pub const TABLE_FUNCTIONS: [&str; 4] = ["range", "generate_series", "unnest", "generate_subscripts"];
 
 /// Statements that read: what the first keyword of a console query may be.
-const QUERY_KEYWORDS: [&str; 10] = [
+const QUERY_KEYWORDS: [&str; 9] = [
     "select",
     "with",
     "from",
@@ -22,7 +22,6 @@ const QUERY_KEYWORDS: [&str; 10] = [
     "summarize",
     "pivot",
     "unpivot",
-    "show",
 ];
 
 /// A query the console runs, after the checks.
@@ -298,6 +297,19 @@ mod tests {
             "SUMMARIZE events",
         ] {
             assert!(lexical(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn show_is_refused_because_duckdb_2_lists_databases_and_settings_with_it() {
+        for sql in ["SHOW TABLES", "show all tables", "SHOW DATABASES", "EXPLAIN SHOW TABLES"] {
+            let e = refused(sql);
+            assert!(
+                e.message.contains("SHOW") && e.message.contains("read-only"),
+                "{sql}: {}",
+                e.message
+            );
+            assert_eq!(&sql[e.offset..e.offset + e.len].to_uppercase(), "SHOW", "{sql}");
         }
     }
 

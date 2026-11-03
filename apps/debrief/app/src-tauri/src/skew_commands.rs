@@ -9,14 +9,24 @@ use debrief_core::skew::{OffsetChange, SetOffsetRequest, SuggestRequest, Suggest
 
 /// Sets a source's clock offset and moves its events.
 #[tauri::command]
-pub(crate) async fn set_source_offset(state: CurrentWindow, _op: OpId, request: SetOffsetRequest) -> CmdResult<OffsetChange> {
+pub(crate) async fn set_source_offset<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: CurrentWindow,
+    _op: OpId,
+    request: SetOffsetRequest,
+) -> CmdResult<OffsetChange> {
     let win = state.arc().clone();
-    let change = crate::engine::with_store(&state, move |s| {
+    let changed = crate::engine::with_store(&state, move |s| {
         let change = s.set_source_offset(&request)?;
         crate::engine::annotate::run(&win, s, &|_| {});
         Ok(change)
     })
-    .await?;
+    .await;
+    // A correction whose ordering failed is applied with its events out of time order: the ordering job repairs it.
+    if changed.is_err() {
+        crate::store_pane::order_events_if_incomplete(&app, &state);
+    }
+    let change = changed?;
     log::info!(Source = u64::from(change.source), OffsetMs = change.offset_ms; "Clock offset set");
     Ok(change)
 }
@@ -72,7 +82,7 @@ mod tests {
             serde_json::json!({"kind": "manual", "source": target, "offsetMs": suggested.suggestions[0].suggested_ms}),
         )
         .unwrap();
-        let change = block(set_source_offset(st(), OpId::default(), req)).unwrap();
+        let change = block(set_source_offset(app.handle().clone(), st(), OpId::default(), req)).unwrap();
         assert_eq!((change.source, change.ids_changed_from), (target, None));
         // The corrected source now agrees with the reference: nothing left to suggest for it.
         let after = block(suggest_offsets(st(), None)).unwrap();
@@ -80,7 +90,7 @@ mod tests {
         // Refused: too large.
         let big: SetOffsetRequest =
             serde_json::from_value(serde_json::json!({"kind": "manual", "source": target, "offsetMs": 9_999_999_999i64})).unwrap();
-        let e = block(set_source_offset(st(), OpId::default(), big)).unwrap_err();
+        let e = block(set_source_offset(app.handle().clone(), st(), OpId::default(), big)).unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid);
         assert!(e.message.contains("too large"), "{}", e.message);
     }

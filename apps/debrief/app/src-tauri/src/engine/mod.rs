@@ -44,6 +44,10 @@ pub(crate) trait StoreHost: Send + Sync {
     fn set_third_party(&self, _plugins: Vec<debrief_store_client::protocol::ThirdPartyPlugin>) {}
     /// Starts what serves the stores ahead of the first one (a background thread calls it after the first paint).
     fn warm_up(&self) {}
+    /// How often the process serving the stores was restarted (0 for a store in process).
+    fn restarts(&self) -> usize {
+        0
+    }
 }
 
 /// The store worker of the app: one process for every window's store.
@@ -131,6 +135,10 @@ impl StoreHost for WorkerHost {
         Ok((Arc::new(store), manifest))
     }
 
+    fn restarts(&self) -> usize {
+        self.worker.status().restarts
+    }
+
     fn warm_up(&self) {
         let started = std::time::Instant::now();
         match self.worker.warm_up() {
@@ -178,6 +186,10 @@ pub(crate) struct Engine {
     last_report: Mutex<Option<debrief_core::ports::ImportReport>>,
     /// The running import's progress (`import_progress`), as its job last read it.
     progress: Mutex<debrief_core::workspace::ProgressSnapshot>,
+    /// The store worker's restarts this window has checked the time order after.
+    seen_restarts: std::sync::atomic::AtomicUsize,
+    /// Where putting the events in time order stands (`crate::ordering`).
+    pub(crate) ordering: Mutex<crate::ordering::State>,
 }
 
 /// Scratch folders made by this process (unique per window and store).
@@ -186,7 +198,6 @@ static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(1);
 impl Engine {
     pub(crate) fn new(host: Arc<dyn StoreHost>, root: PathBuf, label: &str, profile: Profile) -> Engine {
         Engine {
-            host,
             root,
             label: label.to_string(),
             current: RwLock::default(),
@@ -195,6 +206,9 @@ impl Engine {
             stale_parsers: Mutex::new(0),
             last_report: Mutex::default(),
             progress: Mutex::new(debrief_core::workspace::ProgressSnapshot::stopped()),
+            seen_restarts: std::sync::atomic::AtomicUsize::new(host.restarts()),
+            ordering: Mutex::new(crate::ordering::State::default()),
+            host,
         }
     }
 
@@ -220,11 +234,19 @@ impl Engine {
         let profile = crate::sync::lock(&self.profile).clone();
         let store = self.host.create(&dir, &profile).map_err(|e| unavailable(&e))?;
         self.hand_parsers(store.as_ref());
+        self.new_ordering_episode();
         *slot = Some(Current {
             store: store.clone(),
             kind: StoreKind::Scratch,
         });
         Ok(store)
+    }
+
+    /// Another store in the window (opened, created, replaced or closed): a new ordering episode (`crate::ordering`,
+    /// `Event::Opened`), so an earlier episode's Cancel or failure does not keep this store from being ordered.
+    fn new_ordering_episode(&self) {
+        let mut o = crate::sync::lock(&self.ordering);
+        *o = crate::ordering::step(*o, crate::ordering::Event::Opened).0;
     }
 
     /// Hands the window's parser library to `store`; remembers how many of its sources need reading again.
@@ -278,10 +300,18 @@ impl Engine {
     /// Makes `store` the window's store; the one before is closed (and its scratch folder deleted).
     pub(crate) fn replace(&self, store: SharedStore, kind: StoreKind) {
         self.hand_parsers(store.as_ref());
+        self.new_ordering_episode();
         let previous = crate::sync::write(&self.current).replace(Current { store, kind });
         if let Some(p) = previous {
             retire(p);
         }
+    }
+
+    /// Whether the store worker restarted since the last call (it reopened the store; an ordering it was running is
+    /// gone, so the time order may be incomplete).
+    pub(crate) fn worker_restarted(&self) -> bool {
+        let now = self.host.restarts();
+        now > self.seen_restarts.swap(now, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Opens the store already in `dir` (a restored window) as the window's store.
@@ -607,7 +637,10 @@ mod tests {
         drop(a);
         // Another store replaces it; the scratch folder goes.
         let other = local::host().create(&root.join("other"), &Profile::default_profile()).unwrap();
+        // An ordering left to the user belongs to the store it was about: the next store starts a new episode.
+        *crate::sync::lock(&engine.ordering) = crate::ordering::State::LeftToUser;
         engine.replace(other, StoreKind::Project);
+        assert_eq!(*crate::sync::lock(&engine.ordering), crate::ordering::State::Ready);
         assert_eq!(engine.kind(), Some(StoreKind::Project));
         assert!(!first.exists(), "the scratch folder was removed");
         // A project folder stays when the window closes.

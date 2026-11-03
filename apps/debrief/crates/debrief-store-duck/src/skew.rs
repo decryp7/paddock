@@ -3,16 +3,18 @@
 //! A source file's offset is kept in `clock_offsets` (by path) and already applied to its events: files read
 //! later take it as they are written ([`crate::writer::SegmentSink`]), and changing it rewrites the segments that
 //! hold the file's events with their `ts` moved by the difference. The rewritten segments keep their id blocks (an
-//! event keeps its id when it moves in time) and are swapped for the old ones, with the offset, the sources' time
-//! ranges and the histogram, in one catalog transaction: a reader sees the old times or the new ones. The
-//! time-order positions are renumbered afterwards. The full-text index does not hold times, so it stays.
+//! event keeps its id when it moves in time; their `segment_blocks` rows move to the new files) and are swapped for
+//! the old ones, with the offset, the sources' time ranges and the histogram, in one catalog transaction: a reader
+//! sees the old times or the new ones. The time-order positions are renumbered afterwards. The full-text index holds
+//! each event's time and orders hits by it (ADR 0062, defect 3), so the rewritten segments are marked unindexed and
+//! their blocks' documents deleted, still under the write lock: the indexer adds them again with the new times.
 
 use crate::compact::delete_or_trash;
 use crate::schema::{parquet_from, READY};
 use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR};
 use crate::sql::ident;
-use crate::writer::{self, delete_segment, insert_segment, meta_u64, refresh_view, set_meta};
-use crate::{engine, lock, pos, DuckStore};
+use crate::writer::{self, delete_segment, insert_segment, meta_u64, move_blocks, refresh_view, set_meta};
+use crate::{engine, lock, DuckStore};
 use anyhow::Result;
 use debrief_core::batch::{EventBatch, EventId, EventSchema, BATCH_ROWS};
 use debrief_core::ports::{EventsRequest, Query, Skew, StoreError, StoreResult};
@@ -64,6 +66,20 @@ struct Listed {
     first_id: u64,
     end_id: u64,
     indexed: bool,
+}
+
+/// The id blocks of the segments in `listed` that have them, by file.
+fn blocks_of(conn: &Connection, listed: &[Listed]) -> Result<HashMap<String, Vec<(u64, u64)>>> {
+    let mut out: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
+    let mut stmt = conn.prepare("SELECT first_id, end_id FROM segment_blocks WHERE file = ?")?;
+    for l in listed {
+        let rows = stmt.query_map(params![l.file], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, u64>(1)?)))?;
+        let found = rows.collect::<duckdb::Result<Vec<_>>>()?;
+        if !found.is_empty() {
+            out.insert(l.file.clone(), found);
+        }
+    }
+    Ok(out)
 }
 
 /// Writes the live rows of `from` with the sources' times moved, into a new segment with the same id block.
@@ -150,6 +166,8 @@ impl DuckStore {
                 .collect::<duckdb::Result<Vec<_>>>()
                 .map_err(engine)?;
         }
+        // The id blocks of each affected segment: their documents are replaced (see the module docs).
+        let blocks = blocks_of(&conn, &affected).map_err(|e| engine(format!("{e:#}")))?;
         let mut generation = meta_u64(&conn, "file_generation");
         let mut written: Vec<Segment> = Vec::new();
         for l in &affected {
@@ -167,8 +185,12 @@ impl DuckStore {
         conn.execute_batch("BEGIN TRANSACTION").map_err(engine)?;
         let swapped = (|| -> Result<()> {
             for (l, seg) in affected.iter().zip(&written) {
+                move_blocks(&conn, &l.file, &seg.file)?;
                 delete_segment(&conn, &l.file)?;
-                insert_segment(&conn, seg, seg.rows, l.indexed)?;
+                // Indexed again from the new file, unless its blocks are not known yet (a segment whose range
+                // overlaps another's, from before `segment_blocks`): those keep their documents and old times.
+                let keep = l.indexed && !blocks.contains_key(&l.file);
+                insert_segment(&conn, seg, seg.rows, keep)?;
             }
             for (id, delta) in &shifts {
                 conn.execute(
@@ -208,14 +230,49 @@ impl DuckStore {
                 log::warn!("an old data file could not be removed: {e:#}");
             }
         }
+        self.reindex_moved(&conn, &affected, &written, &blocks);
         if !shifts.is_empty() {
-            if let Err(e) = pos::rebuild(&conn) {
-                log::warn!("time-order positions could not be rebuilt: {e}");
-            }
+            // A failed ordering is marked stale and done again by the next open or import; the correction itself holds.
+            let notice = inner.reorder(&conn);
             inner.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             inner.bump_version(&conn)?;
+            if let Some(notice) = notice {
+                return Err(StoreError::Engine(format!("The clock correction is applied. {notice}")));
+            }
         }
         Ok(())
+    }
+
+    /// Deletes the documents of the rewritten segments' blocks, which hold the old times; the indexer (kept out by the
+    /// write lock the caller holds) adds them again from the new files. This covers segments not marked indexed too,
+    /// whose documents may already be committed. When the delete fails (it is rolled back), each new file gets its old
+    /// segment's flag back: indexed ones keep the documents with the old times (as before ADR 0062) rather than appear
+    /// twice.
+    fn reindex_moved(&self, conn: &Connection, affected: &[Listed], written: &[Segment], blocks: &HashMap<String, Vec<(u64, u64)>>) {
+        let Some(fts) = &self.inner.fts else {
+            return;
+        };
+        let moved: Vec<(&Listed, &Segment)> = affected
+            .iter()
+            .zip(written)
+            // Also unindexed ones: their documents may already be committed.
+            .filter(|(l, _)| blocks.contains_key(&l.file))
+            .collect();
+        if moved.is_empty() {
+            return;
+        }
+        let ranges: Vec<(u64, u64)> = moved.iter().flat_map(|(l, _)| blocks[&l.file].iter().copied()).collect();
+        match fts.delete_blocks(&ranges) {
+            Ok(()) => fts.wake(),
+            Err(e) => {
+                log::warn!("the moved events' search entries keep their old times: {e:#}");
+                for (_, seg) in moved.into_iter().filter(|(l, _)| l.indexed) {
+                    if let Err(e) = conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![seg.file]) {
+                        log::warn!("a moved segment could not be marked indexed: {e:#}");
+                    }
+                }
+            }
+        }
     }
 
     /// The file path of a source.

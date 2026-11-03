@@ -56,12 +56,12 @@ impl Importer for TextImporter {
 pub(crate) fn day_order(ctx: &ImportCtx, fmt: LineFormat, sample: &str, max_lines: usize) -> Option<bool> {
     ctx.profile.timestamps.day_first().or_else(|| match fmt {
         LineFormat::Text(i) => {
-            let regex = &ctx.profile.text_formats[i].regex;
+            let format = &ctx.profile.text_formats[i];
             detect_day_first(
                 sample
                     .lines()
                     .take(max_lines)
-                    .filter_map(|l| regex.captures(l).and_then(|c| c.name("timestamp")).map(|m| m.as_str())),
+                    .filter_map(|l| format.captures(l).and_then(|c| c.name("timestamp"))),
             )
         }
         LineFormat::Json => None,
