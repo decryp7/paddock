@@ -97,6 +97,10 @@ build when an ad-hoc Mach-O has the hardened runtime on or when bundled Mach-Os 
 and on the copy inside the DMG. Spotter bundles no sidecar today; one added to `bundle.externalBin` is started from the built app
 by the same step (and `conformance/test/ci-actions.test.mjs` fails until `spotter-release.yml` lists it).
 
+## Third-party notices and SBOM
+
+`scripts/notices.sh spotter --check` verifies `app/src-tauri/resources/THIRD_PARTY_NOTICES.md` (regenerate without `--check`). Spotter 1.0 ships **no SBOM** (decision 2026-11-04): the shared notices/SBOM crate comes after the current releases.
+
 ## Before tagging (rule 54)
 
 - [ ] **`spotter-release.yml` dispatch with bundles green** (Actions > spotter-release > Run workflow, `gates` on): open the run and check that the three `bundle (...)` jobs ran and passed and that the verdict job says `installers: built`. A green run that says `installers: not built` proves nothing about the release path (rule 54).
