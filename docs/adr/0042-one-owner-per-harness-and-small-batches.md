@@ -1,7 +1,8 @@
 # 42. One owner per shared harness, and smaller merge batches: a home branch per harness, size and age caps, CI once per tree
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 6). No work starts
-  before it is accepted.
+- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 6).
+  The user decided its open points on 2026-11-03 (Decisions of the user); it is accepted after a delta review. No
+  work starts before then.
 - Date: 2026-11-03
 - Related: ER-1 / rule 1 (one release at a time), ER-2 / rule 2 (worktrees), ER-4 (complete Conventional Commits), ER-8 /
   rule 3 (the full suite once on the combined result), ER-21 / rule 40, ER-22 / rules 42-43 (share first), rule 50 (CI
@@ -23,7 +24,8 @@
   - Landings on `main` (`git rev-list --count --no-merges`, files from `git diff --name-only`): `925bf02a4..c3404cdc7` 47
     commits, 122 files; `c3404cdc7..09293bcde` 3, 14; `09293bcde..cd4aa0afa` 5, 8; `cd4aa0afa..233c1339b` 30, 78;
     `233c1339b..72edd2eaa` (Dyno 1.0) **146 commits, 403 files**; `72edd2eaa..9da2ccf59` 3, 2. Waiting:
-    `steward/land-1` (Spotter 1.0) **222 commits, 524 files**, oldest commit 2026-10-28, not landed on 11-03 (new RustSec    advisories, log 498).
+    `steward/land-1` (Spotter 1.0) **222 commits, 524 files**, oldest commit 2026-10-28, not landed on 11-03 (new RustSec
+    advisories, log 498).
 
 ## Context
 
@@ -63,17 +65,25 @@ title = "VM start, GUI and update checks (macOS Tart, Windows Fusion), including
 paths = ["scripts/vm-smoke/**", "scripts/vm-win.sh", "scripts/vm-win/**", "tools/macos-vm-smoke.sh", "apps/*/vm-smoke.json"]
 home = "tools/vm-smoke"          # the one branch where its files change
 mode = "home"                     # "home": every change here; "additive": others may add new files only
-lands = "48h"                     # the home lands on main at least this often while it is ahead
+lands = "48h"                     # the home lands at least this often while ahead, outside release windows (below)
 note = "apps/*/vm-smoke.json: an app's own block may change on the app's branch (declared exception below)"
 exceptions = ["apps/*/vm-smoke.json"]
 ```
 
 Seeded with the harnesses measured above: `vm-smoke` (home), the CI kit (`.gitea/actions/**`, `.gitea/workflows/ci.yml`,
 `nightly.yml`, `app-release.yml`, `scripts/affected.mjs`; home), `paddock-dev` (`tools/paddock-dev/**`, `dev`; home),
-`conformance` (`conformance/src/**`; **additive**: a feature branch may add a new check file, while edits to the runner,
-the index and existing checks go through the home), `paddock-e2e` (`ui/projects/paddock-e2e/**`; home) and
+`conformance` (`conformance/src/**`; a strict **home** until checks are auto-discovered, then **additive**: a feature
+branch may add a new check file, while edits to the runner and existing checks go through the home. Additive mode needs
+the runner to discover `conformance/src/checks/C*.mjs` by itself, so adding a check never edits `checks/index.mjs`; that
+change is WP-3's first step, decision D4), `paddock-e2e` (`ui/projects/paddock-e2e/**`; home) and
 `paddock-testkit` (`crates/paddock-testkit/**`; home). Product shared code (`crates/`, `ui/projects/paddock-ui`) is not a
 harness: it changes with its adopting apps in one change (rules 39, 42).
+
+**Release windows (ADR 0022 G.7).** A home whose paths are in `crates/` or `ui/` (`paddock-testkit`, `paddock-e2e`) or
+on a release path (the CI kit's `app-release.yml` and shared actions) lands **only outside a release window**, whatever
+its `lands` age; the register marks such a harness `release_path = true`, and `harness --stale` reports it as "held by
+the <app> release window" instead of overdue. The other homes (`vm-smoke`, the parts of `paddock-dev` off the release
+path) keep the 48-hour age.
 
 **The owner** is the home branch plus a lease: the coordinator gives one agent at a time a harness's lease in its brief
 ("owns harness vm-smoke on tools/vm-smoke"), and logs it. An agent without the lease who needs a harness change asks
@@ -113,7 +123,9 @@ How lines stay under them:
   windows the release does not need, and only if they do not change shared code the release depends on.
 
 A batch over a cap lands only with a trailer on its merge commit, `Batch-size-waived: <reason>; approved: <coordinator|user>`.
-C73 checks the caps over the landing range and the trailer.
+C73 checks the caps over the landing range and the trailer. It runs **at landing**: in the steward's landing step
+(`paddock-conformance batch --range origin/main..<landing head>`) and in the coordinator's dispatch of the landing's CI
+(ADR 0038's dispatch guard); a feature branch's own pushes are not landings and are not checked against the caps.
 
 ### 4. No landing copies: messages right at the source
 
@@ -124,12 +136,19 @@ C73 checks the caps over the landing range and the trailer.
 
 ### 5. CI once per tree
 
-The plan job (`affected.mjs --ci`, later `./dev plan`) looks up the head's **tree hash** among successful runs of the same
-workflow in the last 24 hours. If one ran on an identical tree (the tree includes `.gitea/`, so the workflows are identical
+**Scope: branch runs only.** Reuse applies only to runs started by a push to a branch, or by a `workflow_dispatch`
+without inputs on a branch. It **never** applies to a tag push, any `*-release.yml` run, a scheduled or nightly run, a run
+on `main`, or a dispatch with inputs (gates on, bundles, a chosen app): those always run in full, because a release is
+built and proven from its own tag (ER-15, rule 9, ADR 0039) and the nightly is the full suite (rule 50 (e)).
+
+For a branch run, the plan job (`affected.mjs --ci`, later `./dev plan`) looks up the head's **tree hash** among successful
+branch runs of the same workflow in the last 24 hours. If one ran on an identical tree (the tree includes `.gitea/`, so the workflows are identical
 too), the run marks every gate job "tree already green in run <id>" with the link, skips them, and still runs the
 `commits` job (messages differ). The 24-hour bound exists because some gates read the world (new RustSec advisories failed
 `land-1` on an unchanged tree on 11-03). This removes the second run of a landing copy or a reworded history; ADR 0038's
-local stamp is the same idea before the push.
+local stamp is the same idea before the push, and the two share **one key** (rule 55: one implementation per
+mechanism): G26's input hash, computed by one function in the generic tools (`devkit`), over the tree hash plus the tool
+versions file. The plan job and the local stamp both call it; C58 then treats any second hash function as a copy.
 
 ### 6. Landing cadence
 
@@ -155,7 +174,8 @@ tuned.
    the `commit-msg` hook. The leases start by hand in briefs at once.
 2. **WP-2:** consolidate the live duplicates: `tools/vm-smoke-unified` plus `tools/win-update-test` become
    `tools/vm-smoke` (shared with ADR 0040 WP-1), and land.
-3. **WP-3:** C72 and C73 with fixtures and tests; wired into the `commits` job and the steward's landing checklist.
+3. **WP-3:** the conformance runner discovers its checks (no `index.mjs` edit per check; D4), then C72 and C73 with
+   fixtures and tests; C72 wired into the `commits` job, C73 into the steward's landing step and the dispatch guard.
 4. **WP-4:** the plan job's tree lookup, with a test against a fake Gitea API.
 5. **WP-5:** split `land-1` into landings under the caps (shared parts first), as the first use.
 6. **WP-6:** after two weeks, measure main runs per day, CI runs per landed commit and conflict rounds, record them
@@ -164,7 +184,8 @@ tuned.
 The proposed **rule 61**: "One owner per shared harness, and small batches. A shared harness (`docs/harnesses.toml`)
 changes only on its home branch, by the agent holding its lease; other branches merge the home. A landing holds at most
 the register's caps (60 commits, 200 files, 72 hours) unless waived with `Batch-size-waived:`; a release line lands its
-green parts untagged and its shared parts first; open lines merge `main` daily; the same tree runs CI once. Checked by C72
+green parts untagged and its shared parts first; open lines merge `main` daily; the same tree runs a branch CI
+run once (never a tag, release, nightly or `main` run). Checked by C72
 and C73. *Why:* three copies of vm-smoke blocked a release batch, and 121- to 222-commit batches took repeated CI runs and
 12-file conflict rounds (ADR 0042)."
 
@@ -177,11 +198,11 @@ switched off in the plan job.
 |---|---|
 | WP-1 register, rule, hook | 0.5 |
 | WP-2 consolidate vm-smoke and vm-win (counted in ADR 0040 WP-1) | (1) |
-| WP-3 C72 and C73 | 1.5 |
-| WP-4 tree lookup in the plan job | 1.5 |
+| WP-3 check auto-discovery, C72 and C73 | 1.75 |
+| WP-4 tree lookup in the plan job, on G26's shared input hash | 1.5 |
 | WP-5 split `land-1` into capped landings (steward work) | 1 |
 | WP-6 measure and tune | 0.5 |
-| **Total (new work)** | **5** |
+| **Total (new work)** | **5.25** |
 
 ## Consequences
 
@@ -204,10 +225,12 @@ switched off in the plan job.
 - **A merge queue (bors-style) on Gitea.** Gitea has no built-in merge queue (not re-checked today); the cadence plus the
   tree lookup gives most of the effect without new infrastructure. Kept as a later option.
 
-## Decisions for the user
+## Decisions of the user (2026-11-03)
 
-- **D1:** the caps: 60 commits, 200 files, 72 hours (recommended), or tighter (30, 100, 48 h) at the cost of more main runs?
-- **D2:** the landing cadence: at most every 8 hours (recommended), or once a day?
-- **D3:** CI skipped for a tree already green within 24 hours (recommended), or always run (simpler, costs a run per copy)?
-- **D4:** `conformance` as an additive harness (feature branches may add checks; recommended), or a strict home like the
-  others?
+The user accepted the reviewer's recommendations on 2026-11-03. The status stays Proposed until the delta review.
+- **D1:** the caps are **60 commits, 200 files and 72 hours** (§3).
+- **D2:** the steward lands **at most every 8 hours** (§6).
+- **D3:** CI is **skipped for a tree already green within 24 hours**, for branch runs only, with the exclusions of §5
+  (never tags, `*-release.yml`, nightly, `main`, or dispatches with inputs).
+- **D4:** `conformance` becomes an **additive** harness only once checks are auto-discovered (no `index.mjs` edit to add
+  one); until then it is a strict home like the others.
