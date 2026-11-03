@@ -23,4 +23,5 @@ Wait on conditions, not delays. Revert to `clean-baseline` when done unless the 
 - A promoted tray icon is on the taskbar: set `IsPromoted=1` (DWORD) under `HKCU:\Control Panel\NotifyIconSettings\<id>` whose `ExecutablePath` is the app, then screenshot.
 - A real restart: `shutdown /r /t 3` as `paddock-admin`; poll `query user` for the `console` session; list `Run`, processes and windows (`scripts/vm-smoke/win-gui-probe.ps1`).
 - `cargo xwin` links a Tauri app only with a `mt.exe` on `PATH` (symlink `llvm-mt` from Homebrew's llvm).
+- Logon check: save `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run` to a file after Start at login is on and again after the restart, copy it to the host and run `node apps/dyno/scripts/check-logon-entry.mjs <file>` (exit 1: an entry starts only the agent, or none starts `dyno-app.exe --hidden`).
 - Revert to your own snapshot afterwards; never touch another VM.
