@@ -406,3 +406,20 @@ Decided by the user on 2026-10-29:
   let a kept-profile browser that has answered finish on its own, or give the teardown room for the kept grace. This is
   a shutdown bound, class **S** in ADR 0031 (patience, not wall clocks; proposed on `docs/adr-patience-not-wall-clocks`):
   it stays on the real clock, so the fix is ordering and budget, not patience.
+
+## 8. Schedule after the 2026-11-04 decision (full plan)
+
+User decision 2026-11-04: Debrief 1.2 is the full plan. ER-1: Dyno, Spotter and Pitwall land first, so a package that
+changes shared code (`crates/`, `ui/`, `.gitea/`, conformance) is prepared on a branch with its design and failing tests
+and is **not landed** until those three are merged. `deny.toml` says 1.2.0 ships only after the DuckDB 2 migration
+(zstd and thrift advisories), so DuckDB 2 is mandatory, not optional.
+
+| Track | Packages | Shared code | Starts | Notes |
+|---|---|---|---|---|
+| A. App-local now (`debrief/1.2-lean`) | N1, N2, names rebuild NR1 (app part), zip duplicate paths, autoload off, N6, P2-P4 store loops, event-driven watchers, busy buttons | none | now | each with a failing test first; NR1's keyed submit needs J1 (track C) |
+| B. Search chain (`debrief/search-chain-rebase`) | duckdb-2, wp1, wp2, wp3 (2 commits), ADR 0062 | libduckdb pin and fetch scripts only | now | wp1/wp2 sit on the DuckDB 2 move, so they cannot land without it; D-a (Intel drop, CI image) and D-b (budget run) follow |
+| C. Shared, wait for the three apps | P1 `paddock-proc`, J1 `paddock-jobs`, P5 `paddock-plugin-api`, IP1, PH1-PH4 plugin platform, N3 packs, B1 bench gates, A1 family ADR + conformance checks, C36/C37/C39 | yes | after Dyno, Spotter, Pitwall land | prepare designs and failing tests meanwhile; land in this order: J1, P1, P5, IP1, N3, PH1, PH2, PH3, PH4, B1 |
+| D. Shell and workbench | M1-M5, dialogs (ADR 0043 sizing, 2.5), 2.1-2.7 virtual primitive and timeline, LV1-LV3 (ADR 0031 phase A), 4.1-4.5 UI | yes (`ui/`) | after C's J1 and P1; M1 first | the longest chain (about 25 serial days); dialogs and timeline can run in parallel once M1 is in |
+| E. After A-D | N4, N5, N0, N7, 5.1-5.4 reviews, safety net, release checklist (section 4), vm-smoke (ask the user first) | no | last | tag only with the user's OK |
+
+Parallel now: A and B (two to three agents). Prepare in parallel: C and D designs. Order of landing: A, B, then C, D, E.
