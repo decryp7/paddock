@@ -1,9 +1,10 @@
 import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import gridCases from '../../../../../../ui/projects/paddock-ui/widgets/generated/grid-cases.json';
+import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
   Alarm,
@@ -256,7 +257,7 @@ export class MockBackend implements DynoBackend {
     this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
-    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, ...(options.widgets ?? {}) });
+    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
@@ -1144,8 +1145,12 @@ export class MockBackend implements DynoBackend {
     return this.reply('widgetLayout', () => this.widgets.view(surface));
   }
 
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
-    return this.reply('editWidgetLayout', () => this.widgets.edit(edit));
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView> {
+    return this.reply('editWidgetLayout', () => this.widgets.edit(edit, baseRevision ?? null));
+  }
+
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>> {
+    return this.reply('previewWidgetLayout', () => this.widgets.preview(request));
   }
 
   popoverValues(): Promise<PopoverSurfaceValues> {

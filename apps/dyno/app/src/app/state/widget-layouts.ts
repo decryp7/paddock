@@ -42,18 +42,39 @@ export class WidgetLayouts {
     return this.read(surface);
   }
 
-  /** Sends one edit of a surface. Resolves null when it was applied, or the engine's reason it was refused (the view is then read again). */
+  /**
+   * Sends one edit of a surface. Resolves null when it was applied, or the engine's reason it was refused (the view is then
+   * read again). The edit names the revision of the view it was computed on; when the layout changed meanwhile (code
+   * `stale`, another window edited) the view is read again and the edit is sent once more on the new revision.
+   */
   async edit(surface: 'popover', edit: Edit<PopoverWidget>): Promise<CommandError | null>;
   async edit(surface: 'dashboard', edit: Edit<DashboardWidget>): Promise<CommandError | null>;
   async edit(surface: 'menuBar', edit: Edit<MenuBarItem>): Promise<CommandError | null>;
   async edit(surface: DynoSurface, edit: Edit<never>): Promise<CommandError | null> {
+    const send = (): Promise<SurfaceView> => this.backend.editWidgetLayout({ [surface]: edit } as unknown as SurfaceEdit, this.revisionOf(surface));
     try {
-      this.apply(await this.backend.editWidgetLayout({ [surface]: edit } as unknown as SurfaceEdit));
+      this.apply(await send());
       return null;
-    } catch (e) {
+    } catch (first) {
+      const error = toCommandError(first);
+      if (error.code === 'stale') {
+        await this.read(surface);
+        try {
+          this.apply(await send());
+          return null;
+        } catch (second) {
+          void this.read(surface);
+          return toCommandError(second);
+        }
+      }
       void this.read(surface);
-      return toCommandError(e);
+      return error;
     }
+  }
+
+  private revisionOf(surface: DynoSurface): number | undefined {
+    const view = surface === 'popover' ? this._popover() : surface === 'dashboard' ? this._dashboard() : this._menuBar();
+    return view?.revision;
   }
 
   private async read(surface: DynoSurface): Promise<void> {

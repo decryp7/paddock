@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import type {
   ActivityEntry,
   AgentStatus,
@@ -523,8 +523,12 @@ export class TauriBackend implements DynoBackend {
     return this.command<SurfaceView>('widget_layout', { surface });
   }
 
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
-    return this.command<SurfaceView>('edit_widget_layout', { edit });
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView> {
+    return this.command<SurfaceView>('edit_widget_layout', { edit, baseRevision: baseRevision ?? null });
+  }
+
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>> {
+    return this.command<PreviewReply<DashboardView>>('preview_widget_layout', { request });
   }
 
   popoverValues(): Promise<PopoverSurfaceValues> {
