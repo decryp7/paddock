@@ -23,7 +23,7 @@ serde_json.workspace = true
 
 [dependencies]
 dyno-core.workspace = true
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
 # Only for `Dirs`, `Discovery` and `service::Service` (the agent's per-user service registration); the app never links to
 # the sensors by calling them (ADR 0002: the agent measures, the app is a client).
 dyno-agent.workspace = true

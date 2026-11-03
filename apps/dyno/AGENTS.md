@@ -1,7 +1,7 @@
 # Dyno — engineering rules for coding agents and contributors
 
 Dyno watches your PC and changes nothing on it ([ADR 0021](docs/adr/0021-monitoring-only.md)): a pure Rust core (`crates/dyno-core`), OS adapters
-(`crates/dyno-platform`), a background agent that samples, keeps history and raises alarms (`crates/dyno-agent`), one small IPC (`crates/dyno-ipc`) shared with out-of-process plugins
+(`crates/dyno-platform`), a background agent that samples, keeps history and raises alarms (`crates/dyno-agent`), one IPC (the family's `paddock-ipc`) shared with out-of-process plugins
 (`crates/dyno-plugin-api`, `crates/dyno-plugin-host`), a Tauri 2 shell (`app/src-tauri`) and an Angular UI
 (`app/src`). See README.md for what it does and `docs/adr/` for why it is built this way.
 
@@ -27,7 +27,7 @@ Apply these deliberately. They are not decoration:
 - **Interface segregation.** Keep traits and TypeScript interfaces small and purpose-built.
 - **Dependency inversion / code against abstractions.**
   - The agent depends on the `dyno_core::ports` traits, never on an OS API.
-  - The Tauri shell talks to the agent only through `dyno_core::protocol` over `dyno-ipc`.
+  - The Tauri shell talks to the agent only through `dyno_core::protocol` over `paddock-ipc`.
   - Angular components never call Tauri `invoke` directly: they go through the backend injected by the `BACKEND`
     token (real Tauri backend or the mock for browser dev/tests), and state lives in SignalStores.
 - **Pure core, thin edges.** Grouping, diagnosis, anomaly detection, forecasts,
@@ -92,7 +92,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 - All code that ships inside Dyno is Rust (core, platform, agent, plugins, Tauri shell) plus the Angular UI.
   Don't add C#, C++, Python, PowerShell or other runtimes to the product.
 - Plugins are Rust only and always run out of process: a plugin depends on `dyno-plugin-api` alone, is served by
-  `dyno_plugin_api::serve`, and talks to Dyno over the one IPC (`dyno-ipc`: length-prefixed postcard frames on a
+  `dyno_plugin_api::serve`, and talks to Dyno over the one IPC (`paddock-ipc`: length-prefixed postcard frames on a
   private local stream).
 - `unsafe` is denied workspace-wide. The OS integrations that need FFI get one small module each with
   `#[allow(unsafe_code)]` and a `// SAFETY:` comment on every `unsafe` block, and tests on that platform's CI runner.

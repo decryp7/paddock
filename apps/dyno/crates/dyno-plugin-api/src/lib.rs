@@ -1,7 +1,7 @@
 //! The contract Dyno plugins are written against.
 //!
 //! A plugin is a small Rust executable that depends on this crate only. Dyno's agent starts it as a child process,
-//! talks to it over [`dyno_ipc`] and treats every failure (a panic, a hang, a crash, garbage) as that plugin's error.
+//! talks to it over `paddock-ipc` and treats every failure (a panic, a hang, a crash, garbage) as that plugin's error.
 //! A plugin contributes **sensors** ([`SensorProvider`]): extra readings shown next to Dyno's own. Dyno is
 //! monitoring-only, so a plugin never changes the machine through Dyno.
 //!

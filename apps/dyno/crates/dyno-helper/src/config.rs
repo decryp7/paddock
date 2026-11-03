@@ -2,7 +2,7 @@
 //! start; damage means the daemon refuses to serve (fail closed) and says why.
 
 use dyno_core::helper_wire::HelperUser;
-use dyno_ipc::Token;
+use paddock_ipc::Token;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

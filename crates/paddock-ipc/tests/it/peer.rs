@@ -746,3 +746,87 @@ fn closing_one_side_ends_the_other_and_served_calls_see_a_cancel() {
     assert!(rx.recv_timeout(GUARD).unwrap());
     assert!(b.wait_closed(Some(GUARD)));
 }
+
+#[test]
+fn calls_over_the_limit_wait_in_order_in_the_call_queue_and_past_it_are_busy() {
+    let gate = Gate::default();
+    let g = gate.clone();
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let o = order.clone();
+    let slow: Arc<dyn Handler> = Arc::new(
+        move |_: &CallCtx, body: &[u8]| -> Result<Vec<u8>, RemoteError> {
+            o.lock().unwrap().push(body.to_vec());
+            g.wait();
+            Ok(body.to_vec())
+        },
+    );
+    let mut one = PeerOptions::new("b");
+    one.max_concurrent_calls = 1;
+    one.call_queue = 2;
+    let limit = FrameLimit::default();
+    let (_peer, mut raw) = raw(slow, one, limit);
+    // One connection, so the callee takes the frames in the order they are written: 1 runs, 2 and 3 wait, 4 is refused.
+    for id in 1..=4u64 {
+        let call = Frame::Call {
+            id,
+            credit: 0,
+            body: id.to_string().into_bytes(),
+        };
+        frame::write_frame(&mut raw, &call, limit).unwrap();
+    }
+    match frame::read_frame(&mut raw, limit).unwrap() {
+        Frame::Fail { id: 4, error } => assert_eq!(error.code, codes::BUSY),
+        other => panic!("{other:?}"),
+    }
+    gate.open();
+    for id in 1..=3u64 {
+        match frame::read_frame(&mut raw, limit).unwrap() {
+            Frame::Reply { id: got, body } => {
+                assert_eq!((got, body), (id, id.to_string().into_bytes()));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(
+        *order.lock().unwrap(),
+        vec![b"1".to_vec(), b"2".to_vec(), b"3".to_vec()]
+    );
+}
+
+#[test]
+fn closing_ends_calls_that_were_still_waiting_in_the_queue() {
+    let gate = Gate::default();
+    let g = gate.clone();
+    let ran = Arc::new(AtomicUsize::new(0));
+    let r = ran.clone();
+    let slow: Arc<dyn Handler> = Arc::new(
+        move |_: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
+            r.fetch_add(1, Ordering::SeqCst);
+            g.wait();
+            Ok(Vec::new())
+        },
+    );
+    let mut one = PeerOptions::new("b");
+    one.max_concurrent_calls = 1;
+    one.call_queue = 2;
+    let limit = FrameLimit::default();
+    let (peer, mut raw) = raw(slow, one, limit);
+    for id in 1..=4u64 {
+        let call = Frame::Call {
+            id,
+            credit: 0,
+            body: Vec::new(),
+        };
+        frame::write_frame(&mut raw, &call, limit).unwrap();
+    }
+    // The refusal of the fourth proves the reader took the first three: one runs, two wait.
+    match frame::read_frame(&mut raw, limit).unwrap() {
+        Frame::Fail { id: 4, error } => assert_eq!(error.code, codes::BUSY),
+        other => panic!("{other:?}"),
+    }
+    peer.close();
+    gate.open();
+    assert!(peer.wait_closed(Some(GUARD)));
+    // Only the running call ran; the two that waited were dropped with the connection.
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+}

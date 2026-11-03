@@ -8,9 +8,9 @@ use dyno_agent::Running;
 use dyno_core::history::HistoryRange;
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
-use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::Platform;
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
@@ -85,17 +85,17 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
-    fn subscriber(&self, detail: LiveDetail) -> (Peer<Message>, Receiver<LiveUpdate>) {
+    fn subscriber(&self, detail: LiveDetail) -> (BodyPeer<Message>, Receiver<LiveUpdate>) {
         let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     let _ = tx.send(*l);
                 }
@@ -302,8 +302,8 @@ fn shutdown_removes_the_discovery_file_and_a_second_agent_is_not_needed() {
 fn a_wrong_token_is_refused_and_the_agent_keeps_serving() {
     let h = Harness::start();
     let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-    let bad = dyno_ipc::Token::from_bytes([1; 32]);
-    assert!(Client::connect(&d.endpoint, &bad).is_err());
+    let bad = paddock_ipc::Token::from_bytes([1; 32]);
+    assert!(dyno_agent::wire::connect(&d.endpoint, &bad).is_err());
     let peer = h.client();
     ask(&peer, Request::Settings).unwrap();
 }
@@ -746,7 +746,7 @@ fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
     h.running.as_ref().unwrap().shared.clone()
 }
 
-fn alarm_rules(peer: &Peer<Message>) -> Vec<String> {
+fn alarm_rules(peer: &BodyPeer<Message>) -> Vec<String> {
     let Reply::Alarms(list) = ask(
         peer,
         Request::Alarms {
@@ -1130,7 +1130,7 @@ mod widget_layouts {
         v.layout.placements.iter().map(|p| p.id.to_string()).collect()
     }
 
-    fn view(peer: &Peer<Message>, surface: DynoSurface) -> SurfaceView {
+    fn view(peer: &BodyPeer<Message>, surface: DynoSurface) -> SurfaceView {
         let Reply::WidgetLayout(v) = ask(peer, Request::WidgetLayout { surface }).unwrap() else {
             panic!("a layout")
         };
@@ -1138,13 +1138,13 @@ mod widget_layouts {
     }
 
     /// A second app connection that reports the surfaces whose layout changed.
-    fn watcher(h: &Harness) -> (Peer<Message>, Receiver<DynoSurface>) {
+    fn watcher(h: &Harness) -> (BodyPeer<Message>, Receiver<DynoSurface>) {
         let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::WidgetLayoutChanged(s) = m {
                     let _ = tx.send(s);
                 }

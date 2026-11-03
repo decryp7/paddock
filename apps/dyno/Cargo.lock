@@ -1145,7 +1145,6 @@ name = "dyno-agent"
 version = "1.0.0"
 dependencies = [
  "dyno-core",
- "dyno-ipc",
  "dyno-platform",
  "dyno-plugin-host",
  "flate2",
@@ -1154,6 +1153,7 @@ dependencies = [
  "maxminddb",
  "paddock-download",
  "paddock-env",
+ "paddock-ipc",
  "paddock-jobs",
  "paddock-log",
  "paddock-net",
@@ -1177,7 +1177,6 @@ version = "1.0.0"
 dependencies = [
  "dyno-agent",
  "dyno-core",
- "dyno-ipc",
  "dyno-platform",
  "log",
  "objc2",
@@ -1190,6 +1189,7 @@ dependencies = [
  "paddock-env",
  "paddock-files",
  "paddock-health",
+ "paddock-ipc",
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
@@ -1233,8 +1233,8 @@ version = "1.0.0"
 dependencies = [
  "dyno-agent",
  "dyno-core",
- "dyno-ipc",
  "dyno-platform",
+ "paddock-ipc",
  "serde",
  "serde_json",
  "tempfile",
@@ -1256,21 +1256,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dyno-ipc"
-version = "1.0.0"
-dependencies = [
- "getrandom 0.3.4",
- "libc",
- "postcard",
- "proptest",
- "serde",
- "serde_json",
- "subtle",
- "thiserror 2.0.21",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "dyno-platform"
 version = "1.0.0"
 dependencies = [
@@ -1285,6 +1270,7 @@ dependencies = [
  "plist",
  "serde",
  "serde_json",
+ "sha2",
  "starship-battery",
  "sysinfo",
  "tempfile",
@@ -1296,7 +1282,7 @@ dependencies = [
 name = "dyno-plugin-api"
 version = "1.0.0"
 dependencies = [
- "dyno-ipc",
+ "paddock-ipc",
  "postcard",
  "serde",
 ]
@@ -1312,8 +1298,9 @@ dependencies = [
 name = "dyno-plugin-host"
 version = "1.0.0"
 dependencies = [
- "dyno-ipc",
  "dyno-plugin-api",
+ "log",
+ "paddock-ipc",
  "serde",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
@@ -3576,6 +3563,23 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+]
+
+[[package]]
+name = "paddock-ipc"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "libc",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "postcard",
+ "serde",
+ "serde_json",
+ "subtle",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

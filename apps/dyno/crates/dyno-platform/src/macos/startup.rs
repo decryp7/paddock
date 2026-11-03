@@ -6,8 +6,9 @@
 //! A source that cannot be read is never an empty list: it is logged with the raw reason, and when nothing at all could be read the
 //! error reaches the user with what would help.
 
-use crate::parse::btm::{parse_dumpbtm, BtmItem, BtmKind};
+use crate::parse::btm::{BtmItem, BtmKind};
 use crate::parse::launchd::{parse_launch_agent, parse_print_disabled, LaunchAgent};
+use dyno_core::btm::LoginItemsLink;
 use dyno_core::ports::{PlatformError, StartupItems};
 use dyno_core::startup::{exe_of_command, ImpactRating, StartupEntry, StartupImpact, StartupLocation, StartupState};
 use paddock_jobs::time::{Clock, SystemClock};
@@ -29,11 +30,37 @@ pub trait Launchctl: Send {
 /// Measured 2026-11-03 in a macOS 26.6 VM (Tart, `vmgui-base-tahoe`): `sfltool dumpbtm` run by an admin user in the console GUI
 /// session, and by a standard user without a GUI session, printed nothing and did not exit within 25 s, and a `SecurityAgent`
 /// authorization dialog was left on screen (the tool asks for `system.privilege.admin`). It must therefore never be run by
-/// Dyno's unprivileged agent. The only implementation today, [`NeedsHelperBtm`], says so; the privileged helper (ADR 0022, Dyno
-/// 1.1.0) will be the second implementation, with no change to [`LaunchAgents`].
+/// Dyno's unprivileged agent. [`NeedsHelperBtm`] says so while the helper is not turned on; [`HelperBtm`] asks the privileged
+/// helper (ADR 0027 WP-7), which runs the tool as root and parses the dump where the rights are, so the agent never sees other
+/// accounts' records.
 pub trait BtmSource: Send {
-    /// `sfltool dumpbtm` output, read with the rights it needs.
-    fn dump(&mut self) -> Result<String, PlatformError>;
+    /// The asking account's login items, agents and daemons plus the machine-wide ones.
+    fn items(&mut self) -> Result<Vec<BtmItem>, PlatformError>;
+}
+
+/// The helper as the BTM source.
+pub struct HelperBtm<L: LoginItemsLink> {
+    link: L,
+}
+
+impl<L: LoginItemsLink> HelperBtm<L> {
+    /// Reads through `link`.
+    pub fn new(link: L) -> Self {
+        HelperBtm { link }
+    }
+}
+
+impl<L: LoginItemsLink> BtmSource for HelperBtm<L> {
+    fn items(&mut self) -> Result<Vec<BtmItem>, PlatformError> {
+        let reply = self.link.login_items()?;
+        log::info!(
+            Items = reply.items.len(),
+            Truncated = reply.truncated,
+            OtherAccounts = reply.other_accounts;
+            "Login items read through the helper"
+        );
+        Ok(reply.items)
+    }
 }
 
 /// The BTM source until the privileged helper exists: runs nothing and says what is needed, so the page shows an honest
@@ -41,10 +68,10 @@ pub trait BtmSource: Send {
 pub struct NeedsHelperBtm;
 
 impl BtmSource for NeedsHelperBtm {
-    fn dump(&mut self) -> Result<String, PlatformError> {
+    fn items(&mut self) -> Result<Vec<BtmItem>, PlatformError> {
         Err(PlatformError::AccessDenied(
-            "Login items (System Settings > Login Items & Extensions) need administrator rights to read. The privileged helper, \
-coming in Dyno 1.1, will show them."
+            "Login items (System Settings > Login Items & Extensions) need administrator rights to read. Turn on administrator \
+readings in Settings and Dyno's helper will show them."
                 .into(),
         ))
     }
@@ -99,7 +126,6 @@ pub struct LaunchAgents {
     system_dir: Option<PathBuf>,
     launchctl: Box<dyn Launchctl>,
     btm: Box<dyn BtmSource>,
-    uid: u32,
     /// The last read of the Background Task Management database (slow, and the tool may be refused): kept until it is old or
     /// [`StartupItems::refresh`] is called.
     btm_cache: Option<BtmCache>,
@@ -150,8 +176,6 @@ impl LaunchAgents {
             system_dir: Some(PathBuf::from("/Library/LaunchAgents")),
             launchctl: Box::new(RealLaunchctl::new()),
             btm: Box::new(NeedsHelperBtm),
-            // SAFETY: getuid has no preconditions.
-            uid: unsafe { libc::getuid() },
             btm_cache: None,
             clock: Arc::new(SystemClock),
             unavailable: Vec::new(),
@@ -164,7 +188,6 @@ impl LaunchAgents {
         system_dir: Option<PathBuf>,
         launchctl: Box<dyn Launchctl>,
         btm: Box<dyn BtmSource>,
-        uid: u32,
         clock: Arc<dyn Clock>,
     ) -> Self {
         LaunchAgents {
@@ -172,7 +195,6 @@ impl LaunchAgents {
             system_dir,
             launchctl,
             btm,
-            uid,
             btm_cache: None,
             clock,
             unavailable: Vec::new(),
@@ -216,6 +238,7 @@ fn btm_entry(item: &BtmItem) -> StartupEntry {
     let (prefix, command) = match item.kind {
         BtmKind::LoginItem => ("login", item.exe.clone().unwrap_or_default()),
         BtmKind::Agent => ("btm-agent", item.exe.clone().unwrap_or_default()),
+        BtmKind::Daemon => ("btm-daemon", item.exe.clone().unwrap_or_default()),
     };
     StartupEntry {
         id: format!("{prefix}:{}", item.identifier),
@@ -298,15 +321,7 @@ impl StartupItems for LaunchAgents {
         let before = out.len();
         let now = self.clock.monotonic();
         if !self.btm_cache.as_ref().is_some_and(|c| c.usable(now)) {
-            let uid = self.uid;
-            let result = self.btm.dump().and_then(|t| {
-                parse_dumpbtm(&t, uid).map_err(|e| {
-                    let crate::parse::btm::BtmError::NoRecords { first_line } = e;
-                    PlatformError::Failed(format!(
-                        "Login items could not be read (sfltool dumpbtm printed no records; first line: {first_line})"
-                    ))
-                })
-            });
+            let result = self.btm.items();
             self.btm_cache = Some(BtmCache { at: now, result });
         } else {
             log::debug!("Startup items: login items taken from the cached read");
@@ -362,9 +377,19 @@ mod tests {
     /// A BTM source with a fixed answer.
     struct FakeBtm(Result<String, PlatformError>);
     impl BtmSource for FakeBtm {
-        fn dump(&mut self) -> Result<String, PlatformError> {
-            self.0.clone()
+        fn items(&mut self) -> Result<Vec<BtmItem>, PlatformError> {
+            items_of(&self.0)
         }
+    }
+
+    /// What the helper does with a dump: parse the asking account's records.
+    fn items_of(dump: &Result<String, PlatformError>) -> Result<Vec<BtmItem>, PlatformError> {
+        dump.clone().and_then(|t| {
+            crate::parse::btm::parse_dumpbtm(&t, UID).map_err(|e| {
+                let crate::parse::btm::BtmError::NoRecords { first_line } = e;
+                PlatformError::Failed(format!("Login items could not be read (first line: {first_line})"))
+            })
+        })
     }
 
     const UID: u32 = 501;
@@ -386,7 +411,6 @@ mod tests {
             system,
             Box::new(Fake::default()),
             Box::new(FakeBtm(btm)),
-            UID,
             Arc::new(paddock_jobs::time::FakeClock::new()),
         )
     }
@@ -411,7 +435,6 @@ mod tests {
             Some(system),
             Box::new(fake),
             Box::new(FakeBtm(Ok(DUMP.into()))),
-            UID,
             Arc::new(paddock_jobs::time::FakeClock::new()),
         );
         (dir, la)
@@ -466,9 +489,9 @@ mod tests {
     /// Counts calls, so the tests can tell a cached read from a new one.
     struct CountingBtm(std::sync::Arc<std::sync::atomic::AtomicUsize>, Result<String, PlatformError>);
     impl BtmSource for CountingBtm {
-        fn dump(&mut self) -> Result<String, PlatformError> {
+        fn items(&mut self) -> Result<Vec<BtmItem>, PlatformError> {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.1.clone()
+            items_of(&self.1)
         }
     }
 
@@ -545,8 +568,41 @@ mod tests {
     #[test]
     fn the_real_login_item_source_asks_for_the_helper_and_runs_nothing() {
         assert!(
-            matches!(NeedsHelperBtm.dump(), Err(PlatformError::AccessDenied(m)) if m.contains("administrator") && m.contains("helper"))
+            matches!(NeedsHelperBtm.items(), Err(PlatformError::AccessDenied(m)) if m.contains("administrator") && m.contains("helper"))
         );
+    }
+
+    struct FakeLink(Result<dyno_core::btm::LoginItemsReply, PlatformError>);
+    impl LoginItemsLink for FakeLink {
+        fn login_items(&mut self) -> Result<dyno_core::btm::LoginItemsReply, PlatformError> {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn the_helper_source_passes_items_and_errors_through() {
+        let item = |kind, id: &str, system| BtmItem {
+            kind,
+            name: id.into(),
+            identifier: id.into(),
+            enabled: true,
+            exe: Some("/x".into()),
+            system,
+        };
+        let reply = dyno_core::btm::LoginItemsReply {
+            items: vec![
+                item(BtmKind::Daemon, "16.com.example.d", true),
+                item(BtmKind::LoginItem, "4.a", false),
+            ],
+            truncated: 0,
+            other_accounts: 3,
+        };
+        let mut source = HelperBtm::new(FakeLink(Ok(reply)));
+        let got = source.items().unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(btm_entry(&got[0]).id, "btm-daemon:16.com.example.d");
+        let mut down = HelperBtm::new(FakeLink(Err(PlatformError::AccessDenied("not turned on".into()))));
+        assert!(matches!(down.items(), Err(PlatformError::AccessDenied(_))));
     }
 
     /// Runs the real tools on the machine it is started on: only by hand (`cargo test -- --ignored`), never in CI or an agent's run.

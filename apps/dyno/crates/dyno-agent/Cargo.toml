@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 dyno-core.workspace = true
 dyno-platform.workspace = true
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
 dyno-plugin-host.workspace = true
 # The family's job mechanism (phases, throttled progress, cancel tokens, hashing copy): the long operations run on it.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }

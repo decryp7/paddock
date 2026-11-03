@@ -13,9 +13,9 @@ use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR};
-use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::issues::ToolRunner;
+use paddock_ipc::BodyPeer;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -84,7 +84,7 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
@@ -191,7 +191,7 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
 }
 
 /// Runs the finder as a job and waits for its result.
-fn find(peer: &Peer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
+fn find(peer: &BodyPeer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
     match run_job(peer, JobSpec::FindFiles { query }, Duration::from_secs(60))? {
         JobOutput::Finder(r) => Ok(*r),
         other => panic!("{other:?}"),
@@ -233,7 +233,7 @@ fn the_finder_refuses_a_folder_that_is_not_there() {
     assert!(find(&peer, q).unwrap_err().contains("cannot be opened"));
 }
 
-fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
+fn backup_report(peer: &BodyPeer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
     if refresh {
         let JobOutput::Backup(r) = run_job(peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
             panic!("backup")

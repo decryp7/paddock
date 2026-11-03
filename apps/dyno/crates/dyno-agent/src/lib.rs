@@ -1,4 +1,4 @@
-//! Dyno's background agent: samples the machine, keeps the history, answers the app over dyno-ipc and
+//! Dyno's background agent: samples the machine, keeps the history, answers the app over `paddock-ipc` and
 //! is installed as a per-user service (ADR 0002, 0008, 0010). It runs without the window, so history never stops.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -38,6 +38,7 @@ pub mod server;
 pub mod service;
 pub mod store;
 pub mod unusual;
+pub mod wire;
 
 use agent::Shared;
 use std::sync::Arc;
