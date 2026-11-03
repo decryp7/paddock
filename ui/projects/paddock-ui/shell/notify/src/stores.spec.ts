@@ -132,7 +132,7 @@ class FailingCentre extends NotificationsBackend {
   dismissMany(): Promise<number> {
     return Promise.reject(new Error('no'));
   }
-  dismissAll(): Promise<number> {
+  dismissAll(_upTo: number): Promise<number> {
     return Promise.reject(new Error('no'));
   }
   postNotice(): Promise<Notice> {
@@ -308,11 +308,16 @@ describe('NotificationsStore', () => {
     await store.dismissMany([a.id, b.id, local.id, 12345]);
     expect(store.all().map((n) => n.title)).toEqual(['C']);
     expect(store.toasts().map((t) => t.title)).toEqual(['C']);
-    await store.dismissAll();
+    const seen = store.all().map((n) => n.id);
+    const late = centre.post({ cause: 'late', source: 's', severity: 'info', title: 'Late' });
+    await store.dismissAll(seen);
+    await settle();
+    expect(store.all().map((n) => n.title)).toEqual(['Late']);
+    expect(store.toasts().map((t) => t.title)).toEqual(['Late']);
+    await store.dismissAll([late.id]);
+    await store.dismissAll([]);
     await settle();
     expect(store.all()).toEqual([]);
-    expect(store.toasts()).toEqual([]);
-    await store.dismissAll();
   });
 
   it('an OS notification click focuses its message', async () => {

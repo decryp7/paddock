@@ -52,7 +52,8 @@ describe('TauriNotificationsBackend', () => {
     expect(calls.map((c) => c[0])).toEqual(['notifications_list', 'notifications_mark_read', 'notifications_mark_all_read', 'notifications_dismiss']);
     expect(calls[1]?.[1]).toEqual({ id: 4 });
     await expect(b.dismissMany([1, 2])).resolves.toBe(0);
-    await expect(b.dismissAll()).resolves.toBe(0);
+    await expect(b.dismissAll(7)).resolves.toBe(0);
+    expect(calls[5]?.[1]).toEqual({ upTo: 7 });
     expect(calls.slice(4).map((c) => c[0])).toEqual(['notifications_dismiss_many', 'notifications_dismiss_all']);
     expect(calls[4]?.[1]).toEqual({ ids: [1, 2] });
     const events: NoticesEvent[] = [];
@@ -115,8 +116,9 @@ describe('MemoryNotificationCentre', () => {
     await expect(c.dismissMany([999])).resolves.toBe(0);
     await expect(c.dismissMany([a.id, a.id, b.id, 999])).resolves.toBe(2);
     expect((await c.list()).notices.map((n) => n.title)).toEqual(['C']);
-    await expect(c.dismissAll()).resolves.toBe(1);
-    await expect(c.dismissAll()).resolves.toBe(0);
+    await expect(c.dismissAll(b.id)).resolves.toBe(0);
+    await expect(c.dismissAll(999)).resolves.toBe(1);
+    await expect(c.dismissAll(999)).resolves.toBe(0);
   });
 
   it('resolves, dismisses, marks all read and opens', async () => {

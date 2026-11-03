@@ -427,21 +427,26 @@ pub async fn notifications_dismiss_many<R: Runtime>(
     let c = centre(&app)?;
     let ids: Vec<NoticeId> = ids.into_iter().map(NoticeId).collect();
     let n = c.dismiss_many(resolve(webview.label()), &ids);
-    emit_changed(&app, &c, None, None);
+    if n > 0 {
+        emit_changed(&app, &c, None, None);
+    }
     log::info!(target: "paddock_health", Requested = ids.len(), Removed = n; "Notifications removed");
     Ok(n)
 }
 
-/// Removes every message of the calling window (its project's and the app's); returns how many were removed. Logs the
-/// count only.
+/// Removes the messages of the calling window (its project's and the app's) with an id at or below `up_to`, the newest
+/// one the user saw, so one that arrived while they decided stays; returns how many were removed. Logs the count only.
 #[::tauri::command]
 pub async fn notifications_dismiss_all<R: Runtime>(
     app: AppHandle<R>,
     webview: Webview<R>,
+    up_to: u64,
 ) -> Result<usize, HealthError> {
     let c = centre(&app)?;
-    let n = c.dismiss_all(resolve(webview.label()));
-    emit_changed(&app, &c, None, None);
+    let n = c.dismiss_all(resolve(webview.label()), NoticeId(up_to));
+    if n > 0 {
+        emit_changed(&app, &c, None, None);
+    }
     log::info!(target: "paddock_health", Removed = n; "All notifications removed");
     Ok(n)
 }

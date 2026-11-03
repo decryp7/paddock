@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, signal, untracked } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, signal, untracked } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { MatCheckbox } from '@angular/material/checkbox';
 import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
@@ -27,7 +28,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
 @Component({
   selector: 'pd-notifications-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, SuSegmentedControl, MatCheckbox],
+  imports: [SuEmptyState, SuSegmentedControl, MatCheckbox, MatButton],
   template: `
     <div class="pd-bar" data-testid="notices-filter-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
@@ -39,7 +40,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
         <button type="button" class="pd-btn" data-testid="notices-delete-selected" (click)="deleteSelected()">{{ deleteSelectedLabel() }}</button>
       }
       @if (store.all().length) {
-        <button type="button" class="pd-btn" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
+        <button type="button" matButton="outlined" class="pd-danger" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
       }
       <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
     </div>
@@ -74,7 +75,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
                     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 7.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   </button>
                 }
-                <button type="button" class="pd-icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="store.dismiss(n.id)">
+                <button type="button" class="pd-icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="dismissOne(n.id)">
                   <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
                 </button>
               </span>
@@ -122,6 +123,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     /* The buttons sit over the time, so it gives way whole while they show (not cut in half). */
     .pd-notice:hover .pd-time, .pd-row:has(.pd-row-actions:focus-within) .pd-time { visibility: hidden; }
     @media (hover: none) { .pd-row-actions { position: static; opacity: 1; padding-inline-start: 0; } .pd-notice:hover .pd-time { visibility: visible; } }
+    .pd-danger { --mat-button-outlined-label-text-color: var(--pd-danger); --mat-button-outlined-outline-color: var(--pd-danger); min-height: 26px; }
     .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
     .pd-btn:disabled { color: var(--pd-text-subtle); cursor: default; }
@@ -151,6 +153,8 @@ export class PdNotificationsPanel {
   private readonly chosen = signal<ReadonlySet<number>>(new Set());
   private anchor: number | null = null;
   private shift = false;
+  private keyShift = false;
+  private readonly injector = inject(Injector);
   /** The listed messages' ids in the order shown (group by group). */
   private readonly shownIds = computed(() => this.store.groups().flatMap((g) => g.notices.map((n) => n.id)));
   /** The selection that is still listed (a message that went away is no longer selected). */
@@ -167,11 +171,22 @@ export class PdNotificationsPanel {
   constructor() {
     // Whether Shift was held for the click that changes a checkbox (the checkbox reports its change before the click bubbles).
     const el = this.host.nativeElement;
+    // A key press on a checkbox (Shift+Space) arrives as a click without modifiers, so the key state is kept too.
+    const key = (e: Event): void => {
+      this.keyShift = (e as KeyboardEvent).shiftKey === true;
+    };
     const remember = (e: Event): void => {
-      this.shift = (e as MouseEvent).shiftKey === true;
+      const m = e as MouseEvent;
+      this.shift = m.shiftKey === true || (m.detail === 0 && this.keyShift);
     };
     el.addEventListener('click', remember, true);
-    inject(DestroyRef).onDestroy(() => el.removeEventListener('click', remember, true));
+    el.addEventListener('keydown', key, true);
+    el.addEventListener('keyup', key, true);
+    inject(DestroyRef).onDestroy(() => {
+      el.removeEventListener('click', remember, true);
+      el.removeEventListener('keydown', key, true);
+      el.removeEventListener('keyup', key, true);
+    });
     // A clicked OS notification or "Show in Notifications": scroll the message into view and focus its first button.
     effect(() => {
       const id = this.store.focus();
@@ -246,12 +261,48 @@ export class PdNotificationsPanel {
     const ids = this.selectedIds();
     this.chosen.set(new Set());
     this.anchor = null;
+    const target = this.focusTargetAfter(ids);
     await this.store.dismissMany(ids);
+    this.focusAfterRender(target);
   }
 
-  /** Asks first (it cannot be undone), then removes every message of the window. */
+  /** Dismisses one message and keeps the focus in the list. */
+  protected async dismissOne(id: number): Promise<void> {
+    const target = this.focusTargetAfter([id]);
+    await this.store.dismiss(id);
+    this.focusAfterRender(target);
+  }
+
+  /** The message that should take the focus when `removed` go: the next one still listed, else the one before. */
+  private focusTargetAfter(removed: readonly number[]): number | null {
+    const order = this.shownIds();
+    const gone = new Set(removed);
+    const first = order.findIndex((id) => gone.has(id));
+    if (first < 0) return null;
+    return order.slice(first).find((id) => !gone.has(id)) ?? [...order.slice(0, first)].reverse().find((id) => !gone.has(id)) ?? null;
+  }
+
+  /** Once the list is drawn again: the target's checkbox, else the filter bar (never the page body). */
+  private focusAfterRender(target: number | null): void {
+    afterNextRender(
+      () => {
+        const root = this.host.nativeElement;
+        const el =
+          (target !== null ? root.querySelector<HTMLElement>(`[data-testid="notice-select-${target}"] input`) : null) ??
+          root.querySelector<HTMLElement>('[data-testid="notices-filter-bar"] input, [data-testid="notices-filter-bar"] button');
+        el?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
+   * Asks first (it cannot be undone), then removes the messages the user saw when asking; one that arrives while the
+   * question is open stays. The question's count comes from the same list.
+   */
   protected async deleteAll(): Promise<void> {
-    const count = this.store.all().length;
+    const seen = this.store.all().map((n) => n.id);
+    const count = seen.length;
     const yes = await confirm(this.dialogs, {
       heading: $localize`:@@pd.notifications.delete-all.heading:Delete all notifications?`,
       message:
@@ -263,7 +314,8 @@ export class PdNotificationsPanel {
     if (!yes) return;
     this.chosen.set(new Set());
     this.anchor = null;
-    await this.store.dismissAll();
+    await this.store.dismissAll(seen);
+    this.focusAfterRender(null);
   }
 
   protected time(at: number): string {
