@@ -1194,3 +1194,14 @@ found the list shorter by then ("element(s) not found" at index 9, light theme o
 index with it later; use the locator that names the position. (Same day, run 7453: the Angular dev server of the Dyno chromium
 shard 2 died with `lmdb` "Cannot read properties of null (reading 'refCount')" in its build cache before the first test; the cause
 is not found, the job passed on the other shard and in earlier runs; if it repeats, set `NG_BUILD_CACHE=false` for e2e.)
+## A baseline read after an async step hides what changed during it (2026-11-03, Dyno dialogs)
+
+Dyno 1.0.0's Updates window showed a scrollbar beside one line. `DialogFrame.watch()` took its "last measure" from a fresh
+measure read after the `dialog_ready` round trip, so content that arrived during the round trip was taken as already sent and
+never refitted. **Confirmed on Windows 11 (VM, 2026-11-03, 100 % and 150 %):** the 1.0.0 code ended at inner 105 px (the first,
+loading state) with the scrollbar of the user's screenshot, and the change at 195 px. Ruled out by the new fit log:
+frame rounding (the frame matched `AdjustWindowRectExForDpi`, the inner size is rounded up), the viewport delta (0) and
+fonts (same content height in the later fit). Found on the way: tao resizes the window itself after `ScaleFactorChanged`,
+so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
+is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
+Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.

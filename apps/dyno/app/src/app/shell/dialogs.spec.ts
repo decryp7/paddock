@@ -1,7 +1,7 @@
 import type { DialogDef } from '@decryp7/paddock-ui/shell';
 import { assertDialogBoots } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
-import { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../testing/job-test-support';
 import { provideIcons } from '../shared/icons';
 import { DIALOGS } from './contributions';
 import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from './dialog-base';
@@ -27,7 +27,11 @@ describe('Dyno dialogs boot as their windows do', () => {
     it(`${def.id} (${def.kind})`, async () => {
       await assertDialogBoots(def, {
         dialogs: ALL,
-        providers: () => [provideIcons(), { provide: BACKEND, useFactory: () => new MockBackend({ latencyMs: 0, now: () => 0 }) }, ...dialogJobsProviders(def.id), ...dialogBaseProviders()],
+        // A dialog that follows a job gets the in-memory jobs backend the mock pushes into: the file read ends, and the window settles after it.
+        providers: () => {
+          const { mock, jobs } = mockWithJobs();
+          return [provideIcons(), { provide: BACKEND, useValue: mock }, ...(dialogJobsProviders(def.id).length ? [jobsProviders(jobs)] : []), ...dialogBaseProviders()];
+        },
         baseCommands: DIALOG_BASE_COMMANDS,
         answers: { window_ready: { recovered: null, ui: null } },
         inputs: INPUTS,

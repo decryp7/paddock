@@ -607,6 +607,8 @@ pub struct Around<'a> {
     /// What the window's inner height has beyond the page's viewport, logical px ([`viewport_delta`]), taken once at
     /// `dialog_ready` and reused by every later fit.
     pub viewport_delta: f64,
+    /// The user resized the window by hand: its size is theirs, and a fit only enforces the minimum.
+    pub user_sized: bool,
 }
 
 /// The fit of a dialog of `kind` (preferred-height floor `floor`, [`Kind::policy`]'s viewer height; 0 for the others)
@@ -615,6 +617,7 @@ pub struct Around<'a> {
 ///
 /// * The cap is [`CAP_FRACTION`] of the monitor's work area minus the window's own decorations; it limits the preferred
 ///   size only and never pushes the window below the minimum content. The minimum itself stays on the work area.
+/// * A window the user resized by hand keeps its size like a tool (but never below the minimum).
 /// * A decision, form or viewer takes the content height; a decision and a form shrink and grow, a viewer only grows.
 ///   A tool is user-sized: it keeps its size (but never below the minimum).
 /// * The width is the window's (the frame is laid out at its declared or remembered width) but never below the minimum
@@ -633,6 +636,7 @@ pub fn plan_fit(
         monitor,
         os,
         viewport_delta: delta,
+        user_sized,
     } = *around;
     let measure = measure.checked()?;
     let monitor = monitor.filter(|m| m.work.is_usable());
@@ -645,7 +649,7 @@ pub fn plan_fit(
         height: (measure.min_content.height + delta).min(avail_h),
     };
     let width = current.width.max(min.width);
-    let height = if kind.policy().fits_content {
+    let height = if kind.policy().fits_content && !user_sized {
         let cap = work.map_or(MAX_SIDE, |(_, h)| h * CAP_FRACTION - decor.height);
         fit_target(
             kind,
@@ -746,6 +750,7 @@ mod tests {
             monitor,
             os,
             viewport_delta: 0.0,
+            user_sized: false,
         }
     }
 
@@ -975,6 +980,84 @@ mod tests {
     }
 
     #[test]
+    fn a_short_form_is_its_content_inner_height_whatever_the_windows_frame_and_scale() {
+        // Windows: the frame (title bar and borders) is outside the inner size that `set_size` takes, so the fitted inner
+        // height is the content, never the content less the frame, and it is a whole number of physical px.
+        for (scale, frame_px) in [(1.0, 39.0), (1.25, 48.0), (1.5, 55.0)] {
+            let m = Monitor {
+                work: Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1920.0,
+                    height: 1040.0,
+                },
+                scale,
+            };
+            let decor = size(16.0 / scale, frame_px / scale);
+            let fit = plan_fit(
+                Kind::Form,
+                measure(560.0, 163.0, 400.0, 120.0),
+                0.0,
+                &around(size(560.0, 560.0), decor, Some(m), "windows"),
+            )
+            .unwrap();
+            assert_eq!(fit.size.height, 163.0, "scale {scale}");
+            assert!(fit.resize, "scale {scale}");
+            let physical = placement::physical_ceil(fit.size.height, scale);
+            assert!(
+                f64::from(physical) >= 163.0 * scale,
+                "scale {scale}: {physical}"
+            );
+            assert!(
+                f64::from(physical) < 163.0 * scale + 1.0,
+                "scale {scale}: {physical}"
+            );
+            // The frame is outside the inner size: a content taller than the cap is capped on the inner height, with the
+            // frame taken from the work area (never added to the content, nor taken from it).
+            let tall = plan_fit(
+                Kind::Form,
+                measure(560.0, 4000.0, 400.0, 120.0),
+                0.0,
+                &around(size(560.0, 560.0), decor, Some(m), "windows"),
+            )
+            .unwrap();
+            assert!(
+                (tall.size.height - (CAP_FRACTION * 1040.0 / scale - frame_px / scale)).abs()
+                    < 1e-9,
+                "scale {scale}: {}",
+                tall.size.height
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_the_user_resized_is_not_snapped_back_to_its_content() {
+        let m = Monitor {
+            work: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1920.0,
+                height: 1080.0,
+            },
+            scale: 1.0,
+        };
+        let mut a = around(size(560.0, 400.0), size(0.0, 39.0), Some(m), "windows");
+        // Not user-sized: a form shrinks to its content.
+        let fit = plan_fit(Kind::Form, measure(560.0, 200.0, 400.0, 120.0), 0.0, &a).unwrap();
+        assert_eq!(fit.size.height, 200.0);
+        // Resized by hand: the content changes (shorter or taller), the size stays theirs.
+        a.user_sized = true;
+        for content in [200.0, 700.0] {
+            let fit = plan_fit(Kind::Form, measure(560.0, content, 400.0, 120.0), 0.0, &a).unwrap();
+            assert_eq!(fit.size.height, 400.0, "content {content}");
+            assert!(!fit.resize, "content {content}");
+        }
+        // The minimum still holds: a taller minimum content grows it.
+        let fit = plan_fit(Kind::Form, measure(560.0, 200.0, 400.0, 450.0), 0.0, &a).unwrap();
+        assert_eq!(fit.size.height, 450.0);
+    }
+
+    #[test]
     fn the_cap_is_three_quarters_of_the_work_area_less_the_windows_own_decorations() {
         // A 1920x1080 display at 1x: cap = 0.75 * 1080 - 28 = 782.
         let m = Monitor {
@@ -1091,6 +1174,7 @@ mod tests {
             monitor: Some(m),
             os,
             viewport_delta: 0.0,
+            user_sized: false,
         };
         let fit = plan_fit(
             Kind::Form,

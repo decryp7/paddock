@@ -109,20 +109,18 @@ describe('HashSearchDialog', () => {
     backend.jobSteps = 40;
     backend.jobStepMs = 20;
     const cancel = vi.spyOn(backend, 'cancelJob');
-    const d = await open(HashSearchDialog, inputs, backend, 'viewer');
-    for (let i = 0; i < 10 && !d.el.querySelector('pd-job')?.textContent?.includes('Reading the file'); i++) {
-      await new Promise((r) => setTimeout(r, 20));
-      await settle(d);
-    }
-    const card = d.el.querySelector('pd-job')!;
+    // The read is a pending task, so `open` (which waits for the window to be stable) returns only when it has ended: watch the page meanwhile.
+    const opening = open(HashSearchDialog, inputs, backend, 'viewer');
+    const page = () => document.body.querySelector('pd-job');
+    for (let i = 0; i < 10 && !page()?.textContent?.includes('Reading the file'); i++) await new Promise((r) => setTimeout(r, 20));
+    const card = page()!;
     expect(card.textContent).toContain('Hashing a file');
     expect(card.textContent).toContain('Reading the file');
-    expect(d.el.querySelector('code')).toBeNull();
+    expect(document.body.querySelector('code')).toBeNull();
     [...card.querySelectorAll('button')].find((b) => b.textContent?.includes('Cancel'))!.click();
-    for (let i = 0; i < 40 && d.el.querySelector('pd-job'); i++) {
-      await new Promise((r) => setTimeout(r, 25));
-      await settle(d);
-    }
+    for (let i = 0; i < 40 && page(); i++) await new Promise((r) => setTimeout(r, 25));
+    const d = await opening;
+    await settle(d);
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(d.el.querySelector('[role=alert]')?.textContent).toContain('stopped');
     backend.jobSteps = 1;
