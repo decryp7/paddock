@@ -1,7 +1,7 @@
 # 37. The app composition contract: each app is built in a test the way `run` builds it, and one shared check verifies it
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 ("all", six redesigns under ER-21). It is not yet
-  accepted, and no work package starts until it is (recurring-bug-adr step 7).
+- Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03, after the independent review
+  approved it (round 1 and a delta re-review, 2026-11-03).
 - Date: 2026-11-03
 - Related: ER-14, ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42, 43 (share first, test
   shared behaviour once, one real-app smoke per release), rule 34 (windows share state by commands and events), rule 55
@@ -127,10 +127,19 @@ declaration with no parameter behind it.
 
 A command body can also read state without a parameter (`app.state::<T>()`, `window.state::<T>()`), and C67 would not see
 that from the signature. Two rules close the gap:
-- Clippy's `disallowed-methods` lists `tauri::Manager::state` in the family preset (`lint/clippy.toml`), with the reason
-  "read state through a declared `State<T>` parameter or `try_state`". Set-up code that manages and reads its own state
-  allows it locally, with `#[allow(clippy::disallowed_methods)]` and a comment.
-- C67 also flags `.state::<…>()` calls inside a function that a command table lists, so an `allow` there fails too.
+- **C67 also flags `.state::<…>()` calls inside any function a command table lists.** This is the check that makes the
+  class detected, and it holds whatever the lint allows.
+- **Clippy's `disallowed-methods`** lists `tauri::Manager::state` in the family preset (`lint/clippy.toml`), with the reason
+  "read state through a declared `State<T>` parameter or `try_state`".
+
+The lint has a measured footprint. At `origin/main` `9da2ccf59`, `git grep '\.state::<'` finds **118** call sites in Rust
+files that are not test files (Debrief 87, Pitcrew 11, Pitwall 11, Spotter 4, Dyno 2, shared crates 3). That is an upper
+bound, because it also counts inline `#[cfg(test)]` modules. So the lint is scoped:
+- test code is exempt once per crate, with `#![cfg_attr(test, allow(clippy::disallowed_methods))]` in its `lib.rs`;
+- set-up code (the closures that manage a state and read it back) gets a local `#[allow]` with a one-line reason, and
+  nothing else may;
+- the remaining sites are migrated to declared parameters or `try_state` by WP-3's implementer, from that list. Debrief's
+  87 sites are migrated when Debrief moves to the shell.
 
 `try_state` stays allowed, because its `None` is a handled state.
 
@@ -269,8 +278,9 @@ The shipped instance is already closed in the release window by `d371d5e4a` (out
 - The mock runtime still cannot show OS or webview behaviour. The real-app smoke covers that per release, and on macOS
   only locally in a VM.
 - The macOS smoke mode, and the debug-only tray-click test command of §8, are test code in debug builds only (behind
-  `cfg(debug_assertions)` or a `smoke` feature never enabled in release builds). ADR 0039's verifier checks that the
-  released app refuses `--smoke` (its "no test entry points" check), so a release build cannot carry them.
+  `cfg(debug_assertions)` or a `smoke` feature never enabled in release builds). Each debug-only command
+  carries a unique marker string compiled in only under `cfg(debug_assertions)`. ADR 0039's verifier checks that the
+  marker is absent from every shipped binary without running anything, so a release build cannot carry them.
 
 ## Alternatives considered
 

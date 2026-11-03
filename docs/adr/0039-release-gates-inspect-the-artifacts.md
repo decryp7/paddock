@@ -1,7 +1,7 @@
 # 39. Release gates inspect the artifacts: the published installers are opened, read and started, not the build steps trusted
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns). No work starts before it is
-  accepted.
+- Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03, after the independent review
+  approved it (round 1 and a delta re-review, 2026-11-03).
 - Date: 2026-11-03
 - Related: ER-15 / rule 9 (releases only from a tag in CI), ER-21 / rule 40, ER-27 / rule 56 (logs explain every failure),
   rule 23 (ad-hoc seal, `codesign --verify`, sidecars started from the built app), rule 25 (before tagging), rule 54 (the
@@ -106,7 +106,7 @@ logic lives in shell pipelines, and instance 5's class goes away with them. It r
 | Windows PE: version resources, manifest, imports (ADR 0032), sizes | an object-file reader crate (`object` or `pelite`, licences checked by `cargo deny` at implementation); NSIS unpacked with 7-Zip, which the CI image gains (the `7zip` Ubuntu package, version from ADR 0038's `ci/tool-versions.toml`; it is a CI tool and is never shipped) | Linux job (no Windows host needed to read a PE) |
 | macOS: DMG mounted read-only, `codesign --verify --deep --strict`, identifier and Team ID of every Mach-O, run paths, notices | `hdiutil`, `codesign -dv`, a Mach-O reader for load commands | macOS job |
 | Probes: each executable's `probe` (`--self-test`), and each `[[probe]]` started as declared (`direct`, or `launchd-job`: `launchctl submit` with a unique label, wait for its output, then `launchctl remove`) | the extracted artifact, in a temp folder | the OS's job: macOS and Linux in their verify jobs; Windows in a Windows verify job (below). No probe opens a window; the GUI smoke is ADR 0037's |
-| No test entry points: the released app refuses `--smoke` and has no debug test commands (ADR 0037 §8) | start the main executable with `--smoke` and expect the refusal exit code without a window; check the command table the binary reports with `--list-commands` | each OS's verify job |
+| No test entry points: no shipped binary carries ADR 0037 §8's debug-only commands | read every shipped Mach-O, PE and ELF file and require that the unique marker string, which those commands compile in only under `cfg(debug_assertions)`, is absent. Nothing is started: a released app might ignore an unknown flag and open a window on the CI Mac (ER-14) or hang the job | Linux job (PE, ELF, and Mach-O from the extracted archives) |
 
 **The Dyno probe is the CI check for instance 1.** Since Dyno starts its agent through launchd (decision D2), the macOS
 verify job does what the product does: it `launchctl submit`s the agent from the extracted bundle under a unique label and
@@ -144,6 +144,7 @@ Each check has a test that feeds it a broken synthetic artifact, made in the tes
 - an `.exe` whose version is not the app's;
 - a missing pattern match;
 - a probe that prints `cut_down=true`;
+- a debug build of a small fixture program that carries the test-entry marker: the check must fail on it;
 - a pipe-shaped false pass: the verifier's own "checked N of M" must fail when M is 0.
 
 The verifier is tested once, in `paddock-dev` (rule 43). Apps only declare.

@@ -1,7 +1,7 @@
 # 38. CI parity before push: `./dev check --pre-push` runs CI's own plan for the changed code
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns). No work starts before it is
-  accepted.
+- Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03, after the independent review
+  approved it (round 1 and a delta re-review, 2026-11-03).
 - Date: 2026-11-03
 - Related: ER-7, ER-9, ER-10 / rules 3 and 4 (affected tests, fix locally first, push once), ER-21 / rule 40, ER-24 /
   rule 41 (machine load, `heavy`), rule 50 (CI economy), rule 55 (ADR 0034, copies); ADR 0014 §6 (affected CI), ADR 0021
