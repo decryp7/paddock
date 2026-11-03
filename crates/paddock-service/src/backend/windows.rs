@@ -5,8 +5,8 @@
 
 use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
 use crate::parse::{
-    SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_state,
-    startup_switched_off,
+    SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_privileges,
+    sc_state, startup_switched_off,
 };
 use crate::paths::{REG, SC, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};
 use crate::port::{Elevator, RegisterError, System};
@@ -207,6 +207,33 @@ impl WindowsService {
     }
 }
 
+impl WindowsService {
+    /// Reads the privileges the SCM now keeps (`sc qprivs`) and refuses to start a service that holds any other than the
+    /// declared ones (ADR 0027: `SeChangeNotifyPrivilege` only); nothing is checked when the spec declares none.
+    fn check_privileges(&mut self, name: &str, declared: &[String]) -> Result<(), RegisterError> {
+        if declared.is_empty() {
+            return Ok(());
+        }
+        let out = match self.sys.run(SC, &["qprivs", name]) {
+            Ok(o) if o.success() => o,
+            Ok(o) => return Err(sc_failure("sc qprivs", &o)),
+            Err(e) => return Err(RegisterError::Other(format!("sc.exe {e}"))),
+        };
+        let mut want = declared.to_vec();
+        want.sort();
+        want.dedup();
+        let held = sc_privileges(&out.stdout);
+        if held == want {
+            return Ok(());
+        }
+        Err(RegisterError::Other(format!(
+            "the service {name} holds the privileges [{}] and must hold exactly [{}]; it was not started (remove it and install again)",
+            held.join(", "),
+            want.join(", ")
+        )))
+    }
+}
+
 impl Backend for WindowsService {
     fn mechanism(&self) -> Mechanism {
         Mechanism::WindowsService
@@ -269,6 +296,7 @@ impl Backend for WindowsService {
                 Err(e) => return Err(RegisterError::Other(format!("sc.exe {e}"))),
             }
         }
+        self.check_privileges(&config.name, &config.privileges)?;
         match self.sys.run(SC, &["start", &config.name]) {
             // 1056: already running.
             Ok(o) if o.success() || o.code == Some(1056) => Ok(()),

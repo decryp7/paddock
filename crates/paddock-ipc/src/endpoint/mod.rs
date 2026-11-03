@@ -50,10 +50,14 @@ impl Access {
     /// A Windows service that serves the logged-on user's app (Pitcrew): SYSTEM, Administrators and the pipe's owner get
     /// full access, interactive users read and write, nobody else (services, network logons, other sessions'
     /// non-interactive tokens). On Unix the service runs as the user, so the socket stays owner-only.
+    ///
+    /// Interactive users get `0x12019b` (`FILE_GENERIC_READ | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA`), not
+    /// `GENERIC_WRITE`: that includes `FILE_APPEND_DATA`, which is `FILE_CREATE_PIPE_INSTANCE` on a pipe, and a user who can
+    /// create another instance of the pipe (the owner check does not see it) could serve forged answers.
     pub fn service_for_interactive_users() -> Access {
         Access {
             mode: 0o600,
-            sddl: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;IU)".into(),
+            sddl: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;0x12019b;;;IU)".into(),
         }
     }
 
@@ -65,7 +69,7 @@ impl Access {
     pub fn system_for_all_users() -> Access {
         Access {
             mode: 0o666,
-            sddl: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)".into(),
+            sddl: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)(D;;GA;;;NU)".into(),
         }
     }
 }

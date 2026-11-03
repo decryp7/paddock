@@ -39,7 +39,9 @@ pub use endpoint::Access;
 pub use error::{IpcError, RemoteError, codes, panic_message};
 pub use frame::{Frame, FrameLimit, ProtocolVersion, Skew};
 pub use handshake::{Client, Connection, Host};
-pub use identity::{AccountId, AdminRule, AuditHint, Caller, PeerError, PeerSource, caller_of};
+pub use identity::{
+    AccountId, AdminRule, AuditHint, Caller, PeerError, PeerSource, TokenAdmin, caller_of,
+};
 pub use launch::{Bootstrap, Child, ChildSpec, launch};
 pub use limits::{AccountLimits, Busy, Permit, Weight};
 pub use peer::{

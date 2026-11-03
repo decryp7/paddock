@@ -130,8 +130,8 @@ impl HelperRequest {
 /// What the helper answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HelperReply {
-    /// Answer to `Info`.
-    About(HelperInfo),
+    /// Answer to `Info`: who the helper is, and what this caller sees of it.
+    About(HelperInfo, CallerView),
     /// Answer to `Traffic`.
     Counters(Vec<TrafficCounter>),
     /// Answer to `Audit`.
@@ -466,7 +466,7 @@ mod tests {
                 bytes_in: 1,
                 bytes_out: 2,
             }])),
-            HelperMessage::Reply(HelperReply::About(info("1", 1))),
+            HelperMessage::Reply(HelperReply::About(info("1", 1), CallerView { scope: Visibility::Full, tools: vec![] })),
             HelperMessage::Reply(HelperReply::Log(vec!["a".into()])),
             HelperMessage::Reply(HelperReply::LoginItems(LoginItemsReply {
                 items: vec![],

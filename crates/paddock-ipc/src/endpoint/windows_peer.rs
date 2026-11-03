@@ -7,7 +7,7 @@
 //! (`SECURITY_IDENTIFICATION`), so the server can read the token but not act as the client (WP-0, ADR 0027).
 #![allow(unsafe_code)]
 
-use crate::identity::{AccountId, AdminEvidence, AuditHint, PeerError, RawPeer};
+use crate::identity::{AccountId, AdminEvidence, AuditHint, PeerError, RawPeer, TokenAdmin};
 use crate::trust::Untrusted;
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
@@ -24,6 +24,9 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::Pipes::{GetNamedPipeClientProcessId, ImpersonateNamedPipeClient};
 use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+
+/// `SE_GROUP_USE_FOR_DENY_ONLY` (winnt.h): the group is in the token only to deny, as in a UAC-filtered administrator's token.
+const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
 
 /// The Administrators group, which also marks a UAC-filtered token (the group is present with "deny only").
 const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
@@ -127,8 +130,11 @@ pub(super) fn raw_peer(pipe: HANDLE) -> Result<RawPeer, PeerError> {
             std::slice::from_raw_parts((*groups).Groups.as_ptr(), (*groups).GroupCount as usize);
         entries
             .iter()
-            .filter_map(|g| sid_string(g.Sid))
-            .any(|sid| sid == ADMINISTRATORS_SID)
+            .find(|g| sid_string(g.Sid).is_some_and(|sid| sid == ADMINISTRATORS_SID))
+            .map_or(TokenAdmin::NotAdmin, |g| TokenAdmin::Admin {
+                // A UAC-filtered administrator's token carries the group as "deny only".
+                elevated: g.Attributes & SE_GROUP_USE_FOR_DENY_ONLY == 0,
+            })
     };
     Ok(RawPeer {
         account: AccountId::Sid(account),

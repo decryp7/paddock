@@ -285,6 +285,22 @@ pub fn sc_state(sc_query: &str) -> Option<u32> {
         .ok()
 }
 
+/// The privileges in `sc qprivs` output (`Se…Privilege` words, sorted, once each; the names do not depend on the language).
+pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
+    let mut found: Vec<String> = sc_qprivs
+        .split_whitespace()
+        .filter(|w| {
+            w.starts_with("Se")
+                && w.ends_with("Privilege")
+                && w.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .map(str::to_string)
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
 /// `SERVICE_RUNNING`.
 pub const SC_RUNNING: u32 = 4;
 /// `SERVICE_STOPPED`.
@@ -509,6 +525,9 @@ mod tests {
         );
         assert_eq!(sc_config(""), (None, None));
         assert_eq!(sc_exit::EXISTS, 1073);
+        let privs = "[SC] QueryServiceConfig2 SUCCESS\r\n\r\nSERVICE_NAME: DynoHelper\r\n        PRIVILEGES       : SeChangeNotifyPrivilege\r\n                           SeChangeNotifyPrivilege\r\n";
+        assert_eq!(sc_privileges(privs), ["SeChangeNotifyPrivilege"]);
+        assert!(sc_privileges("PRIVILEGES : \r\n").is_empty());
     }
 
     /// A real `launchctl print` of a healthy job (macOS 26.6.2, 2026-10-31): the whole report, label and ids invented.
