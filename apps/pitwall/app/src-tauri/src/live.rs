@@ -66,6 +66,8 @@ pub async fn run(client: Arc<dyn ServerClient>, sink: &mut dyn LiveSink) {
             // Connection state only; never content.
             eprintln!("Pitwall: live feed ended ({:?}); reconnecting", e.code);
         }
+        // Reconnect back-off, not a wait for a state: the server is not there, so there is nothing to wait on. Tokio's clock,
+        // so a test with paused time passes the delay at once.
         tokio::time::sleep(reconnect_delay(attempt)).await;
         attempt += 1;
     }

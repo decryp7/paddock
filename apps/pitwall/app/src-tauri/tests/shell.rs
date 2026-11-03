@@ -219,6 +219,27 @@ fn the_uis_dialog_contracts_are_generated_from_the_table() {
         .unwrap_or_else(|e| panic!("{e}"));
 }
 
+/// The launch agent the bundle ships is generated from the service's spec, so the app, the shared manager's "is the registered
+/// definition current" check and the file cannot disagree; `PADDOCK_WRITE_TS=1` rewrites it. It is also the file the macOS
+/// bundle config installs under `Library/LaunchAgents`.
+#[test]
+fn the_bundled_launch_agent_is_generated_from_the_services_spec() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let name = format!("{}.plist", pitwall_app_lib::service_manager::LABEL);
+    paddock_commands::testing::sync_generated(
+        &dir.join("macos").join(&name),
+        &pitwall_app_lib::service_manager::bundled_plist(),
+        paddock_commands::testing::WriteMode::from_env(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let conf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("tauri.macos.conf.json")).unwrap()).unwrap();
+    assert_eq!(
+        conf["bundle"]["macOS"]["files"][format!("Library/LaunchAgents/{name}")],
+        format!("./macos/{name}"),
+        "the bundle ships the generated file"
+    );
+}
+
 /// Every command runs on the async runtime and returns at once (rule 10). The shared scanner cannot see the management
 /// methods (`commands.rs` makes them with the `rpc!` macro), so this reads the sources itself: every `#[tauri::command]`
 /// is an `async fn`, the macro's own included, and every table entry is either a written command or an `rpc!` one.

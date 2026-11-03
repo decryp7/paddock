@@ -25,13 +25,14 @@ impl ServiceHooks for PitwallService {
         eprintln!("Pitwall: first start of {current} (before: {})", previous.unwrap_or("none"));
         #[cfg(target_os = "macos")]
         {
-            use crate::service_repair::RepairOutcome;
-            let client = self.client.clone();
-            let answers =
-                || tauri::async_runtime::block_on(crate::commands::forward(client.as_ref(), "overview", serde_json::Value::Null)).is_ok();
-            match crate::service_install::repair_registration(&answers) {
-                Some(RepairOutcome::Failed(e)) => return Err(format!("the service could not be registered again: {e}")),
-                Some(RepairOutcome::Recovered | RepairOutcome::NeedsApproval | RepairOutcome::Cancelled) | None => {}
+            use paddock_service::{RepairOutcome, Started};
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            match crate::service_install::on_start(&self.client, &cancel) {
+                Ok(Some(Started::Repaired(_, RepairOutcome::Failed(e)))) => {
+                    return Err(format!("the service could not be registered again: {e}"))
+                }
+                Err(e) => return Err(format!("the service registration could not be checked: {}", e.message)),
+                Ok(_) => {}
             }
         }
         Ok(())

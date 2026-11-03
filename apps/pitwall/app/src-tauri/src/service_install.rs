@@ -3,12 +3,47 @@
 //! with the launch agent inside the app bundle); on Linux nothing is elevated (a systemd user unit written by
 //! `pitwall-server install`). Pitwall never asks for or handles a password. Adapted from Pitcrew's service_install.
 
-use crate::service_repair::RepairNotice;
-#[cfg(not(target_os = "macos"))]
-use crate::service_repair::{RepairOutcome, RepairPhase};
+use crate::commands::SharedClient;
+use paddock_service::{RepairOutcome, ServiceStatus, Started};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+/// What the UI shows about the repair (the shared tracker's notice without its step).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairNotice {
+    /// Where the repair is.
+    pub state: RepairState,
+    /// The words to show.
+    pub message: String,
+}
+
+/// Where the repair is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RepairState {
+    /// Working.
+    Working,
+    /// Done, the service runs.
+    Succeeded,
+    /// Did not work; the message has next steps.
+    Failed,
+}
+
+impl From<paddock_service::RepairNotice> for RepairNotice {
+    fn from(n: paddock_service::RepairNotice) -> Self {
+        RepairNotice {
+            state: match n.state {
+                paddock_service::RepairState::Working => RepairState::Working,
+                paddock_service::RepairState::Succeeded => RepairState::Succeeded,
+                paddock_service::RepairState::Failed => RepairState::Failed,
+            },
+            message: n.message,
+        }
+    }
+}
 
 /// The service's state as the UI shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -76,9 +111,10 @@ pub struct OsState {
     pub repair: Option<RepairNotice>,
     /// The user switched the item off in Login Items (macOS).
     pub disabled_in_login_items: bool,
-    /// launchd holds a job it cannot start ([`crate::service_repair::JobReport::stale`]).
+    /// The service is registered or known to the OS but cannot start, and the server does not answer (Repair applies).
     pub job_stale: bool,
-    /// launchd has the job, SMAppService does not know the registration.
+    /// The OS has the job but the Login Items list does not show Pitwall (macOS). The shared manager no longer tells
+    /// this apart from a service that cannot start, so it is `false` there and `start_failed` covers both.
     pub job_unlisted: bool,
 }
 
@@ -94,7 +130,7 @@ pub fn compose(os: OsState, running: bool, ask_consent: bool) -> ServiceInstall 
     let repairing = os
         .repair
         .as_ref()
-        .is_some_and(|r| r.state == crate::service_repair::RepairState::Working);
+        .is_some_and(|r| r.state == RepairState::Working);
     let broken = !running && !os.disabled_in_login_items && !repairing;
     let start_failed = broken && os.job_stale;
     let not_in_login_items = broken && os.job_unlisted;
@@ -121,6 +157,19 @@ pub const PLATFORM: &str = if cfg!(windows) {
     "linux"
 };
 
+
+/// The OS state from the shared manager's status.
+pub fn os_state_of(s: &ServiceStatus) -> OsState {
+    OsState {
+        installed: s.installed,
+        message: s.message.clone(),
+        repair: s.repair.clone().map(RepairNotice::from),
+        disabled_in_login_items: s.condition == paddock_service::Condition::SwitchedOff,
+        job_stale: s.can_repair && !s.running,
+        job_unlisted: false,
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     //! SCM queries are safe wrappers; elevation is `ShellExecuteExW` with the "runas" verb, the one unsafe call.
@@ -139,7 +188,7 @@ mod imp {
     const SERVICE_NAME: &str = "Pitwall";
 
     /// Whether the service is registered.
-    pub fn os_state() -> OsState {
+    pub fn os_state(_client: &SharedClient) -> OsState {
         let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) else {
             return OsState {
                 installed: false,
@@ -216,294 +265,63 @@ mod imp {
     }
 
     /// Registers and starts the service (the OS asks the user).
-    pub fn install() -> Result<(), CommandError> {
+    pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
         elevated("install")
     }
 
     /// Stops and removes the service.
-    pub fn uninstall() -> Result<(), CommandError> {
+    pub fn uninstall(_client: &SharedClient) -> Result<(), CommandError> {
         elevated("uninstall")
     }
 }
 
+
 #[cfg(target_os = "macos")]
 mod imp {
-    //! `SMAppService` (macOS 13+). The plist is `Contents/Library/LaunchAgents/net.decryptology.pitwall.service.plist`
-    //! in the app bundle (bundle.macOS.files in tauri.macos.conf.json), with `BundleProgram` pointing at the bundled
-    //! server. The Objective-C calls are the only unsafe code; each is a plain message send on objects we own.
-    #![allow(unsafe_code, unused_unsafe)]
-
+    //! The launch agent inside the app bundle (`SMAppService`), looked after by the shared manager
+    //! ([`crate::service_manager`]): status, install, repair, removal and the check at every start.
     use super::*;
-    use crate::app_state::{self, AppState};
-    use crate::service_repair::{
-        disabled_in_login_items, launchctl_output, not_found_message, parse_print_disabled, plan, run_repair, JobReport, Observed, Plan,
-        RegisterError, RegistrationStatus, RepairOps, RepairOutcome, RepairPhase, REPAIR,
-    };
-    use objc2_foundation::NSString;
-    use objc2_service_management::{SMAppService, SMAppServiceStatus};
-    use paddock_service::launchctl::{bootout as launchd_bootout, job_report as launchd_job_report};
-    use paddock_service::RealSystem;
-    use std::time::{Duration, Instant};
-
-    const PLIST: &str = "net.decryptology.pitwall.service.plist";
-    const LABEL: &str = "net.decryptology.pitwall.service";
-
-    fn service() -> objc2::rc::Retained<SMAppService> {
-        let name = NSString::from_str(PLIST);
-        // SAFETY: a class method taking a valid NSString.
-        unsafe { SMAppService::agentServiceWithPlistName(&name) }
-    }
-
-    /// What `SMAppService` says, as the pure mapping's type.
-    fn registration_status() -> RegistrationStatus {
-        // SAFETY: a property read on a valid object.
-        let status = unsafe { service().status() };
-        if status == SMAppServiceStatus::Enabled {
-            RegistrationStatus::Enabled
-        } else if status == SMAppServiceStatus::RequiresApproval {
-            RegistrationStatus::RequiresApproval
-        } else if status == SMAppServiceStatus::NotFound {
-            RegistrationStatus::NotFound
-        } else {
-            RegistrationStatus::NotRegistered
-        }
-    }
+    use crate::service_manager::{command_error, manager};
+    use paddock_service::Timings;
 
     /// What the OS says about the registration, with the repair's progress and the Login Items switch.
-    pub fn os_state() -> OsState {
-        let status = registration_status();
-        let (installed, message) = match status {
-            RegistrationStatus::Enabled => (true, None),
-            RegistrationStatus::RequiresApproval => (true, Some("allow Pitwall in System Settings > General > Login Items".to_string())),
-            RegistrationStatus::NotFound => (false, Some(not_found_message(registered_version().is_some()).to_string())),
-            RegistrationStatus::NotRegistered => (false, None),
-        };
-        let job = job_report().unwrap_or_default();
-        let message = message.or_else(|| {
-            job.stale().then(|| {
-                format!(
-                    "launchd refused to start the service (error 78, bad configuration): the app was updated and macOS still holds the previous version's signature. Repair replaces it. (launchd reports: {}.)",
-                    job.describe()
-                )
-            })
-        });
-        OsState {
-            installed,
-            message,
-            repair: REPAIR.current(Instant::now()),
-            disabled_in_login_items: disabled_in_login_items(status, launchd_disabled()),
-            job_stale: job.stale(),
-            job_unlisted: job.found && status == RegistrationStatus::NotRegistered,
+    pub fn os_state(client: &SharedClient) -> OsState {
+        match manager(client, Timings::default()) {
+            Ok(mut m) => os_state_of(&m.status()),
+            Err(e) => OsState {
+                message: Some(e.message),
+                ..OsState::default()
+            },
         }
     }
 
     /// Opens System Settings > General > Login Items. The user switches the item; Pitwall never does it for them.
-    pub fn open_login_items() -> Result<(), CommandError> {
-        // SAFETY: a class method without arguments.
-        unsafe { SMAppService::openSystemSettingsLoginItems() };
+    pub fn open_login_items(client: &SharedClient) -> Result<(), CommandError> {
+        manager(client, Timings::default())?.open_login_items();
         Ok(())
     }
 
-    /// Registers the launch agent; `open_settings` also opens Login Items when macOS wants the user's approval.
-    fn register(open_settings: bool) -> Result<(), CommandError> {
-        let s = service();
-        // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
-        match unsafe { s.registerAndReturnError() } {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // SAFETY: as above.
-                if unsafe { s.status() } == SMAppServiceStatus::RequiresApproval {
-                    if open_settings {
-                        // SAFETY: a class method without arguments.
-                        unsafe { SMAppService::openSystemSettingsLoginItems() };
-                    }
-                    return Err(CommandError::new(
-                        ErrorCode::Forbidden,
-                        "macOS needs your approval: allow Pitwall in System Settings > General > Login Items",
-                    ));
-                }
-                Err(CommandError::new(
-                    ErrorCode::Internal,
-                    format!("the launch agent could not be registered: {}", e.localizedDescription()),
-                ))
-            }
-        }
-    }
-
-    /// Registers and starts the service (the OS asks the user).
-    pub fn install() -> Result<(), CommandError> {
-        register(true)?;
-        record_version();
-        Ok(())
+    /// Registers the service (replacing what is there) and waits for it to answer; the OS asks the user where it must.
+    pub fn install(client: &SharedClient) -> Result<(), CommandError> {
+        let cancel = AtomicBool::new(false);
+        manager(client, Timings::default())?.install(&cancel).map(drop).map_err(command_error)
     }
 
     /// Stops and removes the service.
-    pub fn uninstall() -> Result<(), CommandError> {
-        // SAFETY: a method call on a valid object.
-        unsafe { service().unregisterAndReturnError() }.map_err(|e| {
-            CommandError::new(
-                ErrorCode::Internal,
-                format!("the launch agent could not be removed: {}", e.localizedDescription()),
-            )
-        })
+    pub fn uninstall(client: &SharedClient) -> Result<(), CommandError> {
+        manager(client, Timings::default())?.uninstall().map_err(command_error)
     }
 
-    /// launchd's report of the job: `None` when it could not be asked (a timeout, a permission error), which is not
-    /// the same as launchd not knowing the job.
-    fn job_report() -> Option<JobReport> {
-        launchd_job_report(&mut RealSystem::new(), &target()?)
+    /// The Repair the user pressed, as a job body: runs on the calling (blocking) thread; `cancel` is asked between steps
+    /// and while waiting. Refused when the user switched the item off in Login Items, and while another repair works.
+    pub fn repair_blocking(client: &SharedClient, cancel: &AtomicBool) -> Result<RepairOutcome, CommandError> {
+        manager(client, Timings::default())?.repair(cancel).map_err(command_error)
     }
 
-    fn registered_version() -> Option<String> {
-        app_state::data_dir().and_then(|d| AppState::load(&d).service_registered_version)
-    }
-
-    /// Remembers that this version looked after the registration.
-    fn record_version() {
-        if let Some(dir) = app_state::data_dir() {
-            let mut s = AppState::load(&dir);
-            s.service_registered_version = Some(env!("CARGO_PKG_VERSION").to_string());
-            if let Err(e) = s.save(&dir) {
-                eprintln!("Pitwall: could not remember the registered version: {e}");
-            }
-        }
-    }
-
-    fn observe(answers: bool, requested: bool, registered: Option<&str>) -> Plan {
-        plan(&Observed {
-            status: registration_status(),
-            launchd_disabled: launchd_disabled(),
-            answers,
-            job: job_report().unwrap_or_default(),
-            registered_version: registered,
-            current_version: env!("CARGO_PKG_VERSION"),
-            requested,
-        })
-    }
-
-    /// After the app was updated launchd refuses the registered service (its stored launch constraint is the previous
-    /// build's cdhash, see [`JobReport::stale`]), and the job can be missing from Login Items. This registers the
-    /// service again ([`run_repair`]) when launchd reports a stale job while the server is unreachable, and once after
-    /// every version change; progress goes to [`REPAIR`] and every step to standard error. `None`: nothing to repair
-    /// (including the user having switched the item off: that is their choice and is left alone).
-    pub fn repair_registration(answers: &dyn Fn() -> bool) -> Option<RepairOutcome> {
-        let registered = registered_version();
-        // Cheap check first: a healthy, unchanged service needs no launchctl calls.
-        let up = answers();
-        match observe(up, false, registered.as_deref()) {
-            Plan::Nothing => None,
-            Plan::MarkCurrent => {
-                record_version();
-                None
-            }
-            Plan::Repair(_) => REPAIR.start(Instant::now()).then(|| perform(answers, &|| false, &|_| {})),
-        }
-    }
-
-    fn refuse_when_not_repairable() -> Result<(), CommandError> {
-        if observe(false, true, None) == Plan::Nothing {
-            return Err(CommandError::new(
-                ErrorCode::Forbidden,
-                "Pitwall's background item is switched off in System Settings > General > Login Items, or the app is not in /Applications. Switch it on there; Pitwall never does it for you.",
-            ));
-        }
-        Ok(())
-    }
-
-    /// The repair as a job body: runs it on the calling (blocking) thread. `cancel` is asked between steps and while
-    /// waiting, `phase` gets each stage. Refused when the user switched the item off in Login Items or the launch agent is missing, and when another repair is working.
-    pub fn repair_blocking(
-        answers: &dyn Fn() -> bool,
-        cancel: &dyn Fn() -> bool,
-        phase: &dyn Fn(RepairPhase),
-    ) -> Result<RepairOutcome, CommandError> {
-        refuse_when_not_repairable()?;
-        if !REPAIR.start(Instant::now()) {
-            return Err(CommandError::new(ErrorCode::Conflict, "A repair is already working."));
-        }
-        Ok(perform(answers, cancel, phase))
-    }
-
-    /// Runs the repair (the tracker is already working) and records the result.
-    fn perform(answers: &dyn Fn() -> bool, cancel: &dyn Fn() -> bool, phase: &dyn Fn(RepairPhase)) -> RepairOutcome {
-        eprintln!("Pitwall: the background service cannot start (stale registration or new version): repairing");
-        let outcome = run_repair(&mut MacOps { answers, cancel, phase }, &mut |step| {
-            eprintln!("Pitwall: repair: {step}")
-        });
-        REPAIR.finish(&outcome, Instant::now());
-        if outcome == RepairOutcome::Recovered {
-            record_version();
-        }
-        eprintln!("Pitwall: repair finished: {outcome:?}");
-        outcome
-    }
-
-    /// [`RepairOps`] over `SMAppService` and `launchctl`.
-    struct MacOps<'a> {
-        answers: &'a dyn Fn() -> bool,
-        cancel: &'a dyn Fn() -> bool,
-        phase: &'a dyn Fn(RepairPhase),
-    }
-
-    impl RepairOps for MacOps<'_> {
-        fn register(&mut self) -> Result<(), RegisterError> {
-            register(false).map_err(|e| {
-                if e.code == ErrorCode::Forbidden {
-                    RegisterError::NeedsApproval
-                } else {
-                    RegisterError::Other(e.message)
-                }
-            })
-        }
-        fn unregister(&mut self) -> Result<(), String> {
-            uninstall().map_err(|e| e.message)
-        }
-        fn bootout(&mut self) -> Result<(), String> {
-            let t = target().ok_or("the user's launchd domain is unknown")?;
-            // The shared bootout: a job launchd has already dropped (exit 3 or 113) is success, not a failure to log.
-            launchd_bootout(&mut RealSystem::new(), &t)
-        }
-        fn job_gone(&mut self) -> bool {
-            job_report().is_some_and(|job| !job.found)
-        }
-        fn registration_stale(&mut self) -> bool {
-            job_report().unwrap_or_default().stale()
-        }
-        fn service_answers(&mut self) -> bool {
-            (self.answers)()
-        }
-        fn pause(&mut self, how_long: Duration) {
-            std::thread::sleep(how_long);
-        }
-        fn cancelled(&mut self) -> bool {
-            (self.cancel)()
-        }
-        fn phase(&mut self, phase: RepairPhase) {
-            (self.phase)(phase);
-        }
-    }
-
-    /// `gui/<uid>/<label>`.
-    fn target() -> Option<String> {
-        Some(format!("{}/{LABEL}", gui_domain()?))
-    }
-
-    fn gui_domain() -> Option<String> {
-        use std::os::unix::fs::MetadataExt;
-        let home = std::env::var_os("HOME")?;
-        Some(format!("gui/{}", std::fs::metadata(home).ok()?.uid()))
-    }
-
-    /// Whether launchd's override database marks the service disabled (`launchctl print-disabled gui/<uid>`).
-    fn launchd_disabled() -> Option<bool> {
-        let report = launchctl(&["print-disabled", &gui_domain()?])?;
-        parse_print_disabled(&report, LABEL)
-    }
-
-    /// `launchctl <args>` through the shared bounded reader (output read while it runs, the tree ended at the timeout);
-    /// `None` when it cannot be run, times out or fails.
-    fn launchctl(args: &[&str]) -> Option<String> {
-        launchctl_output(&mut RealSystem::new(), args)
+    /// The check at every start (rule 24): replaces a stale registration while the service is down and once after every
+    /// version change; never installs unasked, never touches what the user switched off.
+    pub fn on_start(client: &SharedClient, cancel: &AtomicBool) -> Result<Option<Started>, CommandError> {
+        Ok(Some(manager(client, Timings::default())?.on_start(cancel)))
     }
 }
 
@@ -513,8 +331,7 @@ mod imp {
     //! which writes `~/.config/systemd/user/pitwall.service` and runs `systemctl --user`. The server program has the
     //! timeouts; this side only bounds the wait for it.
     use super::*;
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     const UNIT: &str = "pitwall.service";
 
@@ -527,7 +344,7 @@ mod imp {
     }
 
     /// Whether the unit file exists.
-    pub fn os_state() -> OsState {
+    pub fn os_state(_client: &SharedClient) -> OsState {
         OsState {
             installed: unit_file().is_some_and(|p| p.exists()),
             message: None,
@@ -535,109 +352,115 @@ mod imp {
         }
     }
 
-    /// Runs `pitwall-server <verb>`, waiting at most 90 s; its standard error becomes the message.
+    /// Runs `pitwall-server <verb>`, waiting at most 90 s; its standard error becomes the message. The wait, the timeout and
+    /// ending the program's whole tree are `paddock_proc`'s (rule 53), not a poll loop here.
     fn run_verb(verb: &str) -> Result<(), CommandError> {
         let exe = server_exe()?;
-        // The one place the app starts a program: it is our own server, bounded by the wait loop below (no console
-        // window exists on Linux).
-        #[allow(clippy::disallowed_methods)]
-        let mut child = Command::new(&exe)
-            .arg(verb)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the server program could not be started: {e}")))?;
-        let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(s)) => break s,
-                Ok(None) if started.elapsed() > Duration::from_secs(90) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(CommandError::new(
-                        ErrorCode::Internal,
-                        format!("pitwall-server {verb} took too long and was stopped"),
-                    ));
-                }
-                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-                Err(e) => {
-                    return Err(CommandError::new(
-                        ErrorCode::Internal,
-                        format!("waiting for pitwall-server {verb} failed: {e}"),
-                    ))
-                }
+        let mut cmd = paddock_proc::command(&exe);
+        cmd.arg(verb);
+        let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(90)).max_output(2048))
+            .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the server program could not be run: {e}")))?;
+        match out.outcome {
+            paddock_proc::Outcome::TimedOut => Err(CommandError::new(
+                ErrorCode::Internal,
+                format!("pitwall-server {verb} took too long and was stopped"),
+            )),
+            _ if out.success() => Ok(()),
+            _ => {
+                let message = out.stderr_text();
+                let reason = message.trim();
+                Err(CommandError::new(
+                    ErrorCode::Internal,
+                    if reason.is_empty() {
+                        format!("pitwall-server {verb} failed")
+                    } else {
+                        reason.to_string()
+                    },
+                ))
             }
-        };
-        if status.success() {
-            return Ok(());
         }
-        let mut message = String::new();
-        if let Some(mut err) = child.stderr.take() {
-            use std::io::Read;
-            let _ = err.by_ref().take(2048).read_to_string(&mut message);
-        }
-        let reason = message.trim();
-        Err(CommandError::new(
-            ErrorCode::Internal,
-            if reason.is_empty() {
-                format!("pitwall-server {verb} failed")
-            } else {
-                reason.to_string()
-            },
-        ))
     }
 
     /// Registers and starts the service (as the user).
-    pub fn install() -> Result<(), CommandError> {
+    pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
         run_verb("install")
     }
 
     /// Stops and removes the service.
-    pub fn uninstall() -> Result<(), CommandError> {
+    pub fn uninstall(_client: &SharedClient) -> Result<(), CommandError> {
         run_verb("uninstall")
     }
 }
 
+
 pub use imp::{install, os_state, uninstall};
 
 #[cfg(target_os = "macos")]
-pub use imp::{open_login_items, repair_blocking, repair_registration};
+pub use imp::{on_start, open_login_items, repair_blocking};
 
 /// Opens System Settings > General > Login Items, where the user switches the background item on. Only macOS has one.
 #[cfg(not(target_os = "macos"))]
-pub fn open_login_items() -> Result<(), CommandError> {
+pub fn open_login_items(_client: &SharedClient) -> Result<(), CommandError> {
     Err(CommandError::new(ErrorCode::NotAvailable, "Login Items exist on macOS only"))
 }
 
 /// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
 #[cfg(not(target_os = "macos"))]
-pub fn repair_blocking(
-    _answers: &dyn Fn() -> bool,
-    _cancel: &dyn Fn() -> bool,
-    _phase: &dyn Fn(RepairPhase),
-) -> Result<RepairOutcome, CommandError> {
+pub fn repair_blocking(_client: &SharedClient, _cancel: &AtomicBool) -> Result<RepairOutcome, CommandError> {
     Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
 }
 
-/// How many times a run of the app checks for a stale service registration (macOS).
-pub const REPAIR_ATTEMPTS: u32 = 8;
-
-/// The wait before check number `attempt`: soon after start, then every minute (the service may only fail later,
-/// when it restarts itself onto a new binary).
-pub fn repair_delay(attempt: u32) -> std::time::Duration {
-    std::time::Duration::from_secs(if attempt == 0 { 3 } else { 60 })
+/// The check at every start exists on macOS only (the other systems keep their registration right themselves).
+#[cfg(not(target_os = "macos"))]
+pub fn on_start(_client: &SharedClient, _cancel: &AtomicBool) -> Result<Option<Started>, CommandError> {
+    Ok(None)
 }
+
+pub use crate::service_manager::repair_step;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_service::{Condition, Mechanism};
 
+    #[cfg(not(target_os = "macos"))]
+    fn client() -> SharedClient {
+        std::sync::Arc::new(crate::server_client::fake::FakeServer::new())
+    }
+
+    fn status(condition: Condition, running: bool, can_repair: bool) -> ServiceStatus {
+        ServiceStatus {
+            mechanism: Mechanism::LaunchdBundled,
+            condition,
+            installed: true,
+            running,
+            message: Some("words".into()),
+            can_repair,
+            can_install: false,
+            can_open_login_items: false,
+            repair: None,
+        }
+    }
+
+    /// The shared manager's status reaches the UI's state: a refused or silent service offers Repair, the user's switch
+    /// is kept apart, and a running service offers nothing.
     #[test]
-    fn repair_checks_soon_then_every_minute() {
-        assert_eq!(repair_delay(0).as_secs(), 3);
-        assert_eq!(repair_delay(1).as_secs(), 60);
-        const { assert!(REPAIR_ATTEMPTS >= 5) };
+    fn the_shared_status_maps_onto_what_the_ui_shows() {
+        let refused = os_state_of(&status(Condition::Refused, false, true));
+        assert!(refused.installed && refused.job_stale && !refused.disabled_in_login_items);
+        assert_eq!(refused.message.as_deref(), Some("words"));
+        let off = os_state_of(&status(Condition::SwitchedOff, false, false));
+        assert!(off.disabled_in_login_items && !off.job_stale);
+        let up = os_state_of(&status(Condition::Running, true, false));
+        assert!(!up.job_stale && up.repair.is_none());
+        let mut working = status(Condition::Repairing, false, false);
+        working.repair = Some(paddock_service::RepairNotice {
+            state: paddock_service::RepairState::Working,
+            message: "m".into(),
+            step: Some("Removing the old registration".into()),
+        });
+        let notice = os_state_of(&working).repair.unwrap();
+        assert_eq!((notice.state, notice.message.as_str()), (RepairState::Working, "m"));
     }
 
     #[test]
@@ -645,7 +468,7 @@ mod tests {
         let os = OsState {
             installed: true,
             repair: Some(RepairNotice {
-                state: crate::service_repair::RepairState::Working,
+                state: RepairState::Working,
                 message: "m".into(),
             }),
             disabled_in_login_items: true,
@@ -671,7 +494,7 @@ mod tests {
         assert!(!compose(stale.clone(), true, false).start_failed);
         let mut working = stale.clone();
         working.repair = Some(RepairNotice {
-            state: crate::service_repair::RepairState::Working,
+            state: RepairState::Working,
             message: "m".into(),
         });
         assert!(!compose(working, false, false).start_failed);
@@ -690,7 +513,7 @@ mod tests {
     #[test]
     fn repair_exists_on_macos_only() {
         assert_eq!(
-            repair_blocking(&|| false, &|| false, &|_| {}).unwrap_err().code,
+            repair_blocking(&client(), &AtomicBool::new(false)).unwrap_err().code,
             ErrorCode::NotAvailable
         );
     }
@@ -698,7 +521,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn login_items_exist_on_macos_only() {
-        assert_eq!(open_login_items().unwrap_err().code, ErrorCode::NotAvailable);
+        assert_eq!(open_login_items(&client()).unwrap_err().code, ErrorCode::NotAvailable);
     }
 
     #[test]

@@ -48,12 +48,6 @@ status = "built"
   note = "Ported from Pitwall on 2026-10-24. Its parser and stale() caused Dyno 1.0 blocker B4; Dyno's B4 fix changes both in this copy. The shared stale() no longer counts has_lwcr && !running (fixed in paddock-service)."
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/service_repair.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
-  note = "Pitwall 1.0.x has its own parse_job without nested-block skipping. Pitwall 1.1 switches to paddock_service::parse; plan() and run_repair() stay a copy until 1.2."
-
-  [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_repair.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
@@ -70,6 +64,7 @@ status = "built"
   paths = ["apps/pitwall/app/src-tauri/src/service_install.rs"]
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
+  note = "Pitwall 1.1: macOS goes through paddock_service::Manager (service_manager.rs, repair_schedule.rs). What stays a copy is the Windows elevated install and the Linux `pitwall-server install` verbs, until pitwall-server's own service module moves onto paddock-service."
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_install.rs"]

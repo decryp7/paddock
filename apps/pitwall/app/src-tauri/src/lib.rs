@@ -19,8 +19,9 @@ pub mod live;
 pub mod popup;
 pub mod quit;
 pub mod server_client;
+pub mod repair_schedule;
 pub mod service_install;
-pub mod service_repair;
+pub mod service_manager;
 pub mod tray;
 pub mod tray_model;
 pub mod update_hooks;
@@ -370,18 +371,17 @@ fn pitwall_setup<R: Runtime>(app: &AppHandle<R>, installed: bool) {
     {
         let client = app.state::<SharedClient>().inner().clone();
         std::thread::spawn(move || {
-            let answers =
-                || tauri::async_runtime::block_on(commands::forward(client.as_ref(), "overview", serde_json::Value::Null)).is_ok();
-            // The service may only fail later (it restarts itself onto a new binary when idle), so keep checking while it
-            // does not answer, a bounded number of times per run of the app.
-            for attempt in 0..service_install::REPAIR_ATTEMPTS {
-                std::thread::sleep(service_install::repair_delay(attempt));
-                match service_install::repair_registration(&answers) {
-                    Some(service_repair::RepairOutcome::Recovered | service_repair::RepairOutcome::NeedsApproval) => break,
-                    // Failed: the next check tries again (bounded by REPAIR_ATTEMPTS); nothing to repair: keep watching.
-                    Some(service_repair::RepairOutcome::Failed(_) | service_repair::RepairOutcome::Cancelled) | None => {}
+            // Never cancelled: the thread ends with the app.
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            // The service may only fail later (it restarts itself onto a new binary when idle), so the shared manager's
+            // start check runs again at the schedule's pace; the waits are back-off, taken from the real clock here.
+            repair_schedule::run(&mut std::thread::sleep, &mut || match service_install::on_start(&client, &cancel) {
+                Ok(started) => started,
+                Err(e) => {
+                    eprintln!("Pitwall: checking the service registration failed: {}", e.message);
+                    None
                 }
-            }
+            });
         });
     }
 }

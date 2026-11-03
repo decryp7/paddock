@@ -3797,6 +3797,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-jobs",
  "paddock-menu",
+ "paddock-proc",
  "paddock-service",
  "paddock-shell",
  "paddock-startup",

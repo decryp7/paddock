@@ -5,10 +5,11 @@ use crate::app_state::{self, AppState, FirstRun};
 use crate::commands::{forward, SharedClient};
 use crate::jobs::{self, JobEvent, JobSink, JobSpec, Jobs, Outcome};
 use crate::service_install::{self, ServiceInstall};
-use crate::service_repair::{RepairOutcome, RepairPhase};
+use paddock_service::RepairOutcome;
 use paddock_jobs::Phase;
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::Channel;
@@ -20,7 +21,13 @@ fn internal(m: impl Into<String>) -> CommandError {
 }
 
 async fn compose_state(client: &SharedClient) -> ServiceInstall {
-    let os = service_install::os_state();
+    let os = {
+        let client = client.clone();
+        // The shared manager asks launchd and the server: blocking calls, off the runtime's threads.
+        blocking("reading the service's registration", move || service_install::os_state(&client))
+            .await
+            .unwrap_or_default()
+    };
     let running = forward(client.as_ref(), "overview", Value::Null).await.is_ok();
     let state = app_state::data_dir().map(|d| AppState::load(&d)).unwrap_or_default();
     let ask = app_state::first_run(&state, os.installed, running) == FirstRun::Ask;
@@ -45,8 +52,9 @@ pub async fn service_state(client: State<'_, SharedClient>) -> Result<ServiceIns
 
 /// Opens System Settings > General > Login Items (macOS); the user switches the item, Pitwall never does.
 #[tauri::command]
-pub async fn open_service_login_items() -> Result<(), CommandError> {
-    tauri::async_runtime::spawn_blocking(service_install::open_login_items)
+pub async fn open_service_login_items(client: State<'_, SharedClient>) -> Result<(), CommandError> {
+    let client = client.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service_install::open_login_items(&client))
         .await
         .map_err(|e| internal(format!("opening Login Items stopped unexpectedly: {e}")))?
 }
@@ -283,7 +291,7 @@ pub async fn start_install_service(
         "Waiting for the system to register it",
     );
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |_| async move {
-        blocking_install(service_install::install, "installing the service").await?;
+        blocking_install(client.clone(), service_install::install, "installing the service").await?;
         mark_offered();
         Ok(Outcome::Done(state_json(&client).await?))
     }))
@@ -303,13 +311,17 @@ pub async fn start_uninstall_service(
         "Waiting for the system to remove it",
     );
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |_| async move {
-        blocking_install(service_install::uninstall, "removing the service").await?;
+        blocking_install(client.clone(), service_install::uninstall, "removing the service").await?;
         Ok(Outcome::Done(state_json(&client).await?))
     }))
 }
 
-async fn blocking_install(f: fn() -> Result<(), CommandError>, what: &str) -> Result<(), CommandError> {
-    tauri::async_runtime::spawn_blocking(f)
+async fn blocking_install(
+    client: SharedClient,
+    f: fn(&SharedClient) -> Result<(), CommandError>,
+    what: &str,
+) -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(move || f(&client))
         .await
         .map_err(|e| internal(format!("{what} stopped unexpectedly: {e}")))?
 }
@@ -335,43 +347,68 @@ pub async fn start_repair_service(
     );
     let c = client.clone();
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| {
-        let answers = move || tauri::async_runtime::block_on(forward(c.as_ref(), "overview", Value::Null)).is_ok();
-        repair_job(ctx, client, move |cancel, phase| {
-            service_install::repair_blocking(&answers, cancel, phase)
-        })
+        repair_job(
+            ctx,
+            client,
+            move |cancel| service_install::repair_blocking(&c, cancel),
+            Arc::new(service_install::repair_step),
+        )
     }))
 }
 
-/// The body of the repair job: `runner` does the blocking repair on a blocking thread, asking `cancel` between steps and
-/// reporting each phase. Cancel shows "Cancelling" and waits for the repair to reach a safe step.
+/// How often the repair job reads the shared manager's current step to label its phase. This is progress reporting, not a
+/// wait for a state: the repair itself waits on the OS inside the shared manager.
+const STEP_POLL: Duration = Duration::from_millis(500);
+
+/// The body of the repair job: `runner` does the blocking repair on a blocking thread, reading the `AtomicBool` that Cancel
+/// sets between its steps; `steps` names the step the repair is at, shown as the job's phase. Cancel shows "Cancelling" and
+/// waits for the repair to reach a safe step.
 async fn repair_job(
     ctx: paddock_jobs::JobContext,
     client: SharedClient,
-    runner: impl FnOnce(&dyn Fn() -> bool, &dyn Fn(RepairPhase)) -> Result<RepairOutcome, CommandError> + Send + 'static,
+    runner: impl FnOnce(&AtomicBool) -> Result<RepairOutcome, CommandError> + Send + 'static,
+    steps: Arc<dyn Fn() -> Option<String> + Send + Sync>,
 ) -> Result<Outcome, CommandError> {
-    let token = ctx.cancel_token().clone();
-    let progress = ctx.clone();
-    let run =
-        tokio::task::spawn_blocking(move || runner(&|| token.is_cancelled(), &|p| progress.phase(Phase::discovering(p.id(), p.label()))));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    let run = tokio::task::spawn_blocking(move || runner(&flag));
     tokio::pin!(run);
+    let mut ticker = tokio::time::interval(STEP_POLL);
     let mut showed_cancelling = false;
+    let mut shown: Option<String> = None;
+    let mut count = 0u32;
     let outcome = loop {
         tokio::select! {
             r = &mut run => break r,
             () = jobs::cancelled(ctx.cancel_token()), if !showed_cancelling => {
                 showed_cancelling = true;
+                cancel.store(true, Ordering::SeqCst);
                 ctx.phase(Phase::discovering("cancelling", "Cancelling..."));
+            }
+            _ = ticker.tick(), if !showed_cancelling => {
+                let step = steps();
+                if step.is_some() && step != shown {
+                    count += 1;
+                    if let Some(label) = &step {
+                        ctx.phase(Phase::discovering(&format!("step-{count}"), label));
+                    }
+                    shown = step;
+                }
             }
         }
     }
     .map_err(|e| internal(format!("repairing the service stopped unexpectedly: {e}")))??;
     match outcome {
-        RepairOutcome::Recovered => Ok(Outcome::Done(state_json(&client).await?)),
+        RepairOutcome::Recovered | RepairOutcome::Registered => Ok(Outcome::Done(state_json(&client).await?)),
         RepairOutcome::NeedsApproval => Err(CommandError::new(
             ErrorCode::Forbidden,
             "macOS needs your approval: allow Pitwall in System Settings > General > Login Items.",
         )),
-        RepairOutcome::Failed(why) => Err(internal(why)),
+        RepairOutcome::NeedsElevation | RepairOutcome::Declined => Err(CommandError::new(
+            ErrorCode::Forbidden,
+            "The system's permission prompt was declined or is still waiting; nothing was changed.",
+        )),
+        RepairOutcome::Unavailable(why) | RepairOutcome::Failed(why) => Err(internal(why)),
         RepairOutcome::Cancelled => Ok(Outcome::Cancelled),
     }
 }
@@ -611,40 +648,46 @@ mod tests {
         cancelling("check_updates_now", serde_json::json!({}), "check-updates").await;
     }
 
-    type Runner = Box<dyn FnOnce(&dyn Fn() -> bool, &dyn Fn(RepairPhase)) -> Result<RepairOutcome, CommandError> + Send>;
+    type Runner = Box<dyn FnOnce(&AtomicBool) -> Result<RepairOutcome, CommandError> + Send>;
 
-    /// Starts the repair job over `runner` and returns its id with the events it sends.
-    fn start_repair(jobs: &Arc<Jobs>, runner: Runner) -> (u64, Arc<Events>) {
+    /// Starts the repair job over `runner`, whose current step is what `step` holds, and returns its id with the events.
+    fn start_repair(jobs: &Arc<Jobs>, runner: Runner, step: Arc<Mutex<Option<String>>>) -> (u64, Arc<Events>) {
         let (sink, events) = collector();
         let client: SharedClient = Arc::new(CancelAware::new());
         let id = jobs::start(jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
-            repair_job(ctx, client, runner)
+            repair_job(ctx, client, runner, Arc::new(move || step.lock().unwrap().clone()))
         });
         (id, events)
     }
 
     #[tokio::test(start_paused = true)]
-    async fn the_repair_job_shows_the_repairs_phases_and_ends_with_the_service_state() {
+    async fn the_repair_job_shows_the_repairs_steps_and_ends_with_the_service_state() {
         let jobs = jobs();
+        let step = Arc::new(Mutex::new(None));
+        let (at_step, mut at_step_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let shared = step.clone();
         let (id, events) = start_repair(
             &jobs,
-            Box::new(|_, phase| {
-                phase(RepairPhase::Removing);
-                phase(RepairPhase::Registering);
+            Box::new(move |_| {
+                *shared.lock().unwrap() = Some("Removing the old registration".to_string());
+                at_step.send(()).unwrap();
+                // Held here until the test has seen the step as a phase (a handshake, no sleeping).
+                go_rx.recv().unwrap();
                 Ok(RepairOutcome::Recovered)
             }),
+            step,
         );
+        at_step_rx.recv().await.unwrap();
+        events
+            .until("the step shows as a phase", |e| phases(e).contains(&"Removing the old registration"))
+            .await;
+        go_tx.send(()).unwrap();
         events.until_terminal().await;
         assert!(
             matches!(events.last(), Some(JobEvent::Done { job_id, .. }) if job_id == id),
             "{:?}",
             events.all()
-        );
-        let all = events.all();
-        let seen = phases(&all);
-        assert!(
-            seen.contains(&RepairPhase::Removing.label()) && seen.contains(&RepairPhase::Registering.label()),
-            "{seen:?}"
         );
     }
 
@@ -655,16 +698,18 @@ mod tests {
         let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
         let (id, events) = start_repair(
             &jobs,
-            Box::new(move |cancel, _| {
+            Box::new(move |cancel| {
                 started_tx.send(()).unwrap();
                 // Blocks until the test has pressed Cancel (a handshake, no spinning), then looks once.
                 go_rx.recv().unwrap();
-                assert!(cancel(), "the job's Cancel reaches the repair");
+                assert!(cancel.load(Ordering::SeqCst), "the job's Cancel reaches the repair");
                 Ok(RepairOutcome::Cancelled)
             }),
+            Arc::default(),
         );
         started_rx.recv().await.unwrap();
         assert!(jobs.cancel(id));
+        events.until("the job shows it is cancelling", |e| phases(e).contains(&"Cancelling...")).await;
         go_tx.send(()).unwrap();
         events.until_terminal().await;
         assert_eq!(
@@ -683,13 +728,14 @@ mod tests {
         let cases: Vec<(Result<RepairOutcome, CommandError>, &str)> = vec![
             (Ok(RepairOutcome::NeedsApproval), "Login Items"),
             (Ok(RepairOutcome::Failed("did not start".into())), "did not start"),
+            (Ok(RepairOutcome::Declined), "declined"),
             (
                 Err(CommandError::new(ErrorCode::Conflict, "A repair is already working.")),
                 "already working",
             ),
         ];
         for (result, word) in cases {
-            let (_, events) = start_repair(&jobs, Box::new(move |_, _| result));
+            let (_, events) = start_repair(&jobs, Box::new(move |_| result), Arc::default());
             events.until_terminal().await;
             assert!(
                 matches!(events.last(), Some(JobEvent::Failed { error, .. }) if error.message.contains(word)),
