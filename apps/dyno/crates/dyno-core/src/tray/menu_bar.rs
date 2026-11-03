@@ -134,7 +134,8 @@ pub struct Template {
 }
 
 impl Template {
-    /// Straight RGBA (black with the alpha), as the OS image wants it.
+    /// RGBA bytes: black with the alpha. The colour is 0, so these bytes are both straight and premultiplied, whichever the OS
+    /// representation expects.
     pub fn rgba(&self) -> Vec<u8> {
         self.alpha.iter().flat_map(|a| [0, 0, 0, *a]).collect()
     }

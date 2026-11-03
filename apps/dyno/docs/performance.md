@@ -278,3 +278,25 @@ So about 200 times less work per status. It was never slow enough to notice once
 Maintenance view opens and the minute scan grew with the number of windows. **Memory:** not measured (a vector of at most 504
 instants).
 
+
+## Tray items: text rasterising and re-rendering (2026-11-03)
+
+Why: the menu-bar items redraw every second and 32 items are allowed (ADR 0028); the first version made a font and a CoreText
+line for every mask and every width, and rendered every item each tick whether or not its inputs had changed. Rule 51 / ER-20.
+
+- **Machine and build:** this Mac (Apple silicon, macOS 27.2), debug profile, 2026-11-03, `nice -n 19`, load 7 to 11.
+- **Command:** `cargo test -p dyno-app --lib measure_text -- --ignored --nocapture` (the ignored test `tray_text::tests::measure_text`).
+- **Workload:** 100 ticks of 32 stacked-number items, two text masks and one width each (a label and a value that changes every tick,
+  at @2x), measured on `CoreText::uncached()` and `CoreText::new()`.
+
+| Variant | Per tick, 32 items |
+|---|---|
+| `uncached` (a font and a line made for every call, one measurement per mask) | 4.53 ms |
+| `cached` (fonts per style, lines per text and style) | 0.16 ms |
+
+So about 28 times less per tick. The "before" row is the new code with its caches off, not the code as it was: the first version
+also made an `NSFont` per call and measured each line twice per mask, so it was slower still. Not measured: the native image set per
+item (the macOS VM run: Dyno 1.08 % CPU with 32 items), and the saving of the render memo: an item whose value, state, history
+and tooltip did not change returns its last frame without rendering (`an_item_whose_inputs_did_not_change_is_not_rendered_again`
+counts the masks: none for unchanged items). The model alone, 32 graph items all changing every tick, took 0.21 ms per tick with
+the former renderers (the entry in ADR 0028).

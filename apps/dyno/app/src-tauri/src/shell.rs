@@ -194,20 +194,26 @@ pub struct ShellOf<R: Runtime> {
     first_data: crate::first_data::FirstData,
     /// The open alarms that name a metric, by alarm id: a tray item whose metric an alarm rule covers shows its alert exactly
     /// while one of these is open.
-    open_alarms: Mutex<std::collections::HashMap<u64, dyno_core::widgets::Metric>>,
+    open_alarms: Mutex<crate::tray_look::OpenAlarms>,
     /// The delay before the tray items show the agent is away (on the injected clock).
     away: crate::tray_away::AwayTimer,
 }
 
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
-    pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>, items: Vec<crate::tray_model::ItemSpec>) -> Arc<ShellOf<R>> {
+    pub fn new(
+        app: AppHandle<R>,
+        hub: Hub<R>,
+        pixels: Arc<dyn TrayPixels<R>>,
+        items: Vec<crate::tray_model::ItemSpec>,
+        clock: Arc<dyn paddock_jobs::Clock>,
+    ) -> Arc<ShellOf<R>> {
         Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
             tray: Mutex::new(TrayItems::new(items, crate::tray_model::Env::native())),
             open_alarms: Mutex::new(Default::default()),
-            away: crate::tray_away::AwayTimer::new(Arc::new(paddock_jobs::SystemClock)),
+            away: crate::tray_away::AwayTimer::new(clock),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
@@ -576,17 +582,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
     fn alarm(&self, change: dyno_core::alarms::AlarmChange) {
         {
             // The tray items whose metric an alarm rule covers show their alert while an alarm for it is open.
-            let mut open = lock(&self.open_alarms);
-            match (&change.alarm.metric, change.alarm.state.is_open()) {
-                (Some(m), true) => {
-                    open.insert(change.alarm.id, m.clone());
-                }
-                _ => {
-                    open.remove(&change.alarm.id);
-                }
-            }
-            let mut metrics: Vec<dyno_core::widgets::Metric> = open.values().cloned().collect();
-            metrics.dedup();
+            let metrics = lock(&self.open_alarms).update(change.alarm.id, change.alarm.metric.as_ref(), change.alarm.state.is_open());
             self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_alarmed(metrics);
         }
         if change.notify {

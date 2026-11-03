@@ -311,7 +311,13 @@ fn agent_setup<R: Runtime>(
         dyno_agent::logging::arch(),
         logging::uptime_ms()
     ));
-    let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels, shell::saved_items(&dirs.settings()));
+    let events = shell::ShellOf::new(
+        app.clone(),
+        hub.clone(),
+        pixels,
+        shell::saved_items(&dirs.settings()),
+        Arc::new(paddock_jobs::SystemClock),
+    );
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {

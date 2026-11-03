@@ -32,6 +32,8 @@ pub struct TrayState {
     painted: Mutex<HashMap<String, bool>>,
     /// Per item: what was last sent and how many frames were drawn (the tooltip changes rarely, a picture every second).
     drawn: Mutex<HashMap<String, Drawn>>,
+    /// Per item: how many pictures in a row were refused (the log tells the first, then a count, then the recovery).
+    refused: Mutex<HashMap<String, u32>>,
 }
 
 /// What one item last showed: the tooltip and the picture sent, and how many frames were drawn.
@@ -432,6 +434,7 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
                 lock(&state.items).remove(id);
                 lock(&state.painted).remove(id);
                 lock(&state.drawn).remove(id);
+                lock(&state.refused).remove(id);
             }
             for spec in &plan.create {
                 ops.make(spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
@@ -473,12 +476,22 @@ fn paint_one<O: IconOps>(ops: &mut O, state: &TrayState, item: &str, frame: &Fra
         }
         (paint, entry.count)
     };
+    // The saved position is refreshed on its own count, whether or not this frame draws anything.
+    if paint.save_position {
+        ops.save_position(item);
+    }
     // Each picture set redraws the status item (in the window server on macOS): a tooltip-only change sets none, and a frame
     // with nothing new touches the icon not at all.
     if paint.image_sets == 0 && !paint.tooltip {
         return;
     }
     let set = ops.draw(item, frame, paint.image_sets > 0, paint.tooltip);
+    if set.is_err() {
+        // A refused picture is not on the icon: the next frame sets it again even if it is the same.
+        if let Some(entry) = lock(&state.drawn).get_mut(item) {
+            entry.look = None;
+        }
+    }
     // One line per frame, at debug: the flow of image sets per tick (a flicker shows as more than one set per tick).
     logging::debug(&format!(
         "tray icon {}: frame #{count}: {} picture set(s) ({} representation(s), {w}x{h}, template {}), tooltip {}",
@@ -489,14 +502,36 @@ fn paint_one<O: IconOps>(ops: &mut O, state: &TrayState, item: &str, frame: &Fra
         if paint.tooltip { "sent" } else { "unchanged" }
     ));
     let first = lock(&state.painted).insert(item.to_string(), true).is_none();
-    // Told once per item and on every failure (a line per second per item would flood the log).
-    if let Err(e) = &set {
-        logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
-    } else if first {
-        logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
-    }
-    if paint.save_position {
-        ops.save_position(item);
+    // A line per second per item would flood the log: the first refusal in a row is told with its cause, then every 60th with the
+    // count, and the recovery with how many were lost; the first picture of an item is told once.
+    match &set {
+        Err(e) => {
+            let n = {
+                let mut map = lock(&state.refused);
+                let n = map.entry(item.to_string()).or_default();
+                *n += 1;
+                *n
+            };
+            if n == 1 {
+                logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
+            } else if n % 60 == 0 {
+                logging::info(&format!(
+                    "tray icon {}: {n} drawn images in a row were refused (last: {e})",
+                    tray_id(item)
+                ));
+            }
+        }
+        Ok(()) => {
+            if let Some(n) = lock(&state.refused).remove(item).filter(|n| *n > 1) {
+                logging::info(&format!(
+                    "tray icon {}: drawing works again after {n} refused images",
+                    tray_id(item)
+                ));
+            }
+            if first {
+                logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
+            }
+        }
     }
 }
 
@@ -629,6 +664,7 @@ mod tests {
         removed: usize,
         drawn: usize,
         pictures: usize,
+        saved: usize,
     }
 
     impl FakeOps {
@@ -660,6 +696,7 @@ mod tests {
         }
         fn save_position(&mut self, _: &str) {
             self.here();
+            self.saved += 1;
         }
     }
 
@@ -691,6 +728,7 @@ mod tests {
                 removed: 0,
                 drawn: 0,
                 pictures: 0,
+                saved: 0,
             };
             for cmd in rx {
                 apply(&mut ops, &state, cmd).unwrap();
@@ -740,6 +778,7 @@ mod tests {
             removed: 0,
             drawn: 0,
             pictures: 0,
+            saved: 0,
         };
         let specs = items(1);
         let initial = frames(&specs);
@@ -771,6 +810,46 @@ mod tests {
             (2, 1),
             "the tooltip went out, the picture was not set again"
         );
+    }
+
+    // A frame with nothing new returns before drawing; the every-30th position save must still happen on its count.
+    #[test]
+    fn the_position_is_saved_on_its_count_even_when_nothing_is_drawn() {
+        let state = TrayState::default();
+        let mut ops = FakeOps {
+            owner: std::thread::current().id(),
+            live: BTreeSet::new(),
+            made: 0,
+            removed: 0,
+            drawn: 0,
+            pictures: 0,
+            saved: 0,
+        };
+        let specs = items(1);
+        let initial = frames(&specs);
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Sync {
+                specs,
+                initial: initial.clone(),
+            },
+        )
+        .unwrap();
+        let (item, frame) = initial[0].clone();
+        for _ in 0..30 {
+            apply(
+                &mut ops,
+                &state,
+                TrayCommand::Paint {
+                    item: item.clone(),
+                    frame: frame.clone(),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(ops.drawn, 1, "the same frame is drawn once");
+        assert_eq!(ops.saved, 2, "saved on the 1st and the 30th draw");
     }
 
     #[test]

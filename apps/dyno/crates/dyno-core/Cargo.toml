@@ -37,7 +37,7 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "si
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = { version = "0.3.2", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
-objc2-core-text = { version = "0.3.2", features = ["CTLine", "CTFont", "CTStringAttributes"] }
+objc2-core-text = { version = "0.3.2", features = ["CTLine", "CTFont", "CTStringAttributes", "CTFontDescriptor", "CTFontTraits"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSFont", "NSFontDescriptor", "objc2-core-foundation"] }
 objc2 = "0.6"
 

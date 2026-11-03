@@ -7,7 +7,7 @@
 +    }
 +
 +    /// Paddock patch (macOS only): sets the status item's image from several pixel representations at once. Each `reps` entry is
-+    /// premultiplied RGBA bytes with its width and height in pixels; `size_pt` is the image's size in points. One `setImage`
++    /// RGBA bytes (premultiplied; for Dyno's black templates the same as straight) with its width and height in pixels; `size_pt` is the image's size in points. One `setImage`
 +    /// follows the complete image, with its template flag.
 +    #[cfg(target_os = "macos")]
 +    pub fn set_icon_reps(&self, reps: &[(&[u8], u32, u32)], size_pt: (f64, f64), is_template: bool) -> Result<()> {
@@ -26,11 +26,16 @@
      NSTrackingAreaOptions, NSVariableStatusItemLength, NSView, NSWindow,
  };
  use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-@@ -218,6 +218,71 @@
-         Ok(())
-     }
- 
-+    /// Paddock patch: sets the image from several pixel representations (one per scale), each made from premultiplied RGBA bytes
+@@ -214,6 +214,74 @@
+             tray_target.update_dimensions();
+         }
+         self.attrs.icon = icon;
++        self.attrs.icon_is_template = is_template;
++        Ok(())
++    }
++
++    /// Paddock patch: sets the image from several pixel representations (one per scale), each made from RGBA bytes (premultiplied, as
++    /// the system wants them; the black template images Dyno draws have colour 0, so straight and premultiplied are the same bytes)
 +    /// directly, sized `size_pt` points, and the template flag, before a single `setImage`.
 +    pub fn set_icon_reps(
 +        &mut self,
@@ -42,7 +47,9 @@
 +        else {
 +            return Ok(());
 +        };
-+        let button = ns_status_item.button(self.mtm).unwrap();
++        let Some(button) = ns_status_item.button(self.mtm) else {
++            return Err(Error::OsError(std::io::Error::other("the status item has no button")));
++        };
 +        let size = NSSize::new(size_pt.0, size_pt.1);
 +        let image = NSImage::initWithSize(NSImage::alloc(), size);
 +        for (rgba, width, height) in reps {
@@ -91,14 +98,10 @@
 +        button.setImage(Some(&image));
 +        button.setImagePosition(NSCellImagePosition::ImageLeft);
 +        tray_target.update_dimensions();
-+        self.attrs.icon_is_template = is_template;
-+        Ok(())
-+    }
-+
-     pub fn set_show_menu_on_left_click(&mut self, enable: bool) {
-         if let Some(tray_target) = &self.tray_target {
-             tray_target.ivars().menu_on_left_click.set(enable);
-@@ -287,11 +352,13 @@
+         self.attrs.icon_is_template = is_template;
+         Ok(())
+     }
+@@ -287,11 +355,13 @@
          let nsimage = NSImage::initWithData(NSImage::alloc(), &nsdata).unwrap();
          let new_size = NSSize::new(icon_width, icon_height);
  

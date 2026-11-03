@@ -122,6 +122,10 @@ describe('Chart', () => {
     f.componentInstance.opts.set(line(4));
     await settleAll(f);
     expect(animation()).toBe(false);
+    // A chart's own `animation` key does not override the first-draw-only rule.
+    f.componentInstance.opts.set({ ...line(5), animation: true });
+    await settleAll(f);
+    expect(animation()).toBe(false);
     f.destroy();
   });
 

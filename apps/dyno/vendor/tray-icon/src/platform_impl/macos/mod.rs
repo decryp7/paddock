@@ -218,7 +218,8 @@ impl TrayIcon {
         Ok(())
     }
 
-    /// Paddock patch: sets the image from several pixel representations (one per scale), each made from premultiplied RGBA bytes
+    /// Paddock patch: sets the image from several pixel representations (one per scale), each made from RGBA bytes (premultiplied, as
+    /// the system wants them; the black template images Dyno draws have colour 0, so straight and premultiplied are the same bytes)
     /// directly, sized `size_pt` points, and the template flag, before a single `setImage`.
     pub fn set_icon_reps(
         &mut self,
@@ -230,7 +231,9 @@ impl TrayIcon {
         else {
             return Ok(());
         };
-        let button = ns_status_item.button(self.mtm).unwrap();
+        let Some(button) = ns_status_item.button(self.mtm) else {
+            return Err(Error::OsError(std::io::Error::other("the status item has no button")));
+        };
         let size = NSSize::new(size_pt.0, size_pt.1);
         let image = NSImage::initWithSize(NSImage::alloc(), size);
         for (rgba, width, height) in reps {

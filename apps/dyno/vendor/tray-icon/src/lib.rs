@@ -456,7 +456,7 @@ impl TrayIcon {
     }
 
     /// Paddock patch (macOS only): sets the status item's image from several pixel representations at once. Each `reps` entry is
-    /// premultiplied RGBA bytes with its width and height in pixels; `size_pt` is the image's size in points. One `setImage`
+    /// RGBA bytes (premultiplied; for Dyno's black templates the same as straight) with its width and height in pixels; `size_pt` is the image's size in points. One `setImage`
     /// follows the complete image, with its template flag.
     #[cfg(target_os = "macos")]
     pub fn set_icon_reps(&self, reps: &[(&[u8], u32, u32)], size_pt: (f64, f64), is_template: bool) -> Result<()> {

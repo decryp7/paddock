@@ -121,7 +121,7 @@ export class Chart {
       const options = this.options();
       if (!this.ready() || !this.chart || !options) return;
       try {
-        this.chart.setOption({ animation: animateDraw(!this.drawn, prefersReducedMotion()), animationDuration: 300, ...options }, { notMerge: true, lazyUpdate: true });
+        this.chart.setOption({ animationDuration: 300, ...options, animation: animateDraw(!this.drawn, prefersReducedMotion()) }, { notMerge: true, lazyUpdate: true });
         if (hasData(options)) this.drawn = true;
         this.failed.set(false);
         // The container may have been detached and back since the last resize (a panel's skeleton between two answers).

@@ -271,7 +271,7 @@ impl Env {
             Env {
                 platform: Platform::Mac,
                 px: 18,
-                text: std::sync::Arc::new(crate::tray_text::CoreText),
+                text: std::sync::Arc::new(crate::tray_text::CoreText::new()),
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -299,6 +299,8 @@ pub struct TrayItems {
     state: Vec<ItemState>,
     net_peak: f64,
     env: Env,
+    /// The last frame of each item with what it was drawn from: an item whose inputs did not change is not rendered again.
+    memo: std::cell::RefCell<std::collections::HashMap<String, (MemoKey, Frame)>>,
     policy: AlertPolicy,
     /// The metrics the agent has an open alarm for now.
     alarmed: Vec<Metric>,
@@ -340,6 +342,7 @@ impl TrayItems {
             state,
             net_peak: NET_FLOOR,
             env,
+            memo: Default::default(),
             policy: AlertPolicy::default(),
             alarmed: Vec::new(),
         }
@@ -361,6 +364,7 @@ impl TrayItems {
             return false;
         }
         self.env.px = px;
+        self.memo.borrow_mut().clear();
         for st in &mut self.state {
             st.last = None;
         }
@@ -402,6 +406,7 @@ impl TrayItems {
             return false;
         }
         self.state = specs.iter().map(|_| ItemState::default()).collect();
+        self.memo.borrow_mut().clear();
         self.specs = specs;
         true
     }
@@ -459,6 +464,23 @@ impl TrayItems {
 
     /// The pictures of one item in one visual state.
     fn frame(&self, spec: &ItemSpec, s: &Sample, visual: Visual, dark: bool, tooltip: String) -> Frame {
+        let key = MemoKey {
+            sample: s.clone(),
+            visual,
+            dark,
+            tooltip: tooltip.clone(),
+        };
+        if let Some((k, f)) = self.memo.borrow().get(&spec.id) {
+            if *k == key {
+                return f.clone();
+            }
+        }
+        let frame = self.render(spec, s, visual, dark, tooltip);
+        self.memo.borrow_mut().insert(spec.id.clone(), (key, frame.clone()));
+        frame
+    }
+
+    fn render(&self, spec: &ItemSpec, s: &Sample, visual: Visual, dark: bool, tooltip: String) -> Frame {
         let look = match self.env.platform {
             Platform::Mac => {
                 let st = match visual {
@@ -496,6 +518,7 @@ impl TrayItems {
             let tooltip = format!("Dyno — {name} {:.0}% · busiest core {busiest:.0}%", u.system.cpu.total);
             return self.frame(&spec, &s, Visual::Normal, dark, tooltip);
         }
+        let network = matches!(spec.metric, Metric::NetworkUp | Metric::NetworkDown);
         let Some(m) = self.measure(u, &spec.metric) else {
             self.state[i].alert = AlertGate::default();
             let tooltip = format!("Dyno — {name} is not available on this computer");
@@ -514,10 +537,17 @@ impl TrayItems {
         };
         let s = Sample {
             value: Some(shown),
-            history: history.iter().copied().collect(),
-            cores,
-            up,
-            down,
+            // Only the graphs draw the history; for the others it must not make the sample (and so the memo key) change every tick.
+            history: if matches!(spec.glyph, Glyph::Graph | Glyph::GraphNumber) {
+                history.iter().copied().collect()
+            } else {
+                Vec::new()
+            },
+            // Only the core bars draw the cores (they return above) and only the network items draw up and down: for the
+            // others these change every tick on a real machine and would make the memo key miss every time.
+            cores: Vec::new(),
+            up: if network { up } else { 0.0 },
+            down: if network { down } else { 0.0 },
         };
         let alert = if self.policy.covers(&spec.metric) {
             // An alarm rule covers it: the alert is the alarm, with the alarm's own hold and hysteresis.
@@ -535,6 +565,15 @@ impl TrayItems {
         let tooltip = format!("Dyno — {name} {text}");
         self.frame(&spec, &s, if alert { Visual::Alert } else { Visual::Normal }, dark, tooltip)
     }
+}
+
+/// What a frame was rendered from (the item's spec and the icon size are fixed by the memo's lifetime).
+#[derive(Debug, Clone, PartialEq)]
+struct MemoKey {
+    sample: Sample,
+    visual: Visual,
+    dark: bool,
+    tooltip: String,
 }
 
 /// How an item is drawn now.
@@ -754,6 +793,7 @@ mod tests {
         m.set_policy(AlertPolicy {
             covered: vec![Metric::CpuTotal],
             fallback_percent: 90.0,
+            enabled: true,
         });
         let calm = frame_of(&mut m, &at(update(95.0), 0)).unwrap();
         // 95 % for 10 s, but the rule has not raised an alarm: no alert, whatever the fallback level says.
@@ -772,6 +812,7 @@ mod tests {
         m.set_policy(AlertPolicy {
             covered: vec![],
             fallback_percent: 80.0,
+            enabled: true,
         });
         let first = frame_of(&mut m, &at(update(85.0), 0)).unwrap();
         assert_eq!(frame_of(&mut m, &at(update(85.0), 2_999)), None, "held for less than three seconds");
@@ -785,6 +826,83 @@ mod tests {
             frame_of(&mut m, &at(update(76.0), 4_000)).map(|f| f.look.pictures == later.look.pictures),
             Some(false),
             "the number changed"
+        );
+    }
+
+    /// A text port that counts the masks it is asked for.
+    struct Counting(std::sync::atomic::AtomicUsize);
+
+    impl TextRaster for Counting {
+        fn advance(&self, t: &str, s: &dyno_core::tray::text::TextStyle) -> f32 {
+            dyno_core::tray::text::BoxText.advance(t, s)
+        }
+        fn cap_height(&self, s: &dyno_core::tray::text::TextStyle) -> f32 {
+            dyno_core::tray::text::BoxText.cap_height(s)
+        }
+        fn mask(&self, t: &str, s: &dyno_core::tray::text::TextStyle, scale: f32) -> dyno_core::tray::text::TextMask {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            dyno_core::tray::text::BoxText.mask(t, s, scale)
+        }
+    }
+
+    #[test]
+    fn an_item_whose_inputs_did_not_change_is_not_rendered_again() {
+        let counting = std::sync::Arc::new(Counting(Default::default()));
+        let env = Env {
+            platform: Platform::Mac,
+            px: 18,
+            text: counting.clone(),
+        };
+        let specs: Vec<ItemSpec> = (0..8).map(|i| item(&format!("n{i}"), Metric::CpuTotal, Glyph::Number)).collect();
+        let mut m = TrayItems::new(specs, env);
+        for _ in 0..3 {
+            m.frames(&update(40.0), true);
+        }
+        let masks = counting.0.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(masks > 0, "the first draws rendered text");
+        assert!(m.frames(&update(40.0), true).is_empty());
+        assert_eq!(
+            counting.0.load(std::sync::atomic::Ordering::SeqCst),
+            masks,
+            "no text was rasterised for unchanged items"
+        );
+        assert_eq!(m.frames(&update(41.0), true).len(), 8, "a changed value draws again");
+        assert!(counting.0.load(std::sync::atomic::Ordering::SeqCst) > masks);
+    }
+
+    // On a real machine the per-core loads and the network rates change every tick; a Number, Ring or Meter item does not draw
+    // them, so they must not be in its memo key (they were: every such item rendered again each second).
+    #[test]
+    fn cores_and_network_rates_do_not_redraw_items_that_do_not_show_them() {
+        let counting = std::sync::Arc::new(Counting(Default::default()));
+        let env = Env {
+            platform: Platform::Mac,
+            px: 18,
+            text: counting.clone(),
+        };
+        let specs = vec![
+            item("n", Metric::CpuTotal, Glyph::Number),
+            item("r", Metric::Memory, Glyph::Ring),
+            item("m", Metric::Swap, Glyph::Meter),
+        ];
+        let mut m = TrayItems::new(specs, env);
+        let tick = |k: f32| {
+            let mut u = update(40.0);
+            u.system.cpu.per_core = vec![k, 100.0 - k, k / 2.0, 3.0];
+            u.system.network[0].rx_bps = f64::from(k) * 1_000.0;
+            u.system.network[0].tx_bps = f64::from(k) * 500.0;
+            u
+        };
+        m.frames(&tick(10.0), true);
+        m.frames(&tick(10.0), true);
+        let masks = counting.0.load(std::sync::atomic::Ordering::SeqCst);
+        for k in [20.0, 30.0, 70.0] {
+            assert!(m.frames(&tick(k), true).is_empty(), "nothing these items show changed");
+        }
+        assert_eq!(
+            counting.0.load(std::sync::atomic::Ordering::SeqCst),
+            masks,
+            "no item rendered again"
         );
     }
 

@@ -113,6 +113,8 @@ pub struct AlertPolicy {
     pub covered: Vec<Metric>,
     /// The Settings level in percent for the loads no rule covers.
     pub fallback_percent: f32,
+    /// Alerts are on (`alerts.enabled`); off, the fallback never alerts.
+    pub enabled: bool,
 }
 
 impl Default for AlertPolicy {
@@ -120,6 +122,7 @@ impl Default for AlertPolicy {
         AlertPolicy {
             covered: Vec::new(),
             fallback_percent: 90.0,
+            enabled: true,
         }
     }
 }
@@ -140,6 +143,7 @@ impl AlertPolicy {
         AlertPolicy {
             covered,
             fallback_percent: s.alerts.tray_alert_percent,
+            enabled: s.alerts.enabled,
         }
     }
 
@@ -150,12 +154,41 @@ impl AlertPolicy {
 
     /// The level for a load metric no rule covers (percent); none for everything else.
     pub fn fallback_level(&self, m: &Metric) -> Option<f32> {
+        if !self.enabled {
+            return None;
+        }
         match m {
             Metric::CpuTotal | Metric::CpuPerCore | Metric::Memory | Metric::Swap | Metric::DiskActivity | Metric::GpuLoad => {
                 Some(self.fallback_percent)
             }
             _ => None,
         }
+    }
+}
+
+/// The open alarms that name a metric, by alarm id: what decides the alert of an item whose metric a rule covers.
+#[derive(Debug, Default)]
+pub struct OpenAlarms(std::collections::BTreeMap<u64, Metric>);
+
+impl OpenAlarms {
+    /// An alarm changed: `metric` is the metric it names (if any) and `open` whether it still needs attention. Returns the metrics
+    /// with at least one open alarm now, each once.
+    pub fn update(&mut self, id: u64, metric: Option<&Metric>, open: bool) -> Vec<Metric> {
+        match (metric, open) {
+            (Some(m), true) => {
+                self.0.insert(id, m.clone());
+            }
+            _ => {
+                self.0.remove(&id);
+            }
+        }
+        let mut out: Vec<Metric> = Vec::new();
+        for m in self.0.values() {
+            if !out.contains(m) {
+                out.push(m.clone());
+            }
+        }
+        out
     }
 }
 
@@ -292,6 +325,70 @@ mod tests {
         s.label = "ram".into();
         assert_eq!(short_label(&s), "RAM");
         assert_eq!(short_label(&spec(Metric::Process("firefox".into()), Glyph::Number)), "FIR");
+    }
+
+    #[test]
+    fn the_policy_follows_the_settings_the_built_in_alert_and_the_enabled_rules() {
+        use dyno_core::alarms::custom::{CustomAlertRule, CustomMetric, CustomOp};
+        use dyno_core::settings::Settings;
+        let rule = |id: &str, metric, enabled| CustomAlertRule {
+            id: id.into(),
+            name: id.into(),
+            metric,
+            op: CustomOp::Above,
+            limit: 80.0,
+            for_secs: 0,
+            severity: dyno_core::health::Severity::Warning,
+            enabled,
+        };
+        let mut s = Settings::default();
+        s.alerts.tray_alert_percent = 85.0;
+        s.custom_alerts = vec![
+            rule("mem", CustomMetric::MemoryUsed, true),
+            rule("gpu", CustomMetric::GpuLoad, false),
+        ];
+        let p = AlertPolicy::from_settings(&s);
+        assert!(
+            p.covers(&Metric::Temperature),
+            "the built-in overheating alert covers the temperature"
+        );
+        assert!(p.covers(&Metric::Memory), "an enabled rule covers its metric");
+        assert!(!p.covers(&Metric::GpuLoad), "a disabled rule covers nothing");
+        assert_eq!(
+            p.fallback_level(&Metric::CpuTotal),
+            Some(85.0),
+            "the Settings level for an uncovered load"
+        );
+        assert_eq!(p.fallback_level(&Metric::Battery), None, "no level for what has no too-high");
+        // Alerts switched off: the built-in alert is gone and the fallback never alerts.
+        s.alerts.enabled = false;
+        let off = AlertPolicy::from_settings(&s);
+        assert!(!off.covers(&Metric::Temperature));
+        assert_eq!(off.fallback_level(&Metric::CpuTotal), None);
+    }
+
+    #[test]
+    fn open_alarms_follow_raise_repeat_and_clear_and_list_each_metric_once() {
+        let mut a = OpenAlarms::default();
+        assert_eq!(a.update(1, Some(&Metric::CpuTotal), true), [Metric::CpuTotal]);
+        assert_eq!(
+            a.update(2, Some(&Metric::CpuTotal), true),
+            [Metric::CpuTotal],
+            "two alarms, one metric, listed once"
+        );
+        assert_eq!(a.update(3, Some(&Metric::Memory), true), [Metric::CpuTotal, Metric::Memory]);
+        assert_eq!(
+            a.update(1, Some(&Metric::CpuTotal), false),
+            [Metric::CpuTotal, Metric::Memory],
+            "one of two cleared"
+        );
+        assert_eq!(a.update(2, Some(&Metric::CpuTotal), false), [Metric::Memory]);
+        assert_eq!(
+            a.update(4, None, true),
+            [Metric::Memory],
+            "an alarm that names no metric is ignored"
+        );
+        assert_eq!(a.update(3, Some(&Metric::Memory), false), Vec::<Metric>::new());
     }
 
     #[test]
