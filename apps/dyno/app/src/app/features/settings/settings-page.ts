@@ -14,6 +14,8 @@ import { scrollToSection } from './scroll-to-section';
 import { tauriIpc } from '../../shell/ipc';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
+import { OnlineData } from '../lists/online-data';
+import { IntelStore } from '../../state/intel.store';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
@@ -24,7 +26,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets, OnlineData],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -91,6 +93,11 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <h3 id="popup-widgets">Popup widgets</h3>
               <p class="sub">What the popup shows when you click the icon, and in what order. The preview follows your choices.</p>
               <dy-popup-widgets />
+            </section>
+
+            <section class="card" aria-label="Network ▸ Online data" id="online-data">
+              <h2>Network ▸ Online data</h2>
+              <dy-online-data />
             </section>
 
             <section class="card" aria-label="IP lookup">
@@ -297,6 +304,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 })
 export class SettingsPage implements OnInit {
   protected readonly store = inject(SettingsStore);
+  private readonly intel = inject(IntelStore);
   private readonly backend = inject(BACKEND);
   private readonly notifier = inject(Notifier);
   protected readonly draft = signal<Settings | null>(null);
@@ -382,6 +390,7 @@ export class SettingsPage implements OnInit {
   ngOnInit(): void {
     void this.store.load();
     void this.store.loadPlugins();
+    void this.intel.load();
   }
 
   protected set(patch: Partial<Settings>): void {

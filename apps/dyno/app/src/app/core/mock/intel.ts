@@ -1,0 +1,296 @@
+import type {
+  CommandError,
+  CountryCount,
+  DedupePreview,
+  EditOutcome,
+  FirewallView,
+  GeoSummary,
+  IntelEdit,
+  IntelStatus,
+  ListSource,
+  ListStatus,
+  NetSwitches,
+  SubscriptionStatus,
+} from '../api.types';
+
+const MAX_LISTS = 32;
+const MAX_NAME = 60;
+const NOW_FALLBACK = 1_700_000_000_000;
+
+const err = (code: CommandError['code'], message: string): CommandError => ({ code, message });
+
+const FIRST_RUN_NOTE =
+  'The network map downloads two location databases from DB-IP once a month (download.db-ip.com) and asks Cloudflare, or ipify if Cloudflare does not answer, for your public address to place you on the map; the address is then located on this computer. Each has its own switch in Settings. Lists you subscribe to are fetched from the address you give. Nothing else leaves this computer for these features.';
+const TERMS =
+  'The terms of a list are your responsibility: check that you may use it and how often it may be fetched. Dyno sends only the request for the file, with its name and version as the User-Agent, to the address you gave.';
+const ATTRIBUTION = 'IP Geolocation by DB-IP (https://db-ip.com), licensed CC-BY-4.0. Dyno downloads the files once a month and uses them on this computer only; no address ever leaves it.';
+
+interface Stored {
+  id: string;
+  name: string;
+  enabled: boolean;
+  source: ListSource;
+  text: string;
+  counts: SubscriptionStatus;
+}
+
+const EMPTY: SubscriptionStatus = { lastFetchedMs: null, lastAttemptMs: null, entries: 0, duplicates: 0, covered: 0, skipped: 0, error: null, note: null };
+
+/** The entry lines of a typed list: comments and blanks skipped, `entry # note` split. */
+function lines(text: string): { entry: string; note: string | null }[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'))
+    .map((l) => {
+      const [entry, ...rest] = l.split('#');
+      return { entry: (entry ?? '').trim().toLowerCase(), note: rest.join('#').trim() || null };
+    })
+    .filter((l) => l.entry !== '' && !/\s/.test(l.entry));
+}
+
+function ipv4(entry: string): { start: number; end: number } | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(entry);
+  if (!m) return null;
+  const o = [m[1], m[2], m[3], m[4]].map(Number);
+  if (o.some((n) => n > 255)) return null;
+  const prefix = m[5] === undefined ? 32 : Number(m[5]);
+  if (prefix > 32) return null;
+  const base = ((o[0]! << 24) | (o[1]! << 16) | (o[2]! << 8) | o[3]!) >>> 0;
+  const host = prefix === 0 ? 0xffffffff : prefix === 32 ? 0 : (0xffffffff >>> prefix) >>> 0;
+  const start = (base & ~host) >>> 0;
+  return { start, end: (start | host) >>> 0 };
+}
+
+/** What a typed list would lose to "Remove duplicates" (the same rules as the agent: exact repeats, wider ranges, parent names). */
+export function dedupe(text: string): { kept: string[]; preview: DedupePreview } {
+  const all = lines(text);
+  const removed: [string, string][] = [];
+  let duplicates = 0;
+  let covered = 0;
+  const kept: { entry: string; note: string | null }[] = [];
+  const seen = new Set<string>();
+  const rangeOf = (e: string) => ipv4(e);
+  for (const l of all) {
+    const dupOf = seen.has(l.entry);
+    seen.add(l.entry);
+    const r = rangeOf(l.entry);
+    const cover = all.find((o) => {
+      if (o.entry === l.entry) return false;
+      const or = rangeOf(o.entry);
+      if (r && or) return or.start <= r.start && or.end >= r.end;
+      return !r && !or && l.entry.endsWith('.' + o.entry);
+    });
+    if (cover) {
+      covered++;
+      removed.push([l.entry, cover.entry]);
+    } else if (dupOf) {
+      duplicates++;
+      removed.push([l.entry, l.entry]);
+    } else kept.push(l);
+  }
+  return {
+    kept: kept.map((l) => (l.note ? `${l.entry} # ${l.note}` : l.entry)),
+    preview: { before: all.length, after: kept.length, duplicates, covered, examples: removed.slice(0, 20) },
+  };
+}
+
+/** The lists, switches and map data of the browser mock: plausible, editable, and the same refusals the agent makes. */
+export class MockIntel {
+  private lists: Stored[] = [
+    {
+      id: 'list-1',
+      name: 'Work blocklist',
+      enabled: true,
+      source: 'manual',
+      text: '203.0.113.0/24 # scanner seen last week\n198.51.100.7\nevil.example # c2 host',
+      counts: { ...EMPTY, entries: 3 },
+    },
+  ];
+  private allow = '';
+  private switches: NetSwitches = { locationDatabases: true, ownLocation: true, firstRunNoteSeen: false };
+  private nextId = 2;
+
+  constructor(private readonly now: () => number = () => NOW_FALLBACK) {}
+
+  status(): IntelStatus {
+    const now = this.now();
+    const lists: ListStatus[] = this.lists.map((l) => ({
+      id: l.id,
+      name: l.name,
+      enabled: l.enabled,
+      source: l.source,
+      counts: l.source === 'manual' || 'file' in (l.source as object) ? this.countsOf(l) : l.counts,
+      text: typeof l.source === 'object' && 'url' in l.source ? null : l.text,
+      nextAllowedMs: typeof l.source === 'object' && 'url' in l.source && l.counts.lastAttemptMs && l.counts.lastAttemptMs + 3_600_000 > now ? l.counts.lastAttemptMs + 3_600_000 : null,
+    }));
+    return {
+      lists,
+      allow: this.allow,
+      indexSegments: lists.reduce((n, l) => n + (l.enabled ? l.counts.entries : 0), 0),
+      indexRanges: lists.reduce((n, l) => n + (l.enabled ? l.counts.entries : 0), 0),
+      indexBytes: 1_024,
+      indexError: null,
+      geo: {
+        switches: this.switches,
+        databaseOn: true,
+        dbDate: '2026-11-01',
+        country: { ...EMPTY, lastFetchedMs: now - 86_400_000 },
+        asn: { ...EMPTY, lastFetchedMs: now - 86_400_000 },
+        homeSource: 'Your location: from your public IP (via Cloudflare)',
+        attribution: ATTRIBUTION,
+      },
+      firstRunNote: FIRST_RUN_NOTE,
+      termsNotice: TERMS,
+    };
+  }
+
+  private countsOf(l: Stored): SubscriptionStatus {
+    const p = dedupe(l.text);
+    const rawCount = lines(l.text).length;
+    return { ...EMPTY, entries: p.preview.after, duplicates: p.preview.duplicates, covered: p.preview.covered, skipped: Math.max(0, l.text.split('\n').filter((x) => x.trim() !== '' && !x.trim().startsWith('#')).length - rawCount) };
+  }
+
+  private find(id: string): Stored {
+    const l = this.lists.find((x) => x.id === id);
+    if (!l) throw err('notFound', 'That list no longer exists.');
+    return l;
+  }
+
+  private checkName(name: string, except?: string): string {
+    const n = name.trim();
+    if (n === '' || n.length > MAX_NAME) throw err('badRequest', `A list name must be 1 to ${MAX_NAME} characters, without control characters.`);
+    if (this.lists.some((l) => l.id !== except && l.name.toLowerCase() === n.toLowerCase())) throw err('badRequest', 'Another list already has that name.');
+    return n;
+  }
+
+  edit(edit: IntelEdit): EditOutcome {
+    if ('addList' in edit) {
+      if (this.lists.length >= MAX_LISTS) throw err('badRequest', `You can have at most ${MAX_LISTS} lists. Remove or merge a list first.`);
+      const name = this.checkName(edit.addList.name);
+      const s = edit.addList.source;
+      if ('url' in s && !/^https:\/\/[^\s@/]+/.test(s.url.url.trim())) throw err('badRequest', 'The address must start with https://. Plain http is not used.');
+      const id = `list-${this.nextId++}`;
+      if ('url' in s) {
+        const hours = Math.min(720, Math.max(1, s.url.everyHours ?? 24));
+        const now = this.now();
+        this.lists.push({
+          id,
+          name,
+          enabled: true,
+          source: { url: { url: s.url.url.trim(), schedule: { automatic: { every: hours } } } },
+          text: '',
+          counts: { ...EMPTY, entries: 2, lastFetchedMs: now, lastAttemptMs: now },
+        });
+      } else if ('file' in s) {
+        this.lists.push({ id, name, enabled: true, source: { file: { name: s.file.fileName } }, text: s.file.text, counts: { ...EMPTY } });
+      } else {
+        this.lists.push({ id, name, enabled: true, source: 'manual', text: s.manual.text, counts: { ...EMPTY } });
+      }
+      return { added: { id } };
+    }
+    if ('removeList' in edit) {
+      this.find(edit.removeList.id);
+      this.lists = this.lists.filter((l) => l.id !== edit.removeList.id);
+      return { removed: { id: edit.removeList.id } };
+    }
+    if ('renameList' in edit) {
+      const name = this.checkName(edit.renameList.name, edit.renameList.id);
+      this.find(edit.renameList.id).name = name;
+      return 'done';
+    }
+    if ('setEnabled' in edit) {
+      this.find(edit.setEnabled.id).enabled = edit.setEnabled.enabled;
+      return 'done';
+    }
+    if ('setText' in edit) {
+      const l = this.find(edit.setText.id);
+      if (typeof l.source === 'object' && 'url' in l.source) throw err('badRequest', 'That cannot be done to this kind of list.');
+      l.text = edit.setText.text;
+      return 'done';
+    }
+    if ('setSchedule' in edit) {
+      const l = this.find(edit.setSchedule.id);
+      if (typeof l.source !== 'object' || !('url' in l.source)) throw err('badRequest', 'That cannot be done to this kind of list.');
+      l.source = { url: { url: l.source.url.url, schedule: edit.setSchedule.everyHours === null ? 'manual' : { automatic: { every: edit.setSchedule.everyHours } } } };
+      return 'done';
+    }
+    if ('dedupePreview' in edit || 'dedupeApply' in edit) {
+      const id = 'dedupePreview' in edit ? edit.dedupePreview.id : edit.dedupeApply.id;
+      const l = this.find(id);
+      if (typeof l.source === 'object' && 'url' in l.source) throw err('badRequest', 'That cannot be done to this kind of list.');
+      const d = dedupe(l.text);
+      if ('dedupePreview' in edit) return { preview: d.preview };
+      l.text = d.kept.join('\n');
+      return 'done';
+    }
+    if ('setAllow' in edit) {
+      this.allow = edit.setAllow.text;
+      return 'done';
+    }
+    this.switches = edit.setSwitches.switches;
+    return 'done';
+  }
+
+  geo(): GeoSummary {
+    const c = (code: string, name: string, connections: number, programs: number, hosts: number, flagged = 0, cdn = false): CountryCount => ({ code, name, connections, programs, hosts, flagged, includesContentNetworks: cdn });
+    return {
+      countries: [
+        c('US', 'United States', 54, 6, 21, 1, true),
+        c('IE', 'Ireland', 18, 3, 6),
+        c('DE', 'Germany', 12, 4, 5),
+        c('JP', 'Japan', 4, 1, 2),
+        c('SG', 'Singapore', 3, 2, 2),
+        c('BR', 'Brazil', 1, 1, 1),
+      ],
+      local: [
+        { class: 'loopback', connections: 14, programs: 5 },
+        { class: 'private', connections: 6, programs: 3 },
+      ],
+      unknown: 2,
+      dbDate: '2026-11-01',
+      truncated: 0,
+      databaseOn: true,
+      homeCountry: 'SG',
+      homeSource: 'Your location: from your public IP (via Cloudflare)',
+    };
+  }
+
+  firewall(): FirewallView {
+    return {
+      os: 'macos',
+      sources: [
+        {
+          source: 'applicationFirewall',
+          states: [{ profile: 'all', enabled: true }],
+          switches: [
+            ['blockAll', false],
+            ['stealth', true],
+          ],
+          defaultIn: null,
+          defaultOut: null,
+          ruleCount: 2,
+          rules: [
+            { name: 'Safari', direction: 'in', action: 'allow', enabled: true, program: '/Applications/Safari.app', ports: null, addresses: null, profile: 'all', source: 'applicationFirewall' },
+            { name: 'Example Sync', direction: 'in', action: 'block', enabled: true, program: '/Applications/Example Sync.app', ports: null, addresses: null, profile: 'all', source: 'applicationFirewall' },
+          ],
+          truncated: 0,
+          rulesHidden: false,
+          note: null,
+        },
+        {
+          source: 'pf',
+          states: [],
+          switches: [],
+          defaultIn: null,
+          defaultOut: null,
+          ruleCount: 0,
+          rules: [],
+          truncated: 0,
+          rulesHidden: true,
+          note: 'These rules need the helper. Turn it on in Settings to see them.',
+        },
+      ],
+    };
+  }
+}

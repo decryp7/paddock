@@ -1851,10 +1851,14 @@ export type JobSpec =
   | 'sleepBlockers'
   | 'bootAnalysis'
   | 'appUsage'
-  | 'softwareInventory';
+  | 'softwareInventory'
+  | { updateList: { id: string } }
+  | 'updateGeo'
+  | 'rebuildIntel';
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
+  | { intel: IntelStatus }
   | { finder: FinderResult }
   | { issues: IssuesOverview }
   | { backup: BackupReport }
@@ -1925,4 +1929,169 @@ export interface BackupSettings {
   /** A backup older than this many hours is stale (1 to 2160). */
   staleAfterHours: number;
   overrides: ToolOverride[];
+}
+
+// ---------------------------------------------------------------------------------------------- bad-IP lists, the map, the firewall
+
+/** The switches of the network features: on by default, each its own (there is no Offline mode). */
+export interface NetSwitches {
+  locationDatabases: boolean;
+  ownLocation: boolean;
+  firstRunNoteSeen: boolean;
+}
+
+/** When a subscription is refreshed. */
+export type ListSchedule = 'manual' | { automatic: { every: number } };
+
+/** Where a list comes from. */
+export type ListSource = 'manual' | { file: { name: string } } | { url: { url: string; schedule: ListSchedule } };
+
+/** What the page shows for a subscription (and the counts of a typed list). */
+export interface SubscriptionStatus {
+  lastFetchedMs: number | null;
+  lastAttemptMs: number | null;
+  entries: number;
+  duplicates: number;
+  covered: number;
+  skipped: number;
+  error: string | null;
+  note: string | null;
+}
+
+/** One list. */
+export interface ListStatus {
+  id: string;
+  name: string;
+  enabled: boolean;
+  source: ListSource;
+  counts: SubscriptionStatus;
+  /** When a subscription may be updated again (ms since the epoch), when later than now. */
+  nextAllowedMs: number | null;
+  /** The text of a typed or imported list for the editor (at most 64 KB); null for a subscription or a larger list. */
+  text: string | null;
+}
+
+/** The location features. */
+export interface GeoStatus {
+  switches: NetSwitches;
+  databaseOn: boolean;
+  dbDate: string | null;
+  country: SubscriptionStatus;
+  asn: SubscriptionStatus;
+  homeSource: string;
+  attribution: string;
+}
+
+/** Everything the lists page shows. */
+export interface IntelStatus {
+  lists: ListStatus[];
+  allow: string;
+  indexSegments: number;
+  indexRanges: number;
+  indexBytes: number;
+  indexError: string | null;
+  geo: GeoStatus;
+  firstRunNote: string;
+  termsNotice: string;
+}
+
+/** How a new list starts. */
+export type NewSource =
+  | { manual: { text: string } }
+  | { file: { fileName: string; text: string } }
+  | { url: { url: string; everyHours: number | null } };
+
+/** A change the user asks for. */
+export type IntelEdit =
+  | { addList: { name: string; source: NewSource } }
+  | { removeList: { id: string } }
+  | { renameList: { id: string; name: string } }
+  | { setEnabled: { id: string; enabled: boolean } }
+  | { setText: { id: string; text: string } }
+  | { setSchedule: { id: string; everyHours: number | null } }
+  | { dedupePreview: { id: string } }
+  | { dedupeApply: { id: string } }
+  | { setAllow: { text: string } }
+  | { setSwitches: { switches: NetSwitches } };
+
+/** What "Remove duplicates" would do. */
+export interface DedupePreview {
+  before: number;
+  after: number;
+  duplicates: number;
+  covered: number;
+  /** `[removed entry, the entry that stays and covers it]`. */
+  examples: [string, string][];
+}
+
+/** What an edit produced. */
+export type EditOutcome = 'done' | { added: { id: string } } | { preview: DedupePreview } | { removed: { id: string } };
+
+/** The class of a non-public destination. */
+export type AddressClass = 'public' | 'loopback' | 'private' | 'linkLocal' | 'cgnat' | 'multicast' | 'special' | 'reserved';
+
+/** One country on the map. */
+export interface CountryCount {
+  code: string;
+  name: string;
+  connections: number;
+  programs: number;
+  hosts: number;
+  flagged: number;
+  includesContentNetworks: boolean;
+}
+
+/** Non-public destinations of one class. */
+export interface LocalGroup {
+  class: AddressClass;
+  connections: number;
+  programs: number;
+}
+
+/** The map's data. */
+export interface GeoSummary {
+  countries: CountryCount[];
+  local: LocalGroup[];
+  unknown: number;
+  dbDate: string | null;
+  truncated: number;
+  databaseOn: boolean;
+  homeCountry: string | null;
+  homeSource: string;
+}
+
+export type RuleDirection = 'in' | 'out' | 'any';
+export type RuleAction = 'allow' | 'block';
+export type FirewallProfile = 'domain' | 'private' | 'public' | 'all';
+export type RuleSourceKind = 'windowsFirewall' | 'applicationFirewall' | 'pf' | 'nftables';
+
+export interface FirewallRule {
+  name: string;
+  direction: RuleDirection;
+  action: RuleAction;
+  enabled: boolean;
+  program: string | null;
+  ports: string | null;
+  addresses: string | null;
+  profile: FirewallProfile;
+  source: RuleSourceKind;
+}
+
+export interface FirewallSource {
+  source: RuleSourceKind;
+  states: { profile: FirewallProfile; enabled: boolean }[];
+  switches: [('blockAll' | 'stealth'), boolean][];
+  defaultIn: RuleAction | null;
+  defaultOut: RuleAction | null;
+  ruleCount: number;
+  rules: FirewallRule[];
+  truncated: number;
+  rulesHidden: boolean;
+  note: string | null;
+}
+
+/** The firewall of this computer. */
+export interface FirewallView {
+  os: 'windows' | 'macos' | 'linux';
+  sources: FirewallSource[];
 }

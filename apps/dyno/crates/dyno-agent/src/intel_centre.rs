@@ -235,6 +235,8 @@ impl IntelCentre {
                     source: l.source.clone(),
                     counts,
                     next_allowed_ms: next,
+                    text: (!matches!(l.source, ListSource::Url { .. }) && l.text.len() <= dyno_core::intel_lists::EDITABLE_TEXT_BYTES)
+                        .then(|| l.text.clone()),
                 }
             })
             .collect();

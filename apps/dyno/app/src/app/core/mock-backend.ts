@@ -1,6 +1,7 @@
 import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
-import type { Measured } from './api.types';
+import type { EditOutcome, FirewallView, GeoSummary, IntelEdit, IntelStatus, Measured } from './api.types';
+import { MockIntel } from './mock/intel';
 import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
@@ -787,6 +788,27 @@ export class MockBackend implements DynoBackend {
     });
   }
 
+  // -------------------------------------------------------------------------------------------- bad-IP lists, the map, the firewall
+
+  /** The mock's lists (their state lives for the life of the mock). */
+  readonly intel = new MockIntel(() => this.now());
+
+  intelStatus(): Promise<IntelStatus> {
+    return this.reply('intelStatus', () => this.intel.status());
+  }
+
+  intelEdit(edit: IntelEdit): Promise<EditOutcome> {
+    return this.reply('intelEdit', () => this.intel.edit(edit));
+  }
+
+  geoSummary(): Promise<GeoSummary> {
+    return this.reply('geoSummary', () => this.intel.geo());
+  }
+
+  firewall(): Promise<FirewallView> {
+    return this.reply('firewall', () => this.intel.firewall());
+  }
+
   // -------------------------------------------------------------------------------------------- alarms
 
   private alarmRows(): Alarm[] {
@@ -1408,6 +1430,7 @@ export class MockBackend implements DynoBackend {
     if ('bootAnalysis' in o) return { boot: mockBoot(this.now()) };
     if ('appUsage' in o) return { appUsage: mockUsage() };
     if ('softwareInventory' in o) return { software: mockSoftware() };
+    if ('updateList' in o || 'updateGeo' in o || 'rebuildIntel' in o) return { intel: this.intel.status() };
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
@@ -1515,7 +1538,7 @@ interface MockJob {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1529,6 +1552,9 @@ const JOB_TITLES: Record<JobKindSlug, string> = {
   'boot-analysis': 'Analysing boots',
   'app-usage': 'Reading app usage',
   'software-inventory': 'Listing installed software',
+  'update-list': 'Updating a list',
+  'update-geo': 'Updating the location databases',
+  'rebuild-intel': 'Building the match index',
 };
 
 const SPEC_KIND: Record<string, JobKindSlug> = {
@@ -1540,6 +1566,9 @@ const SPEC_KIND: Record<string, JobKindSlug> = {
   bootAnalysis: 'boot-analysis',
   appUsage: 'app-usage',
   softwareInventory: 'software-inventory',
+  updateList: 'update-list',
+  updateGeo: 'update-geo',
+  rebuildIntel: 'rebuild-intel',
 };
 
 /** The variant of a job spec as an object (a unit variant is a string on the wire). */

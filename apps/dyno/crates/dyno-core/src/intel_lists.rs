@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub const MAX_TEXT_BYTES: usize = 16 << 20;
 /// Longest list name, in characters.
 pub const MAX_NAME: usize = 60;
+/// Largest text of a list the page edits in place (the status carries it).
+pub const EDITABLE_TEXT_BYTES: usize = 64 << 10;
 /// Most examples a "Remove duplicates" preview lists.
 pub const PREVIEW_EXAMPLES: usize = 20;
 /// What the first-run note says goes online (shown once, then under Settings; there is no Offline mode).
@@ -461,6 +463,9 @@ pub struct ListStatus {
     pub counts: SubscriptionStatus,
     /// When a subscription may be updated again (ms since the epoch), when that is later than now.
     pub next_allowed_ms: Option<i64>,
+    /// The text of a typed or imported list for the editor, when it is at most [`EDITABLE_TEXT_BYTES`]; `None` for a
+    /// subscription and for a larger list (those are changed by importing again or by "Remove duplicates").
+    pub text: Option<String>,
 }
 
 /// The location features' state.
@@ -767,6 +772,7 @@ mod tests {
                 },
                 counts: SubscriptionStatus::default(),
                 next_allowed_ms: Some(5),
+                text: Some("8.8.8.8".into()),
             }],
             ..IntelStatus::default()
         };
