@@ -8,6 +8,7 @@
 import { APPS, NAMES, PADDOCK_FAMILY, PADDOCK_SYMBOLS, PALETTE, STATUS_COLOURS, STRIPE, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { PIT_SMALL, pitBuilding } from './paddock-iso.mjs';
 import { pixelIso, pixelLayer, f } from './iso.mjs';
+import { MIX, onTile, smallFlat } from './small-flat.mjs';
 import { ART as SCENE_ART, MAT } from './art-scene.mjs';
 import { BADGE as CORNER_BADGE, DYNO_SMALL, FLAT as DIRECT_FLAT, PACENOTES_SMALL, SPOTTER_SMALL, binoculars, pod, tablet } from './art-direct.mjs';
 
@@ -250,3 +251,15 @@ export const trayGlyphOnly = (app, status, theme = 'template') => traySvg(app, '
 
 /** The bare small tile (no glyph): the reference for coverage at 16. */
 export const bareSmall = (app, size) => smallSvg(app, size, { glyphs: { 16: [], 24: [], 32: [] }, palette: palette(app), uid: `${app}-bare-${size}-` });
+
+/**
+ * The isometric frame for 32 pt and up at `px` (32, 48, 64): the simple frame of the master on the small tile, as vector. small(app,
+ * 48) for every icon, Paddock included (its 48 was its 32 pixel frame scaled).
+ */
+export function iso(app, px = 48, uid = `${app}-iso${px}-`) {
+  return onTile(app, px, 32, u => { const a = art(app, 'simple')(u); return { defs: a.defs, body: `<g transform="translate(16 16) scale(${f(30 / 824)}) translate(-512 -512)">${a.body}</g>` }; }, uid, { clip: true });
+}
+/** The frame of a MIX entry (`flat` or `iso`) at `px`; `master` entries are the rendered masters. */
+export const mixFrame = (app, px, kind) => (kind === 'flat' ? smallFlat(app, px) : iso(app, px));
+export { MIX };
+

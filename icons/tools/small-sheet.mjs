@@ -12,10 +12,10 @@
 import { Resvg } from '@resvg/resvg-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { DEMOS, INK, NAMES, smallSvg } from './design.mjs';
+import { DEMOS, INK, NAMES, masterSvg, smallSvg } from './design.mjs';
 import { check, contrast } from './cvd.mjs';
-import { TRAY_STATES, bareSmall, small, tray } from './iso-family.mjs';
-import { FRONTS, MIX, SMOOTH_FAMILY, SMOOTH_TRAY_STATES, iso48, mixFrame, smallFlat, smoothTray, smoothTrayGlyph, tileBase } from './small-smooth.mjs';
+import { TRAY_STATES, bareSmall, iso as iso48, master, mixFrame, small, tray } from './iso-family.mjs';
+import { FRONTS, MIX, SMOOTH_FAMILY, SMOOTH_TRAY_STATES, smallFlat, smoothTray, smoothTrayGlyph, tileBase } from './small-flat.mjs';
 
 /** Ink coverage at `px` against the bare tile, the measure of tileCoverage in tools/iso-family.test.mjs (importing a test file runs it). */
 function tileCoverage(svg, bare, px) {
@@ -50,7 +50,7 @@ const demoFrames = app => ({ 16: png(smallSvg(app, 16), 16), 24: png(smallSvg(ap
 const frames = Object.fromEntries(SMOOTH_FAMILY.map(a => [a, Object.fromEntries(Object.entries(OPTIONS).map(([k, fn]) => [k, fn(a)]))]));
 for (const d of DEMOS) frames[d] = { current: demoFrames(d), mix: demoFrames(d) };
 const ROWS = [...SMOOTH_FAMILY, ...DEMOS];
-const LABEL = { current: 'Current (pixel art at 24 and 32)', mix: 'Recommended mix (flat to 24 pt, isometric from 32 pt)' };
+const LABEL = { current: 'Before (pixel art at 24 and 32)', mix: 'After (flat to 24 pt, isometric from 32 pt)' };
 
 /**
  * The mix on each OS surface: [label, physical px, the container frame the OS picks]. A frame of another size is resampled to the
@@ -71,7 +71,7 @@ for (const [name, bg, fg] of [['light', '#ECECEF', '#3A3A3C'], ['dark', '#1C1C1E
   const cols = [['1x', 16], ['1x', 24], ['1x', 32], ['1x', 48], ['2x', 16, 'r16'], ['2x', 24, 'r24'], ['2x', 32, 'r32']];
   const gap = 20, groupW = cols.reduce((n, [, pt]) => n + 2 * pt + gap, 0) + 50, x0 = 230, rowH = 130, parts = [];
   const surfX = x0 + 2 * groupW + 40, surfW = SURFACES.reduce((n, s) => n + Math.max(s[1] * (s[2] === 1 ? 2 : 1), 84) + 24, 0);
-  parts.push(text(30, 50, `Small icons: current against the recommended mix, and the mix on each OS surface (${name} background)`, { size: 30, fill: fg, weight: 600 }));
+  parts.push(text(30, 50, `Before and after: the current small icons against the new set, and the new set on each OS surface (${name} background)`, { size: 30, fill: fg, weight: 600 }));
   parts.push(lines(30, 86, [
     'Drawn at 2x: view at 100 % on a Retina screen (50 % on a 1x screen). Columns are point sizes; "1x" is the frame a 1x screen shows, "@2x" the frame a Retina screen shows.',
     'Today: 16 pt @2x is the 32 px pixel frame (.icns ic11), 32 pt @2x is that frame doubled (ic12). Mix: flat glyph for the 16 and 24 pt slots, isometric (vector) from 32 pt up.',
@@ -83,7 +83,7 @@ for (const [name, bg, fg] of [['light', '#ECECEF', '#3A3A3C'], ['dark', '#1C1C1E
     let x = gx;
     for (const [res, pt] of cols) { parts.push(text(x + pt, 214, `${pt}${res === '2x' ? '@2x' : ''}`, { size: 17, fill: fg, anchor: 'middle' })); x += 2 * pt + gap; }
   });
-  parts.push(text(surfX, 170, 'The mix on each surface (1x surfaces as 2 x 2 blocks)', { size: 22, fill: fg, weight: 600 }));
+  parts.push(text(surfX, 170, 'After, on each surface (1x surfaces as 2 x 2 blocks)', { size: 22, fill: fg, weight: 600 }));
   { let x = surfX; for (const s of SURFACES) { const w = Math.max(s[1] * (s[2] === 1 ? 2 : 1), 84); s[0].split('|').forEach((l, i) => parts.push(text(x + w / 2, 200 + i * 18, l, { size: 15, fill: fg, anchor: 'middle' }))); x += w + 24; } }
   ROWS.forEach((app, i) => {
     const y = 236 + i * rowH;
@@ -97,7 +97,52 @@ for (const [name, bg, fg] of [['light', '#ECECEF', '#3A3A3C'], ['dark', '#1C1C1E
     let x = surfX;
     for (const s of SURFACES) { const w = Math.max(s[1] * (s[2] === 1 ? 2 : 1), 84), r = surface(app, s); parts.push(img(r.buf, x + (w - r.w) / 2, y + (96 - r.w), r.w, r.nn)); x += w + 24; }
   });
-  writeFileSync(join(OUT, `compare-${name}.png`), sheet(surfX + surfW + 20, 246 + ROWS.length * rowH, bg, parts));
+  writeFileSync(join(OUT, `before-after-${name}.png`), sheet(surfX + surfW + 20, 246 + ROWS.length * rowH, bg, parts));
+}
+
+// ---------- family sheets: every size, light and dark ----------
+// The new set as it ships, at 2x like the others: the flat frames at 16, 20, 24, 32 and 40 px (each a 1x frame, drawn as 2 x 2 blocks),
+// the isometric frames at 32 (1x), 48 (1x) and 64 (32 pt @2x), and the master at 128 (64 pt @2x).
+for (const [name, bg, fg] of [['light', '#F2F2F4', '#2C2C2E'], ['dark', '#161618', '#E5E5EA']]) {
+  const cols = [['flat 16', 16, 2, a => smallFlat(a, 16)], ['flat 20', 20, 2, a => smallFlat(a, 20)], ['flat 24', 24, 2, a => smallFlat(a, 24)], ['flat 32', 32, 2, a => smallFlat(a, 32)], ['flat 40', 40, 2, a => smallFlat(a, 40)],
+    ['iso 32', 32, 2, a => iso48(a, 32)], ['iso 48', 48, 2, a => iso48(a, 48)], ['iso 64|32 pt @2x', 64, 1, a => iso48(a, 64)], ['master 128|64 pt @2x', 128, 1, a => master(a)]];
+  const parts = [], x0 = 200, rowH = 150, gap = 22;
+  parts.push(text(30, 50, `The family's icons at every size (${name})`, { size: 30, fill: fg, weight: 600 }));
+  parts.push(lines(30, 80, ['Drawn at 2x: view at 100 % on a Retina screen.', 'The flat glyph for the 16 and 24 pt slots (16 to 40 px, each drawn for its size); the isometric object from 32 pt up.'], { size: 19, fill: fg }));
+  let x = x0;
+  for (const [label, px, k] of cols) { const w = px * k; label.split('|').forEach((l, j) => parts.push(text(x + w / 2, 128 + j * 18, l, { size: 15, fill: fg, anchor: 'middle' }))); x += w + gap; }
+  SMOOTH_FAMILY.forEach((app, i) => {
+    const y = 160 + i * rowH;
+    parts.push(text(30, y + 70, NAMES[app], { size: 22, fill: fg, weight: 500 }));
+    let xx = x0;
+    for (const [, px, k, fn] of cols) { const w = px * k; parts.push(img(png(fn(app), px), xx, y + (128 - w), w, k === 2)); xx += w + gap; }
+  });
+  writeFileSync(join(OUT, `family-${name}.png`), sheet(x + 10, 170 + SMOOTH_FAMILY.length * rowH, bg, parts));
+}
+
+// ---------- clarity: on wallpapers, menu bars and taskbars ----------
+{
+  const parts = [], rowH = 84, fg = '#222';
+  const WALL = { light: ['#A9CBEA', '#F3D2AE'], dark: ['#18213D', '#4B2B57'] };
+  parts.push(text(30, 46, 'Clarity at 16: the new set on wallpapers, translucent menu bars and the Windows taskbar (2x)', { size: 28, fill: fg, weight: 600 }));
+  parts.push(`<defs>${Object.entries(WALL).map(([k, [a, b]]) => `<linearGradient id="w${k}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`).join('')}</defs>`);
+  const heads = [[200, 'menu bar, light wallpaper'], [420, 'menu bar, dark wallpaper'], [640, 'Finder 16 pt, light'], [790, 'Finder 16 pt, dark'], [940, 'on wallpaper'], [1090, 'taskbar light 24'], [1240, 'taskbar dark 24']];
+  heads.forEach(([x, h]) => parts.push(text(x, 96, h, { size: 15, fill: fg, weight: 600 })));
+  SMOOTH_FAMILY.forEach((app, i) => {
+    const y = 112 + i * rowH, st = SMOOTH_TRAY_STATES[app][0];
+    parts.push(text(30, y + 40, NAMES[app], { size: 20, fill: fg, weight: 500 }));
+    for (const [k, x, ink, bar] of [['light', 200, '#000000', 'rgba(246,246,246,0.62)'], ['dark', 420, '#FFFFFF', 'rgba(28,28,30,0.5)']]) {
+      parts.push(`<rect x="${x}" y="${y}" width="200" height="64" fill="url(#w${k})"/><rect x="${x}" y="${y + 14}" width="200" height="48" fill="${bar}"/>`);
+      const t = smoothTray(app, 'template', { px: 36 }).replaceAll('fill="#000000"', `fill="${ink}"`), tb = smoothTray(app, 'template', { px: 36, status: st }).replaceAll('fill="#000000"', `fill="${ink}"`).replaceAll('fill="#fff"', 'fill="#fff"');
+      parts.push(img(png(t, 36), x + 40, y + 20, 36), img(png(tb, 36), x + 120, y + 20, 36));
+    }
+    parts.push(`<rect x="640" y="${y}" width="130" height="64" fill="#FFFFFF"/>`, img(png(smallFlat(app, 32), 32), 690, y + 16, 32));
+    parts.push(`<rect x="790" y="${y}" width="130" height="64" fill="#1E1E1E"/>`, img(png(smallFlat(app, 32), 32), 840, y + 16, 32));
+    parts.push(`<rect x="940" y="${y}" width="130" height="64" fill="url(#w${i % 2 ? 'dark' : 'light'})"/>`, img(png(smallFlat(app, 32), 32), 990, y + 16, 32));
+    parts.push(`<rect x="1090" y="${y}" width="130" height="64" fill="#EEF1F6"/>`, img(png(smallFlat(app, 24), 24), 1131, y + 8, 48, true));
+    parts.push(`<rect x="1240" y="${y}" width="130" height="64" fill="#1C1F26"/>`, img(png(smallFlat(app, 24), 24), 1281, y + 8, 48, true));
+  });
+  writeFileSync(join(OUT, 'clarity.png'), sheet(1400, 130 + SMOOTH_FAMILY.length * rowH, '#FFFFFF', parts));
 }
 
 // ---------- zoom sheet ----------

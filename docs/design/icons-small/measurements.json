@@ -26,7 +26,7 @@
   "debrief": {
     "coverage16": {
       "current": 22,
-      "mix": 24
+      "mix": 26
     },
     "contrast": {
       "isoFront": 3.09,
@@ -42,15 +42,15 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 22,
-        "partialEdge": 23
+        "coverage": 24,
+        "partialEdge": 20
       }
     }
   },
   "pitwall": {
     "coverage16": {
       "current": 24,
-      "mix": 22
+      "mix": 23
     },
     "contrast": {
       "isoFront": 4.6,
@@ -67,14 +67,14 @@
       },
       "smooth32": {
         "coverage": 22,
-        "partialEdge": 9
+        "partialEdge": 8
       }
     }
   },
   "sighter": {
     "coverage16": {
       "current": 20,
-      "mix": 24
+      "mix": 25
     },
     "contrast": {
       "isoFront": 4.05,
@@ -91,7 +91,7 @@
       },
       "smooth32": {
         "coverage": 30,
-        "partialEdge": 29
+        "partialEdge": 31
       }
     }
   },
@@ -138,15 +138,15 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 24,
-        "partialEdge": 38
+        "coverage": 26,
+        "partialEdge": 32
       }
     }
   },
   "pacenotes": {
     "coverage16": {
       "current": 20,
-      "mix": 21
+      "mix": 26
     },
     "contrast": {
       "isoFront": 3.52,
@@ -162,8 +162,8 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 22,
-        "partialEdge": 24
+        "coverage": 23,
+        "partialEdge": 25
       }
     }
   },
@@ -186,8 +186,8 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 21,
-        "partialEdge": 51
+        "coverage": 23,
+        "partialEdge": 48
       }
     }
   },

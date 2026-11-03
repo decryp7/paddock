@@ -137,42 +137,59 @@ test('Pitwall paused: the light taskbar badge is dark enough (3:1 on white), the
   assert.ok(tray('pitwall', 'paused', 'dark').includes('#9AA0A6'));
 });
 
-// ---------- the smooth small-frame proposal (STYLE.md section 6a) ----------
-const smooth = await import('./small-smooth.mjs');
+// ---------- the flat small frames and the trays (STYLE.md section 6) ----------
+const flat = await import('./small-flat.mjs');
 const { contrast } = await import('./cvd.mjs');
 const { INK } = await import('./design.mjs');
-/** Fronts below 3:1 on their tile, by design: Pitcrew's orange is mid-light, so a front light enough for 3:1 would lose the 8 L step
- * to its white top (STYLE.md section 3); the white top carries the silhouette at 3.3:1. */
+/**
+ * Fronts below 3:1 on their tile, by design and approved (STYLE.md section 9): Pitcrew's orange is a mid-light tile, whose fronts must
+ * be near-white (section 3); a front light enough for 3:1 would lose the 8 L step to its white top (section 2). The white top carries
+ * the silhouette at 3.3:1.
+ */
 const FRONT_EXCEPTION = { pitcrew: { front: 2.7, top: '#FFFFFF' } };
+const FLAT_SIZES = [16, 20, 24, 32, 40];
 
-for (const app of smooth.SMOOTH_FAMILY) {
+test('stroke weights are whole pixels, at least one, and never lighter at a larger size', () => {
+  let last = 0;
+  for (const n of FLAT_SIZES) {
+    for (const w of [flat.STROKE[n], flat.DETAIL[n]]) assert.ok(Number.isInteger(w) && w >= 1, `${n}: ${w}`);
+    assert.ok(flat.STROKE[n] >= last, `${n}`); last = flat.STROKE[n];
+  }
+});
+
+for (const app of flat.SMOOTH_FAMILY) {
   const [lo, hi] = COVERAGE[GLYPH_KIND[app]];
-  test(`${app}: the mix's flat frames keep the coverage at 16 within the ${GLYPH_KIND[app]} limits`, () => {
-    const c = tileCoverage(smooth.smallFlat(app, 16), bareSmall(app, 16), 16);
+  test(`${app}: the flat frame's coverage at 16 is within the ${GLYPH_KIND[app]} limits`, () => {
+    const c = tileCoverage(flat.smallFlat(app, 16), bareSmall(app, 16), 16);
     assert.ok(c >= lo && c <= hi, `${app} flat 16 px coverage ${c} % is outside ${lo} to ${hi} %`);
   });
-  test(`${app}: every frame the mix ships reaches 3:1 on the tile base (flat ink; isometric fronts, one documented exception)`, () => {
-    const base = smooth.tileBase(app);
+  test(`${app}: every shipped frame reaches 3:1 on the tile base (flat ink; isometric fronts, one approved exception)`, () => {
+    const base = flat.tileBase(app);
     assert.ok(contrast(INK[app], base) >= 3, `${app} flat ink ${contrast(INK[app], base).toFixed(2)}:1`);
-    const ex = FRONT_EXCEPTION[app], c = contrast(smooth.FRONTS[app], base);
+    const ex = FRONT_EXCEPTION[app], c = contrast(flat.FRONTS[app], base);
     if (ex) assert.ok(c >= ex.front - 0.005 && contrast(ex.top, base) >= 3, `${app} isometric front ${c.toFixed(2)}:1`);
     else assert.ok(c >= 3, `${app} isometric front ${c.toFixed(2)}:1`);
   });
-  test(`${app}: the flat glyph's straight edges sit on whole pixels at 16, 20, 24, 32 and 40`, () => {
-    for (const n of [16, 20, 24, 32, 40]) {
-      const svg = smooth.flatMask(smooth.FLAT[app], n, { hues: true });
-      for (const [, k, v] of svg.matchAll(/ (x|y|width|height)="([^"]+)"/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${k}=${v}`);
-      for (const [, d] of svg.matchAll(/<path d="(M[^"]+Z)" fill/g)) if (!/[aAC]/.test(d)) for (const v of d.match(/-?[\d.]+/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${d}`);
+  test(`${app}: the flat glyph is drawn on whole pixels and nothing in it is thinner than one pixel, at 16 to 40`, () => {
+    for (const n of FLAT_SIZES) {
+      for (const p of flat.glyphParts(app, n)) {
+        if (p.rect) {
+          const [x0, y0, x1, y1] = p.rect;
+          for (const v of [x0, y0, x1, y1]) assert.ok(Number.isInteger(v), `${app} at ${n}: rect ${p.rect}`);
+          assert.ok(x1 - x0 >= 1 && y1 - y0 >= 1, `${app} at ${n}: rect ${p.rect} is under a pixel`);
+        } else if (p.d && !/[aAC]/.test(p.d)) for (const v of p.d.match(/-?[\d.]+/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${p.d}`);
+        else if (p.stroke) assert.ok(p.w >= 1, `${app} at ${n}: a stroke of ${p.w} px`);
+      }
     }
   });
-  test(`${app}: the smooth tray is alpha only, anti-aliased, and its glyph within the ${GLYPH_KIND[app]} coverage limits`, () => {
-    const svg = smooth.smoothTray(app, 'template', { px: 36 }), d = pixels(svg, 36);
+  test(`${app}: the tray is alpha only, anti-aliased, and its glyph within the ${GLYPH_KIND[app]} coverage limits`, () => {
+    const svg = flat.smoothTray(app, 'template', { px: 36 }), d = pixels(svg, 36);
     for (let i = 0; i < d.length; i += 4) if (d[i + 3]) assert.deepEqual([d[i], d[i + 1], d[i + 2]], [0, 0, 0]);
     assert.ok(partialAlpha(svg, 36).length > 0 || app === 'paddock', `${app}: no anti-aliased edge at 36 px`);
-    const a = pixels(smooth.smoothTrayGlyph(app, 32), 32);
+    const a = pixels(flat.smoothTrayGlyph(app, 32), 32);
     let ink = 0;
     for (let i = 3; i < a.length; i += 4) ink += a[i] / 255;
     const c = Math.round((100 * ink) / (32 * 32));
-    assert.ok(c >= lo && c <= hi, `${app} smooth tray glyph coverage ${c} % is outside ${lo} to ${hi} %`);
+    assert.ok(c >= lo && c <= hi, `${app} tray glyph coverage ${c} % is outside ${lo} to ${hi} %`);
   });
 }

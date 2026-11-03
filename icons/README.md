@@ -18,7 +18,7 @@ concept) is kept for reference in `archive/2026-10-flat/`; the sections below on
 | `tools/art-direct.mjs` | the masters, 32/24 frames and flat symbols of Spotter, Pacenotes and Dyno (on iso.mjs) |
 | `tools/paddock-iso.mjs` | Paddock's pit building and its 32/24 frames |
 | `tools/iso-family.mjs` | the registry of every frame and tray state of the eight icons, used by build, preview and tests |
-| `tools/small-smooth.mjs`, `tools/small-sheet.mjs` | proposal (2026-11-03): smooth small frames (the recommended mix: flat glyph for 16 and 24 pt, isometric from 32 pt) and smooth trays, and their sheets in `docs/design/icons-small/` (STYLE.md section 6a); no app uses them yet |
+| `tools/small-flat.mjs`, `tools/small-sheet.mjs` | the small sizes approved 2026-11-03 (STYLE.md section 6a): the flat glyph drawn per size for the 16 and 24 pt slots, the container map (`MIX`), the trays; and the review sheets in `docs/design/icons-small/` (family, before and after, zoom, clarity, trays). The apps switch over after the independent review |
 | `tools/install.mjs` | copies the sets into the apps (`src-tauri/icons`, tray PNGs, in-app copies) and `docs/images/src/icons` |
 
 | App | Status |
