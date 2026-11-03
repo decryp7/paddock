@@ -463,8 +463,9 @@ fn to_first_and_to_last() {
     assert_eq!(rect_of(&first, "d"), Rect::new(0, 0, 6, 4));
     assert_eq!(first[0].id, id("d"));
     let last = arrange(&tiles(), 12, &GridGesture::ToLast { id: id("a") }).unwrap();
-    // Below the others at the left; gravity then lifts it into the hole under c.
-    assert_eq!(rect_of(&last, "a"), Rect::new(0, 4, 6, 4));
+    // After d, the last one in reading order; it does not rise into the hole under c, which is earlier.
+    assert_eq!(rect_of(&last, "a"), Rect::new(0, 5, 6, 4));
+    assert_eq!(last.last().unwrap().id, id("a"));
     let stacked = vec![item("a", 0, 0, 12, 3), item("b", 0, 3, 12, 3)];
     let last = arrange(&stacked, 12, &GridGesture::ToLast { id: id("a") }).unwrap();
     assert_eq!(last.last().unwrap().id, id("a"));
@@ -480,11 +481,6 @@ fn to_first_and_to_last_report_when_nothing_changes() {
     assert_eq!(
         arrange(&wide, 12, &GridGesture::ToLast { id: id("b") }),
         Err(GridError::Blocked(Block::Unchanged))
-    );
-    let bottom = vec![item("a", 0, 0, 12, 14), item("b", 0, MAX_ROWS - 14, 12, 14)];
-    assert_eq!(
-        arrange(&bottom, 12, &GridGesture::ToLast { id: id("a") }),
-        Err(GridError::NoRoom)
     );
 }
 
@@ -611,6 +607,10 @@ fn gesture_for(items: &[Item], pick: usize, kind: u8, a: u8, b: u16, c: u8, d: u
     }
 }
 
+fn is_end(g: &GridGesture) -> bool {
+    matches!(g, GridGesture::ToLast { .. })
+}
+
 fn assert_valid(items: &[Item]) {
     for (n, a) in items.iter().enumerate() {
         assert!(a.rect.fits(12), "{a:?}");
@@ -652,10 +652,16 @@ proptest! {
         prop_assert_eq!(&first, &second);
         if let Ok(out) = first {
             assert_valid(&out);
-            assert_gravity(&out);
             prop_assert_eq!(out.len(), items.len());
-            prop_assert_eq!(compact(out.clone()).unwrap(), out.clone());
-            prop_assert_eq!(reading_order(out.clone()), out);
+            prop_assert_eq!(reading_order(out.clone()), out.clone());
+            if is_end(&g) {
+                // End: the moved placement is last in reading order; the others are compact.
+                let GridGesture::ToLast { id } = &g else { unreachable!() };
+                prop_assert_eq!(&out.last().unwrap().id, id);
+            } else {
+                assert_gravity(&out);
+                prop_assert_eq!(compact(out.clone()).unwrap(), out);
+            }
         }
     }
 

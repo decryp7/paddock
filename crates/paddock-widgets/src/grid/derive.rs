@@ -34,7 +34,7 @@ pub fn derive(items: &[Item], design: u8, columns: u8) -> Result<Vec<Item>, Grid
 
 /// The first place at or after `cursor` (row, column), scanning rows then columns, where a `w` by `h` rectangle fits
 /// and overlaps none of `placed`.
-fn first_free(
+pub(crate) fn first_free(
     placed: &[Item],
     cursor: (u32, u32),
     w: u8,

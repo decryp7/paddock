@@ -176,10 +176,33 @@ pub fn arrange(items: &[Item], columns: u8, gesture: &GridGesture) -> Result<Vec
         GridGesture::ToLast { id } => {
             let i = index_of(&items, id)?;
             let before = items.clone();
-            let rect = keys::last(&items, i)?;
-            changed(&before, put(items, i, rect)?)
+            changed(&before, to_last(items, i, columns)?)
         }
     }
+}
+
+/// End: the placement goes after the last one in reading order, in the first free place there, and rises only while it
+/// stays after that one in reading order (ADR 0044 amendment). The others are compacted as usual.
+fn to_last(mut items: Vec<Item>, i: usize, columns: u8) -> Result<Vec<Item>, GridError> {
+    let mut moved = items.remove(i);
+    let others = compact(items)?;
+    // The first free place after the last placement is already the highest one that keeps End last: every place
+    // before it in the scan is earlier in reading order or taken.
+    let rect = match others.last() {
+        Some(last) => {
+            let from = (u32::from(last.rect.y), u32::from(last.rect.x) + 1);
+            super::derive::first_free(&others, from, moved.rect.w, moved.rect.h, columns)?
+        }
+        None => Rect {
+            x: 0,
+            y: 0,
+            ..moved.rect
+        },
+    };
+    moved.rect = rect;
+    let mut out = others;
+    out.push(moved);
+    Ok(out)
 }
 
 fn changed(before: &[Item], next: Vec<Item>) -> Result<Vec<Item>, GridError> {

@@ -92,6 +92,7 @@ pub struct Rect { pub x: u8, pub y: u16, pub w: u8, pub h: u8 }   // cells; x + 
      those overlap is pushed below them in turn (a cascade, bounded by the placement count).
   3. Then the whole layout is compacted. The moved placement is compacted too: a drop into empty space under the last row
      rises to it.
+- **End is the exception to gravity (amendment 2026-11-03).** `ToLast` puts the placement in the first free place after the last one in reading order and does not let gravity lift it into a hole earlier in reading order (a layout is therefore compacted after edits, not on read); the others are compacted as usual, so End always means last.
 - **Keyboard steps** are defined on the same rules (§5): a nudge moves one cell, or past the neighbour that blocks it.
 - **Identity and limits** stay ADR 0035's: ids from the kind, `max_instances`, `max_placements` (32 on the dashboard),
   presets of at most 24, the 128 KiB file limit.

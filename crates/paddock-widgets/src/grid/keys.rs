@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{Block, Dir, GridError, GridGesture, Item, Rect};
+use super::model::{Block, Dir, GridGesture, Item, Rect};
 use super::settle::arrange;
 
 /// Where a nudge sends the placement.
@@ -110,23 +110,6 @@ pub(crate) fn first(item: &Item) -> Rect {
         y: 0,
         ..item.rect
     }
-}
-
-/// End: below everything else, at the left (gravity may then lift it into a hole beside the others).
-pub(crate) fn last(items: &[Item], i: usize) -> Result<Rect, GridError> {
-    let bottom = items
-        .iter()
-        .enumerate()
-        .filter(|(j, _)| *j != i)
-        .map(|(_, o)| o.rect.bottom())
-        .max()
-        .unwrap_or(0);
-    Rect {
-        x: 0,
-        ..items[i].rect
-    }
-    .at_row(bottom)
-    .ok_or(GridError::NoRoom)
 }
 
 ts! {
