@@ -14,6 +14,20 @@ export const DEFAULT_MINIMUM = 99;
 /** No reason allows a crate less than this. */
 export const HARD_FLOOR = 90;
 
+const KEYS = { crate: ['name', 'minimum', 'reason', 'review'], exclude: ['path', 'reason', 'job'] };
+
+/** The line without a trailing `# comment`; a `#` inside a quoted string stays. */
+export function stripComment(raw) {
+  let quoted = false;
+  for (let i = 0; i < raw.length; i += 1) {
+    const c = raw[i];
+    if (quoted && c === '\\') i += 1;
+    else if (c === '"') quoted = !quoted;
+    else if (c === '#' && !quoted) return raw.slice(0, i);
+  }
+  return raw;
+}
+
 /** Parses the register text. Returns { crates, excludes, problems }; problems name the line. */
 export function parseRegister(text) {
   const crates = [];
@@ -21,10 +35,10 @@ export function parseRegister(text) {
   const problems = [];
   let cur = null;
   text.split('\n').forEach((raw, i) => {
-    const line = raw.replace(/\s+#.*$/, '').trim();
+    const line = stripComment(raw).trim();
     if (!line || line.startsWith('#')) return;
     if (line === '[[crate]]' || line === '[[exclude]]') {
-      cur = { line: i + 1 };
+      cur = { line: i + 1, kind: line === '[[crate]]' ? 'crate' : 'exclude' };
       (line === '[[crate]]' ? crates : excludes).push(cur);
       return;
     }
@@ -34,7 +48,12 @@ export function parseRegister(text) {
       problems.push(`line ${i + 1}: cannot read "${raw.trim()}" (expected [[crate]] or [[exclude]] and key = "value" or key = number)`);
       return;
     }
-    cur[(str ?? num)[1]] = str ? str[2].replace(/\\(["\\])/g, '$1') : Number(num[2]);
+    const key = (str ?? num)[1];
+    if (!KEYS[cur.kind].includes(key)) {
+      problems.push(`line ${i + 1}: unknown key "${key}" in [[${cur.kind}]] (known: ${KEYS[cur.kind].join(', ')})`);
+      return;
+    }
+    cur[key] = str ? str[2].replace(/\\(["\\])/g, '$1') : Number(num[2]);
   });
   return { crates, excludes, problems };
 }
@@ -46,10 +65,10 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
  * Checks the register against the tree under `root` (the crates folder). Returns { errors, warnings }: strings.
  * `now` is a Date (injected). Errors fail the gate; a stale review date is only a warning.
  */
-export function validateRegister({ crates, excludes, problems = [] }, root, now = new Date(), exists = existsSync, lsCrates = defaultLs) {
+export function validateRegister({ crates, excludes, problems = [] }, root, now = new Date(), { exists = existsSync, members = null } = {}) {
   const errors = problems.map((p) => `coverage.toml ${p}`);
   const warnings = [];
-  const known = new Set(lsCrates(root));
+  const known = new Set(members ?? defaultLs(root));
   const seen = new Set();
   for (const c of crates) {
     const at = `coverage.toml line ${c.line}`;
@@ -59,7 +78,7 @@ export function validateRegister({ crates, excludes, problems = [] }, root, now 
     }
     if (seen.has(c.name)) errors.push(`${at}: crate ${c.name} is listed twice`);
     seen.add(c.name);
-    if (!known.has(c.name)) errors.push(`${at}: crate ${c.name} does not exist in ${root} (remove the entry)`);
+    if (!known.has(c.name)) errors.push(`${at}: crate ${c.name} is not a member of the workspace in ${root} (remove the entry)`);
     if (typeof c.minimum !== 'number') errors.push(`${at}: crate ${c.name} needs minimum = <recorded figure>`);
     else if (c.minimum < HARD_FLOOR) errors.push(`${at}: crate ${c.name} minimum ${c.minimum} is under the hard floor of ${HARD_FLOOR} % (no reason allows less)`);
     else if (c.minimum >= DEFAULT_MINIMUM) errors.push(`${at}: crate ${c.name} minimum ${c.minimum} is not under ${DEFAULT_MINIMUM} % (remove the entry)`);
@@ -99,4 +118,43 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function ignoreRegex(excludes) {
   if (excludes.length === 0) return '^$';
   return `(${excludes.map((e) => `/${escapeRe(e.path)}`).join('|')})$`;
+}
+
+/** The `members` of a workspace Cargo.toml (`members = [ "a", "b" ]`), or null when the text has none. */
+export function workspaceMembers(cargoToml) {
+  const m = /^members\s*=\s*\[([^\]]*)\]/m.exec(cargoToml);
+  if (!m) return null;
+  return [...m[1].replace(/#.*$/gm, '').matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+}
+
+/** Subjects (a crate name or an excluded path) that a commit message of the change lowers or adds, with the user's approval. */
+export function loweredTrailers(messages) {
+  const out = new Set();
+  for (const m of messages) {
+    for (const t of m.matchAll(/^Coverage-lowered:\s+(\S+)\s+(.+?)\s+approved:\s*user\s*$/gim)) out.add(t[1]);
+  }
+  return out;
+}
+
+/**
+ * The ratchet against the register of the base: a lowered minimum, a new [[crate]] entry and a new [[exclude]] entry are
+ * errors unless a commit of the change carries `Coverage-lowered: <crate|path> <reason> approved: user`. `base` is a parsed
+ * register, or null when the base has none (the initial seed: nothing to compare).
+ */
+export function ratchetErrors(base, current, approved) {
+  if (base === null) return [];
+  const next = (subject) => `Next step: if the user approved it, add a trailer \`Coverage-lowered: ${subject} <reason> approved: user\` to a commit of this change; otherwise add tests or remove the entry.`;
+  const errors = [];
+  const before = new Map(base.crates.map((c) => [c.name, c]));
+  for (const c of current.crates) {
+    if (approved.has(c.name)) continue;
+    const old = before.get(c.name);
+    if (!old) errors.push(`crate ${c.name}: a new [[crate]] entry in coverage.toml lowers its crate's bar to ${c.minimum} %. ${next(c.name)}`);
+    else if (typeof c.minimum === 'number' && c.minimum < old.minimum) errors.push(`crate ${c.name}: minimum lowered from ${old.minimum} % to ${c.minimum} % in coverage.toml. ${next(c.name)}`);
+  }
+  const paths = new Set(base.excludes.map((e) => e.path));
+  for (const e of current.excludes) {
+    if (!paths.has(e.path) && !approved.has(e.path)) errors.push(`file ${e.path}: a new [[exclude]] entry in coverage.toml leaves the file out of coverage. ${next(e.path)}`);
+  }
+  return errors;
 }

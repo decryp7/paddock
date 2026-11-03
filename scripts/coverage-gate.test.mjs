@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { check, crateOf, floor2, measure, measureByCrate } from './coverage-gate.mjs';
-import { ignoreRegex, parseRegister, validateRegister } from './coverage-register.mjs';
+import { fileURLToPath } from 'node:url';
+import { check, crateOf, floor2, measure, measureByCrate, suggest } from './coverage-gate.mjs';
+import { ignoreRegex, loweredTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
 
 const sources = {
   'a.rs': ['fn a() {}', '#[::tauri::command]', 'pub async fn cmd() {', '    body();', '}'].join('\n'),
@@ -26,6 +28,7 @@ test('lines are counted per crate, from the path under the root or after the las
   assert.equal(crateOf('/x/crates/paddock-a/src/lib.rs', '/x/crates'), 'paddock-a');
   assert.equal(crateOf('/ci/crates/work/crates/paddock-b/src/lib.rs'), 'paddock-b');
   assert.equal(crateOf('/elsewhere/lib.rs', '/x/crates'), null);
+  assert.equal(crateOf('/elsewhere/crates/paddock-c/src/lib.rs', '/x/crates'), null, 'a path outside the root is no crate of it');
   const lcov = 'SF:/x/crates/a/src/l.rs\nDA:1,1\nDA:2,0\nend_of_record\nSF:/x/crates/b/src/l.rs\nDA:1,1\nend_of_record';
   const m = measureByCrate(lcov, () => null, '/x/crates');
   assert.deepEqual([...m], [['a', { hit: 1, total: 2, skipped: 0 }], ['b', { hit: 1, total: 1, skipped: 0 }]]);
@@ -40,6 +43,7 @@ test('a recorded figure is cut, never rounded up', () => {
 function tree(names, files = []) {
   const root = mkdtempSync(join(tmpdir(), 'covgate-'));
   for (const n of names) mkdirSync(join(root, n, 'src'), { recursive: true });
+  writeFileSync(join(root, 'Cargo.toml'), `[workspace]\nmembers = [\n${names.map((n) => `    "${n}",`).join('\n')}\n]\n`);
   for (const f of files) {
     mkdirSync(join(root, f, '..'), { recursive: true });
     writeFileSync(join(root, f), '');
@@ -55,8 +59,8 @@ function lcovFor(root, figures) {
     })
     .join('\n');
 }
-const run = (root, figures, register, now = new Date('2026-11-04T00:00:00Z')) =>
-  check({ lcovText: lcovFor(root, figures), registerText: register, root, now, read: () => null });
+const run = (root, figures, register, extra = {}, now = new Date('2026-11-04T00:00:00Z')) =>
+  check({ lcovText: lcovFor(root, figures), registerText: register, root, now, read: () => null, ...extra });
 const entry = (name, minimum, extra = 'reason = "native"\nreview = "2027-02-01"') => `[[crate]]\nname = "${name}"\nminimum = ${minimum}\n${extra}\n`;
 
 test('every crate at 99 % passes with an empty register', () => {
@@ -96,11 +100,13 @@ test('a crate under the 90 % floor fails even with a reason and a minimum under 
   rmSync(root, { recursive: true });
 });
 
-test('a crate above its minimum or at 99 % only warns', () => {
-  const root = tree(['a', 'b']);
-  const r = run(root, { a: [96, 100], b: [99, 100] }, entry('a', 95) + entry('b', 95));
-  assert.ok(r.out.some((l) => l.startsWith('::warning::crate a: 96.00 % is above its recorded minimum 95 %')));
+test('a figure more than 0.05 above its minimum is an error (raise it); a crate at 99 % only warns to drop its entry', () => {
+  const root = tree(['a', 'b', 'c']);
+  const r = run(root, { a: [96, 100], b: [99, 100], c: [9503, 10000] }, entry('a', 95) + entry('b', 95) + entry('c', 95));
+  assert.equal(r.exit, 1);
+  assert.ok(r.out.some((l) => l.startsWith('::error::crate a: 96.00 %') && /raise the minimum to 96\.00/.test(l)));
   assert.ok(r.out.some((l) => l.startsWith('::warning::crate b') && /remove its \[\[crate\]\] entry/.test(l)));
+  assert.ok(!r.out.some((l) => l.startsWith('::error::crate c')), 'within 0.05 above the minimum passes');
   rmSync(root, { recursive: true });
 });
 
@@ -121,10 +127,10 @@ test('an excluded file needs a reason and must exist; a crate entry needs the cr
   const reg = ['[[exclude]]', 'path = "a/src/native.rs"', '', '[[exclude]]', 'path = "a/src/gone.rs"', 'reason = "x"', '', entry('missing', 95)].join('\n');
   const r = run(root, { a: [100, 100] }, reg);
   const text = r.out.join('\n');
+  assert.match(text, /crate missing is not a member of the workspace/);
   assert.equal(r.exit, 1);
   assert.match(text, /excluded file a\/src\/native\.rs needs a reason/);
   assert.match(text, /excluded file a\/src\/gone\.rs does not exist/);
-  assert.match(text, /crate missing does not exist/);
   rmSync(root, { recursive: true });
 });
 
@@ -146,7 +152,7 @@ test('the ignore regex is generated from the excluded files and matches exactly 
 
 test('validateRegister takes the clock and filesystem as arguments', () => {
   const reg = parseRegister(entry('a', 95));
-  const ok = validateRegister(reg, '/r', new Date('2026-11-04'), () => true, () => ['a']);
+  const ok = validateRegister(reg, '/r', new Date('2026-11-04'), { exists: () => true, members: ['a'] });
   assert.deepEqual(ok, { errors: [], warnings: [] });
 });
 
@@ -155,5 +161,79 @@ test('a figure is shown cut like the minimum, so a drop within one hundredth nev
   const r = run(root, { a: [98759, 100000] }, entry('a', 98.76));
   assert.equal(r.exit, 1);
   assert.match(r.out[0], /98\.75 % is under its minimum 98\.76 %/);
+  rmSync(root, { recursive: true });
+});
+
+test('a # inside a quoted value stays; a comment after it goes; an unknown key is an error', () => {
+  const reg = parseRegister('[[crate]]\nname = "a"  # the crate\nreason = "issue #12 stays"\nbogus = "x"\n');
+  assert.equal(reg.crates[0].reason, 'issue #12 stays');
+  assert.equal(reg.crates[0].name, 'a');
+  assert.match(reg.problems.join('\n'), /unknown key "bogus" in \[\[crate\]\]/);
+});
+
+test('workspace members are read from the Cargo.toml', () => {
+  assert.deepEqual(workspaceMembers('[workspace]\nresolver = "3"\nmembers = [\n  "a", # one\n  "b-c",\n]\n'), ['a', 'b-c']);
+  assert.equal(workspaceMembers('[package]\n'), null);
+});
+
+// The ratchet against the base register.
+const reg = (text) => parseRegister(text);
+const base = entry('a', 95) + '[[exclude]]\npath = "a/src/n.rs"\nreason = "r"\n';
+
+test('ratchet: a lowered minimum, a new crate entry and a new exclude each fail without the trailer', () => {
+  const none = new Set();
+  assert.deepEqual(ratchetErrors(reg(base), reg(base), none), []);
+  assert.match(ratchetErrors(reg(base), reg(entry('a', 94.9) + '[[exclude]]\npath = "a/src/n.rs"\nreason = "r"\n'), none)[0], /minimum lowered from 95 % to 94.9 %/);
+  assert.match(ratchetErrors(reg(base), reg(base + entry('b', 96)), none)[0], /crate b: a new \[\[crate\]\] entry/);
+  assert.match(ratchetErrors(reg(base), reg(base + '[[exclude]]\npath = "b/src/n.rs"\nreason = "r"\n'), none)[0], /file b\/src\/n\.rs: a new \[\[exclude\]\] entry/);
+  assert.deepEqual(ratchetErrors(reg(base), reg(entry('a', 99.5).replace('99.5', '96')), none), [], 'a raise is fine');
+});
+
+test('ratchet: a Coverage-lowered trailer approved by the user clears exactly its subject; no base register is the initial seed', () => {
+  const approved = loweredTrailers(['feat: x\n\nCoverage-lowered: b because the adapter needs a desktop approved: user\n', 'fix: y\n\nCoverage-lowered: c reason approved: agent\n']);
+  assert.deepEqual([...approved], ['b']);
+  assert.deepEqual(ratchetErrors(reg(base), reg(base + entry('b', 96)), approved), []);
+  assert.equal(ratchetErrors(reg(base), reg(base + entry('c', 96)), approved).length, 1);
+  assert.deepEqual(ratchetErrors(null, reg(base), new Set()), []);
+});
+
+test('check applies the ratchet with the base register and the change\'s commit messages', () => {
+  const root = tree(['a', 'b']);
+  const lowered = entry('a', 94);
+  const fail = run(root, { a: [94, 100], b: [100, 100] }, lowered, { baseRegisterText: entry('a', 95), commitMessages: ['ci: x'] });
+  assert.equal(fail.exit, 1);
+  assert.ok(fail.out.some((l) => l.startsWith('::error::crate a: minimum lowered')));
+  const ok = run(root, { a: [94, 100], b: [100, 100] }, lowered, { baseRegisterText: entry('a', 95), commitMessages: ['ci: x\n\nCoverage-lowered: a the adapter moved approved: user\n'] });
+  assert.equal(ok.exit, 0);
+  rmSync(root, { recursive: true });
+});
+
+test('suggest prints the measured [[crate]] blocks, keeping reasons and review dates', () => {
+  const root = tree(['a', 'b', 'c']);
+  const m = measureByCrate(lcovFor(root, { a: [9503, 10000], b: [100, 100], c: [80, 100] }), () => null, root);
+  const text = suggest(m, parseRegister(entry('a', 90, 'reason = "kept"\nreview = "2027-02-01"')));
+  assert.match(text, /name = "a"\nminimum = 95\.03\nreason = "kept"\nreview = "2027-02-01"/);
+  assert.match(text, /name = "c"\nminimum = 80\.00\nreason = "TODO/);
+  assert.ok(!text.includes('name = "b"'));
+  rmSync(root, { recursive: true });
+});
+
+test('the CLI reads the base register and the trailers from git', () => {
+  const root = tree(['a']);
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: root, encoding: 'utf8' });
+  git('init', '-q');
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 95));
+  git('add', '.');
+  git('commit', '-q', '-m', 'chore: base');
+  const lcov = join(root, 'lcov.info');
+  writeFileSync(lcov, lcovFor(root, { a: [94, 100] }));
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 94));
+  const gate = fileURLToPath(new URL('./coverage-gate.mjs', import.meta.url));
+  const cli = (...extra) => spawnSync('node', [gate, 'check', lcov, join(root, 'coverage.toml'), '--root', root, '--summary', join(root, 's.md'), ...extra], { encoding: 'utf8' });
+  assert.match(cli('--base', 'HEAD').stdout, /::error::crate a: minimum lowered from 95 % to 94 %/);
+  assert.equal(cli('--base', 'HEAD').status, 1);
+  git('commit', '-q', '-a', '-m', 'ci: lower\n\nCoverage-lowered: a moved approved: user');
+  assert.equal(cli('--base', 'HEAD~1').status, 0);
+  assert.match(cli('--base', 'nonexistent').stdout, /::error::the base nonexistent is not in this checkout/);
   rmSync(root, { recursive: true });
 });
