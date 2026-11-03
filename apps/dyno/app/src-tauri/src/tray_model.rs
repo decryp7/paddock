@@ -183,12 +183,14 @@ pub fn plan_sync(current: &std::collections::HashMap<String, ItemSpec>, wanted: 
     SyncPlan { remove, create }
 }
 
-/// What one drawn frame costs the native icon. The picture is set in ONE call whatever else changed (a second call renders the
-/// status item twice and flickers on macOS, where `set_icon` and then `set_icon_as_template` did exactly that), the tooltip is
-/// sent only when its text changed, and the saved position is refreshed on the first draw and every 30th.
+/// What one drawn frame costs the native icon. The picture is set in ONE call when it changed (a second call renders the
+/// status item twice and flickers on macOS, where `set_icon` and then `set_icon_as_template` did exactly that) and not at
+/// all when only the tooltip changed (each set redraws the item; an idle Dyno's window-server cost was mostly these redraws,
+/// docs/performance.md 2026-11-03), the tooltip is sent only when its text changed, and the saved position is refreshed on
+/// the first draw and every 30th.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaintOps {
-    /// Calls that set the picture (always 1).
+    /// Calls that set the picture: 1 when it changed, else 0.
     pub image_sets: u8,
     /// Whether the tooltip is sent.
     pub tooltip: bool,
@@ -196,10 +198,11 @@ pub struct PaintOps {
     pub save_position: bool,
 }
 
-/// The [`PaintOps`] of the `count`th draw (1-based) of an item whose tooltip was `previous`.
-pub fn paint_ops(previous: &str, tooltip: &str, count: u64) -> PaintOps {
+/// The [`PaintOps`] of the `count`th draw (1-based) of an item whose tooltip was `previous`; `picture_changed` says whether
+/// its picture differs from the one last set (true for the first draw).
+pub fn paint_ops(previous: &str, tooltip: &str, picture_changed: bool, count: u64) -> PaintOps {
     PaintOps {
-        image_sets: 1,
+        image_sets: u8::from(picture_changed),
         tooltip: previous != tooltip,
         save_position: crate::tray_identity::should_save_position(count),
     }
@@ -689,11 +692,14 @@ mod tests {
 
     #[test]
     fn a_frame_sets_the_picture_once_and_the_tooltip_only_when_it_changed() {
-        let first = paint_ops("", "Dyno CPU 5%", 1);
+        let first = paint_ops("", "Dyno CPU 5%", true, 1);
         assert_eq!((first.image_sets, first.tooltip, first.save_position), (1, true, true));
-        let same = paint_ops("Dyno CPU 5%", "Dyno CPU 5%", 2);
+        let same = paint_ops("Dyno CPU 5%", "Dyno CPU 5%", true, 2);
         assert_eq!((same.image_sets, same.tooltip, same.save_position), (1, false, false));
-        assert!(paint_ops("Dyno CPU 5%", "Dyno CPU 6%", 3).tooltip);
+        assert!(paint_ops("Dyno CPU 5%", "Dyno CPU 6%", true, 3).tooltip);
+        // Only the tooltip changed: the picture is not set again (each set redraws the status item).
+        let tip_only = paint_ops("Dyno CPU 5%", "Dyno CPU 6%", false, 4);
+        assert_eq!((tip_only.image_sets, tip_only.tooltip), (0, true));
     }
 
     #[test]

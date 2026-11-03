@@ -30,8 +30,16 @@ pub struct TrayState {
     /// The spec each existing icon was made from (what [`plan_sync`] compares the wanted items with).
     items: Mutex<HashMap<String, ItemSpec>>,
     painted: Mutex<HashMap<String, bool>>,
-    /// Per item: the tooltip last sent and how many pictures were drawn (the tooltip changes rarely, a picture every second).
-    drawn: Mutex<HashMap<String, (String, u64)>>,
+    /// Per item: what was last sent and how many frames were drawn (the tooltip changes rarely, a picture every second).
+    drawn: Mutex<HashMap<String, Drawn>>,
+}
+
+/// What one item last showed: the tooltip and the picture sent, and how many frames were drawn.
+#[derive(Default)]
+struct Drawn {
+    tooltip: String,
+    look: Option<Look>,
+    count: u64,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -281,28 +289,44 @@ pub fn save_positions(app: &AppHandle<Wry>) {
     ));
 }
 
-/// Draws a frame on an item: the pictures in one call, and the tooltip when it changed.
+/// Draws a frame on an item: the pictures in one call when they changed, and the tooltip when it changed.
 pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
     let (w, h) = (frame.look.width, frame.look.height);
-    let set = set_picture(&tray, &frame.look);
-    let Some(state) = app.try_state::<TrayState>() else { return };
+    let Some(state) = app.try_state::<TrayState>() else {
+        let _ = set_picture(&tray, &frame.look);
+        return;
+    };
     let (ops, count) = {
         let mut map = lock(&state.drawn);
         let entry = map.entry(item.to_string()).or_default();
-        entry.1 += 1;
-        let ops = crate::tray_model::paint_ops(&entry.0, &frame.tooltip, entry.1);
+        entry.count += 1;
+        let ops = crate::tray_model::paint_ops(
+            &entry.tooltip,
+            &frame.tooltip,
+            entry.look.as_ref() != Some(&frame.look),
+            entry.count,
+        );
         if ops.tooltip {
-            entry.0 = frame.tooltip.clone();
+            entry.tooltip = frame.tooltip.clone();
         }
-        (ops, entry.1)
+        if ops.image_sets > 0 {
+            entry.look = Some(frame.look.clone());
+        }
+        (ops, entry.count)
+    };
+    // Each set redraws the status item (in the window server on macOS): a frame whose picture did not change sets none.
+    let set = if ops.image_sets > 0 {
+        set_picture(&tray, &frame.look)
+    } else {
+        Ok(())
     };
     if ops.tooltip {
         let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     }
     // One line per picture, at debug: the flow of image sets per tick (a flicker shows as more than one set per tick).
     logging::debug(&format!(
-        "tray icon {}: picture #{count} set ({} call, {} representation(s), {w}x{h}, template {}), tooltip {}",
+        "tray icon {}: frame #{count}: {} picture set(s) ({} representation(s), {w}x{h}, template {}), tooltip {}",
         tray_id(item),
         ops.image_sets,
         frame.look.pictures.len(),

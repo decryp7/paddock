@@ -88,9 +88,11 @@ Trigger: the user's report on Dyno 1.0.0, "High CPU use".
     process table every 2 s: `dyno-agent bench 60` none 0.38-0.39 %, summary 0.72-0.74 % (two runs each, interleaved).
     Fixed: a `tray` level with the process table at the unwatched pace.
   - The menu bar items: WS is 0.0 with no Dyno and 2.1-3.3 with Dyno closed to the tray, so the icon redraws are the
-    largest cost of an idle Dyno in this VM (inferred: nothing else draws then). Each update called `set_icon` then `set_icon_as_template` (two redraws) and
-    the tooltip. Fixed: only changed parts, pixels and template in one call. Most of the WS cost remains: one redraw per
-    item per second (follow-up below).
+    largest cost of an idle Dyno in this VM (inferred: nothing else draws then). Each update called `set_icon` then
+    `set_icon_as_template` (two redraws) and the tooltip. Fixed in the measured change by sending only the changed parts,
+    pixels and template in one call; on main this is now the tray branch's single-call paint (`feat/dyno-tray-per-metric`,
+    `paint_ops`), plus no picture set when only the tooltip changed (`perf/dyno-cpu-2`). Most of the WS cost remains: one
+    redraw per item per second (follow-up below). The tray branch's new item look was not measured here.
   - Ruled out: the Network page (agent 0.9, web 0.4) and the Disk map page after a scan are cheap; the 2 s network poll
     and its `nettop` read do not show above the noise. A disk scan costs the agent about 16 % of one core while it runs,
     bounded and started by the user. ECharts on the dashboard's history panels does not redraw per tick (no poll).
