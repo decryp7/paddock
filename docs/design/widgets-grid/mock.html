@@ -1,0 +1,385 @@
+<!doctype html>
+<!--
+  Mock-up for family ADR 0044 (widget grid: free size and drag-and-drop arrangement) on Dyno's dashboard: edit mode while
+  dragging (lifted widget, snapped placeholder, snapping guides, the others at the engine's previewed places), a corner
+  resize (size chip, pushed neighbour), the keyboard path (focus ring, the widget's menu, the announcement), and a narrow
+  window (the derived 6-column arrangement). Tokens only (tokens.generated.css is compiled from
+  ui/projects/paddock-ui/scss by render.mjs); no colour literal except the macOS window buttons. ?theme=light|dark.
+  Each <figure id="f-..."> is shot on its own. The rectangles are the engine's results for each gesture, worked out by
+  hand from ADR 0044 §1 and §3 (the mock does not compute them).
+-->
+<html lang="en" data-accent="dyno">
+<head>
+<meta charset="utf-8" />
+<title>Widget grid mock-up</title>
+<link rel="stylesheet" href="tokens.generated.css" />
+<script>
+  document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark';
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--pd-bg); color: var(--pd-text); font: var(--pd-text-body) / var(--pd-lh-body) var(--pd-font-sans); -webkit-font-smoothing: antialiased; padding: 24px; }
+  figure { margin: 0 0 40px; display: block; width: max-content; }
+  figcaption { display: none; }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  svg.i * { vector-effect: non-scaling-stroke; }
+  svg.i.s14 { width: 14px; height: 14px; }
+  svg.i.s20 { width: 20px; height: 20px; }
+  .muted { color: var(--pd-text-muted); }
+  .subtle { color: var(--pd-text-subtle); }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .spacer { flex: 1; }
+
+  /* ---------------- window chrome (macOS; the shared shell) ---------------- */
+  .win { position: relative; overflow: hidden; display: grid; grid-template-rows: 40px minmax(0, 1fr) 24px; background: var(--pd-bg); border: 1px solid var(--pd-hairline); border-radius: 10px; box-shadow: var(--pd-shadow-3); }
+  .titlebar { display: flex; align-items: center; gap: 12px; padding-left: 14px; border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-1); }
+  .lights { display: flex; gap: 8px; width: 64px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .titlebar .app { font-weight: var(--pd-weight-semibold); }
+  .titlebar .tb-icon { color: var(--pd-text-muted); }
+  .body { display: grid; grid-template-columns: var(--pd-sidebar-width) minmax(0, 1fr); min-height: 0; }
+  .body.collapsed { grid-template-columns: var(--pd-sidebar-collapsed) minmax(0, 1fr); }
+  .side { border-right: 1px solid var(--pd-hairline); background: var(--pd-surface-1); padding: 8px; display: grid; align-content: start; gap: 2px; }
+  .nav { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); position: relative; }
+  .nav.on { background: color-mix(in srgb, var(--pd-accent) 14%, transparent); color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
+  .nav.on svg { color: var(--pd-accent); }
+  .nav.on::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--pd-accent); }
+  .main { position: relative; overflow: hidden; min-width: 0; }
+  .page { padding: 0 24px 24px; }
+  .status { display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 12px; font-size: var(--pd-text-label); color: var(--pd-text-muted); border-top: 1px solid var(--pd-hairline); background: var(--pd-surface-1); }
+  .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pd-success); display: inline-block; margin-right: 6px; }
+
+  .page-head { display: flex; align-items: flex-start; gap: 12px; padding-top: 24px; margin-bottom: 16px; }
+  .page-head h1 { margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .page-head p { margin: 0; color: var(--pd-text-muted); }
+
+  /* ---------------- buttons ---------------- */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--pd-button-height); padding: 0 12px; border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-strong); background: var(--pd-surface-1); white-space: nowrap; font-weight: var(--pd-weight-medium); }
+  .btn.primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
+  .btn.ghost { border-color: transparent; background: none; }
+  .btn.icon { width: var(--pd-button-height); padding: 0; justify-content: center; }
+  .btn[disabled] { color: var(--pd-text-subtle); border-color: var(--pd-hairline); background: none; }
+  .btn.ghost[disabled] { border-color: transparent; }
+  .vsep { width: 1px; height: 20px; background: var(--pd-hairline); margin: 0 4px; }
+
+  /* ---------------- the board bar (view mode) and the edit bar (edit mode, sticky) ---------------- */
+  .bar { display: flex; align-items: center; gap: 8px; height: 44px; margin-bottom: 12px; }
+  .editbar { display: flex; align-items: center; gap: 8px; height: 52px; margin: 0 -24px 12px; padding: 0 24px; background: var(--pd-bg); border-bottom: 1px solid var(--pd-hairline); position: relative; z-index: 3; }
+  .editbar .what { display: grid; line-height: 16px; min-width: 0; }
+  .editbar .what b { font-weight: var(--pd-weight-semibold); font-size: var(--pd-text-body); line-height: 20px; }
+  .editbar .what span { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .reason { font-size: var(--pd-text-label); color: var(--pd-text-muted); display: inline-flex; align-items: center; gap: 6px; }
+
+  /* ---------------- the grid ---------------- */
+  .board { position: relative; }
+  /* Column guides: drawn in edit mode only, behind the widgets. */
+  /* Snapping guides: while a widget is dragged or resized, 1 px dashed lines continue the placeholder's edges across the
+     board, above the other widgets and below the lifted one. */
+  .guide { position: absolute; z-index: 4; pointer-events: none; }
+  .guide.v { top: 0; bottom: 0; width: 0; border-left: 1px dashed color-mix(in srgb, var(--pd-accent) 70%, transparent); }
+  .guide.h { left: 0; right: 0; height: 0; border-top: 1px dashed color-mix(in srgb, var(--pd-accent) 70%, transparent); }
+
+  /* pd-widget-frame, card variant: surface-1, hairline, radius 10, padding 16. */
+  .w { position: absolute; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px 16px; background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
+  .w-head { display: flex; align-items: center; gap: 8px; height: 20px; flex: none; }
+  .w-head .t { font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
+  .w-head > svg.i { color: var(--pd-text-muted); }
+  .w-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  /* Edit mode: the body is inert; the head gains the ⋯ button, the corner gets the resize grip. */
+  .edit .w { cursor: grab; }
+  .w .more { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); border: 0; background: none; }
+  .w .grip { position: absolute; right: 3px; bottom: 3px; width: 14px; height: 14px; color: var(--pd-text-muted); }
+  /* Edge handles sit on the border (half outside), shown on hover and focus: a raised pill, not a scroll thumb. */
+  .w .edge-r { position: absolute; right: -4px; top: 50%; width: 7px; height: 28px; margin-top: -14px; border-radius: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-border-control); }
+  .w .edge-b { position: absolute; bottom: -4px; left: 50%; height: 7px; width: 28px; margin-left: -14px; border-radius: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-border-control); }
+  .w.hover { border-color: var(--pd-border-strong); }
+  .w.focus { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring, var(--pd-accent)); outline-offset: 2px; }
+  .w.lifted { z-index: 5; box-shadow: var(--pd-shadow-3); transform: scale(1.02); cursor: grabbing; border-color: var(--pd-border-strong); }
+  .w.resizing { z-index: 5; border-color: var(--pd-border-strong); box-shadow: var(--pd-shadow-2); cursor: nwse-resize; }
+  /* The drop placeholder: the snapped target the engine returned. */
+  .ph { position: absolute; border-radius: var(--pd-radius-card); background: var(--pd-accent-tint); outline: 1.5px dashed var(--pd-accent); outline-offset: -1.5px; z-index: 1; }
+  :root[data-contrast=more] .ph { outline: 2px solid var(--pd-accent); }
+  .chip { position: absolute; z-index: 6; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); box-shadow: var(--pd-shadow-2); font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cursor { position: absolute; z-index: 9; width: 18px; height: 18px; pointer-events: none; }
+
+  /* ---------------- widget contents ---------------- */
+  .hero { font-size: var(--pd-text-display); line-height: var(--pd-lh-display); font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .hero small { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 3px; }
+  .spark { width: 100%; flex: 1 1 auto; min-height: 24px; display: block; }
+  .rowline { display: flex; justify-content: space-between; gap: 8px; min-height: 28px; align-items: center; border-bottom: 1px solid var(--pd-hairline); font-size: var(--pd-text-body); }
+  .rowline:last-child { border-bottom: 0; }
+  .rowline .v { font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
+  .ringrow { display: flex; align-items: center; gap: 16px; }
+  .ring { position: relative; width: 84px; height: 84px; flex: none; }
+  .ring svg { position: absolute; inset: 0; }
+  .ring b { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; font-size: 22px; line-height: 24px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; }
+  .ring b small { display: block; font-size: 11px; line-height: 14px; font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
+  .grade { font-size: 22px; line-height: 28px; font-weight: var(--pd-weight-semibold); color: var(--pd-success); }
+  .lbl { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); white-space: nowrap; }
+  .b-warn { background: var(--pd-warning-tint); color: var(--pd-warning); }
+  .b-info { background: var(--pd-info-tint); color: var(--pd-info); }
+  .finding { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--pd-hairline); }
+  .finding:last-child { border-bottom: 0; }
+  .finding .d { grid-column: 1 / 3; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .finding .s { grid-row: 1 / 3; grid-column: 3; color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+  .issue { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 0 10px; align-items: center; }
+  .issue .ic { grid-row: 1 / 3; width: 26px; height: 26px; border-radius: var(--pd-radius-control); display: grid; place-items: center; background: var(--pd-warning-tint); color: var(--pd-warning); }
+  .issue b { font-weight: var(--pd-weight-medium); }
+  .issue small { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .cores { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 12px; }
+  .cores i { border-radius: 2px; background: color-mix(in srgb, var(--pd-accent) var(--l), var(--pd-surface-2)); }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .facts span:nth-child(2n) { text-align: right; font-variant-numeric: tabular-nums; }
+  .diag h4 { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+  .diag p { margin: 0; color: var(--pd-text-muted); }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 12px; border-top: 1px solid var(--pd-hairline); margin-top: auto; }
+  .stats span { font-size: var(--pd-text-label); color: var(--pd-text-muted); display: grid; }
+  .stats b { font-size: var(--pd-text-body); color: var(--pd-text); font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; }
+  .ev { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; min-height: 28px; border-bottom: 1px solid var(--pd-hairline); }
+  .ev:last-child { border-bottom: 0; }
+  .ev .when { font-size: var(--pd-text-label); color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
+
+  /* ---------------- menus, annotations ---------------- */
+  .menu { position: absolute; z-index: 8; width: 236px; padding: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }
+  .mi { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px; border-radius: var(--pd-radius-control); }
+  .mi.on { background: var(--pd-hover, color-mix(in srgb, var(--pd-text) 7%, transparent)); }
+  .mi.dis { color: var(--pd-text-subtle); }
+  .mi .k { margin-left: auto; display: inline-flex; gap: 2px; }
+  .mi kbd { font: inherit; font-size: 11px; line-height: 16px; min-width: 18px; text-align: center; padding: 0 4px; border-radius: 4px; border: 1px solid var(--pd-border-strong); color: var(--pd-text-muted); }
+  .mi.dis kbd { color: var(--pd-text-subtle); border-color: var(--pd-hairline); }
+  .mi.danger { color: var(--pd-danger); }
+  .msep { height: 1px; margin: 4px 0; background: var(--pd-hairline); }
+  /* Not product UI: what a screen reader hears, shown for the review. */
+  .sr { position: absolute; z-index: 9; max-width: 360px; padding: 10px 12px; border-radius: 8px; border: 1px dashed var(--pd-border-strong); background: var(--pd-surface-2); font-size: var(--pd-text-label); line-height: 18px; }
+  .sr b { display: block; font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); text-transform: none; }
+  .toast { position: absolute; z-index: 9; right: 16px; bottom: 16px; width: 360px; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
+  .toast a { color: var(--pd-accent); font-weight: var(--pd-weight-semibold); margin-left: auto; }
+
+  /* Board-only crops (resize and keyboard figures). */
+  .crop { position: relative; overflow: hidden; background: var(--pd-bg); border: 1px solid var(--pd-hairline); border-radius: 10px; padding: 0 24px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Dyno's icon set (apps/dyno/app/src/app/shared/icons.ts); 24 px grid, 1.5 px stroke. -->
+    <symbol id="dashboard" viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/><path d="M4 19h16"/></symbol>
+    <symbol id="processes" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 13h8M8 16.5h5"/></symbol>
+    <symbol id="why" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M9.2 9.2a2 2 0 1 1 2.8 1.8c-.6.3-1 .8-1 1.5"/><circle cx="11" cy="15" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="health" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/><path d="M7.5 12h2.5l1.2-2.2 1.8 4.2 1.2-2h2.3"/></symbol>
+    <symbol id="reports" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></symbol>
+    <symbol id="sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx=".5"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></symbol>
+    <symbol id="disk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="11" r="4"/><circle cx="12" cy="11" r=".9" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="network" viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a14.5 14.5 0 0 1 20 0"/><circle cx="12" cy="19.2" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+    <symbol id="gauge" viewBox="0 0 24 24"><path d="M3.5 16a8.5 8.5 0 1 1 17 0"/><path d="M12 16 8.5 10.5"/><path d="M6.5 16h11"/></symbol>
+    <symbol id="alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17.2" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.25" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+    <symbol id="redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+    <symbol id="edit" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="11" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M14 18.5h6M17 15.5v6"/></symbol>
+    <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+    <symbol id="arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="wider" viewBox="0 0 24 24"><path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"/></symbol>
+    <symbol id="narrower" viewBox="0 0 24 24"><path d="M3 12h6M15 12h6M6 8l4 4-4 4M18 8l-4 4 4 4"/></symbol>
+    <symbol id="taller" viewBox="0 0 24 24"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/></symbol>
+    <symbol id="shorter" viewBox="0 0 24 24"><path d="M12 3v6M12 15v6M8 6l4 4 4-4M8 18l4-4 4 4"/></symbol>
+    <symbol id="tune" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5h10L18 7M9 7V4.5h6V7"/></symbol>
+    <symbol id="resize-grip" viewBox="0 0 14 14"><path d="M13 5 5 13M13 9l-4 4"/></symbol>
+    <symbol id="keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 14.5h10"/><circle cx="6.5" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="10" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="13.5" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="17" cy="10" r=".9" fill="currentColor" stroke="none"/></symbol>
+  </defs>
+</svg>
+
+<!-- 1. Moving a widget: Battery dragged onto Disk activity's place (same size: the two swap). -->
+<figure id="f-edit-drag"><figcaption>Edit mode, dragging Battery onto Disk activity: the placeholder is the snapped target; Disk activity is previewed in Battery's old place (same size: a swap).</figcaption></figure>
+<!-- 2. Resizing from the corner: Top apps by CPU 6 x 6 to 6 x 8; Recent events pushed down by two rows. -->
+<figure id="f-edit-resize"><figcaption>Corner resize with the size chip; the neighbour below is pushed.</figcaption></figure>
+<!-- 3. Keyboard: Disk activity selected, moved right with the arrow key (swapped with Network down), its menu open. -->
+<figure id="f-edit-keyboard"><figcaption>Keyboard focus, the widget menu with its keys, and the announcement.</figcaption></figure>
+<!-- 4. A narrow window: 1,000 px, sidebar open, a 736 px board: the derived 6-column arrangement. -->
+<figure id="f-narrow"><figcaption>A narrow window: the derived arrangement; editing needs a wider board.</figcaption></figure>
+
+<script>
+  // ---------------------------------------------------------------- helpers
+  const icon = (id, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
+  function series(seed, n, base, amp) {
+    let x = seed, out = [];
+    for (let i = 0; i < n; i++) { x = (x * 9301 + 49297) % 233280; const r = x / 233280; base += (r - 0.5) * amp * 0.35; out.push(Math.max(4, Math.min(96, base + Math.sin(i / 3 + seed) * amp * 0.25))); }
+    return out;
+  }
+  function spark(seed, base, amp, color = 'var(--pd-accent)', n = 60) {
+    const v = series(seed, n, base, amp), w = 300, h = 60, step = w / (n - 1);
+    const pts = v.map((y, i) => [i * step, h - 1 - (y / 100) * (h - 2)]);
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}L${w} ${h}L0 ${h}Z" fill="${color}" fill-opacity="0.16"/><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+  function ring(value, color, inner) {
+    const r = 37, c = 2 * Math.PI * r;
+    return `<div class="ring"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="${r}" fill="none" stroke="var(--pd-surface-2)" stroke-width="7"/><circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(c * value / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 42 42)"/></svg><b>${inner}</b></div>`;
+  }
+
+  // ---------------------------------------------------------------- the widgets (Dyno's kinds, simplified)
+  const K = {
+    health: { title: 'Health', icon: 'health', body: () => `
+      <div class="ringrow">${ring(80, 'var(--pd-success)', `80<small>of 100</small>`)}<div><div class="lbl">Health</div><div class="grade">Good</div><div class="lbl">+3 vs last week</div></div></div>
+      <div class="lbl" style="margin-top:4px">What holds it back</div>
+      <div><div class="finding"><span class="badge b-warn">${icon('alert', 's14')}Warning</span><span class="truncate">Macintosh HD is 78% full</span><span class="s">−8</span><span class="d truncate">210 GB free of 953 GB; full in about 41 days.</span></div>
+      <div class="finding"><span class="badge b-warn">${icon('alert', 's14')}Warning</span><span class="truncate">Not restarted for 12 days</span><span class="s">−6</span><span class="d truncate">An update finishes on restart.</span></div>
+      <div class="finding"><span class="badge b-info">${icon('info', 's14')}Info</span><span class="truncate">9 apps start at sign-in</span><span class="s">−4</span><span class="d truncate">The desktop takes 48 s to settle.</span></div></div>` },
+    diag: { title: 'Why is my computer slow?', icon: 'why', body: () => `<div class="diag" style="display:flex;flex-direction:column;gap:10px;height:100%">
+      <h4>A Rust build is using most of your CPU</h4>
+      <div class="issue" style="grid-template-columns:20px minmax(0,1fr)">${icon('cpu', 'muted')}<b>rustc is using 42% CPU</b></div>
+      <p>cargo is compiling dyno-core with 6 parallel rustc processes. Everything else waits for a free core; it ends when the build finishes.</p>
+      <p class="lbl">rustc (6) 42% CPU · CPU total 77% · for 6 min · confidence 86%</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="btn">Open Processes</span><span class="btn ghost">Show 3 other possible causes</span></div>
+      <div class="stats"><span>CPU<b>77%</b></span><span>Memory<b>52%</b></span><span>Disk<b>232 MB/s</b></span><span>Busiest<b class="truncate">cargo</b></span></div></div>` },
+    issues: { title: 'Issues', icon: 'alert', body: () => `
+      <div class="issue"><span class="ic">${icon('trend', 's14')}</span><b class="truncate">Teams memory keeps growing</b><small class="truncate">Memory growth · Microsoft Teams</small></div>
+      <div class="issue"><span class="ic">${icon('alert', 's14')}</span><b class="truncate">mds_stores spikes every 15 min</b><small class="truncate">Periodic spikes · Spotlight</small></div>
+      <div class="issue"><span class="ic">${icon('trend', 's14')}</span><b class="truncate">VirtualBox restarted 6 times</b><small class="truncate">Restart loop · VirtualBox</small></div>` },
+    cpu: { title: 'CPU', icon: 'cpu', body: () => `<span class="hero">77<small>%</small></span>${spark(3, 70, 26)}
+      <div class="cores">${[30, 34, 38, 41, 80, 82, 85, 70, 88, 90, 76, 84, 79, 86].map((l) => `<i style="--l:${l}%"></i>`).join('')}</div>
+      <div class="facts"><span>Frequency</span><span>4.42 GHz · base 1.00 GHz</span><span>Cores</span><span>14 logical · busiest 100%</span></div>` },
+    memory: { title: 'Memory', icon: 'trend', body: () => `<span class="hero">52<small>%</small></span>${spark(11, 52, 10)}` },
+    disk: { title: 'Disk activity', icon: 'trend', body: () => `<span class="hero">84<small>%</small></span>${spark(5, 80, 14)}` },
+    net: { title: 'Network down', icon: 'trend', body: () => `<span class="hero">4.3<small>MB/s</small></span>${spark(9, 40, 60)}` },
+    gpu: { title: 'GPU', icon: 'trend', body: () => `<span class="hero">6<small>%</small></span>${spark(21, 20, 70)}` },
+    battery: { title: 'Battery', icon: 'gauge', body: () => `<div class="ringrow">${ring(86, 'var(--pd-accent)', '86')}<span class="lbl">Charging · 1 h 10 min to full</span></div>` },
+    topcpu: { title: 'Top apps by CPU', icon: 'processes', body: () => '<div>' + [['Rust build (cargo)', '43%'], ['Google Chrome', '6.2%'], ['Visual Studio Code', '3.6%'], ['VirtualBox VM', '3.5%'], ['Kernel', '2.9%'], ['WindowServer', '2.1%'], ['Spotlight', '1.4%']].map(([n, v]) => `<div class="rowline"><span class="truncate">${n}</span><span class="v">${v}</span></div>`).join('') + '</div>' },
+    topmem: { title: 'Top apps by memory', icon: 'processes', body: () => '<div>' + [['Google Chrome', '4.31 GB'], ['VirtualBox VM', '4.09 GB'], ['Rust build (cargo)', '3.15 GB'], ['Visual Studio Code', '2.21 GB'], ['Microsoft Teams', '1.26 GB']].map(([n, v]) => `<div class="rowline"><span class="truncate">${n}</span><span class="v">${v}</span></div>`).join('') + '</div>' },
+    events: { title: 'Recent events', icon: 'bell', body: () => '<div>' + [['alert', 'CPU above 90% for 5 min', '14:21'], ['alert', 'Memory pressure high', '13:58'], ['bell', 'Alarm cleared: Disk almost full', '12:04'], ['settings', 'Dyno lowered the priority of mds_stores', '11:40'], ['bell', 'Backup finished', '09:12'], ['alert', 'Temperature 92 °C', '08:55']].map(([i, t, w]) => `<div class="ev">${icon(i, 's14 subtle')}<span class="truncate">${t}</span><span class="when">${w}</span></div>`).join('') + '</div>' },
+    consumers: { title: 'Biggest consumers', icon: 'processes', body: () => '<div>' + [['Rust build (cargo)', '5 h 12 min CPU'], ['Google Chrome', '2 h 40 min CPU'], ['VirtualBox VM', '1 h 05 min CPU'], ['Spotlight', '38 min CPU'], ['Microsoft Teams', '31 min CPU'], ['Kernel', '22 min CPU']].map(([n, v]) => `<div class="rowline"><span class="truncate">${n}</span><span class="v">${v}</span></div>`).join('') + '</div>' },
+    history: { title: 'History', icon: 'trend', body: () => spark(7, 45, 40) },
+    disktrend: { title: 'Disk space trend', icon: 'disk', body: () => spark(13, 60, 8, 'var(--pd-text-muted)') },
+  };
+
+  // The upgraded Overview (ADR 0044 §4): Dyno 1.0's default layout at schema 2. [kind, x, y, w, h]
+  const L0 = [
+    ['health', 0, 0, 6, 10], ['diag', 6, 0, 6, 10],
+    ['issues', 0, 10, 3, 6], ['cpu', 3, 10, 6, 6], ['memory', 9, 10, 3, 6],
+    ['disk', 0, 16, 3, 4], ['net', 3, 16, 3, 4], ['gpu', 6, 16, 3, 4], ['battery', 9, 16, 3, 4],
+    ['topcpu', 0, 20, 6, 6], ['topmem', 6, 20, 6, 6],
+    ['events', 0, 26, 6, 7], ['consumers', 6, 26, 6, 7],
+    ['history', 0, 33, 12, 8], ['disktrend', 0, 41, 12, 6],
+  ];
+  const with_ = (base, changes) => base.map((r) => (changes[r[0]] ? [r[0], ...changes[r[0]]] : r));
+
+  const ROW = 24, GAP = 16;
+  const geo = (cols, width) => { const cw = (width - (cols - 1) * GAP) / cols; return { cw, rect: (x, y, w, h) => ({ left: x * (cw + GAP), top: y * (ROW + GAP), width: w * cw + (w - 1) * GAP, height: h * ROW + (h - 1) * GAP }) }; };
+  const px = (r) => `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px`;
+
+  function frame(kind, r, { edit = false, cls = '', style = '', grips = 'corner' } = {}) {
+    const k = K[kind];
+    const tools = edit ? `<button class="more" aria-label="More for ${k.title}">${icon('more')}</button>` : '';
+    const handles = edit ? `<svg class="grip" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><use href="#resize-grip"/></svg>${grips === 'all' ? '<i class="edge-r"></i><i class="edge-b"></i>' : ''}` : '';
+    return `<section class="w ${cls}" style="${px(r)};${style}" aria-label="${k.title}"><div class="w-head">${icon(k.icon)}<span class="t truncate">${k.title}</span>${tools}</div><div class="w-body">${k.body()}</div>${handles}</section>`;
+  }
+
+  function board(layout, { cols = 12, width, edit = false, rows = 60, guide = null, extra = '', per = {} } = {}) {
+    const g = geo(cols, width);
+    let guides = '';
+    if (guide) {
+      const r = g.rect(...guide.rect);
+      if (guide.v) guides += `<i class="guide v" style="left:${r.left}px"></i><i class="guide v" style="left:${r.left + r.width}px"></i>`;
+      if (guide.h) guides += `<i class="guide h" style="top:${r.top + r.height}px"></i>`;
+    }
+    const items = layout.map(([kind, x, y, w, h]) => frame(kind, g.rect(x, y, w, h), { edit, ...(per[kind] || {}) })).join('');
+    const height = rows * (ROW + GAP) - GAP;
+    return { html: `<div class="board${edit ? ' edit' : ''}" style="width:${width}px;height:${height}px">${items}${guides}${extra}</div>`, g };
+  }
+
+  const NAV = [['dashboard', 'Dashboard'], ['processes', 'Processes'], ['why', 'Why slow'], ['gauge', 'Throttling'], ['alert', 'Issues'], ['disk', 'Disk map'], ['network', 'Network'], ['trend', 'Counters'], ['bell', 'Alarms'], ['reports', 'Reports'], ['health', 'Health'], ['settings', 'Diagnostics']];
+  function windowFrame(w, h, inner) {
+    return `<div class="win" style="width:${w}px;height:${h}px">
+      <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span>${icon('sidebar', 'tb-icon')}<span class="app">Dyno</span></div>
+      <div class="body"><nav class="side">${NAV.map(([i, t], n) => `<div class="nav${n === 0 ? ' on' : ''}">${icon(i)}<span>${t}</span></div>`).join('')}</nav><main class="main"><div class="page">${inner}</div></main></div>
+      <div class="status"><span>${icon('reports', 's14')} Jobs</span><span><span class="dot"></span>Monitoring</span></div></div>`;
+  }
+  const head = `<div class="page-head"><div><h1>Dashboard</h1><p class="num">up 12 d 3 h</p></div><span class="spacer"></span><span class="btn">${icon('processes')} Open Processes</span></div>`;
+  const editbar = `<div class="editbar"><div class="what"><b>Editing layout</b><span class="truncate">Drag to move. Drag an edge or the corner to resize. Arrow keys move the selected widget; Shift with arrow keys resizes.</span></div><span class="spacer"></span>
+      <button class="btn ghost icon" aria-label="Undo">${icon('undo')}</button><button class="btn ghost icon" aria-label="Redo" disabled>${icon('redo')}</button><span class="vsep"></span>
+      <span class="btn">${icon('plus')} Add widget</span><button class="btn ghost icon" aria-label="More layout actions">${icon('more')}</button><span class="btn primary">Done</span></div>`;
+  const cursor = (x, y, kind = 'grab') => kind === 'grab'
+    ? `<svg class="cursor" style="left:${x}px;top:${y}px" viewBox="0 0 18 18"><path d="M5 8V5.5a1 1 0 0 1 2 0V8m0-3.5V3.5a1 1 0 0 1 2 0V8m0-4a1 1 0 0 1 2 0V8m0-2.5a1 1 0 0 1 2 0V11a5 5 0 0 1-5 5H8.5a4 4 0 0 1-3.2-1.6L3 11.3a1 1 0 0 1 1.5-1.3L5 10.5V8" fill="var(--pd-surface-1)" stroke="var(--pd-text)" stroke-width="1.1" stroke-linejoin="round"/></svg>`
+    : `<svg class="cursor" style="left:${x}px;top:${y}px" viewBox="0 0 18 18"><path d="M2 2h6L6 4l8 8 2-2v6h-6l2-2-8-8-2 2z" fill="var(--pd-surface-1)" stroke="var(--pd-text)" stroke-width="1.1" stroke-linejoin="round"/></svg>`;
+
+  // ---------------------------------------------------------------- 1. drag (1920 x 1080 window; the board is 1,440 px, the family maximum)
+  {
+    const W = 1440;
+    const preview = with_(L0, { disk: [9, 16, 3, 4] }).filter((r) => r[0] !== 'battery');
+    const g = geo(12, W);
+    const ph = g.rect(0, 16, 3, 4);
+    const lifted = g.rect(0, 16, 3, 4); lifted.left += 38; lifted.top -= 22;
+    const extra = `<div class="ph" style="${px(ph)}"></div>` + frame('battery', lifted, { edit: true, cls: 'lifted' }) + cursor(lifted.left + 150, lifted.top + 18);
+    const b = board(preview, { width: W, edit: true, rows: 24, guide: { rect: [0, 16, 3, 4], v: true }, extra, per: { disk: { cls: 'moved' } } });
+    const inner = head + editbar + b.html;
+    document.getElementById('f-edit-drag').insertAdjacentHTML('afterbegin', windowFrame(1920, 1080, `<div style="max-width:1440px">${inner}</div>`));
+  }
+
+  // ---------------------------------------------------------------- 2. resize (board crop, scrolled to rows 15-36)
+  {
+    const W = 1440;
+    const layout = with_(L0, { topcpu: [0, 20, 6, 8], events: [0, 28, 6, 7] });
+    const g = geo(12, W);
+    const r = g.rect(0, 20, 6, 8);
+    const live = { ...r, height: r.height - 22 };   // the frame follows the pointer; the placeholder is snapped
+    const extra = `<div class="ph" style="${px(r)}"></div>` + frame('topcpu', live, { edit: true, cls: 'resizing', grips: 'all' })
+      + `<span class="chip" style="left:${live.left + live.width - 40}px;top:${live.top + live.height + 10}px">6 × 8</span>` + cursor(live.left + live.width - 6, live.top + live.height - 6, 'resize');
+    const b = board(layout.filter((x) => x[0] !== 'topcpu'), { width: W, edit: true, rows: 40, extra, per: { topmem: { cls: 'hover', grips: 'all' } } });
+    document.getElementById('f-edit-resize').insertAdjacentHTML('afterbegin', `<div class="crop" style="width:${W + 48}px;height:760px"><div style="margin-top:${-16 * 40 + 16}px">${b.html}</div></div>`);
+  }
+
+  // ---------------------------------------------------------------- 3. keyboard (board crop, rows 9-31)
+  {
+    const W = 1440;
+    const layout = with_(L0, { net: [0, 16, 3, 4], disk: [3, 16, 3, 4] });
+    const g = geo(12, W);
+    const d = g.rect(3, 16, 3, 4);
+    const mx = d.left + d.width - 236 + 4, my = d.top + 44;
+    const menu = `<div class="menu" style="left:${mx}px;top:${my}px" role="menu">
+      <div class="mi">${icon('arrow-left')}Move left<span class="k"><kbd>←</kbd></span></div>
+      <div class="mi on">${icon('arrow-right')}Move right<span class="k"><kbd>→</kbd></span></div>
+      <div class="mi">${icon('arrow-up')}Move up<span class="k"><kbd>↑</kbd></span></div>
+      <div class="mi">${icon('arrow-down')}Move down<span class="k"><kbd>↓</kbd></span></div>
+      <div class="msep"></div>
+      <div class="mi">${icon('wider')}Wider<span class="k"><kbd>⇧</kbd><kbd>→</kbd></span></div>
+      <div class="mi">${icon('narrower')}Narrower<span class="k"><kbd>⇧</kbd><kbd>←</kbd></span></div>
+      <div class="mi">${icon('taller')}Taller<span class="k"><kbd>⇧</kbd><kbd>↓</kbd></span></div>
+      <div class="mi dis">${icon('shorter')}Shorter<span class="k"><kbd>⇧</kbd><kbd>↑</kbd></span></div>
+      <div class="msep"></div>
+      <div class="mi">${icon('tune')}Options…</div>
+      <div class="mi danger">${icon('trash')}Remove<span class="k"><kbd>⌫</kbd></span></div></div>`;
+    const sr = `<div class="sr" style="position:static;max-width:none;margin-top:12px"><b>${icon('keyboard', 's14')} Not product UI: what a screen reader says after → (polite live region)</b>“Disk activity moved right, after Network down. Position 7 of 15.” Focus stays on Disk activity. Shorter is disabled in the menu: 4 rows is the Graph kind's smallest height.</div>`;
+    const b = board(layout, { width: W, edit: true, rows: 34, extra: menu, per: { disk: { cls: 'focus' } } });
+    document.getElementById('f-edit-keyboard').insertAdjacentHTML('afterbegin', `<div class="crop" style="width:${W + 48}px;height:700px"><div style="margin-top:${-10 * 40 + 16}px">${b.html}</div></div>${sr}`);
+  }
+
+  // ---------------------------------------------------------------- 4. narrow (1,000 x 760 window; 736 px board, 6 columns, derived)
+  {
+    const W = 1000 - 216 - 48;
+    const derived = [
+      ['health', 0, 0, 3, 10], ['diag', 3, 0, 3, 10],
+      ['issues', 0, 10, 3, 6], ['cpu', 3, 10, 3, 6],
+      ['memory', 0, 16, 3, 6], ['disk', 3, 16, 3, 4], ['net', 3, 20, 3, 4], ['gpu', 0, 22, 3, 4], ['battery', 3, 24, 3, 4],
+      ['topcpu', 0, 26, 3, 6], ['topmem', 3, 28, 3, 6],
+    ];
+    const bar = `<div class="bar"><span class="muted">15 widgets</span><span class="spacer"></span><span class="reason">${icon('info', 's14')}Arranging needs a wider dashboard. Make the window wider or collapse the sidebar.</span><button class="btn" disabled>${icon('edit')} Edit layout</button></div>`;
+    const b = board(derived, { cols: 6, width: W, rows: 34 });
+    document.getElementById('f-narrow').insertAdjacentHTML('afterbegin', windowFrame(1000, 900, head + bar + b.html));
+  }
+</script>
+</body>
+</html>
