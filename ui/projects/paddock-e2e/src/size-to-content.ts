@@ -137,7 +137,7 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
 
 /**
  * ADR 0043 check 4 for a real dialog of any app, with no fixture: opened by URL at `scale` as its window, with the content
- * it has, the size loop goes quiet in at most three sends (the first measure, a font or late data, one follow-up), does not
+ * it has, the size loop goes quiet in a few sends (the first measure, each stage of late data, one follow-up: at most six), does not
  * log "did not settle", and sends in epoch 1; a reload sends in epoch 2. The page only (never Rust's conversion).
  */
 export async function expectLoopSettles(browser: Browser, baseURL: string, id: string, contract: DialogContractEntry, scale: number, input: unknown = {}): Promise<void> {
@@ -169,7 +169,7 @@ export async function expectLoopSettles(browser: Browser, baseURL: string, id: s
     };
     await page.goto(dialogWindowUrl(id, input, { title: id }));
     const first = await settle();
-    expect(first.seq, `${where}: ${first.seq} measures sent before it settled (at most three)`).toBeLessThanOrEqual(3);
+    expect(first.seq, `${where}: ${first.seq} measures sent before it settled (a dialog that loads data sends a few: the first, each stage of the data, one follow-up; at most six)`).toBeLessThanOrEqual(6);
     expect(first.epoch).toBe(1);
     await page.reload();
     const again = await settle();

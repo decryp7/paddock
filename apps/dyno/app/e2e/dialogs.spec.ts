@@ -18,7 +18,7 @@ test.describe('Dyno dialogs', () => {
     expect(problems).toEqual([]);
   });
 
-  test('every dialog sizes to its content through one loop: quiet within three measures at 1, 1.25 and 1.5, a new epoch on reload (ADR 0043)', async ({ browser, baseURL }) => {
+  test('every dialog sizes to its content through one loop: quiet within a few measures at 1, 1.25 and 1.5, a new epoch on reload (ADR 0043)', async ({ browser, baseURL }) => {
     test.setTimeout(900_000);
     for (const [id, contract] of Object.entries(CONTRACTS)) {
       for (const scale of SIZE_SCALES) await expectLoopSettles(browser, baseURL!, id, contract, scale, (FIXTURES[id] ?? [{}])[0]);

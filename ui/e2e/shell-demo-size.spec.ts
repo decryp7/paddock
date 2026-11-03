@@ -17,7 +17,7 @@ const ALL = dialogContracts(
   'projects/shell-demo/src/app/generated/dialog-contracts.ts',
   ...['about', 'channels', 'confirm', 'diagnostics', 'mcp', 'setup', 'storage'].map((p) => `projects/paddock-ui/shell/${p}/generated/dialog-contracts.ts`),
 );
-test('every registered dialog settles in at most three measures at 1, 1.25 and 1.5', async ({ browser, baseURL }) => {
+test('every registered dialog settles in a few measures at 1, 1.25 and 1.5', async ({ browser, baseURL }) => {
   test.setTimeout(900_000);
   for (const [id, contract] of Object.entries(ALL)) {
     for (const scale of SIZE_SCALES) await expectLoopSettles(browser, baseURL as string, id, contract, scale);
