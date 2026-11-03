@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-service`: launchd's job report carries the pid and the last exit; `System::write_private`
+- `parse::JobReport` has three new fields read from the job's own keys of `launchctl print` (nested blocks skipped, as before): `pid` (`pid = <n>`,
+  only while it runs), `last_exit_code` (`last exit code = <n>`, `None` before the first exit or after a signal) and `last_signal` (`last terminating
+  signal = …`). A launcher that runs a program as a launchd job tracks it by them (Dyno ADR 0026, amendment 2).
+- `exit_config` now means exactly exit code 78, read from the parsed code; before, any line starting with `last exit code = 78` counted (780 too). The
+  copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
+- `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
+  calls `write`, so other implementations of the port are unchanged.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

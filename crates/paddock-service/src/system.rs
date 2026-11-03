@@ -90,6 +90,10 @@ impl System for RealSystem {
         paddock_env::write_atomic(path, text.as_bytes(), false).map_err(std::io::Error::other)
     }
 
+    fn write_private(&mut self, path: &Path, text: &str) -> std::io::Result<()> {
+        paddock_env::write_atomic(path, text.as_bytes(), true).map_err(std::io::Error::other)
+    }
+
     fn remove(&mut self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_file(path)
     }
@@ -130,6 +134,25 @@ pub fn stable_copy(exe: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_is_owner_only_and_a_plain_one_is_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (private, plain) = (dir.path().join("job.plist"), dir.path().join("unit"));
+        let mut sys = RealSystem::new();
+        sys.write_private(&private, "x").unwrap();
+        sys.write(&plain, "y").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&private), 0o600);
+        assert_ne!(
+            mode(&plain) & 0o044,
+            0,
+            "a plain write stays readable by others"
+        );
+        assert_eq!(sys.read(&private).unwrap(), "x");
+    }
+
     use super::*;
 
     #[cfg(unix)]
