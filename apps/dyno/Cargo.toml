@@ -13,7 +13,8 @@ members = [
 ]
 resolver = "2"
 # The privileged helper is not part of Dyno 1.0: its source stays for 1.1 (ADR 0022) but is neither built nor bundled.
-exclude = ["crates/dyno-helper"]
+# vendor/: patched copies of third-party crates (vendor/PATCHES.md), not members.
+exclude = ["crates/dyno-helper", "vendor"]
 
 # Shared by every member: `edition.workspace = true` etc.
 [workspace.package]
@@ -66,3 +67,7 @@ missing_docs = "warn"
 [workspace.lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
+
+# tray-icon with a GUID provider (vendor/PATCHES.md, ADR 0028): Windows keeps each tray icon's place by GUID.
+[patch.crates-io]
+tray-icon = { path = "vendor/tray-icon" }

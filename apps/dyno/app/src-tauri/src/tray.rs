@@ -6,6 +6,7 @@
 //! Before the first update, and while the agent is away, the static template icons from `icons/tray` stand in.
 
 use crate::logging;
+use crate::tray_identity;
 use crate::tray_model::{Frame, ItemSpec};
 use paddock_window::popover::Rect;
 use paddock_window::tauri::{PopoverSpec, Popovers, Tray, TrayBackend};
@@ -76,7 +77,7 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
 fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
     let menu = build_menu(app)?;
     let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))?;
-    TrayIconBuilder::with_id(tray_id(&spec.id))
+    let tray = TrayIconBuilder::with_id(tray_id(&spec.id))
         .tooltip("Dyno")
         .icon(icon)
         .icon_as_template(cfg!(target_os = "macos"))
@@ -104,9 +105,48 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
                 }
             }
         })
-        .build(app)?;
+        .build(app)
+        .inspect_err(|e| logging::info(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
+    let identity = apply_identity(&tray, &spec.id);
+    logging::info(&format!(
+        "tray icon {} created (metric {}, {identity})",
+        tray_id(&spec.id),
+        crate::tray_model::metric_name(&spec.metric)
+    ));
     lock(&app.state::<TrayState>().items).insert(spec.id.clone());
     Ok(())
+}
+
+/// Gives the icon its stable OS identity (ADR 0028) and returns what the log says about it. Windows took its GUID when the icon
+/// was built (the provider registered in [`sync_items`]); macOS gets its autosave name here; Linux's id is the tray id.
+#[cfg(target_os = "macos")]
+fn apply_identity(tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
+    let name = tray_identity::autosave_name(item);
+    let for_closure = name.clone();
+    let set = tray.with_inner_tray_icon(move |t| match t.ns_status_item() {
+        Some(status_item) => {
+            status_item.setAutosaveName(Some(&objc2_foundation::NSString::from_str(&for_closure)));
+            true
+        }
+        None => false,
+    });
+    match set {
+        Ok(true) => format!("autosave name {name}"),
+        Ok(false) => format!("autosave name {name} NOT set: the icon has no status item"),
+        Err(e) => format!("autosave name {name} NOT set: {e}"),
+    }
+}
+
+/// See the macOS version.
+#[cfg(windows)]
+fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
+    format!("GUID {}", tray_identity::guid_text(tray_identity::guid_for(item)))
+}
+
+/// See the macOS version.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
+    format!("status notifier id {}", tray_id(item))
 }
 
 /// Makes the tray icons match `specs`: every existing one is replaced (a click handler holds what its item opened when it
@@ -115,6 +155,8 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
     }
+    #[cfg(windows)]
+    tray_icon::set_guid_provider(tray_identity::guid_for_tray_id);
     let state = app.state::<TrayState>();
     let old: Vec<String> = lock(&state.items).drain().collect();
     for id in old {

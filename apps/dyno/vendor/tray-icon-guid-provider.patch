@@ -1,0 +1,34 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -417,6 +417,13 @@
+     /// See [`TrayIcon::new`] for more info.
+     pub fn with_id<I: Into<TrayIconId>>(id: I, attrs: TrayIconAttributes) -> Result<Self> {
+         let id = id.into();
++        // Paddock patch: an icon built without a GUID (Tauri's builder has no setter) asks the registered provider.
++        let mut attrs = attrs;
++        if attrs.guid.is_none() {
++            if let Some(provider) = GUID_PROVIDER.get() {
++                attrs.guid = provider(id.as_ref());
++            }
++        }
+         Ok(Self {
+             tray: Rc::new(RefCell::new(platform_impl::TrayIcon::new(
+                 id.clone(),
+@@ -706,6 +713,17 @@
+ 
+ /// A reciever that could be used to listen to tray events.
+ pub type TrayIconEventReceiver = Receiver<TrayIconEvent>;
++/// Paddock patch (see `apps/dyno/vendor/PATCHES.md`): maps a tray icon id to its Windows GUID.
++pub type GuidProvider = fn(&str) -> Option<u128>;
++
++static GUID_PROVIDER: OnceCell<GuidProvider> = OnceCell::new();
++
++/// Registers the provider that picks the GUID of every icon created without one by id (once per process; later calls are
++/// ignored). Windows only uses the result; elsewhere it is ignored like [`TrayIconAttributes::guid`].
++pub fn set_guid_provider(provider: GuidProvider) {
++    let _ = GUID_PROVIDER.set(provider);
++}
++
+ type TrayIconEventHandler = Box<dyn Fn(TrayIconEvent) + Send + Sync + 'static>;
+ 
+ static TRAY_CHANNEL: Lazy<(Sender<TrayIconEvent>, TrayIconEventReceiver)> = Lazy::new(unbounded);

@@ -8,6 +8,7 @@
 
 use dyno_core::protocol::LiveUpdate;
 use dyno_core::tray::{self, Icon, IconMetric, IconStyle};
+use dyno_core::widgets::menu_bar::MAX_ITEMS;
 use dyno_core::widgets::{read_metric, MenuBarItem, Metric, Thresholds};
 use paddock_widgets::Placement;
 use std::collections::VecDeque;
@@ -116,10 +117,10 @@ pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpe
 
 /// Items from `metric:glyph` entries separated by commas, e.g. `cpu:ring,memory:number,cpu:cores` (metrics
 /// `cpu memory swap disk network gpu temp battery`; glyphs `bars graph meter ring number graphnumber cores`). Anything
-/// unrecognised is skipped; at most 8 items.
+/// unrecognised is skipped; at most [`MAX_ITEMS`] items.
 pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     let mut out: Vec<ItemSpec> = Vec::new();
-    for entry in text.split(',').take(8) {
+    for entry in text.split(',').take(usize::from(MAX_ITEMS)) {
         let parts: Vec<&str> = entry.trim().split(':').collect();
         let metric = match parts.first().copied() {
             Some("cpu") => Metric::CpuTotal,
@@ -405,6 +406,29 @@ mod tests {
     }
 
     #[test]
+    fn more_than_four_items_each_get_their_own_spec_and_frame() {
+        let metrics = [
+            Metric::CpuTotal,
+            Metric::Memory,
+            Metric::Swap,
+            Metric::DiskActivity,
+            Metric::NetworkDown,
+            Metric::GpuLoad,
+            Metric::Temperature,
+            Metric::Battery,
+        ];
+        let s = assign_ids(metrics.iter().cloned().map(|metric| (1, MenuBarItem::Ring { metric })));
+        let specs = items_from_settings(&s);
+        assert_eq!(specs.len(), 8);
+        let ids: std::collections::HashSet<&str> = specs.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids.len(), 8, "every item has its own id");
+        let mut items = TrayItems::new(specs, 18);
+        assert_eq!(items.frames(&update(10.0), true).len(), 8, "every item draws");
+        let text = (0..usize::from(MAX_ITEMS) + 5).map(|_| "cpu:ring").collect::<Vec<_>>().join(",");
+        assert_eq!(parse_items(&text).len(), usize::from(MAX_ITEMS));
+    }
+
+    #[test]
     fn items_parse_from_text_and_junk_is_skipped() {
         let items = parse_items("cpu:ring, memory:number, gpu:nope, disk:cores, cpu:cores, bogus:ring");
         let got: Vec<(&str, Glyph)> = items.iter().map(|i| (i.id.as_str(), i.glyph)).collect();
@@ -413,7 +437,6 @@ mod tests {
             [("cpu-1", Glyph::Ring), ("memory-2", Glyph::Number), ("cpu-3", Glyph::CoreBars)]
         );
         assert!(items.iter().all(|i| i.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')));
-        assert_eq!(parse_items(&"cpu:ring,".repeat(20)).len(), 8, "at most eight items");
         assert!(parse_items("").is_empty());
     }
 

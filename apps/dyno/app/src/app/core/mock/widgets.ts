@@ -78,18 +78,18 @@ const DASHBOARD_KINDS = [
 ] as KindInfo<DashboardKind>[];
 
 const MENU_KINDS = [
-  info('lineGraph', 'Line graph', 'A small history line', 'graph', [1], 4),
-  info('verticalBars', 'Bars', 'Vertical bars', 'bars', [1], 4),
-  info('horizontalMeter', 'Meter', 'A horizontal meter', 'meter', [1], 4),
-  info('ring', 'Ring', 'A percentage as a ring', 'ring', [1], 4),
-  info('number', 'Number', 'The value as text', 'number', [1], 4),
-  info('graphAndNumber', 'Graph and number', 'A line with the number beside it', 'graph', [1], 4),
+  info('lineGraph', 'Line graph', 'A small history line', 'graph', [1], 32),
+  info('verticalBars', 'Bars', 'Vertical bars', 'bars', [1], 32),
+  info('horizontalMeter', 'Meter', 'A horizontal meter', 'meter', [1], 32),
+  info('ring', 'Ring', 'A percentage as a ring', 'ring', [1], 32),
+  info('number', 'Number', 'The value as text', 'number', [1], 32),
+  info('graphAndNumber', 'Graph and number', 'A line with the number beside it', 'graph', [1], 32),
 ] as KindInfo<MenuBarKind>[];
 
 const SURFACES: Record<DynoSurface, { surface: SurfaceInfo<DynoSurface>; kinds: KindInfo<string>[] }> = {
   popover: { surface: { id: 'popover', noun: 'popup', columns: 2, maxPlacements: 8, minPlacements: 0, maxUserPresets: 0 }, kinds: POPOVER_KINDS },
   dashboard: { surface: { id: 'dashboard', noun: 'dashboard', columns: 12, maxPlacements: 32, minPlacements: 1, maxUserPresets: 8 }, kinds: DASHBOARD_KINDS },
-  menuBar: { surface: { id: 'menuBar', noun: 'menu bar', columns: 1, maxPlacements: 4, minPlacements: 1, maxUserPresets: 0 }, kinds: MENU_KINDS },
+  menuBar: { surface: { id: 'menuBar', noun: 'menu bar', columns: 1, maxPlacements: 32, minPlacements: 1, maxUserPresets: 0 }, kinds: MENU_KINDS },
 };
 
 const dw = (kind: DashboardKind, metric: Metric, hot?: [number, number]): DashboardWidget => ({

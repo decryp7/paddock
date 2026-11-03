@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Every metric can be its own menu-bar / tray item: the limit of four items is now 32 (one icon each, so each can be dragged to its own place; ADR 0028).
+- Each item keeps the position and visibility you gave it across restarts and updates: macOS names every status item (`NSStatusItem.autosaveName`), Windows gives every icon a stable GUID (`guidItem`), Linux's status-notifier id is the item id. The log tells each icon's identity or why it could not be created.
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed

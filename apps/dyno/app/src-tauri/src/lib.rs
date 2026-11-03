@@ -21,6 +21,7 @@ pub mod service_repair;
 pub mod shell;
 pub mod supervise;
 pub mod tray;
+pub mod tray_identity;
 pub mod tray_model;
 
 use link::{AgentLink, ProcessLauncher};
