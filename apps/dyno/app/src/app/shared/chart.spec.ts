@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { getInstanceByDom } from 'echarts/core';
-import { Chart, animateDraw, prefersReducedMotion } from './chart';
+import { Chart, animateDraw, hasData, prefersReducedMotion } from './chart';
 
 @Component({
   imports: [Chart],
@@ -32,6 +32,19 @@ describe('animateDraw', () => {
     expect(animateDraw(false, false)).toBe(false);
     expect(animateDraw(true, true)).toBe(false);
     expect(animateDraw(false, true)).toBe(false);
+  });
+});
+
+describe('hasData', () => {
+  it('counts a series or dataset with points, not an empty or skeleton draw', () => {
+    expect(hasData({})).toBe(false);
+    expect(hasData({ series: [] })).toBe(false);
+    expect(hasData({ series: [{ type: 'line', data: [] }] })).toBe(false);
+    expect(hasData({ series: { type: 'line' } })).toBe(false);
+    expect(hasData({ series: [{ data: [] }, { data: [1] }] })).toBe(true);
+    expect(hasData({ series: { data: [1] } })).toBe(true);
+    expect(hasData({ dataset: { source: [] } })).toBe(false);
+    expect(hasData({ dataset: { source: [[1, 2]] } })).toBe(true);
   });
 });
 
@@ -92,13 +105,17 @@ describe('Chart', () => {
   it('animates its first draw only; later options are drawn without animation', async () => {
     const f = TestBed.createComponent(Host);
     const line = (n: number) => ({ xAxis: { type: 'category' }, yAxis: { type: 'value' }, series: [{ type: 'line', data: Array.from({ length: n }, (_, i) => i) }] });
-    f.componentInstance.opts.set(line(2));
+    f.componentInstance.opts.set(line(0));
     const host = () => (f.nativeElement as HTMLElement).querySelector('dy-chart .host') as HTMLDivElement;
     const animation = () => (getInstanceByDom(host())?.getOption() as { animation?: boolean } | undefined)?.animation;
     await vi.waitFor(() => {
       f.detectChanges();
       expect(animation()).toBe(true);
     });
+    // An empty first draw (a skeleton) keeps the entry animation for the first draw with data.
+    f.componentInstance.opts.set(line(2));
+    await settleAll(f);
+    expect(animation()).toBe(true);
     f.componentInstance.opts.set(line(3));
     await settleAll(f);
     expect(animation()).toBe(false);

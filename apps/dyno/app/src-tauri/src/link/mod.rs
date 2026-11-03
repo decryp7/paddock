@@ -203,6 +203,18 @@ impl DetailVotes {
         self.votes.values().copied().max_by_key(|d| d.rank()).unwrap_or(LiveDetail::Tray)
     }
 }
+/// Where a voice that is not a window's (the menu bar items) gives its live-detail wish: the link, or a fake in tests.
+pub trait LiveVotes: Send + Sync {
+    /// `Some` sets the wish of `voter`, `None` withdraws it.
+    fn set_vote(&self, voter: &str, detail: Option<LiveDetail>) -> Result<(), CommandError>;
+}
+
+/// What to ask for instead when the agent refused `wanted` as unreadable: an agent older than the tray level cannot read
+/// `Subscribe { tray }` (a new value inside a request loses the whole request), so it gets the summary it understood before.
+pub fn older_agent_fallback(wanted: LiveDetail, error: &CommandError) -> Option<LiveDetail> {
+    (wanted == LiveDetail::Tray && error.code == ErrorCode::BadRequest).then_some(LiveDetail::Summary)
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     // Every guarded value stays consistent if a holder panicked.
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -436,16 +448,6 @@ impl AgentLink {
         self.sync_detail()
     }
 
-    /// A wish that is not a window's (the menu bar items): `Some` sets it, `None` withdraws it. Makes a request to the agent
-    /// when the effective detail changes, so never call it on the UI thread.
-    pub fn set_vote(&self, voter: &str, detail: Option<LiveDetail>) -> Result<(), CommandError> {
-        match detail {
-            Some(d) => lock(&self.votes).set(voter, d),
-            None => lock(&self.votes).remove(voter),
-        }
-        self.sync_detail()
-    }
-
     /// A window is gone: it no longer wants anything. Returns at once (it is called from the UI thread): the subscription is
     /// brought up to date on a worker, because that is a request to the agent.
     pub fn drop_window(self: &Arc<Self>, window: &str) {
@@ -464,7 +466,16 @@ impl AgentLink {
         if *lock(&self.sent) == Some(wanted) {
             return Ok(());
         }
-        self.call(Request::Subscribe { detail: wanted })?;
+        match self.call(Request::Subscribe { detail: wanted }) {
+            Ok(_) => {}
+            Err(e) => {
+                let Some(instead) = older_agent_fallback(wanted, &e) else {
+                    return Err(e);
+                };
+                logging::info(&format!("the agent cannot read the {wanted:?} live level; asking for {instead:?}"));
+                self.call(Request::Subscribe { detail: instead })?;
+            }
+        }
         *lock(&self.sent) = Some(wanted);
         Ok(())
     }
@@ -492,5 +503,16 @@ impl AgentLink {
         let _ = self.events.send(Event::Quit);
         let snapshot = self.transitions.wait_until(Snapshot::stopped);
         snapshot.outcome().is_some_and(|o| o.stopped_own)
+    }
+}
+
+impl LiveVotes for AgentLink {
+    /// Makes a request to the agent when the effective detail changes, so never call it on the UI thread.
+    fn set_vote(&self, voter: &str, detail: Option<LiveDetail>) -> Result<(), CommandError> {
+        match detail {
+            Some(d) => lock(&self.votes).set(voter, d),
+            None => lock(&self.votes).remove(voter),
+        }
+        self.sync_detail()
     }
 }

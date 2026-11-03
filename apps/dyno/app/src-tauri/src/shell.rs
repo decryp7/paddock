@@ -3,7 +3,7 @@
 
 use crate::dto::AgentStatus;
 use crate::health::Hub;
-use crate::link::{AgentLink, Sink};
+use crate::link::{AgentLink, LiveVotes, Sink};
 use crate::logging;
 use crate::login;
 use crate::popover::{Ask, PopoverModel};
@@ -60,7 +60,7 @@ fn now_millis() -> i64 {
 /// The icons are redrawn at most this often (and only when their picture changed).
 const TRAY_INTERVAL: Duration = Duration::from_millis(500);
 /// The menu bar's own voice in the link's live-detail votes (beside the windows').
-const MENU_BAR_VOTER: &str = "menu-bar";
+pub const MENU_BAR_VOTER: &str = "menu-bar";
 /// One line in the log per this many live updates (the log shows that data flows, without filling up).
 const LOG_EVERY: u64 = 60;
 
@@ -155,6 +155,8 @@ pub struct ShellOf<R: Runtime> {
     popover: Mutex<PopoverModel>,
     /// The connection, for the requests the shell itself makes (layouts, popup values).
     link: Mutex<Option<Arc<AgentLink>>>,
+    /// Where the menu bar's live-detail wish goes (the link once connected).
+    votes: Mutex<Option<Arc<dyn LiveVotes>>>,
     /// A `PopoverValues` request is out (one at a time).
     asking: AtomicBool,
     /// This shell, for the threads that answer later.
@@ -189,6 +191,7 @@ impl<R: Runtime> ShellOf<R> {
             hub,
             popover: Mutex::new(PopoverModel::default()),
             link: Mutex::new(None),
+            votes: Mutex::new(None),
             asking: AtomicBool::new(false),
             me: me.clone(),
             last_live: Mutex::new(None),
@@ -198,13 +201,18 @@ impl<R: Runtime> ShellOf<R> {
         })
     }
 
+    /// Where the menu bar's live-detail wish goes from now on (the link at connect; a fake in tests).
+    pub fn use_votes(&self, votes: Arc<dyn LiveVotes>) {
+        *lock(&self.votes) = Some(votes);
+    }
+
     /// The tray items changed (settings, or the development override): the icons follow.
     pub fn set_items(&self, specs: Vec<crate::tray_model::ItemSpec>) {
         // With no window open the link asks for the tray level (no process table at the user's pace); an item that shows
         // one app needs the top lists at that pace, so the menu bar asks for the summary while it has one.
-        if let Some(link) = lock(&self.link).clone() {
+        if let Some(votes) = lock(&self.votes).clone() {
             let wish = crate::tray_model::shows_apps(&specs).then_some(LiveDetail::Summary);
-            if let Err(e) = link.set_vote(MENU_BAR_VOTER, wish) {
+            if let Err(e) = votes.set_vote(MENU_BAR_VOTER, wish) {
                 logging::info(&format!("could not update the menu bar's live detail: {}", e.message));
             }
         }
@@ -553,6 +561,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
 
     fn connected(&self, link: &Arc<AgentLink>) {
         *lock(&self.link) = Some(link.clone());
+        self.use_votes(link.clone());
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
             Ok(Reply::Settings(s)) => {

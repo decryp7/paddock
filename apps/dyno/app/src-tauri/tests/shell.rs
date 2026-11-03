@@ -416,6 +416,36 @@ mod widget_wiring {
         }
     }
 
+    /// Records the menu bar's live-detail wishes instead of asking an agent.
+    #[derive(Default)]
+    struct Votes(std::sync::Mutex<Vec<(String, Option<dyno_core::protocol::LiveDetail>)>>);
+
+    impl dyno_app_lib::link::LiveVotes for Votes {
+        fn set_vote(&self, voter: &str, detail: Option<dyno_core::protocol::LiveDetail>) -> Result<(), dyno_app_lib::dto::CommandError> {
+            self.0.lock().unwrap().push((voter.to_string(), detail));
+            Ok(())
+        }
+    }
+
+    /// With no window open the link asks for the tray level; a menu bar item that shows one app needs the top lists at the
+    /// user's pace, so the menu bar votes for the summary while it has such an item, and withdraws the vote after.
+    #[test]
+    fn a_menu_bar_item_that_shows_one_app_votes_for_the_summary() {
+        use dyno_app_lib::tray_model::{Glyph, ItemSpec};
+        use dyno_core::protocol::LiveDetail;
+        let app = app();
+        let shell = shell(&app);
+        let votes = Arc::new(Votes::default());
+        shell.use_votes(votes.clone());
+        shell.set_items(vec![ItemSpec::new("p", Metric::Process("chrome".into()), Glyph::Number)]);
+        shell.set_items(vec![ItemSpec::new("c", Metric::CpuTotal, Glyph::Number)]);
+        let voter = dyno_app_lib::shell::MENU_BAR_VOTER.to_string();
+        assert_eq!(
+            *votes.0.lock().unwrap(),
+            vec![(voter.clone(), Some(LiveDetail::Summary)), (voter, None)]
+        );
+    }
+
     /// The popup's values reach the webview only while the popup is visible.
     #[test]
     fn values_are_emitted_only_while_the_popup_is_visible() {

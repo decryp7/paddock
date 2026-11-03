@@ -157,6 +157,17 @@ fn the_connection_asks_for_the_most_any_window_wants() {
     assert_eq!(v.effective(), LiveDetail::Tray);
 }
 
+// An agent older than the tray level cannot read `Subscribe { tray }` and answers "could not read that request": the link
+// then asks for the summary that agent understood, instead of keeping whatever it had before (the processes, perhaps).
+#[test]
+fn an_older_agent_that_cannot_read_the_tray_level_gets_the_summary() {
+    let unreadable = CommandError::new(ErrorCode::BadRequest, "Dyno could not read that request.");
+    assert_eq!(older_agent_fallback(LiveDetail::Tray, &unreadable), Some(LiveDetail::Summary));
+    assert_eq!(older_agent_fallback(LiveDetail::Summary, &unreadable), None);
+    let down = CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.");
+    assert_eq!(older_agent_fallback(LiveDetail::Tray, &down), None);
+}
+
 #[test]
 fn the_agent_program_is_next_to_the_app_or_overridden() {
     let dir = tempfile::tempdir().unwrap();
