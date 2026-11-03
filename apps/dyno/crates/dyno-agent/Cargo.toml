@@ -39,6 +39,10 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Content hashes for the duplicate file finder (MIT OR Apache-2.0; already in the tree through other dependencies).
 sha2 = "0.10"
+# The downloaded geo databases (DB-IP Country and ASN Lite, CC-BY-4.0): ISC; read into memory, never mapped (ADR 0031 D10).
+maxminddb = "0.27"
+# gunzip with a cap on the inflated size (the same build the diagnostics bundle uses).
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -46,6 +50,11 @@ libc = "0.2"
 [dev-dependencies]
 plist = "1"
 tempfile.workspace = true
+proptest = "1"
+
+# The tiny MMDB writer (`geo_db::testdb`) for the fuzz seed corpus.
+[features]
+testdb = []
 
 [lints]
 workspace = true

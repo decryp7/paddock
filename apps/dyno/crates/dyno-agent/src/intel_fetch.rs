@@ -1,6 +1,5 @@
 //! Fetching the lists the user subscribed to (ADR 0031 amendment 1). Dyno has no list of its own: every address here is one the
-//! user typed. Each fetch goes through `paddock-net`'s [`Egress`] (https only, public addresses only, the Offline switch, a size
-//! cap), at most hourly per subscription, and the text lands in the cache folder with the last good copy kept.
+//! user typed. Each fetch goes through `paddock-net`'s [`Egress`] (https only, public addresses only, a size cap), at most hourly per subscription, and the text lands in the cache folder with the last good copy kept.
 //!
 //! - **The floor** counts from the last *attempt*, kept in `intel-fetch.json` in the data folder, not in the cache, so clearing
 //!   the cache cannot cause an early fetch. "Update now" respects it too and answers the time it is next allowed.
@@ -74,9 +73,6 @@ pub enum Outcome {
 /// Why an update did not happen or did not finish. Every message says what to do next.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FetchError {
-    /// Dyno is offline.
-    #[error("Dyno is offline. Turn Offline mode off in Settings, then update the list.")]
-    Offline,
     /// The hourly floor.
     #[error("This list can be updated again at the time shown (at most once an hour).")]
     TooSoon {
@@ -107,7 +103,6 @@ impl FetchError {
     /// A short kind for logs (no text from the network).
     pub fn kind(&self) -> &'static str {
         match self {
-            FetchError::Offline => "offline",
             FetchError::TooSoon { .. } => "too-soon",
             FetchError::Net(_) => "network",
             FetchError::Http(_) => "http",
@@ -135,7 +130,7 @@ pub struct FetchState {
 pub struct FetchStore {
     /// File format version.
     pub version: u32,
-    /// By list id.
+    /// By list id (and `geo-country`, `geo-asn` for the location databases).
     pub lists: BTreeMap<String, FetchState>,
 }
 
@@ -207,11 +202,6 @@ impl Fetcher {
         Ok(Fetcher::new(Arc::new(egress), clock))
     }
 
-    /// Dyno's Offline switch: while on, every update fails at once with [`FetchError::Offline`].
-    pub fn set_offline(&self, offline: bool) {
-        self.egress.set_offline(offline);
-    }
-
     /// Updates one subscription: `url` is the user's address, `cache` the folder of this list ([`Dirs::intel_cache`]), `state` what
     /// was kept last time (changed in place: the caller saves it). `phase` is told when each phase starts.
     pub fn update(
@@ -245,9 +235,6 @@ impl Fetcher {
         cancel: &CancelToken,
         phase: &mut dyn FnMut(Phase),
     ) -> Result<Outcome, FetchError> {
-        if self.egress.is_offline() {
-            return Err(FetchError::Offline);
-        }
         let now_ms = self.clock.wall_ms();
         if let Some(at) = next_allowed(state.status.last_attempt_ms, now_ms, MIN_INTERVAL) {
             return Err(FetchError::TooSoon { next_allowed_ms: at });
@@ -335,7 +322,6 @@ fn outcome_kind(o: &Outcome) -> String {
 
 fn map_net(e: NetError) -> FetchError {
     match e {
-        NetError::Offline => FetchError::Offline,
         NetError::Cancelled => FetchError::Cancelled,
         NetError::TooLarge(_) => FetchError::TooBig,
         other => FetchError::Net(other.to_string()),
@@ -343,7 +329,7 @@ fn map_net(e: NetError) -> FetchError {
 }
 
 /// Moves `from` over `to` (Windows cannot rename onto an existing file).
-fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
     if cfg!(windows) && to.exists() {
         std::fs::remove_file(to)?;
     }
@@ -458,16 +444,6 @@ mod tests {
         assert_eq!(load_entries(&r.dir.path().join("c")).len(), 2);
         assert_eq!(r.wire.sends(), 1);
         assert!(policy().user_agent.starts_with("Dyno/"), "an honest User-Agent");
-    }
-
-    #[test]
-    fn offline_refuses_before_any_request_and_does_not_count_as_an_attempt() {
-        let r = rig(vec![Reply::ok(b"8.8.8.8\n")]);
-        r.fetcher.set_offline(true);
-        let mut st = FetchState::default();
-        assert_eq!(run(&r, &mut st), Err(FetchError::Offline));
-        assert_eq!(r.wire.sends(), 0);
-        assert_eq!(st.status.last_attempt_ms, None);
     }
 
     #[test]

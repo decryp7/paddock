@@ -17,6 +17,7 @@ pub mod disk;
 pub mod extras;
 pub mod facts;
 pub mod forecast;
+pub mod geo;
 pub mod grouping;
 pub mod hardware;
 pub mod health;
