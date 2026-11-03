@@ -15,7 +15,7 @@ describe('tauriDialogIo', () => {
     await io.take();
     await io.close(undefined);
     await io.close({ ok: 1 });
-    await io.measure(3, 1, { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } });
+    await io.measure(3, 1, { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 }, overflow: false });
     await io.ready(3, 1);
     await io.requestClose('d-main-1');
     const got: unknown[] = [];
@@ -27,7 +27,7 @@ describe('tauriDialogIo', () => {
       ['dialog_take_input', undefined],
       ['dialog_close', { result: null }],
       ['dialog_close', { result: { ok: 1 } }],
-      ['dialog_measure', { epoch: 3, seq: 1, measure: { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } } }],
+      ['dialog_measure', { epoch: 3, seq: 1, measure: { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 }, overflow: false } }],
       ['dialog_ready', { epoch: 3, seq: 1 }],
       ['emitTo', 'd-main-1', DIALOG_EVENTS.closeRequested, null],
       ['listen', DIALOG_EVENTS.result],
@@ -61,9 +61,9 @@ describe('browserDialogIo', () => {
     await expect(io.open({ dialogId: 'x', title: 't' })).rejects.toThrow(/in the page/);
     (await io.listen('e', () => undefined))();
     await io.requestClose('d-main-1');
-    await io.measure(1, 1, { content: { width: 400, height: 200 }, minContent: { width: 320, height: 120 } });
+    await io.measure(1, 1, { content: { width: 400, height: 200 }, minContent: { width: 320, height: 120 }, overflow: false });
     await io.ready(1, 1);
-    await io.measure(1, 2, { content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 } });
+    await io.measure(1, 2, { content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 }, overflow: false });
     const data = document.documentElement.dataset;
     expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent'], data['contentWidth'], data['fitSeq'], data['fitEpoch']]).toEqual(['true', '260', '200,260', '330x120', '400', '2', '1']);
     // A reload of the same window is a new page load: its epoch is the next one.

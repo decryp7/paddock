@@ -1,7 +1,7 @@
 import { SizeLoop } from './size-loop';
 import type { DialogMeasure } from './io';
 
-const measure = (height: number, minHeight = 100): DialogMeasure => ({ content: { width: 400, height }, minContent: { width: 320, height: minHeight } });
+const measure = (height: number, minHeight = 100): DialogMeasure => ({ content: { width: 400, height }, minContent: { width: 320, height: minHeight }, overflow: false });
 
 describe('SizeLoop (ADR 0043 §2)', () => {
   function loop() {

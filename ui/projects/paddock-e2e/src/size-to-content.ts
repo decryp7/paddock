@@ -6,6 +6,15 @@ import { dialogWindowUrl, type DialogContractEntry } from './shell.ts';
 /** The scales of the size checks (ADR 0043 check 4): CSS rounding and re-wrap show at the fractional ones. */
 export const SIZE_SCALES = [1, 1.25, 1.5] as const;
 
+/**
+ * The least a dialog window can be, logical px: `DIALOG_MIN` (320 x 200) for every kind, and the viewer's kind floor `VIEWER_MIN`
+ * (680 x 560, which is its OS minimum, so a viewer opens at the larger of its content and 560). Rust applies them in
+ * `size.rs`; the browser has no window, so the helper sizes the viewport the same way.
+ */
+export function kindFloor(kind: string): { width: number; height: number } {
+  return kind === 'viewer' ? { width: 680, height: 560 } : { width: 320, height: 200 };
+}
+
 /** The fixture a dialog offers: the button that adds content after the first measure. */
 export interface SizeFixture {
   /** The dialog id (a fixture of one kind). */
@@ -55,10 +64,14 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
     await page.locator('html[data-fit-settled]').waitFor({ timeout: 15_000 });
     const first = await quiet();
     // For the independent review (ER-23): the window as the frame sized it, before and after the late content.
-    const shot = async (name: string, height: number) => {
+    // The window the frame would be given: its measure within the cap, never below the kind's floor; a tool keeps its default size.
+    const windowHeight = (measured: number) => (contract.kind === 'tool' ? Math.min(contract.height ?? 680, cap) : Math.max(kindFloor(contract.kind).height, Math.min(measured, cap)));
+    const shot = async (name: string, measured: number) => {
+      const height = windowHeight(measured);
+      expect(height, `${where}: a window below the 200 px floor`).toBeGreaterThanOrEqual(200);
+      await page.setViewportSize({ width: contract.width, height });
       if (!shots) return;
       mkdirSync(shots, { recursive: true });
-      await page.setViewportSize({ width: contract.width, height: contract.kind === 'tool' ? cap : Math.min(height, cap) });
       await page.screenshot({ path: join(shots, `${id}-${scale}x-${name}.png`) });
     };
     await shot('initial', first.height);
@@ -71,7 +84,7 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
     expect(later.epoch).toBe(first.epoch);
     if (contract.kind !== 'tool') {
       // A window as tall as the last measure (within the cap) shows all of it, and its footer.
-      const height = Math.min(later.height, cap);
+      const height = windowHeight(later.height);
       await page.setViewportSize({ width: contract.width, height });
       const body = await page.evaluate(() => {
         const el = document.querySelector('[data-testid=dialog-body]');
@@ -89,12 +102,79 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
         expect(hit, `${where}: footer button ${i} is covered`).toBe(true);
       }
     }
+    // A long error arrives late too: the loop follows it, and the review sees it.
+    await page.getByTestId('fixture-error').click();
+    const withError = await quiet();
+    expect(withError.seq - later.seq, `${where}: an error sent ${withError.seq - later.seq} measures (at most two)`).toBeLessThanOrEqual(2);
+    await shot('error', withError.height);
+    // Content taller than the screen allows: the window stops at the cap, the body scrolls and the footer stays in view.
+    if (contract.kind !== 'tool') {
+      let tall = withError;
+      for (let i = 0; i < 8 && tall.height <= cap; i++) {
+        await page.getByTestId(fixture.addButton ?? 'fixture-add').click();
+        tall = await quiet();
+      }
+      expect(tall.height, `${where}: could not make the content taller than the cap`).toBeGreaterThan(cap);
+      await shot('capped', tall.height);
+      const body = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid=dialog-body]');
+        return el ? { scroll: el.scrollHeight, client: el.clientHeight } : null;
+      });
+      expect(body && body.scroll > body.client + 1, `${where}: at the cap the body must scroll`).toBe(true);
+      const foot = await page.locator('[data-testid=dialog-footer] button').first().boundingBox();
+      expect(foot && foot.y + foot.height <= cap + 0.5, `${where}: the footer is cut off at the cap`).toBe(true);
+    }
     // A reload is a new page load: the next measure carries a new epoch, from seq 1.
     await page.reload();
     await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
     await page.locator('html[data-fit-settled]').waitFor({ timeout: 15_000 });
     const reloaded = await quiet();
     expect(reloaded.epoch, `${where}: a reload sent the same epoch`).toBe(first.epoch + 1);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * ADR 0043 check 4 for a real dialog of any app, with no fixture: opened by URL at `scale` as its window, with the content
+ * it has, the size loop goes quiet in a few sends (the first measure, each stage of late data, one follow-up: at most six), does not
+ * log "did not settle", and sends in epoch 1; a reload sends in epoch 2. The page only (never Rust's conversion).
+ */
+export async function expectLoopSettles(browser: Browser, baseURL: string, id: string, contract: DialogContractEntry, scale: number, input: unknown = {}): Promise<void> {
+  const where = `${id} at ${scale}x`;
+  const context = await browser.newContext({ baseURL, deviceScaleFactor: scale, viewport: { width: contract.width, height: Math.floor(1080 * 0.75) } });
+  try {
+    const page = await context.newPage();
+    const warnings: string[] = [];
+    page.on('console', (m) => {
+      if (m.text().includes('did not settle')) warnings.push(m.text());
+    });
+    const state = () =>
+      page.evaluate(() => ({ seq: Number(document.documentElement.dataset['fitSeq'] ?? '0'), epoch: Number(document.documentElement.dataset['fitEpoch'] ?? '0') }));
+    const settle = async () => {
+      await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+      await page.locator('[data-testid=dialog-loading]').waitFor({ state: 'detached', timeout: 15_000 });
+      await page.locator('html[data-fit-settled]').waitFor({ timeout: 15_000 });
+      let before = await state();
+      await expect
+        .poll(async () => {
+          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+          const now = await state();
+          const same = now.seq === before.seq;
+          before = now;
+          return same;
+        }, { message: `${where}: the size loop never went quiet` })
+        .toBe(true);
+      return before;
+    };
+    await page.goto(dialogWindowUrl(id, input, { title: id }));
+    const first = await settle();
+    expect(first.seq, `${where}: ${first.seq} measures sent before it settled (a dialog that loads data sends a few: the first, each stage of the data, one follow-up; at most six)`).toBeLessThanOrEqual(6);
+    expect(first.epoch).toBe(1);
+    await page.reload();
+    const again = await settle();
+    expect(again.epoch, `${where}: a reload sent the same epoch`).toBe(2);
+    expect(warnings, `${where}: the size loop reported a loop`).toEqual([]);
   } finally {
     await context.close();
   }
