@@ -18,6 +18,8 @@ async function open(page: Page, theme: string, contrast: 'off' | 'more' = 'off')
 const board = (page: Page) => page.getByTestId('wgg-board');
 const cell = (page: Page, id: string) => board(page).locator(`[data-pd-cell="${id}"]`);
 const lines = (c: Locator) => c.evaluate((e) => ({ column: (e as HTMLElement).style.gridColumn, row: (e as HTMLElement).style.gridRow }));
+/** Waits for every finite animation (the FLIP glide) so a capture never shows a widget half way. */
+const animationsDone = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime as number)).map((a) => a.finished.catch(() => undefined))));
 const startEditing = async (page: Page) => {
   await board(page).getByRole('button', { name: 'Edit layout' }).click();
   await expect(board(page).getByText('Editing layout')).toBeVisible();
@@ -51,33 +53,49 @@ for (const theme of THEMES) {
           await open(page, theme);
           await shot(board(page), 'board');
           await startEditing(page);
+          // A refused key, on a fresh board: Alpha is at the left edge.
+          await cell(page, 'a').focus();
+          await page.keyboard.press('ArrowLeft');
+          await expect(board(page).locator('.pd-wg-feedback--bad')).toHaveText("Alpha is already at the left edge.");
+          await shot(board(page), 'board-blocked-focus-ring');
+          await page.keyboard.press('ArrowRight');
+          await expect(board(page).locator('.pd-wg-feedback')).toContainText('Alpha moved right');
           await cell(page, 'b').focus();
           await shot(board(page), 'board-editing-focus');
+          const drag = async (name: string) => {
+            const p = await pitch(page);
+            const a = (await cell(page, 'e').boundingBox())!;
+            await page.mouse.move(a.x + 20, a.y + 20);
+            await page.mouse.down();
+            await page.mouse.move(a.x + 20 + p.col * 3, a.y + 20 - p.row * 2, { steps: 6 });
+            await expect(board(page).locator('.pd-wg-ph')).toBeVisible();
+            await animationsDone(page);
+            await shot(board(page), name);
+            await page.mouse.up();
+            await expect(board(page).locator('.pd-wg-ph')).toHaveCount(0);
+          };
+          await drag('board-dragging');
+          const corner = (await cell(page, 'f').locator('.pd-wg-h--se').boundingBox())!;
           const p = await pitch(page);
-          const a = (await cell(page, 'a').boundingBox())!;
-          await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+          await page.mouse.move(corner.x + 12, corner.y + 12);
           await page.mouse.down();
-          await page.mouse.move(a.x + a.width / 2 + p.col * 2, a.y + a.height / 2 + p.row * 2, { steps: 6 });
-          await expect(board(page).locator('.pd-wg-ph')).toBeVisible();
-          await shot(board(page), 'board-dragging');
-          await page.mouse.up();
-          const corner = await cell(page, 'e').locator('.pd-wg-h--se').boundingBox();
-          await page.mouse.move(corner!.x + 12, corner!.y + 12);
-          await page.mouse.down();
-          await page.mouse.move(corner!.x + 12 + p.col * 2, corner!.y + 12 + p.row, { steps: 6 });
+          await page.mouse.move(corner.x + 12 + p.col * 2, corner.y + 12 + p.row, { steps: 6 });
           await expect(board(page).locator('.pd-wg-chip')).toBeVisible();
+          await animationsDone(page);
           await shot(board(page), 'board-resizing');
           await page.mouse.up();
-          await cell(page, 'd').focus();
-          await page.keyboard.press('ArrowLeft');
-          await expect(board(page).locator('.pd-wg-feedback--bad')).toBeVisible();
-          await shot(board(page), 'board-blocked');
           await page.keyboard.press('Escape');
-          await shot(page.getByTestId('widget-grid').locator('.wgg-states'), 'states');
-          await shot(page.getByTestId('wgg-cases'), 'golden-cases');
+          await expect(board(page).getByRole('button', { name: 'Edit layout' })).toBeVisible();
+          await expect(board(page).locator('.pd-wg-feedback')).toHaveCount(0);
+          await shot(page.locator('.wgg-states'), 'states');
+          for (let i = 0; i < 12; i++) await shot(page.getByTestId(`wgg-case-${i}`), `golden-case-${String(i + 1).padStart(2, '0')}`);
           await page.emulateMedia({ reducedMotion: 'reduce' });
+          await page.evaluate(() => document.documentElement.setAttribute('data-motion', 'reduce'));
+          await startEditing(page);
+          await drag('board-dragging-reduced-motion');
           await page.evaluate(() => document.documentElement.setAttribute('data-contrast', 'more'));
-          await shot(board(page), 'board-contrast');
+          await shot(board(page), 'board-contrast-editing');
+          await drag('board-contrast-dragging');
         });
       });
     }
@@ -147,7 +165,7 @@ test('Widget grid: the keys move, resize and undo, and a refused key says why', 
   await expect.poll(() => lines(cell(page, 'b'))).toEqual(expect.objectContaining({ column: '4 / span 4' }));
   await cell(page, 'a').focus();
   await page.keyboard.press('ArrowLeft');
-  await expect(board(page).locator('.pd-wg-feedback--bad')).toContainText("Alpha can't move left.");
+  await expect(board(page).locator('.pd-wg-feedback--bad')).toHaveText('Alpha is already at the left edge.');
   await page.keyboard.press('Escape');
   await expect(board(page).getByRole('button', { name: 'Edit layout' })).toBeVisible();
 });
@@ -187,13 +205,17 @@ test('Widget grid: a drag across a 32-widget board stays under the frame budget'
   await first.scrollIntoViewIfNeeded();
   const a = (await first.boundingBox())!;
   const p = { col: a.width / 3, row: a.height / 3 };
+  // Frame cost: the time from a frame's rAF callback to the first task after rendering (style, layout, paint included), per frame.
   await page.evaluate(() => {
-    const w = window as unknown as { __frames: number[] };
+    const w = window as unknown as { __frames: number[]; __stop: boolean };
     w.__frames = [];
-    let last = performance.now();
-    const tick = (t: number) => {
-      w.__frames.push(t - last);
-      last = t;
+    w.__stop = false;
+    const tick = () => {
+      if (w.__stop) return;
+      const t0 = performance.now();
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => w.__frames.push(performance.now() - t0);
+      ch.port2.postMessage(0);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -202,7 +224,25 @@ test('Widget grid: a drag across a 32-widget board stays under the frame budget'
   await page.mouse.down();
   await page.mouse.move(a.x + 20 + p.col * 6, a.y + 20 + p.row * 6, { steps: 30 });
   await page.mouse.up();
+  await page.evaluate(() => ((window as unknown as { __stop: boolean }).__stop = true));
   const frames = await page.evaluate(() => (window as unknown as { __frames: number[] }).__frames);
-  test.info().annotations.push({ type: 'frame-times', description: `max ${Math.max(...frames).toFixed(1)} ms over ${frames.length} frames` });
-  expect(Math.max(...frames)).toBeLessThan(100);
+  // The budget is 16.7 ms a frame (ADR 0044 §7). CI noise makes the single worst frame a poor gate, so the p95 over the drag is asserted.
+  const sorted = [...frames].sort((x, y) => x - y);
+  const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] as number;
+  test.info().annotations.push({ type: 'frame-cost', description: `p95 ${p95.toFixed(1)} ms, max ${sorted.at(-1)!.toFixed(1)} ms over ${frames.length} frames` });
+  expect(frames.length).toBeGreaterThan(30);
+  expect(p95).toBeLessThan(16.7);
+});
+
+test('Widget grid: the add sheet lists the kinds and adds one; Options is in the menu of a kind that has it', async ({ page }) => {
+  await open(page, 'dark');
+  await startEditing(page);
+  await board(page).getByRole('button', { name: 'Add widget' }).click();
+  const sheet = page.getByTestId('wgg-sheet');
+  await expect(sheet.getByText('Shown in the')).toHaveCount(0);
+  await expect(board(page).locator('[data-pd-cell]')).toHaveCount(6);
+  await sheet.getByRole('button', { name: /^Add Golf|^Add .*/ }).first().click();
+  await expect(board(page).locator('[data-pd-cell]')).toHaveCount(7);
+  await cell(page, 'a').getByRole('button', { name: 'Actions for Alpha' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Options…' })).toBeVisible();
 });

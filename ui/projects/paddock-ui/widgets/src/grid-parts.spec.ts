@@ -5,7 +5,7 @@ import type { Rect } from '../generated/widgets';
 import { ManualFrameScheduler, PD_FRAME_SCHEDULER } from './frame-scheduler';
 import { PdGridGesture, reducedMotion, type GridGestureTarget } from './grid-gesture';
 import { columnLines, moveTarget, resizeTarget, rowLines, sameRect, type GridGeometry } from './grid-math';
-import { blockOf, blockText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText } from './grid-text';
+import { blockOf, blockText, cantText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText } from './grid-text';
 
 const G: GridGeometry = { left: 100, top: 50, colWidth: 84, rowHeight: 24, gap: 16, columns: 12 };
 
@@ -71,6 +71,15 @@ describe('grid words', () => {
     expect(blockText('CPU', 'largest')).toBe("CPU can't get any larger.");
     expect(blockText('CPU', 'smallest')).toBe("CPU can't get any smaller.");
     expect(blockText('CPU', 'unchanged')).toBe('CPU stays where it is.');
+  });
+
+  it('says why a key does nothing, in the words of a refusal', () => {
+    expect(cantText('CPU', 'left')).toBe('CPU is already at the left edge.');
+    expect(cantText('CPU', 'down')).toBe('CPU is already at the bottom edge.');
+    expect(cantText('CPU', 'first')).toBe('CPU is already first.');
+    expect(cantText('CPU', 'last')).toBe('CPU is already last.');
+    expect(cantText('CPU', 'wider')).toBe("CPU can't get any larger.");
+    expect(cantText('CPU', 'shorter')).toBe("CPU can't get any smaller.");
   });
 
   it('reads the engine rejections', () => {

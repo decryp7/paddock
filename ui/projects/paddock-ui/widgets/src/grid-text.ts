@@ -6,8 +6,8 @@ export type MoveName = keyof Moves;
 export interface MoveAction {
   /** The menu item. */
   readonly label: string;
-  /** Said when the engine says the gesture would change nothing: "Memory can't move left." */
-  readonly cant: string;
+  /** What the engine's refusal would be, for the words when its `moves` flag says the key does nothing. */
+  readonly block: Block | 'first' | 'last';
   /** The intent sent to the engine. */
   readonly gesture: (id: string) => GridGesture;
 }
@@ -17,16 +17,16 @@ const grow = (dir: Dir) => (id: string): GridGesture => ({ grow: { id, dir } });
 
 /** The ten gestures in menu order (ADR 0044 §5), each with the intent it sends. The engine decides which of them work. */
 export const MOVE_ACTIONS: Readonly<Record<MoveName, MoveAction>> = {
-  left: { label: 'Move left', cant: "can't move left", gesture: nudge('left') },
-  right: { label: 'Move right', cant: "can't move right", gesture: nudge('right') },
-  up: { label: 'Move up', cant: "can't move up", gesture: nudge('up') },
-  down: { label: 'Move down', cant: "can't move down", gesture: nudge('down') },
-  first: { label: 'Move to first', cant: 'is already first', gesture: (id) => ({ toFirst: { id } }) },
-  last: { label: 'Move to last', cant: 'is already last', gesture: (id) => ({ toLast: { id } }) },
-  wider: { label: 'Wider', cant: "can't get any wider", gesture: grow('right') },
-  narrower: { label: 'Narrower', cant: "can't get any narrower", gesture: grow('left') },
-  taller: { label: 'Taller', cant: "can't get any taller", gesture: grow('down') },
-  shorter: { label: 'Shorter', cant: "can't get any shorter", gesture: grow('up') },
+  left: { label: 'Move left', block: { edge: 'left' }, gesture: nudge('left') },
+  right: { label: 'Move right', block: { edge: 'right' }, gesture: nudge('right') },
+  up: { label: 'Move up', block: { edge: 'up' }, gesture: nudge('up') },
+  down: { label: 'Move down', block: { edge: 'down' }, gesture: nudge('down') },
+  first: { label: 'Move to first', block: 'first', gesture: (id) => ({ toFirst: { id } }) },
+  last: { label: 'Move to last', block: 'last', gesture: (id) => ({ toLast: { id } }) },
+  wider: { label: 'Wider', block: 'largest', gesture: grow('right') },
+  narrower: { label: 'Narrower', block: 'smallest', gesture: grow('left') },
+  taller: { label: 'Taller', block: 'largest', gesture: grow('down') },
+  shorter: { label: 'Shorter', block: 'smallest', gesture: grow('up') },
 };
 /** The names in menu order. */
 export const MOVE_NAMES = Object.keys(MOVE_ACTIONS) as readonly MoveName[];
@@ -51,6 +51,14 @@ export function blockText(title: string, block: Block): string {
 
 /** True when the engine answered that the view the gesture was computed on is out of date. */
 export const isStale = (e: unknown): boolean => e === 'stale';
+
+/** What a key says when the engine's `moves` flag for it is false: the same words a refused gesture would get. */
+export function cantText(title: string, move: MoveName): string {
+  const b = MOVE_ACTIONS[move].block;
+  if (b === 'first') return `${title} is already first.`;
+  if (b === 'last') return `${title} is already last.`;
+  return blockText(title, b);
+}
 
 /** The block the engine reported, or null for any other answer. */
 export function blockOf(e: unknown): Block | null {

@@ -75,6 +75,7 @@ export function viewOf(items: readonly Item[], opts: { revision?: number; canUnd
 export class MockGridBackend implements WidgetGridBackend<GridSample, string, string> {
   private items: Item[];
   private revision = 1;
+  private added = 0;
   private readonly undo: Item[][] = [];
   private readonly redo: Item[][] = [];
 
@@ -104,6 +105,11 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
       return Promise.resolve(this.view());
     }
     if (typeof edit === 'string') return Promise.reject({ invalid: 'The gallery engine does not do that.' });
+    if ('add' in edit) {
+      const id = `n${++this.added}`;
+      const y = Math.max(0, ...this.items.map((i) => i.rect.y + i.rect.h));
+      return this.commit([...this.items, { id, rect: { x: 0, y, w: 6, h: 4 } }]);
+    }
     if ('remove' in edit) return this.commit(this.items.filter((i) => i.id !== edit.remove.id));
     if ('arrange' in edit) return this.compute(edit.arrange.gesture).then((items) => this.commit(items));
     return Promise.reject({ invalid: 'The gallery engine does not do that.' });
