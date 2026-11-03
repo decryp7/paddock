@@ -4,6 +4,24 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
+- New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
+  `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through
+  `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
+  `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
+  administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
+  connection (`PeerError`); on Windows the server must have read from the pipe once (`PeerError::NotReady` otherwise).
+- New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
+  anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
+  no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
+  checks the same folder rule on the serving side.
+- `Access::system_for_all_users()` (mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+  starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
+  refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
+  `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
+- New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
+  frees its slot on drop and reports `held()` on the injected `Clock`).
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

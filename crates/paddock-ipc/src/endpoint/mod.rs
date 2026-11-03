@@ -8,6 +8,9 @@
 //!
 //! The OS-specific code lives in two small modules; this one is the portable surface.
 
+use crate::identity::{PeerError, PeerSource, RawPeer};
+use crate::trust::Untrusted;
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::Duration;
@@ -15,9 +18,13 @@ use std::time::Duration;
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
+mod unix_peer;
+#[cfg(unix)]
 use unix as sys;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+mod windows_peer;
 #[cfg(windows)]
 use self::windows as sys;
 
@@ -46,7 +53,19 @@ impl Access {
     pub fn service_for_interactive_users() -> Access {
         Access {
             mode: 0o600,
-            sddl: "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;IU)".into(),
+            sddl: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;IU)".into(),
+        }
+    }
+
+    /// A system endpoint any local account may connect to (Dyno's helper, ADR 0027): a Unix socket with mode 0666 in a
+    /// folder only the service can change, or a pipe **owned by SYSTEM** (`O:SY`: a LocalSystem service's objects default
+    /// to the Administrators group as owner, which clients refuse) that SYSTEM and Administrators open fully, interactive
+    /// users read and write, and network logons never reach. Who may do what is decided per request from the caller's
+    /// identity ([`Stream::raw_peer`](crate::identity::PeerSource)), not by this access list.
+    pub fn system_for_all_users() -> Access {
+        Access {
+            mode: 0o666,
+            sddl: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)".into(),
         }
     }
 }
@@ -77,6 +96,25 @@ impl Listener {
         self.0.name()
     }
 
+    /// Like [`Listener::bind_fixed`] for a system service: on Unix the socket's folder must belong to the account running
+    /// this process and have no group or world write bit (a client checks the same before it trusts the socket), so nobody
+    /// else can replace the socket. On Windows the pipe is created as the first instance, which makes a squatter's earlier
+    /// pipe an error (`ERROR_PIPE_BUSY`, 231) and not an answer.
+    pub fn bind_system(name: &str, access: &Access) -> Result<Listener, Untrusted> {
+        #[cfg(unix)]
+        sys::check_own_folder(name)?;
+        sys::Listener::bind_fixed(name, access)
+            .map(Listener)
+            .map_err(|e| Untrusted::Unreadable {
+                what: "create the endpoint",
+                cause: format!(
+                    "{e} ({:?} os error {})",
+                    e.kind(),
+                    e.raw_os_error().unwrap_or(0)
+                ),
+            })
+    }
+
     /// Waits up to `timeout` for a client. Returns the stream and the client's process id when the OS reports it. A
     /// timeout is `ErrorKind::TimedOut`; the listener can then wait again.
     pub fn accept(&mut self, timeout: Duration) -> io::Result<(Stream, Option<u32>)> {
@@ -91,6 +129,14 @@ impl Stream {
     /// Connects to the endpoint `name`, retrying for up to `timeout` while it is busy.
     pub fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
         sys::Stream::connect(name, timeout).map(Stream)
+    }
+
+    /// Connects to a system endpoint and checks the server before anything is sent (ADR 0027 §2): on Windows the pipe is
+    /// opened at identification level and its owner must be SYSTEM; on Unix the socket's folder must be root's and closed
+    /// to others, and the process listening must run as root. A server that fails is [`SystemConnectError::Untrusted`],
+    /// which callers treat as "the service is missing".
+    pub fn connect_system(name: &str, timeout: Duration) -> Result<Stream, SystemConnectError> {
+        sys::Stream::connect_system(name, timeout).map(Stream)
     }
 
     /// The user id of the process on the other end, where the OS tells (Unix); `None` on Windows (the access list
@@ -138,6 +184,34 @@ impl Write for Stream {
         Ok(())
     }
 }
+
+impl PeerSource for Stream {
+    /// The caller's facts from the OS (audit token, `SO_PEERCRED`, the caller's own token); never from a pid. On Windows
+    /// the server must have read from the connection once, or the answer is [`PeerError::NotReady`].
+    fn raw_peer(&self) -> Result<RawPeer, PeerError> {
+        self.0.raw_peer()
+    }
+}
+
+/// Why [`Stream::connect_system`] gave no connection.
+#[derive(Debug)]
+pub enum SystemConnectError {
+    /// The endpoint could not be opened (nobody listens, the name is not there, a timeout).
+    Connect(io::Error),
+    /// Something answered, but it is not the service: nothing was sent to it.
+    Untrusted(Untrusted),
+}
+
+impl fmt::Display for SystemConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SystemConnectError::Connect(e) => write!(f, "the service could not be reached: {e}"),
+            SystemConnectError::Untrusted(u) => write!(f, "{u}"),
+        }
+    }
+}
+
+impl std::error::Error for SystemConnectError {}
 
 /// Ends a connection; see [`Stream::closer`].
 pub struct Closer(sys::Closer);
