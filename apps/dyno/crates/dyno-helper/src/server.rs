@@ -208,6 +208,8 @@ mod tests {
                 login_items: Box::new(NoItems),
                 smart: Box::new(crate::tools::NotHere("none")),
                 tools: Box::new(crate::tools::NotHere("none")),
+                wakes: Box::new(dyno_core::wake::NoWakes),
+                wol: Box::new(dyno_core::wake::NoWakes),
                 log_tail: Box::new(|_| vec![]),
             }));
             let stop = Arc::new(AtomicBool::new(false));
@@ -320,6 +322,17 @@ mod tests {
             K::Audit => HelperRequest::Audit(1),
             K::LogTail => HelperRequest::LogTail(1),
             K::Uninstall => HelperRequest::Uninstall,
+            K::ScheduleWake => HelperRequest::ScheduleWake {
+                tag: dyno_core::wake::WakeTag::parse("t").unwrap(),
+                at_utc: 1,
+            },
+            K::CancelWake => HelperRequest::CancelWake {
+                tag: dyno_core::wake::WakeTag::parse("t").unwrap(),
+            },
+            K::ListWakes => HelperRequest::ListWakes,
+            K::WolState => HelperRequest::WolState {
+                ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
+            },
         }
     }
 

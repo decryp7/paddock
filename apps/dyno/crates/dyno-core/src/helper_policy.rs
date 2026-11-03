@@ -41,11 +41,19 @@ pub enum RequestKind {
     LogTail,
     /// `Uninstall`.
     Uninstall,
+    /// `ScheduleWake`.
+    ScheduleWake,
+    /// `CancelWake`.
+    CancelWake,
+    /// `ListWakes`.
+    ListWakes,
+    /// `WolState`.
+    WolState,
 }
 
 impl RequestKind {
     /// Every kind, for tests and tables.
-    pub const ALL: [RequestKind; 15] = [
+    pub const ALL: [RequestKind; 19] = [
         RequestKind::Info,
         RequestKind::Processes,
         RequestKind::Traffic,
@@ -61,13 +69,24 @@ impl RequestKind {
         RequestKind::Audit,
         RequestKind::LogTail,
         RequestKind::Uninstall,
+        RequestKind::ScheduleWake,
+        RequestKind::CancelWake,
+        RequestKind::ListWakes,
+        RequestKind::WolState,
     ];
 
     /// Requests that run an external tool for a long time: the server gives them `Weight::Slow` (one per account at a time).
     pub fn is_slow(self) -> bool {
         matches!(
             self,
-            RequestKind::Smart | RequestKind::LoginItems | RequestKind::Firewall | RequestKind::Extras | RequestKind::InstallTool
+            RequestKind::Smart
+                | RequestKind::LoginItems
+                | RequestKind::Firewall
+                | RequestKind::Extras
+                | RequestKind::InstallTool
+                | RequestKind::ScheduleWake
+                | RequestKind::CancelWake
+                | RequestKind::ListWakes
         )
     }
 }
@@ -118,7 +137,7 @@ pub enum Access {
 pub fn access(kind: RequestKind, standing: Standing) -> Access {
     use RequestKind as K;
     match (kind, standing.is_privileged()) {
-        (K::InstallTool | K::Audit | K::LogTail | K::Uninstall, false) => Access::Denied,
+        (K::InstallTool | K::Audit | K::LogTail | K::Uninstall | K::ScheduleWake | K::CancelWake | K::ListWakes, false) => Access::Denied,
         (K::Firewall | K::Extras, false) => Access::CountsOnly,
         _ => Access::Full,
     }
@@ -200,7 +219,15 @@ mod tests {
             }
         }
         let other = |k| access(k, Standing::Other);
-        for k in [K::InstallTool, K::Audit, K::LogTail, K::Uninstall] {
+        for k in [
+            K::InstallTool,
+            K::Audit,
+            K::LogTail,
+            K::Uninstall,
+            K::ScheduleWake,
+            K::CancelWake,
+            K::ListWakes,
+        ] {
             assert_eq!(other(k), Access::Denied, "{k:?}");
         }
         for k in [K::Firewall, K::Extras] {
@@ -215,6 +242,7 @@ mod tests {
             K::LoginItems,
             K::Counters,
             K::MemoryModules,
+            K::WolState,
             K::Smart,
         ] {
             assert_eq!(other(k), Access::Full, "{k:?}");
@@ -224,7 +252,19 @@ mod tests {
     #[test]
     fn the_slow_kinds_are_the_tool_runs() {
         let slow: Vec<_> = K::ALL.into_iter().filter(|k| k.is_slow()).collect();
-        assert_eq!(slow, [K::LoginItems, K::Smart, K::InstallTool, K::Firewall, K::Extras]);
+        assert_eq!(
+            slow,
+            [
+                K::LoginItems,
+                K::Smart,
+                K::InstallTool,
+                K::Firewall,
+                K::Extras,
+                K::ScheduleWake,
+                K::CancelWake,
+                K::ListWakes
+            ]
+        );
     }
 
     #[test]

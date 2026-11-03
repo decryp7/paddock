@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn the_self_test_passes_without_touching_anything() {
         let line = self_test().unwrap();
-        assert!(line.contains("ok: api 2"), "{line}");
+        assert!(line.contains(&format!("ok: api {}", dyno_core::helper_wire::HELPER_API)), "{line}");
         assert_eq!(run(Command::SelfTest), 0);
         assert_eq!(run(Command::Version), 0);
     }

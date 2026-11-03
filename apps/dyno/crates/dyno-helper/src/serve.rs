@@ -111,6 +111,8 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         login_items: login_items_reader(),
         smart: crate::tools::smart_reader(paths.host, &paths.data_dir.join("tools"), Arc::new(SystemClock)),
         tools: crate::tools::installer(paths.host, &paths.data_dir, Arc::new(SystemClock)),
+        wakes: crate::tools::wake_scheduler(paths.host),
+        wol: crate::tools::wol_reader(paths.host),
         log_tail: Box::new(move |n| logfile::tail(&log_path, n)),
         on_uninstall: Box::new(move || remove()),
     }));

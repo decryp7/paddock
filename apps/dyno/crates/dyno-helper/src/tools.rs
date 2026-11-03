@@ -115,6 +115,26 @@ pub fn smart_reader(host: HelperHost, tools_dir: &std::path::Path, clock: Arc<dy
     }
 }
 
+/// The scheduled-wake handler of this system (Dyno ADR 0032 D2): systemd timers on Linux, `pmset` on macOS; Windows schedules in the agent.
+pub fn wake_scheduler(host: HelperHost) -> Box<dyn dyno_core::wake::WakeScheduler> {
+    match host {
+        HelperHost::Linux => Box::new(dyno_platform::wakes::SystemdWakes(Box::new(SystemRunner))),
+        HelperHost::Macos => Box::new(dyno_platform::wakes::PmsetWakes::new(
+            Box::new(SystemRunner),
+            Box::new(dyno_platform::wakes::system_offset_at),
+        )),
+        HelperHost::Windows => Box::new(dyno_core::wake::NoWakes),
+    }
+}
+
+/// The wake-on-LAN reader of this system (Linux only).
+pub fn wol_reader(host: HelperHost) -> Box<dyn dyno_core::wake::WolReader> {
+    match host {
+        HelperHost::Linux => Box::new(dyno_platform::wakes::EthtoolWol(Box::new(SystemRunner))),
+        _ => Box::new(dyno_core::wake::NoWakes),
+    }
+}
+
 /// The installer of this system.
 pub fn installer(host: HelperHost, data_dir: &std::path::Path, clock: Arc<dyn Clock>) -> Box<dyn ToolInstaller> {
     let tools = data_dir.join("tools");

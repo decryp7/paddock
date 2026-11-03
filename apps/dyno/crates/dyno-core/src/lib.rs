@@ -59,5 +59,6 @@ pub mod toolpath;
 pub mod tray;
 pub mod units;
 pub mod unusual;
+pub mod wake;
 pub mod weblinks;
 pub mod widgets;

@@ -14,10 +14,11 @@ use crate::helper_requests::{
 };
 use crate::network_traffic::TrafficCounter;
 use crate::smart::SmartReply;
+use crate::wake::{IfName, WakeEntry, WakeTag, WolReply};
 use serde::{Deserialize, Serialize};
 
 /// The version of the helper's request set. A different value is refused by the agent with "update the helper".
-pub const HELPER_API: u32 = 2;
+pub const HELPER_API: u32 = 3;
 
 /// The oldest helper build this Dyno accepts as `Ready`. Raised only when a helper fix must reach users (ADR 0027 section 4).
 pub const MIN_HELPER_VERSION: &str = "1.1.0";
@@ -80,6 +81,26 @@ pub enum HelperRequest {
     LogTail(u32),
     /// Removes the helper from this computer. Owner and administrators only.
     Uninstall,
+    /// Sets a wake of the computer at a time (Dyno ADR 0032): a wake Dyno tagged, replacing one with the same tag. Owner and
+    /// administrators only; macOS and the Linux `.deb`.
+    ScheduleWake {
+        /// The wake's tag (`[a-z0-9-]{1,32}`).
+        tag: WakeTag,
+        /// When, seconds since 1970 (UTC): in the future and at most 31 days ahead.
+        at_utc: i64,
+    },
+    /// Cancels the wake with this tag (only Dyno's own). Owner and administrators only.
+    CancelWake {
+        /// The wake's tag.
+        tag: WakeTag,
+    },
+    /// Dyno's pending wakes. Owner and administrators only.
+    ListWakes,
+    /// The wake-on-LAN modes of an interface (Linux, read only, modes only). Any caller.
+    WolState {
+        /// The interface.
+        ifname: IfName,
+    },
 }
 
 impl HelperRequest {
@@ -101,6 +122,10 @@ impl HelperRequest {
             HelperRequest::Audit(_) => RequestKind::Audit,
             HelperRequest::LogTail(_) => RequestKind::LogTail,
             HelperRequest::Uninstall => RequestKind::Uninstall,
+            HelperRequest::ScheduleWake { .. } => RequestKind::ScheduleWake,
+            HelperRequest::CancelWake { .. } => RequestKind::CancelWake,
+            HelperRequest::ListWakes => RequestKind::ListWakes,
+            HelperRequest::WolState { .. } => RequestKind::WolState,
         }
     }
 
@@ -138,6 +163,12 @@ pub enum HelperReply {
     Entries(Vec<AuditEntry>),
     /// Answer to `Firewall`, already reduced to what the caller may have.
     Firewall(FirewallSource),
+    /// Answer to `ScheduleWake` and `ListWakes`: Dyno's pending wakes, soonest first.
+    Wakes(Vec<WakeEntry>),
+    /// Answer to `CancelWake`: whether there was one to cancel.
+    WakeCancelled(bool),
+    /// Answer to `WolState`.
+    Wol(WolReply),
     /// Answer to `Smart`.
     Smart(SmartReply),
     /// Answer to `InstallTool`: the tool is now installed.
@@ -341,7 +372,7 @@ pub fn readings(host: HelperHost) -> &'static [&'static str] {
             "Per-program network traffic",
             "Disk health",
             "What is keeping the computer awake",
-            "Backup versions",
+            "Windows Backup versions (the restore points of the built-in backup)",
         ],
         HelperHost::Macos => &[
             "Every process of every account",
@@ -664,6 +695,17 @@ mod tests {
             HelperRequest::Audit(5),
             HelperRequest::LogTail(5),
             HelperRequest::Uninstall,
+            HelperRequest::ScheduleWake {
+                tag: WakeTag::parse("nightly").unwrap(),
+                at_utc: 1_800_000_000,
+            },
+            HelperRequest::CancelWake {
+                tag: WakeTag::parse("nightly").unwrap(),
+            },
+            HelperRequest::ListWakes,
+            HelperRequest::WolState {
+                ifname: IfName::parse("eth0").unwrap(),
+            },
         ];
         let kinds: Vec<_> = reqs.iter().map(|r| r.kind()).collect();
         assert_eq!(kinds, RequestKind::ALL, "one kind per request, in the table's order");

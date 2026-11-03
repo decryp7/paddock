@@ -9,6 +9,7 @@ use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, Caller
 use dyno_core::network_traffic::MAX_COUNTERS;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use dyno_core::smart::{SmartReader, ToolInstaller};
+use dyno_core::wake::{plan_schedule, WakeScheduler, WolReader};
 use paddock_ipc::RemoteError;
 
 /// Everything a [`Dispatcher`] needs from outside.
@@ -27,6 +28,10 @@ pub struct Parts {
     pub smart: Box<dyn SmartReader>,
     /// The pinned tool installer of this system.
     pub tools: Box<dyn ToolInstaller>,
+    /// Dyno's scheduled wakes of this system (macOS, Linux; elsewhere the agent schedules).
+    pub wakes: Box<dyn WakeScheduler>,
+    /// The wake-on-LAN reader of this system (Linux).
+    pub wol: Box<dyn WolReader>,
     /// The last `n` lines of the helper's log, oldest first.
     pub log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
     /// Called after an `Uninstall` request was audited and answered (it removes the helper in the background).
@@ -41,6 +46,8 @@ pub struct Dispatcher {
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
     on_uninstall: Box<dyn Fn() + Send + Sync>,
     login_items: Box<dyn LoginItemsReader>,
+    wakes: Box<dyn WakeScheduler>,
+    wol: Box<dyn WolReader>,
     smart: Box<dyn SmartReader>,
     tools: Box<dyn ToolInstaller>,
     log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
@@ -88,10 +95,25 @@ impl Dispatcher {
             clock: parts.clock,
             on_uninstall: parts.on_uninstall,
             login_items: parts.login_items,
+            wakes: parts.wakes,
+            wol: parts.wol,
             smart: parts.smart,
             tools: parts.tools,
             log_tail: parts.log_tail,
         }
+    }
+
+    /// Writes the audit line of a wake change before it happens: a log that cannot be written means nothing was changed.
+    fn audit_wake(&self, peer: Option<u32>, what: String) -> Result<(), RemoteError> {
+        self.audit
+            .record(&AuditEntry {
+                at: (self.clock)(),
+                peer,
+                what,
+                verdict: AuditVerdict::Done,
+                detail: "Asked by the owner or an administrator.".into(),
+            })
+            .map_err(|m| RemoteError::new(codes::FAILED, format!("{m} Nothing was changed.")))
     }
 
     /// Records a connection that was turned away (wrong user or program) without answering it.
@@ -151,6 +173,19 @@ impl Dispatcher {
                 let outcome = self.tools.install(tool, &bytes);
                 self.audit_tool(peer, tool, &outcome);
                 outcome.map(HelperReply::Installed).map_err(|e| remote(&e))
+            }
+            HelperRequest::ListWakes => self.wakes.list().map(HelperReply::Wakes).map_err(|e| remote(&e)),
+            HelperRequest::WolState { ifname } => self.wol.read(&ifname).map(HelperReply::Wol).map_err(|e| remote(&e)),
+            HelperRequest::ScheduleWake { tag, at_utc } => {
+                let pending = self.wakes.list().map_err(|e| remote(&e))?;
+                plan_schedule(&pending, &tag, at_utc, (self.clock)()).map_err(|r| RemoteError::new(codes::REFUSED, r.message()))?;
+                self.audit_wake(peer, format!("Set the wake {} for {at_utc}", tag.as_str()))?;
+                self.wakes.schedule(&tag, at_utc).map_err(|e| remote(&e))?;
+                self.wakes.list().map(HelperReply::Wakes).map_err(|e| remote(&e))
+            }
+            HelperRequest::CancelWake { tag } => {
+                self.audit_wake(peer, format!("Cancel the wake {}", tag.as_str()))?;
+                self.wakes.cancel(&tag).map(HelperReply::WakeCancelled).map_err(|e| remote(&e))
             }
             HelperRequest::LogTail(n) => Ok(HelperReply::Log((self.log_tail)(HelperRequest::log_len(n)))),
             HelperRequest::Audit(n) => Ok(HelperReply::Entries(self.audit.tail(HelperRequest::audit_len(n)))),
@@ -250,6 +285,20 @@ mod tests {
     }
 
     fn rig(host: HelperHost, traffic: Result<Vec<TrafficCounter>, PlatformError>) -> Rig {
+        rig_with(
+            host,
+            traffic,
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(dyno_core::wake::NoWakes),
+        )
+    }
+
+    fn rig_with(
+        host: HelperHost,
+        traffic: Result<Vec<TrafficCounter>, PlatformError>,
+        wakes: Box<dyn dyno_core::wake::WakeScheduler>,
+        wol: Box<dyn dyno_core::wake::WolReader>,
+    ) -> Rig {
         let dir = tempfile::tempdir().unwrap();
         let gone = Arc::new(AtomicBool::new(false));
         let flag = gone.clone();
@@ -267,6 +316,8 @@ mod tests {
             login_items: Box::new(Items(Ok(items_reply()))),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
+            wakes,
+            wol,
             log_tail: Box::new(|n| (0..n.min(3)).map(|i| format!("line {i}")).collect()),
         });
         Rig { d, gone, _dir: dir }
@@ -364,6 +415,8 @@ mod tests {
             login_items: Box::new(Items(Ok(items_reply()))),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
+            wakes: Box::new(dyno_core::wake::NoWakes),
+            wol: Box::new(dyno_core::wake::NoWakes),
             log_tail: Box::new(|_| vec![]),
         });
         assert!(d
@@ -411,6 +464,8 @@ mod tests {
             login_items: Box::new(Items(Err(PlatformError::AccessDenied("no".into())))),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
+            wakes: Box::new(dyno_core::wake::NoWakes),
+            wol: Box::new(dyno_core::wake::NoWakes),
             log_tail: Box::new(|_| vec![]),
         });
         assert!(failing.handle_for(&ctx, HelperRequest::LoginItems).is_err());
@@ -442,5 +497,120 @@ mod tests {
         }
         let entry = &audit(&r)[0];
         assert!(entry.what.contains("Smartmontools") && entry.verdict == AuditVerdict::Done);
+    }
+
+    use dyno_core::wake::{IfName, WakeEntry, WakeScheduler, WakeTag, WolMode, WolReader, WolReply, MAX_WAKES, MAX_WAKE_AHEAD_SECS};
+    use std::sync::Mutex;
+
+    /// An in-memory set of Dyno's wakes.
+    #[derive(Clone, Default)]
+    struct Wakes(Arc<Mutex<Vec<WakeEntry>>>);
+    impl WakeScheduler for Wakes {
+        fn schedule(&self, tag: &WakeTag, at_utc: i64) -> Result<(), PlatformError> {
+            let mut w = self.0.lock().unwrap();
+            w.retain(|e| &e.tag != tag);
+            w.push(WakeEntry { tag: tag.clone(), at_utc });
+            w.sort_by_key(|e| e.at_utc);
+            Ok(())
+        }
+        fn cancel(&self, tag: &WakeTag) -> Result<bool, PlatformError> {
+            let mut w = self.0.lock().unwrap();
+            let before = w.len();
+            w.retain(|e| &e.tag != tag);
+            Ok(w.len() != before)
+        }
+        fn list(&self) -> Result<Vec<WakeEntry>, PlatformError> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+    }
+    struct Wol;
+    impl WolReader for Wol {
+        fn read(&self, ifname: &IfName) -> Result<WolReply, PlatformError> {
+            assert_eq!(ifname.as_str(), "eth0");
+            Ok(WolReply {
+                enabled: vec![WolMode::Magic],
+                supported: vec![WolMode::Magic, WolMode::Unicast],
+            })
+        }
+    }
+    fn tag(s: &str) -> WakeTag {
+        WakeTag::parse(s).unwrap()
+    }
+
+    #[test]
+    fn wakes_are_checked_against_the_caps_audited_before_they_happen_and_listed() {
+        let wakes = Wakes::default();
+        let r = rig_with(HelperHost::Linux, Ok(vec![]), Box::new(wakes.clone()), Box::new(Wol));
+        let schedule = |t: &str, at: i64| r.d.handle(Some(9), HelperRequest::ScheduleWake { tag: tag(t), at_utc: at });
+        // The clock of the rig is 1_000 s.
+        for (at, why) in [(1_000, "past"), (999, "past"), (1_000 + MAX_WAKE_AHEAD_SECS + 1, "ahead")] {
+            let e = schedule("a", at).unwrap_err();
+            assert_eq!(e.code, codes::REFUSED, "{why}");
+        }
+        assert!(wakes.0.lock().unwrap().is_empty(), "nothing was set");
+        match schedule("a", 5_000).unwrap() {
+            HelperReply::Wakes(w) => assert_eq!(
+                w,
+                [WakeEntry {
+                    tag: tag("a"),
+                    at_utc: 5_000
+                }]
+            ),
+            other => panic!("{other:?}"),
+        }
+        assert!(audit(&r)[0].what.contains("Set the wake a"), "{:?}", audit(&r));
+        for i in 0..MAX_WAKES - 1 {
+            schedule(&format!("w{i}"), 6_000 + i as i64).unwrap();
+        }
+        assert_eq!(schedule("one-too-many", 9_000).unwrap_err().code, codes::REFUSED);
+        assert!(schedule("a", 7_000).is_ok(), "a wake with an existing tag is replaced, not added");
+        match r.d.handle(None, HelperRequest::ListWakes).unwrap() {
+            HelperReply::Wakes(w) => assert_eq!(w.len(), MAX_WAKES),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            r.d.handle(None, HelperRequest::CancelWake { tag: tag("a") }).unwrap(),
+            HelperReply::WakeCancelled(true)
+        );
+        assert_eq!(
+            r.d.handle(None, HelperRequest::CancelWake { tag: tag("a") }).unwrap(),
+            HelperReply::WakeCancelled(false)
+        );
+        assert!(audit(&r).iter().any(|e| e.what.contains("Cancel the wake a")));
+    }
+
+    #[test]
+    fn a_wake_that_cannot_be_audited_is_not_set_and_wol_modes_are_read_only() {
+        let wakes = Wakes::default();
+        let r = rig_with(HelperHost::Linux, Ok(vec![]), Box::new(wakes.clone()), Box::new(Wol));
+        // The audit log's folder goes away: the write fails, and so does the request, before anything is set.
+        std::fs::remove_dir_all(r._dir.path()).unwrap();
+        let e =
+            r.d.handle(
+                None,
+                HelperRequest::ScheduleWake {
+                    tag: tag("a"),
+                    at_utc: 5_000,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(e.code, codes::FAILED);
+        assert!(wakes.0.lock().unwrap().is_empty());
+        match r
+            .d
+            .handle(
+                None,
+                HelperRequest::WolState {
+                    ifname: IfName::parse("eth0").unwrap(),
+                },
+            )
+            .unwrap()
+        {
+            HelperReply::Wol(w) => assert_eq!(w.enabled, [WolMode::Magic]),
+            other => panic!("{other:?}"),
+        }
+        // A system without wakes says so.
+        let none = rig(HelperHost::Windows, Ok(vec![]));
+        assert_eq!(none.d.handle(None, HelperRequest::ListWakes).unwrap_err().code, codes::UNSUPPORTED);
     }
 }
