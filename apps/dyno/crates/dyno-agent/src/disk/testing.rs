@@ -18,6 +18,9 @@ pub struct FakeFs {
     open_errors: Mutex<HashMap<PathBuf, ReadError>>,
     stat_errors: Mutex<HashMap<PathBuf, ReadError>>,
     entry_errors: Mutex<HashMap<PathBuf, Vec<ReadError>>>,
+    /// Folders whose failing read takes the whole volume down with it (the root then fails its `stat` too).
+    drops_volume: Mutex<std::collections::HashSet<PathBuf>>,
+    volume_down: std::sync::atomic::AtomicBool,
     hook: Mutex<Option<Hook>>,
     stat_hook: Mutex<Option<Hook>>,
     entry_hook: Mutex<Option<Hook>>,
@@ -33,6 +36,8 @@ impl FakeFs {
             open_errors: Mutex::new(HashMap::new()),
             stat_errors: Mutex::new(HashMap::new()),
             entry_errors: Mutex::new(HashMap::new()),
+            drops_volume: Mutex::new(std::collections::HashSet::new()),
+            volume_down: std::sync::atomic::AtomicBool::new(false),
             hook: Mutex::new(None),
             stat_hook: Mutex::new(None),
             entry_hook: Mutex::new(None),
@@ -110,6 +115,12 @@ impl FakeFs {
         self.open_errors.lock().unwrap().insert(path.to_path_buf(), e);
     }
 
+    /// Reading this folder (its open or its entries) fails and takes the whole volume down: the root answers nothing afterwards,
+    /// as a dropped share does. Without this a failure is local to the folder.
+    pub fn drop_volume_at(&self, path: &Path) {
+        self.drops_volume.lock().unwrap().insert(path.to_path_buf());
+    }
+
     /// Opening this folder works again (the person gave the rights).
     pub fn allow_open(&self, path: &Path) {
         self.open_errors.lock().unwrap().remove(path);
@@ -150,6 +161,9 @@ impl DirSource for FakeFs {
         if let Some(e) = self.stat_errors.lock().unwrap().get(path) {
             return Err(e.clone());
         }
+        if path == self.root && self.volume_down.load(Ordering::SeqCst) {
+            return Err(ReadError::Unreachable("Socket is not connected (os error 57)".into()));
+        }
         if path == self.root {
             return Ok(self.entry(OsStr::new("fake-root"), EntryKind::Dir, 0, 1, 1, 1));
         }
@@ -167,6 +181,9 @@ impl DirSource for FakeFs {
         let hook = self.hook.lock().unwrap().clone();
         if let Some(h) = hook {
             h(path);
+        }
+        if self.drops_volume.lock().unwrap().contains(path) {
+            self.volume_down.store(true, Ordering::SeqCst);
         }
         if let Some(e) = self.open_errors.lock().unwrap().get(path) {
             return Err(e.clone());

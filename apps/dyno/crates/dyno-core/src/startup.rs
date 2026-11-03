@@ -217,6 +217,10 @@ pub struct StartupOverview {
     pub os_count: u32,
     /// How many are signed and not the OS's.
     pub signed_count: u32,
+    /// What could not be read (a source the OS refused or that failed), one sentence each: the list is then partial and the page
+    /// says so instead of presenting it as everything.
+    #[serde(default)]
+    pub unavailable: Vec<String>,
 }
 
 /// Applies `filter` to `entries`.
@@ -242,6 +246,7 @@ pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::os
         total,
         os_count,
         signed_count,
+        unavailable: Vec::new(),
     }
 }
 

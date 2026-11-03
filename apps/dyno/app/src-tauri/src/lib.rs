@@ -60,6 +60,7 @@ paddock_commands::command_table! {
     /// "Export report..." on the Inventory tab.
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
+    Mutation [MAIN] => commands::open_taskbar_settings,
     Mutation [MAIN] => commands::pick_folder,
     /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035). The tray popup reads its
     /// own layout to draw its widgets.
@@ -258,6 +259,36 @@ impl link::Launcher for NoAgent {
     fn finish(&self, _: std::time::Duration) {}
 }
 
+/// The launcher of the app's own agent ([`link::launch_route`]): a launchd job on macOS, the app's child elsewhere.
+fn app_launcher(dirs: &dyno_agent::paths::Dirs) -> Box<dyn link::Launcher> {
+    let route = link::launch_route(std::env::consts::OS);
+    logging::info(&format!(
+        "the app starts its own agent {}",
+        match route {
+            link::LaunchRoute::Launchd => "as a launchd job",
+            link::LaunchRoute::Child => "as its child process",
+        }
+    ));
+    match route {
+        #[cfg(target_os = "macos")]
+        link::LaunchRoute::Launchd => Box::new(link::LaunchdLauncher::new(
+            login::agent_program,
+            link::launchd::Setup {
+                plist: dirs.root().join(link::launchd::PLIST_FILE),
+                uid: paddock_service::native::current_uid(),
+                grace: link::driver::END_GRACE,
+                env: link::launchd::agent_env(|k| std::env::var(k).ok()),
+                sys: Box::new(paddock_service::system::RealSystem::new().with_timeout(std::time::Duration::from_secs(5))),
+                clock: std::sync::Arc::new(paddock_jobs::SystemClock),
+            },
+        )),
+        _ => {
+            let _ = dirs;
+            Box::new(ProcessLauncher::new(login::agent_program))
+        }
+    }
+}
+
 /// Dyno's own log, the shell glue and the agent link in `dirs`; the installed app also starts the agent process, keeps
 /// late windows told about it and repairs its service registration.
 fn agent_setup<R: Runtime>(
@@ -274,11 +305,7 @@ fn agent_setup<R: Runtime>(
         logging::uptime_ms()
     ));
     let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels);
-    let launcher: Box<dyn link::Launcher> = if installed {
-        Box::new(ProcessLauncher::new(login::agent_program))
-    } else {
-        Box::new(NoAgent)
-    };
+    let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {
         // Asked before the link starts an agent of its own: none beside one the login service supervises.
@@ -299,10 +326,14 @@ fn agent_setup<R: Runtime>(
     // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
     // keep the old job: replace the registration once per version and whenever launchd says it is stale
     // (`service_repair`), in the background, so measuring resumes without the user's help.
+    #[cfg(not(windows))]
     let repair = link.clone();
     // The old route (`tauri-plugin-autostart`) left `~/Library/LaunchAgents/Dyno.plist`; `SMAppService.mainApp` replaces it.
     #[cfg(target_os = "macos")]
     std::thread::spawn(login::migrate_legacy_login_at_start);
+    // Windows: no repair here (it rewrote the app's logon entry in 1.0.0); the stale entry of 1.0.0 is repaired once, with the
+    // switch, when the settings first arrive (`shell::settings_changed`).
+    #[cfg(not(windows))]
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
         match login::platform_service().repair(&|| repair.connected()) {

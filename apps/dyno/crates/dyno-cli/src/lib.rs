@@ -15,6 +15,16 @@ use args::{Command, Invocation};
 use dyno_core::protocol::{LiveDetail, Reply, Request};
 use std::io::Write;
 
+/// The arguments for the agent's own command line when `args` is `agent ...` (`dyno agent --version`): the agent program is
+/// a GUI-subsystem program on Windows (so the login entry opens no console window) and cannot print or return its exit code
+/// to a terminal reliably, so `dyno`, a console program, runs the same commands. `None` for any other command.
+pub fn agent_args(args: &[String]) -> Option<&[String]> {
+    match args {
+        [first, rest @ ..] if first == "agent" => Some(rest),
+        _ => None,
+    }
+}
+
 /// Runs `dyno` with the arguments after the program name; returns the exit code (0 done, 1 failed, 2 wrong usage, 3 versions
 /// differ, 4 Dyno is not running).
 pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
@@ -136,4 +146,23 @@ fn counters_get(agent: &dyn Agent, paths: &[String], json: bool) -> Result<Strin
         values = ask()?;
     }
     Ok(data(json, &values, || render::values_text(&values)))
+}
+
+#[cfg(test)]
+mod agent_route_tests {
+    use super::agent_args;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn agent_commands_go_to_the_agent_and_others_do_not() {
+        let a = v(&["agent", "service", "install"]);
+        assert_eq!(agent_args(&a), Some(&a[1..]));
+        assert_eq!(agent_args(&v(&["agent"])), Some(&[][..]));
+        assert_eq!(agent_args(&v(&["status"])), None);
+        assert_eq!(agent_args(&v(&["--json", "agent"])), None);
+        assert_eq!(agent_args(&[]), None);
+    }
 }

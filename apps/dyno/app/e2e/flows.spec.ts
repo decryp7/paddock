@@ -144,6 +144,27 @@ test.describe('dashboard', () => {
     await expect(page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '7d' })).toBeChecked();
   });
 
+  test('switching the history range keeps a drawn chart (it went empty until the view was reopened)', async ({ page }) => {
+    await page.goto('/?latency=0&gates#/');
+    const history = page.getByRole('region', { name: 'History' });
+    const range = history.getByRole('radiogroup', { name: 'Range' });
+    const drawn = history.locator('dy-chart canvas').first();
+    await expect(drawn).toBeVisible();
+    for (const label of ['7d', '30d', '24h']) {
+      // Hold the answer: the panel shows its skeleton (the chart is detached) until the test lets the answer through.
+      await page.evaluate(() => (window as unknown as { __mockHold(n: string): void }).__mockHold('history'));
+      await range.getByRole('radio', { name: label }).click();
+      await expect(range.getByRole('radio', { name: label })).toBeChecked();
+      await expect(history.getByLabel('Loading history')).toBeVisible();
+      await page.evaluate(() => (window as unknown as { __mockRelease(n: string): void }).__mockRelease('history'));
+      await expect(history.getByLabel('Loading history')).toHaveCount(0);
+      await expect(history.getByText('No history yet')).toHaveCount(0);
+      await expect(drawn).toBeVisible();
+      // A chart that lost its size shows a canvas of 0 px height.
+      await expect.poll(async () => (await drawn.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+    }
+  });
+
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
     await page.goto(url('/', '&mock=desktop'));
     const battery = page.getByRole('group', { name: 'Battery', exact: true });

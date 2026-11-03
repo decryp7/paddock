@@ -145,6 +145,106 @@ Consequences:
 4. The detection works from the list itself, so a change in the rule on another macOS version degrades to the same
    visible message instead of to wrong data.
 
+### Amendment 2026-11-03: the dotted identifier is necessary, not sufficient [M]
+
+The released `Dyno_1.0.0` bundle has the right identifiers (`dyno-agent` = `net.decryptology.dyno.agent`, `dyno` =
+`net.decryptology.dyno.cli`, checked with `codesign -dv` on the published `Dyno.app.tar.gz`), and the Network page still said
+"only its own sockets" (app log 2026-11-01 14:20:51, request `Network`, answered by an agent whose parent was the app, not
+launchd). Probes on macOS 27.2 (26B123), same dotted ad-hoc binary: from a shell, as a `launchctl submit` job and as a
+`launchctl bootstrap`ed LaunchAgent it sees the whole list (113 to 119 of 121 announced); as a **child of an ad-hoc signed
+`.app` started by LaunchServices** (directly or through `/bin/sh`) it sees 0 of 113. `responsibility_spawnattrs_setdisclaim` did
+not change that. So the app's own fallback launch (`ProcessLauncher`, a plain child) gets the cut-down view; the login service
+does not. Follow-ups: the page text names the real identifier and the way out; the agent logs `Agent socket view` at start;
+`check-bundle.sh` runs `dyno-agent view` as a launchd job. **Open design question:** start the agent from the app through launchd
+instead of as a child (decided in the next amendment).
+
+### Amendment 2026-11-03 (2): the app starts its own agent through launchd
+
+Decides the open question of the amendment above. Evidence marks as above; [V] measured in a Tart VM of macOS 27.2 (26B123,
+`ghcr.io/cirruslabs/macos-golden-gate-base`), never on the user's Mac (ER-14).
+
+**Measured [V]** (same bundle, the agent's `Agent socket view` start line or `dyno-agent view`; "sent / announced"):
+
+| Launch path (local unpublished build of `fix/dyno-agent-signing-id`, 4998c742c, then of this change) | parent | sent / announced | cut down |
+|---|---|---|---|
+| `dyno-agent view` from a shell (`tart exec`) | shell | 39 / 39 | no |
+| `launchctl submit -l … -- dyno-agent view` | launchd | 39 / 39 | no |
+| `launchctl bootstrap gui/501` of a plist running `dyno-agent view` | launchd | 39 / 39 | no |
+| 4998c742c: the app (`open -a`, LaunchServices) starts its fallback agent as its child | the app | **0 / 20** | **yes** |
+| 4998c742c: Start at login on, the `SMAppService` agent (`submitted by smd`) | launchd | 35 / 35 | no |
+| 4998c742c: Start at login off again, the app takes the agent back as its child | the app | **0 / 20** | **yes** |
+| this change, Start at login off: the app loads `…agent.ondemand` (`bootstrap` 221 ms) | launchd | 20 / 25 | no |
+| this change, Start at login on: hand-over (own agent exits 0 after `Shutdown`, job booted out), `SMAppService` agent | launchd | 20 / 20 | no |
+| this change, Start at login off: take-back, `…agent.ondemand` loaded again | launchd | 20 / 20 | no |
+
+So the SMAppService agent was never affected: only the app's own child is, and the VM reproduces the user's case exactly. With
+this change the Network page in the VM (Start at login off) lists other programs' listeners (`kdc` on 88, `launchd`'s SSH on 22;
+20 listening). After Quit no Dyno process runs, launchd has no `…agent.ondemand` job, `agent.json` is gone, nothing is in
+`~/Library/LaunchAgents`, and `sfltool dumpbtm` has no record of the job: the bootstrap adds no Background Items entry and no
+notification of its own (the "Dyno can run in the background" notice in the VM came from the `SMAppService` registration).
+Announced exceeds sent by the dead control blocks the header counts (see 3. above).
+
+**Likely mechanism [I].** What separates the cut-down cases from the whole ones is not the binary, its identifier or the user
+but who macOS holds *responsible* for the process: a child of an app is attributed to the app (the responsible process that TCC and
+other policy checks look at), while a launchd job, a `launchctl submit` job and a shell's child are their own or the shell's.
+The kernel's filter itself is not in the public XNU source, so this stays an inference; the decision rests on the measurements,
+not on it.
+
+**Rejected: spawn the child with responsibility disclaimed.** `responsibility_spawnattrs_setdisclaim` (a private libSystem call,
+not in the SDK) makes a spawned child its own responsible process. Measured on the host it did not lift the cut-down view
+(amendment above), and a private call can change or vanish in any macOS update. Not used.
+
+**Decision.** On macOS the app never runs its agent as its own child. When no login service runs one, it loads the bundled agent
+as a launchd job of the user's GUI session: `launchctl bootstrap gui/<uid> <data folder>/agent-ondemand.plist`, label
+`net.decryptology.dyno.agent.ondemand`, `RunAtLoad` true, `KeepAlive` false, `ExitTimeOut` 3 s (the driver's end grace),
+`ProcessType` Standard, standard streams to `/dev/null`, `DYNO_DATA_DIR` passed when the app has it, no
+`AssociatedBundleIdentifiers` or `BundleProgram`. `LaunchdLauncher` (`link/launchd.rs`) implements the unchanged `Launcher`
+port; Linux and Windows keep `ProcessLauncher`. The link machine does not change, so the model check does not either.
+
+| | A. `SMAppService.agent` always registered | **B. `launchctl bootstrap` of a plist in the data folder** | C. `launchctl submit -l` |
+|---|---|---|---|
+| Approval, Background Items | registers the login item: BTM record, the "background item added" notice, a Login Items row and possibly "requires approval", for a user who never asked to start at login | no BTM record, no notice, no Login Items row [V]: the plist is outside `~/Library/LaunchAgents` | none (no file); legacy subcommand |
+| Identity | the bundle's job (`BundleProgram`, LWCR) | the bundled binary, its own dotted identifier; no launch constraint stored | same as B |
+| Pid and End | the service's `KeepAlive` restarts it after `Shutdown`; Quit cannot end it, which breaks "Quit stops the agent the app started" | pid from `launchctl print`; End = wait for the exit, then `bootout` (launchd ends a stubborn one after `ExitTimeOut`) | submit keeps the job alive (`KeepAlive`): an exit 3 or a `Shutdown` is restarted until `launchctl remove` |
+| Quit, uninstall | registration survives Quit and the app's removal (until BTM notices) | Quit boots the job out; nothing is in `~/Library/LaunchAgents`, so nothing starts at the next login; a removed app leaves only the small plist in the data folder | job lives until `remove` or logout |
+| Take-back, restore at login | `installed` would always be true: the link would always wait for the service, the hand-over and take-back paths (ADR 0025) and the restore-at-login decision would change | untouched: a separate label, so the probe (`SMAppService.status`, `launchctl print net.decryptology.dyno.agent`), the repair and the hand-over never see the app's job | untouched |
+
+B wins: it is the only option that keeps the reviewed supervision (one agent, the app ends only what it started, the service
+decides when it is on) and adds no Login Items record. A is rejected for the approval prompt and the changed meaning of the
+switch; C for the restart loop, which fights the link's own decision, and because `submit` is a legacy subcommand.
+
+**Contract details.**
+
+- One at a time: `launch` loads nothing while the job it loaded runs or launchd is still starting it (`spawn scheduled` reads as
+  "starting", the machine already treats a held child without a pid as running). An exited job's record is booted out (and its
+  absence waited for, bounded) before the next `bootstrap`; `bootstrap` over a loaded job fails with error 5.
+- A running job of this label that this launcher did not load (an earlier Dyno quit or crashed while it ran) is not ended and no
+  second one is loaded: the launch fails with a message and the link connects to that agent once it holds the data folder.
+- Exit: `last exit code` (3 = another agent holds the folder) and `last terminating signal` come from launchd's report, read by
+  the shared parser (`paddock_service::parse::JobReport`, new `pid`, `last_exit_code`, `last_signal`).
+- Rule 53: the process is launchd's child and is ended only through launchd (`bootout` of the job), never by a pid; the pid
+  launchd reports is used for the CPU reading and the paused check only, with the identity taken from the live process at once.
+- Rule 56: `Agent job loaded` (Via launchd, label, domain, bootstrap ms), `Agent launched` / `Agent launch failed` carry
+  `Via`, `Agent job ended` (whether launchd had to end it, how long it waited), and the agent's own `Agent socket view` line
+  (identifier, announced, sent, cut down, parent) says what macOS shows it.
+- The label names the data folder: `net.decryptology.dyno.agent.ondemand` for the default one, with an 8-digit FNV-1a hash
+  of the folder appended when `DYNO_DATA_DIR` moves it (review P2), so a tool or test instance never waits for, takes or ends the
+  user's job. A job that someone else booted out is not booted out again at the quit (the label may be another's by then).
+- Waits are deadlines on the injected `paddock_jobs::time::Clock` (the bootout's 10 s, the quit's grace), not loop counts; a
+  `finish` that finds launchd mute goes straight to the bootout. `job state = spawn failed` counts as an exit with its code.
+  launchd going mute and coming back, and an ended job's record dropped before a new bootstrap, are logged.
+- The definition is written owner-only (0600, `System::write_private`).
+- **Known gap:** an app that crashed (or was force-quit) while its agent job ran leaves that job running. The next app finds it,
+  does not load a second one and connects to it as an agent it did not start, so its Quit leaves it running too; it ends at
+  logout, or when a later app that started its own agent quits. Adopting such a job was not done: the launcher could not tell it
+  from a job another copy of the app on the same folder still owns.
+- Not changed: the login service's plist, its registration, repair and every take-back and restore path; Windows and Linux.
+
+**Follow-ups.** The VM smoke harness (`scripts/vm-smoke/judge.mjs`, branch `tools/vm-smoke-unified`) allows launchd as the
+helper's parent only while Launch at login is on; Dyno's agent now has launchd as its parent always, so the Dyno config needs a
+parent kind for that. The macOS deployment diagram (`diagrams/uml-deployment-macos.drawio`) still draws the agent as the app's
+child; it is left for a designer (rule 22: a changed drawing gets an independent review).
+
 ### What the page gains and loses
 
 | | now (`proc_pidfdinfo` sweep) | kernel list |

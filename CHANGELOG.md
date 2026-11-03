@@ -34,6 +34,34 @@ Conventional Commits; one semver tag for the whole repo.
 - New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
   frees its slot on drop and reports `held()` on the injected `Clock`).
 
+### `paddock-shell`: `files_*` commands always have their service
+
+An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).
+
+### `paddock-proc`: `console::attach_parent_console` for GUI-subsystem sidecars
+- A program built for the Windows GUI subsystem (so a Run entry, a service or the app starts it without a console window) calls it first thing: it attaches to
+  the parent terminal's console, when there is one, and points missing standard handles at `CONIN$`/`CONOUT$`, so `--version` and friends still print.
+  A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
+
+### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
+- Fixed: on Windows the popover showed and vanished at once. Measured in the Windows 11 VM (grace 0): `Focused(true)` at 83 ms after show, `Focused(false)` 1 ms later
+  (the shell's taskbar took the foreground back after the click's mouse-up), `Focused(true)` again 1 ms after the close began; `set_focus` had succeeded. A blur
+  within `BLUR_GRACE` (600 ms, **Windows only**: `popover::blur_grace_for`; macOS and Linux keep closing on every blur, grace 0) of showing is now kept; when
+  the grace is over `popover::grace_end` decides: it has the focus again, it stays; the shell (`Shell_TrayWnd`, the overflow) still has the foreground, it asks
+  for the focus once more and a refusal closes it; any other window in front, it closes (a real dismissal). The grace and the fade run on the `Popovers` clock
+  (`Popovers::clock`, a `FakeClock` in tests), the wait is cancelled when the popover closes, and `Popovers::blur_grace` / `foreground_class` set them for tests.
+  The popover path logs show requested (with the grace), shown (with the `show` and `set_focus` results and the focus), focus gained or lost with the time since
+  shown, and hide with its reason (`toggle`, `blur`, `blur after grace`, `focus refused`, `requested`).
+
+### `paddock-service`: launchd's job report carries the pid and the last exit; `System::write_private`
+- `parse::JobReport` has three new fields read from the job's own keys of `launchctl print` (nested blocks skipped, as before): `pid` (`pid = <n>`,
+  only while it runs), `last_exit_code` (`last exit code = <n>`, `None` before the first exit or after a signal) and `last_signal` (`last terminating
+  signal = …`). A launcher that runs a program as a launchd job tracks it by them (Dyno ADR 0026, amendment 2).
+- `exit_config` now means exactly exit code 78, read from the parsed code; before, any line starting with `last exit code = 78` counted (780 too). The
+  copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
+- `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
+  calls `write`, so other implementations of the port are unchanged.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

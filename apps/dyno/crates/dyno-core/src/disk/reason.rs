@@ -14,6 +14,8 @@ pub enum UnreadableReason {
     NeedsAdmin,
     /// macOS protects the folder (it said "operation not permitted") and Full Disk Access is not what is missing.
     Protected,
+    /// The folder did not answer in time (a cloud placeholder, a network-backed or stuck folder); the volume itself still did.
+    NotAnswering,
     /// Any other error (a read failure, a folder that vanished, ...).
     Other,
 }
@@ -132,6 +134,7 @@ pub fn unreadable_reason(error: &ReadError, ctx: &ReasonContext, path: &Path) ->
             UnreadableReason::NeedsFullDiskAccess
         }
         (ReadError::PermissionDenied | ReadError::NotPermitted, _) => UnreadableReason::NeedsAdmin,
+        (ReadError::Unreachable(_), _) => UnreadableReason::NotAnswering,
         _ => UnreadableReason::Other,
     }
 }
@@ -254,11 +257,23 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_that_did_not_answer_has_its_own_reason_on_every_os() {
+        let slow = ReadError::Unreachable("Operation timed out (os error 60)".into());
+        for os in [Os::MacOs, Os::Windows, Os::Linux] {
+            assert_eq!(
+                why(&slow, &ctx(os, true), "/Users/alex/Library/CloudStorage/x"),
+                UnreadableReason::NotAnswering
+            );
+        }
+    }
+
+    #[test]
     fn serialises_in_camel_case() {
         for (r, s) in [
             (UnreadableReason::NeedsFullDiskAccess, "needsFullDiskAccess"),
             (UnreadableReason::NeedsAdmin, "needsAdmin"),
             (UnreadableReason::Protected, "protected"),
+            (UnreadableReason::NotAnswering, "notAnswering"),
             (UnreadableReason::Other, "other"),
         ] {
             assert_eq!(serde_json::to_string(&r).unwrap(), format!("\"{s}\""));

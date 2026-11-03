@@ -23,6 +23,7 @@ import { aboutBackend, jobsBackend, notifyBackends, settingsBackend, updatesBack
 import { DynoIcon } from './icon';
 import { tauriBridge, tauriIpc } from './ipc';
 import { provideWidgetNavigation } from './navigate';
+import { provideTrayHint } from './tray-hint';
 import { SettingsStore } from '../state/settings.store';
 import type { DynoContext } from './context';
 
@@ -66,6 +67,7 @@ export function bootMainWindow(): Promise<unknown> {
       ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
       provideWidgetNavigation(),
+      provideTrayHint(),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
       ...menuModeProviders(!!ipc, window.location.search),

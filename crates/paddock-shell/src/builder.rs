@@ -597,6 +597,13 @@ impl<R: Runtime> Builder<R> {
                 }
             };
             paddock_files::tauri::install(app, files);
+        } else {
+            // The shell serves the `files_*` commands to every app (About's releases link is `files_open_url`), so an app that
+            // set up no user files gets the web-address-only service: no drops granted, no folders, no recent lists.
+            log::info!(
+                "No user files set up by the app; the shell serves files_open_url only (web addresses)"
+            );
+            paddock_files::tauri::install_open_url_only(app);
         }
 
         if let Some(f) = self.storage {

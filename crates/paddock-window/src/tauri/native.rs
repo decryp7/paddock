@@ -88,3 +88,30 @@ mod tray_icon {
         }
     }
 }
+
+/// The class name of the window that has the foreground (Windows), to tell the shell's taskbar from another program's
+/// window; `None` elsewhere or when there is none.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub(crate) fn foreground_class() -> Option<String> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
+    // SAFETY: two plain calls; the buffer outlives the call and its length is passed.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 256];
+        let n = GetClassNameW(hwnd, &mut buf);
+        usize::try_from(n)
+            .ok()
+            .filter(|n| *n > 0)
+            .map(|n| String::from_utf16_lossy(&buf[..n]))
+    }
+}
+
+/// No foreground class outside Windows.
+#[cfg(not(windows))]
+pub(crate) fn foreground_class() -> Option<String> {
+    None
+}

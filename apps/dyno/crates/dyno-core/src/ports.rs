@@ -95,6 +95,13 @@ pub trait FileLocks: Send {
 pub trait StartupItems: Send {
     /// Everything that starts at login (impact is filled in by the agent from its measurements).
     fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError>;
+    /// Forgets anything cached, so the next [`StartupItems::list`] reads the OS again (an explicit refresh; sources that are slow
+    /// to read keep their answer between refreshes).
+    fn refresh(&mut self) {}
+    /// What the last [`StartupItems::list`] could not read, one sentence each, for the page to show next to a partial list.
+    fn unavailable(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Slow-changing facts (disk health, pending updates, power plan…). Called every few minutes off the sampling path.

@@ -18,6 +18,8 @@
 //! the data folder is free. A Windows `Run` entry starts nothing until the next logon, so there the app keeps its own agent.
 
 pub mod driver;
+#[cfg(any(target_os = "macos", test))]
+pub mod launchd;
 pub mod machine;
 pub mod ports;
 pub mod steps;
@@ -34,10 +36,12 @@ use dyno_agent::discovery::Discovery;
 use dyno_agent::paths::Dirs;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::{activity::ActivityEntry, alerts::Alert};
+#[cfg(any(target_os = "macos", test))]
+pub use launchd::LaunchdLauncher;
 use machine::{Event, Snapshot, Supervisor};
 use paddock_ipc::{BodyPeer, IpcError};
 use paddock_proc::StallCause;
-pub use ports::{agent_exe, Child, Launcher, ProcessLauncher};
+pub use ports::{agent_exe, launch_route, Child, LaunchRoute, Launcher, ProcessLauncher};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};

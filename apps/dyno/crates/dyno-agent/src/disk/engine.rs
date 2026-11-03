@@ -10,7 +10,10 @@ use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+
+/// Unreachable folders in a row (no folder read well between them) after which the volume counts as lost although its root answers.
+pub const MAX_UNREACHABLE_IN_A_ROW: u32 = 8;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -120,6 +123,10 @@ pub struct WalkConfig {
     pub listing_progress_every: usize,
     /// What decides why a folder was refused (the OS, Full Disk Access, the user's home); tests choose.
     pub reasons: ReasonContext,
+    /// Unreachable folders in a row (none read well between) after which the volume counts as lost although its root answers.
+    /// Only for network volumes, whose root can answer from the attribute cache; on a local volume a run of offline cloud
+    /// (File Provider) folders is not a lost volume, so it is `None` there.
+    pub unreachable_run_limit: Option<u32>,
 }
 
 /// Entries read between two progress reports inside one folder.
@@ -174,6 +181,8 @@ pub struct Walk {
     stopped: AtomicBool,
     finishing: AtomicBool,
     root_dev: u64,
+    /// Folders in a row that answered "unreachable" while the root still answered; any folder read well sets it back to 0.
+    unreachable_run: AtomicU32,
     /// Counts the passes; a worker of an earlier one is told apart from the current ones by it.
     epoch: AtomicU64,
     /// The latest pass was a retry: if it was cut short, the first pass's tree is still whole, so a retry may follow.
@@ -262,6 +271,7 @@ impl Walk {
             stopped: AtomicBool::new(false),
             finishing: AtomicBool::new(false),
             root_dev: me.dev,
+            unreachable_run: AtomicU32::new(0),
             gate: Mutex::new(()),
             retry_pass: AtomicBool::new(false),
             epoch: AtomicU64::new(0),
@@ -606,6 +616,37 @@ impl Walk {
         !seen.insert((e.dev, e.ino))
     }
 
+    /// Whether the volume itself is gone, after one folder answered "unreachable" (`detail`, the OS text with its error number).
+    /// The scan root is looked at again: if it answers, the failure belonged to that folder alone and is logged as such; if it
+    /// does not, the link is down. Logged either way so a diagnostic bundle shows which it was (no paths: they are user content).
+    fn volume_lost(&self, detail: &str, stage: &str) -> bool {
+        match self.source.stat(&self.root) {
+            Err(ReadError::Unreachable(root)) => {
+                log::error!(Stage = stage, Detail = detail, RootDetail = root.as_str(); "Disk scan: a folder and the scan root both stopped answering; the volume is lost");
+                true
+            }
+            // A share can answer a stat of its root from the attribute cache while every folder under it times out: a run of
+            // unreachable folders with no good one between them is the volume, not a few folders.
+            Ok(_)
+                if self
+                    .cfg
+                    .unreachable_run_limit
+                    .is_some_and(|limit| self.unreachable_run.fetch_add(1, Ordering::SeqCst) + 1 >= limit) =>
+            {
+                log::error!(Stage = stage, Detail = detail, InARow = self.unreachable_run.load(Ordering::SeqCst); "Disk scan: folders keep timing out one after another although the root answers; the volume is treated as lost");
+                true
+            }
+            Ok(_) => {
+                log::warn!(Stage = stage, Detail = detail; "Disk scan: one folder timed out or was unreachable but the volume still answers; the folder is marked incomplete and the scan goes on");
+                false
+            }
+            Err(other) => {
+                log::warn!(Stage = stage, Detail = detail, RootError = other.to_string().as_str(); "Disk scan: one folder was unreachable and the scan root gave another error; the folder is marked incomplete and the scan goes on");
+                false
+            }
+        }
+    }
+
     /// Reads one folder and commits it; returns the child folders to read next.
     fn process(&self, task: &Task, epoch: u64) -> Vec<Task> {
         let notable = self.cfg.limits.notable_bytes;
@@ -672,17 +713,30 @@ impl Walk {
             }
             true
         });
+        // "Unreachable" from one folder is not yet a lost volume: macOS answers ETIMEDOUT for a single File Provider placeholder or
+        // a stuck network-backed folder while the volume is fine. Only when the scan root stops answering too is the volume gone.
+        let folder_unreachable = unreachable.is_some();
         if let Some(detail) = unreachable {
-            self.pending_items.fetch_sub(seen, Ordering::Relaxed);
-            self.fail(ScanFailure::VolumeUnreachable { detail });
-            return Vec::new();
+            if self.volume_lost(&detail, "entry") {
+                self.pending_items.fetch_sub(seen, Ordering::Relaxed);
+                self.fail(ScanFailure::VolumeUnreachable { detail });
+                return Vec::new();
+            }
+            // The listing stopped part way: what was read counts, and the folder is incomplete for good.
+            entry_denied.get_or_insert(ReadError::Unreachable(detail));
+        }
+        if listed.is_ok() && !folder_unreachable {
+            self.unreachable_run.store(0, Ordering::SeqCst);
         }
         let unreadable_here = match &listed {
             Ok(()) => None,
             Err(ReadError::Unreachable(d)) => {
-                self.pending_items.fetch_sub(seen, Ordering::Relaxed);
-                self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
-                return Vec::new();
+                if self.volume_lost(d, "open") {
+                    self.pending_items.fetch_sub(seen, Ordering::Relaxed);
+                    self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
+                    return Vec::new();
+                }
+                Some(unreadable_reason(&ReadError::Unreachable(d.clone()), &self.cfg.reasons, &task.path))
             }
             // Gone since it was listed: nothing to read. On a retry the path was rebuilt from the index, so "not found" may mean
             // the path is wrong; the folder then stays refused rather than being called complete and empty.
@@ -823,6 +877,7 @@ mod tests {
                 fda_missing: false,
                 home: None,
             },
+            unreachable_run_limit: Some(MAX_UNREACHABLE_IN_A_ROW),
         }
     }
 
@@ -1746,6 +1801,7 @@ mod tests {
         fs.file(&r, "top", 34);
         let b = fs.dir(&r, "b");
         fs.fail_open(&b, ReadError::Unreachable("ENOTCONN".into()));
+        fs.drop_volume_at(&b);
         let (w, rec, end) = run(Arc::new(fs), r, cfg(1));
         assert_eq!(end, End::Failed(ScanFailure::VolumeUnreachable { detail: "ENOTCONN".into() }));
         assert_eq!(*lock(&rec.ended), vec![end]);
@@ -1763,6 +1819,7 @@ mod tests {
         for n in ["a", "b"] {
             let d = fs.dir(&r, n);
             fs.fail_open(&d, ReadError::Unreachable(format!("lost {n}")));
+            fs.drop_volume_at(&d);
         }
         let gate = crate::disk::testing::Gate::new();
         let g = gate.clone();
@@ -1786,8 +1843,129 @@ mod tests {
         let r = fs.root();
         fs.file(&r, "x", 5);
         fs.fail_entries(&r, vec![ReadError::Unreachable("ETIMEDOUT".into())]);
+        fs.drop_volume_at(&r);
         let (_, _, end) = run(Arc::new(fs), r, cfg(2));
         assert!(matches!(end, End::Failed(ScanFailure::VolumeUnreachable { .. })));
+    }
+
+    /// The reported bug: macOS answered ETIMEDOUT (os error 60) for one folder and the whole scan stopped with "The link to
+    /// Macintosh HD dropped". One folder's timeout marks that folder and the scan goes on.
+    #[test]
+    fn one_folder_timing_out_marks_it_incomplete_and_the_scan_goes_on() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let a = fs.dir(&r, "a");
+        fs.file(&a, "x", 12);
+        fs.file(&r, "top", 34);
+        let slow = fs.dir(&r, "cloud");
+        fs.fail_open(&slow, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+        let c = fs.dir(&r, "c");
+        fs.file(&c, "y", 7);
+        let (w, rec, end) = run(Arc::new(fs), r, cfg(1));
+        assert_eq!(end, End::Done, "the volume still answers");
+        assert_eq!(*lock(&rec.ended), vec![End::Done]);
+        assert_eq!(w.snapshot().progress.unreadable, 1);
+        assert_eq!(level(&w, 0).node.bytes, 34 + 12 + 7, "the other folders were counted");
+        assert!(!w.with_index(DiskIndex::is_complete), "the timed-out folder is incomplete");
+    }
+
+    /// A share whose root still answers (from the attribute cache) while every folder under it times out is a lost volume.
+    #[test]
+    fn folders_timing_out_in_a_row_are_a_lost_volume_even_if_the_root_answers() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        for n in 0..(MAX_UNREACHABLE_IN_A_ROW + 2) {
+            let d = fs.dir(&r, format!("slow{n}"));
+            fs.fail_open(&d, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+        }
+        let (_, _, end) = run(Arc::new(fs), r, cfg(1));
+        assert!(matches!(end, End::Failed(ScanFailure::VolumeUnreachable { .. })), "{end:?}");
+    }
+
+    /// More timeouts in total than the run limit, but a folder read well breaks every run: the scan is not a lost volume.
+    /// The order is sequenced: one reader takes the newest-listed folder first, so the folders are listed in the reverse of
+    /// the order they are read, and the test asserts the order it got instead of assuming it.
+    #[test]
+    fn a_folder_read_well_between_timeouts_resets_the_run() {
+        let burst = (MAX_UNREACHABLE_IN_A_ROW - 2) as usize;
+        let mut read_order: Vec<(String, bool)> = Vec::new(); // (name, times out)
+        for round in 0..3 {
+            for n in 0..burst {
+                read_order.push((format!("slow{round}-{n}"), true));
+            }
+            if round < 2 {
+                read_order.push((format!("good{round}"), false));
+            }
+        }
+        assert!(read_order.iter().filter(|(_, slow)| *slow).count() > MAX_UNREACHABLE_IN_A_ROW as usize);
+        let fs = FakeFs::new();
+        let r = fs.root();
+        for (name, slow) in read_order.iter().rev() {
+            let d = fs.dir(&r, name);
+            if *slow {
+                fs.fail_open(&d, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        fs.on_read(move |p| {
+            if let Some(n) = p.file_name().and_then(|n| n.to_str()).filter(|n| *n != "fake-root") {
+                lock(&log).push(n.to_string());
+            }
+        });
+        let (_, _, end) = run(Arc::new(fs), r, cfg(1));
+        let expected: Vec<String> = read_order.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(*lock(&seen), expected, "the sequence the test relies on");
+        assert_eq!(end, End::Done);
+    }
+
+    /// The reported case: Macintosh HD with many offline File Provider folders read back to back is a local volume, not a lost one.
+    #[test]
+    fn many_timed_out_folders_on_a_local_volume_do_not_stop_the_scan() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let n = MAX_UNREACHABLE_IN_A_ROW + 5;
+        for i in 0..n {
+            let d = fs.dir(&r, format!("cloud{i}"));
+            fs.fail_open(&d, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+        }
+        let good = fs.dir(&r, "good");
+        fs.file(&good, "x", 1);
+        let mut local = cfg(1);
+        local.unreachable_run_limit = None;
+        let (w, _, end) = run(Arc::new(fs), r, local);
+        assert_eq!(end, End::Done);
+        assert_eq!(w.snapshot().progress.unreadable, u64::from(n));
+    }
+
+    #[test]
+    fn a_few_timeouts_below_the_run_limit_do_not_stop_the_scan() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        for n in 0..(MAX_UNREACHABLE_IN_A_ROW - 1) {
+            let d = fs.dir(&r, format!("slow{n}"));
+            fs.fail_open(&d, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+        }
+        let good = fs.dir(&r, "good");
+        fs.file(&good, "x", 1);
+        let (w, _, end) = run(Arc::new(fs), r, cfg(1));
+        assert_eq!(end, End::Done);
+        assert_eq!(w.snapshot().progress.unreadable, u64::from(MAX_UNREACHABLE_IN_A_ROW - 1));
+    }
+
+    #[test]
+    fn a_folder_timing_out_mid_listing_is_partial_and_the_scan_goes_on() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let a = fs.dir(&r, "a");
+        fs.file(&a, "x", 12);
+        fs.fail_entries(&a, vec![ReadError::Unreachable("Operation timed out (os error 60)".into())]);
+        let b = fs.dir(&r, "b");
+        fs.file(&b, "y", 5);
+        let (w, _, end) = run(Arc::new(fs), r, cfg(1));
+        assert_eq!(end, End::Done);
+        assert_eq!(level(&w, 0).node.bytes, 17);
+        assert!(!w.with_index(DiskIndex::is_complete));
     }
 
     #[test]

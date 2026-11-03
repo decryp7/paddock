@@ -1,6 +1,7 @@
 //! Pure parsers and mappings for what the OS and its tools return. Compiled on every OS so they are tested
 //! everywhere; the OS modules only feed them bytes and text.
 
+pub mod btm;
 pub mod cpu_topology;
 pub mod desktop_entry;
 pub mod gpu;

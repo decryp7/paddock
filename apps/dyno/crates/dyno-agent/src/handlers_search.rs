@@ -48,12 +48,15 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
         Request::WebSearch { query } => search_url(&query).map(Reply::Url).map_err(|e| bad(e.to_string())),
         Request::VirusTotalUrl { sha256 } => virustotal_url(&sha256).map(Reply::Url).map_err(|e| bad(e.to_string())),
         Request::StartupOverview { filter } => {
-            let list = lock(&shared.ports.startup).list()?;
-            Ok(Reply::StartupOverview(Box::new(dyno_core::startup::overview(
-                list,
-                filter,
-                crate::unusual::current_os(),
-            ))))
+            // The list and what it could not read come from one lock, so they describe the same read.
+            let (list, unavailable) = {
+                let mut startup = lock(&shared.ports.startup);
+                let list = startup.list()?;
+                (list, startup.unavailable())
+            };
+            let mut overview = dyno_core::startup::overview(list, filter, crate::unusual::current_os());
+            overview.unavailable = unavailable;
+            Ok(Reply::StartupOverview(Box::new(overview)))
         }
         other => Err(bad(format!("{other:?} is not a search request."))),
     }

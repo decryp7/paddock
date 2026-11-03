@@ -22,7 +22,7 @@ use std::time::Duration;
 
 /// How long a child gets to exit by itself when it is ended, before it is ended through its handle.
 // cap: ADR 0031 class S. A quit must end, so this is the one deliberate time limit of the supervisor.
-const END_GRACE: Duration = Duration::from_secs(3);
+pub const END_GRACE: Duration = Duration::from_secs(3);
 
 enum LauncherJob {
     Launch(Generation),
@@ -80,8 +80,10 @@ impl Executor {
                         });
                         let launch_ms = u64::try_from(launching.elapsed().as_millis()).unwrap_or(u64::MAX);
                         match &result {
-                            Ok(launch) => log::info!(Pid = launch.pid.unwrap_or(0), LaunchMs = launch_ms; "Agent launched"),
-                            Err(e) => log::error!(LaunchMs = launch_ms, Error = e.as_str(); "Agent launch failed"),
+                            Ok(launch) => {
+                                log::info!(Pid = launch.pid.unwrap_or(0), LaunchMs = launch_ms, Via = l.launcher.via(); "Agent launched")
+                            }
+                            Err(e) => log::error!(LaunchMs = launch_ms, Via = l.launcher.via(), Error = e.as_str(); "Agent launch failed"),
                         }
                         if result.is_err() {
                             let mut held = lock(&h);
