@@ -272,11 +272,14 @@ fn app_launcher(dirs: &dyno_agent::paths::Dirs) -> Box<dyn link::Launcher> {
         #[cfg(target_os = "macos")]
         link::LaunchRoute::Launchd => Box::new(link::LaunchdLauncher::new(
             login::agent_program,
-            dirs.root().join(link::launchd::PLIST_FILE),
-            paddock_service::native::current_uid(),
-            link::driver::END_GRACE,
-            link::launchd::agent_env(|k| std::env::var(k).ok()),
-            Box::new(paddock_service::system::RealSystem::new().with_timeout(std::time::Duration::from_secs(5))),
+            link::launchd::Setup {
+                plist: dirs.root().join(link::launchd::PLIST_FILE),
+                uid: paddock_service::native::current_uid(),
+                grace: link::driver::END_GRACE,
+                env: link::launchd::agent_env(|k| std::env::var(k).ok()),
+                sys: Box::new(paddock_service::system::RealSystem::new().with_timeout(std::time::Duration::from_secs(5))),
+                clock: std::sync::Arc::new(paddock_jobs::SystemClock),
+            },
         )),
         _ => {
             let _ = dirs;

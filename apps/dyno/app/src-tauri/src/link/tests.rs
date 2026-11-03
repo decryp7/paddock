@@ -106,8 +106,11 @@ fn contract_exit_code_is_reported(l: &dyn Launcher, exits: &dyn Fn(i32)) {
     l.launch().unwrap();
     exits(code);
     let mut state = l.child();
-    // A real child exits on its own; its exit is what is waited on (a condition, not a time).
+    // A real child exits on its own; its exit is what is waited on (a condition, not a time). The guard only turns a hang into
+    // a failure with a message (a script that never exits); it is not a timing assertion.
+    let guard = Instant::now() + Duration::from_secs(60);
     while matches!(state, Child::Running { .. } | Child::None) {
+        assert!(Instant::now() < guard, "hang guard: the agent never exited ({state:?})");
         std::thread::sleep(Duration::from_millis(10));
         state = l.child();
     }
