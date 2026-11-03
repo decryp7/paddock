@@ -104,6 +104,10 @@
   --pd-control-height: 28px;
   --pd-button-height: 32px;
   --pd-hit-min: 24px;
+  // The widget grid's row unit (ADR 0044): a widget of h rows is h x 24 + (h - 1) x gap px, so every height is on the 8 px snap.
+  --pd-widget-row: 24px;
+  // The widget grid's snapping guides: the accent at 70 %.
+  --pd-snap-guide: color-mix(in srgb, var(--pd-accent) 70%, transparent);
   // The resting colour of a row's "..." button: subtle text mixed 75 % into the surface, 3:1 or better (SC 1.4.11); hover, focus and
   // open use the text colour.
   --pd-row-action-rest: color-mix(in srgb, var(--pd-text-subtle) 75%, var(--pd-surface-1));

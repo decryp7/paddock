@@ -35,6 +35,8 @@ product-reference points come from established knowledge (marked "[k]" in Source
 - 4 px base grid. Spacing scale: 2, 4, 8, 12, 16, 24, 32, 48. Card padding 16 (Standard) / 12 (Compact) / 20 (Comfortable).
   Gap between cards 16 (12 compact). Page gutter 24, max content width 1440 for dashboards, 880 for forms/settings.
 - Dashboard grid: 12 columns, tiles span 3/4/6/12; row heights snap to 8 px. Align baselines of hero numbers across a row.
+  A movable, resizable widget grid (`pd-widget-grid`, ADR 0044) counts rows in `--pd-widget-row` (24 px) units: a widget `h` rows high
+  is `h × 24 + (h − 1) × gap` px, so a row pitch is 40 px (36 Compact) and every height is on the 8 px snap.
 - Sidebar 216 px (collapsed 56), toolbar 44 px (Debrief 40), status bar 24 px, page-footer safe area 56 px, dialog widths 400/560/720.
 - Title bar 40 px, its own height (not a toolbar): app name and, on Windows, Linux and in the browser, the in-app menu
   bar; on macOS the menus are in the native menu bar only and the title bar keeps 78 px clear for the window buttons.
@@ -290,6 +292,32 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
     problem of the whole surface (that is the notice).
   A frame or row that opens a page is one real `button` with a chevron; widgets are sections labelled by their titles, in layout
   order.
+- **Widget grid** (`pd-widget-grid`, `@decryp7/paddock-ui/widgets`, ADR 0044): the movable, resizable dashboard. It draws the
+  arrangement the engine returns for the container's width (12 columns from 840 px, 6 from 560, 1 below) with widgets placed by
+  CSS grid lines in `--pd-widget-row` units, each widget a `pd-widget-frame` `card` (fills its cell, head and body clipped to it).
+  Outside edit mode it is just the dashboard plus one outlined **Edit layout** button; below 840 px the button is disabled and
+  the reason sits under it ("Arranging needs a wider dashboard. Make the window wider or collapse the sidebar.").
+  - **Edit mode** (explicit, never always on): a sticky bar "Editing layout" with one muted hint line, **Undo**, **Redo**,
+    **Add widget** (outlined) and **Done** (the one primary). Widget bodies are inert. Each widget is one tab stop
+    (`role="group"`, `aria-roledescription="widget"`, named by its title, described by "6 by 4, position 1 of 15" and the hint);
+    its "⋯" button (24 × 24, the next tab stop) lists Move left, right, up, down, to first, to last, Wider, Narrower, Taller,
+    Shorter, then Remove, each enabled only when the engine's `moves` says it would change the layout.
+  - **Pointer**: press anywhere on a widget and move 4 px to lift it (`--pd-shadow-3`, scale 1.02, `grabbing`); the corner grip
+    (two diagonal strokes, 24 × 24) and the right and bottom edge grips (two 1.5 px strokes, 16 px long, 5 px apart, shown on
+    hover and focus) resize. The **placeholder** is the snapped target (`--pd-accent-tint` fill, 1.5 px dashed `--pd-accent`
+    outline, radius 10; solid 2 px in high contrast); the **snapping guides** are 1 px dashed lines in `--pd-snap-guide` behind the
+    widgets along the placeholder's left and right edges; other widgets glide to their previewed places (160 ms,
+    `--pd-ease-move`; they jump in reduced motion, and the dragged widget gets no lift scale). A **size chip** ("8 × 6", or
+    "Largest size" / "Smallest size") sits in the placeholder while resizing. Escape or a lost pointer cancels; the page
+    scrolls within 48 px of its top or bottom edge, at most 16 px a frame.
+  - **Keyboard**: arrow keys move one cell (past a blocking neighbour), Shift with arrow keys resizes, Home and End go first
+    and last, Delete and Backspace remove, Ctrl or Command Z undoes (with Shift redoes), Escape leaves edit mode. A key the engine
+    says would change nothing is not sent; it is said in words ("Alpha can't move left.") under the bar and in a polite live
+    region, as is every result ("Alpha moved right, after Bravo. Position 2 of 6."). Focus returns to the moved widget after the
+    DOM follows the new reading order.
+  - **States**: loading is a skeleton of tiles (`aria-busy`), error says what failed with **Retry**, empty says "Nothing on the
+    dashboard yet" with **Add widget**; a refused gesture is always words, never colour alone. The grid shows what the engine
+    returns; it holds no layout rules.
 - **Chooser** (`pd-widget-chooser`, in the app's Settings): two lists, "Shown in the popup" (n of max) and "Add a widget".
   Each shown row has a drag handle (a 24 × 32 button that is also the keyboard control: Alt or Option with Up, Down, Home and End
   moves the row, focus stays on it and the live region says "Disk space moved to position 1 of 4"), the kind's icon, title and

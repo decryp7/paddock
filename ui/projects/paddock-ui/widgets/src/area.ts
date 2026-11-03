@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, contentChildren, input, output, ViewEncapsulation } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
-import type { CatalogueInfo, KindInfo, Placement, PlacementId, PlacementState, SurfaceNotice, SurfaceValues, Tone, WidgetState } from '../generated/widgets';
+import type { CatalogueInfo, KindInfo, Placement as GenericPlacement, PlacementId, Span, PlacementState, SurfaceNotice, SurfaceValues, Tone, WidgetState } from '../generated/widgets';
 import { PdWidgetFrame } from './frame';
 import { defaultKindOf, PdWidget } from './widget';
 
+type Placement<W> = GenericPlacement<W, Span>;
 const TONE_STATUS: Record<Tone, PdStatus> = { info: 'info', warning: 'warning', danger: 'error' };
 
 /**

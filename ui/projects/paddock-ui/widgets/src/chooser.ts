@@ -28,13 +28,20 @@ import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/m
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
-import type { Edit, KindInfo, LayoutView, Placement, Preset } from '../generated/widgets';
+import type { Edit, KindInfo, LayoutView, Placement as GenericPlacement, Preset as GenericPreset, Span } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
 /** The family's undo toast class (the safe area above the status bar is in `_material.scss`). */
 const UNDO_SNACK_CLASS = 'pd-undo-snack';
 const UNDO_SECONDS = 8;
+type Placement<W> = GenericPlacement<W, Span>;
+type Preset<W> = GenericPreset<W, Span>;
 let nextId = 0;
+
+/** The spans a flow kind allows (a grid kind has none: the chooser is for flow surfaces). */
+function spansOf(info: KindInfo<unknown>): readonly number[] {
+  return info.size.arrangement === 'spans' ? info.size.spans : [];
+}
 
 /** A move target: where a row goes. */
 type Move = 'up' | 'down' | 'top' | 'bottom';
@@ -95,9 +102,9 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                 @if (optionFor(p); as opt) {
                   <ng-container *ngTemplateOutlet="opt.template; context: { $implicit: p }" />
                 }
-                @if (info && info.spans.length > 1) {
+                @if (info && spansOf(info).length > 1) {
                   <mat-button-toggle-group class="pd-wc-toggle" [hideSingleSelectionIndicator]="true" [value]="p.span" [attr.aria-label]="titleOf(p) + ' width'" (change)="resize(p, $event.value)">
-                    @for (s of info.spans; track s) {
+                    @for (s of spansOf(info); track s) {
                       <mat-button-toggle [value]="s">{{ spanLabel(s) }}</mat-button-toggle>
                     }
                   </mat-button-toggle-group>
@@ -262,7 +269,7 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private readonly snackBar = inject(MatSnackBar);
 
   /** The engine's view of the surface: layout, catalogue, notes, `canUndo` and `editable`. */
-  readonly view = input.required<LayoutView<S, W, K>>();
+  readonly view = input.required<LayoutView<S, W, Span, K>>();
   /** A new widget value of a kind, with its default options (`Edit.add`). */
   readonly widgetFor = input.required<(kind: K) => W>();
   /** The kind (wire name) of a widget value; see `defaultKindOf`. */
@@ -361,6 +368,8 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private query(selector: string): HTMLElement | null {
     return this.host.nativeElement.querySelector<HTMLElement>(selector);
   }
+
+  protected readonly spansOf = spansOf;
 
   protected infoOf(p: Placement<W>): KindInfo<K> | undefined {
     const kind = this.kindOf()(p.widget);

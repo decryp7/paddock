@@ -8,13 +8,15 @@ import { DomSanitizer, By } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement, Preset, Progress, SurfaceValues, WidgetState } from '../generated/widgets';
+import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement as GenericPlacement, Preset as GenericPreset, Progress, Span, SurfaceValues, WidgetState } from '../generated/widgets';
 import { PdWidgetArea } from './area';
 import { PdWidgetChooser } from './chooser';
 import { progressText, PdWidgetFrame } from './frame';
 import { relativeAgo } from './time';
 import { defaultKindOf, PdSkeleton, PdWidget, PdWidgetOption } from './widget';
 
+type Placement<W> = GenericPlacement<W, Span>;
+type Preset<W> = GenericPreset<W, Span>;
 type W = { kind: 'cpu' | 'alarms' | 'disk' | 'net'; volume?: string };
 type V = { text: string };
 type A = 'retry' | 'open';
@@ -24,7 +26,7 @@ const kind = (k: string, title: string, spans: number[], maxInstances = 1, icon 
   title,
   summary: `${title} summary`,
   icon,
-  spans,
+  size: { arrangement: 'spans', spans },
   maxInstances,
   refresh,
 });
@@ -34,8 +36,12 @@ const CATALOGUE: CatalogueInfo<string, string> = {
 };
 const place = (id: string, k: W['kind'], span = 2): Placement<W> => ({ id, span, widget: { kind: k } });
 const PLACEMENTS = [place('alarms', 'alarms'), place('disk', 'disk'), place('cpu', 'cpu'), place('net', 'net', 1)];
-const view = (over: Partial<LayoutView<string, W, string>> = {}, placements = PLACEMENTS, catalogue = CATALOGUE): LayoutView<string, W, string> => ({
+const view = (over: Partial<LayoutView<string, W, Span, string>> = {}, placements = PLACEMENTS, catalogue = CATALOGUE): LayoutView<string, W, Span, string> => ({
   layout: { version: 1, placements, presets: [] },
+  revision: 1,
+  arrangements: [],
+  moves: [],
+  canRedo: false,
   catalogue,
   builtinPresets: [],
   notes: [],
@@ -840,7 +846,7 @@ describe('pd-widget-chooser', () => {
   });
 
   const preset = (id: string, name: string, builtin: boolean, n: number): Preset<W> => ({ id, name, builtin, placements: PLACEMENTS.slice(0, n) });
-  const withPresets = (max: number, user: Preset<W>[], builtin: Preset<W>[], over: Partial<LayoutView<string, W, string>> = {}) =>
+  const withPresets = (max: number, user: Preset<W>[], builtin: Preset<W>[], over: Partial<LayoutView<string, W, Span, string>> = {}) =>
     view({ layout: { version: 1, placements: PLACEMENTS, presets: user }, builtinPresets: builtin, ...over }, PLACEMENTS, { ...CATALOGUE, surface: { ...CATALOGUE.surface, maxUserPresets: max } });
   const nameInput = (f: ComponentFixture<unknown>) => q(f, '.pd-wc-save input') as HTMLInputElement;
   const type = async (f: ComponentFixture<ChooserHost>, text: string) => {
