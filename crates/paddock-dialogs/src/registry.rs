@@ -80,8 +80,12 @@ pub struct OpenDialog {
     pub viewport_delta: Option<f64>,
     /// The webview zoom, taken at `dialog_ready` and changed only as [`zoom_after`] says.
     pub zoom: Option<ZoomState>,
-    /// The inner size, physical px, and scale factor this layer last gave the window ([`Dialogs::note_own_size`]).
-    pub own_size: Option<OwnSize>,
+    /// The inner sizes this layer asked the window system for and it has not reported yet, oldest first
+    /// ([`Dialogs::note_own_size`]); at most [`MAX_PENDING_SIZES`].
+    pub pending_sizes: Vec<OwnSize>,
+    /// The size the window system last reported (or the window had when a fit left it alone): late reports of it are
+    /// not the user's.
+    pub settled_size: Option<OwnSize>,
     /// The user resized the window by hand: its size is theirs from then on and a fit never changes it
     /// ([`Dialogs::note_resized`]).
     pub user_sized: bool,
@@ -94,6 +98,9 @@ pub struct OwnSize {
     pub height: u32,
     pub scale: f64,
 }
+
+/// The most requested sizes kept waiting for the window system's report (a fit every frame cannot grow it without bound).
+pub const MAX_PENDING_SIZES: usize = 8;
 
 /// How far (physical px) a window's inner size may be from the one this layer set before it counts as the user's:
 /// the window system rounds (ADR 0040: within 2 px).
@@ -124,7 +131,8 @@ impl OpenDialog {
             measure: None,
             viewport_delta: None,
             zoom: None,
-            own_size: None,
+            pending_sizes: Vec::new(),
+            settled_size: None,
             user_sized: false,
         }
     }
@@ -411,27 +419,81 @@ impl Dialogs {
         Some(*e.viewport_delta.get_or_insert_with(first))
     }
 
-    /// This layer set the inner size of `label` to `size` (physical px at `scale`): a resize to it is not the user's.
+    /// This layer asked for the inner size `size` of `label` (physical px at `scale`), before it asks the window system:
+    /// the report of that resize is not the user's, however late it comes.
     pub fn note_own_size(&self, label: &str, size: OwnSize) {
         if let Some(e) = self.lock().get_mut(label) {
-            e.own_size = Some(size);
+            e.pending_sizes.push(size);
+            if e.pending_sizes.len() > MAX_PENDING_SIZES {
+                let old = e.pending_sizes.remove(0);
+                e.settled_size = Some(old);
+            }
         }
     }
 
-    /// The window `label` was resized to `width` x `height` physical px at `scale`. It is the user's resize (and the
-    /// size is theirs from now on: `true`) when the dialog is shown, this layer has set a size, the scale factor is the one
-    /// it set it at (a scale change resizes a window by itself and is refitted instead) and the size differs by more
-    /// than [`OWN_SIZE_TOLERANCE_PX`]. Whether the dialog is user-sized is returned either way.
+    /// A fit left the window at `size` (it asked for nothing new): the size to compare late reports with, unless a request
+    /// is still waiting.
+    pub fn note_current_size(&self, label: &str, size: OwnSize) {
+        if let Some(e) = self.lock().get_mut(label)
+            && e.pending_sizes.is_empty()
+        {
+            e.settled_size = Some(size);
+        }
+    }
+
+    /// The size last asked for, or else the one the window last settled at: what a diagnosis compares a report with.
+    pub fn last_requested(&self, label: &str) -> Option<OwnSize> {
+        let map = self.lock();
+        let e = map.get(label)?;
+        e.pending_sizes.last().or(e.settled_size.as_ref()).copied()
+    }
+
+    /// The window `label` reported a resize to `width` x `height` physical px at `scale`. Whether the dialog is
+    /// user-sized (theirs from now on) is returned.
+    ///
+    /// Reports come late and in order of the requests, from a window system that rounds and clamps, so only one that
+    /// answers none of this layer's requests is the user's:
+    /// * within [`OWN_SIZE_TOLERANCE_PX`] of a waiting request: that request and every older one are answered;
+    /// * within it of the settled size: a late report of an earlier answer;
+    /// * a scale factor other than the requests' own: the window system resized for the scale change, which is
+    ///   refitted, not the user's;
+    /// * any other report while requests wait: the window system's answer (a clamp to its minimum or maximum), which
+    ///   settles the window at what it reports;
+    /// * any other, of a shown window with no request waiting: the user's.
     pub fn note_resized(&self, label: &str, width: u32, height: u32, scale: f64) -> bool {
         let mut map = self.lock();
         let Some(e) = map.get_mut(label) else {
             return false;
         };
-        if let (true, Some(own)) = (e.shown && !e.user_sized, e.own_size)
-            && (own.scale - scale).abs() < 1e-9
-            && (own.width.abs_diff(width) > OWN_SIZE_TOLERANCE_PX
-                || own.height.abs_diff(height) > OWN_SIZE_TOLERANCE_PX)
-        {
+        if e.user_sized || !e.shown {
+            return e.user_sized;
+        }
+        let reported = OwnSize {
+            width,
+            height,
+            scale,
+        };
+        let close = |o: &OwnSize| {
+            (o.scale - scale).abs() < 1e-9
+                && o.width.abs_diff(width) <= OWN_SIZE_TOLERANCE_PX
+                && o.height.abs_diff(height) <= OWN_SIZE_TOLERANCE_PX
+        };
+        let known_scale = e
+            .pending_sizes
+            .last()
+            .or(e.settled_size.as_ref())
+            .map(|o| o.scale);
+        if known_scale.is_none_or(|k| (k - scale).abs() >= 1e-9) {
+            return false;
+        }
+        if let Some(i) = e.pending_sizes.iter().position(close) {
+            e.settled_size = Some(e.pending_sizes[i]);
+            e.pending_sizes.drain(..=i);
+        } else if e.settled_size.as_ref().is_some_and(close) {
+        } else if !e.pending_sizes.is_empty() {
+            e.pending_sizes.clear();
+            e.settled_size = Some(reported);
+        } else {
             e.user_sized = true;
         }
         e.user_sized
@@ -480,28 +542,73 @@ mod tests {
         OpenDialog::new(host, parent, id, d.contracts().get(id).unwrap())
     }
 
+    fn sized(width: u32, height: u32, scale: f64) -> OwnSize {
+        OwnSize {
+            width,
+            height,
+            scale,
+        }
+    }
+
     #[test]
     fn only_a_resize_by_hand_of_a_shown_window_makes_it_user_sized() {
         let d = Dialogs::new(contracts());
         let l = d.reserve(entry(&d, "main", "main", "ask")).unwrap();
-        let own = OwnSize {
-            width: 700,
-            height: 300,
-            scale: 1.25,
-        };
-        d.note_own_size(&l, own);
+        d.note_own_size(&l, sized(700, 300, 1.25));
         // Pending (hidden): never the user's.
         assert!(!d.note_resized(&l, 900, 500, 1.25));
         d.mark_shown(&l);
-        // The window system's own rounding of the size we set.
+        // The window system's own rounding of the size we asked for.
         assert!(!d.note_resized(&l, 701, 299, 1.25));
         // A resize that comes with a scale change is refitted, not the user's.
         assert!(!d.note_resized(&l, 900, 500, 1.5));
-        // The user drags it.
+        // The user drags it: nothing is waiting and the size is none of ours.
         assert!(d.note_resized(&l, 900, 300, 1.25));
         // And it stays theirs, even when the size goes back.
         assert!(d.note_resized(&l, 700, 300, 1.25));
         assert!(!d.note_resized("d-main-99", 1, 1, 1.0));
+    }
+
+    #[test]
+    fn a_late_report_of_an_earlier_request_is_not_the_users() {
+        // ready asked for A (105 px), a refit for B (195 px) before the window system reported A.
+        let d = Dialogs::new(contracts());
+        let l = d.reserve(entry(&d, "main", "main", "ask")).unwrap();
+        d.mark_shown(&l);
+        d.note_own_size(&l, sized(560, 105, 1.0));
+        d.note_own_size(&l, sized(560, 195, 1.0));
+        assert!(!d.note_resized(&l, 560, 105, 1.0), "A, after B was noted");
+        assert!(!d.note_resized(&l, 560, 195, 1.0), "B");
+        // Reports repeated after both are answered (the settled size).
+        assert!(!d.note_resized(&l, 560, 195, 1.0));
+        // An old size reported with nothing waiting is no request's: the user's.
+        assert!(d.note_resized(&l, 560, 105, 1.0));
+    }
+
+    #[test]
+    fn a_report_of_a_later_request_answers_the_older_ones_too() {
+        let d = Dialogs::new(contracts());
+        let l = d.reserve(entry(&d, "main", "main", "ask")).unwrap();
+        d.mark_shown(&l);
+        d.note_own_size(&l, sized(560, 105, 1.0));
+        d.note_own_size(&l, sized(560, 195, 1.0));
+        // The window system coalesced the two: only B is reported.
+        assert!(!d.note_resized(&l, 560, 195, 1.0));
+        assert!(!d.is_user_sized(&l));
+        assert_eq!(d.last_requested(&l), Some(sized(560, 195, 1.0)));
+    }
+
+    #[test]
+    fn a_window_systems_clamp_of_a_request_is_not_the_users() {
+        // Asked for 560x100; the window system's minimum makes it 560x140.
+        let d = Dialogs::new(contracts());
+        let l = d.reserve(entry(&d, "main", "main", "ask")).unwrap();
+        d.mark_shown(&l);
+        d.note_own_size(&l, sized(560, 100, 1.0));
+        assert!(!d.note_resized(&l, 560, 140, 1.0));
+        // It settled there: a repeat is no one's doing, and a drag from there is the user's.
+        assert!(!d.note_resized(&l, 560, 140, 1.0));
+        assert!(d.note_resized(&l, 560, 400, 1.0));
     }
 
     #[test]

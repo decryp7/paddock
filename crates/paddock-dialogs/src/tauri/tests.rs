@@ -917,13 +917,13 @@ fn a_scale_change_refits_after_the_window_systems_own_resize_not_inside_its_even
     let dialog = os_window(&app, &info.label);
     ready(&h, &dialog, measure(300.0, 100.0), "linux").unwrap();
     timer.deadline_passes();
-    let before = state(&app).get(&info.label).unwrap().own_size;
+    let before = state(&app).last_requested(&info.label);
     assert!(before.is_some());
     state(&app).set_measure(&info.label, measure(300.0, 400.0));
     scale_changed(&dialog);
-    assert_eq!(state(&app).get(&info.label).unwrap().own_size, before);
+    assert_eq!(state(&app).last_requested(&info.label), before);
     timer.deadline_passes();
-    assert_ne!(state(&app).get(&info.label).unwrap().own_size, before);
+    assert_ne!(state(&app).last_requested(&info.label), before);
 }
 
 #[test]

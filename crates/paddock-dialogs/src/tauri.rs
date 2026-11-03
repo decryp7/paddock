@@ -579,23 +579,28 @@ pub fn moved<R: Runtime>(window: &Window<R>) {
     }
 }
 
-/// A dialog was resized: remember where it is, and whether the user did it (a window system's own rounding of the size
-/// this layer set is not the user's, nor is a resize that comes with a scale change). From a user's resize on, fits leave its
-/// size alone (rule 17: the window is the user's).
-pub fn resized<R: Runtime>(window: &Window<R>) {
+/// A dialog was resized to `size` (as the window system reported it): remember where it is, and whether the user did it
+/// (the report of a size this layer asked for is not, however late, nor is a clamp of it, nor a resize that comes with a
+/// scale change: [`Dialogs::note_resized`]). From a user's resize on, fits leave its size alone (rule 17: the window is
+/// the user's). The log says which size was asked for last, so a wrong switch can be diagnosed.
+pub fn resized<R: Runtime>(window: &Window<R>, size: PhysicalSize<u32>) {
     moved(window);
-    let (Some(d), Ok(size), Ok(scale)) = (
+    let (Some(d), Ok(scale)) = (
         window.app_handle().try_state::<Dialogs>(),
-        window.inner_size(),
         window.scale_factor(),
     ) else {
         return;
     };
     let was = d.is_user_sized(window.label());
+    let asked = d.last_requested(window.label());
     if d.note_resized(window.label(), size.width, size.height, scale) && !was {
+        let asked = asked.map_or_else(
+            || "none".to_string(),
+            |a| format!("{}x{} @{}", a.width, a.height, a.scale),
+        );
         log::info!(
             target: TARGET,
-            Window = window.label(), Width = size.width, Height = size.height, Scale = scale;
+            Window = window.label(), Width = size.width, Height = size.height, Scale = scale, Asked = asked.as_str();
             "Dialog window resized by the user: its size is no longer fitted to its content"
         );
     }
@@ -701,7 +706,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
             }
         }
         WindowEvent::Moved(_) if is_dialog => moved(window),
-        WindowEvent::Resized(_) if is_dialog => resized(window),
+        WindowEvent::Resized(size) if is_dialog => resized(window, *size),
         WindowEvent::ScaleFactorChanged { .. } if is_dialog => scale_changed(window),
         WindowEvent::Destroyed if is_dialog => on_destroyed(app, label),
         WindowEvent::Destroyed if matches!(parsed, Some(Label::Main | Label::Window(_))) => {
@@ -916,27 +921,27 @@ fn fit_as<R: Runtime>(
             placement::physical_ceil(plan.min.height, scale),
         )))
         .map_err(failed)?;
-    // The size the window has from this fit on, noted before the window system reports it, so that report is not taken
-    // for the user's resize.
-    let own = if plan.resize {
-        OwnSize {
+    // What was asked of the window system, noted before it is asked, so its report is not taken for the user's resize.
+    if plan.resize {
+        let own = OwnSize {
             width: placement::physical_ceil(plan.size.width, scale),
             height: placement::physical_ceil(plan.size.height, scale),
             scale,
-        }
-    } else {
-        let now = window.inner_size().map_err(failed)?;
-        OwnSize {
-            width: now.width,
-            height: now.height,
-            scale,
-        }
-    };
-    dialogs.note_own_size(window.label(), own);
-    if plan.resize {
+        };
+        dialogs.note_own_size(window.label(), own);
         window
             .set_size(PhysicalSize::new(own.width, own.height))
             .map_err(failed)?;
+    } else {
+        let now = window.inner_size().map_err(failed)?;
+        dialogs.note_current_size(
+            window.label(),
+            OwnSize {
+                width: now.width,
+                height: now.height,
+                scale,
+            },
+        );
     }
     if let Some(at) = plan.move_to {
         set_position(window, &at).map_err(failed)?;
@@ -1022,7 +1027,7 @@ fn schedule_deadline<R: Runtime>(app: &AppHandle<R>, dialogs: &Dialogs, label: &
 /// refit it from its last measure, which is in logical px and so still right; a dialog that has not reported yet has
 /// nothing to refit and is sized by its `dialog_ready` at the scale it has then.
 ///
-/// The refit is scheduled, never run inside the event: the window system resizes the window itself after it has told the
+/// The refit is posted to the main thread from another one (the scheduler's), never run inside the event: the window system resizes the window itself after it has told the
 /// app (tao's `WM_DPICHANGED` sends `ScaleFactorChanged`, then calls `SetWindowPos` with its own size), so a size set in
 /// the event is overwritten (Windows VM, 2026-11-03: asked 614.4 px wide, ended 512).
 pub fn scale_changed<R: Runtime>(window: &Window<R>) {
@@ -1037,10 +1042,17 @@ pub fn scale_changed<R: Runtime>(window: &Window<R>) {
     {
         return;
     }
+    // Posted to the main thread from another one: run inside the event (as `run_on_main_thread` does from the main
+    // thread itself) it would be overwritten again.
     let (app, window) = (app.clone(), window.clone());
     dialogs.scheduler().after(
         Duration::ZERO,
-        Box::new(move || refit_after_scale(&app, &window)),
+        Box::new(move || {
+            let (a, w) = (app.clone(), window.clone());
+            if let Err(e) = app.run_on_main_thread(move || refit_after_scale(&a, &w)) {
+                log::warn!(target: TARGET, Window = window.label(); "Dialog refit after a scale change could not be posted: {e}");
+            }
+        }),
     );
 }
 
