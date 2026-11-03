@@ -106,9 +106,10 @@ agent side was run at nice 10 to show the unit does not inherit it):
 | Cancel on an all-core burner (8 busy loops) | `systemctl --user stop` took 7 ms by hand; `ProcessLauncher::run` returned in under 2 s after the decision; no process left, unit inactive |
 | Restart cleanup | A recorded leftover unit was stopped; a unit with the same prefix and a foreign InvocationID stayed running; the records were forgotten |
 
-These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They need a user manager and
-return at once, saying so, where there is none (most CI containers). To run them on a Linux machine with systemd:
-`cargo test -p dyno-agent --test bench_units -- --test-threads=1`. On a headless machine start the manager first
+These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They are `#[ignore]`d in a plain
+`cargo test` and FAIL without a user manager (never a silent pass). Run them with `scripts/linux-units-check.sh` (a release
+checklist step, `docs/releasing.md`), which is `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on
+`paddock-gate-arm`. On a headless machine start the manager first
 (`sudo loginctl enable-linger $USER`, then `XDG_RUNTIME_DIR=/run/user/$(id -u)`). Unit tests of the pure parts (command
 lines, parsers, cleanup decisions) are in `dyno_core::bench::unit`, and the agent's logic runs against a scripted child.
 `LINUX_UNITS_VERIFIED` in `bench.rs` switches the unit mode off in one place if it ever has to be.

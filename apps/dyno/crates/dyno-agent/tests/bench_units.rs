@@ -1,7 +1,7 @@
 //! Linux: the benchmark child as a named systemd user unit, with a scripted runner (ADR 0030 D5, the B2 spike as a test).
-//! Needs a systemd user manager; without one every test returns at once and says so (a CI container usually has none, so the
-//! check runs where one exists: a Linux machine with `systemctl --user` working). Nothing here touches anything it did not start:
-//! unit names carry this test process's id.
+//! Needs a systemd user manager, so the tests are `#[ignore]`d in a plain `cargo test` (a CI container usually has none) and FAIL,
+//! never pass silently, when run without one. Run them where a manager exists: `scripts/linux-units-check.sh` (release checklist,
+//! `docs/releasing.md`). Nothing here touches anything it did not start: unit names carry this test process's id.
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
 
@@ -15,12 +15,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-fn manager() -> bool {
-    let ok = SystemctlControl::available();
-    if !ok {
-        eprintln!("skipped: no systemd user manager here (systemctl --user is-system-running)");
-    }
-    ok
+/// Fails the test when there is no user manager: an ignored test that is asked for must run (ER-12).
+fn manager() {
+    assert!(
+        SystemctlControl::available(),
+        "no systemd user manager here (systemctl --user is-system-running must say running or degraded); see docs/linux.md"
+    );
 }
 
 /// Writes an executable script and returns its path.
@@ -83,10 +83,9 @@ impl ChildEvents for Never {
 }
 
 #[test]
+#[ignore = "needs a systemd user manager (docs/linux.md)"]
 fn a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_nothing() {
-    if !manager() {
-        return;
-    }
+    manager();
     let dir = tempfile::tempdir().unwrap();
     // The runner reads `go` (stdin through --pipe), then reports its own nice value and memory.high through its result line.
     let runner = script(
@@ -115,10 +114,9 @@ echo "{\"t\":\"result\",\"status\":{\"state\":\"unavailable\",\"reason\":\"ni=$n
 }
 
 #[test]
+#[ignore = "needs a systemd user manager (docs/linux.md)"]
 fn cancel_stops_an_all_core_burner_within_two_seconds_and_nothing_is_left() {
-    if !manager() {
-        return;
-    }
+    manager();
     let dir = tempfile::tempdir().unwrap();
     let runner = script(
         dir.path(),
@@ -153,10 +151,9 @@ while :; do echo '{"t":"heartbeat"}'; sleep 1; done"#,
 }
 
 #[test]
+#[ignore = "needs a systemd user manager (docs/linux.md)"]
 fn a_restart_stops_a_recorded_leftover_unit_and_leaves_a_foreign_one() {
-    if !manager() {
-        return;
-    }
+    manager();
     let dir = tempfile::tempdir().unwrap();
     let pid = std::process::id();
     let (mine, foreign) = (format!("dyno-bench-t3a-{pid}"), format!("dyno-bench-t3b-{pid}"));

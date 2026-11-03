@@ -86,6 +86,7 @@ In this order, on one commit:
    `installers: not built` proves nothing about the release path (rule 54).
 2b. Run the scripted VM start check on those installers, on a fresh clone: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app dyno --run <the run id>`
    ([scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)). Attach its result file; a failed step blocks the tag.
+2c. Run the benchmark unit check for the Linux runner: `scripts/linux-units-check.sh` (OrbStack `paddock-gate-arm`, a systemd user manager; it runs `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1`, ADR 0030 D5). A failure blocks the tag: set `LINUX_UNITS_VERIFIED` to false in `crates/dyno-agent/src/bench.rs` or fix it.
 3. Run the install and update plan, rows 24a to 24i of [testing-manual.md](testing-manual.md#install-and-update-in-a-throwaway-vm),
    on those installers (the VM plan says how the test builds are made).
 4. Re-measure the overhead numbers in `docs/architecture.md` on a quiet machine (roadmap G13) and refresh `docs/screenshots`
