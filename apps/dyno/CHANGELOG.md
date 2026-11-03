@@ -5,6 +5,8 @@
 ### Added
 
 - Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
+- Administrator readings (Dyno ADR 0027, WP-11): Settings has a card "Administrator readings" with the helper's state in words and an icon (Off, Not running, Needs repair, Update available, On, Not available here), what turning it on shows and what the OS will ask, and Turn on / Repair / Update / Turn off as one job with phases and Cancel (Cancel waits while the system's permission prompt is open and says so; the job has no UI deadline). A helper that is not installed, does not answer, or whose endpoint is owned by something else (never sent anything) is a state with a next step, not an error.
+- Agent protocol: `Request::HelperStatus` / `Reply::HelperStatus` and `JobSpec::Helper { action }` / `JobKind::Helper` / `JobOutput::Helper` are appended to the wire. The version number is not raised here: the steward's single bump to `PROTOCOL_VERSION` 4 covers this change together with the other appended variants of 1.1.0.
 
 ### Fixed
 
