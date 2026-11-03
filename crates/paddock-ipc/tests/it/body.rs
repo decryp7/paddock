@@ -2,7 +2,9 @@
 
 use crate::common::GUARD;
 use paddock_ipc::endpoint;
-use paddock_ipc::{BodyOptions, BodyPeer, Connection, FrameLimit, IpcError, Peer, RemoteError, codes};
+use paddock_ipc::{
+    BodyOptions, BodyPeer, Connection, FrameLimit, IpcError, Peer, RemoteError, codes,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
 
@@ -34,7 +36,10 @@ fn echo() -> impl Fn(Msg) -> Result<Msg, RemoteError> {
 #[test]
 fn calls_return_typed_answers_failures_and_contained_panics() {
     let (a, _b) = pair(BodyOptions::new("a"), BodyOptions::new("b").serve(echo()));
-    assert_eq!(a.call(Msg::Ask("hi".into()), GUARD).unwrap(), Msg::Answer("hi".into()));
+    assert_eq!(
+        a.call(Msg::Ask("hi".into()), GUARD).unwrap(),
+        Msg::Answer("hi".into())
+    );
     assert_eq!(
         a.call(Msg::Ask("fail".into()), GUARD).unwrap_err(),
         IpcError::Remote(RemoteError::new("nope", "it failed"))
@@ -44,7 +49,10 @@ fn calls_return_typed_answers_failures_and_contained_panics() {
         Err(IpcError::Remote(e)) if e.code == codes::PANIC
     ));
     // The connection survives the panic.
-    assert_eq!(a.call(Msg::Ask("again".into()), GUARD).unwrap(), Msg::Answer("again".into()));
+    assert_eq!(
+        a.call(Msg::Ask("again".into()), GUARD).unwrap(),
+        Msg::Answer("again".into())
+    );
 }
 
 #[test]
@@ -93,9 +101,11 @@ fn a_body_that_does_not_decode_fails_the_call_or_is_counted_not_fatal() {
     let (tx, rx) = mpsc::channel();
     let typed = BodyPeer::start(
         Connection::raw(x, limit),
-        BodyOptions::new("typed").serve(echo()).on_push(move |m: Msg| {
-            let _ = tx.send(m);
-        }),
+        BodyOptions::new("typed")
+            .serve(echo())
+            .on_push(move |m: Msg| {
+                let _ = tx.send(m);
+            }),
     )
     .unwrap();
     let plain = Peer::start(

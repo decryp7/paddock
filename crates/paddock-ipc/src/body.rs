@@ -102,7 +102,9 @@ impl<B> Clone for BodyPeer<B> {
 
 impl<B> fmt::Debug for BodyPeer<B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BodyPeer").field("peer", &self.peer).finish()
+        f.debug_struct("BodyPeer")
+            .field("peer", &self.peer)
+            .finish()
     }
 }
 
