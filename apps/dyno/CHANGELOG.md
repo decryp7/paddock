@@ -27,6 +27,11 @@
 - Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
 - macOS: the Network page lists every program's sockets also when Start at login is off. The agent the app starts itself was its child process, and macOS 27 shows a child of an ad-hoc signed app only its own sockets; the app now starts it as a launchd job of the user's session (`launchctl bootstrap`, label `net.decryptology.dyno.agent.ondemand`, its definition in Dyno's data folder, not in `~/Library/LaunchAgents`, so nothing starts it at login), and ends it through launchd on Quit. Linux and Windows are unchanged. The log says which way the agent was started (`Via`) and the agent logs what macOS shows it (Dyno ADR 0026).
 - macOS: the menu-bar icons no longer risk flickering: each picture is set with its template flag in one call (it was set, then set again as a template), the tooltip is sent only when it changed, and changing the items replaces only the icons that changed. The log shows every picture set at debug level. Not yet confirmed on the Mac that reported it.
+- Lower CPU use (measured in a macOS VM, `docs/performance.md` 2026-11-03):
+  - With no window open, the app asks the agent for the new `tray` live level instead of the summary: the menu bar icons keep the user's sampling interval, and the process table is read at the unwatched pace (every 10 s instead of every 2 s). A menu bar item that shows one app's numbers keeps the summary level; an older agent that cannot read the tray level gets the summary.
+  - A menu-bar picture is not set again when only its tooltip changed.
+  - Charts animate only their first draw with data. Options are replaced whole on each update, so a live chart (Counters, every 2 s) replayed its entry animation on every poll.
+  - Live numbers glide in 6 steps over 300 ms instead of one step per display frame (about 18 repaints per update, every second on the dashboard).
 
 ## [1.0.0] - 2026-10-29
 

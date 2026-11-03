@@ -181,8 +181,10 @@ working in memory.
 ## Dyno's own overhead
 
 Dyno measures itself on every tick (`Overhead` in each `LiveUpdate`) and `dyno-agent bench [seconds]
-[none|summary|processes]` reports it as JSON: `none` is nobody watching, `summary` a dashboard subscriber, `processes`
-the task manager open. Measured on the 14-core M4 Mac mini with `dyno-agent bench 25 …`:
+[none|tray|summary|processes]` reports it as JSON: `none` is nobody watching, `tray` the app with no window open (the menu
+bar icons: the system sample at the user's pace, the process table at the unwatched pace), `summary` a dashboard
+subscriber, `processes` the task manager open. The 2026-11-03 VM measurements of every process (agent, app, web view,
+window server) are in [performance.md](performance.md). Measured on the 14-core M4 Mac mini with `dyno-agent bench 25 …`:
 
 | Scenario | CPU (share of **one** core) | Resident memory |
 | --- | --- | --- |
