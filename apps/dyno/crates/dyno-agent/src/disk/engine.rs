@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 /// Unreachable folders in a row (no folder read well between them) after which the volume counts as lost although its root answers.
-const MAX_UNREACHABLE_IN_A_ROW: u32 = 8;
+pub const MAX_UNREACHABLE_IN_A_ROW: u32 = 8;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -123,6 +123,10 @@ pub struct WalkConfig {
     pub listing_progress_every: usize,
     /// What decides why a folder was refused (the OS, Full Disk Access, the user's home); tests choose.
     pub reasons: ReasonContext,
+    /// Unreachable folders in a row (none read well between) after which the volume counts as lost although its root answers.
+    /// Only for network volumes, whose root can answer from the attribute cache; on a local volume a run of offline cloud
+    /// (File Provider) folders is not a lost volume, so it is `None` there.
+    pub unreachable_run_limit: Option<u32>,
 }
 
 /// Entries read between two progress reports inside one folder.
@@ -623,8 +627,13 @@ impl Walk {
             }
             // A share can answer a stat of its root from the attribute cache while every folder under it times out: a run of
             // unreachable folders with no good one between them is the volume, not a few folders.
-            Ok(_) if self.unreachable_run.fetch_add(1, Ordering::SeqCst) + 1 >= MAX_UNREACHABLE_IN_A_ROW => {
-                log::error!(Stage = stage, Detail = detail, InARow = MAX_UNREACHABLE_IN_A_ROW; "Disk scan: folders keep timing out one after another although the root answers; the volume is treated as lost");
+            Ok(_)
+                if self
+                    .cfg
+                    .unreachable_run_limit
+                    .is_some_and(|limit| self.unreachable_run.fetch_add(1, Ordering::SeqCst) + 1 >= limit) =>
+            {
+                log::error!(Stage = stage, Detail = detail, InARow = self.unreachable_run.load(Ordering::SeqCst); "Disk scan: folders keep timing out one after another although the root answers; the volume is treated as lost");
                 true
             }
             Ok(_) => {
@@ -868,6 +877,7 @@ mod tests {
                 fda_missing: false,
                 home: None,
             },
+            unreachable_run_limit: Some(MAX_UNREACHABLE_IN_A_ROW),
         }
     }
 
@@ -1907,6 +1917,25 @@ mod tests {
         let expected: Vec<String> = read_order.iter().map(|(n, _)| n.clone()).collect();
         assert_eq!(*lock(&seen), expected, "the sequence the test relies on");
         assert_eq!(end, End::Done);
+    }
+
+    /// The reported case: Macintosh HD with many offline File Provider folders read back to back is a local volume, not a lost one.
+    #[test]
+    fn many_timed_out_folders_on_a_local_volume_do_not_stop_the_scan() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let n = MAX_UNREACHABLE_IN_A_ROW + 5;
+        for i in 0..n {
+            let d = fs.dir(&r, format!("cloud{i}"));
+            fs.fail_open(&d, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+        }
+        let good = fs.dir(&r, "good");
+        fs.file(&good, "x", 1);
+        let mut local = cfg(1);
+        local.unreachable_run_limit = None;
+        let (w, _, end) = run(Arc::new(fs), r, local);
+        assert_eq!(end, End::Done);
+        assert_eq!(w.snapshot().progress.unreadable, u64::from(n));
     }
 
     #[test]

@@ -302,7 +302,9 @@ impl StartupItems for LaunchAgents {
             let result = self.btm.dump().and_then(|t| {
                 parse_dumpbtm(&t, uid).map_err(|e| {
                     let crate::parse::btm::BtmError::NoRecords { first_line } = e;
-                    PlatformError::Failed(format!("sfltool dumpbtm printed no records (first line: {first_line})"))
+                    PlatformError::Failed(format!(
+                        "Login items could not be read (sfltool dumpbtm printed no records; first line: {first_line})"
+                    ))
                 })
             });
             self.btm_cache = Some(BtmCache { at: now, result });
@@ -317,7 +319,7 @@ impl StartupItems for LaunchAgents {
             }
             Some(Err(e)) => {
                 log::warn!(Error = e.to_string().as_str(); "Startup items: login items could not be read from the Background Task Management database");
-                unavailable.push(format!("Login items: {e}"));
+                unavailable.push(e.to_string());
                 problems.push(e.clone());
             }
             None => {}
@@ -536,10 +538,7 @@ mod tests {
         ))));
         la.refresh();
         assert_eq!(la.list().unwrap().len(), 3);
-        assert_eq!(
-            la.unavailable(),
-            vec!["Login items: Login items need administrator rights".to_string()]
-        );
+        assert_eq!(la.unavailable(), vec!["Login items need administrator rights".to_string()]);
     }
 
     /// The real source runs nothing: `sfltool dumpbtm` asks for an administrator password (measured in a VM).
