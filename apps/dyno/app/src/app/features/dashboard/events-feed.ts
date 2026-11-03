@@ -53,6 +53,9 @@ export const FEED_LIMIT = 7;
         </li>
       }
     </ul>
+    @if (hidden() > 0) {
+      <p class="more num">+{{ hidden() }} more</p>
+    }
   `,
   styles: `
     :host { display: block; min-width: 0; }
@@ -67,6 +70,7 @@ export const FEED_LIMIT = 7;
     .txt { flex: 1; min-width: 0; display: grid; }
     .title { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .detail { color: var(--text-3); font-size: var(--fs-xs); }
+    .more { margin: 0; padding: var(--sp-1); color: var(--text-3); font-size: var(--fs-xs); }
     .when { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
   `,
 })
@@ -76,7 +80,10 @@ export class EventsFeed {
   protected readonly activity = inject(ActivityStore);
   protected readonly alerts = inject(AlertsStore);
   private readonly live = inject(LiveStore);
-  protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), this.limit()));
+  private readonly all = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), Infinity));
+  protected readonly items = computed(() => this.all().slice(0, this.limit()));
+  /** How many entries the limit leaves out (shown as "+n more"). */
+  protected readonly hidden = computed(() => this.all().length - this.items().length);
   /** Relative to the engine's clock, so the feed reads right whatever the computer's clock does. */
   protected readonly ago = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
 

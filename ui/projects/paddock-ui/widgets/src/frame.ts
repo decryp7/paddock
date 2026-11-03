@@ -105,6 +105,9 @@ interface Meta {
     /* An inert body (the grid while editing) reads as inactive: a filled primary or accent text button loses its emphasis, so the page's own primary action stays the only one. */
     .pd-widget-frame[inert] .mat-mdc-unelevated-button:not(:disabled) { background-color: transparent; color: var(--pd-text-muted); }
     .pd-widget-frame[inert] .mat-mdc-button:not(:disabled), .pd-widget-frame[inert] .pd-w-act { color: var(--pd-text-muted); }
+    /* The other body controls (segmented and toggle buttons, checkboxes, selects, switches) read at reduced emphasis too: the chosen state stays visible (ring, tick, label) at 0.7 so it still clears 3:1. */
+    .pd-widget-frame[inert] :is(.mat-button-toggle-group, .mat-mdc-checkbox, .mat-mdc-select, .mat-mdc-slide-toggle, .mat-mdc-radio-button, select, input) { opacity: 0.7; }
+    .pd-widget-frame[inert] .mat-button-toggle-checked .mat-button-toggle-label-content { color: var(--pd-text-muted); }
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-w-icon.mat-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

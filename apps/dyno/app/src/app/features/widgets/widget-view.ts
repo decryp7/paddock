@@ -21,6 +21,8 @@ import { CpuTile } from '../dashboard/tiles';
 import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
+import { ActivityStore } from '../../state/activity.store';
+import { AlertsStore } from '../../state/alerts.store';
 import { CountersStore } from '../../state/counters.store';
 import { counterReading } from './counter-reading';
 import { seriesFor } from './series';
@@ -32,18 +34,36 @@ export const HERO_MIN_WIDTH = 4;
 /** From this many rows the health hero lists three reasons, below it two (the third would be cut). */
 export const HERO_ROWS_FOR_THREE = 11;
 
-/** From this many rows the issues widget lists three issues, below it two (a third would be cut). */
-export const ISSUES_ROWS_FOR_THREE = 8;
-
 /** The height of one recent-events entry (two lines and its padding), the head and the padding and grip clearance of a card, in px. */
 export const EVENT_ROW_PX = 48;
+/** The height of one issue (a name of up to two lines and its line below) and of a "+n more" line, in px. */
+export const ISSUE_ROW_PX = 64;
+export const MORE_LINE_PX = 22;
 const CARD_CHROME_PX = 62;
-const FEED_MAX = 7;
 
-/** How many recent-events entries fit `rows` grid rows (at the standard 24 px row and 16 px gap), at least one. */
-export function eventsFitting(rows: number): number {
-  const inner = rows * 24 + (rows - 1) * 16 - CARD_CHROME_PX;
-  return Math.min(FEED_MAX, Math.max(1, Math.floor(inner / EVENT_ROW_PX)));
+/** The px a body has below the head, inside the padding and clear of the resize grip, at the standard 24 px row and 16 px gap. */
+function innerPx(rows: number): number {
+  return rows * 24 + (rows - 1) * 16 - CARD_CHROME_PX;
+}
+
+/**
+ * How many entries of `px` each fit `rows` grid rows out of `total`, at least one: all of them when they fit, else as many as fit
+ * beside a "+n more" line. Nothing is capped while the card has room.
+ */
+function fitting(rows: number, total: number, px: number): number {
+  const inner = innerPx(rows);
+  if (total * px <= inner) return total;
+  return Math.max(1, Math.floor((inner - MORE_LINE_PX) / px));
+}
+
+/** How many recent-events entries (of `total`) fit `rows` grid rows. */
+export function eventsFitting(rows: number, total = Number.POSITIVE_INFINITY): number {
+  return fitting(rows, total, EVENT_ROW_PX);
+}
+
+/** How many issues (of `total`) fit `rows` grid rows. */
+export function issuesFitting(rows: number, total = Number.POSITIVE_INFINITY): number {
+  return fitting(rows, total, ISSUE_ROW_PX);
 }
 
 /** The placement the body reads while there is no value (never drawn: the twin is). */
@@ -93,7 +113,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
       @case ('ring') {
         <div class="ringrow">
           <dy-ring [value]="reading().percent ?? 0" [tone]="ringTone()" [label]="title() + ' ' + reading().text + reading().unit" style="--ring-size: 84px">
-            <span class="rn"><dy-animated-number [value]="reading().text" /></span>
+            <span class="rn"><dy-animated-number [value]="reading().text" /><small>{{ reading().unit }}</small></span>
           </dy-ring>
           @if (reading().reason; as why) {
             <p class="note"><span>Not available. {{ why }}</span></p>
@@ -131,6 +151,9 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
             </li>
           }
         </ul>
+        @if (moreIssues() > 0) {
+          <p class="more num">+{{ moreIssues() }} more</p>
+        }
       }
       @case ('cpu') { <dy-cpu-tile /> }
       @case ('diagnosis') { <dy-diagnosis-card /> }
@@ -168,6 +191,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
     .note.ok { color: var(--ok); }
     .bar-track { height: 6px; }
     .ringrow { display: flex; align-items: center; gap: var(--sp-4); }
+    .rn small { font: var(--fw-regular) var(--fs-sm) / 1 var(--font-sans); margin-inline-start: 4px; color: var(--text-3); }
     .rn { font: var(--fw-semibold) var(--fs-xl) / 1 var(--font-display); font-variant-numeric: tabular-nums; }
     .grade { font: var(--fw-semibold) var(--fs-lg) / 1.2 var(--font-display); }
     .grade[data-tone='ok'] { color: var(--ok); } .grade[data-tone='warn'] { color: var(--warn); } .grade[data-tone='bad'] { color: var(--bad); }
@@ -183,6 +207,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
     .issues strong { font-size: var(--fs-base); font-weight: var(--fw-semibold); }
     /* A name wraps to a second line before it is cut (the tooltip has the rest). */
     .two-lines { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+    .more { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
     .issues small { color: var(--text-3); font-size: var(--fs-xs); }
   `,
 })
@@ -204,6 +229,8 @@ export class WidgetView {
   protected readonly health = inject(HealthStore);
   private readonly diagnosis = inject(DiagnosisStore);
   private readonly counters = inject(CountersStore);
+  private readonly activity = inject(ActivityStore);
+  private readonly alerts = inject(AlertsStore);
 
   /** The metric's name (the content's accessible names; the frame's head says the same through the board's `titleOf`). */
   protected readonly title = computed(() => this.choices.title(this.widget().metric));
@@ -242,10 +269,11 @@ export class WidgetView {
     const u = this.live.update();
     return ((this.widget().metric === 'memory' ? u?.topMemory : u?.topCpu) ?? []).slice(0, 5);
   });
-  /** Three issues fit from `ISSUES_ROWS_FOR_THREE` rows (each takes up to three lines), below it two. */
   /** As many feed entries as the widget's rows hold (two-line entries of `EVENT_ROW_PX` below the head, inside the padding and clear of the resize grip). */
-  protected readonly eventLimit = computed(() => eventsFitting(this.rows()));
-  protected readonly anomalies = computed(() => this.diagnosis.anomalies().slice(0, this.rows() >= ISSUES_ROWS_FOR_THREE ? 3 : 2));
+  protected readonly eventLimit = computed(() => eventsFitting(this.rows(), this.activity.entries().length + this.alerts.alerts().length));
+  /** As many issues as the rows hold (the rest as "+n more"). */
+  protected readonly anomalies = computed(() => this.diagnosis.anomalies().slice(0, issuesFitting(this.rows(), this.diagnosis.anomalies().length)));
+  protected readonly moreIssues = computed(() => this.diagnosis.anomalies().length - this.anomalies().length);
   protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
   protected readonly gradeTone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));
   protected readonly pct = formatPercent;

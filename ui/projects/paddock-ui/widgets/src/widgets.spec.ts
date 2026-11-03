@@ -84,7 +84,7 @@ class AreaHost {
   imports: [PdWidgetFrame, PdWidget],
   template: `
     <pd-widget-frame title="Disk space" icon="pd:folder" [attr.inert]="inert() ? '' : null" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
-    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p><button type="button" class="mat-mdc-unelevated-button mdc-button">Check now</button></ng-template>
+    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p><button type="button" class="mat-mdc-unelevated-button mdc-button">Check now</button><div class="mat-button-toggle-group"><span class="mat-button-toggle mat-button-toggle-checked"><span class="mat-button-toggle-label-content">Now</span></span></div><label class="mat-mdc-checkbox"><input type="checkbox" /></label></ng-template>
   `,
 })
 class FrameHost {
@@ -206,6 +206,24 @@ describe('pd-widget-frame', () => {
     f.componentInstance.inert.set(false);
     await settle(f);
     expect(getComputedStyle(button).color).not.toContain('pd-text-muted');
+  });
+
+  it('dims segmented controls, toggles and checkboxes in an inert body, and keeps the chosen label readable', async () => {
+    const f = await setup();
+    f.componentInstance.state.set(ready('182 GB'));
+    await settle(f);
+    const group = q(f, '.mat-button-toggle-group')!;
+    const box = q(f, '.mat-mdc-checkbox')!;
+    const label = q(f, '.mat-button-toggle-label-content')!;
+    expect(getComputedStyle(group).opacity).toBe('1');
+    f.componentInstance.inert.set(true);
+    await settle(f);
+    expect(getComputedStyle(group).opacity).toBe('0.7');
+    expect(getComputedStyle(box).opacity).toBe('0.7');
+    expect(getComputedStyle(label).color).toContain('pd-text-muted');
+    f.componentInstance.inert.set(false);
+    await settle(f);
+    expect(getComputedStyle(group).opacity).toBe('1');
   });
 
   it('draws the ready template with a value, a fresh reading with its meta and the span as a grid column', async () => {

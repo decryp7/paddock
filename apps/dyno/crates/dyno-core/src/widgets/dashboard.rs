@@ -405,7 +405,7 @@ fn overview() -> Vec<Placement<DashboardWidget, Cells>> {
     use Metric as M;
     // What the fixed dashboard used to show, as widgets: the verdict first, then the live tiles, the busiest apps,
     // what happened and the history.
-    cells([
+    let mut placements = cells([
         (MEDIUM, w(K::Health, M::CpuTotal)),
         (MEDIUM, w(K::Diagnosis, M::CpuTotal)),
         (SMALL, w(K::Issues, M::CpuTotal)),
@@ -421,8 +421,19 @@ fn overview() -> Vec<Placement<DashboardWidget, Cells>> {
         (MEDIUM, w(K::Consumers, M::CpuTotal)),
         (LARGE, w(K::History, M::CpuTotal)),
         (LARGE, w(K::DiskTrend, M::DiskFree)),
-    ])
+    ]);
+    // The upgrade makes every widget of a row as tall as the row (the CPU's 6); the memory graph reads as one of the
+    // small graphs below it, four rows like Disk activity, so it is not stretched beside the CPU.
+    for p in &mut placements {
+        if p.widget.kind == K::Graph && p.widget.metric == M::Memory {
+            p.place.rect.h = OVERVIEW_GRAPH_ROWS;
+        }
+    }
+    placements
 }
+
+/// The rows of a small graph in the Overview (Memory beside the CPU, Disk activity and the others in the next row).
+const OVERVIEW_GRAPH_ROWS: u8 = 4;
 
 fn developer() -> Vec<Placement<DashboardWidget, Cells>> {
     use DashboardKind as K;
@@ -562,7 +573,19 @@ mod tests {
         let r = read::<DashboardCatalogue>(&serde_json::json!({ "version": 1, "placements": stored, "presets": [] }));
         assert_eq!(r.upgraded, Some(1));
         assert!(r.notes.is_empty(), "{:?}", r.notes);
-        assert_eq!(r.layout.placements, defaults, "the 1.0 default arrives looking as it did");
+        // The Overview is the 1.0 look except the memory graph: the upgrade stretches it to the CPU's six rows, the Overview
+        // keeps it at the four rows of the small graphs below (Disk activity).
+        let mut as_defaults = r.layout.placements.clone();
+        for p in &mut as_defaults {
+            if p.widget.kind == DashboardKind::Graph && p.widget.metric == Metric::Memory {
+                assert_eq!(p.place.rect.h, 6, "the plain upgrade stretches it to its row");
+                p.place.rect.h = 4;
+            }
+        }
+        assert_eq!(as_defaults, defaults, "the 1.0 default arrives looking as it did, bar the memory graph's height");
+        let rows = |m: Metric| defaults.iter().find(|p| p.widget.kind == DashboardKind::Graph && p.widget.metric == m).map(|p| p.place.rect.h);
+        assert_eq!(rows(Metric::Memory), rows(Metric::DiskActivity), "Memory is as tall as Disk activity");
+        assert_eq!(rows(Metric::Memory), Some(4));
         // Row 1 is 6 + 6 (Health, Why slow: 9 rows); row 2: Issues 3, CPU 6, Graph 3 (CPU/Issues: 6 rows).
         assert_eq!(defaults[0].place.rect, paddock_widgets::Rect::new(0, 0, 6, 9));
         assert_eq!(defaults[2].place.rect, paddock_widgets::Rect::new(0, 9, 3, 6));

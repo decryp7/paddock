@@ -134,6 +134,23 @@ test.describe('dashboard grid', () => {
     await page.mouse.up();
   });
 
+  test('edit mode: the segmented controls and checkboxes of the bodies read at reduced emphasis, and at full strength again after Done', async ({ page }) => {
+    await open(page);
+    const strength = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('pd-widget-frame .mat-button-toggle-group, pd-widget-frame .mat-mdc-checkbox')].map((c) => Number(getComputedStyle(c).opacity)),
+      );
+    const normal = await strength();
+    expect(normal.length).toBeGreaterThan(4);
+    expect(normal.every((o) => o === 1)).toBe(true);
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    await expect(page.getByText('Editing layout')).toBeVisible();
+    expect((await strength()).every((o) => o < 1 && o >= 0.6)).toBe(true);
+    await page.getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByText('Editing layout')).toHaveCount(0);
+    expect((await strength()).every((o) => o === 1)).toBe(true);
+  });
+
   test('a window too narrow to arrange disables Edit layout and says why', async ({ page }) => {
     await open(page, 700);
     const edit = page.getByRole('button', { name: 'Edit layout' });

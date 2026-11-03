@@ -1,3 +1,4 @@
+import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import type { HealthReason } from '../../core/api.types';
 import { formatSigned } from '../../shared/format';
@@ -10,7 +11,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 /** The health score with its top reasons. */
 @Component({
   selector: 'dy-health-hero',
-  imports: [MatTooltip, Ring, Icon],
+  imports: [FullTextTip, MatTooltip, Ring, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.report(); as r) {
@@ -36,7 +37,7 @@ import { MatTooltip } from '@angular/material/tooltip';
             <li>
               <div class="txt">
                 <span class="t"><span class="badge" [attr.data-tone]="sevTone(x)">{{ sevLabel(x) }}</span> {{ x.title }}</span>
-                <span class="d">{{ x.detail }}</span>
+                <span class="d" [dyFullText]="x.detail">{{ x.detail }}</span>
               </div>
               <span class="imp num" [matTooltip]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
             </li>

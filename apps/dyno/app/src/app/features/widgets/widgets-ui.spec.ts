@@ -8,10 +8,12 @@ import type { Cells, DashboardWidget, MetricReading, Placement } from '../../cor
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { CountersStore } from '../../state/counters.store';
+import { ActivityStore } from '../../state/activity.store';
+import { AlertsStore } from '../../state/alerts.store';
 import { LiveStore } from '../../state/live.store';
 import { AnimatedNumber } from './animated-number';
 import { DASHBOARD_KINDS, WidgetBoard } from './widget-board';
-import { eventsFitting, ISSUES_ROWS_FOR_THREE, WidgetView } from './widget-view';
+import { eventsFitting, issuesFitting, WidgetView } from './widget-view';
 import type { DyValue } from './dashboard-states';
 
 /** A dashboard placement of `kind` showing `metric`, `w` columns wide. */
@@ -58,6 +60,7 @@ describe('dy-widget', () => {
     const el = body('ring', given('ring', 'battery', rd(86))).nativeElement as HTMLElement;
     expect(el.querySelector('dy-ring')).not.toBeNull();
     expect(el.querySelector('.bar-track')).toBeNull();
+    expect(el.querySelector('.rn')!.textContent).toContain('%');
   });
 
   it('says the battery state beside the ring instead of repeating the title, and nothing for another ring', () => {
@@ -84,24 +87,48 @@ describe('dy-widget', () => {
     expect(el.textContent).not.toContain('Health score');
   });
 
-  it('lists two issues when short and three from ISSUES_ROWS_FOR_THREE rows, each name allowed a second line with its full text in the tooltip', async () => {
+  it('lists as many issues as the rows hold with "+n more" for the rest, nothing dropped silently, each name allowed a second line', async () => {
     env();
     await TestBed.inject(DiagnosisStore).loadAnomalies();
+    const total = TestBed.inject(DiagnosisStore).anomalies().length;
+    expect(total).toBeGreaterThan(1);
     const at = (h: number): DyValue => ({ placement: { ...place('issues', 'cpuTotal', 3), h }, reading: null });
-    const el = body('issues', at(ISSUES_ROWS_FOR_THREE - 1)).nativeElement as HTMLElement;
-    expect(el.querySelectorAll('.issues li').length).toBe(2);
-    const tall = body('issues', at(ISSUES_ROWS_FOR_THREE)).nativeElement as HTMLElement;
-    expect(tall.querySelectorAll('.issues li').length).toBe(3);
+    const f = body('issues', at(4));
+    const el = f.nativeElement as HTMLElement;
+    const shown = el.querySelectorAll('.issues li').length;
+    expect(shown).toBe(issuesFitting(4, total));
+    expect(shown).toBeLessThan(total);
+    expect(el.querySelector('.more')!.textContent).toBe(`+${total - shown} more`);
+    const tall = body('issues', at(20)).nativeElement as HTMLElement;
+    expect(tall.querySelectorAll('.issues li').length).toBe(total);
+    expect(tall.querySelector('.more')).toBeNull();
     expect(tall.querySelector('.issues strong')!.classList.contains('two-lines')).toBe(true);
   });
 
-  it('lists as many recent events as the rows hold, so the last entry never reaches the resize grip', () => {
-    expect([4, 7, 9, 14, 99].map(eventsFitting)).toEqual([1, 4, 5, 7, 7]);
-    expect(eventsFitting(1)).toBe(1);
+  it('fits entries to the rows: all while they fit, else as many as fit beside a "+n more" line, at least one', () => {
+    expect([4, 7, 9, 14].map((r) => eventsFitting(r))).toEqual([1, 3, 5, 9]);
+    expect(eventsFitting(7, 3)).toBe(3);
+    expect(eventsFitting(7, 9)).toBe(3);
+    expect(eventsFitting(1, 5)).toBe(1);
+    expect(issuesFitting(6, 3)).toBe(2);
+    expect(issuesFitting(7, 3)).toBe(3);
+    expect(issuesFitting(2, 5)).toBe(1);
+  });
+
+  it('lists the recent events the rows hold and counts the rest as "+n more"', async () => {
     env();
+    await TestBed.inject(ActivityStore).load();
+    await TestBed.inject(AlertsStore).load();
+    const feed = TestBed.inject(ActivityStore).entries().length + TestBed.inject(AlertsStore).alerts().length;
     const at = (h: number): DyValue => ({ placement: { ...place('events', 'cpuTotal', 6), h }, reading: null });
-    const f = body('events', at(7));
-    expect((f.nativeElement as HTMLElement).querySelectorAll('dy-events-feed li').length).toBeLessThanOrEqual(4);
+    const short = (body('events', at(4)).nativeElement as HTMLElement);
+    const shown = short.querySelectorAll('dy-events-feed li').length;
+    expect(shown).toBe(eventsFitting(4, feed));
+    expect(shown).toBeLessThan(feed);
+    expect(short.querySelector('.more')!.textContent).toBe(`+${feed - shown} more`);
+    const tall = body('events', at(30)).nativeElement as HTMLElement;
+    expect(tall.querySelectorAll('dy-events-feed li').length).toBe(feed);
+    expect(tall.querySelector('.more')).toBeNull();
   });
 
   it('says why a graph has no reading instead of drawing a history for it', () => {

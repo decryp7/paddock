@@ -62,6 +62,8 @@ describe('DiagnosisCard stats', () => {
     const dds = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.stats dd')];
     expect(dds.length).toBe(4);
     expect(dds.map((d) => d.classList.contains('name'))).toEqual([false, false, false, true]);
+    expect(dds[3]!.getAttribute('data-full-text')).toBeTruthy();
+    expect(dds[0]!.hasAttribute('data-full-text')).toBe(false);
   });
 });
 
@@ -150,6 +152,8 @@ describe('HealthHero', () => {
     expect(el.querySelector('.num')?.textContent).toBe('77');
     expect([...el.querySelectorAll('li .t')].map((t) => /Reason (\w)/.exec(t.textContent ?? '')?.[1])).toEqual(['b', 'd', 'c']);
     expect(el.querySelector('.clear')).toBeNull();
+    // A description wraps to two lines, then the tooltip has all of it.
+    expect([...el.querySelectorAll('li .d')].map((d) => d.getAttribute('data-full-text'))).toEqual([...el.querySelectorAll('li .d')].map((d) => d.textContent));
   });
 
   it('says nothing needs attention when there are no reasons', async () => {

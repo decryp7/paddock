@@ -135,7 +135,7 @@ const DASH_PRESETS: Record<string, [string, [number, DashboardWidget][]]> = {
 };
 
 function builtinPresets(): Preset<DashboardWidget, Cells>[] {
-  return Object.entries(DASH_PRESETS).map(([id, [name, items]]) => ({ id, name, builtin: true, placements: cellsFromSpans(items) }));
+  return Object.entries(DASH_PRESETS).map(([id, [name, items]]) => ({ id, name, builtin: true, placements: id === 'overview' ? overviewCells(items) : cellsFromSpans(items) }));
 }
 
 // ---------------------------------------------------------------------------------------------------- grid helpers
@@ -206,6 +206,11 @@ function cellsFromSpans(items: [number, DashboardWidget][]): Placement<Dashboard
   });
 }
 
+/** The Overview: the 1.0 look, but the memory graph keeps the four rows of the small graphs below it (as the engine's `overview()`), not the CPU's six. */
+function overviewCells(items: [number, DashboardWidget][]): Placement<DashboardWidget, Cells>[] {
+  return cellsFromSpans(items).map((p) => (p.widget.kind === 'graph' && p.widget.metric === 'memory' ? { ...p, h: 4 } : p));
+}
+
 /** The arrangement of a narrower grid: the engine derives it (half or full width in reading order); a rough imitation. */
 function derived(items: Placement<W, Cells>[], columns: number): Arrangement['placements'] {
   const out: Arrangement['placements'] = [];
@@ -236,7 +241,7 @@ function derived(items: Placement<W, Cells>[], columns: number): Arrangement['pl
 
 const DEFAULTS: Record<DynoSurface, () => Placement<W>[]> = {
   popover: () => assign<W>([[2, 'activeAlarms'], [2, { diskSpace: { volume: 'all' } }], [2, 'cpuMemory']]),
-  dashboard: () => cellsFromSpans(DASH_PRESETS['overview']![1]) as unknown as Placement<W>[],
+  dashboard: () => overviewCells(DASH_PRESETS['overview']![1]) as unknown as Placement<W>[],
   menuBar: () => assign<W>([[1, { verticalBars: { metric: 'cpuTotal' } }], [1, { verticalBars: { metric: 'memory' } }]]),
 };
 

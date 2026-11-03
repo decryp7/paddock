@@ -680,6 +680,14 @@ describe('mock extras and backup health', () => {
 });
 
 describe('hardware: throttling, lifespan and baselines', () => {
+  it('keeps the Overview memory graph at the four rows of Disk activity, not stretched to the CPU beside it', async () => {
+    const view = await make().widgetLayout('dashboard');
+    if (!('dashboard' in view)) throw new Error('not the dashboard');
+    const h = (metric: string) => view.dashboard.layout.placements.find((p) => p.widget.kind === 'graph' && p.widget.metric === metric)?.h;
+    expect(h('memory')).toBe(4);
+    expect(h('memory')).toBe(h('diskActivity'));
+  });
+
   it('answers the throttling overview: fine now, a few episodes in the last 30 days', async () => {
     const t = await make().throttling();
     expect(t.reading.verdict).toBe('fine');
