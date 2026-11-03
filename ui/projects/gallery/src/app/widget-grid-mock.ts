@@ -128,7 +128,7 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
     const r = me.rect;
     const put = (rect: Rect): Promise<readonly Item[]> => {
       const clamped = { ...rect, x: Math.max(0, Math.min(12 - rect.w, rect.x)), y: Math.max(0, rect.y) };
-      return same(clamped, r) ? Promise.reject({ blocked: 'unchanged' }) : Promise.resolve(this.items.map((i) => (i.id === g.id ? { id: i.id, rect: clamped } : i)));
+      return same(clamped, r) ? Promise.reject({ blocked: 'unchanged' }) : Promise.resolve(roughSettle(this.items.map((i) => (i.id === g.id ? { id: i.id, rect: clamped } : i)), g.id));
     };
     switch (g.gesture) {
       case 'place':
@@ -143,6 +143,30 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
         return put({ ...r, x: 0, y: Math.max(...this.items.map((i) => i.rect.y + i.rect.h)) });
     }
   }
+}
+
+const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * A rough stand-in for the engine's settle (push the overlapped down, then let everything rise): enough for the gallery's board to
+ * look like a dashboard after a drop. The real rules (swap, push order, holes) are the engine's and are checked by its own tests.
+ */
+function roughSettle(items: readonly Item[], movedId: string): Item[] {
+  const out = items.map((i) => ({ ...i }));
+  for (let pass = 0; pass < 200; pass++) {
+    const ordered = reading(out);
+    const pair = ordered.flatMap((p) => ordered.filter((q) => q !== p && overlaps(p.rect, q.rect)).map((q) => [p, q] as const))[0];
+    if (!pair) break;
+    // The moved one stays; otherwise the later one in reading order goes down.
+    const [keep, push] = pair[1].id === movedId ? [pair[1], pair[0]] : [pair[0], pair[1]];
+    (push as { rect: Rect }).rect = { ...push.rect, y: keep.rect.y + keep.rect.h };
+  }
+  for (const i of reading(out)) {
+    let y = i.rect.y;
+    while (y > 0 && !out.some((o) => o !== i && overlaps(o.rect, { ...i.rect, y: y - 1 }))) y--;
+    (i as { rect: Rect }).rect = { ...i.rect, y };
+  }
+  return out;
 }
 
 /** The same value with every object's keys in order, so two gestures compare as text whatever order their keys were written in. */

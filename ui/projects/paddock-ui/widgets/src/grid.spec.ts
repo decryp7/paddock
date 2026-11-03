@@ -563,13 +563,16 @@ describe('PdWidgetGrid', () => {
       expect(q('.pd-wg-guide--right')!.style.gridColumn).toBe('12 / span 6'.replace('12 / span 6', '12 / span 1'));
       expect(q('.pd-wg-guide--left')!.getAttribute('aria-hidden')).toBe('true');
       expect(q('.pd-wg-chip')).toBeNull();
-      expect(ids()).toEqual(['b', 'a', 'c']);
+      // The DOM keeps its order while a preview is drawn (moving the dragged node would drop its pointer capture).
+      expect(ids()).toEqual(['a', 'b', 'c']);
+      expect(cell('b').style.gridColumn).toBe('1 / span 6');
       expect(q('.pd-wg-grid')!.style.gridTemplateRows).toBe('repeat(16, var(--pd-widget-row))');
       up('a');
       await settle(f);
       expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { gesture: 'place', id: 'a', rect: R(4, 0, 6, 4) } } }, 7);
       expect(say).toHaveBeenCalledWith('CPU moved here, after Network. Position 2 of 3.', 'polite');
       expect(q('.pd-wg-ph')).toBeNull();
+      expect(ids()).toEqual(['b', 'a', 'c']);
       expect(f.componentInstance.changes).toHaveLength(1);
     });
 
@@ -584,10 +587,10 @@ describe('PdWidgetGrid', () => {
       expect(backend.preview.mock.calls.map((c) => c[0].seq)).toEqual([1, 2]);
       pending[0]!(replyFor(moved(), 1));
       await settle(f);
-      expect(ids()).toEqual(['a', 'b', 'c']);
+      expect(cell('a').style.gridColumn).toBe('1 / span 6');
       pending[1]!(replyFor(moved(), 2));
       await settle(f);
-      expect(ids()).toEqual(['b', 'a', 'c']);
+      expect(cell('a').style.gridColumn).toBe('7 / span 6');
     });
 
     it('a resize shows the size chip and the engine limit in words', async () => {

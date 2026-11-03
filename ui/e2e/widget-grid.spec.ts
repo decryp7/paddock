@@ -68,7 +68,7 @@ for (const theme of THEMES) {
           await expect(board(page).locator('.pd-wg-chip')).toBeVisible();
           await shot(board(page), 'board-resizing');
           await page.mouse.up();
-          await cell(page, 'a').focus();
+          await cell(page, 'd').focus();
           await page.keyboard.press('ArrowLeft');
           await expect(board(page).locator('.pd-wg-feedback--bad')).toBeVisible();
           await shot(board(page), 'board-blocked');
@@ -115,7 +115,7 @@ test('Widget grid: a drag cancelled with Escape changes nothing', async ({ page 
   await page.mouse.move(a.x + 20 + p.col * 8, a.y + 20 + p.row * 8, { steps: 8 });
   await page.keyboard.press('Escape');
   await page.mouse.up();
-  expect(await lines(cell(page, 'a'))).toEqual(before);
+  await expect.poll(() => lines(cell(page, 'a'))).toEqual(before);
   await expect(board(page).locator('.pd-wg-ph')).toHaveCount(0);
   await expect(board(page).getByText('Editing layout')).toBeVisible();
 });

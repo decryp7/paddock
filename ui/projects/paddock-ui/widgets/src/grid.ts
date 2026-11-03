@@ -343,9 +343,18 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     const v = this.shown();
     if (!v) return [];
     const byId = new Map(v.layout.placements.map((p) => [p.id, p] as const));
-    const placed = v.arrangements[this.arrangementIndex()]?.placements ?? [];
-    const order: { id: string; rect: Rect }[] = placed.filter((p) => byId.has(p.id)).map((p) => ({ id: p.id, rect: p.rect }));
-    const seen = new Set(order.map((o) => o.id));
+    const index = this.arrangementIndex();
+    const rects = new Map((v.arrangements[index]?.placements ?? []).map((p) => [p.id, p.rect] as const));
+    // The DOM keeps the stored reading order while a preview is drawn: moving the dragged node would drop its pointer capture.
+    const stored = (this.view_()?.arrangements[index]?.placements ?? []).map((p) => p.id);
+    const order: { id: string; rect: Rect }[] = [];
+    const seen = new Set<string>();
+    for (const id of [...stored, ...rects.keys()]) {
+      const rect = rects.get(id);
+      if (seen.has(id) || !rect || !byId.has(id)) continue;
+      seen.add(id);
+      order.push({ id, rect });
+    }
     const columns = this.columns();
     let y = Math.max(0, ...order.map((o) => o.rect.y + o.rect.h));
     for (const p of v.layout.placements) {
