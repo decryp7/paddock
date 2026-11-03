@@ -12,16 +12,15 @@ for (const colorScheme of THEMES) {
     test('Up, Down, Home and End move focus through the page links, wrapping, with the focus ring visible', async ({ app, page, pageErrors }) => {
       await app.frame.open();
       const links = app.sidebar.links;
-      const count = await links.count();
       await links.first().focus();
       await page.keyboard.press('ArrowDown');
       await expect(links.nth(1)).toBeFocused();
       await page.keyboard.press('End');
-      await expect(links.nth(count - 1)).toBeFocused();
+      await expect(links.last()).toBeFocused();
       await page.keyboard.press('ArrowDown');
       await expect(links.first()).toBeFocused();
       await page.keyboard.press('ArrowUp');
-      await expect(links.nth(count - 1)).toBeFocused();
+      await expect(links.last()).toBeFocused();
       await page.keyboard.press('Home');
       await expect(links.first()).toBeFocused();
       // The focus ring is drawn (keyboard focus: :focus-visible).

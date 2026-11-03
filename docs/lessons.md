@@ -1185,3 +1185,12 @@ as such; the UI never clamps or offsets it, and the start of the count is record
 The decided rule (user, 2026-11-03): the card counts local calendar days, and Ready also needs 7 times 24 hours since the
 first sighting; on the last day the card says when it will be ready, and the engine sends that time (`ready_at`), so a clock
 change moves it by exactly the hour the clock moved.
+
+## A sidebar spec counted the links once and indexed past the end (2026-11-03, shell-demo; CI run 7452)
+
+`shell-demo-framenav.spec.ts` read `links.count()` right after the frame opened and later asked for `links.nth(count - 1)`; one run
+found the list shorter by then ("element(s) not found" at index 9, light theme only, passed in the runs before). The spec now uses
+`links.last()`, which is resolved against the page when it is asserted. **Lesson:** never freeze a locator's count in a number and
+index with it later; use the locator that names the position. (Same day, run 7453: the Angular dev server of the Dyno chromium
+shard 2 died with `lmdb` "Cannot read properties of null (reading 'refCount')" in its build cache before the first test; the cause
+is not found, the job passed on the other shard and in earlier runs; if it repeats, set `NG_BUILD_CACHE=false` for e2e.)
