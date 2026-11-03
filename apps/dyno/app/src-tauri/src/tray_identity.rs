@@ -38,6 +38,12 @@ pub fn appkit_defaults_keys(autosave_name: &str) -> [String; 2] {
     ]
 }
 
+/// The key Dyno puts back: the position only. The visibility key is copied too (so it is not lost) but never restored, or an item
+/// the user once hid would stay hidden every time Dyno made it again.
+pub fn restored_keys(autosave_name: &str) -> [String; 1] {
+    [appkit_defaults_keys(autosave_name)[0].clone()]
+}
+
 /// Where Dyno keeps its copy of an AppKit key.
 pub fn saved_key(appkit_key: &str) -> String {
     format!("{NAMESPACE}.saved.{appkit_key}")
@@ -107,6 +113,13 @@ mod tests {
             "net.decryptology.dyno.saved.NSStatusItem Preferred Position net.decryptology.dyno.menubar.cpu-1"
         );
         assert_ne!(saved_key(&keys[0]), saved_key(&keys[1]));
+    }
+
+    #[test]
+    fn only_the_position_is_restored_never_a_hidden_state() {
+        let name = "net.decryptology.dyno.menubar.cpu-1";
+        assert_eq!(restored_keys(name).to_vec(), [appkit_defaults_keys(name)[0].clone()]);
+        assert!(restored_keys(name).iter().all(|k| !k.contains("Visible")));
     }
 
     #[test]

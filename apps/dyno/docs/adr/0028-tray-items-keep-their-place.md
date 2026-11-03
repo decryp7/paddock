@@ -31,8 +31,10 @@ apart across runs, and `sync_items` removed and made every icon on any change.
      "hidden stays hidden" holds only for items the user hid [V]. AppKit is **believed to delete these keys when the status item
      is removed** (tray-icon's `Drop` calls `removeStatusItem`; Tauri removes all icons on exit) [I, V]. So Dyno copies the keys
      to `net.decryptology.dyno.saved.<key>` before it removes an item, at `ExitRequested` and `Exit`, and every 30th picture of
-     an item (a drag in the bar tells us nothing), and puts them back before an item is made, never over a key AppKit holds
-     (`tray_position.rs`). Whether the copy is needed at all is a [V] item.
+     an item (a drag in the bar tells us nothing), and puts the **position** back before an item is made, never over a key AppKit
+     holds and never the visibility copy (an item the user hid once would stay hidden whenever it is made again; the copy only
+     keeps the value from being lost). Copies of removed items stay in the app's defaults for good, bounded by the id space
+     (at most two keys per id, ids are `[a-z0-9-]` up to 32 characters, in practice a few dozen) (`tray_position.rs`). Whether the copy is needed at all is a [V] item.
    - **Windows:** `guidItem`, a GUID from SHA-256 of a Dyno-only name, **UUID version 8** (RFC 9562, custom; not version 5, which
      is SHA-1) with the RFC variant bits. tray-icon has `TrayIconAttributes::guid` [S: `src/lib.rs`, `windows/mod.rs`
      `apply_guid`], but **Tauri 2.12.5's `TrayIconBuilder` has no setter** (`src/tray/mod.rs`) and a GUID can only be given when
@@ -42,7 +44,8 @@ apart across runs, and `sync_items` removed and made every icon on any change.
      NOTIFYICONDATA remarks]. So `NIM_ADD` can fail when another `dyno.exe` (an older install folder, a build in another
      place) or a crashed instance holds the GUID. The patch then deletes the GUID's registration and adds again, and if that
      fails adds the icon without a GUID; either way the icon appears, and the result (`Registered`,
-     `RegisteredAfterReclaim`, `FellBackToNoGuid`, `NotAdded`) is in the log line of each icon (ER-27). Consequences for an
+     `RegisteredAfterReclaim`, `FellBackToNoGuid`, `NotAdded`) is in the log line; the same recovery runs when the icon is added again after
+     `TaskbarCreated` (Explorer restarted, or it was not up at the first add) of each icon (ER-27). Consequences for an
      unsigned build: places survive restarts and updates **only while the executable stays at the same path**; an install to a new
      path takes the GUID over (position reset [V]); a build that cannot take it over has no remembered place. Signing the
      releases would remove the path rule; that is a release decision, not made here.

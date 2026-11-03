@@ -8,7 +8,7 @@
 #![allow(unsafe_code)]
 
 use crate::logging;
-use crate::tray_identity::{appkit_defaults_keys, saved_key};
+use crate::tray_identity::{appkit_defaults_keys, restored_keys, saved_key};
 use objc2_foundation::{NSString, NSUserDefaults};
 
 /// Copies AppKit's keys of the item `autosave_name` to Dyno's own, when AppKit has them. Returns how many were copied.
@@ -25,11 +25,12 @@ pub fn save(autosave_name: &str) -> usize {
     copied
 }
 
-/// Puts Dyno's copy back for every key AppKit no longer holds. Returns how many were restored.
+/// Puts Dyno's copy of the position back when AppKit no longer holds it (never the visibility: see [`restored_keys`]). Returns how
+/// many keys were restored.
 pub fn restore(autosave_name: &str) -> usize {
     let defaults = NSUserDefaults::standardUserDefaults();
     let mut restored = 0;
-    for key in appkit_defaults_keys(autosave_name) {
+    for key in restored_keys(autosave_name) {
         let (appkit, saved) = (NSString::from_str(&key), NSString::from_str(&saved_key(&key)));
         if defaults.objectForKey(&appkit).is_some() {
             continue;

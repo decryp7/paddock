@@ -157,32 +157,16 @@ impl TrayIcon {
 
             let hicon = attrs.icon.as_ref().map(|i| i.inner.as_raw_handle());
 
-            // Paddock patch: a GUID that the shell refuses (it is bound to another executable path while unsigned, or a crashed
-            // instance left it registered) must not leave the icon missing: delete the GUID's registration and retry, then
-            // fall back to an icon without a GUID. The outcome is reported by `TrayIcon::guid_status`.
+            // Paddock patch: see `register_with_guid_recovery`. The window's own copy must forget a GUID that was given up, or later
+            // modifies and the re-add after `TaskbarCreated` would use it.
             let mut guid = guid;
-            let mut guid_status = if guid.is_some() { crate::GuidStatus::Registered } else { crate::GuidStatus::NotRequested };
-            if !register_tray_icon(hwnd, internal_id, guid, &hicon, &attrs.tooltip, true) {
-                if guid.is_some() {
-                    remove_tray_icon(hwnd, internal_id, guid);
-                    if register_tray_icon(hwnd, internal_id, guid, &hicon, &attrs.tooltip, true) {
-                        guid_status = crate::GuidStatus::RegisteredAfterReclaim;
-                    } else if register_tray_icon(hwnd, internal_id, None, &hicon, &attrs.tooltip, true) {
-                        guid = None;
-                        // The window's own copy must forget the GUID too, or later modifies and the re-add would use it.
-                        let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
-                        if !userdata.is_null() {
-                            (*userdata).guid = None;
-                        }
-                        guid_status = crate::GuidStatus::FellBackToNoGuid;
-                    } else {
-                        guid_status = crate::GuidStatus::NotAdded;
-                    }
-                } else {
-                    guid_status = crate::GuidStatus::NotAdded;
+            let guid_status =
+                register_with_guid_recovery(hwnd, internal_id, &mut guid, &hicon, &attrs.tooltip, true);
+            if guid.is_none() && attrs.guid.is_some() {
+                let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
+                if !userdata.is_null() {
+                    (*userdata).guid = None;
                 }
-                // NotAdded: Explorer/taskbar may not be ready yet (e.g., app starts before explorer.exe).
-                // Keep the window alive and wait for TaskbarCreated to re-register.
             }
 
             if let Some(menu) = &attrs.menu {
@@ -399,10 +383,11 @@ unsafe extern "system" fn tray_proc(
         }
         _ if msg == *S_U_TASKBAR_RESTART => {
             remove_tray_icon(userdata.hwnd, userdata.internal_id, userdata.guid);
-            register_tray_icon(
+            // Paddock patch: the same GUID recovery as the first add (a first add that failed because Explorer was not up gets here).
+            register_with_guid_recovery(
                 userdata.hwnd,
                 userdata.internal_id,
-                userdata.guid,
+                &mut userdata.guid,
                 &userdata.icon.as_ref().map(|i| i.inner.as_raw_handle()),
                 &userdata.tooltip,
                 userdata.visible,
@@ -594,6 +579,34 @@ unsafe fn show_tray_menu(hwnd: HWND, menu: HMENU, x: i32, y: i32) {
     // The shell docs recommend posting a benign message after TrackPopupMenu
     // for notification area menus so the task switch is finalized correctly.
     PostMessageW(hwnd, WM_NULL, 0, 0);
+}
+
+/// Paddock patch: adds the icon; when the shell refuses its GUID (bound to another executable path while unsigned, or left registered
+/// by a crashed instance), deletes the GUID's registration and adds again, and if that fails too adds it without a GUID (`guid`
+/// becomes `None`). If nothing can be added (Explorer is not up) `guid` is kept and the result is `NotAdded`.
+unsafe fn register_with_guid_recovery(
+    hwnd: HWND,
+    id: u32,
+    guid: &mut Option<GUID>,
+    hicon: &Option<HICON>,
+    tooltip: &Option<String>,
+    visible: bool,
+) -> crate::GuidStatus {
+    if register_tray_icon(hwnd, id, *guid, hicon, tooltip, visible) {
+        return if guid.is_some() { crate::GuidStatus::Registered } else { crate::GuidStatus::NotRequested };
+    }
+    if guid.is_none() {
+        return crate::GuidStatus::NotAdded;
+    }
+    remove_tray_icon(hwnd, id, *guid);
+    if register_tray_icon(hwnd, id, *guid, hicon, tooltip, visible) {
+        crate::GuidStatus::RegisteredAfterReclaim
+    } else if register_tray_icon(hwnd, id, None, hicon, tooltip, visible) {
+        *guid = None;
+        crate::GuidStatus::FellBackToNoGuid
+    } else {
+        crate::GuidStatus::NotAdded
+    }
 }
 
 #[inline]
