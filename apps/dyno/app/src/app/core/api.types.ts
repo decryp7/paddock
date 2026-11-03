@@ -1348,6 +1348,8 @@ export interface CounterObjectList {
   objects: CounterObjectSummary[];
   /** Something was left out to keep the catalog small. */
   truncated: boolean;
+  /** When the list was last read, when this answer is the one an earlier run saved (shown at once while the agent lists again); `null` when read just now. */
+  savedAt: Timestamp | null;
 }
 
 /** One search match: a counter (of one instance). Paths are `\Object(Instance)\Counter`. */
@@ -1805,6 +1807,8 @@ export interface SoftwareInventory {
   items: SoftwareItem[];
   truncated: boolean;
   unavailable: string | null;
+  /** When the list was last read, when this answer is the one an earlier run saved (shown at once while the agent reads again); `null` when read just now. */
+  savedAt: Timestamp | null;
 }
 
 export type InventoryFormat = 'markdown' | 'json';

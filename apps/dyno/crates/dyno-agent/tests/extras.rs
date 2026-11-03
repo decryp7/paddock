@@ -88,6 +88,14 @@ impl Harness {
         connect(&self.dirs).unwrap().0
     }
 
+    /// Stops the agent and starts another on the same data folder, as a login or an update does.
+    fn restart(&mut self) {
+        self.running.take().unwrap().stop();
+        let fake = Fake::new();
+        fake.add_process(process(100, "calm", 1.0));
+        self.running = Some(Running::start(self.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap());
+    }
+
     fn shared(&self) -> Arc<dyno_agent::agent::Shared> {
         self.running.as_ref().unwrap().shared.clone()
     }
@@ -433,6 +441,47 @@ fn the_inventory_report_is_written_only_to_a_valid_path() {
     assert!(text.contains("| bash | 5.2 |"), "{text}");
     assert!(ask(&peer, req(&dir.path().join("inv.json"))).is_err(), "wrong extension");
     assert!(ask(&peer, req(&dir.path().join("missing/inv.md"))).is_err(), "folder must exist");
+}
+
+/// ADR 0029 (D7): the software list read in one run is shown at once, with its time, after the agent restarts, while the system
+/// is read again in the background; the next ask has the fresh list.
+#[test]
+fn the_software_list_is_saved_and_shown_at_once_after_a_restart() {
+    let mut h = Harness::start();
+    let first = |h: &Harness, tools: Arc<Tools>| {
+        let s = h.shared();
+        s.extras.use_os("linux");
+        s.extras.use_tools(tools);
+        let JobOutput::Software(sw) = run_job(&h.client(), JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
+            panic!("software")
+        };
+        (sw, s)
+    };
+    let (live, s) = first(&h, Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\n")])]));
+    assert_eq!((live.items.len(), live.saved_at), (2, None), "read just now");
+    s.cache.as_ref().unwrap().flush();
+    drop(s);
+    h.restart();
+    let (saved, s) = first(
+        &h,
+        Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\ngit\t2.43\n")])]),
+    );
+    assert_eq!(saved.items.len(), 2, "the saved list answers at once");
+    assert!(saved.saved_at.is_some_and(|t| t.millis() > 0), "with the time it was saved");
+    // The background read ends and the next ask has the fresh list (a bounded wait on the result, not on time).
+    let fresh = loop {
+        let JobOutput::Software(sw) = run_job(&h.client(), JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
+            panic!("software")
+        };
+        if sw.saved_at.is_none() {
+            break sw;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(fresh.items.len(), 3);
+    s.cache.as_ref().unwrap().flush();
+    let (_, _, data) = s.cache.as_ref().unwrap().view("extras.software").unwrap();
+    assert!(data.contains("git"), "kept for the next run");
 }
 
 #[test]

@@ -272,8 +272,10 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             .map_err(|e| JobError::Failed(e.message)),
         JobSpec::AppUsage => tool_step(ctx, "usage", "Reading network and energy use", || crate::extras::app_usage(shared))
             .map(|r| JobOutput::AppUsage(Box::new(r))),
-        JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || crate::extras::software(shared))
-            .map(|r| JobOutput::Software(Box::new(r))),
+        JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || {
+            crate::extras::software_for_page(shared)
+        })
+        .map(|r| JobOutput::Software(Box::new(r))),
     }
 }
 

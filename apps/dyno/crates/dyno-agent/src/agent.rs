@@ -271,6 +271,9 @@ pub struct Shared {
     pub baselines: crate::baselines::BaselineCentre,
     /// The disk map: volumes and scans (read-only).
     pub disk: Arc<crate::disk::centre::DiskCentre>,
+    /// The saved-views cache (ADR 0029), when there is one: the disk map, the counter catalog and the software list keep
+    /// their last answer in it.
+    pub cache: Option<crate::cache::Cache>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -401,6 +404,7 @@ impl Shared {
             network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
             hardware: crate::hardware::HardwareCentre::new(hardware.signals, hardware.wear, hardware.battery),
             baselines: crate::baselines::BaselineCentre::new(),
+            cache: saved_maps.clone(),
             disk: Arc::new(crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),
                 disk_ports.volumes,
@@ -416,7 +420,8 @@ impl Shared {
             next_conn: AtomicU64::new(1),
         });
         shared.disk.set_read_threads(read_threads);
-        shared.disk.attach_cache(saved_maps);
+        shared.disk.attach_cache(saved_maps.clone());
+        shared.counters.attach_cache(saved_maps);
         shared.disk.apply_saved_maps(saved_maps_settings);
         Ok((shared, sensors, processes))
     }

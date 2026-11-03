@@ -58,7 +58,9 @@ pub struct ExtrasCentre {
     backup_tools: Mutex<Option<Arc<dyn ToolRunner>>>,
     os: Mutex<&'static str>,
     own_folder: bool,
-    software: Mutex<Option<(Instant, SoftwareInventory)>>,
+    software: Arc<Mutex<Option<(Instant, SoftwareInventory)>>>,
+    /// A read of the software list for the saved one is under way in the background.
+    software_refreshing: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
     /// Signalled when a backup check ends and when a job waiting for one is cancelled.
     pub(crate) backup_done: Arc<std::sync::Condvar>,
@@ -74,7 +76,8 @@ impl ExtrasCentre {
             backup_tools: Mutex::new(None),
             os: Mutex::new(std::env::consts::OS),
             own_folder,
-            software: Mutex::new(None),
+            software: Arc::new(Mutex::new(None)),
+            software_refreshing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             backup: Arc::new(Mutex::new(backup_check::Slot::default())),
             backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
@@ -131,7 +134,12 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
     }
 }
 
-/// The software list, from the cache when fresh.
+/// The key of the saved software list in the cache (`view_saved`) and its document format.
+const SAVED_SOFTWARE: &str = "extras.software";
+const SAVED_FORMAT: u32 = 1;
+
+/// The software list as read now, or from the last ten minutes. Always a list that was read in this run (the changes timeline
+/// compares it with the last baseline, which a saved list would make look like nothing changed).
 pub fn software(shared: &Shared) -> SoftwareInventory {
     let x = &shared.extras;
     if let Some((at, s)) = lock(&x.software).as_ref() {
@@ -139,11 +147,68 @@ pub fn software(shared: &Shared) -> SoftwareInventory {
             return s.clone();
         }
     }
-    let list = dyno_platform::extras::software_list(x.tools().as_ref(), x.os());
+    read_software(&x.software, x.tools(), x.os(), shared.cache.as_ref())
+}
+
+/// Reads the list from the system, remembers it for [`SOFTWARE_TTL`] and keeps it for the next run.
+fn read_software(
+    memory: &Mutex<Option<(Instant, SoftwareInventory)>>,
+    tools: Arc<dyn ToolRunner>,
+    os: &'static str,
+    cache: Option<&crate::cache::Cache>,
+) -> SoftwareInventory {
+    let list = dyno_platform::extras::software_list(tools.as_ref(), os);
     if list.unavailable.is_none() {
-        *lock(&x.software) = Some((Instant::now(), list.clone()));
+        *lock(memory) = Some((Instant::now(), list.clone()));
+        if let (Some(cache), Ok(json)) = (cache, serde_json::to_string(&list)) {
+            cache.put_view(SAVED_SOFTWARE, SAVED_FORMAT, json);
+        }
     }
     list
+}
+
+/// The software list for the Extras page. Before the first read of this run, the list an earlier run saved answers at once (with
+/// `saved_at`) and the system is read again in the background, so asking again a moment later gives the fresh one; otherwise as
+/// [`software`].
+pub fn software_for_page(shared: &Shared) -> SoftwareInventory {
+    let x = &shared.extras;
+    let first_of_this_run = lock(&x.software).is_none();
+    let saved = first_of_this_run.then(|| saved_software(shared)).flatten();
+    let Some(saved) = saved else { return software(shared) };
+    if !x.software_refreshing.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let (memory, tools, os, cache, flag) = (
+            x.software.clone(),
+            x.tools(),
+            x.os(),
+            shared.cache.clone(),
+            x.software_refreshing.clone(),
+        );
+        let spawned = std::thread::Builder::new().name("dyno-software-refresh".into()).spawn({
+            let flag = flag.clone();
+            move || {
+                read_software(&memory, tools, os, cache.as_ref());
+                log::info!("Installed software listed again in the background");
+                flag.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        if spawned.is_err() {
+            flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    saved
+}
+
+/// The list an earlier run saved, with the time it was saved; `None` when there is none or it does not parse.
+fn saved_software(shared: &Shared) -> Option<SoftwareInventory> {
+    let (format, at, data) = shared.cache.as_ref()?.view(SAVED_SOFTWARE)?;
+    if format != SAVED_FORMAT {
+        return None;
+    }
+    let parsed: SoftwareInventory = serde_json::from_str(&data).ok()?;
+    // Bound it again as the system's answer is: the file is not trusted more.
+    let mut list = SoftwareInventory::from_items(parsed.items);
+    list.saved_at = Some(Timestamp(at));
+    Some(list)
 }
 
 fn changes(shared: &Shared, query: ChangesQuery) -> Result<dyno_core::extras::changes::ChangeTimeline, AgentError> {

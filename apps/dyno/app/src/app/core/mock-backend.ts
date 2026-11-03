@@ -133,6 +133,11 @@ export interface MockOptions {
   now?: () => number;
   /** Disk maps the agent "offers from its cache" at start (ADR 0029), as after a restart: a finished scan, `ageMs` old. */
   savedMaps?: ReadonlyArray<{ target: DiskTarget; ageMs: number; changedBytes: number | null }>;
+  /**
+   * The counter objects and the software list come first from "the cache of the earlier run", this many ms old, with `savedAt`
+   * set (ADR 0029); the next ask has the list read just now (`savedAt` null), as after the agent's background read.
+   */
+  savedListsAgeMs?: number;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -242,8 +247,19 @@ export class MockBackend implements DynoBackend {
   /** Bundles the mock "saved", for tests. */
   readonly savedBundles: SavedDiagnostics[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** The lists whose saved answer was already given once (`savedListsAgeMs`). */
+  private readonly savedGiven = new Set<string>();
+  private readonly options: MockOptions;
+
+  /** True the first time a list is asked for when `savedListsAgeMs` is set: the saved answer; the next ask has the fresh one. */
+  private takeSaved(list: string): boolean {
+    if (this.options.savedListsAgeMs === undefined || this.savedGiven.has(list)) return false;
+    this.savedGiven.add(list);
+    return true;
+  }
 
   constructor(options: MockOptions = {}) {
+    this.options = options;
     this.machine = options.machine ?? 'laptop';
     const base = osProfile(options.os ?? 'macos');
     this.profile =
@@ -756,7 +772,10 @@ export class MockBackend implements DynoBackend {
   }
 
   counterObjects(): Promise<CounterObjectList> {
-    return this.reply('counterObjects', () => this.counters.objects());
+    return this.reply('counterObjects', () => {
+      const list = this.counters.objects();
+      return this.takeSaved('counters') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list;
+    });
   }
 
   counterObject(name: string): Promise<CounterObject> {
@@ -1413,7 +1432,10 @@ export class MockBackend implements DynoBackend {
     if ('sleepBlockers' in o) return { sleep: mockSleep() };
     if ('bootAnalysis' in o) return { boot: mockBoot(this.now()) };
     if ('appUsage' in o) return { appUsage: mockUsage() };
-    if ('softwareInventory' in o) return { software: mockSoftware() };
+    if ('softwareInventory' in o) {
+      const list = mockSoftware();
+      return { software: this.takeSaved('software') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list };
+    }
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 

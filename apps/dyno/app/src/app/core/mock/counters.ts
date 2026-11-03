@@ -139,7 +139,7 @@ export class MockCounters {
   }
 
   objects(): CounterObjectList {
-    return { objects: this.objectList.map((o) => ({ name: o.name, counters: o.counters.length, instancesTotal: o.instancesTotal })), truncated: false };
+    return { objects: this.objectList.map((o) => ({ name: o.name, counters: o.counters.length, instancesTotal: o.instancesTotal })), truncated: false, savedAt: null };
   }
 
   object(name: string): CounterObject {
