@@ -694,3 +694,37 @@ describe('hardware: throttling, lifespan and baselines', () => {
     expect((await b.weeklyReport(5)).hardware).toEqual([]);
   });
 });
+
+describe('MockBackend: the helper', () => {
+  it('reads the state it starts in from ?helper= and ignores anything else', async () => {
+    expect(mockOptionsFromUrl('?helper=foreign').helper).toBe('foreign');
+    expect(mockOptionsFromUrl('?helper=root')).not.toHaveProperty('helper');
+    expect((await make().helperStatus()).state).toBe('off');
+    for (const [variant, state] of [['silent', 'notRunning'], ['foreign', 'missing'], ['outdated', 'outdated'], ['ready', 'ready'], ['notIncluded', 'notIncluded']] as const) {
+      expect((await make({ helper: variant }).helperStatus()).state, variant).toBe(state);
+    }
+  });
+
+  it('turning on ends ready, turning off ends off, and the helper job runs its phases with an uncancellable prompt', async () => {
+    const b = make({ jobSteps: 4 });
+    b.jobStepMs = 1;
+    const id = await b.startJob({ helper: { action: 'turnOn' } });
+    const seen = new Set<string>();
+    for (let i = 0; i < 400 && b.jobStatuses().find((j) => j.id === id)!.state !== 'done'; i++) {
+      const s = b.jobStatuses().find((j) => j.id === id)! as SuJobSnapshot & { phase?: { id: string } | null; cancellable: boolean };
+      if (s.phase) seen.add(s.phase.id);
+      if (s.phase?.id === 'prompt') expect(s.cancellable).toBe(false);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect([...seen]).toContain('prompt');
+    expect((await b.jobResult(id)) as JobOutput).toMatchObject({ helper: { state: 'ready' } });
+    expect((await b.helperStatus()).state).toBe('ready');
+    expect(await runJob(make({ helper: 'ready' }), { helper: { action: 'turnOff' } })).toMatchObject({ helper: { state: 'off' } });
+  });
+
+  it('a declined prompt fails the job with the engine\'s words and changes nothing', async () => {
+    const b = make({ fail: new Set(['helperJob']) });
+    await expect(runJob(b, { helper: { action: 'turnOn' } })).rejects.toMatchObject({ message: expect.stringContaining('declined') });
+    expect((await b.helperStatus()).state).toBe('off');
+  });
+});

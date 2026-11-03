@@ -14,6 +14,7 @@ import { scrollToSection } from './scroll-to-section';
 import { tauriIpc } from '../../shell/ipc';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
+import { HelperCard } from './helper-card';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
@@ -24,7 +25,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets, HelperCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -54,6 +55,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <mat-slide-toggle [checked]="d.launchAtLogin" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
               </div>
             </section>
+
+            <dy-helper-card />
 
             <section class="card" aria-label="Measuring">
               <h2>Measuring and history</h2>
