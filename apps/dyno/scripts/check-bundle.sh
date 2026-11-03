@@ -75,6 +75,22 @@ case "$(uname -s)" in
       "$agent" once > "$out" || err "the bundled dyno-agent could not measure once"
       head -c 400 "$out"; echo
       rm -f "$out"
+      # The identifier on disk is not the whole story (Dyno 1.0.0 had the right one and the Network page still showed only the
+      # agent's own sockets): ask the running bundled agent what it is shown, started the way the login service starts it, as a
+      # launchd job. `dyno-agent view` prints `identifier=… announced=… sent=… cut_down=…`.
+      view="$(mktemp "${TMPDIR:-/tmp}/dyno-view-ci.XXXXXX")"
+      label="net.decryptology.dyno.checkbundle.$$"
+      launchctl submit -l "$label" -o "$view" -e "$view.err" -- "$agent" view || err "launchctl could not start the bundled dyno-agent view"
+      for _ in $(seq 1 100); do [[ -s "$view" || -s "$view.err" ]] && break; sleep 0.2; done
+      launchctl remove "$label" 2>/dev/null || true
+      line="$(head -n 1 "$view")"
+      echo "bundled agent socket view (as a launchd job): ${line:-none} $(head -c 300 "$view.err" 2>/dev/null)"
+      rm -f "$view" "$view.err"
+      [[ "$line" =~ identifier=net\.decryptology\.dyno\. ]] || err "the running bundled agent reports '${line:-nothing}': its code-signing identifier is not net.decryptology.dyno.* (ADR 0026)"
+      # The kernel hides other programs' sockets from a cut-down view only on macOS 27 (ADR 0026).
+      if [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 && "$line" == *"cut_down=true"* ]]; then
+        err "macOS showed the bundled agent only its own sockets even as a launchd job ('$line'): the Network page would be empty (ADR 0026)"
+      fi
     fi
     ;;
   *)

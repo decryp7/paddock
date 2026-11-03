@@ -109,11 +109,67 @@ fn both() -> Result<PcbList, PlatformError> {
 
 fn refuse_cut_down(all: &PcbList, own_pid: u32) -> Result<(), PlatformError> {
     if all.restricted(own_pid) {
-        return Err(PlatformError::AccessDenied(
-            "macOS showed this program only its own sockets. The agent needs a code-signing identifier with a dot (net.decryptology.dyno.agent), which this build does not have.".into(),
-        ));
+        return Err(PlatformError::AccessDenied(cut_down_message(signing_identifier().as_deref())));
     }
     Ok(())
+}
+
+/// What the page says about a cut-down list. It names the identifier this program really has: with a dotted one the dot is not
+/// what is missing (macOS also cut the view down for a dotted agent that the app started itself as its child, Dyno ADR 0026),
+/// so the text must not blame the identifier then.
+pub(crate) fn cut_down_message(identifier: Option<&str>) -> String {
+    match identifier {
+        Some(id) if id.contains('.') => format!(
+            "macOS showed this program only its own sockets, although its code-signing identifier ({id}) has a dot. This happens when the app started the agent itself instead of the login service: turn on the Dyno login service in Settings and restart Dyno."
+        ),
+        Some(id) => format!(
+            "macOS showed this program only its own sockets. The agent needs a code-signing identifier with a dot (net.decryptology.dyno.agent); this build has {id}."
+        ),
+        None => "macOS showed this program only its own sockets, and its code-signing identifier could not be read.".into(),
+    }
+}
+
+/// This process's code-signing identifier (`csops(CS_OPS_IDENTITY)`), or `None` when it is unsigned or cannot be read.
+#[allow(unsafe_code)]
+pub fn signing_identifier() -> Option<String> {
+    const CS_OPS_IDENTITY: libc::c_uint = 11;
+    extern "C" {
+        fn csops(pid: libc::pid_t, ops: libc::c_uint, useraddr: *mut libc::c_void, usersize: libc::size_t) -> libc::c_int;
+    }
+    let mut buf = [0u8; 1024];
+    // SAFETY: `buf` is 1024 writable bytes and its size is passed; the kernel writes at most that many.
+    let rc = unsafe { csops(libc::getpid(), CS_OPS_IDENTITY, buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    // A blob: magic u32, length u32 (big endian), then the NUL-terminated identifier.
+    let text = buf.get(8..)?;
+    let end = text.iter().position(|b| *b == 0)?;
+    String::from_utf8(text[..end].to_vec()).ok().filter(|s| !s.is_empty())
+}
+
+/// What this process is shown of the kernel's socket lists, for the start-up log line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocketView {
+    /// The code-signing identifier, when readable.
+    pub identifier: Option<String>,
+    /// Sockets the lists announced.
+    pub announced: usize,
+    /// Sockets actually sent.
+    pub sent: usize,
+    /// Whether the view is the cut-down one (Dyno ADR 0026).
+    pub cut_down: bool,
+}
+
+/// Reads both lists once and says what this process is shown (never refuses: the caller logs it).
+pub fn socket_view() -> Result<SocketView, PlatformError> {
+    let all = merged()?;
+    Ok(SocketView {
+        identifier: signing_identifier(),
+        announced: all.announced,
+        sent: all.sockets.len(),
+        cut_down: all.restricted(std::process::id()),
+    })
 }
 
 /// Every TCP and UDP socket of the machine with its owner.
@@ -178,6 +234,22 @@ mod tests {
             .expect("the listener is among the connections");
         assert_eq!((c.protocol.as_str(), c.remote.as_str(), c.state.as_str()), ("TCP", "", "LISTEN"));
         assert!(connections_of(0x7fff_fff0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_cut_down_message_does_not_blame_a_dot_that_is_there() {
+        // The released 1.0.0 agent had the dotted identifier and still got the cut-down view, yet the page said it lacked a dot.
+        let m = cut_down_message(Some("net.decryptology.dyno.agent"));
+        assert!(!m.contains("needs a code-signing identifier"), "{m}");
+        assert!(m.contains("net.decryptology.dyno.agent") && m.contains("login service"), "{m}");
+        assert!(cut_down_message(Some("dyno-agent-55554944")).contains("this build has dyno-agent-55554944"));
+        assert!(cut_down_message(None).contains("could not be read"));
+    }
+
+    #[test]
+    fn a_test_binary_reads_its_own_signing_identifier() {
+        let id = signing_identifier().expect("a cargo test binary is linker-signed, so it has an identifier");
+        assert!(!id.is_empty());
     }
 
     #[test]

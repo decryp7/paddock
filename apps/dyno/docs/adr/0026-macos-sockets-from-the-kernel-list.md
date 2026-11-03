@@ -145,6 +145,19 @@ Consequences:
 4. The detection works from the list itself, so a change in the rule on another macOS version degrades to the same
    visible message instead of to wrong data.
 
+### Amendment 2026-11-03: the dotted identifier is necessary, not sufficient [M]
+
+The released `Dyno_1.0.0` bundle has the right identifiers (`dyno-agent` = `net.decryptology.dyno.agent`, `dyno` =
+`net.decryptology.dyno.cli`, checked with `codesign -dv` on the published `Dyno.app.tar.gz`), and the Network page still said
+"only its own sockets" (app log 2026-11-01 14:20:51, request `Network`, answered by an agent whose parent was the app, not
+launchd). Probes on macOS 27.2 (26B123), same dotted ad-hoc binary: from a shell, as a `launchctl submit` job and as a
+`launchctl bootstrap`ed LaunchAgent it sees the whole list (113 to 119 of 121 announced); as a **child of an ad-hoc signed
+`.app` started by LaunchServices** (directly or through `/bin/sh`) it sees 0 of 113. `responsibility_spawnattrs_setdisclaim` did
+not change that. So the app's own fallback launch (`ProcessLauncher`, a plain child) gets the cut-down view; the login service
+does not. Follow-ups: the page text names the real identifier and the way out; the agent logs `Agent socket view` at start;
+`check-bundle.sh` runs `dyno-agent view` as a launchd job. **Open design question:** start the agent from the app through launchd
+instead of as a child.
+
 ### What the page gains and loses
 
 | | now (`proc_pidfdinfo` sweep) | kernel list |
