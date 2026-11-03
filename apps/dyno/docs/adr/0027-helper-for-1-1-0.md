@@ -7,6 +7,8 @@
   request; `SeDebugPrivilege` measured or dropped. P2: family ADR links, ADR 0042 landing plan, release order, R1 wording, tool
   pins, R3, systemd hardening, log levels, the DMG ownership argument, ADR 0041, the smallest first slice).
 - Revision 3 (2026-11-03): the delta review's P2 (pipe squatting on Windows) and the user's decisions; accepted.
+- Revision 4 (2026-11-03): WP-0 measured in VMs (section "WP-0 results"): `SeDebugPrivilege` dropped, the pipe SDDL names
+  its owner, the NSIS components fixed, `sfltool` works as root, Windows firewall and NVMe SMART need no helper.
 - Date: 2026-11-03
 - Related:
   - Amends ADR [0016](0016-privileged-helper-install-and-ipc.md) (install on a click and the closed request list stay; the
@@ -112,17 +114,19 @@ implementation per mechanism). `dyno-helper install` is the elevated program; it
 | Protected copy | `/Library/PrivilegedHelperTools/net.decryptology.dyno.helper` (root:wheel 0755; folder `root:wheel 1755`) | `%ProgramFiles%\Dyno Helper\dyno-helper.exe`, explicit ACL: SYSTEM and Administrators Full, Users Read & execute, no inheritance | none needed: `/usr/bin/dyno-helper` is owned by root and by dpkg |
 | Registration | `paddock-service` `LaunchdFile`: `/Library/LaunchDaemons/net.decryptology.dyno.helper.plist`, `launchctl bootstrap system`, `RunAtLoad`, `KeepAlive` on failure | `paddock-service` `WindowsService`: `DynoHelper`, LocalSystem, auto start, restart on failure, quoted `binPath`, **required privileges** (`SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO`: only what WP-0 measures as needed, see below; the SCM removes the rest from the token), a service DACL that lets interactive users *start* it | unit `/usr/lib/systemd/system/dyno-helper.service` shipped **disabled** in the package; `install` runs `systemctl enable --now` |
 | Data | `/Library/Application Support/Dyno/Helper/` (0700) | `%ProgramData%\Dyno\Helper\`, created with create-new and an explicit descriptor; an existing folder that fails the protected-location rule is renamed aside (0022 §1 and its P2 list) | `StateDirectory=dyno-helper` (0700) |
-| Endpoint | `/var/run/dyno-helper/helper.sock` 0666 in a root-owned 0755 folder | `\\.\pipe\net.decryptology.dyno.helper`, SDDL `SY`, `BA` full, `IU` read/write, `NU` denied, `PIPE_REJECT_REMOTE_CLIENTS` | `RuntimeDirectory=dyno-helper`, socket 0666 |
+| Endpoint | `/var/run/dyno-helper/helper.sock` 0666 in a root-owned 0755 folder | `\\.\pipe\net.decryptology.dyno.helper`, SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)` (owner named: WP-0), `SY`, `BA` full, `IU` read/write, `NU` denied, `PIPE_REJECT_REMOTE_CLIENTS` | `RuntimeDirectory=dyno-helper`, socket 0666 |
 | Start at boot | launchd at boot | SCM auto start | systemd `WantedBy=multi-user.target` |
 | Turn off | Settings > Turn off: the authenticated `Uninstall` request (owner or administrator only); `dyno-helper uninstall` elevated when the helper does not answer | the same; the per-user NSIS uninstaller's `PREUNINSTALL` hook asks for one UAC prompt to run the protected copy's `uninstall` | the same through `systemctl disable --now`; `prerm remove` stops and disables; `postrm purge` removes the state folder |
 | Orphan | the orphan watch of 0022 §3 over every recorded app location (one-shot one-hour deadline, `paddock-watch` events, no loop) | same | dpkg owns it |
 
-**Windows privileges.** `SeDebugPrivilege` is kept only if WP-0 measures that C1 needs it (other sessions' and protected
-processes' details with and without it, on the Windows VM); otherwise it is not in the list. If it stays, it gives **no
-containment**: a process holding it can open any process, including SYSTEM ones, so it is as strong as SYSTEM itself. The
-required-privileges list then only removes the other privileges (backup, restore, take ownership, load driver) from the token,
-which narrows misuse of a bug in the helper's own code paths that do not touch processes; it is not a sandbox. The same holds
-for `wbadmin` or the SMART installer if WP-0 shows they need more.
+**Windows privileges (settled by WP-0).** The required-privileges list is **`SeChangeNotifyPrivilege` only**;
+`SeDebugPrivilege` is not in it. Measured as LocalSystem with only that privilege: C1 reads 125 of 132 and 132 of 143
+processes on two boots (owner, command line, image), EStats switch-on (C2), `powercfg /requests`, `wbadmin get versions`, `smartctl`, the
+silent smartmontools install and the pipe server with identification-level impersonation all work. What `SeDebugPrivilege`
+adds is a handful of OS processes (`csrss`, `WmiPrvSE`, `SppExtComObj`) and the interactive user's own brokers, which the
+agent already reads unprivileged; those few show name, pid, memory and CPU from the system process list and "Windows
+protects this process" for the rest. The SCM removes every other privilege (backup, restore, take ownership, load driver,
+debug, impersonate, TCB) from the token. This is still not a sandbox: the helper stays LocalSystem.
 
 **Linux hardening** (systemd.exec(5), freedesktop.org, read 2026-11-03): `ProtectSystem=strict`, `ProtectHome=read-only`,
 `PrivateTmp=yes`, `NoNewPrivileges=yes`, `RestrictAddressFamilies=AF_UNIX AF_NETLINK`, `IPAddressDeny=any`,
@@ -238,7 +242,7 @@ The helper keeps no samples and has no loops; a machine read is cached for 1 s o
 | `MemoryModules` | C8 | Linux | 0022 §5 (DMI parser, no serials) |
 | `Smart(SmartQuery)` | C6: per-disk model, capacity, temperature, percentage used, media errors, power-on hours, unsafe shutdowns; **no serial numbers or WWN** | all | `smartctl --scan-open -j`, then `smartctl -a -j <device>` for devices from that scan only; existing `parse/hardware.rs` parsers; 20 s per disk, at most 32 disks |
 | `InstallTool(Smartmontools, bytes)` | C6: puts the downloaded upstream package into the helper's tools folder; owner and administrators only | Windows, macOS | section 7 |
-| `Firewall` | C10: typed, bounded view (state per profile or table, default policies, at most 4,096 rules with name, direction, action, program, ports, addresses; rules to the owner and administrators only, state and counts to others) | macOS `pf`, Linux | `pfctl -s info`, `pfctl -s rules`; `nft -j list ruleset` (JSON, capped at 4 MB), firewalld/ufw state derived from it. Windows profiles and rules, and the macOS Application Firewall, are read by the agent without the helper (WP-0 confirms) |
+| `Firewall` | C10: typed, bounded view (state per profile or table, default policies, at most 4,096 rules with name, direction, action, program, ports, addresses; rules to the owner and administrators only, state and counts to others) | macOS `pf`, Linux | `pfctl -s info`, `pfctl -s rules`; `nft -j list ruleset` (JSON, capped at 4 MB), firewalld/ufw state derived from it. Windows profiles and rules (`INetFwPolicy2` or `Get-NetFirewall*` in the interactive session), and the macOS Application Firewall (`socketfilterfw --get*`/`--listapps`), are read by the agent without the helper (WP-0 measured) |
 | `Extras(WakeRequests \| BackupVersions)` | C9; detail to the owner and administrators, counts to others | Windows | `powercfg /requests`, `wbadmin get versions`; fixed arguments, 15 s |
 | `Audit(n)`, `LogTail(n)` | the audit log, the helper's log for the diagnostics bundle | all | owner and administrators only |
 | `Uninstall` | removes the helper | all | owner and administrators only |
@@ -278,7 +282,10 @@ from `17bae21b1` stays.
   - Windows: runs the copy as `/S /SO <components> /D=%ProgramFiles%\Dyno Helper\tools\smartmontools-7.5` with `TEMP`/`TMP`
     pointing into the staging folder (0022's P1-3). The installer's own options are
     `[/S] [/SO component,...] [/D=INSTDIR]` (`os_win32/installer.nsi`, tag `RELEASE_7_5`, read 2026-11-03); components chosen so
-    no `smartd` service, no Start-menu entries and no uninstaller registry key are written (the exact list is fixed in WP-0).
+    no `smartd` service, no Start-menu entries and no uninstaller registry key are written: `/SO x64,smartctl,drivedb` (WP-0,
+    measured: writes only `bin\smartctl.exe`, `bin\drivedb.h`, `bin\update-smart-drivedb.ps1`; no registry, service, menu or
+    PATH change). WP-0 also found NVMe SMART readable on Windows **without** administrator rights, so for NVMe disks the agent
+    could run `smartctl` itself; the helper stays the reader for SATA (ATA pass-through) and for one code path.
   - macOS: `hdiutil attach -readonly -nobrowse -mountrandom <staging>`, `pkgutil --expand-full` of the package inside into
     staging, copy `smartctl` and `drivedb.h` into `tools/smartmontools-7.5/`, detach. Nothing is installed system-wide. If WP-0
     shows `smartctl` reads SMART on macOS without root, the agent instead runs it from its own `paddock-runtime` store and the
@@ -305,7 +312,7 @@ state's reason and its button, never 0.
 | Copy, config or data folder fails the protected-location rule | the helper refuses to serve and logs why; `Missing` with Repair (one prompt) |
 | Peer facts unreadable | that connection refused; the agent shows "The helper could not check who is asking" and logs the OS error |
 | A tool missing, failing or timing out (`sfltool`, `smartctl`, `powermetrics`, `pfctl`, `nft`, `powercfg`) | that request answers `Unavailable` with the tool, its exit code and the next step; the process is ended by its handle (rule 53); other requests are unaffected |
-| `sfltool` still asks for authorization as root (WP-0) | `LoginItems` answers `Unavailable` ("macOS would not list login items even for the helper") and C5 stays as in 1.0 |
+| `sfltool` asks for authorization as root on a later macOS (WP-0 measured it does not on 26.6.2) | `LoginItems` answers `Unavailable` ("macOS would not list login items even for the helper") and C5 stays as in 1.0 |
 | Download refused, interrupted or hash mismatch | the job fails with the phase and the reason; nothing reaches the helper; Retry |
 | Tool install fails | staging is deleted; the state stays "not installed"; the audit log has the step and exit code |
 | Policy file invalid | defaults (U3) and an audit line naming the line and field |
@@ -399,6 +406,155 @@ maybe 8) total 4 to 6 (plus 8 if it applies) and go first, in one window between
 by `known-copies.toml` whatever this record decides. With up to five agents (the Mac's limit) the critical path is
 1a → 1b → 11 → 12 → 14 → VM runs, about 15 to 22 working days.
 
+### WP-0 results (measured 2026-11-03)
+
+Measured in local VMs only (ER-14), never on the build Mac or a user's machine. **Windows:** `paddock-win11-test` (Windows 11
+Pro Arm64, `DisplayVersion` 26H2, build 26300, VMware Fusion), reverted to its `gui-session` snapshot afterwards. Callers:
+`paddock-test` (standard user) over SSH (a `NETWORK` logon, session 0) and in its console session 1 through a scheduled task
+(`LogonType Interactive`, an `INTERACTIVE` token); `paddock-admin` over SSH (full administrator token); LocalSystem services
+with `sc.exe privs` lists. Probe: a C# program compiled in the VM (`Add-Type -OutputAssembly`), per process
+`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`, `OpenProcessToken`+`TokenUser` (owner), `NtQueryInformationProcess`
+class 60 (command line), `QueryFullProcessImageNameW`, class 61 (protection). **macOS:** a Tart clone of
+`vmgui-base-tahoe-4aaa751f` (macOS 26.6.2, build 25G83, arm64), deleted afterwards. macOS 15 and 27 were not run. Process
+counts move by a few between runs (processes come and go); each comparison below is from one boot.
+
+**1. `sfltool dumpbtm` as root: works, no dialog.** Run as root three ways, each with a 25 s watchdog and a `pgrep -x
+SecurityAgent` before and after:
+
+| Context | `launchctl managername` | exit | time | stdout | stderr | SecurityAgent |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sudo` from the console user's Aqua context | Aqua | 0 | < 1 s | 146 lines | 0 bytes | none |
+| `sudo` in an SSH session (no GUI) | Background | 0 | < 1 s | 159 lines | 0 bytes | none |
+| a root LaunchDaemon (`/Library/LaunchDaemons/*.plist`, `launchctl bootstrap system`, `RunAtLoad`) | System, uid 0 | 0 | < 1 s | 146 lines | 0 bytes | none |
+
+Unprivileged it hangs with a SecurityAgent dialog (measured in `17bae21b1`). Format: blocks headed by a line of `=`, then
+` Records for UID <uid> : <uuid>` (seen: `-2`, `0`, `501`), then ` ServiceManagement migrated:`, ` LaunchServices registered:`,
+` Items:` and numbered records ` #n:` with right-aligned `Key: value` lines: `UUID`, `Name`, `Developer Name`, optional `Team
+Identifier`, `Type` (seen `developer (0x20)`, `legacy daemon (0x10010)`), `Flags`, `Disposition` (for example `[enabled,
+allowed, notified] (0xb)`), `Identifier`, `URL`, optional `Executable Path`, `Generation`, optional `Parent Identifier` and
+`Embedded Item Identifiers` (a nested numbered list). A plist-file LaunchDaemon with an unsigned program appears as `Type: legacy
+daemon`, `Identifier: 16.<label>`, `Parent Identifier: Unknown Developer`, disposition `notified` (macOS 26.6.2; how 15 and 27
+show it stays open). **Settles:** WP-7 goes ahead as designed; the "still asks as root" failure row becomes a guard for later
+macOS versions. **New for WP-7:** `parse/btm.rs` knows only `login item` and `agent`; system-wide items arrive as `legacy daemon`
+(and presumably `daemon`) records under UID 0 and -2, so the parser needs those kinds or it under-reports system items.
+
+**2. `smartctl` on macOS: not settled for real hardware.** The upstream universal `smartctl` 7.5 (from the DMG, run in place
+with `-B drivedb.h`) in the VM: `--scan-open -j` exits 0 with no devices, as user and as root; `-a -j disk0` exits 2 with
+`Smartctl open device: disk0 failed: Operation not supported by device`, as user and as root. The VM's disk is
+`AppleVirtIODiskStorageDevice`, which has no SMART at all, so a VM cannot answer whether an Apple silicon internal SSD needs
+root. Upstream's `os_darwin.cpp` (tag `RELEASE_7_5`) reads NVMe through the IOKit `IONVMeSMARTUserClient` plug-in
+(`GetIdentifyData`, `GetLogPage`) with no uid check of its own (read, not measured). **Plan:** keep section 7 as written (helper
+copy on macOS); the one remaining measurement is a single read-only `smartctl -a -j disk0` without `sudo` on a real Apple
+silicon Mac, which only the user can allow (open item O1 below). If it works, macOS SMART moves to the agent and the helper's
+macOS `InstallTool` drops out.
+
+**3. smartmontools 7.5 artefacts.** Downloaded from the GitHub release `RELEASE_7_5` inside the VMs (the Windows installer in
+both VMs; hashes agree):
+
+| File | Bytes | SHA-256 | Upstream `.md5` |
+| --- | --- | --- | --- |
+| `smartmontools-7.5.win32-setup.exe` | 1,508,408 | `896337fcc253220614cf8cdbd5cf2321c5aa326a37a04160a672a281e6104c70` | `bb1e199ad6a3db3e1c27ae54b835cbd5` (matches) |
+| `smartmontools-7.5.dmg` | 1,619,514 | `4aa176c161612488f3db053fdf3eee47bbc5178c8fe46afb2002d8dbdf563cc5` | `414d905b7a6c6ea8861d4e6f7fa14c1c` |
+| `smartmontools-7.5.tar.gz` | 1,122,317 | `690b83ca331378da9ea0d9d61008c4b22dde391387b9bbad7f29387f2595f76e` | |
+
+Signatures: `gpg --verify` (GnuPG 2.5.24 in the macOS VM) says `Good signature from "Smartmontools Signing Key (through 2025)
+<smartmontools-support@listi.jpberlin.de>" [expired]` for all three, made 2025-04-30 08:29 UTC with RSA key
+**`0C95 77FD 2C4C FCB4 B9A5 9964 0A30 812E FF3A EFF5`** (rsa4096, created 2020-12-21, **expired 2025-12-31**, after the
+signatures). The key came from `keyserver.ubuntu.com` (keys.openpgp.org has no copy); its short id matches `KEYID=0xFF3AEFF5`
+"Smartmontools Signing Key (through 2025)" in upstream `do_release` at the tag. smartmontools.org (which lists the keys) refused
+automated reads (an Anubis challenge), so the full fingerprint has one independent source plus the short id: the pinning record
+of section 7 should add the fingerprint from smartmontools.org read by a person. The Windows installer also carries a valid
+Authenticode signature (`CN=SignPath Foundation`). The next smartmontools release will be signed with a new key, so the
+pinning step must expect a key change.
+
+**Windows installer.** `os_win32/installer.nsi` at the tag: `/SO` takes a comma list of `x32`, `x64`, `smartctl`, `smartd`,
+`smartctlnc`, `drivedb`, `doc`, `uninst`, `menu`, `path`, `driveremove`, `drive0` to `drive5`; any section not named is
+switched off; `/D=` must come last. Measured as LocalSystem with only `SeChangeNotifyPrivilege`: `/S /SO x64,smartctl,drivedb
+/D=C:\ProgramData\DynoHelperWp0\tools\smartmontools-7.5` exits 0 and writes exactly `bin\smartctl.exe` (1,165,312 bytes,
+x86-64, runs under emulation on Arm64), `bin\drivedb.h` and `bin\update-smart-drivedb.ps1`; before and after: no
+`Uninstall\smartmontools` key (native or WOW6432Node), no `smartd` service, no Start-menu folder, no machine `PATH` change, no
+`Drive\shell\smartctl*` verbs, nothing under `Program Files\smartmontools`. There is no native Arm64 build.
+
+**macOS DMG.** One HFS volume with `README.html` and `smartmontools-7.5-r5714.pkg` (unsigned: `pkgutil --check-signature` says
+"no signature"). `pkgutil --expand-full` gives `Payload/usr/local/sbin/{smartctl,smartd,update-smart-drivedb,smart-pkg-uninstall}`,
+`Payload/usr/local/share/smartmontools/drivedb.h`, docs, man pages and `Payload/private/etc/smartd*`; no install scripts.
+`smartctl` is a universal (x86_64, arm64) binary, ad-hoc and linker-signed (`flags=0x20002(adhoc,linker-signed)`).
+`hdiutil attach -readonly -nobrowse -mountrandom <dir>` needs `<dir>` to exist.
+
+**SMART on Windows without the helper.** As the standard user, `smartctl --scan-open -j` finds `/dev/sda` (type `nvme`) and
+`smartctl -a -j /dev/sda` exits 0 with the full `nvme_smart_health_information_log` (percentage used, media errors, power-on
+hours, unsafe shutdowns, temperature) on the VM's `VMware Virtual NVMe Disk`. NVMe health goes through the in-box `stornvme`
+storage query, which Windows allows without administrator rights; SATA SMART (ATA pass-through) needs administrator rights according to
+upstream's Windows notes (not re-read, not measured: the VM has no SATA disk). **Plan change for WP-8:** on Windows, NVMe SMART can be
+read by the agent; the helper's `Smart` request is needed for SATA disks. Whether `InstallTool` stays in the helper on
+Windows is open item O2 below.
+
+**4. `SeDebugPrivilege` and C1: drop it.** Readable processes (`OpenProcess` limited, then owner and command line; the three
+pseudo-processes `System`, `Registry`, `Memory Compression` have no command line for anyone):
+
+| Caller | Token privileges | Processes | Opened | Owner | Command line | Not opened |
+| --- | --- | --- | --- | --- | --- | --- |
+| standard user, SSH (session 0) | 5, no debug | 131 | 34 | 34 | 34 | 97 (all services, other sessions) |
+| standard user, interactive (session 1) | 5, no debug | 146 | 35 | 35 | 35 | 111 (services, session 0, `winlogon`, `dwm`, `csrss`) |
+| administrator, SSH | 24, debug on | 131 | 131 | 130 | 128 | none |
+| administrator, debug removed | 23 | 131 | 91 | 90 | 88 | 40, mostly the session-1 user's processes |
+| LocalSystem, SCM default list | 28, debug on | 127 | 127 | 127 | 124 | none |
+| LocalSystem, `SeChangeNotifyPrivilege` only | 1 | 132 / 143 | 125 / 132 | 125 / 132 | 122 / 129 | 7 / 11: `csrss` (s0, s1), `WmiPrvSE`, `SppExtComObj`, `slui`, `smartscreen`, `RuntimeBroker`, `dllhost`, `UserOOBEBroker` |
+| LocalSystem, change-notify and debug | 2 | 131 | 131 | 131 | 128 | none |
+
+The session-1 processes the stripped helper cannot open (`RuntimeBroker`, `dllhost`, `UserOOBEBroker`, `smartscreen`, `slui`)
+belong to the interactive user, whose agent reads them itself (they are not in its "not opened" list). What remains is OS
+plumbing (`csrss`, `WmiPrvSE`, `SppExtComObj`), which keeps name, pid, memory and CPU from the system process list.
+`SeDebugPrivilege` would let the helper open nearly every process (all but protected ones) for those few rows. **Decision:** not
+in the required-privileges list (section 1). Same measurement, other C-rows: `SetPerTcpConnectionEStats` (C2) returns 0 as
+LocalSystem with only `SeChangeNotifyPrivilege` and 5 (access denied) as the standard user; `powercfg /requests` (C9) exits 0
+as stripped LocalSystem and 1 ("You do not have the permissions required") as the standard user; `wbadmin get versions`
+reaches "No backup was found" as stripped LocalSystem and "Access denied. You must be a member of the Administrators group or
+Backup Operators group" as the standard user. None needs a privilege beyond `SeChangeNotifyPrivilege`.
+
+**Firewall (C10) without administrator rights: yes, in the interactive session.** As the standard user in its console session:
+`Get-NetFirewallProfile` (3 profiles), `Get-NetFirewallRule` (494 rules), `HNetCfg.FwPolicy2` (`INetFwPolicy2`: per-profile
+state, current profile, 494 rules) and `netsh advfirewall firewall show rule name=all` (exit 0) all work. Over SSH (a
+`NETWORK` logon) the CIM cmdlets fail with "Cannot connect to CIM server. Access denied" while COM and `netsh` still work, so
+**WP-9 reads through `INetFwPolicy2`** (works in every logon type, no WMI), and tests that run over SSH must not use the CIM
+cmdlets as their oracle. macOS: `socketfilterfw --getglobalstate`, `--getblockall`, `--getstealthmode`, `--getallowsigned` and
+`--listapps` exit 0 as the user; `defaults read /Library/Preferences/com.apple.alf` has no `globalstate` on 26.6.2 (do not read
+the plist); `/sbin/pfctl -s info` and `-s rules` fail as the user (`/dev/pf: Permission denied`) and work as root.
+
+**5. Named-pipe owner check and identification-level connect: confirmed, with one fix.** Server: LocalSystem with only
+`SeChangeNotifyPrivilege`, `CreateNamedPipeW` with `FILE_FLAG_FIRST_PIPE_INSTANCE` and `PIPE_REJECT_REMOTE_CLIENTS`. Client:
+`CreateFileW(..., SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)`, then `GetSecurityInfo(SE_KERNEL_OBJECT,
+OWNER_SECURITY_INFORMATION)` and a refusal unless the owner is `S-1-5-18`, before sending anything.
+
+| Case | Result |
+| --- | --- |
+| SDDL `D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)` (no owner part), interactive client | owner is **`S-1-5-32-544` (Administrators)**, not SYSTEM: the client refuses the real helper |
+| same with `O:SY` in front, interactive client | owner `S-1-5-18`, client trusts it, round trip works |
+| server side, both cases | `ImpersonateNamedPipeClient` works without `SeImpersonatePrivilege`; the thread token has the client's SID and level 1 (`SecurityIdentification`); opening a file while impersonating fails with 1346 (`ERROR_BAD_IMPERSONATION_LEVEL`) |
+| client over SSH (`NETWORK` logon) | `CreateFile` error 5: the `NU` deny works |
+| standard user creates the pipe name with `O:SY` | `CreateNamedPipe` error 1307 (`ERROR_INVALID_OWNER`): a user cannot fake the owner |
+| standard user squats the name first (default owner), then the helper starts | the helper's create fails with 231 (`ERROR_PIPE_BUSY`, first instance taken); the client sees owner = the user's SID and refuses before sending |
+
+**Settles:** WP-1a's client check (owner == SYSTEM) and identification-level connect are right, and the helper needs no
+impersonation privilege. **Fix:** a LocalSystem service's objects default to the Administrators group as owner, so the
+helper's SDDL must start with `O:SY` (section 1's endpoint row now does). `paddock-ipc`'s existing service SDDL
+(`crates/paddock-ipc/src/endpoint/mod.rs:49`, `D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;IU)`) has no owner part,
+so WP-1a adds `O:SY` there (a Pitcrew client that adds the same owner check would otherwise refuse its own service) and a test
+that the created pipe's owner is SYSTEM. The helper should log the create error by name (231 means the name is taken) as part
+of the squatting refusal of revision 3.
+
+**What changes in the plan.** WP-2: the Windows required-privileges list is `SeChangeNotifyPrivilege` alone. WP-1a: `O:SY`
+in the system endpoint's SDDL and an owner test. WP-7: parser learns daemon kinds. WP-8: Windows `/SO x64,smartctl,drivedb`;
+NVMe SMART on Windows needs no helper; macOS open until one real-hardware read; the pinning record expects an expired key and a
+new key for the next release. WP-9: `INetFwPolicy2` for Windows, `socketfilterfw` for macOS, both in the agent. WP-0's two
+days are spent; the estimates of the other packages do not change by more than half a day each (WP-8 may shrink).
+
+**Open after WP-0 (for the user).** O1: allow one read-only `smartctl -a -j disk0` without `sudo` on a real Apple silicon Mac
+(the upstream binary run from a scratch folder, nothing installed), or accept the helper path on macOS untested on hardware
+until the VM runs. O2: on Windows, keep `InstallTool` in the helper (one tool for NVMe and SATA, installed under Program
+Files) or let the agent fetch `smartctl` into its own `paddock-runtime` store for NVMe and use the helper only for SATA.
+Recommended: O2 keeps the helper path (one mechanism, rule 55), with the agent reading NVMe itself when the helper is off.
+
 ### The smallest first slice (D1a): the landing order
 
 Decided 2026-11-03: the full plan ships in Dyno 1.1.0. The slice below is only the order in which the work lands:
@@ -472,6 +628,6 @@ slices need no API change between them.
   `smartmontools/os_win32/installer.nsi` at that tag (usage line `[/S] [/SO component,...] [/D=INSTDIR]`; sections `smartctl`,
   `smartd`, `drivedb.h`, `Uninstaller`, Start-menu shortcuts). <https://www.smartmontools.org/> (7.5 released 2025-04-30; the
   download page refused automated reads).
-- Not verified, left to WP-0 in a VM: `sfltool` as root; `smartctl` without root on macOS; Windows firewall reads as a standard
-  user (secondary sources only: a PowerShell cheat sheet and forum posts say reads work); `pfctl` and `nft` needing root (common
-  knowledge, not re-read); PackageKit's `InstallPackages` polkit flow on the Ubuntu VM.
+- Measured in WP-0 (section "WP-0 results"): `sfltool` as root; Windows firewall reads as a standard user; `pfctl` needing
+  root. Still not verified: `smartctl` on a real Apple silicon internal SSD (a VM has none); `nft` needing
+  `CAP_NET_ADMIN` (common knowledge, not re-read); PackageKit's `InstallPackages` polkit flow on the Ubuntu VM.
