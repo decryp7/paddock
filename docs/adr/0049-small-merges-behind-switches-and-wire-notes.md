@@ -1,8 +1,10 @@
 # 49. Small merges behind feature switches, a drift check, wire schemas and notes, and conflict-free shared logs
 
-- Status: Proposed (2026-11-04), revision 2. The user approved the direction on 2026-11-04 and accepted decisions D1 to D6
-  as recommended in revision 1; revision 2 answers the independent review (verdict "needs rework", 5 P1, 9 P2, P3s) and
-  adjusts D1, D2, D3 and D5 where the fixes require it (Decisions). D7 (the release freeze) is new and open.
+- Status: Proposed (2026-11-04), revision 3. The user approved the direction on 2026-11-04 and accepted decisions D1 to D6
+  as recommended in revision 1; revision 2 answered the independent review (verdict "needs rework") and adjusted D1, D2,
+  D3 and D5 where the fixes required it; revision 3 answers the re-review ("needs another round": the wire schema, the
+  helper and plugin wires, the freeze's enforcement). No user decision changed in revision 3; D7 (the release freeze) is
+  still open.
 - Date: 2026-11-04
 - Related: ER-1 / rule 1 (one release at a time), ER-4 (Conventional Commits), ER-8 / rule 3 (the full suite once on the
   combined result), ER-14 / rule 7 and rule 49 (tests never read the user's environment; no leaked state), ER-21 / rule
@@ -123,12 +125,15 @@ adr = "apps/dyno/docs/adr/0029-saved-views.md"
   0037's one `compose`), so tests pass `Switches::all_on()` or a chosen table and never read the environment (ER-14, rule
   49).
 - **The UI asks the backend.** The table reaches the UI through the backend port (a `switches()` command on the injected
-  backend; the mock backend returns a table each spec sets, all-on by default). `./dev gen switches` writes only the
-  `SwitchId` string-literal union into `app/src/app/generated/switches.ts`, and a test checks that it matches the TOML;
-  there is no compiled TS constant to override.
-- **Where the all-on runs come from.** Specs and browser e2e use the mock's table. The nightly's all-on leg builds the
-  real app in debug, starts it with `PADDOCK_SWITCHES=all-on`, and runs the real-app smoke and e2e (ADR 0037's real-app
-  smoke) through the backend port. Release builds ignore the variable.
+  backend). `./dev gen switches` writes the `SwitchId` string-literal union into `app/src/app/generated/switches.ts` and the
+  shipped table into a spec-support file, `app/src/testing/switches.shipped.ts`; a test checks both against the TOML. There
+  is no compiled TS constant to override.
+- **The mock's default is the shipped table.** The mock backend returns `switches.shipped.ts` unless a spec says otherwise;
+  all-on is always explicit: a spec calls the mock's `useSwitches('all-on')` (or a chosen table), and the browser e2e has a
+  named all-on project in the nightly.
+- **Where the all-on runs come from.** The nightly's all-on legs are that browser e2e project (mock backend) and a debug
+  build of the real app started with `PADDOCK_SWITCHES=all-on`, running the real-app smoke and e2e (ADR 0037) through the
+  backend port. Branch runs and release builds use the shipped table; release builds ignore the variable.
 - **Gated at the edges.** A switch is read only in `compose` and in the UI's routes and menus (from the backend's table).
   Pure core code never branches on a switch. Off means: the code compiles, its unit tests run, its commands, handlers,
   tray and menu entries and settings section are not registered (a call answers "not available"; `paddock-settings` drops
@@ -166,70 +171,141 @@ approved: <coordinator|user>: <reason>` (user for a later release line).
 
 ### 3. Release freeze (D7)
 
-From an app's **freeze** (the coordinator cuts the release batch and records it in the log and on the release line's
-branch: `Freeze: <app> <version>` in the merge commit) until its tag, only that release's parts land in `apps/<app>/**`
-and in the shared code it depends on (rule 1 already covers the shared code). Other lines of the same app wait, switch or
-not: dormant code still changes the release tree and its tests.
+**Opening and closing.** The coordinator opens an app's freeze when it cuts the release batch. The steward's merge
+commit on `main` that lands that batch (or its first part) carries the trailer `Freeze: <app> <version>`. The tag
+`<app>-v<version>` closes the freeze; a freeze given up is closed by `Freeze-closed: <app> <version>: <reason>` on a
+later landing merge. A freeze is open while `main` has a `Freeze:` trailer with neither.
+
+**What may land.** While a freeze is open, only that release's parts land in `apps/<app>/**` and in the shared code it
+depends on (rule 1 already covers the shared code). Other lines of the same app wait, switch or not: dormant code still
+changes the release tree and its tests.
+
+**Enforced at landing.** The steward marks each landing merge that carries a release part with `Release-part: <app>
+<version>`. C81's landing mode (`./dev drift --landing <range>`) refuses a range that changes `apps/<app>/**` while a
+freeze of `<app>` is open and the merge has no matching `Release-part:` (WP-2).
+
+**The caps yield to the freeze.** While a freeze of `<app>` is open, C81 only warns (never fails) for that app's other
+lines, and their 24-hour first-part rule (§2) is suspended; the warnings still show their size, so the steward can plan
+the first landings after the tag.
 
 **Dormant wire changes bump the shipped protocol.** postcard is positional: a field added behind an off switch is still
 encoded, so the shipped wire changes and §4 derives a new version from the schema whatever the switch says. That is
-correct and accepted: app and agent ship together, and §4 bumps at most once per release line. A line that does not want
+correct and accepted: §4 bumps at most once per release line, and says what a bump costs for each wire (the helper's
+needs a helper release). A line that does not want
 to bump a released protocol keeps its wire change out of the freeze (it lands after the tag).
 
-### 4. Wire schemas and notes, the version derived from the schema: C80
+### 4. Wire schemas, golden encodings and notes, the version derived from them: C80
 
-Each app with a versioned wire declares it in `apps/<app>/wire.toml`:
+Each app with a versioned wire declares every wire separately in `apps/<app>/wire.toml`. Dyno has three:
 
 ```toml
 version = 1
 
 [[protocol]]
-id = "app-agent"
-format = "postcard"                       # "postcard" (positional) or "json"
-roots = ["Message", "Request", "Reply", "ErrorCode", "LiveDetail", "JobSpec", "JobOutput",
-         "HelperRequest", "HelperReply", "HelperMessage"]
+id = "app-agent"                          # the app (and the dyno command) <-> the agent
+format = "postcard"
+roots = ["Message", "Request", "Reply", "ErrorCode", "LiveDetail", "JobSpec", "JobOutput"]
+json_roots = ["JsonOnLink<Vec<PopoverState>>", "JsonOnLink<serde_json::Value>"]   # seeded by the test below
 constant = { file = "crates/dyno-core/src/protocol.rs", name = "PROTOCOL_VERSION" }
-schema = "wire-schema/app-agent.txt"      # checked in, generated by the test below
-roundtrip = "crates/dyno-core/tests/wire_roundtrip.rs"
 tags = "dyno-v*"
-notes = "wire-changes/app-agent"
+dir = "wire-schema/app-agent"             # schema.json, samples.json, samples.postcard.hex, notes/
+
+[[protocol]]
+id = "agent-helper"                       # the agent <-> the privileged helper (installed separately, Dyno ADR 0027)
+format = "postcard"
+roots = ["HelperRequest", "HelperReply", "HelperMessage"]
+constant = { file = "crates/dyno-core/src/helper_wire.rs", name = "HELPER_API" }
+tags = "dyno-v*"
+dir = "wire-schema/agent-helper"
+
+[[protocol]]
+id = "host-plugin"                        # the agent <-> sensor plugins
+format = "postcard"
+roots = ["PluginMessage", "PluginRequest", "PluginReply"]
+constant = { file = "crates/dyno-plugin-api/src/protocol.rs", name = "WIRE_MAJOR" }
+tags = "dyno-v*"
+dir = "wire-schema/host-plugin"
 ```
 
-- **A schema fingerprint, not a file list.** A test in the owning crate traces every root with
-  [serde-reflection](https://github.com/zefchain/serde-reflection) (MIT OR Apache-2.0; 0.6.0, published 2026-05-26 on
-  crates.io; read 2026-11-04) into a registry of every reachable container, field and variant, in order, and writes it
-  as stable text to `schema`. It fails when the checked-in file differs ("run `./dev wire sync`"). The trace follows
-  types wherever they live (`disk/scan.rs`, `power/`, `wol/`), so no path list can miss one. serde-reflection traces
-  through `Deserialize`; a type with custom deserialisation gets a sample value, which the trace needs anyway (WP-4
-  finds them; its alternative, postcard's own `postcard-schema`, 0.2.5 of 2025-08-23, MIT OR Apache-2.0, needs a derive
-  on every type).
-- **Breaking is decided by the diff, never by the note.** C80 compares the schema with the copy in the last tag's tree. For
-  `postcard`, the only additive change is a variant appended at the end of an enum; anything else (a field added,
-  removed, reordered or retyped; a variant inserted or removed) is breaking. For `json`, a removed or retyped field or
-  variant is breaking; an added field or variant is reported, and the note's `kind = "additive"` is accepted only when the
-  field has a serde default (checked by the test, which tries the tag's samples against the new types).
-- **The version.** `released` is the constant in the tree of the **last tag**: the highest semver among the tags that
-  match `tags`, reachable from `HEAD` or not. `version = released + 1` when the schema diff against that tag is breaking,
-  else `released`. **No matching tag** (an app never released): nothing is bumped and no diff is required; the first tag
-  sets the baseline. `./dev wire sync` writes the schema file and the constant; two branches that both need the bump
-  write the same line, which git merges cleanly. The integrator runs `./dev wire sync --check` at landing.
-- **Notes stay, for the reader.** A change of the schema adds one note
-  (`<notes>/<yyyy-mm-dd>-<slug>.toml`: `summary`, `changed`, `added`); its `kind` must agree with the diff or C80 fails.
-  Notes are compared **by path**: a note absent from the last tag's tree is new; a note present in it is shipped and
-  **immutable** (C80 fails on its edit or removal). `./dev wire log` prints the history by version; the comment above the
-  constant shrinks to one line pointing at the notes folder.
-- **Samples.** Every `added` entry appears as a sample in the `roundtrip` file (textual); the full guard
-  (`every_variant_has_a_sample`) runs as the crate's test. The round-trip helper moves to `paddock-testkit::wire`.
-- **Two unreleased wires with one number.** Between tags two builds can carry version 4 with different schemas. In
-  non-release builds the IPC handshake also carries the first 8 bytes of the SHA-256 of the schema file (embedded with
-  `include_bytes!`), and refuses a mismatch with "rebuild both: the wire schemas differ"; release builds compare the
-  version only.
-- **CI fetches tags.** C80 needs the tags and the tag trees: every job that runs it checks out with `fetch-tags: true`
-  (§6).
-- Seeded for Dyno's app-agent and helper wires, Pitcrew's protocol (`json`) and Debrief's `debrief-ai` worker wire
-  (`json`). Debrief's store-client wire (`WIRE_VERSION` 3) is positional by its table's row order
-  (`debrief-store-client/src/port_table.rs`); WP-4 traces its operation list as an enum-like root and treats it like
-  `postcard` (appended rows only).
+**The schema: postcard-schema, not serde-reflection (decided).** Dyno's wire types are generic: `Reading<T>`
+(`dyno-core/src/metrics.rs`) is used with `bool`, `f64`, `u32`, `f32`, `Vec<String>`, `Vec<Temperature>` and `Vec<Fan>`;
+`Measured<T>`, `Total<T>` and `ListOrReason<T>` (`process.rs`) likewise. serde-reflection records containers by their
+serde name, which erases type parameters, so these instantiations collide under one name. Three ways out were weighed:
+- *monomorphic newtypes per instantiation*: changes dozens of domain types for a test's sake; rejected;
+- *golden encodings only*: they prove that old bytes still decode, but not that a new field was appended rather than
+  inserted where no sample reaches; kept as the second check, not the only one;
+- **[postcard-schema](https://crates.io/crates/postcard-schema)** (MIT OR Apache-2.0, 0.2.5 of 2025-08-23, from the
+  postcard repository; checked on crates.io and docs.rs on 2026-11-04): `Schema` has an associated
+  `const SCHEMA: &'static NamedType` per type, so every instantiation of a generic gets its own structural schema, in
+  postcard's own data model. It needs `#[derive(Schema)]` on every type reachable from a postcard root (about 515
+  `Serialize` derives in `dyno-core` and 34 in `paddock-widgets` on `land-f`; most are reachable), behind a `schema`
+  feature in shared crates, and hand-written impls for types with custom serialisation (`JsonOnLink<T>`, `Timestamp`).
+  The derives are mechanical and cheap next to the alternatives; chosen.
+
+A test in each owning crate builds the `OwnedNamedType` of every root and writes it, as pretty JSON in a stable order, to
+`<dir>/schema.json`; it fails when the checked-in file differs ("run `./dev wire sync`").
+
+**JSON payloads inside the binary wire.** `JsonOnLink<T>` (`dyno-core/src/widgets/wire.rs`) travels as one JSON string on
+the postcard link, so the postcard schema sees a string. Its hand-written `Schema` impl names its `T` in that node; the
+test lists every such node and fails unless it is in `json_roots`. Each JSON root is checked like a `json` protocol
+(below), in human-readable mode.
+
+**The serde lint.** postcard cannot carry `#[serde(tag = "...")]`, `untagged`, `flatten` or `skip_serializing_if`, and the
+derive does not see serde attributes. C80 reads the type names in `schema.json` and refuses those four attributes on any of
+them in the source (JSON roots are exempt: `PopoverSurfaceValues` has `#[serde(flatten)]` at
+`widgets/popover_values/mod.rs:182` and travels inside `JsonOnLink`).
+
+**Golden encodings.** `./dev wire sync` also writes the round-trip samples (the `*_samples()` functions of the guard,
+moved to `paddock-testkit::wire` for the shared part) as `<dir>/samples.json` (human-readable) and, for postcard, each
+sample's bytes as one hex line in `<dir>/samples.postcard.hex`. They are in every tag's tree. `./dev wire check` extracts
+the last tag's goldens to a temporary folder and runs the crate's golden test against them (path passed as an explicit
+test input): every old postcard sample must decode with the new types and re-encode to the same bytes; every old JSON
+sample must decode.
+
+**Breaking is decided by the code, never by the note.**
+- `postcard`: the schema diff against the last tag. The only additive change is a variant appended at the end of an enum;
+  anything else (a field added, removed, reordered or retyped; a variant inserted or removed) is breaking. The goldens
+  must pass either way.
+- `json` (Pitcrew's protocol, Debrief's `debrief-ai` worker, the `json_roots`): breaking when an old golden no longer
+  decodes; an added field with a serde default, or a new variant, decodes and is additive.
+- Debrief's store-client wire (`WIRE_VERSION` 3) is positional by the row order of its operation table
+  (`debrief-store-client/src/port_table.rs`, `wire_names`): WP-4 writes a manual emitter that lists the rows in order with
+  their DTO types as `schema.json`; appended rows are additive, anything else breaking; the DTOs get JSON goldens.
+
+**The version.** `released` is the constant in the tree of the **last tag**: the highest semver among the tags matching
+`tags`, reachable from `HEAD` or not. `version = released + 1` when the code is breaking against that tag, else
+`released`. **No matching tag**, or a tag whose tree has no `<dir>` yet: nothing is bumped and no diff is required; the
+first tag with a schema sets the baseline. `./dev wire sync` writes the schema, the goldens and the constant; two branches
+that both need the bump write the same line, which git merges cleanly. The integrator runs `./dev wire sync --check` at
+landing.
+
+**What a bump means per wire.**
+- `app-agent`: app, command and agent ship in one installer, so a bump costs one "update the older one" refusal between a
+  new app and an old running agent, once per release line.
+- `agent-helper`: the helper is installed separately (Dyno ADR 0027). A `HELPER_API` bump makes the agent refuse every
+  installed helper with "update the helper", so it needs a helper release in the same app release and
+  `MIN_HELPER_VERSION` (`helper_wire.rs`, `dyno-helper-service`) raised to it; the release checklist names both. The
+  frame major `WIRE_MAJOR` of that link (1) stays for frame-level changes only.
+- `host-plugin`: a bump refuses every plugin built for the old major; plugins are rebuilt and shipped with the release.
+
+**Notes stay, for the reader.** A change of a schema adds one note (`<dir>/notes/<yyyy-mm-dd>-<slug>.toml`: `summary`,
+`changed`, `added`); its `kind` must agree with the code or C80 fails. Notes are compared **by path**: a note absent from
+the last tag's tree is new; a note present in it is shipped and **immutable** (C80 fails on its edit or removal). Every
+`added` entry appears as a sample. `./dev wire log` prints the history by version; the comment above each constant is one
+line pointing at its folder.
+
+**Two unreleased wires with one number.** Between tags two builds can both say version 4 with different schemas. In
+non-release builds each side puts the low 16 bits of the SHA-256 of its `schema.json` (embedded with `include_bytes!`) in
+the existing `minor` of `paddock_ipc::ProtocolVersion`; release builds keep `minor` 0. `ProtocolVersion::accepts` on
+`land-f` takes any child minor up to the host's (`frame.rs:74`), so it would not refuse a different hash: in non-release
+builds the app's and the agent's link code compare the minors for equality right after the handshake and refuse a
+mismatch with "rebuild both: the wire schemas differ". No new field in the shared handshake; if the peer's version is not
+yet readable after `connect`, a read-only accessor is the one change to `paddock-ipc` (WP-4).
+
+**CI fetches tags.** C80 needs the tags and their trees: every job that runs it checks out with `fetch-tags: true` (§6).
+
+**Which parts run where.** C80's note, immutability, constant and serde-lint parts need no build and run in the push
+check. The schema and golden tests need a build and run in `./dev check --pre-push` and CI.
 
 ### 5. Additive files: union where a blind merge is safe, conflicts kept where it is not: C82
 
@@ -244,8 +320,8 @@ notes = "wire-changes/app-agent"
   are resolved by hand; per-entry fragments are the fallback if WP-7 shows they still cost a landing (D5).
 - **C82** (`paddock-conformance logs`) checks every union file: index rows unique by number, sorted, one per ADR file and
   pointing at an existing file; no heading twice in a lessons file; no exact repeated line within a section, and a
-  **near-duplicate warning** for two lines in one section that differ by less than 10 % (edit distance), which is what a
-  row edited on both sides leaves; a blank line before every heading. `paddock-conformance logs --fix` sorts rows and
+  **near-duplicate warning** for two lines of at least 20 characters in one section whose edit distance is at most 10 %
+  of the longer line's length, which is what a row edited on both sides leaves; a blank line before every heading. `paddock-conformance logs --fix` sorts rows and
   restores blank lines; duplicates are left to the author. WP-3's fixtures include each union blind spot and the
   changelog case (to prove the CHANGELOGs are not union files).
 - **`./dev adr next [--app <app>]`** prints the next free ADR number over `origin/main` and every remote branch.
@@ -261,11 +337,14 @@ A new workflow, `.gitea/workflows/push-check.yml`, on `push` with `branches-igno
 - formatting: for each changed `.rs` file, its owning package from `cargo metadata --no-deps` of the owning workspace
   (no dependency resolution), then `cargo fmt --check -p <package>` in that workspace. That uses each workspace's own
   edition (2024 for `crates/`, `tools/paddock-dev`, the demos and the fuzz crates; 11 manifests on `main`) and its own
-  `rustfmt.toml`;
+  `rustfmt.toml`. A `.rs` file no workspace package owns (a script, a spike) is checked with `rustfmt --check --edition
+  <edition>` from the nearest `Cargo.toml` above it (2021 when there is none) and the nearest `rustfmt.toml`. The toolchain
+  is the one in the `paddock-ci` image, the same as the Linux fmt job's; its version is printed in the job summary and
+  recorded with the measured run;
 - **every conformance check that needs no build**, for the apps and shared paths the range touches: WP-1 adds a
   `needs: "none" | "build" | "bundle"` field to each check's metadata, and the push check runs the `none` ones (C24, the
-  image review rows, among them), plus C72, C79, C80's note and schema-file checks (the schema test itself needs a build
-  and runs in `--pre-push` and CI), C81 and C82.
+  image review rows, among them), plus C72, C79, C80's parts that need no build (notes, immutability, the constant, the serde lint; the schema and
+  golden tests need a build and run in `--pre-push` and CI), C81 and C82.
 
 It runs on its own runner label (`push-check`, one slot on the Linux host) so it never queues behind or ahead of the gate
 runs, and cancels an older run of the same branch. It writes a one-line job summary per check and prints an `::error::`
@@ -318,7 +397,7 @@ are Rust in `tools/paddock-dev`; C80 and C81 are thin Node entries that call `./
 renumbered at acceptance if they take fewer): "Small merges behind switches. Unfinished work lands in reviewed parts behind
 a declared switch (`apps/<app>/switches.toml`, default off, a removal tag or date, injected into `compose`, no override in
 release builds); a line holds at most 25 commits and 48 hours unlanded; during an app's release freeze only that release's
-parts land for it. A wire version is derived from the traced wire schema and the last tag, never chosen by hand; a wire
+parts land for it. A wire version is derived from its schema and goldens against the last tag, never chosen by hand; a wire
 change adds its note and its round-trip samples. The ADR indexes, lessons and benchmark logs merge with `merge=union` and
 are checked by C82; changelogs do not. Commit messages, formatting and the conformance checks that need no build run on
 every push. Checked by C79 to C82. *Why:* the Dyno 1.1 landings found five independent "4:" protocol notes, 28 of 35
@@ -333,7 +412,7 @@ its end."
 | Check | What it enumerates | Fails today on |
 |---|---|---|
 | **C79** switches | every switch, its uses, its `remove_by`; tags against reached deadlines | nothing yet; the ad-hoc "disk test off until WP-B3" in `e5acb772b` becomes a switch |
-| **C80** wire | the traced schema against the last tag's; the constant against the derived version; notes (new, immutable, kind agrees); samples | the Dyno lines above (no notes; two at version 3 with new fields); `land-f`'s hand-merged history |
+| **C80** wire | per wire: the postcard schema against the last tag's, the last tag's goldens decoded, the constant against the derived version, notes (new, immutable, kind agrees), samples, the serde lint over the schema's types | the Dyno lines above (no notes; two at version 3 with new fields); `land-f`'s hand-merged history |
 | **C81** drift | each branch head against `origin/main` | warns on all seven lines in the drift table (hot files overlap); **fails** on `feat/dyno-network-features` (52 unlanded, over 50) |
 | **C82** logs | every row, heading and line of the union files | the duplicate ADR 0032 row (`f41dd6157`), the order (`cbe1e6bc1`) |
 | push check | every branch push | `land-bc`'s over-long subjects and C24 rows, `bench_units.rs` formatting, at push time |
@@ -343,13 +422,13 @@ its end."
 | WP | What | Days |
 |---|---|---|
 | WP-1 | `push-check.yml` (partial clone with tags, own runner label, commit-lint, per-package `cargo fmt --check`, summary, `::error::`), the `needs` field on every check, its ci-actions test; one measured run; rule 50 (f) text | 1.5 |
-| WP-2 | `./dev drift`, `[drift]` and `[line]` in `docs/harnesses.toml`, C81, fixtures; the ADR 0042 §3 amendment text | 1 |
+| WP-2 | `./dev drift`, `[drift]` and `[line]` in `docs/harnesses.toml`, C81 with the freeze rules (`Freeze:`, `Freeze-closed:`, `Release-part:`, warn-only during a freeze), fixtures; the ADR 0042 §3 amendment text | 1.25 |
 | WP-3 | `merge=union` lines in `.gitattributes`; C82 with fixtures for each union blind spot, the near-duplicate warning and the changelog case; `logs --fix`; `./dev adr next` | 1.5 |
-| WP-4 | `wire.toml`; the serde-reflection trace and schema files for Dyno (two wires), Pitcrew and Debrief (two), with samples for custom types; the diff rules for postcard and JSON; `./dev wire sync`, `--check`, `log`; notes for the 1.1 changes split from the combined comment; C80; the debug handshake hash; `paddock-testkit::wire` | 2.75 |
+| WP-4 | `wire.toml` with Dyno's three wires, Pitcrew's and Debrief's two; `#[derive(Schema)]` on every type reachable from a postcard root (about 550 in `dyno-core` and `paddock-widgets`, a `schema` feature in shared crates), hand impls for `JsonOnLink<T>` and `Timestamp`; the schema tests; golden samples and postcard bytes with the golden test; the JSON rules and `json_roots`; Debrief's store-client emitter; the serde lint; `./dev wire sync`, `--check`, `log`; notes for the 1.1 changes; C80; the non-release minor hash and the equality check in the link code (and a read-only `paddock-ipc` accessor if needed); `paddock-testkit::wire` | 4.5 |
 | WP-5 | `paddock-build::Build::switches` (parser, `Id`, `Switches`, `SHIPPED`, `current()` with the debug `OnceLock`), `compose` taking the table in every app, the backend `switches()` command and the mock's table, `./dev gen switches` with its test, `--switches` on the composing binaries, ADR 0039's probe, C79 with tag refusal, the nightly all-on leg | 4.5 |
 | WP-6 | rule 65, the rule 61 clause, the freeze in the `integrate` skill and AGENTS.md "Working in the monorepo", the landing step (`wire sync --check`, `drift`, `logs`) | 0.5 |
 | WP-7 | after two weeks: push-check minutes per day, conflicts per merge, CI runs per landing, **reviews per landing**, unlanded age; recorded in `docs/benchmarks.md` (rule 48); tune caps and thresholds; decide on changelog fragments | 0.5 |
-| **Total (this ADR)** | | **12.25** |
+| **Total (this ADR)** | | **14.25** |
 | WP-8 (follow-up) | Additive registration for Dyno's hot files: per-feature modules for the API types and the three backends, the command and handler lists generated from per-feature files; as an amendment to ADR 0037. Owner: a designer the coordinator assigns; the amendment is due 2026-11-21, after the Dyno 1.1.0 tag. Estimate to be made from that amendment's work packages (memory note "estimate after design") | (open) |
 
 Order: WP-1 and WP-3 first (no product code), then WP-4 before the next wire change, WP-2, WP-5 after the Dyno 1.1.0 tag,
@@ -362,7 +441,7 @@ and landed outside the Dyno release window (ADR 0022 G.7, on `origin/docs/adr-00
 The push check is one short job: git queries on a partial clone, rustfmt on a few packages, TOML and Markdown parsing. It
 parallelises nothing; its cost is the container start and the clone. On 11-02 and 11-03 the remote branches gained 277
 non-merge commits across 52 heads, so it runs tens of times a day; the first measured run (WP-1) sets the budget. What it
-saves: a red landing run is about 1 to 1.5 hours of the shared runners (log 727; memory `ci-economy`). The schema trace
+saves: a red landing run is about 1 to 1.5 hours of the shared runners (log 727; memory `ci-economy`). The schema and golden
 runs in the crate's tests, in milliseconds, with no extra build.
 
 ## Consequences
@@ -387,7 +466,13 @@ runs in the crate's tests, in milliseconds, with no extra build.
 - **Bump `PROTOCOL_VERSION` only by the integrator at landing.** One person reads every branch's notes, and a branch build
   carries the old number with a breaking change. Rejected (D1).
 - **Wire change detected by a list of type files.** It misses most wire types (16 imported modules, types in subfolders)
-  and trusts the note's `kind`. Replaced by the traced schema.
+  and trusts the note's `kind`. Replaced by the schema.
+- **serde-reflection for the schema** (revision 2). It records containers by serde name and so erases type parameters:
+  `Reading<T>`, `Measured<T>`, `Total<T>` and `ListOrReason<T>` collide. Rejected for postcard-schema (§4).
+- **Monomorphic newtypes per generic instantiation.** They would make serde-reflection work, at the cost of dozens of
+  domain types changed for a test. Rejected.
+- **A new handshake field for the schema hash.** It changes the shared `paddock-ipc` frame for a debug-only need; the
+  existing `minor` carries it in non-release builds. Rejected.
 - **`merge=union` for the CHANGELOGs plus a placement rule.** Rejected: it needs the tags in every check and still misplaces
   silently between checks (§5).
 - **Changelog and lessons fragments.** No conflicts at all, but an assembler, broken lessons anchors, and a change to what
@@ -401,8 +486,9 @@ runs in the crate's tests, in milliseconds, with no extra build.
 ## Decisions
 
 Accepted by the user on 2026-11-04 (revision 1), adjusted by revision 2 as marked:
-- **D1:** the wire version is derived, on any branch, by `./dev wire sync`. *Adjusted:* derived from the traced schema
-  against the last tag, not from the notes' `kind`; notes stay required.
+- **D1:** the wire version is derived, on any branch, by `./dev wire sync`. *Adjusted:* derived from the code (the
+  postcard schema and the last tag's goldens), not from the notes' `kind`; notes stay required; one derivation per wire
+  (app-agent, agent-helper, host-plugin for Dyno).
 - **D2:** the push check on every branch push and rule 50 (f). *Adjusted:* not `wip/**`, its own runner slot, and the
   budget set from one measured run before (f) takes effect.
 - **D3:** switches fixed in release builds, `remove_by` at most the next minor tag or 30 days. *Adjusted:* a generated
