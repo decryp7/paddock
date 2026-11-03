@@ -32,10 +32,16 @@ impl Theme {
             [0xb0, 0x1e, 0x6e, 0xff]
         }
     }
-    /// Tracks: the ink at 30 %.
+    /// Tracks: the ink at 30 % (40 % on a dark taskbar, for 3:1 non-text contrast against it).
     pub fn track(&self) -> Rgba {
         let mut c = self.ink();
-        c[3] = 0x4d;
+        c[3] = if self.dark { 0x66 } else { 0x4d };
+        c
+    }
+    /// The track of an alert bar: the danger colour at 35 % (70 % on a dark taskbar, for 3:1 against it).
+    pub fn alert_track(&self) -> Rgba {
+        let mut c = self.alert().0;
+        c[3] = if self.dark { 0xb3 } else { 0x59 };
         c
     }
     /// The alert plate (the family's danger colour) and the ink on it.
@@ -344,28 +350,22 @@ impl Canvas {
     }
 }
 
-/// The alert notch: a 5 px right triangle in the top left corner (rows of 5, 4, 3, 2, 1), drawn after everything else and
-/// leaving out every pixel that touches (also diagonally) something already drawn, so a gutter of 1 px always separates it
-/// from the digits, the label and the arc, whatever the value.
-fn draw_notch(cv: &mut Canvas, plate: Rgba) {
-    let k = 5;
-    let mut keep = Vec::new();
+/// The alert notch: a right triangle in the top left corner, `k` px on its first row (rows of k, k-1, .. 1; 5 when the digits
+/// leave room, 4 at the least). Always whole.
+fn draw_notch(cv: &mut Canvas, plate: Rgba, k: i32) {
     for y in 0..k {
-        for x in 0..k - y {
-            let touches = (-1..=1).any(|dy| {
-                (-1..=1).any(|dx| {
-                    let (nx, ny) = (x + dx, y + dy);
-                    nx >= 0 && ny >= 0 && nx < cv.size && ny < cv.size && cv.pm.pixels()[(ny * cv.size + nx) as usize].alpha() != 0
-                })
-            });
-            if !touches {
-                keep.push((x, y));
-            }
-        }
+        cv.rect(0, y, k - y, y + 1, plate);
     }
-    for (x, y) in keep {
-        cv.rect(x, y, x + 1, y + 1, plate);
-    }
+}
+
+/// Whether (x, y) is on or touches (also diagonally) the notch of size `k`: the pixels glyphs must stay out of.
+fn in_notch_zone(k: i32, x: i32, y: i32) -> bool {
+    (x - 1).max(0) + (y - 1).max(0) < k && x >= 0 && y >= 0 && x < k + 1 && y < k + 1
+}
+
+/// The numerals to try at one size, widest first: as laid out, one pixel narrower, and a condensed hairline set.
+pub fn ladder(n: Numerals) -> [Numerals; 3] {
+    [n, Numerals { w: n.w - 1, ..n }, Numerals { w: n.w - 2, s: 1, ..n }]
 }
 
 /// The layout of one size.
@@ -469,15 +469,58 @@ fn text_width(text: &str, n: Numerals, tracking: i32) -> i32 {
 
 /// Draws numerals right-aligned at `right` (exclusive), within `right` pixels. Returns the left edge.
 pub fn digits(cv: &mut Canvas, text: &str, n: Numerals, tracking: i32, right: i32, y: i32, c: Rgba) -> i32 {
+    let placed = place(text, n, tracking, right);
+    for (g, x) in &placed {
+        cv.glyph(g, *x, y, c);
+    }
+    placed.first().map_or(right, |(_, x)| *x)
+}
+
+/// The glyphs of `text` with their left edges, right-aligned at `right`.
+fn place(text: &str, n: Numerals, tracking: i32, right: i32) -> Vec<(Glyph, i32)> {
     let gs = glyphs(text, n, tracking, right);
     let w = gs.iter().map(|g| g.w).sum::<i32>() + tracking * (gs.len() as i32 - 1).max(0);
     let mut x = right - w;
-    let left = x;
+    let mut out = Vec::new();
     for g in gs {
-        cv.glyph(&g, x, y, c);
-        x += g.w + tracking;
+        let gw = g.w;
+        out.push((g, x));
+        x += gw + tracking;
     }
-    left
+    out
+}
+
+/// How the numbers fit beside an alert notch.
+#[derive(Clone, Copy, Debug)]
+pub struct Fit {
+    /// The numerals.
+    pub n: Numerals,
+    /// Top row of the numerals.
+    pub y: i32,
+    /// The notch size.
+    pub k: i32,
+}
+
+/// The numerals, row and notch size that keep a 1 px gutter between the notch and every glyph pixel: the full 5 px notch first,
+/// with the digits narrowing (see [`ladder`]) or dropping one row before the notch shrinks to 4 px.
+pub fn fit(text: &str, l: &Layout, right: i32) -> Fit {
+    for k in [5, 4] {
+        for n in ladder(l.digits) {
+            for y in [l.digits_y, l.digits_y + 1] {
+                let clear = place(text, n, l.tracking, right)
+                    .iter()
+                    .all(|(g, x)| (0..g.h).all(|gy| (0..g.w).all(|gx| !g.at(gx, gy) || !in_notch_zone(k, x + gx, y + gy))));
+                if clear {
+                    return Fit { n, y, k };
+                }
+            }
+        }
+    }
+    Fit {
+        n: l.digits,
+        y: l.digits_y,
+        k: 4,
+    }
 }
 
 /// Draws a label right-aligned at `right`.
@@ -595,43 +638,36 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
     let right = if l.size <= 16 { s } else { s - 1 };
     let (plate, plate_ink) = t.alert();
     let small_alert = l.size < 24;
-    let danger_track = {
-        let mut c = plate;
-        c[3] = 0x59;
-        c
-    };
-    // The notch is drawn last (see `draw_notch`), so that it can keep a gutter from whatever else is on the icon.
-    let want_notch = std::cell::Cell::new(false);
-    let notch = |_: &mut Canvas| want_notch.set(true);
-    // One alert encoding at every size: a danger bar. From 24 px it spans the number's plate (`plate_x0`), else the icon.
-    let bar = |cv: &mut Canvas, v: Option<f32>, y: i32, h: i32, plate_x0: Option<i32>| {
-        if state != State::Alert {
-            meter_in(cv, &l, v, t.track(), t.accent(), 1, right, y, h);
-        } else if let (false, Some(x0)) = (small_alert, plate_x0) {
-            meter_in(cv, &l, v, danger_track, plate, x0, s, y, h);
+    let danger_track = t.alert_track();
+    // The notch is drawn last, whole; its size comes from the digits' fit.
+    let notch_k = std::cell::Cell::new(0);
+    let notch = |_: &mut Canvas| notch_k.set(5);
+    // From 24 px the number sits on a tile of one fixed width (that of "100") and the bar spans the same box in both states.
+    let tile_w = (text_width("100", l.digits, l.tracking) + 2).min(s);
+    let tile_x0 = s - tile_w;
+    // One alert encoding at every size: a danger bar.
+    let bar = |cv: &mut Canvas, v: Option<f32>, y: i32, h: i32, tiled: bool| {
+        let (x0, x1) = if tiled && !small_alert { (tile_x0, s) } else { (1, right) };
+        if state == State::Alert {
+            meter_in(cv, &l, v, danger_track, plate, x0, x1, y, h);
         } else {
-            meter_in(cv, &l, v, danger_track, plate, 1, right, y, h);
+            meter_in(cv, &l, v, t.track(), t.accent(), x0, x1, y, h);
         }
     };
-    // The number with its alert plate.
-    // Returns the left edge of the plate (from 24 px) the bar below aligns with.
-    let num = |cv: &mut Canvas, text: &str| -> Option<i32> {
+    // The number with its alert notch (small) or plate (from 24 px).
+    let num = |cv: &mut Canvas, text: &str| {
         let n = l.digits;
         if state == State::Alert && small_alert {
             // Below 24 px a knocked-out plate smears the digits: they stay solid ink and the alert is the corner notch and
-            // the danger bar under them.
-            notch(cv);
-            digits(cv, text, n, l.tracking, right, l.digits_y, ink);
-            None
+            // the danger bar under them. The digits yield to the notch (`fit`).
+            let f = fit(text, &l, right);
+            notch_k.set(f.k);
+            digits(cv, text, f.n, l.tracking, right, f.y, ink);
         } else if state == State::Alert {
-            let w = text_width(text, n, l.tracking);
-            let (x0, x1) = ((right - w - 1).max(0), s);
-            cv.rounded(x0, l.digits_y - 1, x1, l.digits_y + n.h + 1, plate);
+            cv.rounded(tile_x0, l.digits_y - 1, s, l.digits_y + n.h + 1, plate);
             digits(cv, text, n, l.tracking, right, l.digits_y, plate_ink);
-            Some(x0)
         } else {
             digits(cv, text, n, l.tracking, right, l.digits_y, ink);
-            None
         }
     };
     match kind {
@@ -640,24 +676,32 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
             let text = value.map_or("-".to_string(), |v| format!("{}", v.clamp(0.0, 100.0).round() as u32));
-            let x0 = num(&mut cv, &text);
-            bar(&mut cv, value, l.meter_y, l.meter_h, x0);
+            num(&mut cv, &text);
+            bar(&mut cv, value, l.meter_y, l.meter_h, true);
         }
         Kind::Temperature => {
-            let mut x0 = None;
             if l.label_rows > 0 {
                 label(&mut cv, "TMP", l.label_rows, right, l.label_y, ink);
             }
             if l.size <= 20 {
                 // 16 and 20 px: two bold digits and a 3 px degree ring tucked into the top right (no gap would fit).
                 let text = value.map_or("-".to_string(), |v| format!("{}", v.round().min(99.0) as u32));
+                let f = if state == State::Alert {
+                    fit(&text, &l, s - 3)
+                } else {
+                    Fit {
+                        n: l.digits,
+                        y: l.digits_y,
+                        k: 5,
+                    }
+                };
                 if state == State::Alert {
-                    notch(&mut cv);
+                    notch_k.set(f.k);
                 }
                 let c = ink;
-                digits(&mut cv, &text, l.digits, l.tracking, s - 3, l.digits_y, c);
+                digits(&mut cv, &text, f.n, l.tracking, s - 3, f.y, c);
                 if value.is_some() {
-                    cv.glyph(&numeral('°', Numerals { h: 3, w: 3, s: 1 }), s - 3, l.digits_y, c);
+                    cv.glyph(&numeral('°', Numerals { h: 3, w: 3, s: 1 }), s - 3, f.y, c);
                 }
             } else {
                 let text = match value {
@@ -665,9 +709,9 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                     Some(v) if v >= 99.5 => format!("{}", v.round() as u32),
                     Some(v) => format!("{}°", v.round() as u32),
                 };
-                x0 = num(&mut cv, &text);
+                num(&mut cv, &text);
             }
-            bar(&mut cv, value.map(|v| (v - 20.0) / 0.9), l.meter_y, l.meter_h, x0);
+            bar(&mut cv, value.map(|v| (v - 20.0) / 0.9), l.meter_y, l.meter_h, true);
         }
         Kind::Meter { label: lb } => {
             let mh = (s / 4).max(4);
@@ -679,7 +723,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             if l.label_rows > 0 {
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
-            bar(&mut cv, value, my, mh, None);
+            bar(&mut cv, value, my, mh, false);
             if state == State::Alert {
                 notch(&mut cv);
             }
@@ -790,8 +834,8 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             }
         }
     }
-    if want_notch.get() {
-        draw_notch(&mut cv, plate);
+    if notch_k.get() > 0 {
+        draw_notch(&mut cv, plate, notch_k.get());
     }
     let dim = if state == State::Unavailable { 0.45 } else { 1.0 };
     let size = l.size as u32;
@@ -911,5 +955,184 @@ mod tests {
         }
         let i = render(&Kind::Cores, &Reading::default(), State::Normal, 16, Theme { dark: true });
         assert_eq!(i.size, 16);
+    }
+
+    fn alert_icon(kind: &Kind, v: f32, size: i32, dark: bool) -> Icon {
+        let r = Reading {
+            value: Some(v),
+            ..Reading::default()
+        };
+        render(kind, &r, State::Alert, size, Theme { dark })
+    }
+
+    fn near(i: &Icon, x: i32, y: i32, f: &dyn Fn([u8; 4]) -> bool) -> bool {
+        (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                let (nx, ny) = (x + dx, y + dy);
+                nx >= 0 && ny >= 0 && nx < i.size as i32 && ny < i.size as i32 && f(px(i, nx as u32, ny as u32))
+            })
+        })
+    }
+
+    #[test]
+    fn the_notch_never_touches_a_glyph_at_any_value_size_or_theme() {
+        for dark in [false, true] {
+            let t = Theme { dark };
+            let (plate, _) = t.alert();
+            for size in [16, 20, 22] {
+                let l = layout(size);
+                for v in 0..=100 {
+                    let i = alert_icon(&Kind::Percent { label: "CPU".into() }, v as f32, size, dark);
+                    let mut notch = 0;
+                    for y in 0..l.meter_y {
+                        for x in 0..size {
+                            if px(&i, x as u32, y as u32) == plate {
+                                notch += 1;
+                                assert!(!near(&i, x, y, &|p| p == t.ink()), "notch ({x},{y}) touches a glyph: {v} at {size}");
+                            }
+                        }
+                    }
+                    assert_eq!(notch, 15, "the notch is whole: {v} at {size}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_notch_has_the_same_shape_for_every_value() {
+        let (plate, _) = Theme { dark: false }.alert();
+        for size in [16, 20, 22] {
+            for v in [0.0, 7.0, 17.0, 33.0, 88.0, 100.0] {
+                let i = alert_icon(&Kind::Percent { label: "CPU".into() }, v, size, false);
+                for (y, w) in [(0, 5), (1, 4), (2, 3), (3, 2), (4, 1)] {
+                    for x in 0..5 {
+                        assert_eq!(px(&i, x, y) == plate, x < w, "({x},{y}) {v} at {size}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_digit_stays_distinct_in_every_numeral_set_of_the_ladder() {
+        for size in [16, 20, 22, 24, 32] {
+            for n in ladder(layout(size).digits) {
+                let gs: Vec<Glyph> = "0123456789".chars().map(|c| numeral_with(c, n, false)).collect();
+                for a in 0..10 {
+                    for b in a + 1..10 {
+                        assert!(
+                            gs[a].w != gs[b].w || gs[a].bits != gs[b].bits,
+                            "{a} and {b} differ at {size} ({n:?})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_bar_spans_the_same_box_normal_or_alert() {
+        let cols = |i: &Icon, y: u32| (0..i.size).filter(|x| px(i, *x, y)[3] != 0).collect::<Vec<_>>();
+        for size in [16, 20, 22, 24, 32] {
+            let l = layout(size);
+            for dark in [false, true] {
+                let r = Reading {
+                    value: Some(93.0),
+                    ..Reading::default()
+                };
+                let k = Kind::Percent { label: "CPU".into() };
+                let a = render(&k, &r, State::Alert, size, Theme { dark });
+                let n = render(&k, &r, State::Normal, size, Theme { dark });
+                assert_eq!(cols(&a, l.meter_y as u32), cols(&n, l.meter_y as u32), "{size}");
+            }
+        }
+    }
+
+    fn lum(c: [f32; 3]) -> f32 {
+        let f = |v: f32| {
+            let v = v / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+    }
+
+    #[test]
+    fn dark_taskbar_tracks_have_3_to_1_contrast() {
+        // Windows 11's dark taskbar is about #202020; test a bit darker and lighter as well.
+        let t = Theme { dark: true };
+        for bgv in [0u8, 0x18, 0x20, 0x2b] {
+            let bg = [f32::from(bgv); 3];
+            let lb = lum(bg);
+            for c in [t.track(), t.alert_track()] {
+                let a = f32::from(c[3]) / 255.0;
+                let mix = [0, 1, 2].map(|k| f32::from(c[k]) * a + bg[k] * (1.0 - a));
+                let ratio = (lum(mix) + 0.05) / (lb + 0.05);
+                assert!(ratio >= 3.0, "{c:?} on #{bgv:02x}: {ratio:.2}");
+            }
+        }
+    }
+    #[test]
+    fn a_hundred_is_three_distinct_digits_at_16_and_20_px() {
+        for size in [16, 20] {
+            let i = alert_icon(&Kind::Percent { label: "CPU".into() }, 100.0, size, false);
+            let l = layout(size);
+            let ink = Theme { dark: false }.ink();
+            let cols: Vec<bool> = (0..size as u32)
+                .map(|x| (l.digits_y as u32..(l.digits_y + l.digits.h) as u32).any(|y| px(&i, x, y) == ink))
+                .collect();
+            let runs = cols.windows(2).filter(|w| !w[0] && w[1]).count() + usize::from(cols[0]);
+            assert_eq!(runs, 3, "1, 0 and 0 are separated by gaps at {size} px");
+        }
+    }
+
+    #[test]
+    fn the_alert_bar_is_danger_at_every_size_and_aligned_with_the_plate_from_24_px() {
+        for dark in [false, true] {
+            let t = Theme { dark };
+            let (plate, _) = t.alert();
+            for size in [16, 20, 22, 24, 32] {
+                let l = layout(size);
+                let i = alert_icon(&Kind::Percent { label: "CPU".into() }, 93.0, size, dark);
+                let by = l.meter_y as u32;
+                assert_eq!(px(&i, size as u32 / 2, by), plate, "bar fill is danger at {size}");
+                assert_ne!(px(&i, size as u32 / 2, by), t.accent());
+                if size >= 24 {
+                    // The plate's left edge is where its first column has plate pixels at the digits' middle row.
+                    let my = (l.digits_y + l.digits.h / 2) as u32;
+                    let left = (0..size as u32).find(|x| px(&i, *x, my)[3] != 0).unwrap();
+                    assert_eq!(px(&i, left, by), plate, "bar starts at the plate, {size}");
+                    assert_ne!(px(&i, size as u32 - 1, by)[3], 0, "bar ends at the plate, {size}");
+                    assert!(left < 2 || px(&i, left - 1, by)[3] == 0, "nothing left of the plate, {size}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn digits_follow_the_taskbar_theme() {
+        for size in [16, 20, 24, 32] {
+            let r = Reading {
+                value: Some(42.0),
+                ..Reading::default()
+            };
+            let has = |dark: bool, c: Rgba| {
+                render(&Kind::Percent { label: "CPU".into() }, &r, State::Normal, size, Theme { dark })
+                    .rgba
+                    .chunks(4)
+                    .any(|p| p == c)
+            };
+            assert!(
+                has(false, [0x1b, 0x1b, 0x1f, 0xff]) && !has(false, [0xff, 0xff, 0xff, 0xff]),
+                "light taskbar: dark ink, {size}"
+            );
+            assert!(
+                has(true, [0xff, 0xff, 0xff, 0xff]) && !has(true, [0x1b, 0x1b, 0x1f, 0xff]),
+                "dark taskbar: white ink, {size}"
+            );
+        }
     }
 }
