@@ -25,6 +25,15 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock_dialogs::size::SizeState`: the pure state machine (epoch and seq order, a queue of requested physical sizes, user resize versus echo, scale change, monitor move, show gating); its glue (`tauri/sizing.rs`) runs every
   transition on the main thread and logs one line each. The Windows, Linux and macOS edges read the DPI, the visible frame and the user-resize signal. `SizeLoop` (one measure function, last-sent baseline, at most two sends per change)
   replaces the handshake measure and the frame's own watch baseline. `data-fit-seq` and `data-size-mode` are set on `<html>`.
+### Conformance C71 and `@decryp7/paddock-e2e`: tests do not settle on real time, screenshots are checked
+- New check **C71** (ADR 0041, ER-12, rule 49), opt-in with `"timingLint": true` in `paddock.conformance.json` (the Paddock repo is on, and scans every app): errors on
+  `waitForTimeout(`, a `setTimeout`/`sleep`/`delay` wait, a wait on `requestAnimationFrame` turns and a locator `.count()` used later to `.nth(..)` in spec, test and e2e
+  files, and on `thread::sleep` / `tokio::time::sleep` in Rust test code. A real backoff says `// conformance: real-wait — <why>`. The 654 sites that exist today are in
+  `conformance/baselines/C71.json` (file and hash of the line, expires 2027-04-30, may only shrink); `node conformance/bin/paddock-timing-baseline.mjs` lists them.
+- New in `@decryp7/paddock-e2e`: `expectScreenshotClean(page, label, options)`, `screenshotProblems`, `captureChecked` (check, settled screenshot, check) and the pure
+  `rawTextProblems` / `statusChipProblems`. They fail a page that has text cut without a declared ellipsis, raw `SNAKE_CASE` / `camelCase` / `undefined` / `null` /
+  `NaN` / `[object Object]` text, mock, lorem, TODO or debug strings, or a status chip with neither a word nor an icon. `captureDocScreens` takes `check` (and a
+  per-screen `check`, `false` to skip); the gallery's e2e is the first consumer.
 
 ### `paddock-shell`: `files_*` commands always have their service
 

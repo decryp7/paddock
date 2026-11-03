@@ -83,3 +83,17 @@ export {
   type BuildGuard,
 } from './build-guard.ts';
 export { expectLoopSettles, expectSizeToContent, SIZE_SCALES, type SizeFixture } from './size-to-content.ts';
+export {
+  captureChecked,
+  expectScreenshotClean,
+  screenshotProblems,
+  readScreenshotFacts,
+  rawTextProblems,
+  statusChipProblems,
+  RAW_TEXT_RULES,
+  STATUS_CHIPS,
+  DEFAULT_IGNORE,
+  type ChipProbe,
+  type ScreenshotCheckOptions,
+  type VisibleText,
+} from './screenshot-check.ts';

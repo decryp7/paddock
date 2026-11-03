@@ -1256,3 +1256,14 @@ itself (ER-12), and measure the failure rate before and after (ER-28).
 ## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
 
 I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.
+
+## A rule that counts sites needs a baseline by text, not by count (2026-11-04, C71 and the screenshot check)
+
+C71 (tests do not settle on real time, ADR 0041) found 654 sites on `main` the day it ran: 339 Rust sleeps in test code, 181
+`setTimeout` waits, 57 `sleep`/`wait(n)` helpers, 35 `waitForTimeout`, 30 `requestAnimationFrame` waits and 12 `.count()`-then-`.nth()`
+uses. They sit in `conformance/baselines/C71.json` as file plus a hash of the whitespace-collapsed line, so moving a line keeps it
+known, editing it makes it new, and a second copy of a known line is new too (a per-file count would let a new site hide behind
+a fixed old one). The same day: `expectScreenshotClean` in `@decryp7/paddock-e2e` runs the clipping checks that already existed in
+`layout.ts` together with raw-identifier, placeholder and status-chip checks, so an app calls one function before and after a
+photograph. **Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
+what the line says, with a date, and say in the check's fix text how to waive a real case.
