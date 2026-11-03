@@ -117,7 +117,7 @@ export function binoculars({ simple = false, ink = INK.spotter, deep = PALETTE.s
  * tall up its slope, H thick, propped at `a` radians on a folio base FB thick; the base reaches fm past it at the sides and back
  * and fd in front, where the stylus lies.
  */
-export const tabletGeo = ({ W = 300, Hs = 400, H = 22, a = Math.PI / 6, FB = 40, fm = 22, fd = 74 } = {}) => {
+const tabletGeo = ({ W = 300, Hs = 400, H = 22, a = Math.PI / 6, FB = 40, fm = 22, fd = 74 } = {}) => {
   const ca = Math.cos(a), sa = Math.sin(a);
   /** A point on the tablet: u across (along s), v up the slope, h out of the screen (h = 0 the back, h = H the glass). */
   const T = (u, v, h) => [u, v * ca - h * sa, FB + v * sa + h * ca];

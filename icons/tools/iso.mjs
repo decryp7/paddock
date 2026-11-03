@@ -151,39 +151,6 @@ export function pixelIso({ grid, xs, ys }) {
 /** A flat, crisp layer in a literal colour for smallSvg (no anti-aliasing: the 2:1 diagonals become clean pixel stairs). */
 export const pixelLayer = (d, colour) => ({ kind: 'fill', d, tone: 'primary', colour, crisp: true });
 
-// ---------- small frames: smooth 2:1 isometric (proposal 2026-11-03, STYLE.md section 6, option A) ----------
-/**
- * The anti-aliased counterpart of pixelIso: the same 2:1 projection (x = s + d, y = (s - d) / 2 - t), scaled by `k` (draw an object
- * once in 32-grid units and pass k = grid / 32) and centred on the grid by its outline (`xs`, `ys` in unscaled units, as pixelIso),
- * shifted by `dx`, `dy`. The face builders snap every vertex's x to a whole pixel, so vertical edges stay crisp; the 2:1 diagonals and
- * all curves are left to anti-aliasing, so they render smooth at 1x and at 2x instead of as pixel stairs. Round parts take `P` (not
- * snapped) as the `proj` of ring, disc, arcPts and cylinder. Returns P, the snapped S, poly and face, end and flat (as pixelIso).
- */
-export function smoothIso({ grid, xs, ys, k = 1, dx = 0, dy = 0 }) {
-  const ox = grid / 2 - (k * (xs[0] + xs[1])) / 2 + dx, oy = grid / 2 - (k * (ys[0] + ys[1])) / 2 + dy;
-  const Ps = (s, d, t) => [f(ox + k * (s + d)), f(oy + k * ((s - d) / 2 - t))];
-  const S = (s, d, t) => { const [x, y] = Ps(s, d, t); return [Math.round(x), y]; };
-  const pp = (...p) => 'M' + p.map(q => q.join(' ')).join('L') + 'Z';
-  return {
-    P: v => Ps(...v), S, poly: pp, k, ox, oy,
-    face: (s0, s1, d, t0, t1) => pp(S(s0, d, t0), S(s1, d, t0), S(s1, d, t1), S(s0, d, t1)),
-    end: (s, d0, d1, t0, t1) => pp(S(s, d0, t0), S(s, d1, t0), S(s, d1, t1), S(s, d0, t1)),
-    flat: (s0, s1, d0, d1, t) => pp(S(s0, d0, t), S(s1, d0, t), S(s1, d1, t), S(s0, d1, t)),
-  };
-}
-/**
- * The family shadow at small sizes (STYLE.md section 4, scaled down): a soft long shadow swept away from the light and a tight contact
- * shadow, from the footprint `foot` (four screen points of smoothIso: front-left, front-right, back-right, back-left). Blur in grid
- * units; `long: 0` drops the long shadow (at 16, where it only smudges). Returns { defs, body }; put the body under the object.
- */
-export function smallShadow(kit, foot, { k = 1, dark = false, long = 1 } = {}) {
-  const sw = foot.map(([x, y]) => [f(x + 2.6 * k), f(y + 1.6 * k)]);
-  const defs = kit.blur('ss', f(1.1 * k)) + kit.blur('sc', f(0.45 * Math.max(k, 0.6)));
-  const body = `<path d="${poly(foot[0], foot[1], sw[1], sw[2], sw[3], foot[3])}" fill="${SHADOW.colour}" opacity="${long === 0 ? 0 : dark ? 0.42 : 0.28}" filter="url(#${kit.id('ss')})"/>`
-    + `<path d="${poly(...foot)}" fill="${SHADOW.colour}" opacity="0.55" filter="url(#${kit.id('sc')})"/>`;
-  return { defs, body };
-}
-
 // ---------- vectors, light and colour (lifted from tools/iso-c.mjs of icons C) ----------
 /** 3-vector helpers in (s, d, t). */
 export const norm = v => { const l = Math.hypot(...v); return v.map(x => x / l); };
@@ -249,12 +216,12 @@ export const WHITE_BODY = [[0, VALUES.shade[1]], [0.3, VALUES.shade[0]], [0.55, 
 // ---------- round parts ----------
 /** Axis frames: [axis A, U, W] with U and W spanning the cross-section. Cylinders lie along d or s. */
 export const AXES = { d: [[0, 1, 0], [1, 0, 0], [0, 0, 1]], s: [[1, 0, 0], [0, -1, 0], [0, 0, 1]] };
-/** A circle of radius r around centre c in the plane of U and W, as n screen points (`proj`: the projection, P by default). */
-export const ring = (c, U, W, r, n = 120, proj = Pv) => Array.from({ length: n }, (_, i) => { const q = (i / n) * 2 * Math.PI; return proj(add(c, mul(U, r * Math.cos(q)), mul(W, r * Math.sin(q)))); });
+/** A circle of radius r around centre c in the plane of U and W, as n screen points. */
+export const ring = (c, U, W, r, n = 120) => Array.from({ length: n }, (_, i) => { const q = (i / n) * 2 * Math.PI; return Pv(add(c, mul(U, r * Math.cos(q)), mul(W, r * Math.sin(q)))); });
 /** That circle as a closed path (an ellipse on screen): caps, lenses, dials. */
-export const disc = (c, U, W, r, proj = Pv) => pathOf(ring(c, U, W, r, 120, proj)) + 'Z';
+export const disc = (c, U, W, r) => pathOf(ring(c, U, W, r)) + 'Z';
 /** Points along an arc from angle q0 to q1 (radians) of that circle: rims, specular arcs. */
-export const arcPts = (c, U, W, r, q0, q1, n = 33, proj = Pv) => Array.from({ length: n }, (_, i) => { const q = q0 + ((q1 - q0) * i) / (n - 1); return proj(add(c, mul(U, r * Math.cos(q)), mul(W, r * Math.sin(q)))); });
+export const arcPts = (c, U, W, r, q0, q1, n = 33) => Array.from({ length: n }, (_, i) => { const q = q0 + ((q1 - q0) * i) / (n - 1); return Pv(add(c, mul(U, r * Math.cos(q)), mul(W, r * Math.sin(q)))); });
 /** Convex hull of screen points (monotone chain). */
 export function hull(pts) {
   const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -266,31 +233,30 @@ export function hull(pts) {
 }
 /**
  * A shaded cylinder: `axis` 'd' or 's', `c` the centre of the cap at a = 0, `len` along the axis, `r` the radius, and
- * `tone(intensity) => colour` (for example x => ramp(WHITE_BODY, x) or x => ramp(darkInk(ink).body, x)); `proj` the projection (P,
- * or smoothIso's P for a small frame). The side is the hull of both
+ * `tone(intensity) => colour` (for example x => ramp(WHITE_BODY, x) or x => ramp(darkInk(ink).body, x)). The side is the hull of both
  * caps (exact for a cylinder) with a gradient across the projected axis whose stops are sampled from the visible normals under the
  * key light. Returns { side, cap, capN, grad, fill }: put `grad` in the defs, draw `side` with `fill`, then the visible end `cap`
  * (normal `capN`, shade it with tone(lit(capN))).
  */
-export function cylinder(kit, name, { axis, c, len, r, tone, proj = Pv }) {
+export function cylinder(kit, name, { axis, c, len, r, tone }) {
   const [A, U, W] = AXES[axis];
   const c1 = add(c, mul(A, len));
   const startVisible = dot(mul(A, -1), VIEW) > 0;
   const capC = startVisible ? c : c1, capN = startVisible ? mul(A, -1) : A;
-  const side = pathOf(hull([...ring(c, U, W, r, 120, proj), ...ring(c1, U, W, r, 120, proj)])) + 'Z';
-  const z = proj([0, 0, 0]), ax = proj(A), al = Math.hypot(ax[0] - z[0], ax[1] - z[1]), p = [-(ax[1] - z[1]) / al, (ax[0] - z[0]) / al];
+  const side = pathOf(hull([...ring(c, U, W, r), ...ring(c1, U, W, r)])) + 'Z';
+  const z = Pv([0, 0, 0]), ax = Pv(A), al = Math.hypot(ax[0] - z[0], ax[1] - z[1]), p = [-(ax[1] - z[1]) / al, (ax[0] - z[0]) / al];
   const samples = [];
   for (let i = 0; i <= 360; i++) {
     const q = (i / 360) * 2 * Math.PI, n = add(mul(U, Math.cos(q)), mul(W, Math.sin(q)));
     if (dot(n, VIEW) < -1e-6) continue;
-    const sp = proj(mul(n, r));
+    const sp = Pv(mul(n, r));
     samples.push([(sp[0] - z[0]) * p[0] + (sp[1] - z[1]) * p[1], tone(lit(n))]);
   }
   samples.sort((a, b) => a[0] - b[0]);
-  const u0 = samples[0][0], u1 = samples.at(-1)[0], m = proj(add(c, mul(A, len / 2)));
+  const u0 = samples[0][0], u1 = samples.at(-1)[0], m = Pv(add(c, mul(A, len / 2)));
   const stops = samples.filter((_, i) => i % 10 === 0 || i === samples.length - 1).map(([u, col]) => [f((u - u0) / (u1 - u0)), col]);
   const grad = kit.lin(name, [f(m[0] + u0 * p[0]), f(m[1] + u0 * p[1])], [f(m[0] + u1 * p[0]), f(m[1] + u1 * p[1])], stops);
-  return { side, cap: disc(capC, U, W, r, proj), capN, grad, fill: `url(#${kit.id(name)})` };
+  return { side, cap: disc(capC, U, W, r), capN, grad, fill: `url(#${kit.id(name)})` };
 }
 /** A specular stroke that fades in and out along a polyline (the highlight on a lit metal edge or rim). Returns { def, el }. */
 export function fadeStroke(kit, name, pts, w, colour = '#FFFFFF', peak = 0.95) {

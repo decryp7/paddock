@@ -1,23 +1,21 @@
-// Comparison sheets for the smooth small frames (tools/small-smooth.mjs, a proposal awaiting the user's pick):
+// Comparison sheets for the smooth small frames (tools/small-smooth.mjs, the recommended mix, awaiting the user's pick):
 //   node tools/small-sheet.mjs [outDir]      (default ../docs/design/icons-small)
-// Writes:
-//   compare-light.png, compare-dark.png  every icon: current, option A, option B at 16, 24, 32 and 48 px (1x), and the frames a Retina
-//                                        screen shows at 16 pt and 32 pt (32 and 64 px, drawn at their physical size, so the sheet is
-//                                        viewed as a 2x screen would show them)
-//   zoom.png                             the 1x frames magnified 6x (nearest neighbour) and the 16 pt @2x frames magnified 3x: the
-//                                        pixel structure, stairs against anti-aliasing
-//   trays.png                            menu bar (template at 18 pt, 1x and @2x) and Windows notification area (32 px), current
-//                                        against the smooth @2x proposal, on light and dark bars, plus a 4x zoom of the @2x frames
-//   measurements.json                    coverage at 16, contrast, the measured blockiness of each frame
+// Writes (all drawn at 2x: one sheet pixel per Retina device pixel):
+//   compare-light.png, compare-dark.png  every icon: current against the recommended mix by point size (1x and @2x frames), and the
+//                                        mix on each OS surface (the frame the OS picks, resampled where it resamples)
+//   zoom.png                             the 1x frames at 6x and the 16 pt @2x frame at 3x (nearest neighbour): stairs against
+//                                        anti-aliasing
+//   trays.png                            menu bar and Windows notification area, current against the smooth tray
+//   measurements.json                    coverage at 16, contrast, blockiness, tray coverage, tile CVD distances
+// Options A (smooth isometric at 16 to 32) and B (flat at every size below 48 px) are in the first sheets of this study (git history,
+// commit 91b55d671); the review chose the mix.
 import { Resvg } from '@resvg/resvg-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { DEMOS, INK, NAMES, PADDOCK_FAMILY, PALETTE, smallSvg } from './design.mjs';
-import { MAT } from './art-scene.mjs';
-import { atL, tintedValues } from './iso.mjs';
+import { DEMOS, INK, NAMES, smallSvg } from './design.mjs';
 import { check, contrast } from './cvd.mjs';
 import { TRAY_STATES, bareSmall, small, tray } from './iso-family.mjs';
-import { SMOOTH_FAMILY, SMOOTH_TRAY_STATES, iso48, smallA, smallB, smoothTray, FLAT_B } from './small-smooth.mjs';
+import { FRONTS, MIX, SMOOTH_FAMILY, SMOOTH_TRAY_STATES, iso48, mixFrame, smallFlat, smoothTray, smoothTrayGlyph, tileBase } from './small-smooth.mjs';
 
 /** Ink coverage at `px` against the bare tile, the measure of tileCoverage in tools/iso-family.test.mjs (importing a test file runs it). */
 function tileCoverage(svg, bare, px) {
@@ -31,56 +29,81 @@ mkdirSync(OUT, { recursive: true });
 const render = (svg, px) => new Resvg(svg, { fitTo: { mode: 'width', value: px }, shapeRendering: 2, font: { loadSystemFonts: false } }).render();
 const png = (svg, px) => render(svg, px).asPng();
 const img = (buf, x, y, w, nn = false) => `<image x="${x}" y="${y}" width="${w}" height="${w}"${nn ? ' image-rendering="optimizeSpeed"' : ''} href="data:image/png;base64,${buf.toString('base64')}"/>`;
+/** A frame resampled to `px` the way an OS scales an icon it has no exact frame for (smooth filtering). */
+const resample = (buf, px) => png(`<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}">${img(buf, 0, 0, px)}</svg>`, px);
 const text = (x, y, s, { size = 13, fill = '#555', weight = 400, anchor = 'start' } = {}) => `<text x="${x}" y="${y}" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${s}</text>`;
+const lines = (x, y, list, opts) => list.map((s, i) => text(x, y + i * 26, s, opts)).join('');
 const sheet = (w, h, bg, parts) => new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/>${parts.join('')}</svg>`, { fitTo: { mode: 'original' }, font: { loadSystemFonts: false, fontFiles: ['/System/Library/Fonts/Helvetica.ttc'], defaultFontFamily: 'Helvetica' } }).render().asPng();
 
-/** The frames of one option per app: 1x PNGs at 16, 24, 32 and 48, and the Retina frames for 16 pt (32 px) and 32 pt (64 px). */
+/** Per point-size slot: the 1x frames at 16, 24, 32 and 48, and the Retina frames for 16, 24 and 32 pt (32, 48 and 64 px). */
 const OPTIONS = {
   current: app => ({
     16: png(small(app, 16), 16), 24: png(small(app, 24), 24), 32: png(small(app, 32), 32), 48: png(small(app, 48), 48),
-    r16: png(small(app, 32), 32), r32: png(small(app, 32), 64), // the .icns ic11 and ic12 entries today
+    r16: png(small(app, 32), 32), r24: png(small(app, 48), 48), r32: png(small(app, 32), 64), // the .icns ic11 and ic12 entries today
   }),
-  A: app => ({ 16: png(smallA(app, 16), 16), 24: png(smallA(app, 24), 24), 32: png(smallA(app, 32), 32), 48: png(iso48(app), 48), r16: png(smallA(app, 32), 32), r32: png(smallA(app, 32, { px: 64 }), 64) }),
-  B: app => ({ 16: png(smallB(app, 16), 16), 24: png(smallB(app, 24), 24), 32: png(smallB(app, 32), 32), 48: png(iso48(app), 48), r16: png(smallB(app, 32), 32), r32: png(iso48(app, 64), 64) }),
+  mix: app => ({
+    16: png(smallFlat(app, 16), 16), 24: png(smallFlat(app, 24), 24), 32: png(iso48(app, 32), 32), 48: png(iso48(app), 48),
+    r16: png(smallFlat(app, 32), 32), r24: png(iso48(app), 48), r32: png(iso48(app, 64), 64),
+  }),
 };
-const demoFrames = app => ({ 16: png(smallSvg(app, 16), 16), 24: png(smallSvg(app, 24), 24), 32: png(smallSvg(app, 32), 32), 48: png(smallSvg(app, 48), 48), r16: png(smallSvg(app, 32), 32), r32: png(smallSvg(app, 32), 64) });
+const demoFrames = app => ({ 16: png(smallSvg(app, 16), 16), 24: png(smallSvg(app, 24), 24), 32: png(smallSvg(app, 32), 32), 48: png(smallSvg(app, 48), 48), r16: png(smallSvg(app, 32), 32), r24: png(smallSvg(app, 48), 48), r32: png(smallSvg(app, 32), 64) });
 const frames = Object.fromEntries(SMOOTH_FAMILY.map(a => [a, Object.fromEntries(Object.entries(OPTIONS).map(([k, fn]) => [k, fn(a)]))]));
-for (const d of DEMOS) frames[d] = { current: demoFrames(d), A: demoFrames(d), B: demoFrames(d) };
+for (const d of DEMOS) frames[d] = { current: demoFrames(d), mix: demoFrames(d) };
 const ROWS = [...SMOOTH_FAMILY, ...DEMOS];
-const LABEL = { current: 'Current (pixel art at 24 and 32)', A: 'A: smooth isometric', B: 'B: flat front view' };
+const LABEL = { current: 'Current (pixel art at 24 and 32)', mix: 'Recommended mix (flat to 24 pt, isometric from 32 pt)' };
+
+/**
+ * The mix on each OS surface: [label, physical px, the container frame the OS picks]. A frame of another size is resampled to the
+ * slot, as the OS does. Windows at 100 % and Linux are 1x surfaces (shown as 2 x 2 blocks).
+ */
+const ico = px => MIX.ico.find(e => e[2] === px);
+const SURFACES = [
+  ['Finder list|16 pt @2x', 32, 2, MIX.icns[1]], ['Finder icons|32 pt @2x', 64, 2, MIX.icns[3]],
+  ['Win title bar|100 %: 16', 16, 1, ico(16)], ['Win taskbar|100 %: 24', 24, 1, ico(24)], ['Win taskbar|125 %: 30', 30, 1, ico(32)],
+  ['Win taskbar|150 %: 36', 36, 1, ico(40)], ['Linux panel|22', 22, 1, MIX.linux[1]],
+];
+const surface = (app, [, px, scale, [, , fpx, kind]]) => { const b = png(mixFrame(app, fpx, kind), fpx); return { buf: fpx === px ? b : resample(b, px), w: px * (scale === 1 ? 2 : 1), nn: scale === 1 }; };
 
 // ---------- compare sheets ----------
-// Drawn at 2x: one sheet pixel is one device pixel of a Retina screen (view at 100 % there, 50 % on a 1x screen). A 1x frame is shown
-// with each of its pixels as a 2 x 2 block (what a 1x screen shows, at the same physical size); a Retina frame at its own pixels.
-// Columns are point sizes: 16 (Finder lists, title bars), 24 (Windows taskbar), 32 (Finder icons, Dock at its smallest), 48.
+// A 1x frame is shown with each of its pixels as a 2 x 2 block (what a 1x screen shows, at the same physical size); a Retina frame
+// at its own pixels. Columns are point sizes: 16 (Finder lists, title bars), 24 (Windows taskbar), 32 (Finder icons, Dock), 48.
 for (const [name, bg, fg] of [['light', '#ECECEF', '#3A3A3C'], ['dark', '#1C1C1E', '#D8D8DC']]) {
-  const cols = [['1x', 16], ['1x', 24], ['1x', 32], ['1x', 48], ['2x', 16, 'r16'], ['2x', 24, 48], ['2x', 32, 'r32']];
+  const cols = [['1x', 16], ['1x', 24], ['1x', 32], ['1x', 48], ['2x', 16, 'r16'], ['2x', 24, 'r24'], ['2x', 32, 'r32']];
   const gap = 20, groupW = cols.reduce((n, [, pt]) => n + 2 * pt + gap, 0) + 50, x0 = 230, rowH = 130, parts = [];
-  parts.push(text(30, 50, `Small icons: current, option A (smooth isometric), option B (flat front view), ${name} background`, { size: 30, fill: fg, weight: 600 }));
-  parts.push(text(30, 86, 'Drawn at 2x: view at 100 % on a Retina screen (50 % on a 1x screen). Columns are point sizes. "1x": the frame a 1x screen shows; "@2x": the frame a Retina screen shows', { size: 19, fill: fg }));
-  parts.push(text(30, 112, '(16 pt: the 32 px frame, the .icns ic11; 24 pt: the 48 frame, Windows at 200 %; 32 pt: the 64 px .icns ic12, today the 32 frame doubled; B: the 48 frame drawn at 64). 48 px: the simple isometric frame (A and B: Paddock included; today the Paddock 48 is its 32 pixel frame scaled).', { size: 19, fill: fg }));
+  const surfX = x0 + 2 * groupW + 40, surfW = SURFACES.reduce((n, s) => n + Math.max(s[1] * (s[2] === 1 ? 2 : 1), 84) + 24, 0);
+  parts.push(text(30, 50, `Small icons: current against the recommended mix, and the mix on each OS surface (${name} background)`, { size: 30, fill: fg, weight: 600 }));
+  parts.push(lines(30, 86, [
+    'Drawn at 2x: view at 100 % on a Retina screen (50 % on a 1x screen). Columns are point sizes; "1x" is the frame a 1x screen shows, "@2x" the frame a Retina screen shows.',
+    'Today: 16 pt @2x is the 32 px pixel frame (.icns ic11), 32 pt @2x is that frame doubled (ic12). Mix: flat glyph for the 16 and 24 pt slots, isometric (vector) from 32 pt up.',
+    'Surfaces: the frame each OS picks from the mix (.icns, .ico, Linux sizes in STYLE.md 6a), resampled where the OS resamples (Windows 125 % and 150 %, a 22 px Linux panel).',
+  ], { size: 19, fill: fg }));
   Object.keys(OPTIONS).forEach((opt, g) => {
     const gx = x0 + g * groupW;
-    parts.push(text(gx, 160, LABEL[opt], { size: 24, fill: fg, weight: 600 }));
+    parts.push(text(gx, 186, LABEL[opt], { size: 22, fill: fg, weight: 600 }));
     let x = gx;
-    for (const [res, pt] of cols) { parts.push(text(x + pt, 190, `${pt}${res === '2x' ? '@2x' : ''}`, { size: 17, fill: fg, anchor: 'middle' })); x += 2 * pt + gap; }
+    for (const [res, pt] of cols) { parts.push(text(x + pt, 214, `${pt}${res === '2x' ? '@2x' : ''}`, { size: 17, fill: fg, anchor: 'middle' })); x += 2 * pt + gap; }
   });
+  parts.push(text(surfX, 170, 'The mix on each surface (1x surfaces as 2 x 2 blocks)', { size: 22, fill: fg, weight: 600 }));
+  { let x = surfX; for (const s of SURFACES) { const w = Math.max(s[1] * (s[2] === 1 ? 2 : 1), 84); s[0].split('|').forEach((l, i) => parts.push(text(x + w / 2, 200 + i * 18, l, { size: 15, fill: fg, anchor: 'middle' }))); x += w + 24; } }
   ROWS.forEach((app, i) => {
-    const y = 210 + i * rowH;
+    const y = 236 + i * rowH;
     parts.push(text(30, y + 62, NAMES[app].replace('Paddock ', ''), { size: 22, fill: fg, weight: 500 }));
     Object.keys(OPTIONS).forEach((opt, g) => {
       let x = x0 + g * groupW;
       if (DEMOS.includes(app) && opt !== 'current') { parts.push(text(x, y + 62, 'unchanged: its frames are flat vector already', { size: 19, fill: fg })); return; }
       for (const [res, pt, key] of cols) { parts.push(img(frames[app][opt][key ?? pt], x, y + (96 - 2 * pt), 2 * pt, res === '1x')); x += 2 * pt + gap; }
     });
+    if (DEMOS.includes(app)) return;
+    let x = surfX;
+    for (const s of SURFACES) { const w = Math.max(s[1] * (s[2] === 1 ? 2 : 1), 84), r = surface(app, s); parts.push(img(r.buf, x + (w - r.w) / 2, y + (96 - r.w), r.w, r.nn)); x += w + 24; }
   });
-  writeFileSync(join(OUT, `compare-${name}.png`), sheet(x0 + 3 * groupW, 220 + ROWS.length * rowH, bg, parts));
+  writeFileSync(join(OUT, `compare-${name}.png`), sheet(surfX + surfW + 20, 246 + ROWS.length * rowH, bg, parts));
 }
 
 // ---------- zoom sheet ----------
 {
   const parts = [], z = 6, rowH = 32 * z + 40, bg = '#F4F4F6';
-  parts.push(text(20, 30, 'Pixel structure: 1x frames at 6x (nearest neighbour), and the 16 pt @2x frame at 3x (same physical size)', { size: 18, fill: '#222', weight: 600 }));
+  parts.push(text(20, 30, 'Pixel structure: the 1x frames at 16, 24 and 32 px at 6x (nearest neighbour), and the 16 pt @2x frame at 3x', { size: 18, fill: '#222', weight: 600 }));
   const opts = Object.keys(OPTIONS), groupW = (16 + 24 + 32) * z + 32 * 3 + 50;
   opts.forEach((o, g) => parts.push(text(150 + g * groupW, 62, LABEL[o], { size: 15, fill: '#222', weight: 600 })));
   SMOOTH_FAMILY.forEach((app, i) => {
@@ -92,7 +115,7 @@ for (const [name, bg, fg] of [['light', '#ECECEF', '#3A3A3C'], ['dark', '#1C1C1E
       parts.push(img(frames[app][o].r16, x + 10, y, 96, true));
     });
   });
-  writeFileSync(join(OUT, 'zoom.png'), sheet(150 + 3 * groupW, 90 + SMOOTH_FAMILY.length * rowH, bg, parts));
+  writeFileSync(join(OUT, 'zoom.png'), sheet(150 + opts.length * groupW, 90 + SMOOTH_FAMILY.length * rowH, bg, parts));
 }
 
 // ---------- tray sheet ----------
@@ -101,9 +124,9 @@ for (const [name, bg, fg] of [['light', '#ECECEF', '#3A3A3C'], ['dark', '#1C1C1E
   const parts = [], rowH = 176, fg = '#222';
   // A template is alpha only: the menu bar draws it in the bar's ink (black on a light bar, white on a dark one).
   const inked = (svg, ink) => svg.replaceAll('fill="#000000"', `fill="${ink}"`).replaceAll('stroke="#000000"', `stroke="${ink}"`);
-  parts.push(text(30, 46, 'Tray icons: current whole-pixel set vs the smooth @2x proposal (option B glyph, vector badges)', { size: 30, fill: fg, weight: 600 }));
-  parts.push(text(30, 80, 'Drawn at 2x: view at 100 % on a Retina screen. macOS: the 18 pt template the apps load (1x kept on whole pixels; @2x is what a Retina menu bar shows).', { size: 19, fill: fg }));
-  parts.push(text(30, 106, 'Windows: the notification-area icon at 100 % (16 px, kept) and at 200 % (32 px). Zoom: the @2x template at 4x, nearest neighbour.', { size: 19, fill: fg }));
+  parts.push(text(30, 46, 'Tray icons: current whole-pixel set against the smooth tray (the flat glyph, vector badges with a 1 px knock-out)', { size: 30, fill: fg, weight: 600 }));
+  parts.push(text(30, 80, 'Drawn at 2x. The apps load one image: macOS the 36 px template, set to 18 pt (a 1x screen downsamples it); Windows the 32 px PNG, scaled to the tray size.', { size: 19, fill: fg }));
+  parts.push(text(30, 106, 'Shown: the 18 pt 1x PNG (shipped but unused), the 36 px current and smooth templates; Windows 16 and 32. Zoom: the 36 px templates at 4x, nearest neighbour.', { size: 19, fill: fg }));
   const heads = [[260, 'menu bar: 1x | current @2x | smooth @2x'], [700, '4x: current @2x'], [870, '4x: smooth @2x'], [1050, 'Windows light: 16 | cur 32 | smooth 32'], [1400, 'Windows dark: 16 | cur 32 | smooth 32']];
   heads.forEach(([x, h]) => parts.push(text(x, 150, h, { size: 17, fill: fg, weight: 600 })));
   let row = 0;
@@ -138,19 +161,17 @@ const blockiness = (buf, px) => { // share of aligned 2x2 blocks with four ident
   return Math.round((100 * s) / n);
 };
 const m = {};
-// The main front face of each option A object (the face the contrast rule judges) and the option B ink.
-const A_FRONT = { paddock: '#C9D0D8', debrief: MAT.debrief.top[0], pitwall: MAT.pitwall.lit[0], sighter: MAT.sighter.lit[0], pitcrew: MAT.pitcrew.lit[0], spotter: atL(INK.spotter, 33), pacenotes: '#FFFFFF', dyno: tintedValues(PALETTE.dyno.deep, 0.12).litLight[0] };
-const tileBase = app => (app === 'paddock' ? PADDOCK_FAMILY.palettes.graphite : PALETTE[app]).base;
+const tileBaseOf = tileBase;
 const alphaStats = (svg, px) => { const d = render(svg, px).pixels; let ink = 0, partial = 0, any = 0; for (let i = 3; i < d.length; i += 4) { ink += d[i] / 255; if (d[i]) any++; if (d[i] && d[i] < 255) partial++; } return { coverage: Math.round((100 * ink) / (px * px)), partialEdge: Math.round((100 * partial) / any) }; };
 for (const app of SMOOTH_FAMILY) {
   const bare = bareSmall(app, 16);
   m[app] = {
-    coverage16: { current: tileCoverage(small(app, 16), bare, 16), A: tileCoverage(smallA(app, 16), bare, 16), B: tileCoverage(smallB(app, 16), bare, 16) },
-    contrast: { A_front: +contrast(A_FRONT[app], tileBase(app)).toFixed(1), B_ink: +contrast(INK[app], tileBase(app)).toFixed(1) },
+    coverage16: { current: tileCoverage(small(app, 16), bare, 16), mix: tileCoverage(smallFlat(app, 16), bare, 16) },
+    contrast: { isoFront: +contrast(FRONTS[app], tileBaseOf(app)).toFixed(2), flatInk: +contrast(INK[app], tileBaseOf(app)).toFixed(2) },
     blockiness64: Object.fromEntries(Object.keys(OPTIONS).map(o => [o, blockiness(frames[app][o].r32, 64)])),
-    tray2x: { current: alphaStats(tray(app, TRAY_STATES[app][0], 'template'), 32), smooth: alphaStats(smoothTray(app, 'template', { px: 32 }), 32) },
+    tray: { current32: alphaStats(tray(app, TRAY_STATES[app][0], 'template'), 32), smooth32: alphaStats(smoothTrayGlyph(app, 32), 32) },
   };
 }
-m.tileCvd = check(Object.fromEntries(SMOOTH_FAMILY.map(a => [a, tileBase(a)])));
+m.tileCvd = check(Object.fromEntries(SMOOTH_FAMILY.map(a => [a, tileBaseOf(a)])));
 writeFileSync(join(OUT, 'measurements.json'), JSON.stringify(m, null, 2) + '\n');
 console.log(JSON.stringify(m));

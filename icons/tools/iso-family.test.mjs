@@ -139,27 +139,40 @@ test('Pitwall paused: the light taskbar badge is dark enough (3:1 on white), the
 
 // ---------- the smooth small-frame proposal (STYLE.md section 6a) ----------
 const smooth = await import('./small-smooth.mjs');
-const { smoothIso } = await import('./iso.mjs');
-
-test('smoothIso snaps every vertex x to a whole pixel and keeps y exact', () => {
-  const g = smoothIso({ grid: 24, xs: [0, 15], ys: [-10, 5], k: 0.75 });
-  for (const d of [g.face(0, 10, 0, 0, 13), g.end(10, 0, 5, 0, 13), g.flat(0, 10, 0, 5, 13)]) {
-    for (const [, x] of d.matchAll(/[ML](-?[\d.]+) /g)) assert.equal(+x, Math.round(+x), d);
-  }
-  assert.deepEqual(g.P([1, 0, 0]).map(v => +v.toFixed(2)), [+(g.ox + 0.75).toFixed(2), +(g.oy + 0.375).toFixed(2)]);
-});
+const { contrast } = await import('./cvd.mjs');
+const { INK } = await import('./design.mjs');
+/** Fronts below 3:1 on their tile, by design: Pitcrew's orange is mid-light, so a front light enough for 3:1 would lose the 8 L step
+ * to its white top (STYLE.md section 3); the white top carries the silhouette at 3.3:1. */
+const FRONT_EXCEPTION = { pitcrew: { front: 2.7, top: '#FFFFFF' } };
 
 for (const app of smooth.SMOOTH_FAMILY) {
   const [lo, hi] = COVERAGE[GLYPH_KIND[app]];
-  test(`${app}: options A and B keep the coverage at 16 within the ${GLYPH_KIND[app]} limits`, () => {
-    for (const [name, svg] of [['A', smooth.smallA(app, 16)], ['B', smooth.smallB(app, 16)]]) {
-      const c = tileCoverage(svg, bareSmall(app, 16), 16);
-      assert.ok(c >= lo && c <= hi, `${app} option ${name} 16 px coverage ${c} % is outside ${lo} to ${hi} %`);
+  test(`${app}: the mix's flat frames keep the coverage at 16 within the ${GLYPH_KIND[app]} limits`, () => {
+    const c = tileCoverage(smooth.smallFlat(app, 16), bareSmall(app, 16), 16);
+    assert.ok(c >= lo && c <= hi, `${app} flat 16 px coverage ${c} % is outside ${lo} to ${hi} %`);
+  });
+  test(`${app}: every frame the mix ships reaches 3:1 on the tile base (flat ink; isometric fronts, one documented exception)`, () => {
+    const base = smooth.tileBase(app);
+    assert.ok(contrast(INK[app], base) >= 3, `${app} flat ink ${contrast(INK[app], base).toFixed(2)}:1`);
+    const ex = FRONT_EXCEPTION[app], c = contrast(smooth.FRONTS[app], base);
+    if (ex) assert.ok(c >= ex.front - 0.005 && contrast(ex.top, base) >= 3, `${app} isometric front ${c.toFixed(2)}:1`);
+    else assert.ok(c >= 3, `${app} isometric front ${c.toFixed(2)}:1`);
+  });
+  test(`${app}: the flat glyph's straight edges sit on whole pixels at 16, 20, 24, 32 and 40`, () => {
+    for (const n of [16, 20, 24, 32, 40]) {
+      const svg = smooth.flatMask(smooth.FLAT[app], n, { hues: true });
+      for (const [, k, v] of svg.matchAll(/ (x|y|width|height)="([^"]+)"/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${k}=${v}`);
+      for (const [, d] of svg.matchAll(/<path d="(M[^"]+Z)" fill/g)) if (!/[aAC]/.test(d)) for (const v of d.match(/-?[\d.]+/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${d}`);
     }
   });
-  test(`${app}: the smooth tray template is alpha only and anti-aliased at 2x`, () => {
+  test(`${app}: the smooth tray is alpha only, anti-aliased, and its glyph within the ${GLYPH_KIND[app]} coverage limits`, () => {
     const svg = smooth.smoothTray(app, 'template', { px: 36 }), d = pixels(svg, 36);
     for (let i = 0; i < d.length; i += 4) if (d[i + 3]) assert.deepEqual([d[i], d[i + 1], d[i + 2]], [0, 0, 0]);
     assert.ok(partialAlpha(svg, 36).length > 0 || app === 'paddock', `${app}: no anti-aliased edge at 36 px`);
+    const a = pixels(smooth.smoothTrayGlyph(app, 32), 32);
+    let ink = 0;
+    for (let i = 3; i < a.length; i += 4) ink += a[i] / 255;
+    const c = Math.round((100 * ink) / (32 * 32));
+    assert.ok(c >= lo && c <= hi, `${app} smooth tray glyph coverage ${c} % is outside ${lo} to ${hi} %`);
   });
 }
