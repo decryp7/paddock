@@ -147,8 +147,20 @@ Processes are grouped three ways. Yours and the system's are listed one by one. 
 users** row with whatever totals the OS allows. On Linux, a system that hides other accounts' processes (`hidepid`) says so
 in one line above the list.
 
-Dyno 1.0 runs only with your own rights, so there is nothing to approve and nothing to install. Elevation (a read-only helper
-that gives the readings Dyno cannot get today, and starting as administrator at login) is planned for Dyno 1.1.
+### Administrator readings (Dyno 1.1)
+
+Out of the box Dyno still runs only with your own rights. **Settings > Dyno > Administrator readings** can turn on a small
+read-only helper that gives the readings your account cannot take. Turning it on asks the operating system once: a password
+or Touch ID on macOS, the polkit prompt on Linux, and on Windows the User Account Control prompt, which names an unknown
+publisher because the Windows build is not signed; that is expected. The helper only reads (and sets or cancels Dyno's own scheduled
+wakes); it changes nothing else, and the card's Turn off removes it.
+
+What it adds: every account's processes in detail, per-program network traffic (Windows), disk health (SMART), the program that
+holds a socket or a file (Linux), temperatures, fans and CPU energy, memory slots (Linux), and on Windows what keeps the computer
+awake and the Windows Backup versions. Who sees what: the account that turned it on and administrators see everything; any other
+account sees its own and the system's programs, and the rest as one **Other users** total (or not at all), never another
+person's program folder. Every change request is recorded in the helper's audit log, which the card shows. The helper's log never
+holds file contents or command lines.
 
 ## Troubleshooting
 

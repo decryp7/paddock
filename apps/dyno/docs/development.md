@@ -9,7 +9,7 @@ crates/dyno-core         pure core: model, grouping, diagnosis, health, alarms, 
 crates/dyno-platform     OS adapters (windows/, macos/, linux/) and test fakes
 crates/dyno-ipc          the one local IPC (frames, token handshake, host/child)
 crates/dyno-agent        the agent: sampler, server, handlers, store, rollup, service, cli
-crates/dyno-helper       the privileged helper: not shipped in 1.0, kept for 1.1 (ADR 0022)
+crates/dyno-helper       the optional read-only privileged helper (ADR 0027): closed request list, per-OS install through paddock-service
 crates/dyno-plugin-api   what a plugin depends on; crates/dyno-plugin-host guards plugins
 plugins/                 example plugin
 app/src-tauri            Tauri shell (commands, link to the agent, tray, windows, native feel, updater)

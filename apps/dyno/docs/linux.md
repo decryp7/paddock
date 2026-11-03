@@ -70,7 +70,7 @@ removed AppImage path, `dyno-agent service ensure` rewrites it.
 
 ## What Dyno can read without root
 
-Dyno 1.0 installs no helper and no system service. With `hidepid=0` (the default) `/proc` gives CPU and owner for every
+Dyno installs no helper and no system service unless you turn on Administrator readings (the `.deb` ships `dyno-helper.service` disabled, with a polkit rule; the AppImage has no helper). With `hidepid=0` (the default) `/proc` gives CPU and owner for every
 process (memory for other accounts' processes is resident memory only, which overstates shared memory, so it says *Unavailable* with that reason); disk I/O and the program path need ptrace rights, so for system processes and other accounts they say *Unavailable: Linux
 shows this only for your own processes*. System processes (uid below `UID_MIN` in `/etc/login.defs`, default 1000) are listed one
 by one; other accounts' processes are one **Other users** row with the number of processes and CPU. With `hidepid=1` or `2` the
