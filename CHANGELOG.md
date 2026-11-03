@@ -10,7 +10,7 @@ Conventional Commits; one semver tag for the whole repo.
   `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
   `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
   administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
-  connection (`PeerError`); on Windows the server must have read from the pipe once (`PeerError::NotReady` otherwise).
+  connection (`PeerError`); on Windows the OS may refuse before the client's first bytes arrive (`PeerError::NotReady`; Windows 11 build 26300 identified a client that had sent nothing).
 - New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
   anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
   no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`

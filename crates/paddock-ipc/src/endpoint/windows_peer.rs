@@ -91,7 +91,8 @@ fn token_info(token: HANDLE, class: i32, what: &'static str) -> Result<Vec<u64>,
     Ok(buf)
 }
 
-/// The facts of the client on `pipe`, after the server has read from it at least once.
+/// The facts of the client on `pipe`. The documentation asks for one read first; the OS may answer `ERROR_CANNOT_IMPERSONATE`
+/// before it, which is [`PeerError::NotReady`].
 pub(super) fn raw_peer(pipe: HANDLE) -> Result<RawPeer, PeerError> {
     let mut pid = 0u32;
     // SAFETY: a connected pipe server handle and a valid out pointer. A hint for the log only.

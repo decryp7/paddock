@@ -126,7 +126,8 @@ pub enum PeerError {
         /// The OS error text.
         cause: String,
     },
-    /// Windows only: the server must have read from the pipe once before it can impersonate the client.
+    /// Windows only: the OS refused to impersonate the client yet (documented to happen until the server has read from the
+    /// pipe once; Windows 11 build 26300 does not need the read). Retry after the first read.
     NotReady,
 }
 

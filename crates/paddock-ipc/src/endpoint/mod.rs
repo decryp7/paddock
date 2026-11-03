@@ -180,7 +180,7 @@ impl Write for Stream {
 
 impl PeerSource for Stream {
     /// The caller's facts from the OS (audit token, `SO_PEERCRED`, the caller's own token); never from a pid. On Windows
-    /// the server must have read from the connection once, or the answer is [`PeerError::NotReady`].
+    /// the OS may answer [`PeerError::NotReady`] before the client's first bytes arrive (Windows 11 build 26300 did not).
     fn raw_peer(&self) -> Result<RawPeer, PeerError> {
         self.0.raw_peer()
     }
