@@ -11,7 +11,7 @@ import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
     <article class="text">
       <h2>Size fixture</h2>
       <p>Content that arrives after the window was measured.</p>
-      <p>
+      <p class="actions">
         <button type="button" data-testid="fixture-add" (click)="addRows()">Add content</button>
         <button type="button" data-testid="fixture-error" (click)="error.set(true)">Add an error</button>
       </p>

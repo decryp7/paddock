@@ -8,3 +8,6 @@
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--pd-space-1) var(--pd-space-4); margin: 0; }
 .facts dt { color: var(--pd-text-muted); }
 .facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.actions { display: flex; gap: var(--pd-space-2); margin: 0; }
+.actions button { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; cursor: pointer; }

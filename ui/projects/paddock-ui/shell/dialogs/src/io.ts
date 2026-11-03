@@ -1,28 +1,15 @@
 import { InjectionToken } from '@angular/core';
-import { DIALOG_EVENTS, type DialogInfo, type DialogRequest, type DialogSize, type DialogStart } from '@decryp7/paddock-ui/shell';
+import { DIALOG_EVENTS, type DialogInfo, type DialogMeasureWire, type DialogRequest, type DialogStart } from '@decryp7/paddock-ui/shell';
 
 /** Stops listening. */
 export type Unlisten = () => void;
 
 /**
- * What the dialog frame measured, the dialog's own inner logical size (ADR 0026 §4.2): `content` is what it needs at its
- * declared width (header, body at its natural height, footer), `minContent` the least it can be (header, footer, the
- * body's declared minimum; the footer's buttons on one line), which the window system makes the OS minimum.
+ * What the dialog frame measured (ADR 0026 §4.2, ADR 0043 §2): the wire type `DialogMeasureWire`, generated from Rust's
+ * `Measure`; `content` is what it needs at its declared width, `minContent` the least it can be, `overflow` whether the body
+ * scrolls. Declared nowhere else.
  */
-export interface DialogMeasure {
-  readonly content: DialogSize;
-  readonly minContent: DialogSize;
-  /**
-   * The page's `innerHeight` when it measured, CSS px: Rust adds what the window's inner height has beyond it (the spike
-   * saw a viewport 32 px short of the window on a Mac, cutting the footer off).
-   */
-  readonly viewportHeight?: number;
-  /**
-   * The page's `window.devicePixelRatio` when it measured. Rust converts CSS px to logical px with the webview zoom,
-   * `devicePixelRatio` over the window's scale factor (1 when absent). Finite, 0.25 to 8.
-   */
-  readonly devicePixelRatio?: number;
-}
+export type DialogMeasure = DialogMeasureWire;
 
 /**
  * Everything the dialog layer needs from the window system, in one seam (rule: code against abstractions). The desktop

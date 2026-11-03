@@ -454,6 +454,8 @@ canonical = "paddock-dialogs"
 paths = ["crates/paddock-dialogs/src/**"]
 status = "built"
 adr = "0026"
+# ADR 0043 (2026-11-03): the canonical sizing is now `paddock_dialogs::size` and `tauri/sizing.rs`. Debrief's copy is frozen: it takes no sizing
+# change except a fix with the rule 55 trailer, and adopts the shared dialogs on this model in 1.2 (docs/plans/debrief-1-2-api-dialogs.md).
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src-tauri/src/dialog_contracts.rs", "apps/debrief/app/src-tauri/src/dialog_placement.rs", "apps/debrief/app/src-tauri/src/dialog_windows.rs"]

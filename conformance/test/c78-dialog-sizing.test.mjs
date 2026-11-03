@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ratchets, windowSizingCalls } from '../src/checks/C74-dialog-sizing.mjs';
+import { ownWireTypes, ratchets, windowSizingCalls } from '../src/checks/C78-dialog-sizing.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
 
 test('windowSizingCalls finds production calls only', () => {
@@ -14,21 +14,31 @@ test('ratchets finds heights that follow the window', () => {
   assert.deepEqual(ratchets('a { margin: 0 }'), []);
 });
 
-test('C74 good: an app that leaves dialog sizing to paddock-dialogs', async () => {
+test('C78 good: an app that leaves dialog sizing to paddock-dialogs', async () => {
   const app = makeApp({ 'app/src-tauri/src/lib.rs': 'use paddock_dialogs::tauri;\nfn a() {}\n', 'app/src/app/dialogs/about.ts': "@Component({ styles: 'p { margin: 0 }' }) export class A {}" });
-  assert.deepEqual(await findingsOf('C74', app), []);
+  assert.deepEqual(await findingsOf('C78', app), []);
 });
 
-test('C74 bad: an app sizing a dialog window, calling the commands, and a ratchet in a form', async () => {
+test('C78 bad: an app sizing a dialog window, calling the commands, and a ratchet in a form', async () => {
   const app = makeApp({
     'app/src-tauri/src/lib.rs': 'use paddock_dialogs::tauri;\nfn a(w: &Window) { w.set_size(s); }\n',
     'app/src/app/core/x.ts': "invoke('dialog_measure', {});",
     'app/src/app/dialogs/form.ts': "@Component({ styles: '.a { height: 100vh }' }) export class F {}",
     'app/src/app/dialogs/big-tool.ts': "@Component({ styles: '.a { height: 100vh }' }) export class T {}",
   });
-  const f = await findingsOf('C74', app);
+  const f = await findingsOf('C78', app);
   assert.equal(f.length, 3);
   assert.match(messages(f), /set_size/);
   assert.match(messages(f), /dialog_measure is called outside/);
   assert.match(messages(f), /viewport-height unit/);
+});
+
+test('ownWireTypes finds hand-declared wire types and accepts aliases of the generated ones', () => {
+  assert.deepEqual(ownWireTypes('export interface DialogMeasure {\n  a: 1;\n}\nexport type DialogStart = { id: string };').map((w) => w.name), ['DialogMeasure', 'DialogStart']);
+  assert.deepEqual(ownWireTypes('export type DialogMeasure = DialogMeasureWire;\nexport interface DialogIo {}\nimport type { DialogInfo } from "x";'), []);
+});
+
+test('C78 bad: io.ts declaring a wire type of its own', async () => {
+  const app = makeApp({ 'ui/projects/paddock-ui/shell/dialogs/src/io.ts': 'export interface DialogMeasure {\n  content: number;\n}\n' });
+  assert.match(messages(await findingsOf('C78', app)), /io.ts declares the wire type DialogMeasure/);
 });
