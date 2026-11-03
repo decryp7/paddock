@@ -42,6 +42,7 @@
 //! ```
 
 pub mod contract;
+pub mod edge;
 pub mod placement;
 pub mod registry;
 pub mod size;
