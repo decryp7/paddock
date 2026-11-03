@@ -1,0 +1,17 @@
+#!/bin/sh
+# Dyno's package, after removal (Dyno ADR 0027 section 1). `purge` also removes what the helper kept: its state folder, and only that.
+set -e
+
+case "$1" in
+    purge)
+        if [ -d /var/lib/dyno-helper ]; then
+            rm -r /var/lib/dyno-helper
+        fi
+        ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+exit 0

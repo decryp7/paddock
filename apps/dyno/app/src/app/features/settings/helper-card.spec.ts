@@ -25,7 +25,7 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     ['silent', 'Not running', 'did not answer. Repair it', 'Repair the helper'],
     ['foreign', 'Not trusted', 'does not trust it', 'Repair the helper'],
     ['outdated', 'Update available', 'needs helper version 1.1.0 or newer', 'Update the helper'],
-    ['ready', 'On', 'The helper only reads', null],
+    ['ready', 'On', 'Administrator readings are on', null],
     ['notIncluded', 'Not available here', 'AppImage', null],
   ])('%s', async (variant, chip, message, primary) => {
     const { el, button } = await make(variant);

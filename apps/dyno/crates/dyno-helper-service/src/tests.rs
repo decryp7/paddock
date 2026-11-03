@@ -195,3 +195,106 @@ fn the_helper_removes_itself_files_first_and_stops_last() {
         "{commands:?}"
     );
 }
+
+// ---- the Linux package files (ADR 0027 section 1, WP-13): shipped as text, checked here against what the spec says ----
+
+const PACKAGE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/src-tauri/linux");
+
+fn package_file(name: &str) -> String {
+    std::fs::read_to_string(std::path::Path::new(PACKAGE_DIR).join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+#[test]
+fn the_shipped_unit_is_exactly_what_the_spec_renders_and_is_not_enabled_by_the_package() {
+    let rendered = paddock_service::render::systemd_unit(&spec(), "/usr/bin/dyno-helper", None);
+    if std::env::var_os("DYNO_UPDATE_PACKAGE_UNIT").is_some() {
+        std::fs::write(std::path::Path::new(PACKAGE_DIR).join("dyno-helper.service"), &rendered).unwrap();
+    }
+    assert_eq!(
+        package_file("dyno-helper.service"),
+        rendered,
+        "run with DYNO_UPDATE_PACKAGE_UNIT=1 to regenerate the unit from the spec"
+    );
+    // Shipped disabled: the package never enables it (the user's click does, through `dyno-helper install`).
+    for script in ["postinst", "prerm", "postrm"] {
+        assert!(
+            !package_file(script).contains("systemctl enable") && !package_file(script).contains("enable --now"),
+            "{script} must not enable the helper"
+        );
+    }
+}
+
+#[test]
+fn the_polkit_rule_allows_starting_the_helpers_unit_from_a_local_active_session_and_nothing_else() {
+    let rule = package_file("50-dyno-helper.rules");
+    let code: String = rule
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for must in [
+        r#"action.id == "org.freedesktop.systemd1.manage-units""#,
+        r#"action.lookup("unit") == "dyno-helper.service""#,
+        r#"action.lookup("verb") == "start""#,
+        "subject.local && subject.active",
+        "polkit.Result.YES",
+    ] {
+        assert!(code.contains(must), "{must}\n{code}");
+    }
+    assert_eq!(code.matches("polkit.addRule").count(), 1);
+    assert_eq!(code.matches("polkit.Result.").count(), 1, "one outcome, and it is the narrow one");
+    assert!(!code.contains("Result.YES;\n  }\n  return"), "no fall-through grant");
+}
+
+#[test]
+fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_helpers_own_things() {
+    for script in ["postinst", "prerm", "postrm"] {
+        let text = package_file(script);
+        assert!(text.starts_with("#!/bin/sh\n"), "{script}");
+        assert!(text.contains("\nset -e\n"), "{script}");
+        assert!(text.contains("/run/systemd/system"), "{script} skips where systemd is not running");
+        assert!(text.trim_end().ends_with("exit 0"), "{script} succeeds");
+        assert!(!text.contains("bash") && !text.contains("[["), "{script} is POSIX sh");
+        for line in text.lines().filter(|l| l.contains("systemctl")) {
+            assert!(
+                line.contains("dyno-helper.service") || line.contains("daemon-reload"),
+                "{script}: {line}"
+            );
+        }
+    }
+    let prerm = package_file("prerm");
+    assert!(prerm.contains("remove | deconfigure)") && prerm.contains("disable --now dyno-helper.service"));
+    assert!(prerm.contains("upgrade)") && prerm.contains("stop dyno-helper.service"));
+    let postrm = package_file("postrm");
+    assert!(postrm.contains("purge)") && postrm.contains("rm -r /var/lib/dyno-helper"));
+    assert_eq!(postrm.matches("rm ").count(), 1, "one removal, of one fixed path, only on purge");
+    assert!(
+        package_file("postinst").contains("try-restart dyno-helper.service"),
+        "an upgrade restarts it only when it was enabled"
+    );
+}
+
+#[test]
+fn the_windows_uninstaller_asks_for_one_prompt_to_remove_the_service_with_the_bundled_copy() {
+    let hooks = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../app/src-tauri/windows/installer-hooks.nsh"
+    ))
+    .unwrap();
+    let pre_uninstall = hooks
+        .split("!macro NSIS_HOOK_PREUNINSTALL")
+        .nth(1)
+        .expect("the pre-uninstall hook")
+        .split("!macroend")
+        .next()
+        .unwrap();
+    assert!(
+        pre_uninstall.contains(r"SYSTEM\CurrentControlSet\Services\DynoHelper"),
+        "only when the service exists"
+    );
+    assert!(
+        pre_uninstall.contains(r#"ExecShellWait "runas" "$INSTDIR\dyno-helper.exe" "uninstall""#),
+        "the bundled copy removes the installed one (a running program cannot delete itself)"
+    );
+    assert_eq!(pre_uninstall.matches("runas").count(), 1, "one prompt");
+}
