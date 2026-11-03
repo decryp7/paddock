@@ -65,6 +65,7 @@ export function mockStartupOverview(all: StartupEntry[], filter: StartupFilter):
     total: all.length,
     osCount: all.filter((e) => kind(e) === 'os').length,
     signedCount: all.filter((e) => kind(e) === 'signed').length,
+    unavailable: [],
   };
 }
 

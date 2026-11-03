@@ -23,47 +23,29 @@ pub trait Launchctl: Send {
 }
 
 /// The Background Task Management database.
+///
+/// Measured 2026-11-03 in a macOS 26.6 VM (Tart, `vmgui-base-tahoe`): `sfltool dumpbtm` run by an admin user in the console GUI
+/// session, and by a standard user without a GUI session, printed nothing and did not exit within 25 s, and a `SecurityAgent`
+/// authorization dialog was left on screen (the tool asks for `system.privilege.admin`). It must therefore never be run by
+/// Dyno's unprivileged agent. The only implementation today, [`NeedsHelperBtm`], says so; the privileged helper (ADR 0022, Dyno
+/// 1.1.0) will be the second implementation, with no change to [`LaunchAgents`].
 pub trait BtmSource: Send {
-    /// `sfltool dumpbtm` output.
+    /// `sfltool dumpbtm` output, read with the rights it needs.
     fn dump(&mut self) -> Result<String, PlatformError>;
 }
 
-/// The real `sfltool`.
-pub struct RealBtm;
+/// The BTM source until the privileged helper exists: runs nothing and says what is needed, so the page shows an honest
+/// "needs administrator rights" instead of a silent gap (or a password dialog the user did not ask for).
+pub struct NeedsHelperBtm;
 
-impl BtmSource for RealBtm {
+impl BtmSource for NeedsHelperBtm {
     fn dump(&mut self) -> Result<String, PlatformError> {
-        let mut cmd = crate::process::command("/usr/bin/sfltool");
-        cmd.arg("dumpbtm");
-        let out = crate::process::run_with_timeout(cmd, Duration::from_secs(20))?;
-        btm_output(
-            out.status.code(),
-            &String::from_utf8_lossy(&out.stdout),
-            &String::from_utf8_lossy(&out.stderr),
-        )
+        Err(PlatformError::AccessDenied(
+            "Login items (System Settings > Login Items & Extensions) need administrator rights to read. The privileged helper, \
+coming in Dyno 1.1, will show them."
+                .into(),
+        ))
     }
-}
-
-/// Turns the tool's exit code and text into the dump or a typed error. Split from [`RealBtm`] so the refusals are tested.
-pub(crate) fn btm_output(code: Option<i32>, stdout: &str, stderr: &str) -> Result<String, PlatformError> {
-    if code == Some(0) && !stdout.trim().is_empty() {
-        return Ok(stdout.to_string());
-    }
-    let said = format!("{stderr}\n{stdout}");
-    let first = said.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("it printed nothing");
-    let lower = said.to_lowercase();
-    if ["root", "privilege", "not permitted", "authoriz", "administrator", "sudo"]
-        .iter()
-        .any(|w| lower.contains(w))
-    {
-        return Err(PlatformError::AccessDenied(format!(
-            "Login items need administrator rights to read (sfltool said: {first}). The privileged helper, a later release, can show them."
-        )));
-    }
-    let exit = code.map_or("no exit code".to_string(), |c| format!("exit {c}"));
-    Err(PlatformError::Failed(format!(
-        "sfltool dumpbtm gave nothing usable ({exit}): {first}"
-    )))
 }
 
 /// The real `launchctl` for the current user's GUI domain.
@@ -116,6 +98,31 @@ pub struct LaunchAgents {
     launchctl: Box<dyn Launchctl>,
     btm: Box<dyn BtmSource>,
     uid: u32,
+    /// The last read of the Background Task Management database (slow, and the tool may be refused): kept until it is old or
+    /// [`StartupItems::refresh`] is called.
+    btm_cache: Option<BtmCache>,
+    /// What the last `list` could not read.
+    unavailable: Vec<String>,
+}
+
+/// How long a good read of the BTM database is reused.
+const BTM_FRESH: Duration = Duration::from_secs(300);
+
+struct BtmCache {
+    at: std::time::Instant,
+    result: Result<Vec<BtmItem>, PlatformError>,
+}
+
+impl BtmCache {
+    /// Whether this answer may be reused at `now`: a good read for [`BTM_FRESH`], a refusal until refreshed (asking again cannot
+    /// change it). Other failures are asked again at once.
+    fn usable(&self, now: std::time::Instant) -> bool {
+        match &self.result {
+            Ok(_) => now.duration_since(self.at) < BTM_FRESH,
+            Err(PlatformError::AccessDenied(_)) => true,
+            Err(_) => false,
+        }
+    }
 }
 
 /// What one launch-agent folder gave.
@@ -137,9 +144,11 @@ impl LaunchAgents {
             user_dir: home.map(|h| h.join("Library").join("LaunchAgents")),
             system_dir: Some(PathBuf::from("/Library/LaunchAgents")),
             launchctl: Box::new(RealLaunchctl::new()),
-            btm: Box::new(RealBtm),
+            btm: Box::new(NeedsHelperBtm),
             // SAFETY: getuid has no preconditions.
             uid: unsafe { libc::getuid() },
+            btm_cache: None,
+            unavailable: Vec::new(),
         }
     }
 
@@ -157,6 +166,8 @@ impl LaunchAgents {
             launchctl,
             btm,
             uid,
+            btm_cache: None,
+            unavailable: Vec::new(),
         }
     }
 
@@ -277,21 +288,33 @@ impl StartupItems for LaunchAgents {
             }
         }
         let before = out.len();
-        match self.btm.dump().and_then(|t| {
-            parse_dumpbtm(&t, self.uid).map_err(|e| {
-                let crate::parse::btm::BtmError::NoRecords { first_line } = e;
-                PlatformError::Failed(format!("sfltool dumpbtm printed no records (first line: {first_line})"))
-            })
-        }) {
-            Ok(items) => {
+        let now = std::time::Instant::now();
+        if !self.btm_cache.as_ref().is_some_and(|c| c.usable(now)) {
+            let uid = self.uid;
+            let result = self.btm.dump().and_then(|t| {
+                parse_dumpbtm(&t, uid).map_err(|e| {
+                    let crate::parse::btm::BtmError::NoRecords { first_line } = e;
+                    PlatformError::Failed(format!("sfltool dumpbtm printed no records (first line: {first_line})"))
+                })
+            });
+            self.btm_cache = Some(BtmCache { at: now, result });
+        } else {
+            log::debug!("Startup items: login items taken from the cached read");
+        }
+        let mut unavailable = Vec::new();
+        match self.btm_cache.as_ref().map(|c| &c.result) {
+            Some(Ok(items)) => {
                 out.extend(items.iter().map(btm_entry));
                 log::info!(Listed = out.len() - before; "Startup items: login items read from the Background Task Management database");
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 log::warn!(Error = e.to_string().as_str(); "Startup items: login items could not be read from the Background Task Management database");
-                problems.push(e);
+                unavailable.push(format!("Login items: {e}"));
+                problems.push(e.clone());
             }
+            None => {}
         }
+        self.unavailable = unavailable;
         log::info!(Entries = out.len(), Problems = problems.len(), Ms = started.elapsed().as_millis() as u64; "Startup items listed");
         // Never an empty list that hides a failed read: with nothing read and something unreadable, the reason is the answer.
         if out.is_empty() {
@@ -301,6 +324,14 @@ impl StartupItems for LaunchAgents {
         }
         out.sort_by_key(|e| e.name.to_lowercase());
         Ok(out)
+    }
+
+    fn refresh(&mut self) {
+        self.btm_cache = None;
+    }
+
+    fn unavailable(&self) -> Vec<String> {
+        self.unavailable.clone()
     }
 }
 
@@ -408,17 +439,81 @@ mod tests {
         assert_eq!(la.list().unwrap().len(), 3);
     }
 
-    #[test]
-    fn sfltool_refusals_say_what_would_help() {
-        assert!(matches!(btm_output(Some(0), "text", ""), Ok(t) if t == "text"));
-        assert!(
-            matches!(btm_output(Some(1), "", "sfltool: must be run as root"), Err(PlatformError::AccessDenied(m)) if m.contains("helper"))
-        );
-        assert!(matches!(btm_output(Some(0), "  \n", ""), Err(PlatformError::Failed(m)) if m.contains("exit 0")));
-        assert!(matches!(btm_output(None, "", "boom"), Err(PlatformError::Failed(m)) if m.contains("no exit code") && m.contains("boom")));
+    /// Counts calls, so the tests can tell a cached read from a new one.
+    struct CountingBtm(std::sync::Arc<std::sync::atomic::AtomicUsize>, Result<String, PlatformError>);
+    impl BtmSource for CountingBtm {
+        fn dump(&mut self) -> Result<String, PlatformError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.1.clone()
+        }
     }
 
     #[test]
+    fn the_login_item_read_is_reused_until_a_refresh() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut la = agents(None, None, Ok(DUMP.into()));
+        la.btm = Box::new(CountingBtm(calls.clone(), Ok(DUMP.into())));
+        for _ in 0..3 {
+            assert_eq!(la.list().unwrap().len(), 1);
+        }
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "filter changes and health reports do not spawn sfltool"
+        );
+        la.refresh();
+        la.list().unwrap();
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "an explicit refresh reads again"
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_remembered_but_a_failure_is_asked_again() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (d, mut la) = setup();
+        la.btm = Box::new(CountingBtm(calls.clone(), Err(PlatformError::AccessDenied("needs admin".into()))));
+        la.list().unwrap();
+        la.list().unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        la.btm = Box::new(CountingBtm(calls.clone(), Err(PlatformError::Timeout("slow".into()))));
+        la.refresh();
+        la.list().unwrap();
+        la.list().unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+        drop(d);
+    }
+
+    /// The page must say that login items are missing, not present a partial list as everything.
+    #[test]
+    fn a_partial_list_says_what_is_not_shown() {
+        let (_d, mut la) = setup();
+        la.list().unwrap();
+        assert!(la.unavailable().is_empty());
+        la.btm = Box::new(FakeBtm(Err(PlatformError::AccessDenied(
+            "Login items need administrator rights".into(),
+        ))));
+        la.refresh();
+        assert_eq!(la.list().unwrap().len(), 3);
+        assert_eq!(
+            la.unavailable(),
+            vec!["Login items: Login items need administrator rights".to_string()]
+        );
+    }
+
+    /// The real source runs nothing: `sfltool dumpbtm` asks for an administrator password (measured in a VM).
+    #[test]
+    fn the_real_login_item_source_asks_for_the_helper_and_runs_nothing() {
+        assert!(
+            matches!(NeedsHelperBtm.dump(), Err(PlatformError::AccessDenied(m)) if m.contains("administrator") && m.contains("helper"))
+        );
+    }
+
+    /// Runs the real tools on the machine it is started on: only by hand (`cargo test -- --ignored`), never in CI or an agent's run.
+    #[test]
+    #[ignore = "runs sfltool and launchctl on this machine"]
     fn this_macs_startup_items_list_without_changing_anything() {
         let mut la = LaunchAgents::for_current_user();
         // Either a list or a reason; never a silent empty list caused by a failed read.
