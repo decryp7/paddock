@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### CI: the crates coverage gate is per crate (ADR 0050)
+
+- Every crate must reach 99 % of its lines; `crates/coverage.toml` registers the exceptions (a reason, a review date, a minimum that is the recorded figure and only goes up, never under 90 %) and the whole files left out (each with a reason). The `--ignore-filename-regex` is generated from it. `cargo deny check` is its own step and runs after a coverage failure; the job summary has the per-crate table and each step's result.
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.

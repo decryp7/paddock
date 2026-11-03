@@ -1,0 +1,149 @@
+# The coverage register (ADR 0050). `scripts/coverage-gate.mjs` reads it; CI's coverage step fails a crate under its figure.
+#
+# [[crate]]: a crate that may sit under the default 99 % of lines. `minimum` is the recorded figure (cut to two decimals) and
+#   only goes up: a change that lowers it fails, even above 90 %. `reason` says why the lines cannot be covered; `review` is
+#   the date to look again (a passed date warns). No entry allows less than 90 %. Remove the entry when the crate reaches 99 %.
+# [[exclude]]: a whole file that cannot run in unit tests, `path` relative to crates/, with a `reason` and, if one runs it,
+#   the `job` that covers it. The `--ignore-filename-regex` of the coverage step is generated from these entries
+#   (`node ../scripts/coverage-gate.mjs regex coverage.toml`).
+#
+# Figures were measured with CI's command on a macOS worktree (2026-11-04); the first Linux CI run reconciles them.
+
+[[crate]]
+name = "paddock-commands"
+minimum = 96.82
+reason = "table.rs: the `const fn`s `dialog_count` and `dialog_names` run only while the compiler evaluates the generated tables, where llvm-cov records no execution; the tables' contents are tested."
+review = "2027-02-04"
+
+[[crate]]
+name = "paddock-dialogs"
+minimum = 98.07
+reason = "the tauri adapter's window-system arms (user-resize and scale-change callbacks in tauri/sizing.rs, window events in tauri.rs) that the mock runtime cannot raise; the real-window harness probe.rs (job dialog-window-probe) exercises them."
+review = "2027-02-04"
+
+[[crate]]
+name = "paddock-env"
+minimum = 98.75
+reason = "error and warning arms of the versioned store's file handling (a backup that cannot be restored, a path that is not a file, an unreadable listing) and AppDirs fallbacks that tests cannot provoke without breaking the user's folders (ER-14)."
+review = "2027-02-04"
+
+[[crate]]
+name = "paddock-menu"
+minimum = 90.41
+reason = "tauri.rs builds the native menu bar (Submenu, CheckMenuItem) on a real AppHandle, which the mock runtime does not build (about 100 lines); the model and the spec it builds from are covered."
+review = "2027-02-04"
+
+[[crate]]
+name = "paddock-proc"
+minimum = 97.87
+reason = "OS arms in sys.rs, login.rs and run.rs: setpriority and the macOS memory and task-info calls, ignoring SIGTERM, and the login-shell probe fallbacks; they need real OS state or processes that are ended by force."
+review = "2027-02-04"
+
+[[crate]]
+name = "paddock-shell"
+minimum = 96.45
+reason = "builder.rs wires the Tauri Builder (channels, run-event and plugin closures) that only a running app invokes, and logging.rs installs the log into the real app folders."
+review = "2027-02-04"
+
+[[exclude]]
+path = "paddock-build/src/native.rs"
+reason = "the call into tauri-build, which needs a Tauri project to build; native glue (its own header says it is left out of coverage, but the old regex never listed it)."
+
+[[exclude]]
+path = "paddock-window/src/tauri/native.rs"
+reason = "the tray icon and window effects that rule 7 forbids on the desktop, and Tauri events tests cannot build (RunEvent::ExitRequested and Reopen, WindowEvent::CloseRequested). Each function hands over to tested code or makes one platform call."
+
+[[exclude]]
+path = "paddock-panels/src/tauri/native.rs"
+reason = "the OS pointer and mouse button state, showing the ghost window without taking focus, the frameless window and the tracker thread's loop. Rule 7 forbids window effects on the desktop in tests."
+
+[[exclude]]
+path = "paddock-updater/src/tauri/native.rs"
+reason = "quitting, starting the app again and handing the package to tauri-plugin-updater; a test must not quit or replace the running app."
+
+[[exclude]]
+path = "paddock-secrets/src/os/native.rs"
+reason = "the only file that calls the `keyring` crate, so it reaches the real OS keychain; tests run behind a gate (`real_blocked`) that never touches it (ER-14)."
+
+[[exclude]]
+path = "paddock-diag/src/tauri/native.rs"
+reason = "the native save dialog through tauri-plugin-dialog (feature `dialog`), which needs a real window to own the dialog."
+
+[[exclude]]
+path = "paddock-files/src/tauri/native.rs"
+reason = "the native open and save dialogs through tauri-plugin-dialog (feature `dialog`), which need a real calling window."
+
+[[exclude]]
+path = "paddock-service/src/native.rs"
+reason = "the real Login Items (SMAppService), the Windows elevation prompt (ShellExecuteExW with runas) and the real adapters; tests never touch the user's services or elevation (rule 7, ER-14)."
+
+[[exclude]]
+path = "paddock-watch/src/native.rs"
+reason = "the real-folder adapter (one `notify` watcher per folder): native glue reviewed by hand; the logic around it is tested with a fake and one real-folder test."
+
+[[exclude]]
+path = "paddock-metrics/src/native.rs"
+reason = "the real machine through `sysinfo` and paddock-proc: CPU, memory, volumes; a test cannot make the machine busy (rule 7). The logic is in `Sampler`."
+
+[[exclude]]
+path = "paddock-health/src/tauri/native.rs"
+reason = "the OS notification port over tauri-plugin-notification; a test never shows a real toast. The decisions are in `notify::os`."
+
+[[exclude]]
+path = "paddock-siblings/src/native.rs"
+reason = "the real `Spawner` that starts an installed sibling app detached; no test starts an installed app (ER-14)."
+
+[[exclude]]
+path = "paddock-power/src/native.rs"
+reason = "the OS power calls (IOPMAssertion, PowerCreateRequest, logind, sleep and wake registrations); a test must not hold the machine awake or sleep it (ER-14)."
+job = "vm tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-proc/src/testchild.rs"
+reason = "a re-executed copy of the test binary that its parent ends with SIGKILL, so its coverage data is never written; the parent side is covered."
+
+[[exclude]]
+path = "paddock-chromium/src/fake.rs"
+reason = "the fake DevTools browser: a script re-runs the test binary as a loopback WebSocket server that the driver's tests often end by force, so no coverage data is written (Unix only)."
+
+[[exclude]]
+path = "paddock-ipc/src/bin/test_child.rs"
+reason = "the child process of paddock-ipc's tests, started by them and ended by force or by its lifeline, so its coverage data is never written; never shipped by an app."
+
+[[exclude]]
+path = "paddock-dialogs/src/probe.rs"
+reason = "the ADR 0026 section 6 real-window harness: opens real webview windows and exits at once unless PADDOCK_REAL_WINDOWS=1, so no ordinary test reaches it."
+job = "dialog-window-probe"
+
+[[exclude]]
+path = "paddock-plugin-test/src/bin/fixture.rs"
+reason = "the sample plugin as a process (`paddock-plugin-fixture`): a program the host's tests start and end, often by force (its `main` is the file), so its coverage data is never written."
+
+[[exclude]]
+path = "paddock-plugin-test/src/bin/fixture_v1.rs"
+reason = "the frozen protocol-1 plugin as a process: a program the host's tests start and end, often by force (its `main` is the file), so its coverage data is never written."
+
+[[exclude]]
+path = "paddock-plugin-test/src/bin/misbehaving.rs"
+reason = "the garbled, silent, dying and greedy plugins as a process: a program the host's tests start and end, often by force (its `main` is the file), so its coverage data is never written."
+
+[[exclude]]
+path = "paddock-plugin-api/src/entry.rs"
+reason = "a plugin process' `main` (`serve`): it reads its bootstrap from standard input and only runs in a process the app started; tests reach everything behind it through the fake host."
+
+[[exclude]]
+path = "paddock-plugin-test/src/process.rs"
+reason = "ends or blocks this process on purpose (`Real`) and runs `cargo` to build a test program; it only runs in processes whose coverage data is never written or when a program is missing."
+
+[[exclude]]
+path = "cargo-paddock-plugin/src/main.rs"
+reason = "the program's `main`: the real working folder, `cargo` and standard streams; everything else is in the library."
+
+[[exclude]]
+path = "paddock-ipc/src/endpoint/unix.rs"
+reason = "the Unix socket endpoint (raw descriptors, 0700 directory, socket path limits): OS error paths a test cannot provoke; the portable surface in endpoint/mod.rs is covered."
+
+[[exclude]]
+path = "paddock-ipc/src/endpoint/windows.rs"
+reason = "the Windows named-pipe endpoint (overlapped I/O, unsafe); Windows-only code that is not built on the Linux coverage job. Checked and tested on the Windows crate leg."
+job = "crate (windows-latest)"

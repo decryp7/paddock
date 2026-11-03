@@ -9,11 +9,11 @@ Rules for a crate here:
 
 - Pure logic and thin adapters, no dependency on any app crate. Edition and licence come from `[workspace.package]`.
 - Library errors are typed, no `unwrap`/`expect` on user data or I/O, `cargo clippy -- -D warnings` clean,
-  >= 99% line coverage.
+  >= 99% line coverage per crate (ADR 0050; a lower figure only through `crates/coverage.toml`, never under 90 %).
 - Native glue (code only a real desktop runs, that tests cannot reach by rule 7 or because Tauri does not let them build
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
-  `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
-  `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
+  `native.rs` under the adapter and is left out of the coverage job (one `[[exclude]]` entry with its reason in
+  `crates/coverage.toml`, from which CI generates the `--ignore-filename-regex`). Native glue is never logic: each function hands over to tested code or makes one platform
   call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`, `paddock-siblings/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables

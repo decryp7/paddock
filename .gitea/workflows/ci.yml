@@ -360,24 +360,46 @@ jobs:
       - name: Unused dependencies
         run: cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspace-hack/$')
 
-      # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances).
-      # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so are paddock-proc's test child (a
-      # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written) and paddock-ipc's (the same); paddock-ipc's endpoint/{unix,windows}.rs are
-      # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered). paddock-chromium's fake browser
-      # runs in re-executed test binaries that are often ended by force (no coverage data), like paddock-proc's test child.
-      # paddock-dialogs' `probe.rs` (feature `probe`) is the ADR 0026 section 6 real-window harness: it opens real webview windows and
-      # runs only where there is a window system (PADDOCK_REAL_WINDOWS=1: the `dialog-window-probe` job), so no ordinary test reaches it.
-      # The gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines: llvm-cov charges every
-      # region of the macro's generated wrapper to that line, which no test can all reach.
+      # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances),
+      # judged per crate (ADR 0050): every crate must reach 99 % of its lines, a crate may sit lower only through its entry in
+      # crates/coverage.toml (a reason, a review date, a minimum that is its recorded figure and only goes up; never under 90 %).
+      # Whole files that cannot run in unit tests are excluded one by one in the same register, each with its reason (the native
+      # glue, the re-executed test children, the real-window probe, the process entries); the --ignore-filename-regex below is
+      # generated from those entries, not written here. The gate (scripts/coverage-gate.mjs) also leaves out the
+      # `#[tauri::command]` attribute lines: llvm-cov charges every region of the macro's generated wrapper to that line, which
+      # no test can all reach. It prints one ::error:: per failing crate and a per-crate table in the job summary.
       # This is also Linux's all-features test run (the crate leg skips its own on Linux): the real-browser tests of
       # paddock-chromium must find the image's Chrome for Testing instead of skipping.
-      - name: Coverage (>= 99 % lines)
+      - name: Coverage (per crate, crates/coverage.toml)
+        id: coverage
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src|paddock-power/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-dialogs/src/probe\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
-          node ../scripts/coverage-gate.mjs lcov.info 99
-      - run: cargo deny check
+          IGNORE="$(node ../scripts/coverage-gate.mjs regex coverage.toml)"
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex "$IGNORE" --lcov --output-path lcov.info
+          node ../scripts/coverage-gate.mjs check lcov.info coverage.toml --root .
+
+      # Its own step, run even when the coverage step failed, so a coverage failure never hides a licence or advisory failure.
+      - name: Dependency policy (cargo deny)
+        id: deny
+        if: ${{ !cancelled() }}
+        run: cargo deny check
+
+      # What ran and how it ended (ER-27): the coverage table is in the summary above; this lists each step's result.
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        env:
+          COVERAGE: ${{ steps.coverage.outcome }}
+          DENY: ${{ steps.deny.outcome }}
+        run: |
+          {
+            echo "### crates job steps"
+            echo "| Step | Result |"
+            echo "| --- | --- |"
+            echo "| Coverage (per crate) | ${COVERAGE} |"
+            echo "| cargo deny check | ${DENY} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$COVERAGE" = success ] && [ "$DENY" = success ] || echo "::error::crates job: coverage was ${COVERAGE}, cargo deny was ${DENY}; both ran, see their steps above."
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 

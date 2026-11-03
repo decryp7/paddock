@@ -1290,3 +1290,10 @@ line) never sees it, like the other harnesses it joins in the ignore regex (`pad
 `paddock-ipc` test child). Its check is the `dialog-window-probe` job instead. **Lesson:** a harness is excluded by name with its reason beside
 the regex, never by lowering the gate; and a job that stops at its first failing step (here coverage, before `cargo deny check`) hides the
 steps after it: read a red job's later steps as not run, not as passed.
+
+Coverage gate (2026-11-04, ADR 0050)
+- One aggregate coverage number hides the short crate and, as one plain step, hides the steps after it: run 7489 read 98.67 %
+  against 99 % and `cargo deny check` was skipped behind it. Judge every crate on its own (99 %, a registered lower figure
+  that only ratchets up, a hard floor of 90 %), keep each exclusion and exception in one register with a reason and a date,
+  generate CI's `--ignore-filename-regex` from it instead of writing it by hand, and give each independent check its own
+  step (`if: !cancelled()`) so one failure never hides another.
