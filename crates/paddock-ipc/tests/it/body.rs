@@ -140,3 +140,26 @@ fn peer_options_reach_the_underlying_peer() {
     assert!(format!("{:?}", BodyOptions::<Msg>::new("z")).contains("serves"));
     drop(p);
 }
+
+#[test]
+fn a_launched_childs_peer_is_wrapped_and_a_handler_is_built_from_a_body_handler() {
+    use crate::common::child_program;
+    let mut spec = paddock_ipc::ChildSpec::new(child_program(), "the test child").arg("echo");
+    spec.start_timeout = GUARD;
+    let child = paddock_ipc::launch(&spec, paddock_ipc::body_handler(echo())).unwrap();
+    // The test child echoes the bytes it gets, which are a postcard `Msg`, so it answers the same message.
+    let view = BodyPeer::<Msg>::wrap(child.peer().clone());
+    assert_eq!(
+        view.call(Msg::Ask("x".into()), GUARD).unwrap(),
+        Msg::Ask("x".into())
+    );
+    assert_eq!(view.undecodable_pushes(), 0);
+}
+
+#[test]
+fn the_raw_stream_of_a_connection_is_reachable_for_tests() {
+    let (x, _y) = endpoint::pair().unwrap();
+    let mut conn = Connection::raw(x, FrameLimit::default());
+    use std::io::Write;
+    conn.stream_mut().write_all(b"x").unwrap();
+}

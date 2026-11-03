@@ -74,6 +74,11 @@ impl Connection {
     pub fn limit(&self) -> FrameLimit {
         self.limit
     }
+
+    /// The raw stream, for tests and diagnostics that must write bytes a [`Peer`](crate::Peer) never would.
+    pub fn stream_mut(&mut self) -> &mut Stream {
+        &mut self.stream
+    }
 }
 
 /// Runs `f` on `stream` with a watchdog on `clock`: when `limit` passes first, the stream is closed (the blocked read

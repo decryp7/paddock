@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{ChildStdin, Stdio};
+use std::process::{ChildStdin, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -115,6 +115,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Child {
     process: Mutex<Supervised>,
     stdin: Mutex<Option<ChildStdin>>,
+    status: Mutex<Option<ExitStatus>>,
     pid: u32,
     peer: Peer,
     /// Kept so the private socket folder lives as long as the connection.
@@ -141,6 +142,24 @@ impl Child {
     /// Whether the process has exited.
     pub fn exited(&self) -> bool {
         !lock(&self.process).is_running()
+    }
+
+    /// How it ended: waits up to `wait` for the OS to report the exit, then returns the status (`None` while it still runs,
+    /// or when its tree was already ended by [`Child::kill`] / [`Child::stop`], which reap it).
+    pub fn exit_status(&self, wait: Duration) -> Option<ExitStatus> {
+        let end = Instant::now().checked_add(wait);
+        let mut process = lock(&self.process);
+        while process.is_running() && end.is_some_and(|e| Instant::now() < e) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if process.is_running() {
+            return None;
+        }
+        let mut status = lock(&self.status);
+        if status.is_none() {
+            *status = process.wait();
+        }
+        *status
     }
 
     /// The most memory its watcher saw, in bytes (0 without a memory limit).
@@ -258,6 +277,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     Ok(Child {
         process: Mutex::new(process),
         stdin: Mutex::new(stdin),
+        status: Mutex::new(None),
         pid,
         peer,
         _host: host,

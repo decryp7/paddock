@@ -169,3 +169,16 @@ fn the_bootstrap_line_roundtrips_and_bad_lines_are_refused() {
     };
     assert!(connect(&no_host, ProtocolVersion::UNVERSIONED).is_err());
 }
+
+#[test]
+fn exit_status_waits_for_the_exit_and_is_kept() {
+    let child = launch(&spec(&["echo"]), Arc::new(NoCalls)).unwrap();
+    // Still running: no status after a short wait.
+    assert_eq!(child.exit_status(Duration::from_millis(30)), None);
+    child.close_stdin();
+    assert!(child.peer().wait_closed(Some(GUARD)));
+    let status = child.exit_status(GUARD).expect("it exited");
+    assert!(status.success(), "{status}");
+    // A second ask returns the same status (it is read once from the OS).
+    assert_eq!(child.exit_status(Duration::ZERO), Some(status));
+}

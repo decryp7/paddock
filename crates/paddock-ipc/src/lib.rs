@@ -34,7 +34,7 @@ pub mod token;
 pub mod trust;
 pub mod wire;
 
-pub use body::{BodyHandler, BodyOptions, BodyPeer};
+pub use body::{BodyHandler, BodyOptions, BodyPeer, body_handler};
 pub use endpoint::Access;
 pub use error::{IpcError, RemoteError, codes, panic_message};
 pub use frame::{Frame, FrameLimit, ProtocolVersion, Skew};

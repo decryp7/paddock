@@ -126,6 +126,15 @@ where
     }
 }
 
+/// The byte-level [`Handler`] that answers with `handler` over `B` (for [`launch`](crate::launch), whose peer is started
+/// there).
+pub fn body_handler<B>(handler: impl BodyHandler<B>) -> Arc<dyn Handler>
+where
+    B: Serialize + DeserializeOwned + Send + 'static,
+{
+    Arc::new(Typed(Some(Arc::new(handler) as Arc<dyn BodyHandler<B>>)))
+}
+
 impl<B> BodyPeer<B>
 where
     B: Serialize + DeserializeOwned + Send + 'static,
@@ -149,6 +158,16 @@ where
             undecodable,
             body: PhantomData,
         })
+    }
+
+    /// A typed view of a peer that was started elsewhere (a [`Child`](crate::Child)'s, or one with a handler built by
+    /// [`body_handler`]). Only calls and pushes go through the view; the peer keeps its own handler and callbacks.
+    pub fn wrap(peer: Peer) -> BodyPeer<B> {
+        BodyPeer {
+            peer,
+            undecodable: Arc::new(AtomicU64::new(0)),
+            body: PhantomData,
+        }
     }
 
     /// Calls the other side and waits up to `timeout` for its answer. A typed failure is [`IpcError::Remote`]; an answer
