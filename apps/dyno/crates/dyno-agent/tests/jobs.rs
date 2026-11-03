@@ -14,7 +14,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{ErrorCode, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_platform::fake::{process, Fake};
-use dyno_platform::issues::ToolRunner;
+use dyno_platform::runner::ToolRunner;
 use paddock_ipc::{BodyOptions, BodyPeer};
 use paddock_jobs::wire::{WireSnapshot, WireState};
 use std::sync::{Arc, Condvar, Mutex};
@@ -78,9 +78,17 @@ impl IssueSource for Slow {
 struct SlowTool(Arc<Gate>);
 
 impl ToolRunner for SlowTool {
-    fn run(&self, _program: &str, _args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
-        self.0.pass();
-        Err(PlatformError::Unsupported("scripted".into()))
+    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
+        let (_program, _args) = (tool.program.as_str(), &tool.args);
+        let answer: Result<String, PlatformError> = {
+            self.0.pass();
+            Err(PlatformError::Unsupported("scripted".into()))
+        };
+        answer.map(|stdout| dyno_platform::runner::ToolOutput {
+            ok: true,
+            stdout,
+            error: String::new(),
+        })
     }
 }
 

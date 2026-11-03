@@ -14,7 +14,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR};
 use dyno_platform::fake::{process, Fake};
-use dyno_platform::issues::ToolRunner;
+use dyno_platform::runner::ToolRunner;
 use paddock_ipc::BodyPeer;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -38,29 +38,37 @@ impl Tools {
 }
 
 impl ToolRunner for Tools {
-    fn run(&self, program: &str, args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
-        let key = format!(
-            "{} {}",
-            program.rsplit('/').next().unwrap_or(program),
-            args.first().map(String::as_str).unwrap_or("")
-        );
-        self.calls.lock().unwrap().push(key.trim().to_string());
-        let mut answers = self.answers.lock().unwrap();
-        let bare = program.rsplit('/').next().unwrap_or(program).to_string();
-        let name = if answers.contains_key(key.trim()) {
-            key.trim().to_string()
-        } else {
-            bare
+    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
+        let (program, args) = (tool.program.as_str(), &tool.args);
+        let answer: Result<String, PlatformError> = {
+            let key = format!(
+                "{} {}",
+                program.rsplit('/').next().unwrap_or(program),
+                args.first().map(String::as_str).unwrap_or("")
+            );
+            self.calls.lock().unwrap().push(key.trim().to_string());
+            let mut answers = self.answers.lock().unwrap();
+            let bare = program.rsplit('/').next().unwrap_or(program).to_string();
+            let name = if answers.contains_key(key.trim()) {
+                key.trim().to_string()
+            } else {
+                bare
+            };
+            let hit = answers.get_mut(&name);
+            match hit {
+                Some(v) if v.len() > 1 => v.remove(0),
+                Some(v) => v
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
+                None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
+            }
         };
-        let hit = answers.get_mut(&name);
-        match hit {
-            Some(v) if v.len() > 1 => v.remove(0),
-            Some(v) => v
-                .first()
-                .cloned()
-                .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
-            None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
-        }
+        answer.map(|stdout| dyno_platform::runner::ToolOutput {
+            ok: true,
+            stdout,
+            error: String::new(),
+        })
     }
 }
 

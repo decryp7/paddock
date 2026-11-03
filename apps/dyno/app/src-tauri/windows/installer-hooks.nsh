@@ -15,4 +15,10 @@
     Pop $0
     nsExec::ExecToLog '"$INSTDIR\dyno-agent.exe" stop'
     Pop $0
+  ; The administrator readings (Dyno ADR 0027): when the helper's service is there, one UAC prompt runs the bundled helper's
+  ; `uninstall`, which removes the service, the protected copy in Program Files and the helper's data. The bundled copy does it,
+  ; not the installed one: Windows cannot delete a program that is running. Declining leaves the helper as it was.
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\DynoHelper" "ImagePath"
+  StrCmp $0 "" +2 0
+    ExecShellWait "runas" "$INSTDIR\dyno-helper.exe" "uninstall" SW_HIDE
 !macroend

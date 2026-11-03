@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 publish = false
+build = "build.rs"
 
 [lib]
 name = "dyno_helper"
@@ -18,11 +19,17 @@ path = "src/main.rs"
 
 [dependencies]
 dyno-core.workspace = true
+dyno-helper-service = { path = "../dyno-helper-service" }
+paddock-service = { path = "../../../../crates/paddock-service" }
+paddock-watch = { path = "../../../../crates/paddock-watch", features = ["notify"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+paddock-env = { path = "../../../../crates/paddock-env" }
 paddock-ipc.workspace = true
 log = { version = "0.4", features = ["kv"] }
 dyno-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

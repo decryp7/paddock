@@ -40,6 +40,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -332,6 +333,10 @@ export class TauriBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.request('inventory');
+  }
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.request('helperStatus');
   }
 
   counterObjects(): Promise<CounterObjectList> {

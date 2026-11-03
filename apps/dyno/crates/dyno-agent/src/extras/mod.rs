@@ -13,7 +13,7 @@ use dyno_core::extras::software::{render_report, validate_destination, Inventory
 use dyno_core::extras::usage::{self, UsageReport};
 use dyno_core::protocol::{AgentError, BootRecord, ErrorCode, Reply, Request, SavedInventory};
 use dyno_core::time::{Timestamp, DAY, HOUR, SECOND};
-use dyno_platform::issues::{OsRunner, ToolRunner};
+use dyno_platform::runner::{SystemRunner as OsRunner, ToolRunner};
 use dyno_platform::toolpath::PathResolver;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

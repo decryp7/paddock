@@ -59,7 +59,7 @@ routes on one machine.
 - System processes (uid below 500) are listed one by one with name, path, owner and parent. macOS gives CPU, memory and disk only for
   your own processes, so for system processes those columns say *Unavailable: macOS shows this only for your own processes*. Other
   accounts' processes are one **Other users** row that shows how many there are; its CPU, memory and disk totals say *Unavailable* with the same reason.
-- Dyno 1.0 installs no helper and no LaunchDaemon. Dyno 1.0 runs only with your own rights; elevation is planned for 1.1 (ADR 0022).
+- Dyno installs no helper and no LaunchDaemon until you turn on Administrator readings (Dyno 1.1, ADR 0027), which asks for your password once and registers `net.decryptology.dyno.helper`. Without it Dyno runs only with your own rights.
 
 ## After updating Dyno
 

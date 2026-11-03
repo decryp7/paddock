@@ -7,6 +7,66 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
+### `paddock-service`: `privileged` (protected install, update and removal of a system service) and `hardening`
+- New `Hardening` on `ServiceSpec` (system services only): the Windows token privileges the SCM keeps (`sc privs`, checked with `sc qprivs` before the service starts), the service DACL that lets interactive users start it (`sc sdset`), and the systemd sandbox keys of ADR 0027. `Systemd::packaged()` enables and disables a unit a package ships without writing or removing it.
+- New `privileged` module: `layout` and `backend_for` per OS, `Installer` (plan, `ProtectedFiles` port, root-owned and not-group-or-world-writable checks, hash of the copy, Windows ACL by SID, bounded confirm, self-removal with the stop last), `run_elevated` (osascript, pkexec, UAC), `assess` (ask only when the protocol or the minimum version changed). `ScmConfig` gains `privileges` and `sddl`. No change for specs without hardening.
+
+### `paddock-shell`: `files_*` commands always have their service
+
+An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).
+
+### `paddock-proc`: `console::attach_parent_console` for GUI-subsystem sidecars
+- A program built for the Windows GUI subsystem (so a Run entry, a service or the app starts it without a console window) calls it first thing: it attaches to
+  the parent terminal's console, when there is one, and points missing standard handles at `CONIN$`/`CONOUT$`, so `--version` and friends still print.
+  A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
+
+### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
+- Fixed: on Windows the popover showed and vanished at once. Measured in the Windows 11 VM (grace 0): `Focused(true)` at 83 ms after show, `Focused(false)` 1 ms later
+  (the shell's taskbar took the foreground back after the click's mouse-up), `Focused(true)` again 1 ms after the close began; `set_focus` had succeeded. A blur
+  within `BLUR_GRACE` (600 ms, **Windows only**: `popover::blur_grace_for`; macOS and Linux keep closing on every blur, grace 0) of showing is now kept; when
+  the grace is over `popover::grace_end` decides: it has the focus again, it stays; the shell (`Shell_TrayWnd`, the overflow) still has the foreground, it asks
+  for the focus once more and a refusal closes it; any other window in front, it closes (a real dismissal). The grace and the fade run on the `Popovers` clock
+  (`Popovers::clock`, a `FakeClock` in tests), the wait is cancelled when the popover closes, and `Popovers::blur_grace` / `foreground_class` set them for tests.
+  The popover path logs show requested (with the grace), shown (with the `show` and `set_focus` results and the focus), focus gained or lost with the time since
+  shown, and hide with its reason (`toggle`, `blur`, `blur after grace`, `focus refused`, `requested`).
+
+### `paddock-service`: launchd's job report carries the pid and the last exit; `System::write_private`
+- `parse::JobReport` has three new fields read from the job's own keys of `launchctl print` (nested blocks skipped, as before): `pid` (`pid = <n>`,
+  only while it runs), `last_exit_code` (`last exit code = <n>`, `None` before the first exit or after a signal) and `last_signal` (`last terminating
+  signal = …`). A launcher that runs a program as a launchd job tracks it by them (Dyno ADR 0026, amendment 2).
+- `exit_config` now means exactly exit code 78, read from the parsed code; before, any line starting with `last exit code = 78` counted (780 too). The
+  copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
+- `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
+  calls `write`, so other implementations of the port are unchanged.
+### Dyno moves from `dyno-ipc` to `paddock-ipc`; `paddock-ipc` gains `BodyPeer` (Dyno ADR 0027, WP-1b)
+- New `body` module: `BodyPeer<B>`, `BodyOptions<B>`, `BodyHandler<B>` and `body_handler`, a typed view over `Peer` for apps whose wire is one postcard enum
+  (calls, answers and pushes are all `B`). The frames on the wire are the same as any peer's; a body that does not decode is `invalid` (a call) or counted in
+  `undecodable_pushes` (a push), never a closed connection. `BodyPeer::wrap` views a peer that was started elsewhere (a `Child`'s).
+- `Child::exit_status(wait)` (how a launched child ended, read once from the OS and kept) and `Connection::stream_mut` (the raw stream, for tests that must break the protocol).
+- Dyno's agent, command line, plugin API and host, helper and app now use `paddock-ipc`; `apps/dyno/crates/dyno-ipc` and its three `known-copies.toml` entries are deleted.
+  The one change users of Dyno's wire can see: the IPC handshake carries the app protocol (or the plugin / helper protocol) as its major version, so a peer of
+  another protocol is refused with which side to update. Everything else is kept: calls over the concurrency limit wait in order, a plugin's memory cap is still
+  a hard Windows job-object commit limit.
+- `PeerOptions::call_queue` (and `BodyOptions::calls`): opt-in bounded FIFO for calls over `max_concurrent_calls` (default 0: refused with `busy`, as before).
+- `MemoryCap::hard_commit` / `ChildSpec::memory_hard` (`paddock-proc`, `paddock-ipc`): also set `JOB_OBJECT_LIMIT_PROCESS_MEMORY` on the child's job object (Windows).
+
+### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
+- New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
+  `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through
+  `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
+  `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
+  administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
+  connection (`PeerError`); on Windows the OS may refuse before the client's first bytes arrive (`PeerError::NotReady`; Windows 11 build 26300 identified a client that had sent nothing).
+- New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
+  anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
+  no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
+  checks the same folder rule on the serving side.
+- `Access::system_for_all_users()` (correction, review 2026-11-03: `GRGW` for `IU` included `FILE_CREATE_PIPE_INSTANCE`, now `0x12019b` in both lists; mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+  starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
+  refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
+  `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
+- New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
+  frees its slot on drop and reports `held()` on the injected `Clock`).
 
 ### `paddock-shell`: `files_*` commands always have their service
 

@@ -9,12 +9,19 @@
 
 pub mod access;
 pub mod battery;
+pub mod btm_reader;
 pub mod counters;
 pub mod dev_folders;
 pub mod extras;
 pub mod fake;
 pub mod fileid;
+pub mod firewall_readers;
 pub mod hardware;
+pub mod helper_counters;
+pub mod helper_extras;
+#[cfg(unix)]
+pub mod helper_holders;
+pub mod helper_sweep;
 pub mod inventory;
 pub mod issues;
 pub mod links;
@@ -27,7 +34,11 @@ pub mod processes;
 pub mod readability;
 pub mod runner;
 pub mod sensors;
+pub mod smart_reader;
+pub mod tool_install;
 pub mod toolpath;
+pub mod wakes;
+pub mod windows_firewall;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;

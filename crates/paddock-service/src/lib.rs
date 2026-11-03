@@ -58,6 +58,7 @@
 pub mod backend;
 pub mod control;
 mod error;
+pub mod hardening;
 pub mod launchctl;
 pub mod login;
 pub mod manager;
@@ -66,6 +67,7 @@ pub mod parse;
 pub mod paths;
 pub mod plan;
 pub mod port;
+pub mod privileged;
 pub mod record;
 pub mod render;
 pub mod repair;

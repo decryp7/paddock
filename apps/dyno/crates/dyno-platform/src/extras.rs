@@ -3,7 +3,7 @@
 //! `dyno_core`. The OS is a parameter (`std::env::consts::OS` values), so every branch is tested on every host.
 //! A tool that is missing, slow or refused becomes an "unavailable: reason" in the report, never an error.
 
-use crate::issues::ToolRunner;
+use crate::runner::ToolRunner;
 use dyno_core::backup::{self, BackupState, BackupStatus, BackupTool};
 use dyno_core::extras::boot::{self, BootStep};
 use dyno_core::extras::gpu::{self, GpuReport};
@@ -569,8 +569,8 @@ mod tests {
     struct Per(Scripted);
 
     impl ToolRunner for Per {
-        fn run(&self, p: &str, a: &[String], t: Duration) -> Result<String, PlatformError> {
-            self.0.run(p, a, t)
+        fn run_tool(&self, tool: &crate::runner::Tool, t: Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+            self.0.run_tool(tool, t)
         }
     }
 

@@ -96,8 +96,10 @@ totals the OS allows (by session on Windows, by uid on macOS and Linux). On Wind
 `NtQuerySystemInformation` and trusts its undocumented CPU and I/O fields only when a start-up self-check against the documented
 calls agrees.
 
-Elevation (a read-only helper and starting as administrator at login) is planned for 1.1 under ADR 0022; Dyno 1.0 has no way to run
-elevated.
+From 1.1 an optional read-only helper (a system service the user turns on in Settings; ADR 0027, built on ADR 0016 and 0022)
+answers a closed list of requests over a local pipe or socket: the caller is identified from the OS's own credentials, each request
+has a standing table (owner, administrator, other) saying full, counts only or denied, and a per-account cap bounds the load.
+The app and the agent still run with the user's own rights; Dyno 1.0 has no way to run elevated.
 
 Plugins are out-of-process Rust programs speaking `dyno-ipc` that add sensors; the agent starts the host on
 first use of the plugins page (`Request::Plugins`) and the host guards them (timeouts, memory cap, quarantine).
@@ -168,7 +170,7 @@ working in memory.
   again. Open only what the user chose.
 - **Never trust another process.** Frames are bounded; the handshake needs the per-launch token (constant-time compare)
   and, where the OS tells, the peer pid. The discovery file is owner-only.
-- **Least privilege.** Nothing Dyno runs is elevated; Dyno changes nothing on the machine and installs no service or helper. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
+- **Least privilege.** Nothing Dyno runs is elevated unless the user turns on the helper (ADR 0027); Dyno changes nothing on the machine and installs no service or helper by default. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
   origin; `scripts/check-capabilities.mjs` enforces it in CI.
 - **Contain failures.** Per-request and per-tick panics are caught, locks recover from poisoning, plugins are guarded and
   quarantined, a failing sensor is an unavailable reading, the app restarts a dead agent and an agent without an app keeps

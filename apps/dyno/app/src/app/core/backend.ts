@@ -37,6 +37,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -144,6 +145,9 @@ export interface DynoBackend {
 
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
+
+  /** Whether the privileged helper is off, running, outdated and so on (it never blocks: an absent helper is a state). */
+  helperStatus(): Promise<HelperStatus>;
 
   // Performance counters (observe-only): browse, search, read now, and the readings kept with the app's events.
   counterObjects(): Promise<CounterObjectList>;

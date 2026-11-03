@@ -1,0 +1,19 @@
+#!/bin/sh
+# Dyno's package, before removal or upgrade (Dyno ADR 0027 section 1). Without systemd there is nothing to stop.
+set -e
+
+if [ ! -d /run/systemd/system ]; then
+    exit 0
+fi
+
+case "$1" in
+    remove | deconfigure)
+        systemctl disable --now dyno-helper.service 2>/dev/null || true
+        ;;
+    upgrade)
+        # The new package's postinst starts it again when it was enabled.
+        systemctl stop dyno-helper.service 2>/dev/null || true
+        ;;
+esac
+
+exit 0

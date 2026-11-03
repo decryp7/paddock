@@ -284,6 +284,8 @@ pub struct Shared {
     /// The saved-views cache (ADR 0029), when there is one: the disk map, the counter catalog and the software list keep
     /// their last answer in it.
     pub cache: Option<crate::cache::Cache>,
+    /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
+    pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -447,6 +449,7 @@ impl Shared {
                 cores,
                 settings_limits,
             )),
+            helper: crate::helper_os::centre(),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

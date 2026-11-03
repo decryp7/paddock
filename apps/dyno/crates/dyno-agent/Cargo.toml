@@ -28,6 +28,9 @@ paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 # The agent's own log (one dated paddock-log file per process, panic hook and crash marker) and the folders it lives in.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# Turning the helper on and off (the OS's one prompt) and the trusted connection to its endpoint (ADR 0027).
+dyno-helper-service = { path = "../dyno-helper-service" }
+paddock-service = { path = "../../../../crates/paddock-service" }
 log = { version = "0.4", features = ["kv"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true

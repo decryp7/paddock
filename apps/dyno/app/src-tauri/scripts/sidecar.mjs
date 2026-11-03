@@ -13,8 +13,9 @@ const host = /host: (\S+)/.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8
 const triple = process.env.TAURI_ENV_TARGET_TRIPLE || host;
 if (!triple) throw new Error('cannot tell the target triple (rustc -vV)');
 const profile = dev ? 'dev' : 'dist';
-// [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`.
-const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli'], ['dyno-bench', 'dyno-bench']];
+// [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`. The helper (ADR 0027) ships next to the agent on every
+// OS: the program the one OS prompt runs to install it (macOS, Windows), `/usr/bin/dyno-helper` in the .deb; the AppImage never uses it.
+const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli'], ['dyno-bench', 'dyno-bench'], ['dyno-helper', 'dyno-helper']];
 const args = ['build', ...sidecars.flatMap(([, pkg]) => ['-p', pkg]), '--profile', profile];
 if (triple !== host) args.push('--target', triple);
 execFileSync('cargo', args, { cwd: root, stdio: 'inherit' });
