@@ -14,7 +14,26 @@
          Ok(Self {
              tray: Rc::new(RefCell::new(platform_impl::TrayIcon::new(
                  id.clone(),
-@@ -706,6 +713,17 @@
+@@ -424,6 +431,18 @@
+             )?)),
+             id,
+         })
++    }
++
++    /// Paddock patch: what became of the GUID this icon asked for.
++    pub fn guid_status(&self) -> GuidStatus {
++        #[cfg(windows)]
++        {
++            self.tray.borrow().guid_status()
++        }
++        #[cfg(not(windows))]
++        {
++            GuidStatus::NotRequested
++        }
+     }
+ 
+     /// Returns the id associated with this tray icon.
+@@ -706,6 +725,32 @@
  
  /// A reciever that could be used to listen to tray events.
  pub type TrayIconEventReceiver = Receiver<TrayIconEvent>;
@@ -22,6 +41,21 @@
 +pub type GuidProvider = fn(&str) -> Option<u128>;
 +
 +static GUID_PROVIDER: OnceCell<GuidProvider> = OnceCell::new();
++
++/// Paddock patch: what became of the GUID an icon asked for (Windows only; other platforms say `NotRequested`).
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum GuidStatus {
++    /// The icon has no GUID, or this platform has none.
++    NotRequested,
++    /// The shell accepted the GUID at the first try.
++    Registered,
++    /// The shell refused the GUID once; deleting its old registration and adding again worked.
++    RegisteredAfterReclaim,
++    /// The GUID stayed refused, so the icon exists without it (its place is not remembered).
++    FellBackToNoGuid,
++    /// The shell took no icon at all (Explorer is not up); it is added again when the taskbar is created.
++    NotAdded,
++}
 +
 +/// Registers the provider that picks the GUID of every icon created without one by id (once per process; later calls are
 +/// ignored). Windows only uses the result; elsewhere it is ignored like [`TrayIconAttributes::guid`].
@@ -32,3 +66,63 @@
  type TrayIconEventHandler = Box<dyn Fn(TrayIconEvent) + Send + Sync + 'static>;
  
  static TRAY_CHANNEL: Lazy<(Sender<TrayIconEvent>, TrayIconEventReceiver)> = Lazy::new(unbounded);
+--- a/src/platform_impl/windows/mod.rs
++++ b/src/platform_impl/windows/mod.rs
+@@ -90,6 +90,7 @@
+     menu: Option<Box<dyn menu::ContextMenu>>,
+     internal_id: u32,
+     guid: Option<GUID>,
++    guid_status: crate::GuidStatus,
+ }
+ 
+ impl TrayIcon {
+@@ -156,8 +157,31 @@
+ 
+             let hicon = attrs.icon.as_ref().map(|i| i.inner.as_raw_handle());
+ 
++            // Paddock patch: a GUID that the shell refuses (it is bound to another executable path while unsigned, or a crashed
++            // instance left it registered) must not leave the icon missing: delete the GUID's registration and retry, then
++            // fall back to an icon without a GUID. The outcome is reported by `TrayIcon::guid_status`.
++            let mut guid = guid;
++            let mut guid_status = if guid.is_some() { crate::GuidStatus::Registered } else { crate::GuidStatus::NotRequested };
+             if !register_tray_icon(hwnd, internal_id, guid, &hicon, &attrs.tooltip, true) {
+-                // Explorer/taskbar may not be ready yet (e.g., app starts before explorer.exe).
++                if guid.is_some() {
++                    remove_tray_icon(hwnd, internal_id, guid);
++                    if register_tray_icon(hwnd, internal_id, guid, &hicon, &attrs.tooltip, true) {
++                        guid_status = crate::GuidStatus::RegisteredAfterReclaim;
++                    } else if register_tray_icon(hwnd, internal_id, None, &hicon, &attrs.tooltip, true) {
++                        guid = None;
++                        // The window's own copy must forget the GUID too, or later modifies and the re-add would use it.
++                        let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
++                        if !userdata.is_null() {
++                            (*userdata).guid = None;
++                        }
++                        guid_status = crate::GuidStatus::FellBackToNoGuid;
++                    } else {
++                        guid_status = crate::GuidStatus::NotAdded;
++                    }
++                } else {
++                    guid_status = crate::GuidStatus::NotAdded;
++                }
++                // NotAdded: Explorer/taskbar may not be ready yet (e.g., app starts before explorer.exe).
+                 // Keep the window alive and wait for TaskbarCreated to re-register.
+             }
+ 
+@@ -169,11 +193,16 @@
+                 hwnd,
+                 internal_id,
+                 guid,
++                guid_status,
+                 menu: attrs.menu,
+             })
+         }
+     }
+ 
++    pub fn guid_status(&self) -> crate::GuidStatus {
++        self.guid_status
++    }
++
+     pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
+         unsafe {
+             let mut nid = NOTIFYICONDATAW {

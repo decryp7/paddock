@@ -8,8 +8,10 @@
 - Licence: `MIT OR Apache-2.0` (kept: `LICENSE-MIT`, `LICENSE-APACHE`, `LICENSE.spdx`, and `license` in its `Cargo.toml`).
   cargo-deny sees it as a path dependency with that licence; the notices generator reads it from `cargo metadata` like any
   other package.
-- The only change: [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch) (`src/lib.rs`: `set_guid_provider` and
-  its use in `TrayIcon::with_id`). `Cargo.lock` is dropped from the copy. Nothing else differs from the `.crate`.
+- The only changes: [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch). `src/lib.rs`: `set_guid_provider` and its
+  use in `TrayIcon::with_id`, and `GuidStatus` with `TrayIcon::guid_status`. `src/platform_impl/windows/mod.rs`: when the shell
+  refuses a GUID (`NIM_ADD` fails), delete the GUID's registration (`NIM_DELETE` by GUID) and add again; if that fails too, add
+  the icon without a GUID (and the window forgets the GUID); the outcome is `guid_status`, which Dyno logs. `Cargo.lock` is dropped from the copy. Nothing else differs from the `.crate`.
 - Why: Windows keeps an icon's place and visibility under its `guidItem`, and tray-icon has `TrayIconAttributes::guid`
   and `TrayIconBuilder::with_guid` (0.25.1), but **Tauri 2.12.5's `TrayIconBuilder` has no GUID setter** (`src/tray/mod.rs`:
   its `inner` builder is private and `with_inner_tray_icon` runs only after the icon exists), and the GUID can only be set

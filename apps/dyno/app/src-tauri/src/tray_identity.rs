@@ -2,7 +2,7 @@
 //! each icon and whether it is shown. Pure: the names depend on the item id only, never on time, the run or the machine.
 //!
 //! - macOS: `NSStatusItem.autosaveName`, [`autosave_name`] (AppKit keeps the position and visibility under that name).
-//! - Windows: `NOTIFYICONDATA.guidItem`, [`guid_for`] (a name-based GUID; the shell keys the "always show" setting on it).
+//! - Windows: `NOTIFYICONDATA.guidItem`, [`guid_for`] (a stable GUID; the shell keys the "always show" setting on it).
 //! - Linux: the StatusNotifierItem / appindicator id is the tray id, already stable ([`crate::tray::tray_id`]); the host
 //!   decides the order, so there is nothing more to give.
 
@@ -16,16 +16,37 @@ pub fn autosave_name(item: &str) -> String {
     format!("{NAMESPACE}.menubar.{item}")
 }
 
-/// The Windows GUID of an item: the first 16 bytes of SHA-256 over a Dyno-only name, with the version (5, name-based) and
-/// variant bits of RFC 4122 set so it reads as a GUID. Equal for equal ids, different for different ids, and in Dyno's own
+/// The Windows GUID of an item: the first 16 bytes of SHA-256 over a Dyno-only name, with the version (8, "custom", RFC 9562:
+/// it is not the SHA-1 of version 5) and the variant bits set so it reads as a GUID. Equal for equal ids, different for different ids, and in Dyno's own
 /// name space so it cannot meet another app's GUID.
 pub fn guid_for(item: &str) -> u128 {
     let digest = Sha256::digest(format!("{NAMESPACE}.tray-icon.{item}").as_bytes());
     let mut b = [0u8; 16];
     b.copy_from_slice(&digest[..16]);
-    b[6] = (b[6] & 0x0f) | 0x50;
+    b[6] = (b[6] & 0x0f) | 0x80;
     b[8] = (b[8] & 0x3f) | 0x80;
     u128::from_be_bytes(b)
+}
+
+/// The `NSUserDefaults` keys AppKit keeps for a status item with this autosave name: its position and, once the user has hidden
+/// or shown it, its visibility. AppKit is believed to delete them when the item is removed (ADR 0028, to be verified on the
+/// Mac), so Dyno keeps a copy under [`saved_key`] and puts it back before the item is made again.
+pub fn appkit_defaults_keys(autosave_name: &str) -> [String; 2] {
+    [
+        format!("NSStatusItem Preferred Position {autosave_name}"),
+        format!("NSStatusItem Visible {autosave_name}"),
+    ]
+}
+
+/// Where Dyno keeps its copy of an AppKit key.
+pub fn saved_key(appkit_key: &str) -> String {
+    format!("{NAMESPACE}.saved.{appkit_key}")
+}
+
+/// Whether the `n`th draw of an item (1-based) also saves its AppKit position: the first, then every 30th. Counted, not timed
+/// (a drag in the menu bar changes the key without telling us).
+pub fn should_save_position(n: u64) -> bool {
+    n == 1 || (n > 0 && n.is_multiple_of(30))
 }
 
 /// The GUID as text (`8-4-4-4-12` lower-case hex), for the log.
@@ -50,7 +71,7 @@ mod tests {
         // Pinned values: a change here moves every user's icons, so it must be deliberate (an ADR amendment).
         assert_eq!(autosave_name("cpu-1"), "net.decryptology.dyno.menubar.cpu-1");
         assert_eq!(guid_for("cpu-1"), guid_for("cpu-1"));
-        assert_eq!(guid_text(guid_for("cpu-1")), "8f6f7e9f-9bfc-5b3b-bca6-6519140f1430");
+        assert_eq!(guid_text(guid_for("cpu-1")), "8f6f7e9f-9bfc-8b3b-bca6-6519140f1430");
     }
 
     #[test]
@@ -66,14 +87,33 @@ mod tests {
     }
 
     #[test]
-    fn a_guid_has_the_name_based_version_and_variant() {
+    fn a_guid_has_the_custom_version_and_the_rfc_variant() {
         for i in ["a", "cpu-1", "gpu-12"] {
             let t = guid_text(guid_for(i));
             let parts: Vec<&str> = t.split('-').collect();
             assert_eq!(parts.iter().map(|p| p.len()).collect::<Vec<_>>(), [8, 4, 4, 4, 12], "{t}");
-            assert!(parts[2].starts_with('5'), "{t}");
+            assert!(parts[2].starts_with('8'), "{t}");
             assert!("89ab".contains(parts[3].chars().next().unwrap()), "{t}");
         }
+    }
+
+    #[test]
+    fn the_appkit_keys_and_their_copies_are_distinct_and_fixed() {
+        let keys = appkit_defaults_keys("net.decryptology.dyno.menubar.cpu-1");
+        assert_eq!(keys[0], "NSStatusItem Preferred Position net.decryptology.dyno.menubar.cpu-1");
+        assert_eq!(keys[1], "NSStatusItem Visible net.decryptology.dyno.menubar.cpu-1");
+        assert_eq!(
+            saved_key(&keys[0]),
+            "net.decryptology.dyno.saved.NSStatusItem Preferred Position net.decryptology.dyno.menubar.cpu-1"
+        );
+        assert_ne!(saved_key(&keys[0]), saved_key(&keys[1]));
+    }
+
+    #[test]
+    fn positions_are_saved_on_the_first_draw_and_every_thirtieth() {
+        let saved: Vec<u64> = (1..=100).filter(|n| should_save_position(*n)).collect();
+        assert_eq!(saved, [1, 30, 60, 90]);
+        assert!(!should_save_position(0));
     }
 
     #[test]

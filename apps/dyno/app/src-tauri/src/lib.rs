@@ -23,6 +23,8 @@ pub mod supervise;
 pub mod tray;
 pub mod tray_identity;
 pub mod tray_model;
+#[cfg(target_os = "macos")]
+pub mod tray_position;
 
 use link::{AgentLink, ProcessLauncher};
 use paddock_shell::{AppIdentity, Builder};
@@ -382,6 +384,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if matches!(_event, tauri::RunEvent::Ready) {
                 on_ready(_handle, asked_hidden);
+            }
+            // The icons are removed on the way out (AppKit may drop their positions then): keep a copy while they are still there.
+            #[cfg(target_os = "macos")]
+            if matches!(_event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                tray::save_positions(_handle);
             }
         }),
         Err(e) => {

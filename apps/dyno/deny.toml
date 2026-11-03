@@ -38,6 +38,9 @@ allow = [
 multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
+# Exactly one tray-icon: the vendored, patched copy (vendor/PATCHES.md) replaces Tauri's through [patch.crates-io]; a second
+# version in the graph would mean the patch no longer applies and the tray GUIDs silently stop working.
+deny = [{ crate = "tray-icon", deny-multiple-versions = true }]
 
 [sources]
 unknown-registry = "deny"

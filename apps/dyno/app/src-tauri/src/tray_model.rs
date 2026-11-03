@@ -148,11 +148,137 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     out
 }
 
+/// What changing the icons from `current` to `wanted` takes: only items that are gone or differ are removed, only items that are new
+/// or differ are made, so an unchanged item keeps its native icon (and with it its place in the bar).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SyncPlan {
+    /// Ids to remove, sorted.
+    pub remove: Vec<String>,
+    /// Specs to make, in `wanted` order.
+    pub create: Vec<ItemSpec>,
+}
+
+/// The [`SyncPlan`] from the icons now there to the wanted specs.
+pub fn plan_sync(current: &std::collections::HashMap<String, ItemSpec>, wanted: &[ItemSpec]) -> SyncPlan {
+    let mut remove: Vec<String> = current
+        .iter()
+        .filter(|(id, old)| wanted.iter().find(|w| &w.id == *id).is_none_or(|w| w != *old))
+        .map(|(id, _)| id.clone())
+        .collect();
+    remove.sort();
+    let create = wanted.iter().filter(|w| current.get(&w.id) != Some(*w)).cloned().collect();
+    SyncPlan { remove, create }
+}
+
+/// What one drawn frame costs the native icon. The picture is set in ONE call whatever else changed (a second call renders the
+/// status item twice and flickers on macOS, where `set_icon` and then `set_icon_as_template` did exactly that), the tooltip is
+/// sent only when its text changed, and the saved position is refreshed on the first draw and every 30th.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaintOps {
+    /// Calls that set the picture (always 1).
+    pub image_sets: u8,
+    /// Whether the tooltip is sent.
+    pub tooltip: bool,
+    /// Whether the macOS position copy is refreshed.
+    pub save_position: bool,
+}
+
+/// The [`PaintOps`] of the `count`th draw (1-based) of an item whose tooltip was `previous`.
+pub fn paint_ops(previous: &str, tooltip: &str, count: u64) -> PaintOps {
+    PaintOps {
+        image_sets: 1,
+        tooltip: previous != tooltip,
+        save_position: crate::tray_identity::should_save_position(count),
+    }
+}
+
+/// What a render function gets: the value on the glyph's 0..100 scale, the history (oldest first), the pixel height of the bar
+/// and whether the bar is dark.
+pub struct RenderCtx<'a> {
+    /// The value, 0 to 100.
+    pub value: f32,
+    /// The recent values, oldest first.
+    pub graph: &'a [f32],
+    /// The bar's picture height in pixels.
+    pub size: u32,
+    /// Whether the taskbar or menu bar is dark.
+    pub dark: bool,
+}
+
+/// A picture and the fixed width its status item keeps. One function per item kind returns this, so a new look replaces a function
+/// here and nothing else (the mechanics around it are the same for every look).
+pub struct Rendered {
+    /// The pixels.
+    pub icon: Icon,
+    /// The width in pixels (today the picture is square, so equal to its size).
+    pub width: u32,
+}
+
+impl Rendered {
+    fn of(icon: Icon) -> Rendered {
+        Rendered { width: icon.size, icon }
+    }
+}
+
+fn render_bars(c: &RenderCtx) -> Rendered {
+    Rendered::of(tray::render(&[(IconMetric::Cpu, c.value)], &[], IconStyle::Bars, c.size, c.dark))
+}
+
+fn render_graph(c: &RenderCtx) -> Rendered {
+    Rendered::of(tray::render(
+        &[(IconMetric::Cpu, c.value)],
+        c.graph,
+        IconStyle::Graph,
+        c.size,
+        c.dark,
+    ))
+}
+
+fn render_meter(c: &RenderCtx) -> Rendered {
+    Rendered::of(tray::render_meter(c.value, c.size, c.dark))
+}
+
+fn render_ring(c: &RenderCtx) -> Rendered {
+    Rendered::of(tray::render_ring(c.value, c.size, c.dark))
+}
+
+fn render_number(c: &RenderCtx) -> Rendered {
+    Rendered::of(tray::render_number(c.value, c.size, c.dark))
+}
+
+fn render_graph_number(c: &RenderCtx) -> Rendered {
+    Rendered::of(tray::render_graph_number(c.value, c.graph, c.size, c.dark))
+}
+
+fn render_core_bars(cores: &[f32], size: u32, dark: bool) -> Rendered {
+    Rendered::of(tray::render_core_bars(cores, size, dark))
+}
+
+/// The picture of an item whose metric cannot be measured here.
+fn render_unavailable(size: u32, dark: bool) -> Rendered {
+    Rendered::of(tray::render_meter(0.0, size, dark))
+}
+
+/// The render function of a glyph (per-core bars take the cores, not a single value: see [`render_core_bars`]).
+pub fn render_glyph(glyph: Glyph, c: &RenderCtx) -> Rendered {
+    match glyph {
+        Glyph::Bars => render_bars(c),
+        Glyph::Graph => render_graph(c),
+        Glyph::Meter => render_meter(c),
+        Glyph::Ring => render_ring(c),
+        Glyph::Number => render_number(c),
+        Glyph::GraphNumber => render_graph_number(c),
+        Glyph::CoreBars => render_unavailable(c.size, c.dark),
+    }
+}
+
 /// An icon with its tooltip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     /// The pixels.
     pub icon: Icon,
+    /// The width in pixels the status item keeps whatever the value (its length never follows the text).
+    pub width: u32,
     /// The tooltip.
     pub tooltip: String,
 }
@@ -279,14 +405,18 @@ impl TrayItems {
         if spec.glyph == Glyph::CoreBars {
             let cores = &u.system.cpu.per_core;
             let busiest = cores.iter().copied().fold(0.0f32, f32::max);
+            let r = render_core_bars(cores, size, dark);
             return Frame {
-                icon: tray::render_core_bars(cores, size, dark),
+                icon: r.icon,
+                width: r.width,
                 tooltip: format!("Dyno — {name} {:.0}% · busiest core {busiest:.0}%", u.system.cpu.total),
             };
         }
         let Some(m) = self.measure(u, &spec.metric) else {
+            let r = render_unavailable(size, dark);
             return Frame {
-                icon: tray::render_meter(0.0, size, dark),
+                icon: r.icon,
+                width: r.width,
                 tooltip: format!("Dyno — {name} is not available on this computer"),
             };
         };
@@ -297,22 +427,23 @@ impl TrayItems {
         }
         let graph: Vec<f32> = history.iter().copied().collect();
         let v = m.scale;
-        let icon = match spec.glyph {
-            Glyph::Bars => tray::render(&[(IconMetric::Cpu, v)], &[], IconStyle::Bars, size, dark),
-            Glyph::Graph => tray::render(&[(IconMetric::Cpu, v)], &graph, IconStyle::Graph, size, dark),
-            Glyph::Meter => tray::render_meter(v, size, dark),
-            Glyph::Ring => tray::render_ring(v, size, dark),
-            Glyph::Number => tray::render_number(v, size, dark),
-            Glyph::GraphNumber => tray::render_graph_number(v, &graph, size, dark),
-            Glyph::CoreBars => tray::render_meter(0.0, size, dark), // handled above
-        };
+        let rendered = render_glyph(
+            spec.glyph,
+            &RenderCtx {
+                value: v,
+                graph: &graph,
+                size,
+                dark,
+            },
+        );
         let text = if spec.unit.is_empty() {
             m.text
         } else {
             format!("{:.0}{}", m.scale, spec.unit)
         };
         Frame {
-            icon,
+            icon: rendered.icon,
+            width: rendered.width,
             tooltip: format!("Dyno — {name} {text}"),
         }
     }
@@ -426,6 +557,85 @@ mod tests {
         assert_eq!(items.frames(&update(10.0), true).len(), 8, "every item draws");
         let text = (0..usize::from(MAX_ITEMS) + 5).map(|_| "cpu:ring").collect::<Vec<_>>().join(",");
         assert_eq!(parse_items(&text).len(), usize::from(MAX_ITEMS));
+    }
+
+    /// ER-20 measurement, not a check: `cargo test -p dyno-app --lib measure_32 -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement that prints the drawing time of 32 graph items; it asserts nothing about time"]
+    fn measure_32_graph_items() {
+        let specs: Vec<ItemSpec> = (0..32)
+            .map(|n| ItemSpec::new(&format!("cpu-{n}"), Metric::CpuTotal, Glyph::Graph))
+            .collect();
+        let mut items = TrayItems::new(specs, 18);
+        let start = Instant::now();
+        let mut drawn = 0;
+        for tick in 0..200 {
+            drawn += items.frames(&update((tick % 100) as f32), true).len();
+        }
+        let per_tick = start.elapsed() / 200;
+        println!("32 graph items: {drawn} frames in 200 ticks, {per_tick:?} per tick (all items changing every tick)");
+    }
+
+    #[test]
+    fn a_frame_sets_the_picture_once_and_the_tooltip_only_when_it_changed() {
+        let first = paint_ops("", "Dyno CPU 5%", 1);
+        assert_eq!((first.image_sets, first.tooltip, first.save_position), (1, true, true));
+        let same = paint_ops("Dyno CPU 5%", "Dyno CPU 5%", 2);
+        assert_eq!((same.image_sets, same.tooltip, same.save_position), (1, false, false));
+        assert!(paint_ops("Dyno CPU 5%", "Dyno CPU 6%", 3).tooltip);
+    }
+
+    #[test]
+    fn an_items_picture_keeps_its_size_whatever_the_value() {
+        // A picture that changes size changes the status item's width and moves its neighbours: the flicker's third suspect.
+        for glyph in [
+            Glyph::Bars,
+            Glyph::Graph,
+            Glyph::Meter,
+            Glyph::Ring,
+            Glyph::Number,
+            Glyph::GraphNumber,
+            Glyph::CoreBars,
+        ] {
+            let mut items = TrayItems::new(vec![ItemSpec::new("cpu-1", Metric::CpuTotal, glyph)], 18);
+            let mut shapes = std::collections::HashSet::new();
+            for v in [0.0, 1.0, 9.0, 10.0, 55.0, 99.0, 100.0] {
+                for (_, f) in items.frames(&update(v), true) {
+                    shapes.insert((f.icon.size, f.icon.rgba.len(), f.width));
+                }
+            }
+            assert_eq!(shapes.len(), 1, "{glyph:?} changed size: {shapes:?}");
+        }
+    }
+
+    #[test]
+    fn an_unchanged_value_draws_nothing() {
+        let mut items = TrayItems::new(vec![ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring)], 18);
+        assert_eq!(items.frames(&update(40.0), true).len(), 1);
+        assert!(
+            items.frames(&update(40.0), true).is_empty(),
+            "no redraw when the picture did not change"
+        );
+    }
+
+    #[test]
+    fn only_changed_items_are_removed_and_made() {
+        use std::collections::HashMap;
+        let a = ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring);
+        let b = ItemSpec::new("memory-2", Metric::Memory, Glyph::Number);
+        let c = ItemSpec::new("swap-3", Metric::Swap, Glyph::Bars);
+        let current: HashMap<String, ItemSpec> = [&a, &b, &c].iter().map(|s| (s.id.clone(), (*s).clone())).collect();
+        assert_eq!(
+            plan_sync(&current, &[a.clone(), b.clone(), c.clone()]),
+            SyncPlan::default(),
+            "nothing changed"
+        );
+        let b2 = ItemSpec::new("memory-2", Metric::Memory, Glyph::Graph);
+        let d = ItemSpec::new("gpu-4", Metric::GpuLoad, Glyph::Ring);
+        let plan = plan_sync(&current, &[a.clone(), b2.clone(), d.clone()]);
+        assert_eq!(plan.remove, ["memory-2", "swap-3"]);
+        assert_eq!(plan.create, [b2, d]);
+        assert_eq!(plan_sync(&HashMap::new(), std::slice::from_ref(&a)).create, [a]);
     }
 
     #[test]

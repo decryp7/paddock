@@ -7,7 +7,7 @@
 
 use crate::logging;
 use crate::tray_identity;
-use crate::tray_model::{Frame, ItemSpec};
+use crate::tray_model::{plan_sync, Frame, ItemSpec};
 use paddock_window::popover::Rect;
 use paddock_window::tauri::{PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{item, TrayView, QUIT_ID, SHOW_ID};
@@ -26,8 +26,11 @@ pub fn tray_id(item: &str) -> String {
 /// The ids of the items that have a tray icon, and which of them currently show a drawn picture.
 #[derive(Default)]
 pub struct TrayState {
-    items: Mutex<std::collections::HashSet<String>>,
+    /// The spec each existing icon was made from (what [`plan_sync`] compares the wanted items with).
+    items: Mutex<HashMap<String, ItemSpec>>,
     painted: Mutex<HashMap<String, bool>>,
+    /// Per item: the tooltip last sent and how many pictures were drawn (the tooltip changes rarely, a picture every second).
+    drawn: Mutex<HashMap<String, (String, u64)>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -77,6 +80,8 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
 fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
     let menu = build_menu(app)?;
     let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))?;
+    #[cfg(target_os = "macos")]
+    crate::tray_position::restore(&tray_identity::autosave_name(&spec.id));
     let tray = TrayIconBuilder::with_id(tray_id(&spec.id))
         .tooltip("Dyno")
         .icon(icon)
@@ -113,7 +118,7 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
         tray_id(&spec.id),
         crate::tray_model::metric_name(&spec.metric)
     ));
-    lock(&app.state::<TrayState>().items).insert(spec.id.clone());
+    lock(&app.state::<TrayState>().items).insert(spec.id.clone(), spec.clone());
     Ok(())
 }
 
@@ -139,8 +144,12 @@ fn apply_identity(tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
 
 /// See the macOS version.
 #[cfg(windows)]
-fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
-    format!("GUID {}", tray_identity::guid_text(tray_identity::guid_for(item)))
+fn apply_identity(tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
+    let guid = tray_identity::guid_text(tray_identity::guid_for(item));
+    match tray.with_inner_tray_icon(|t| t.guid_status()) {
+        Ok(status) => format!("GUID {guid}: {status:?}"),
+        Err(e) => format!("GUID {guid}: status unknown ({e})"),
+    }
 }
 
 /// See the macOS version.
@@ -149,8 +158,8 @@ fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
     format!("status notifier id {}", tray_id(item))
 }
 
-/// Makes the tray icons match `specs`: every existing one is replaced (a click handler holds what its item opened when it
-/// was made, so a changed item needs a new icon). Called only when the items changed. Returns the first error.
+/// Makes the tray icons match `specs`: an unchanged item keeps its icon (so its place in the bar), a changed or removed one is
+/// removed, a new or changed one is made ([`plan_sync`]). Called only when the items changed. Returns the first error.
 pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()> {
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
@@ -158,31 +167,90 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
     #[cfg(windows)]
     tray_icon::set_guid_provider(tray_identity::guid_for_tray_id);
     let state = app.state::<TrayState>();
-    let old: Vec<String> = lock(&state.items).drain().collect();
-    for id in old {
-        let _ = app.remove_tray_by_id(&tray_id(&id));
+    let plan = plan_sync(&lock(&state.items), specs);
+    logging::info(&format!(
+        "tray sync: {} item(s) wanted, removing {:?}, making {:?}",
+        specs.len(),
+        plan.remove,
+        plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()
+    ));
+    for id in &plan.remove {
+        // AppKit may forget the position of a removed status item: keep a copy.
+        #[cfg(target_os = "macos")]
+        crate::tray_position::save(&tray_identity::autosave_name(id));
+        let _ = app.remove_tray_by_id(&tray_id(id));
+        lock(&state.items).remove(id);
+        lock(&state.painted).remove(id);
+        lock(&state.drawn).remove(id);
     }
-    lock(&state.painted).clear();
-    for spec in specs {
+    for spec in &plan.create {
         create_item(app, spec)?;
     }
     Ok(())
 }
 
-/// Draws a frame on an item: the pixels and the tooltip.
+/// macOS: copies the position AppKit holds for every icon to Dyno's own keys (the icons are about to be removed on quit).
+#[cfg(target_os = "macos")]
+pub fn save_positions(app: &AppHandle<Wry>) {
+    let Some(state) = app.try_state::<TrayState>() else { return };
+    let ids: Vec<String> = lock(&state.items).keys().cloned().collect();
+    let saved: usize = ids
+        .iter()
+        .map(|id| crate::tray_position::save(&tray_identity::autosave_name(id)))
+        .sum();
+    logging::info(&format!(
+        "tray positions: {saved} key(s) of {} item(s) saved before the icons go",
+        ids.len()
+    ));
+}
+
+/// Draws a frame on an item: the pixels, and the tooltip when it changed.
 pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
-    // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states);
-    // Windows and Linux get Dyno's own colours.
+    // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states), set together
+    // with the picture in one call (two calls render the icon twice); Windows and Linux get Dyno's own colours.
     let template = cfg!(target_os = "macos");
     let drawn = if template { frame.icon.as_template() } else { frame.icon.clone() };
     let icon = Image::new_owned(drawn.rgba, drawn.size, drawn.size);
-    let _ = tray.set_icon(Some(icon));
-    let _ = tray.set_icon_as_template(template);
-    let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
-    if let Some(state) = app.try_state::<TrayState>() {
-        lock(&state.painted).insert(item.to_string(), true);
+    let size = drawn.size;
+    let set = tray.set_icon_with_as_template(Some(icon), template);
+    let Some(state) = app.try_state::<TrayState>() else { return };
+    let (ops, count) = {
+        let mut map = lock(&state.drawn);
+        let entry = map.entry(item.to_string()).or_default();
+        entry.1 += 1;
+        let ops = crate::tray_model::paint_ops(&entry.0, &frame.tooltip, entry.1);
+        if ops.tooltip {
+            entry.0 = frame.tooltip.clone();
+        }
+        (ops, entry.1)
+    };
+    if ops.tooltip {
+        let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     }
+    // One line per picture, at debug: the flow of image sets per tick (a flicker shows as more than one set per tick).
+    logging::debug(&format!(
+        "tray icon {}: picture #{count} set ({} call, {size}x{size} px, template {template}), tooltip {}",
+        tray_id(item),
+        ops.image_sets,
+        if ops.tooltip { "sent" } else { "unchanged" }
+    ));
+    let first = lock(&state.painted).insert(item.to_string(), true).is_none();
+    // Told once per item and on every failure (a line per second per item would flood the log).
+    if let Err(e) = &set {
+        logging::info(&format!(
+            "tray icon {}: the drawn image ({size}x{size} px) was refused: {e}",
+            tray_id(item)
+        ));
+    } else if first {
+        logging::info(&format!("tray icon {}: first drawn image set, {size}x{size} px", tray_id(item)));
+    }
+    #[cfg(target_os = "macos")]
+    if ops.save_position {
+        crate::tray_position::save(&tray_identity::autosave_name(item));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = count;
 }
 
 /// While the agent is away the static icons are back (a frozen bar would look like a measurement).
@@ -192,9 +260,12 @@ pub fn show_disconnected(app: &AppHandle<Wry>) {
     for id in painted {
         let Some(tray) = app.tray_by_id(&tray_id(&id)) else { continue };
         if let Ok(icon) = Image::from_bytes(static_icon_bytes(dark_taskbar())) {
-            let _ = tray.set_icon(Some(icon));
-            let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
+            let _ = tray.set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
             let _ = tray.set_tooltip(Some("Dyno — the agent is not running"));
+            if let Some(state) = app.try_state::<TrayState>() {
+                // The next picture's tooltip is always sent again.
+                lock(&state.drawn).remove(&id);
+            }
         }
     }
 }

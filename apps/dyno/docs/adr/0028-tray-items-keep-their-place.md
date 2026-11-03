@@ -1,43 +1,79 @@
-# 0028. Every menu-bar item is its own icon, and the OS remembers its place
+# 0028. Every menu-bar item is its own icon, and the OS is given what it needs to remember its place
 
-- Status: Proposed (2026-11-03; needs the VM checks below before Accepted)
+- Status: Proposed (2026-11-03; every claim marked [V] needs the VM checks at the end before this is Accepted)
 - Date: 2026-11-03
-- Related: ADR 0023 (the app shell), the user's request of 2026-11-03 ("one for each metric so I can rearrange position on
-  the menu bar or system tray"), ER-27 (logs).
+- Related: ADR 0023 (the app shell), ADR 0027 (the helper for 1.1.0, on branch docs/dyno-helper-1-1; no dependency, listed so
+  the numbers are not confused), the user's request of 2026-11-03 ("one for each metric so I can rearrange position on the menu
+  bar or system tray"), ER-21, ER-22, ER-27 (logs).
 - Evidence marks: [S] read in source on 2026-11-03: tauri 2.12.5, tray-icon 0.25.1, objc2-app-kit 0.3.2 (all in
   `~/.cargo/registry/src`); [I] inference; [V] still to verify on a VM.
 
 ## Context
 
-Dyno already builds one `TrayIconBuilder` icon per item, but the settings capped the items at 4, and the OS could not tell
-the icons apart across runs: the user's order and visibility were lost whenever an icon was recreated.
+Dyno builds one `TrayIconBuilder` icon per item, but the settings capped the items at 4, and the OS could not tell the icons
+apart across runs, and `sync_items` removed and made every icon on any change.
 
 ## Decision
 
-1. **Cap.** `MAX_ITEMS = 32` (`dyno-core` `widgets/menu_bar.rs`), the dashboard's bound; the item id is at most 32
-   characters of `[a-z0-9-]`, which the identities below derive from. More than a few dozen icons cannot be placed in any bar.
-2. **Identity** (`tray_identity.rs`, pure, deterministic, no clock): the item id is the key.
-   - macOS: `NSStatusItem.autosaveName = net.decryptology.dyno.menubar.<id>` [S: `NSStatusItem::setAutosaveName`; tray-icon
-     exposes the item as `TrayIcon::ns_status_item()`, Tauri as `TrayIcon::with_inner_tray_icon`]. Set right after the icon is built.
-   - Windows: `guidItem`, a name-based GUID (SHA-256 of a Dyno-only name, RFC 4122 version 5 and variant bits). tray-icon has
-     `TrayIconAttributes::guid` [S: `src/lib.rs`, `platform_impl/windows/mod.rs` `apply_guid`], but **Tauri 2.12.5's
-     `TrayIconBuilder` has no setter** (`src/tray/mod.rs`) and a GUID can only be given when the icon is added. The smallest
-     safe change: a vendored copy of tray-icon 0.25.1 with one addition, `set_guid_provider`, asked by `TrayIcon::with_id`
-     when no GUID was given (`apps/dyno/vendor/PATCHES.md`, `[patch.crates-io]` in `apps/dyno/Cargo.toml`). Drop it when
-     Tauri exposes the GUID. Windows binds a GUID to the executable's path unless it is Authenticode-signed by the same
-     publisher [S: the doc comment on `guid`], so the release (signed) keeps places across updates, an unsigned dev build does not.
-   - Linux: appindicator's id is `tray-icon tray app dyno-<id>` (stable); StatusNotifier hosts choose the order, so there is
-     nothing more to set. [I]
-3. Logs (ER-27): one line per icon created with its id, metric and identity, or the error.
+1. **Cap.** `MAX_ITEMS = 32` (`dyno-core` `widgets/menu_bar.rs`), the dashboard's bound; the item id is at most 32 characters of
+   `[a-z0-9-]`, which the identities derive from. More than a few dozen icons cannot be placed in any bar. Cost: the live
+   pictures are drawn only for changed items, the template flag and the picture are set in one call, and the tooltip is sent
+   only when it changed; the drawing time of 32 graph items is in "Measured" below.
+2. **Which icons change** (`tray_model::plan_sync`): only items that are gone or differ are removed and only new or differing
+   ones made, so an unchanged icon keeps its native item. A layout change no longer replaces all icons.
+3. **Identity** (`tray_identity.rs`, pure, deterministic, no clock): the item id is the key. The id comes from the widget kind
+   (`ring`, `ring-2`), not from the metric, and is kept in the layout: removing an item and adding another of the same kind
+   gives the new one the old id and so the old place; two items of one kind swap places if the first is removed.
+   - **macOS:** `NSStatusItem.autosaveName = net.decryptology.dyno.menubar.<id>` [S: `NSStatusItem::setAutosaveName`;
+     tray-icon exposes the item as `TrayIcon::ns_status_item()`, Tauri as `with_inner_tray_icon`], set right after the icon is
+     built. AppKit keeps the position under the defaults key `NSStatusItem Preferred Position <name>` and, once the user has
+     hidden or shown the item, `NSStatusItem Visible <name>`; the visibility key does not exist until the user changes it, so
+     "hidden stays hidden" holds only for items the user hid [V]. AppKit is **believed to delete these keys when the status item
+     is removed** (tray-icon's `Drop` calls `removeStatusItem`; Tauri removes all icons on exit) [I, V]. So Dyno copies the keys
+     to `net.decryptology.dyno.saved.<key>` before it removes an item, at `ExitRequested` and `Exit`, and every 30th picture of
+     an item (a drag in the bar tells us nothing), and puts them back before an item is made, never over a key AppKit holds
+     (`tray_position.rs`). Whether the copy is needed at all is a [V] item.
+   - **Windows:** `guidItem`, a GUID from SHA-256 of a Dyno-only name, **UUID version 8** (RFC 9562, custom; not version 5, which
+     is SHA-1) with the RFC variant bits. tray-icon has `TrayIconAttributes::guid` [S: `src/lib.rs`, `windows/mod.rs`
+     `apply_guid`], but **Tauri 2.12.5's `TrayIconBuilder` has no setter** (`src/tray/mod.rs`) and a GUID can only be given when
+     the icon is added. The smallest safe change is a vendored tray-icon 0.25.1 with a GUID provider, plus a recovery path
+     (`apps/dyno/vendor/PATCHES.md`, `[patch.crates-io]`). **Dyno is not Authenticode-signed**, and Windows binds a GUID to the
+     path of the first executable that used it unless the binary is signed [S: the doc comment on `guid`; Microsoft's
+     NOTIFYICONDATA remarks]. So `NIM_ADD` can fail when another `dyno.exe` (an older install folder, a build in another
+     place) or a crashed instance holds the GUID. The patch then deletes the GUID's registration and adds again, and if that
+     fails adds the icon without a GUID; either way the icon appears, and the result (`Registered`,
+     `RegisteredAfterReclaim`, `FellBackToNoGuid`, `NotAdded`) is in the log line of each icon (ER-27). Consequences for an
+     unsigned build: places survive restarts and updates **only while the executable stays at the same path**; an install to a new
+     path takes the GUID over (position reset [V]); a build that cannot take it over has no remembered place. Signing the
+     releases would remove the path rule; that is a release decision, not made here.
+   - **Linux:** appindicator's id is `tray-icon tray app dyno-<id>` (stable); StatusNotifier hosts choose the order, so there is
+     nothing more to set [I].
+4. **Dependencies:** `tray-icon` is pinned `=0.25.1` with default features off in Dyno's manifest (a Windows-only dependency
+   for the provider), `deny.toml` allows one `tray-icon` version, and the notices are regenerated from the lock.
+5. **Logs (ER-27):** one line per icon created with its id, metric and identity (and on Windows the GUID outcome), one line per
+   sync with what is kept, removed and made, the saved and restored macOS keys, and every refused picture.
 
-## Consequences
+## Measured
 
-- Placement ids come from the layout and are kept in it, so they are stable until the user removes the item; a removed and
-  re-added item may get a new id and so a new place.
-- `sync_items` still replaces all icons on a change; with stable identities they come back where they were.
+2026-11-03, this Mac, debug build, `cargo test -p dyno-app --lib measure_32 -- --ignored --nocapture`: 32 graph items, every
+picture changing every tick: 6400 frames in 200 ticks, **about 0.21 ms per tick** to draw all 32. Drawing is not the cost to
+worry about; the native calls are (one image set per changed item per tick, one call each), and they are bounded by the model
+returning only changed pictures and by `paint_ops` (one image call, tooltip only when changed). Not measured: the native cost of
+32 status items on a Mac and a PC (a [V] item: CPU of Dyno with 32 items, from Activity Monitor and Task Manager).
 
-## To verify [V]
+## The macOS flicker (user report, 2026-11-03)
 
-macOS and Windows VMs: add several items, drag them to a new order, quit and start, update the app: positions and
-visibility kept. On macOS also that removing the icon on a layout change keeps the saved position (AppKit may drop a
-position when its item is removed).
+Suspects and what settles each: (1) two image sets per picture (`set_icon` renders the image as non-template, then
+`set_icon_as_template` renders it again: visible in tray-icon's macOS `set_icon`, which passes `false`) is removed by one
+`set_icon_with_as_template` call, pinned by `paint_ops` (`image_sets == 1`); (2) all icons replaced on any change is removed by
+`plan_sync`; (3) a picture whose size changes moves the status item's width: `an_items_picture_keeps_its_size_whatever_the_value`
+shows every glyph keeps one size across 0 to 100 %; (4) redraws without a change: `an_unchanged_value_draws_nothing`. Each
+picture is logged at debug (`tray icon <id>: picture #n set (1 call, ...)`). Which suspect caused the user's flicker is **not yet
+measured** [V]: record the menu bar (screen recording or rapid screenshots) on the 1.0.0 build and on this one, with the debug
+level on, and count image sets per tick in the log.
+
+## To verify [V] (VMs, after the coordinator's go)
+
+- macOS: reorder, quit, start; change the layout; read `defaults read` for the keys above before and after removal; upgrade from 1.0.
+- Windows 11: pin and reorder, quit, start, update; run a second `dyno.exe` from another folder; kill and start; restart Explorer.
+- Linux: smoke test that the icons appear.

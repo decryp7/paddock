@@ -29,6 +29,11 @@ pub fn info(message: &str) {
     log::info!(target: "dyno", "{message}");
 }
 
+/// Logs a line at debug (the log file only: it is for following one flow, such as the tray's image sets per tick).
+pub fn debug(message: &str) {
+    log::debug!(target: "dyno", "{message}");
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, OnceLock};

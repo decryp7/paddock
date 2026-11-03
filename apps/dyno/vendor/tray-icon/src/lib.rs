@@ -433,6 +433,18 @@ impl TrayIcon {
         })
     }
 
+    /// Paddock patch: what became of the GUID this icon asked for.
+    pub fn guid_status(&self) -> GuidStatus {
+        #[cfg(windows)]
+        {
+            self.tray.borrow().guid_status()
+        }
+        #[cfg(not(windows))]
+        {
+            GuidStatus::NotRequested
+        }
+    }
+
     /// Returns the id associated with this tray icon.
     pub fn id(&self) -> &TrayIconId {
         &self.id
@@ -717,6 +729,21 @@ pub type TrayIconEventReceiver = Receiver<TrayIconEvent>;
 pub type GuidProvider = fn(&str) -> Option<u128>;
 
 static GUID_PROVIDER: OnceCell<GuidProvider> = OnceCell::new();
+
+/// Paddock patch: what became of the GUID an icon asked for (Windows only; other platforms say `NotRequested`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuidStatus {
+    /// The icon has no GUID, or this platform has none.
+    NotRequested,
+    /// The shell accepted the GUID at the first try.
+    Registered,
+    /// The shell refused the GUID once; deleting its old registration and adding again worked.
+    RegisteredAfterReclaim,
+    /// The GUID stayed refused, so the icon exists without it (its place is not remembered).
+    FellBackToNoGuid,
+    /// The shell took no icon at all (Explorer is not up); it is added again when the taskbar is created.
+    NotAdded,
+}
 
 /// Registers the provider that picks the GUID of every icon created without one by id (once per process; later calls are
 /// ignored). Windows only uses the result; elsewhere it is ignored like [`TrayIconAttributes::guid`].

@@ -5,7 +5,12 @@
 ### Added
 
 - Every metric can be its own menu-bar / tray item: the limit of four items is now 32 (one icon each, so each can be dragged to its own place; ADR 0028).
-- Each item keeps the position and visibility you gave it across restarts and updates: macOS names every status item (`NSStatusItem.autosaveName`), Windows gives every icon a stable GUID (`guidItem`), Linux's status-notifier id is the item id. The log tells each icon's identity or why it could not be created.
+- Each item is given a stable identity so the OS can remember where you put it: macOS names every status item (`NSStatusItem.autosaveName`) and keeps a copy of its saved position across the item being removed; Windows gives every icon a GUID (`guidItem`), recovering a GUID the shell refuses and falling back to no GUID rather than losing the icon; Linux's status-notifier id is the item id. Not yet verified on a Mac or a Windows PC. Windows builds are not signed, so a remembered place holds only while the program stays in the same folder. A new item of the same kind as a removed one takes its place.
+- Changing the items only replaces the icons that changed. The log tells each icon's identity (and, on Windows, whether its GUID was accepted) or why it could not be created.
+
+### Fixed
+
+- macOS: the menu-bar icons no longer risk flickering: each picture is set with its template flag in one call (it was set, then set again as a template), the tooltip is sent only when it changed, and changing the items replaces only the icons that changed. The log shows every picture set at debug level. Not yet confirmed on the Mac that reported it.
 
 ## [1.0.0] - 2026-10-29
 
