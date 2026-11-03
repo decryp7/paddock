@@ -137,17 +137,18 @@ export const FLAT = {
   // front instead: the socket's ring, its hex bore and the square anvil in it.
   pitcrew: g => {
     if (g.n <= 20) {
-      const c = Math.round(8 * g.u * 2) / 2, R = f(5.85 * g.u), hr = 4.2 * g.u, a = Math.max(2, Math.round(2.6 * g.u));
+      // The socket from the front, as on the master: a hexagonal body with the square drive hole.
+      const c = Math.round(8 * g.u * 2) / 2, hr = 5.6 * g.u, a = Math.round(3.6 * g.u);
       const hex = Array.from({ length: 6 }, (_, i) => { const t = (Math.PI / 3) * i; return `${f(c + hr * Math.cos(t))} ${f(c + hr * Math.sin(t))}`; });
-      return [{ role: 'ink', d: circlePx(c, c, R) }, { role: 'inset', d: `M${hex.join('L')}Z`, curved: true }, g.px('ink', Math.round(c - a / 2), Math.round(c - a / 2), a, a)];
+      return [{ role: 'ink', d: `M${hex.join('L')}Z`, curved: true }, g.px('inset', Math.round(c - a / 2), Math.round(c - a / 2), a, a)];
     }
     const p = g.p, k = Math.tan((15 * Math.PI) / 180), s = g.dw;
     const yT = p(3.75), yB = p(9.25), r = (yB - yT) / 2, cx = p(4.75), gb = p(14.25), gf = 8, gw = 3.25;
     // The grip's front edge, raked 15 degrees: x at a height y (pixels).
     const front = y => gf * g.u - (y - yB) * k, back = y => front(y) - gw * g.u;
-    const gy = p(12.75), gx = p(11);
+    const gy = p(12.75), gx = p(11), q = 0.9 * g.u; // q: the fillet where the grip's back meets the housing
     const outline = `M${cx} ${yT}H${p(10)}V${p(4.5)}H${p(11.25)}V${p(5.25)}H${p(13.75)}V${p(7.75)}H${p(11.25)}V${p(8.5)}H${p(10)}V${yB}H${gx}V${gy}`
-      + `H${f(front(gy))}L${f(front(gb))} ${gb}H${f(back(gb))}L${f(back(yB))} ${yB}H${cx}A${r} ${r} 0 0 1 ${cx} ${yT}Z`;
+      + `H${f(front(gy))}L${f(front(gb))} ${gb}H${f(back(gb))}L${f(back(yB + q))} ${f(yB + q)}Q${f(back(yB))} ${yB} ${f(cx - 0.72 * q)} ${f(yB - 0.1 * q)}A${r} ${r} 0 0 1 ${cx} ${yT}Z`;
     const hole = `M${f(front(yB + s) + s * 0.5)} ${yB + s}H${gx - s}V${gy - s}H${f(front(gy - s) + s * 0.5)}Z`;
     return [{ role: 'ink', d: outline, curved: true }, { role: 'inset', d: hole, curved: true }];
   },
