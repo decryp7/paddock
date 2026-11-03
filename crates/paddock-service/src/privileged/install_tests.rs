@@ -38,6 +38,9 @@ struct State {
     registration_override: Option<Registration>,
     job_override: Option<Job>,
     points_here: Option<bool>,
+    /// The running job's process, and how many asks it stays alive for.
+    process: Option<paddock_proc::ProcessId>,
+    alive_polls: u32,
 }
 
 #[derive(Clone, Default)]
@@ -132,6 +135,18 @@ impl Backend for Scripted {
     }
     fn pause(&mut self, _how_long: Duration) {
         self.0.lock().unwrap().log.push("pause".into());
+    }
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        self.0.lock().unwrap().process
+    }
+    fn process_alive(&mut self, process: paddock_proc::ProcessId) -> bool {
+        let mut s = self.0.lock().unwrap();
+        s.log.push(format!("alive {}", process.pid()));
+        if s.alive_polls > 0 {
+            s.alive_polls -= 1;
+            return true;
+        }
+        false
     }
 }
 
@@ -1028,4 +1043,56 @@ fn a_program_the_os_will_not_delete_while_it_runs_is_left_and_the_registration_s
             .starts_with("left in place while it runs")
     );
     assert!(backend.log().contains(&"unregister".to_string()));
+}
+
+fn helper_process() -> paddock_proc::ProcessId {
+    paddock_proc::ProcessId::new(
+        4242,
+        paddock_proc::StartTime::from_micros(1_700_000_000_000_000),
+    )
+}
+
+#[test]
+fn a_stop_waits_until_the_running_process_has_ended_before_anything_is_removed() {
+    // Measured in the Windows 11 VM: the service entry was gone while the process still held its program, so the removal
+    // failed with "Access is denied". The wait is on the process's identity (pid and start time), not on the service entry.
+    let files = mac_disk();
+    files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+        s.process = Some(helper_process());
+        s.alive_polls = 3;
+    });
+    let report = run_uninstall(&layout_for(Os::MacOs), &files, &backend).unwrap();
+    assert_eq!(phases(&report)[0], Step::StopExisting);
+    let log = backend.log();
+    assert_eq!(
+        log.iter().filter(|l| l.starts_with("alive 4242")).count(),
+        4,
+        "asked until it ended: {log:?}"
+    );
+    assert!(log.iter().filter(|l| *l == "pause").count() >= 3, "{log:?}");
+    assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
+}
+
+#[test]
+fn a_process_that_does_not_end_is_an_error_that_names_it_and_removes_nothing() {
+    let files = mac_disk();
+    files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+        s.process = Some(helper_process());
+        s.alive_polls = u32::MAX;
+    });
+    let err = run_uninstall(&layout_for(Os::MacOs), &files, &backend).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Failed { phase: Step::StopExisting, why } if why.contains("4242") && why.contains("still running")),
+        "{err:?}"
+    );
+    assert!(
+        files.facts_of(Path::new(MAC_PROGRAM)).is_some(),
+        "the program stays"
+    );
 }

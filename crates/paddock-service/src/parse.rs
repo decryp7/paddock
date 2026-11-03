@@ -285,6 +285,16 @@ pub fn sc_state(sc_query: &str) -> Option<u32> {
         .ok()
 }
 
+/// The process id in `sc queryex` output (`PID : 1234`); `None` when the service has no process (`0`).
+pub fn sc_pid(sc_queryex: &str) -> Option<u32> {
+    sc_field(sc_queryex, "PID")?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+        .filter(|p| *p != 0)
+}
+
 /// The privileges in `sc qprivs` output (`Se…Privilege` words, sorted, once each; the names do not depend on the language).
 pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
     let mut found: Vec<String> = sc_qprivs
@@ -342,6 +352,14 @@ pub mod sc_exit {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_service_process_id_is_read_from_queryex() {
+        let text = "SERVICE_NAME: DynoHelper\n        TYPE               : 10  WIN32_OWN_PROCESS\n        STATE              : 4  RUNNING\n        PID                : 9884\n        FLAGS              :\n";
+        assert_eq!(super::sc_pid(text), Some(9884));
+        assert_eq!(super::sc_pid(&text.replace("9884", "0")), None);
+        assert_eq!(super::sc_pid("nothing here"), None);
+    }
+
     use super::*;
 
     const LABEL: &str = "net.decryptology.pitwall.service";

@@ -340,6 +340,16 @@ impl Backend for WindowsService {
         matches!(self.state(), Ok(None | Some(SC_STOPPED)))
     }
 
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let name = self.spec.name().to_string();
+        match self.sys.run(SC, &["queryex", &name]) {
+            Ok(o) if o.success() => {
+                crate::parse::sc_pid(&o.stdout).and_then(paddock_proc::ProcessId::of)
+            }
+            _ => None,
+        }
+    }
+
     fn pause(&mut self, how_long: Duration) {
         self.sys.pause(how_long);
     }

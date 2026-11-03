@@ -154,6 +154,15 @@ pub trait Backend: Send {
     fn evict(&mut self) -> Result<(), String>;
     /// Whether the OS no longer holds the job.
     fn job_gone(&mut self) -> bool;
+    /// The process of the running job (pid and start time, read now), so a stop can wait for that process to end: the OS may
+    /// drop the job's entry while the process still holds its program open (Windows: the program cannot then be deleted).
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        None
+    }
+    /// Whether `process` still runs (by identity, never by pid alone: rule 53).
+    fn process_alive(&mut self, process: paddock_proc::ProcessId) -> bool {
+        process.is_alive()
+    }
     /// Waits (through the port: the fake only advances its clock).
     fn pause(&mut self, how_long: Duration);
     /// Replaces the registration in one step when the mechanism can only do it that way (one elevation prompt instead

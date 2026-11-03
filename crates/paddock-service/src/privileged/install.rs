@@ -322,6 +322,8 @@ impl<'a> Installer<'a> {
 
     fn stop_existing(&mut self) -> Result<String, InstallError> {
         let mut notes = Vec::new();
+        // Read before the stop: afterwards the OS may not name the process any more.
+        let running = self.backend.job_process();
         if let Err(e) = self.backend.evict() {
             notes.push(format!("stop: {e}"));
         }
@@ -336,6 +338,25 @@ impl<'a> Installer<'a> {
             }
             self.backend.pause(self.waits.poll);
             waited += self.waits.poll;
+        }
+        // The entry being gone is not the process being gone: wait for that process itself, by identity, before anything
+        // is removed (Windows cannot delete a program a process still holds).
+        if let Some(process) = running.filter(|_| !self.running_here) {
+            let mut waited = Duration::ZERO;
+            while self.backend.process_alive(process) {
+                if waited >= self.waits.gone {
+                    return Err(failed(
+                        Step::StopExisting,
+                        format!(
+                            "the old process (pid {}) is still running {} s after it was asked to stop; close it, or restart the computer, and try again",
+                            process.pid(),
+                            self.waits.gone.as_secs()
+                        ),
+                    ));
+                }
+                self.backend.pause(self.waits.poll);
+                waited += self.waits.poll;
+            }
         }
         Ok(if notes.is_empty() {
             "removed".into()
