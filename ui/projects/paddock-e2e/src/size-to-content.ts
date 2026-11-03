@@ -66,10 +66,19 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
     // For the independent review (ER-23): the window as the frame sized it, before and after the late content.
     // The window the frame would be given: its measure within the cap, never below the kind's floor; a tool keeps its default size.
     const windowHeight = (measured: number) => (contract.kind === 'tool' ? Math.min(contract.height ?? 680, cap) : Math.max(kindFloor(contract.kind).height, Math.min(measured, cap)));
-    const shot = async (name: string, measured: number) => {
+    const shot = async (name: string, measured: number, fits = true) => {
       const height = windowHeight(measured);
       expect(height, `${where}: a window below the 200 px floor`).toBeGreaterThanOrEqual(200);
       await page.setViewportSize({ width: contract.width, height });
+      // A window as tall as the measure (within the cap) shows everything: no overflow cue (and no scroll within a pixel).
+      if (fits && contract.kind !== 'tool' && measured <= cap) {
+        await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+        const m = await page.evaluate(() => {
+          const el = document.querySelector('[data-testid=dialog-body]') as HTMLElement;
+          return { scroll: el.scrollHeight, client: el.clientHeight, cue: el.getAttribute('data-overflow') };
+        });
+        expect(m.cue, `${where} ${name}: the overflow cue shows with ${m.scroll} px of content in ${m.client} px`).toBeNull();
+      }
       if (!shots) return;
       mkdirSync(shots, { recursive: true });
       await page.screenshot({ path: join(shots, `${id}-${scale}x-${name}.png`) });
@@ -121,7 +130,7 @@ export async function expectSizeToContent(browser: Browser, baseURL: string, fix
         tall = await quiet();
       }
       expect(tall.height, `${where}: could not make the content taller than the cap`).toBeGreaterThan(cap);
-      await shot('capped', tall.height);
+      await shot('capped', tall.height, false);
       const body = await page.evaluate(() => {
         const el = document.querySelector('[data-testid=dialog-body]');
         return el ? { scroll: el.scrollHeight, client: el.clientHeight } : null;
