@@ -35,6 +35,21 @@ pub enum LiveDetail {
     Summary,
     /// Also every process and group (the task manager is open).
     Processes,
+    /// Only what the menu bar icons draw: no window shows live data. The agent keeps the user's system interval (the
+    /// icons stay live) but reads the process table at its unwatched pace, and sends no process list.
+    Tray,
+}
+
+impl LiveDetail {
+    /// How much this detail asks of the sampler: `Tray` < `Summary` < `Processes`. The sampler serves the most any
+    /// subscriber wants.
+    pub fn rank(self) -> u8 {
+        match self {
+            LiveDetail::Tray => 1,
+            LiveDetail::Summary => 2,
+            LiveDetail::Processes => 3,
+        }
+    }
 }
 
 /// Something the app asks the agent.

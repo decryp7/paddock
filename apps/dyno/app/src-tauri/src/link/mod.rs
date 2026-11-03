@@ -183,8 +183,9 @@ pub fn stop_agent_on_quit(started_by_this_app: bool, service_installed: bool) ->
 }
 
 /// What each window wants from the live stream. The agent keeps one subscription per connection, so the link asks for
-/// the most any window wants (`processes` while a task manager is open), never less than `summary` (the tray icon
-/// needs the numbers even when no window is open).
+/// the most any window wants (`processes` while a task manager is open). With no window it asks for `tray`: the menu bar
+/// icons still need the system numbers, but nothing shows the process table, which the agent then reads at its unwatched
+/// pace.
 #[derive(Debug, Default)]
 pub struct DetailVotes {
     votes: HashMap<String, LiveDetail>,
@@ -203,11 +204,7 @@ impl DetailVotes {
 
     /// What the connection should ask the agent for.
     pub fn effective(&self) -> LiveDetail {
-        if self.votes.values().any(|d| *d == LiveDetail::Processes) {
-            LiveDetail::Processes
-        } else {
-            LiveDetail::Summary
-        }
+        self.votes.values().copied().max_by_key(|d| d.rank()).unwrap_or(LiveDetail::Tray)
     }
 }
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -440,6 +437,16 @@ impl AgentLink {
     /// A window's wish for the live detail; the connection asks for the most any window wants.
     pub fn set_detail(&self, window: &str, detail: LiveDetail) -> Result<(), CommandError> {
         lock(&self.votes).set(window, detail);
+        self.sync_detail()
+    }
+
+    /// A wish that is not a window's (the menu bar items): `Some` sets it, `None` withdraws it. Makes a request to the agent
+    /// when the effective detail changes, so never call it on the UI thread.
+    pub fn set_vote(&self, voter: &str, detail: Option<LiveDetail>) -> Result<(), CommandError> {
+        match detail {
+            Some(d) => lock(&self.votes).set(voter, d),
+            None => lock(&self.votes).remove(voter),
+        }
         self.sync_detail()
     }
 

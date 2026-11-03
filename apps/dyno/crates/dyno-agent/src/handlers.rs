@@ -378,8 +378,7 @@ fn alarm_event(shared: &Shared, event: AlarmEvent) -> Answer {
 }
 
 fn subscribe(shared: &Arc<Shared>, conn: &Conn, detail: LiveDetail) -> Answer {
-    conn.detail
-        .store(if detail == LiveDetail::Processes { 2 } else { 1 }, Ordering::Relaxed);
+    conn.detail.store(crate::agent::detail_code(detail), Ordering::Relaxed);
     shared.wake_sampler();
     // Show something at once instead of waiting for the next tick.
     let live = lock(&shared.core).latest.live.clone();

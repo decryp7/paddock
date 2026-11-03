@@ -216,6 +216,12 @@ pub struct Picture {
     pub height: u32,
 }
 
+/// Whether a menu bar item shows one app's numbers, which come from the top lists: the shell then asks for the summary
+/// level even with no window open, so the process table keeps the user's pace for that item.
+pub fn shows_apps(specs: &[ItemSpec]) -> bool {
+    specs.iter().any(|s| matches!(s.metric, Metric::Process(_)))
+}
+
 /// An item's pictures with its tooltip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -913,6 +919,15 @@ mod tests {
         }];
         let mut m = TrayItems::new(vec![item("p", Metric::Process("chrome".into()), Glyph::Number)], win_env(32));
         assert!(m.frames(&u, true)[0].1.tooltip.contains("chrome 33%"));
+    }
+
+    #[test]
+    fn an_item_that_shows_one_app_needs_the_top_lists() {
+        assert!(!shows_apps(&[item("c", Metric::CpuTotal, Glyph::Number)]));
+        assert!(shows_apps(&[
+            item("c", Metric::CpuTotal, Glyph::Number),
+            item("p", Metric::Process("chrome".into()), Glyph::Number)
+        ]));
     }
 
     #[test]

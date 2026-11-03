@@ -84,7 +84,7 @@ fn spawn_signal_watch() {
 const USAGE: &str = "dyno-agent — measures your computer and keeps its history\n\n\
 usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent status              is an agent running?\n  \
 dyno-agent stop                ask the running agent to exit\n  dyno-agent once                print one measurement as JSON (changes nothing)\n  \
-dyno-agent bench [seconds] [none|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
+dyno-agent bench [seconds] [none|tray|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
 dyno-agent service install|uninstall|status|ensure   register it to start at login\n";
 
 /// The exit code of `run` when another agent already runs for the data folder: this one started nothing and changed
@@ -363,7 +363,8 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
         "none" => None,
         "summary" => Some(LiveDetail::Summary),
         "processes" => Some(LiveDetail::Processes),
-        _ => return Err("bench subscribers: none, summary or processes".into()),
+        "tray" => Some(LiveDetail::Tray),
+        _ => return Err("bench subscribers: none, tray, summary or processes".into()),
     };
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
     let tmp = tempfile_dir()?;
