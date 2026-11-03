@@ -5,6 +5,7 @@ pub mod btm;
 pub mod cpu_topology;
 pub mod desktop_entry;
 pub mod gpu;
+pub mod firewall;
 pub mod hardware;
 pub mod ioreg;
 pub mod launchd;

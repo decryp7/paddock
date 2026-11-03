@@ -17,6 +17,7 @@ pub mod diagnostics;
 pub mod disk;
 pub mod extras;
 pub mod facts;
+pub mod firewall;
 pub mod forecast;
 pub mod grouping;
 pub mod hardware;

@@ -15,6 +15,7 @@ pub mod dev_folders;
 pub mod extras;
 pub mod fake;
 pub mod fileid;
+pub mod firewall_readers;
 pub mod hardware;
 pub mod inventory;
 pub mod issues;
