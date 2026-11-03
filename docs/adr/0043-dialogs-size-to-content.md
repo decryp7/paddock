@@ -1,9 +1,10 @@
 # 43. Dialogs size to their content: a declared size mode, a continuous measure loop, logical units converted once at the OS edge
 
-- Status: Proposed (2026-11-03). Asked for by the user on 2026-11-03 ("should Paddock dialogs use the same design as
-  WPF's `Window.SizeToContent`?"). Independent review round 1 (2026-11-03) asked for changes; this revision answers its
-  three P1 and nine P2 points. The user decided D1-D6 the same day (Decisions of the user, below). Stays Proposed until
-  the delta review and the Windows VM findings (placeholder section).
+- Status: Accepted (2026-11-03; user decisions 2026-11-03; independent review approved). Asked for by the user on
+  2026-11-03 ("should Paddock dialogs use the same design as WPF's `Window.SizeToContent`?"). Review round 1 asked for
+  changes (three P1, nine P2), answered in the revision; the delta review approved it with the D3 text, fixed here. The
+  Windows VM findings (placeholder section) are still to be recorded; a cause they show that this design does not
+  cover reopens the ADR.
 - Date: 2026-11-03
 - Related: rule 17 (every dialog is a real OS window), rule 40 / ER-21 (recurring bugs mean a missing design rule),
   rule 55 / ADR 0034 (one implementation per mechanism), rule 56 / ER-27 (logs explain every failure), rule 57 / ER-28
@@ -149,7 +150,7 @@ dialog: fixed width, content height, re-layout on content change. AutoScaleMode 
 pub enum SizeMode {
     /// The window keeps the size it was given (placed, remembered or dragged); only the OS minimum follows the content.
     Manual,
-    /// Width fixed (declared, then remembered or dragged); height follows the content.
+    /// Width fixed (the kind's declared width, or dragged); height follows the content.
     Height { shrink: Shrink },
 }
 pub enum Shrink { Always, Never }   // Never: a viewer's result does not shrink under the reader (today's grows_only)
@@ -161,10 +162,10 @@ ADR, not a field.
 
 | Kind | Mode | Notes |
 |---|---|---|
-| `decision` | `Height { shrink: Always }` | width `narrow` 400 or `medium` 560 |
-| `form` | `Height { shrink: Always }` | no declared height (unchanged from ADR 0026) |
-| `viewer` | `Height { shrink: Never }` | opens at `min(content, preferred)`, grows to the cap (D2); remembers width and offset (D3) |
-| `tool` | `Manual` | preferred 960x680, OS minimum = measured minimum content |
+| `decision` | `Height { shrink: Always }` | width `narrow` 400 or `medium` 560; remembers only its offset (D3) |
+| `form` | `Height { shrink: Always }` | no declared height (unchanged from ADR 0026); remembers only its offset (D3) |
+| `viewer` | `Height { shrink: Never }` | opens at `min(content, preferred)`, grows to the cap (D2); remembers only its offset (D3) |
+| `tool` | `Manual` | default 960x680, OS minimum = measured minimum content; keeps its remembered size, clamped to the minimum content (the one exception, D3) |
 
 WPF's `Width` and `WidthAndHeight` are not adopted now (see Alternatives); the enum is closed and a variant is added by
 a later ADR if a dialog needs it.
@@ -173,9 +174,11 @@ Constraints are WPF's Min/Max: `min = max(kind floor, measured min content)`, `m
 window's current monitor; the 75 % cap (`CAP_FRACTION`) stays as the limit of the *preferred* (content) size and never
 pushes below `min` (ADR 0016 decision 4, unchanged).
 
-**A user resize switches the window to `Manual` for the rest of this opening** (WPF; D4, D6). Each opening starts in
-its kind's mode, and a `Height` window restores no remembered height (D3): a decision remembers its offset, a form and a
-viewer their width and offset, a tool its size.
+**A user resize switches the window to `Manual` for the rest of this opening** (WPF; D4, D6). Each opening starts at
+its kind's natural size (D3): decisions, forms and viewers remember only their offset (position); their width is the
+kind's declared width and their height follows the content (amends ADR 0026 §1 for forms and viewers). A tool
+(`Manual`) has no natural size beyond its 960x680 default; it keeps its remembered size, clamped to the minimum content,
+as the one exception (user confirmed 2026-11-03).
 
 ### 2. One measure loop in the page; the handshake no longer sizes
 
@@ -383,8 +386,8 @@ Each check below says which code it exercises; one that only exercises a fake is
 
 ## Phase log and the Windows 150 % run (placeholder, to be filled from `fix/dialog-sizing`)
 
-> **PLACEHOLDER: findings of the Windows VM run in progress on `fix/dialog-sizing` (`08ad47b22`). Do not accept this
-> ADR before this section is filled.** For Dyno's `pd.updates` (and at least one decision and one form), at 100 % and
+> **PLACEHOLDER: findings of the Windows VM run in progress on `fix/dialog-sizing` (`08ad47b22`). The ADR was accepted
+> before this section was filled; a cause it shows that the design does not cover reopens the ADR.** For Dyno's `pd.updates` (and at least one decision and one form), at 100 % and
 > 150 %, record the `Phase=ready`, `Phase=fit` and `Phase=scale` lines (`Content`, `Height`, `Current`, `Decor`,
 > `Delta`, `Scale`, `Zoom`, `Resized`) and the client rectangle, `GetWindowRect`, `DWMWA_EXTENDED_FRAME_BOUNDS` and
 > `GetDpiForWindow` read through UI Automation and Win32.
@@ -402,7 +405,7 @@ Each check below says which code it exercises; one that only exercises a fake is
 
 The confirmed cause is fixed as an instance in Dyno 1.1.0 (WP-0), with its failing test first (rule 5 / ER-11) and
 confirmed by a run without it (ER-28). The row then names where this design makes the cause impossible or checked (§3
-edge, §4, check 2, 5 or 6b). A cause this design does not cover sends the ADR back for revision before acceptance.
+edge, §4, check 2, 5 or 6b). A cause this design does not cover reopens the ADR for revision.
 
 ## Consequences
 
@@ -471,10 +474,11 @@ The user accepted the reviewer's answers to the open decisions. The numbers stay
 - **D2. Viewers never shrink** (`Height { shrink: Never }`), opening at `min(content, preferred)` and growing to the
   cap, with the viewport-content guard: check 3c rejects content whose height follows the window, so the window cannot
   ratchet itself to the cap.
-- **D3. Each opening starts in its kind's declared mode; no remembered size** is restored into a `Height` window. A
-  user resize to `Manual` lasts for that opening only. Read as: decisions remember their offset, forms and viewers
-  their width and offset (this **amends ADR 0026 §1** for viewers, which remembered their size); tools (`Manual`) keep
-  their remembered size, clamped to the minimum content, as before. The delta review should confirm this reading.
+- **D3. Each opening starts at its kind's natural size:** decisions, forms and viewers remember only their offset
+  (position); their width is the kind's declared width and their height follows the content (**amends ADR 0026 §1**
+  for forms and viewers). A tool (`Manual`) has no natural size beyond its 960x680 default; it keeps its remembered
+  size, clamped to the minimum content, as the one exception (user confirmed 2026-11-03). A user resize to `Manual`
+  lasts for that opening only.
 - **D4. Only a real resize switches to `Manual`:** `WM_SIZING` or `SC_SIZE` on Windows, live resize on macOS, an
   unexplained configure on X11 and Wayland (§3); a move never does.
 - **D5. Answer `WM_GETDPISCALEDSIZE`, and also defer the refit:** the posted refit after `ScaleFactorChanged` runs on
