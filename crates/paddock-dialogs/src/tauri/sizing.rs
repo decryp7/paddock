@@ -167,6 +167,15 @@ fn carry_out<R: Runtime>(
         window
             .set_size(PhysicalSize::new(r.width, r.height))
             .map_err(failed)?;
+        // A window that is not mapped yet gets no configure event for a size asked of it on GTK (found with the real
+        // probe on X11, ADR 0043 §3), and its `inner_size` still reads the old size: report the size asked for as the
+        // echo, or the show would wait for the deadline. The configure that comes with the map repeats it (the state
+        // takes that as no change) or differs (the window system's own say, taken as it comes).
+        #[cfg(target_os = "linux")]
+        if !window.is_visible().unwrap_or(true) {
+            let (w, asked) = (window.clone(), PhysicalSize::new(r.width, r.height));
+            on_main_thread(app, move || resized(&w, asked));
+        }
         if can_place()
             && let (Some(outer), Some(inner)) = (outer_rect(window), plan.inner)
             && let Some((x, y)) =
