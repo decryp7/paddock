@@ -403,22 +403,24 @@ line says "review".
 - **D1 Priority.** Measure at normal priority as a named, narrow exception to rule 52's gentle default for bulk work,
   with the marker and conformance note of section 2, rather than the brief's background priority. *Recommended
   (review):* normal, recorded as the exception.
-- **D2 GPU in its own runner** `dyno-bench-gpu`. *Recommended:* yes (crash isolation, size, build time); its signing
-  and notarizing cost is WP-B6a.
+- **D2 GPU in its own runner** `dyno-bench-gpu`. *Recommended (review):* yes (crash isolation, size, build time); its
+  signing and notarizing cost is WP-B6a.
 - **D3 Disk defaults:** 1 GiB file, 3 repetitions, at most 14.5 GiB written per drive per run as counted by
   `disk_write_budget` (fill, ramps and measured parts), sustained write off unless confirmed. *Recommended (review):*
   yes; alternative 5 repetitions like CrystalDiskMark (at most 23.5 GiB).
-- **D4 No composite score.** *Recommended:* none; per-metric numbers with spread only.
+- **D4 No composite score.** *Recommended (review):* none; per-metric numbers with spread only.
 - **D5 Linux:** start the runners as a named transient unit through `systemd-run --user`, stopped with `systemctl --user
   stop` on Cancel, and cleaned up by invocation id; spike first. *Recommended (review):* yes, fallback marked low
   confidence.
-- **D6 Battery:** consent per run; stop on unplugging without consent. *Recommended:* yes.
+- **D6 Battery:** consent per run; stop on unplugging without consent. *Recommended (review):* yes.
 - **D7 Sustained length:** 5 minutes default (2, 10, 20 offered where a temperature is readable; 5 at most where none
   is). *Recommended (review):* 5, with the no-sensor limit.
-- **D8 SIMD dispatch** through `multiversion` rather than hand-written `std::arch`. *Recommended:* `multiversion`, if
-  cargo-deny accepts its licence.
-- **D9 1.0 history:** keep and mark "measured the old way". *Recommended:* keep (cheap; 1.0 never produced real runs in
-  an install, finding 1, so it is likely empty).
+- **D8 SIMD dispatch** through `multiversion` rather than hand-written `std::arch`. *Recommended (review):* `multiversion`
+  (MIT OR Apache-2.0, accepted by the review); hand-written `#[target_feature]` functions with run-time detection are
+  the smaller alternative if the dependency is unwanted.
+- **D9 1.0 history:** keep and mark "measured the old way". *Recommended (review):* keep (cheap). The review notes
+  that dropping the 1.0 history is simpler and probably loses nothing, since 1.0 never produced real runs in an install
+  (finding 1).
 - **D10 Shipping the runner.** WP-B0 lands in 1.1.0, bundled only together with the fixed disk test (B3) or with Disk
   turned off; the 1.0 disk test is never shipped. If a 1.0.x is cut, it only changes the missing-runner text from
   "reinstall Dyno" to "Benchmarks arrive in Dyno 1.1". *Recommended (review):* yes.
