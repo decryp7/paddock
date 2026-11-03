@@ -1,0 +1,19 @@
+symbol Constant Version 8-8
+symbol Variable counter 10-10
+symbol Interface Shape 12-14
+symbol Method Shape.Area 13-13
+symbol Struct Rect 16-19
+symbol Field Rect.W 17-17
+symbol Field Rect.H 17-17
+symbol Field Rect.name 18-18
+symbol TypeAlias ID 21-21
+symbol Function NewRect 23-26
+symbol Method Rect.Area 28-32
+import fmt
+import strings
+call NewRect -> Println
+call Rect.Area -> ToUpper
+chunk Shape.Area 0 13-13
+chunk Rect 0 16-19
+chunk NewRect 0 23-26
+chunk Rect.Area 0 28-32

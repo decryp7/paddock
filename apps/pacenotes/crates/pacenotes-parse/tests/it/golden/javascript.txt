@@ -1,0 +1,15 @@
+symbol Variable path 2-2
+symbol Class Rect 4-11
+symbol Method Rect.constructor 5-7
+symbol Method Rect.area 8-10
+symbol Function load 13-16
+symbol Function double 18-18
+import fs
+call - -> require
+call Rect.area -> max
+call load -> join
+call load -> readFile
+chunk Rect.constructor 0 5-7
+chunk Rect.area 0 8-10
+chunk load 0 13-16
+chunk double 0 18-18

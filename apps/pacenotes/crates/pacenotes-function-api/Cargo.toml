@@ -1,0 +1,30 @@
+[package]
+name = "pacenotes-function-api"
+description = "The function port of Pacenotes (plan section 2.1): what a function contributes, the host calls it may make, the serialisable messages across the boundary and their typed errors, with a postcard codec that bounds every message."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# The reusable contract test of a `Host` (`pacenotes_function_api::contract`), for the engine's own host.
+testing = []
+
+[dependencies]
+pacenotes-core = { workspace = true }
+paddock-jobs = { workspace = true }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+# The integration tests use the contract module; the leg runs without --all-features.
+pacenotes-function-api = { path = ".", features = ["testing"] }
+paddock-testkit = { workspace = true }
+serde_json = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+
+[lints]
+workspace = true

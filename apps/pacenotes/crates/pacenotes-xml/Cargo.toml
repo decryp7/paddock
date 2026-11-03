@@ -1,0 +1,16 @@
+[package]
+name = "pacenotes-xml"
+description = "The one safe way Pacenotes reads untrusted XML (reports, office files): no entity can expand, no document type definition is loaded, nesting is bounded before the parser runs, and errors say where."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+roxmltree = "0.20"
+thiserror = "2"
+
+[lints]
+workspace = true

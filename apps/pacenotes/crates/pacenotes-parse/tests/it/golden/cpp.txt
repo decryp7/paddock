@@ -1,0 +1,13 @@
+symbol Module shapes 4-24
+symbol Class shapes::Rect 6-13
+symbol Method shapes::Rect::area 9-9
+symbol Struct shapes::Pair 15-18
+symbol Function shapes::twice 20-22
+symbol Method shapes::Rect::perimeter 26-28
+symbol TypeAlias Numbers 30-30
+import vector
+import local.hpp
+chunk shapes::Rect::area 0 9-9
+chunk shapes::Pair 0 15-18
+chunk shapes::twice 0 20-22
+chunk shapes::Rect::perimeter 0 26-28

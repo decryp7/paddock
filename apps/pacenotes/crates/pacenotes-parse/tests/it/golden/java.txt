@@ -1,0 +1,22 @@
+symbol Class Sample 6-33
+symbol Field Sample.count 7-7
+symbol Field Sample.LIMIT 8-8
+symbol Constructor Sample.Sample 10-12
+symbol Method Sample.total 14-20
+symbol Method Sample.helper 22-24
+symbol Interface Sample.Visitor 26-28
+symbol Method Sample.Visitor.visit 27-27
+symbol Enum Sample.Mode 30-30
+symbol Constant Sample.Mode.FAST 30-30
+symbol Constant Sample.Mode.SLOW 30-30
+symbol Struct Sample.Pair 32-32
+import java.util.List
+import static java.lang.Math.max
+call Sample.total -> max
+call Sample.total -> helper
+chunk Sample.Sample 0 10-12
+chunk Sample.total 0 14-20
+chunk Sample.helper 0 22-24
+chunk Sample.Visitor.visit 0 27-27
+chunk Sample.Mode 0 30-30
+chunk Sample.Pair 0 32-32

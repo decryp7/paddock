@@ -1,0 +1,28 @@
+[package]
+name = "pacenotes-index"
+description = "Pacenotes' index, pure half (ADR 0005): the SQLite schema v1 with its rebuild rule, the change plan (renames keep their ids), the secret denylist, the workspace walk that never leaves the workspace, and the indexer over two ports (the file system and the symbol source). Spawns nothing and parses nothing itself."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pacenotes-core = { workspace = true }
+paddock-jobs = { workspace = true }
+regex = "1.12"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+thiserror = "2"
+
+[dev-dependencies]
+pacenotes-core = { workspace = true, features = ["testing"] }
+pacenotes-git = { workspace = true }
+pacenotes-parse = { workspace = true }
+pacenotes-trap = { workspace = true }
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true

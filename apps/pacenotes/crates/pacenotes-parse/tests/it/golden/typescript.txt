@@ -1,0 +1,22 @@
+symbol Interface Shape 4-6
+symbol Method Shape.area 5-5
+symbol TypeAlias Id 8-8
+symbol Enum Mode 10-13
+symbol Class Rect 15-23
+symbol Field Rect.w 16-16
+symbol Method Rect.constructor 17-19
+symbol Method Rect.area 20-22
+symbol Function load 25-27
+symbol Function double 29-29
+symbol Variable limit 30-30
+import fs
+import path
+call Rect.area -> max
+call load -> readFile
+call load -> join
+chunk Shape.area 0 5-5
+chunk Mode 0 10-13
+chunk Rect.constructor 0 17-19
+chunk Rect.area 0 20-22
+chunk load 0 25-27
+chunk double 0 29-29

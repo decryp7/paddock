@@ -1,0 +1,15 @@
+[package]
+name = "pacenotes-trap"
+description = "The trap repository of audit finding PN1 as a generated fixture: a build script, a .env and a symlink that escapes the workspace, with the test that an indexer runs, leaks and escapes nothing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true
