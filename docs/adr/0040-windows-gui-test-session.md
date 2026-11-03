@@ -1,8 +1,8 @@
 # 40. A Windows GUI test session as standard: auto-logon, an in-session runner, and vm-smoke's GUI steps on Windows
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 2).
-  The user decided its open points on 2026-11-03 (Decisions of the user); it is accepted after a delta review. No
-  work starts before then.
+- Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03 (ER-21 redesigns, item 2)
+  and decided its open points the same day (Decisions of the user), after the independent review approved it (round 1
+  and a delta re-review, 2026-11-03).
 - Date: 2026-11-03
 - Related: ER-14 / rule 7 (tests never touch the user's machine), ER-21 / rule 40, ER-24 / rule 41 (machine load), ER-27 /
   rule 56 (logs explain every failure, on branch `ci/publish-tools`), rule 17 (every dialog is a real OS window, sized by
@@ -233,7 +233,7 @@ in `docs/benchmarks.md` (rule 48) before anyone quotes it.
 
 ## Decisions of the user (2026-11-03)
 
-The user accepted the reviewer's recommendations on 2026-11-03. The status stays Proposed until the delta review.
+The user accepted the reviewer's recommendations on 2026-11-03. The delta re-review approved the ADR with them.
 - **D1:** SmartScreen stays **MANUAL**; the Edge download and "Run anyway" are not automated.
 - **D2:** the Windows GUI result **gates the Dyno 1.1.0 tag now**; it gates another app's tags once C70 shows that app's
   `windows.gui` block (not `null`, every tray item and dialog covered or listed as manual).

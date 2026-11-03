@@ -1,8 +1,8 @@
 # 41. Deterministic timing in tests: injected clocks, paces and seams, one check over every test, and a nightly starved run
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 4).
-  The user decided its open points on 2026-11-03 (Decisions of the user); it is accepted after a delta review. No
-  work starts before then.
+- Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03 (ER-21 redesigns, item 4)
+  and decided its open points the same day (Decisions of the user), after the independent review approved it (round 1
+  and a delta re-review, 2026-11-03).
 - Date: 2026-11-03
 - Related: ER-12 / rule 5 (no sleeps or raised timeouts; one retry at most, flaky is red), ER-14 / rule 7, ER-21 / rule 40,
   ER-24 / rule 41 (machine load), ER-28 / rule 57 and ER-29 / rule 58 (a cause confirmed by a run without it; shuffled
@@ -89,10 +89,11 @@ Playwright clock that was never paused, a whole test over its budget under conte
 > starvation factor, under the runner's kill, failing with what it saw), written through the test kit, which stops a
 > test that would never end and never decides a verdict; or (b) in a harness that drives a real OS (`vm-smoke`, a
 > real-app smoke), a declared observation window: watching for a time, with its reason in the config, for an event that
-> must **not** happen (a window closing, a second process starting), never proving that something happened in time. Speed is measured in benchmarks (rule 16). A test that fails
-> only in the starved nightly run is a bug of this rule, fixed before the app's next tag. Load is reproduced by starving
-> the test, never by loading the machine (§5). Checked by C71. *Why:* about fifteen tests failed only under load in eight
-> days (ADR 0041), and a researcher's CPU burners failed a release run.
+> must **not** happen (a window closing, a second process starting), never proving that something happened in time.
+> Speed is measured in benchmarks (rule 16). A test that fails only in the starved nightly run is a bug of this rule,
+> fixed before the app's next tag once the hang-guard scaling has landed (D3). Load is reproduced by starving the test,
+> never by loading the machine (§5). Checked by C71. *Why:* about fifteen tests failed only under load in eight days
+> (ADR 0041), and a researcher's CPU burners failed a release run.
 
 ### 2. The seams in product code
 
@@ -268,7 +269,7 @@ The migration figure is a planning estimate from the counts above, not a measure
 
 ## Decisions of the user (2026-11-03)
 
-The user accepted the reviewer's recommendations on 2026-11-03. The status stays Proposed until the delta review.
+The user accepted the reviewer's recommendations on 2026-11-03. The delta re-review approved the ADR with them.
 - **D1:** C71 is an **error** over the ratchet baseline from the day it lands (§4).
 - **D2:** the starved run is **nightly in CI on Linux and Windows**; the macOS local run is **advisory** (§5).
 - **D3:** a starved-run failure **blocks the app's tag only after the hang-guard scaling has landed** (WP-2's scaled

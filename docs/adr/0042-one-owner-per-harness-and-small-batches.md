@@ -1,8 +1,8 @@
 # 42. One owner per shared harness, and smaller merge batches: a home branch per harness, size and age caps, CI once per tree
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 6).
-  The user decided its open points on 2026-11-03 (Decisions of the user); it is accepted after a delta review. No
-  work starts before then.
+- Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03 (ER-21 redesigns, item 6)
+  and decided its open points the same day (Decisions of the user), after the independent review approved it (round 1
+  and a delta re-review, 2026-11-03).
 - Date: 2026-11-03
 - Related: ER-1 / rule 1 (one release at a time), ER-2 / rule 2 (worktrees), ER-4 (complete Conventional Commits), ER-8 /
   rule 3 (the full suite once on the combined result), ER-21 / rule 40, ER-22 / rules 42-43 (share first), rule 50 (CI
@@ -227,7 +227,7 @@ switched off in the plan job.
 
 ## Decisions of the user (2026-11-03)
 
-The user accepted the reviewer's recommendations on 2026-11-03. The status stays Proposed until the delta review.
+The user accepted the reviewer's recommendations on 2026-11-03. The delta re-review approved the ADR with them.
 - **D1:** the caps are **60 commits, 200 files and 72 hours** (§3).
 - **D2:** the steward lands **at most every 8 hours** (§6).
 - **D3:** CI is **skipped for a tree already green within 24 hours**, for branch runs only, with the exclusions of §5
