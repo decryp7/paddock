@@ -34,6 +34,7 @@ so the numbering is fixed.
 | [0029](0029-saved-views-disk-map-cache.md) | Saved views: disk-map scans (and the counter catalog and software list) kept in a rebuildable `cache.db` with one writer thread, shown at once with their age, refreshed on demand and swapped when done (Accepted) |
 | [0030](0030-benchmark-tool.md) | The benchmark tool (Accepted): per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
 | [0027](0027-helper-for-1-1-0.md) | Dyno 1.1.0 (Accepted): the helper is switched on in Settings (one OS prompt), runs from a protected copy as a system service started with the OS, answers scoped read requests (processes, traffic, login items, SMART through on-demand smartmontools, firewall, counters) over `paddock-ipc`; packaging unchanged |
+| [0031](0031-network-threat-lists-world-map-and-firewall-view.md) | Network threat lists, the connections world map and a read-only firewall view: core features over opt-in downloaded data (Accepted) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.
