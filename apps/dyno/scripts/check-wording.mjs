@@ -38,6 +38,11 @@ export const ALLOW = [
   { file: 'app/src/app/features/settings/settings-page.ts', text: 'Undo is in the message that follows', reason: 'a widget layout edit is saved at once and can be undone: a setting of Dyno, not of the computer' },
   { file: 'app/src/app/core/api.types.ts', text: 'tune retire', reason: 'wire value of the alarm statistics hint kind: adjust an alarm\'s own threshold' },
   { file: 'app/src/app/core/mock/alarms.ts', text: 'tune GPU load', reason: 'mock of that wire value' },
+  // Landed with the widget grid, the benchmarks, the lists and the disk-health tool.
+  { file: 'app/src/app/core/generated/widgets.ts', text: 'undo redo', reason: 'wire names of the layout edits Undo and Redo (generated from paddock-widgets): Dyno\'s own layout' },
+  { file: 'app/src/app/features/benchmarks/bench-page.ts', text: 'undo', reason: 'the name of an icon (a cancelled run is shown with the undo icon): no change to the computer' },
+  { file: 'app/src/app/features/lists/lists-page.ts', text: 'applyDedupe', reason: 'removes duplicate entries from the person\'s own list, which is Dyno\'s data, not the computer' },
+  { file: 'crates/dyno-agent/src/tool_own_copy.rs', text: 'quarantine', reason: 'the macOS download flag of Dyno\'s own extracted copy of the tool (its own folder, removed with it)' },
   { file: 'crates/dyno-plugin-host/Cargo.toml', text: 'quarantine', reason: 'the plugin host stops a crashing plugin (a state of the plugin, not a change to the computer)' },
 ];
 

@@ -102,7 +102,7 @@ pub fn load(files: &mut dyn ProtectedFiles, path: &Path) -> Loaded {
     match parse(&text) {
         Ok(policy) => Loaded {
             policy,
-            note: Some(format!("{} applied", path.display())),
+            note: Some(format!("{} is in force", path.display())),
         },
         Err(why) => defaults(Some(format!("{} is ignored, {why}; the defaults are in force", path.display()))),
     }
@@ -154,7 +154,7 @@ mod tests {
         disk.put_file(path, b"others = \"detail\"", 0, 0o644);
         let l = load(&mut disk, path);
         assert_eq!(l.policy.others, OthersPolicy::Detail);
-        assert!(l.note.unwrap().contains("applied"));
+        assert!(l.note.unwrap().contains("is in force"));
         // A file anyone could have written is ignored.
         disk.put_file(path, b"others = \"detail\"", 501, 0o644);
         let l = load(&mut disk, path);
