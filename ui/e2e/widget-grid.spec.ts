@@ -107,7 +107,7 @@ for (const theme of THEMES) {
           // The menu, the undo toast and the add sheet, as the person sees them (the viewport).
           await startEditing(page);
           await cell(page, 'a').getByRole('button', { name: 'Actions for Alpha' }).click();
-          await expect(page.getByRole('menuitem', { name: 'Options…' })).toBeVisible();
+          await expect(page.getByRole('menuitem', { name: 'Options for Alpha…' })).toBeVisible();
           await animationsDone(page);
           await page.screenshot({ path: join(SHOTS as string, `options-menu-${theme}-${scale}x.png`) });
           await page.keyboard.press('Escape');
@@ -208,8 +208,8 @@ test('Widget grid: the actions menu does what the keys do', async ({ page }) => 
   await open(page, 'dark');
   await startEditing(page);
   await cell(page, 'a').getByRole('button', { name: 'Actions for Alpha' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Move left' })).toBeDisabled();
-  await page.getByRole('menuitem', { name: 'Wider' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Move Alpha left' })).toBeDisabled();
+  await page.getByRole('menuitem', { name: 'Make Alpha wider' }).click();
   await expect.poll(() => lines(cell(page, 'a'))).toEqual(expect.objectContaining({ column: '1 / span 5' }));
 });
 
@@ -227,7 +227,7 @@ test('Widget grid: the states and the twelve golden scenarios are drawn', async 
   await expect(page.getByTestId('wgg-empty')).toContainText('Nothing on the dashboard yet');
   await expect(page.getByTestId('wgg-cases').locator('article')).toHaveCount(12);
   await expect(page.getByTestId('wgg-case-0').locator('pd-widget-grid')).toHaveCount(2);
-  await expect(page.getByTestId('wgg-case-7').getByRole('status')).toContainText('Refused');
+  await expect(page.getByTestId('wgg-case-7').getByRole('status')).toContainText('already at the left edge');
 });
 
 test('Widget grid: a drag across a 32-widget board stays under the frame budget', async ({ page }) => {
@@ -277,8 +277,9 @@ test('Widget grid: the add sheet lists the kinds and adds one; Options is in the
   await expect(board(page).locator('[data-pd-cell]')).toHaveCount(6);
   await sheet.getByRole('button', { name: /^Add Golf|^Add .*/ }).first().click();
   await expect(board(page).locator('[data-pd-cell]')).toHaveCount(7);
+  await sheet.getByRole('button', { name: 'Close' }).click();
   await cell(page, 'a').getByRole('button', { name: 'Actions for Alpha' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Options…' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Options for Alpha…' })).toBeVisible();
 });
 
 test('Widget grid: ARIA snapshots in normal and edit mode, every widget is named, moves reach the live region', async ({ page }) => {
@@ -307,5 +308,5 @@ test('Widget grid: no raw engine text reaches the page, and a refused golden cas
   await open(page, 'dark');
   const text = await page.getByTestId('widget-grid').innerText();
   expect(text).not.toMatch(/Edge\(|Largest\b\(|Smallest\b\(|Block|Debug|\[object/);
-  await expect(page.getByTestId('wgg-case-7').getByRole('status')).toHaveText('Refused: Alpha is already at the left edge.');
+  await expect(page.getByTestId('wgg-case-7').getByRole('status')).toHaveText('Alpha is already at the left edge.');
 });

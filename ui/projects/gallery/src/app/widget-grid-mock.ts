@@ -22,7 +22,8 @@ export const GOLDEN_CASES = cases as unknown as readonly GoldenCase[];
 /** Six sample kinds; the golden cases use a to f. */
 export const SAMPLE_KINDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot'] as const;
 const size = { cells: { widths: { range: { min: 2, max: 12 } }, heights: { range: { min: 2, max: 14 } }, defaultW: 6, defaultH: 4 } } as const;
-const kindInfo = (k: string): KindInfo<string> => ({ kind: k, title: k[0]!.toUpperCase() + k.slice(1), summary: `${k} summary`, icon: 'pd:activity', size, maxInstances: 12, refresh: 'onChange' });
+const SUMMARIES: Record<string, string> = { alpha: 'Load and use now, with the last minute', bravo: 'Download and upload now', charlie: 'Free space per volume', delta: 'Most severe alarms first', echo: 'When backups last ran', foxtrot: 'The busiest apps by CPU' };
+const kindInfo = (k: string): KindInfo<string> => ({ kind: k, title: k[0]!.toUpperCase() + k.slice(1), summary: SUMMARIES[k] ?? 'A sample widget', icon: 'pd:activity', size, maxInstances: 12, refresh: 'onChange' });
 
 /** The sample kind of a placement id: a, b, c ... in turn. */
 export const kindOfId = (id: string): string => SAMPLE_KINDS[Math.max(0, id.charCodeAt(id.length - 1) - 97) % SAMPLE_KINDS.length] as string;

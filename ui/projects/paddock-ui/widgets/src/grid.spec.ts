@@ -397,7 +397,6 @@ describe('PdWidgetGrid', () => {
       key(cell('c'), 'Backspace');
       await settle(f);
       expect(backend.edit.mock.calls.map((c) => c[0])).toEqual([{ remove: { id: 'c' } }, { remove: { id: 'c' } }]);
-      expect(say).toHaveBeenCalledWith('Disk removed. Undo is in the bar.', 'polite');
     });
 
     it('a key the engine says would change nothing is not sent and says why', async () => {
@@ -491,7 +490,7 @@ describe('PdWidgetGrid', () => {
       backend.edit.mockResolvedValue({ ...v, outcome: { ...(v.outcome as NonNullable<View['outcome']>), position: 1, after: null } });
       key(cell('b'), 'Home');
       await settle(f);
-      expect(say).toHaveBeenCalledWith('Network moved to first, first. Position 1 of 3.', 'polite');
+      expect(say).toHaveBeenCalledWith('Network moved to first, before Disk. Position 1 of 3.', 'polite');
     });
 
     it('a resolved move that changed nothing says so, and a vanished widget is ignored', async () => {
@@ -548,6 +547,7 @@ describe('PdWidgetGrid', () => {
 
   describe('the menu', () => {
     const items = () => [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=menuitem]')];
+    const label = (i: HTMLElement) => i.querySelector('.pd-wg-lbl')!.textContent!.trim();
 
     it('lists the ten gestures and Remove, disables what the engine says would change nothing, and runs the chosen one', async () => {
       await create();
@@ -555,7 +555,9 @@ describe('PdWidgetGrid', () => {
       backend.edit.mockResolvedValue(moved());
       (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).toEqual(['Move left', 'Move right', 'Move up', 'Move down', 'Move CPU to first place', 'Move CPU to the end', 'Wider', 'Narrower', 'Taller', 'Shorter', 'Options…', 'Remove']);
+      expect(items().map(label)).toEqual(['Move CPU left', 'Move CPU right', 'Move CPU up', 'Move CPU down', 'Move CPU to first place', 'Move CPU to the end', 'Make CPU wider', 'Make CPU narrower', 'Make CPU taller', 'Make CPU shorter', 'Options for CPU…', 'Remove CPU']);
+      expect(items().map((i) => i.querySelector('.pd-wg-key')?.textContent ?? '')).toEqual(['←', '→', '↑', '↓', 'Home', 'End', '⇧→', '⇧←', '⇧↓', '⇧↑', '', 'Delete']);
+      expect(document.querySelectorAll('.cdk-overlay-container .pd-wg-sep')).toHaveLength(4);
       expect(items().map((i) => i.hasAttribute('disabled') || i.getAttribute('aria-disabled') === 'true')).toEqual([true, false, false, false, false, false, false, false, false, false, false, false]);
       items()[1]!.click();
       await settle(f);
@@ -572,13 +574,13 @@ describe('PdWidgetGrid', () => {
       await edit();
       (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).toContain('Options…');
-      items().find((i) => i.textContent?.trim() === 'Options…')!.click();
+      expect(items().map(label)).toContain('Options for CPU…');
+      items().find((i) => label(i) === 'Options for CPU…')!.click();
       expect(f.componentInstance.opened).toBe('a');
       await settle(f);
       (cell('b').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).not.toContain('Options…');
+      expect(items().map(label)).not.toContain('Options for CPU…');
       backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
       items().at(-1)!.click();
       await settle(f);
@@ -779,7 +781,7 @@ describe('PdWidgetGrid', () => {
   });
 
   describe('odd input and rare paths', () => {
-    type Internals = { arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
+    type Internals = { reset(): Promise<void>; arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
     const grid = () => f.debugElement.children[0]!.componentInstance as unknown as Internals;
 
     it('never throws without a view: nothing to draw, nothing to send', async () => {
@@ -828,7 +830,7 @@ describe('PdWidgetGrid', () => {
       button('Undo').disabled = false;
       await grid().undoRedo('undo');
       expect(say).not.toHaveBeenCalledWith('Undone.', 'polite');
-      expect(say).not.toHaveBeenCalledWith('CPU removed. Undo is in the bar.', 'polite');
+      expect(document.querySelector('.pd-undo-snack')).toBeNull();
       expect(say).toHaveBeenCalledWith("Couldn't change the layout. Try again.", 'polite');
     });
 
@@ -856,6 +858,27 @@ describe('PdWidgetGrid', () => {
       key(cell('a'), 'ArrowRight');
       await settle(f);
       expect(say).toHaveBeenCalledWith('CPU moved right, after net. Position 2 of 3.', 'polite');
+    });
+
+    it('has Reset to defaults in the bar menu', async () => {
+      await create();
+      await edit();
+      backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-reset') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenCalledWith('resetToDefaults', 7);
+      expect(say).toHaveBeenCalledWith('The layout is back to its defaults.', 'polite');
+      backend.edit.mockClear();
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      let done: (v: View) => void = () => undefined;
+      backend.edit.mockImplementation(() => new Promise<View>((r) => (done = r)));
+      key(cell('a'), 'ArrowRight');
+      await grid().reset();
+      expect(backend.edit).toHaveBeenCalledTimes(1);
+      done(moved());
     });
 
     it('passes a widget state action up', async () => {

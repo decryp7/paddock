@@ -76,6 +76,7 @@ export class GalBigBoard {
       <div class="wgg-board" data-testid="wgg-board">
         <pd-widget-grid [view]="view()" [values]="values()" [templates]="templates()" [hasOptions]="hasOptions" (options)="optioned = $event" [(editing)]="editing" (viewChange)="view.set($event)" (addWidget)="sheet.set(true)" />
         @if (sheet()) {
+          <div class="wgg-scrim" aria-hidden="true" (click)="sheet.set(false)"></div>
           <aside class="wgg-sheet" role="dialog" aria-label="Add a widget" data-testid="wgg-sheet">
             <pd-widget-chooser mode="add" [view]="chooserView()" [widgetFor]="widgetFor" (edit)="addEdit($event)" />
             <button matButton="outlined" type="button" (click)="sheet.set(false)">Close</button>
@@ -109,7 +110,7 @@ export class GalBigBoard {
                 @if (c.after) {
                   <pd-widget-grid [view]="c.after" [bar]="false" [values]="c.afterValues" [templates]="templates()" [width]="1000" />
                 } @else {
-                  <p class="wgg-refused" role="status">Refused: {{ c.refusal }}</p>
+                  <p class="wgg-refused" role="status">{{ c.refusal }}</p>
                 }
               </figure>
             </div>
@@ -123,7 +124,8 @@ export class GalBigBoard {
     h4 { margin: 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     .wgg-board { padding: var(--pd-space-4); background: var(--pd-surface-1); border-radius: var(--pd-radius-card); }
     .wgg-sheet { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; display: grid; align-content: start; gap: var(--pd-space-3); width: min(420px, 100vw); padding: var(--pd-space-4); overflow: auto; background: var(--pd-surface-3); box-shadow: var(--pd-shadow-3); }
-    .wgg-size { font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: var(--pd-numeric); }
+    .wgg-scrim { position: fixed; z-index: 19; inset: 0; background: color-mix(in srgb, var(--pd-bg) 55%, transparent); }
+    .wgg-size { align-self: start; font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: var(--pd-numeric); }
     .wgg-states { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--pd-space-4); }
     .wgg-fig, .wgg-pair figure { margin: 0; min-width: 0; }
     figcaption { margin-bottom: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }

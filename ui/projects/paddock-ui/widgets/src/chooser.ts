@@ -193,7 +193,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
             }
           }
         }
-        @if (editable()) {
+        @if (editable() && mode() === 'edit') {
           <div class="pd-wc-foot"><button matButton="text" type="button" (click)="reset()">Reset to defaults</button></div>
         }
       </div>

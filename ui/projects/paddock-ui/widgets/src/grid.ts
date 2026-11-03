@@ -88,6 +88,7 @@ interface Active {
         <button matButton type="button" class="pd-wg-undo" [disabled]="!view_()?.canUndo || busy()" (click)="undoRedo('undo')">Undo</button>
         <button matButton type="button" class="pd-wg-redo" [disabled]="!view_()?.canRedo || busy()" (click)="undoRedo('redo')">Redo</button>
         <button matButton="outlined" type="button" class="pd-wg-add" (click)="addWidget.emit()">Add widget</button>
+        <button matIconButton type="button" class="pd-wg-barmore" aria-label="More layout actions" [matMenuTriggerFor]="barMenu" [disabled]="busy()"><pd-glyph name="more" [size]="16" /></button>
         <button matButton="filled" type="button" class="pd-wg-done" (click)="editing.set(false)">Done</button>
       } @else if (view_(); as v) {
         <button matButton="outlined" type="button" class="pd-wg-edit" [disabled]="!canEdit()" [attr.aria-describedby]="canEdit() ? null : reasonId" (click)="editing.set(true)"><pd-glyph name="edit" [size]="16" />Edit layout</button>
@@ -203,15 +204,22 @@ interface Active {
       </div>
     }
 
+    <mat-menu #barMenu="matMenu" class="pd-wg-menu">
+      <button mat-menu-item type="button" class="pd-wg-reset" (click)="reset()"><span class="pd-wg-lbl">Reset to defaults</span></button>
+    </mat-menu>
     <mat-menu #menu="matMenu" class="pd-wg-menu">
       <ng-template matMenuContent let-id="id">
         @for (name of names; track name) {
-          <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)">{{ labelOf(id, name) }}</button>
+          <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)"><span class="pd-wg-lbl">{{ labelOf(id, name) }}</span><span class="pd-wg-key" aria-hidden="true">{{ actions[name].key }}</span></button>
+          @if (name === 'last' || name === 'down' || name === 'shorter') {
+            <hr class="pd-wg-sep" />
+          }
         }
         @if (hasOptions()(kindOfId(id))) {
-          <button mat-menu-item type="button" class="pd-wg-options" (click)="options.emit(id)">Options…</button>
+          <button mat-menu-item type="button" class="pd-wg-options" (click)="options.emit(id)"><span class="pd-wg-lbl">Options for {{ titleOf(id) }}…</span></button>
+          <hr class="pd-wg-sep" />
         }
-        <button mat-menu-item type="button" (click)="removeById(id)">Remove</button>
+        <button mat-menu-item type="button" (click)="removeById(id)"><span class="pd-wg-lbl">Remove {{ titleOf(id) }}</span><span class="pd-wg-key" aria-hidden="true">Delete</span></button>
       </ng-template>
     </mat-menu>
   `,
@@ -245,9 +253,13 @@ interface Active {
     .pd-wg-h--e::after { top: 50%; left: 0.75px; height: 16px; width: 6.5px; transform: translateY(-50%); border-inline: 1.5px solid currentColor; }
     .pd-wg-h--s::after { left: 50%; top: 0.75px; width: 16px; height: 6.5px; transform: translateX(-50%); border-block: 1.5px solid currentColor; }
     .pd-wg-ph { z-index: 0; border-radius: var(--pd-radius-card); background: var(--pd-accent-tint); outline: 1.5px dashed var(--pd-accent); outline-offset: -1.5px; position: relative; }
+    .pd-wg-menu .mat-mdc-menu-item .mat-mdc-menu-item-text { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-4); }
+    .pd-wg-key { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-wg-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: var(--pd-space-1) 0; }
     .pd-wg-chipbox { z-index: 5; pointer-events: none; display: flex; justify-content: flex-end; align-items: flex-end; }
     .pd-wg-chip { margin: 0 0 calc(-1 * (var(--pd-space-2) + 24px)) 0; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); box-shadow: var(--pd-shadow-1); }
     .pd-wg-guide { z-index: 0; pointer-events: none; width: 1px; box-sizing: border-box; border-left: 1px dashed var(--pd-snap-guide); }
+    @media (max-resolution: 1.5dppx) { .pd-wg-guide { border-left-style: solid; } }
     .pd-wg-guide--left { justify-self: start; }
     .pd-wg-guide--right { justify-self: end; }
     .pd-wg-empty, .pd-wg-state { min-width: 0; overflow-wrap: anywhere; box-sizing: border-box; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--pd-space-0) var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
@@ -463,12 +475,9 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     return sizeText(row.rect, row.position, row.of);
   }
 
-  /** The menu item: the plain label, but first and last name the widget ("Move Delta to first place", "Move Alpha to the end"). */
+  /** The menu item: a verb, the widget's name and the direction ("Move Delta left", "Make Alpha wider"). */
   protected labelOf(id: string, name: MoveName): string {
-    const title = this.titleOf(id);
-    if (name === 'first') return `Move ${title} to first place`;
-    if (name === 'last') return `Move ${title} to the end`;
-    return MOVE_ACTIONS[name].label;
+    return MOVE_ACTIONS[name].label(this.titleOf(id));
   }
 
   protected kindOfId(id: string): string {
@@ -534,9 +543,15 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     if (this.busy()) return;
     const next = await this.apply({ remove: { id } }, title);
     if (!next) return;
-    this.say(`${title} removed. Undo is in the bar.`, false);
     // The undo toast (the family's class, as the chooser's): Undo takes the removal back.
     this.snack.open(`${title} removed.`, 'Undo', { duration: UNDO_SECONDS * 1000, panelClass: 'pd-undo-snack' }).onAction().subscribe(() => void this.undoRedo('undo'));
+  }
+
+  /** Puts the app's default layout back (an undoable edit; the engine knows the defaults). */
+  protected async reset(): Promise<void> {
+    if (this.busy()) return;
+    const next = await this.apply('resetToDefaults', 'The layout');
+    if (next) this.say('The layout is back to its defaults.', false);
   }
 
   protected async undoRedo(which: 'undo' | 'redo'): Promise<void> {
@@ -655,7 +670,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
 
   // ---- words, focus and motion ----
 
-  private titleOf(id: string): string {
+  protected titleOf(id: string): string {
     return this.rows().find((r) => r.id === id)?.title ?? id;
   }
 
@@ -664,7 +679,8 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     const o = next.outcome;
     if (!o) return `${this.titleOf(id)} stays where it is.`;
     const previous = o.after === null ? null : this.kindTitle(next, o.after);
-    return outcomeText(this.titleOf(id), o, previous, gesture, before);
+    const following = o.before === null ? null : this.kindTitle(next, o.before);
+    return outcomeText(this.titleOf(id), o, previous, following, gesture, before);
   }
 
   private kindTitle(v: GridView<W, K, S>, id: string): string {
