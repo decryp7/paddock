@@ -246,7 +246,12 @@ impl CounterReader for SystemCounters {
             )),
             (HelperHost::Windows, CounterId::Thermal) => {
                 let args = ["-NoProfile", "-NonInteractive", "-Command", MSACPI].map(String::from);
-                let zones = parse_msacpi(&self.runner.run(POWERSHELL, &args, TIMEOUT)?);
+                // "Not supported": the machine has no ACPI thermal zone class (a virtual machine), not a failure to explain.
+                let text = match self.runner.run(POWERSHELL, &args, TIMEOUT) {
+                    Err(e) if e.to_string().contains("Not supported") => return Err(nothing("thermal zones")),
+                    other => other?,
+                };
+                let zones = parse_msacpi(&text);
                 if zones.is_empty() {
                     Err(nothing("thermal zones"))
                 } else {
@@ -423,6 +428,18 @@ mod tests {
         );
         assert!(matches!(win.read(CounterId::Thermal), Ok(CounterValue::Thermal(z)) if z[0].milli_celsius == 26_850));
         assert!(matches!(win.read(CounterId::Fans), Err(PlatformError::Unsupported(_))));
+        struct NotSupported;
+        impl ToolRunner for NotSupported {
+            fn run_tool(&self, _: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
+                Ok(ToolOutput {
+                    ok: false,
+                    stdout: String::new(),
+                    error: "Get-CimInstance : Not supported".into(),
+                })
+            }
+        }
+        let vm = SystemCounters::new(HelperHost::Windows, Box::new(NotSupported));
+        assert!(matches!(vm.read(CounterId::Thermal), Err(PlatformError::Unsupported(m)) if m.contains("thermal zones")));
         let empty = SystemCounters::new(HelperHost::Windows, Box::new(Scripted("")));
         assert!(empty.read(CounterId::Thermal).is_err());
     }

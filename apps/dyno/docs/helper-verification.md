@@ -94,6 +94,20 @@ Update runs the same code as Repair (install again over the running helper) and 
 | Squatting | the standard user cannot create under `/run`; with `/run/dyno-helper` made the standard user's own (as root) the state is `Foreign`; given back it is `Ready` |
 | Turn off | the helper removes itself on the authenticated request: the unit is stopped and `/run/dyno-helper` and `/var/lib/dyno-helper` are gone; the package's program stays (dpkg's) |
 
+## The readers, on real systems (2026-11-04; WP-5, WP-6, WP-10)
+
+Each OS ran the real helper and the agent's connection (`helper_vm`, test `the_helper_readers_on_this_machine`), which sends `Processes`,
+`Counters`, `MemoryModules`, `SocketOwners`, `FileHolders` and `Extras` and prints counts and kinds only. The machines were as for the runs
+above (Windows from `gui-session-tools`, reverted; Tart clone deleted; Orb restored: helper, unit and build folder removed).
+
+| System | What came back |
+| --- | --- |
+| Windows 11 (as the owner, interactive session) | `Processes`: 138 items, owners Caller 38, Service 43, System 57, one page. `MemoryModules`: `Slots`, one module (VMware). `Extras`: wake requests 0 and backup versions 0, in detail (a standard owner is shown detail), no error. Thermal: the VM has no ACPI thermal zone class, so `Get-CimInstance` answers "Not supported"; it now reads "This computer does not report thermal zones". Fans and CPU energy: unavailable with the reason. The MSAcpi read on real hardware is **not** verified. |
+| macOS 26.6.2 (Tart, Apple silicon VM) | `Processes`: 421 items (Caller 201, Service 65, System 155). `powermetrics --samplers cpu_power,smc` fails with "unrecognized sampler: smc" on Apple silicon; the reader now repeats with `cpu_power` alone and says fans are not offered. The VM has no `pmgr`, so `powermetrics` listed no CPU power: the parse of real `powermetrics` output on hardware is **not** verified. Thermal says macOS reports a pressure level, not temperatures. `MemoryModules`: `Unified`, 8 GB (the first call of `system_profiler` once took over 8 s and fell back to the total with that reason). |
+| Ubuntu 24.04 arm64 (Orb) | `Processes`: 171 items (Caller 138, Service 10, System 23). `SocketOwners`: 137 sockets. `FileHolders` for a file the test held open: exactly the test process, owner Caller. Thermal and fans: empty lists (no sensors in the machine); CPU energy: "does not publish CPU energy counters"; memory: the slot table is not published in a virtual machine. RAPL energy and fans on real hardware are **not** verified. |
+
+**Findings.** (1) On Linux an account below `UID_MIN` (Orb's user is 501) was classed as a service account and so lost its own processes as "Caller": the helper now carries the id with a service owner and compares it with the caller first (regression test `a_caller_below_the_first_person_id_still_sees_its_own_processes_as_its_own`), and the first person id comes from `/etc/login.defs`. (2) The `smc` sampler failure above. (3) The Windows "Not supported" wording above.
+
 ## Findings of the macOS and Linux runs, and what was done
 
 6. **A missing socket folder was "Not trusted".** Before anything is installed, `/var/run/dyno-helper` does not exist and `paddock-ipc`'s
