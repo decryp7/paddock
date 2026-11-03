@@ -1,7 +1,7 @@
 // The start check itself, against a `guest` (the Tart VM in run.mjs, a fake in checks.test.mjs). Every wait is a poll on state with a
 // guard for a truly stuck step; the verdicts come from judge.mjs. The guest is a throw-away clone: the only processes the check ends
 // are the app's own leftovers, and only after re-checking their identity in the same guest command (rule 53).
-import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
+import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, launchdLabelsOf, orphansAfterQuit, parseLabelledPrints, parseLaunchctlPrint, parsePs } from './judge.mjs';
 import { makeSteps } from './steplog.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -51,8 +51,19 @@ export class Check {
   async snapshot() {
     const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,lstart=,command=');
     const procs = parsePs(r.stdout);
+    // The pid launchd runs for each declared helper job, read right after ps: a helper whose parent is launchd counts only when it
+    // is that job's process (judge.mjs judgeSnapshot).
+    procs.launchdPids = await this.launchdPids();
     this.trace.push({ at: this.g.now(), procs });
     return procs;
+  }
+
+  /** { label: pid or null } for every launchd label the config declares (`launchdLabels`); {} when it declares none. */
+  async launchdPids() {
+    const labels = launchdLabelsOf(this.config);
+    if (labels.length === 0) return {};
+    const r = await this.g.exec(labels.map((l) => `printf '### %s\\n' ${sq(l)}; launchctl print gui/$(id -u)/${sq(l)} 2>&1`).join('; '));
+    return parseLabelledPrints(r.stdout);
   }
 
   async readFile(p) {
@@ -163,6 +174,12 @@ export class Check {
     for (const f of (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
       const c = await this.readFile(f.path);
       checks.push({ ok: c == null, detail: `${f.path}: ${c == null ? 'removed' : 'still there after Quit'}` });
+    }
+    // The job the app loads for its own helper (Launch at login off) is the app's to remove on Quit: launchd must not know it.
+    for (const spec of this.config.processes.filter((x) => x.launchdLabels?.off && !this.loginOn)) {
+      const label = spec.launchdLabels.off;
+      const job = parseLaunchctlPrint((await this.g.exec(`launchctl print gui/$(id -u)/${sq(label)} 2>&1`)).stdout);
+      checks.push({ ok: job.state === null, detail: `launchd job ${label}: ${job.state === null ? 'not found (removed on Quit)' : `still loaded after Quit (state ${job.state}, pid ${job.pid})`}` });
     }
     const evidence = describeTree(procs, this.config, this.bundle);
     const ok = checks.every((c) => c.ok);

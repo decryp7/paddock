@@ -89,9 +89,13 @@ export function describeTree(procs, config, bundleDir) {
 /**
  * Judges one snapshot against the app's declared processes.
  * - every spec has between `min` (default 1 for a snapshot that must be running) and `max` instances;
- * - each instance's parent is an allowed one: the app process ("app"), or launchd (ppid 1) only where the spec lists "launchd"
- *   and `loginService` is on.
- * @param {{running: boolean, loginService?: boolean}} want `running` false: nothing of the app may remain.
+ * - each instance's parent is an allowed one: the app process ("app"), or launchd (ppid 1) where the spec lists "launchd". A spec
+ *   with `launchdLabels` ({ on, off }: the job that runs the helper with Launch at login on and off) accepts ppid 1 only when
+ *   launchd reports that very pid for the label of the current state (`want.launchdPids`, else the snapshot's own `launchdPids`,
+ *   read by the caller with `launchctl print`): an orphan whose parent became launchd is not a launchd job. A spec without it
+ *   accepts ppid 1 only while `loginService` is on.
+ * @param {{running: boolean, loginService?: boolean, launchdPids?: Record<string, number|null>}} want `running` false: nothing
+ *   of the app may remain.
  * @returns {{ok:boolean, checks:{id:string, ok:boolean, detail:string}[]}}
  */
 export function judgeSnapshot(procs, config, bundleDir, want) {
@@ -121,12 +125,18 @@ export function judgeSnapshot(procs, config, bundleDir, want) {
     if (!want.running || spec.role === 'app') continue;
     for (const p of found) {
       const viaApp = (spec.parents ?? ['app']).includes('app') && appPids.has(p.ppid);
-      const viaLaunchd = (spec.parents ?? []).includes('launchd') && want.loginService === true && p.ppid === 1;
-      checks.push({
-        id: `parent:${spec.name}:${p.pid}`,
-        ok: viaApp || viaLaunchd,
-        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + ')'}`,
-      });
+      const launchdOk = (spec.parents ?? []).includes('launchd') && p.ppid === 1;
+      const label = spec.launchdLabels ? spec.launchdLabels[want.loginService ? 'on' : 'off'] : null;
+      const jobPid = label ? (want.launchdPids ?? procs.launchdPids ?? {})[label] ?? null : null;
+      const viaLaunchd = launchdOk && (label ? jobPid === p.pid : want.loginService === true);
+      const why = viaApp
+        ? 'the app'
+        : viaLaunchd
+          ? label ? `launchd, the job ${label} (pid ${jobPid})` : 'launchd (Launch at login is on)'
+          : label
+            ? `not allowed (expected launchd's job ${label}, which ${jobPid === null ? 'runs no process' : `runs pid ${jobPid}`})`
+            : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + ')';
+      checks.push({ id: `parent:${spec.name}:${p.pid}`, ok: viaApp || viaLaunchd, detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${why}` });
     }
   }
   return { ok: checks.every((c) => c.ok), checks };
@@ -191,6 +201,22 @@ export function parseLaunchctlPrint(text) {
   const field = (re) => re.exec(t)?.[1] ?? null;
   const pid = field(/^\s*pid = (\d+)\s*$/m);
   return { state: field(/^\s*state = (.+?)\s*$/m), pid: pid === null ? null : Number(pid), program: field(/^\s*program = (.+?)\s*$/m) };
+}
+
+/** The launchd labels a config declares for its helpers (`launchdLabels.on` and `.off`), each once. */
+export function launchdLabelsOf(config) {
+  return [...new Set(config.processes.flatMap((s) => (s.launchdLabels ? [s.launchdLabels.on, s.launchdLabels.off] : [])).filter(Boolean))];
+}
+
+/** Output of `printf '### %s\n' <label>; launchctl print gui/<uid>/<label>` per label to { label: pid or null }. */
+export function parseLabelledPrints(text) {
+  const out = {};
+  for (const part of String(text ?? '').split(/^### /m).slice(1)) {
+    const nl = part.indexOf('\n');
+    const label = (nl < 0 ? part : part.slice(0, nl)).trim();
+    if (label) out[label] = parseLaunchctlPrint(nl < 0 ? '' : part.slice(nl + 1)).pid;
+  }
+  return out;
 }
 
 /**

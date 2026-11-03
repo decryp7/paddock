@@ -15,24 +15,30 @@ const B = '/Applications/Dyno.app';
 /** A small fake guest: a process table, an agent.json, and the few commands the check issues. `bug` picks a seeded fault. */
 function fakeGuest({ bug = null } = {}) {
   let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false, gatekeeperOn = false;
+  // launchd's jobs that run the agent (Dyno ADR 0026 amendment 2): the login item's with Launch at login on, the app's ondemand one off.
+  const jobs = { on: null, off: null };
+  const LABELS = { [dynoConfig.processes.find((x) => x.launchdLabels).launchdLabels.on]: 'on', [dynoConfig.processes.find((x) => x.launchdLabels).launchdLabels.off]: 'off' };
+  const own = (agent) => { jobs[loginOn ? 'on' : 'off'] = agent.pid; return agent; };
   const spawn = (name, ppid, args = '') => { const p = { pid: ++pid, ppid, born: clock, command: `${B}/Contents/MacOS/${name}${args}` }; procs.push(p); return p; };
   const startApp = () => {
     if (procs.some((p) => p.command.includes('dyno-app'))) { // single instance
       if (bug === 'swap-on-second-launch') { // the agent is replaced at once: never two at a time, two over the step
         const app = procs.find((p) => p.command.includes('dyno-app'));
         procs = procs.filter((p) => !p.command.includes('dyno-agent'));
-        agentJson = JSON.stringify({ pid: spawn('dyno-agent', app.pid, ' run').pid });
+        agentJson = JSON.stringify({ pid: own(spawn('dyno-agent', 1, ' run')).pid });
       }
       return;
     }
     const app = spawn('dyno-app', 1);
-    const agent = spawn('dyno-agent', loginOn ? 1 : app.pid, ' run');
+    // launchd is the agent's parent whatever Launch at login says; a seeded fault starts it as the app's child, or re-parents it to
+    // launchd without a job.
+    const agent = bug === 'app-child' ? spawn('dyno-agent', app.pid, ' run') : bug === 'no-job' ? spawn('dyno-agent', 1, ' run') : own(spawn('dyno-agent', 1, ' run'));
     agentJson = JSON.stringify({ pid: agent.pid });
     if (bug === 'second-agent') setTimeout_(10, () => spawn('dyno-agent', app.pid, ' run'));
     // A duplicate that is gone before the app is ready, so no snapshot after ready shows two.
     if (bug === 'dup-before-ready') { const dup = spawn('dyno-agent', app.pid, ' run'); setTimeout_(4, () => { procs = procs.filter((p) => p !== dup); }); }
     // The first agent dies and a second takes over (discovery file rewritten): one at a time, two over the step.
-    if (bug === 'replaced') setTimeout_(8, () => { procs = procs.filter((p) => p !== agent); const a3 = spawn('dyno-agent', app.pid, ' run'); agentJson = JSON.stringify({ pid: a3.pid }); });
+    if (bug === 'replaced') setTimeout_(8, () => { procs = procs.filter((p) => p !== agent); const a3 = own(spawn('dyno-agent', 1, ' run')); agentJson = JSON.stringify({ pid: a3.pid }); });
   };
   const timers = [];
   const setTimeout_ = (after, fn) => timers.push({ at: clock + after, fn });
@@ -52,6 +58,7 @@ function fakeGuest({ bug = null } = {}) {
       // Quit ends the app; the agent ends with it, unless the seeded fault leaves it behind, re-parented to launchd.
       procs = procs.filter((p) => !p.command.includes('dyno-app') && (bug === 'orphan-agent' || !p.command.includes('dyno-agent')));
       if (bug === 'orphan-agent') { for (const a of procs) a.ppid = 1; } else agentJson = null;
+      if (bug !== 'job-left') jobs.off = null;
       return app ? ok() : { code: 1, stdout: '', stderr: 'not running' };
     }
     if (cmd.startsWith('ps -o lstart= -p')) return ok('Fri Oct 30 14:25:12 2026\n');
@@ -59,8 +66,13 @@ function fakeGuest({ bug = null } = {}) {
     if (kill && bug === 'ignore-term' && kill[2] === '-TERM') return ok();
     if (kill) { procs = procs.filter((p) => p.pid !== Number(kill[1])); return ok(); }
     if (cmd.includes('dyno-agent') && cmd.includes('status') && !cmd.includes('service')) return procs.some((p) => p.command.includes('dyno-agent')) ? ok('running') : { code: 1, stdout: '', stderr: '' };
-    if (cmd.includes("'service' 'install'")) { loginOn = true; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) a.ppid = 1; return ok('installed and started'); }
-    if (cmd.includes("'service' 'uninstall'")) { loginOn = false; const app = procs.find((p) => p.command.includes('dyno-app')); const a = procs.find((p) => p.command.includes('dyno-agent')); if (a && app) a.ppid = app.pid; return ok('removed'); }
+    if (cmd.includes("'service' 'install'")) { loginOn = true; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) { jobs.off = null; jobs.on = a.pid; } return ok('installed and started'); }
+    if (cmd.includes("'service' 'uninstall'")) { loginOn = false; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) { jobs.on = null; jobs.off = a.pid; } return ok('removed'); }
+    if (cmd.startsWith("printf '### ")) {
+      const labels = [...cmd.matchAll(/printf '### %s\\n' '([^']+)'/g)].map((m) => m[1]);
+      return ok(labels.map((l) => `### ${l}\n${jobs[LABELS[l]] ? `\tstate = running\n\tpid = ${jobs[LABELS[l]]}\n` : `Could not find service "${l}" in domain for user gui: 501\n`}`).join(''));
+    }
+    if (cmd.startsWith('launchctl print') && cmd.includes('.ondemand')) return jobs.off ? ok(`\tstate = running\n\tpid = ${jobs.off}\n`) : { code: 113, stdout: 'Could not find service', stderr: '' };
     if (cmd.startsWith('launchctl print')) return bug === 'no-launchd' ? { code: 113, stdout: 'Could not find service', stderr: '' } : ok('\tstate = running\n\tpid = 7\n');
     if (cmd === 'sudo spctl --global-enable') gatekeeperOn = true;
     if (cmd.startsWith('spctl --status')) return ok(gatekeeperOn ? 'assessments enabled\n' : 'assessments disabled\n'); // the pinned image ships with it off
@@ -244,4 +256,22 @@ test('the headless manual rows say Gatekeeper is enabled in the guest and point 
   const g = MANUAL.find((m) => /Gatekeeper/.test(m.title));
   assert.match(g.summary, /enabled in the guest/);
   assert.match(g.summary, /--gui/);
+});
+
+test("Dyno's agent passes only as the pid launchd runs for the job of the current state; a child of the app or a stray orphan fails", async () => {
+  for (const bug of ['app-child', 'no-job']) {
+    const s = byTitle(await run(bug), /Cold start/);
+    assert.equal(s.status, 'fail', bug);
+    assert.match(s.checks.filter((c) => !c.ok).map((c) => c.detail).join(' '), /expected launchd's job net\.decryptology\.dyno\.agent\.ondemand/, bug);
+  }
+  // The healthy run: the agent is the ondemand job's process (only failing parent checks are listed in a step).
+  assert.equal(byTitle(await run(null), /Cold start/).status, 'pass');
+});
+
+test("Quit with Launch at login off must leave no ondemand job in launchd", async () => {
+  const q = byTitle(await run('job-left'), /Quit with a window open/);
+  assert.equal(q.status, 'fail');
+  assert.ok(q.checks.some((c) => !c.ok && /net\.decryptology\.dyno\.agent\.ondemand: still loaded after Quit/.test(c.detail)), JSON.stringify(q.checks));
+  const healthy = byTitle(await run(null), /Quit with a window open/);
+  assert.ok(healthy.checks.some((c) => c.ok && /ondemand: not found \(removed on Quit\)/.test(c.detail)));
 });

@@ -23,13 +23,15 @@ function fakeGui({ bug = null } = {}) {
   let clock = 0, pid = 400;
   const procs = () => [
     ...(st.app ? [`${st.app.pid} 1 00:10 Fri Oct 30 14:00:00 2026 ${bug === 'translocated' ? '/private/var/folders/x/T/AppTranslocation/1/d/Dyno.app/Contents/MacOS/dyno-app' : `${B}/Contents/MacOS/dyno-app`}`] : []),
-    ...st.agents.map((a) => `${a.pid} ${a.ppid} 00:09 Fri Oct 30 14:00:01 2026 ${a.ppid === 1 ? 'dyno-agent run' : `${B}/Contents/MacOS/dyno-agent run`}`),
+    // The login item's job runs the bare program name (BundleProgram); the app's ondemand job runs the bundle path (ProgramArguments).
+    ...st.agents.map((a) => `${a.pid} ${a.ppid} 00:09 Fri Oct 30 14:00:01 2026 ${a.job === 'on' ? 'dyno-agent run' : `${B}/Contents/MacOS/dyno-agent run`}`),
   ].join('\n');
   const startApp = ({ login = false, hidden = false } = {}) => {
     st.app = { pid: ++pid };
     st.window = hidden ? false : !login || bug === 'login-window';
     st.log += login && bug !== 'login-window' ? 'started hidden (flag or login item)\n' : 'started with a window\n';
-    st.agents = [{ pid: ++pid, ppid: st.job && login ? 1 : st.app.pid }];
+    // launchd is the agent's parent either way (Dyno ADR 0026 amendment 2): the login item's job, or the app's ondemand job.
+    st.agents = [{ pid: ++pid, ppid: 1, job: st.job && login ? 'on' : 'off' }];
     if (bug === 'second-agent' && login) st.agents.push({ pid: ++pid, ppid: st.app.pid });
   };
   const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
@@ -82,7 +84,7 @@ function fakeGui({ bug = null } = {}) {
       if (bug === 'app-press-lost' && st.appSwitch === 0 && st.btm === 'refused' && !st.appLost) { st.appLost = true; return ok('pressed'); }
       st.appSwitch = 1 - st.appSwitch; st.dirty = true;
     }
-    else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (!st.appSwitch && bug !== 'off-not-saved') st.log += 'start at login is now off\n'; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.ppid === 1 && st.app ? { pid: ++pid, ppid: st.app.pid } : a)); } }
+    else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (!st.appSwitch && bug !== 'off-not-saved') st.log += 'start at login is now off\n'; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.job === 'on' && st.app ? { pid: ++pid, ppid: 1, job: 'off' } : a)); } }
     else if (app === 'System Settings' && role === 'AXCheckBox') {
       if (st.lostPress) { st.lostPress = false; return ok('pressed'); }
       st.liSwitch = 1 - st.liSwitch;
@@ -105,7 +107,7 @@ function fakeGui({ bug = null } = {}) {
     if (cmd.startsWith('sudo rm -rf') && cmd.includes('open ')) { st.installed = false; st.dmgOpen = true; return ok(); }
     if (cmd.startsWith('[ -x ')) return st.installed ? ok() : no;
     if (cmd.startsWith('codesign') || cmd.startsWith('mkdir -p') || cmd.startsWith('osascript') && !cmd.includes('open (POSIX')) {
-      if (cmd.includes('"Dyno" to quit')) { st.app = null; st.agents = st.agents.filter((a) => a.ppid === 1); st.window = false; }
+      if (cmd.includes('"Dyno" to quit')) { st.app = null; st.agents = st.agents.filter((a) => a.job === 'on'); st.window = false; }
       if (cmd.includes('"System Settings" to quit')) st.loginItemsOpen = false;
       return ok();
     }
@@ -115,7 +117,11 @@ function fakeGui({ bug = null } = {}) {
     if (cmd.includes('LoginItems-Settings')) { st.loginItemsOpen = true; return ok(); }
     if (cmd.startsWith('pgrep -x "System Settings"')) return st.loginItemsOpen ? ok('1') : no;
     if (cmd.startsWith('sudo sfltool')) return ok(st.btm ? ` #1:\n                 Name: dyno-agent\n          Disposition: ${disp()}\n           Identifier: 8.${LABEL}\n` : '');
-    if (cmd.startsWith('launchctl print')) return st.job ? ok(`gui/501/${LABEL} = {\n\tstate = ${st.agents.some((a) => a.ppid === 1) ? 'running' : 'spawn scheduled'}\n}`) : ok('Could not find service');
+    const jobPid = (j) => st.agents.find((a) => a.job === j)?.pid ?? null;
+    const printOf = (j) => (j === 'on' ? st.job : jobPid('off')) ? `\tstate = ${jobPid(j) ? 'running' : 'spawn scheduled'}\n${jobPid(j) ? `\tpid = ${jobPid(j)}\n` : ''}` : 'Could not find service\n';
+    if (cmd.startsWith("printf '### ")) return ok([...cmd.matchAll(/printf '### %s\\n' '([^']+)'/g)].map((x) => `### ${x[1]}\n${printOf(x[1].endsWith('.ondemand') ? 'off' : 'on')}`).join(''));
+    if (cmd.startsWith('launchctl print') && cmd.includes('.ondemand')) return jobPid('off') ? ok(printOf('off')) : { code: 113, stdout: 'Could not find service', stderr: '' };
+    if (cmd.startsWith('launchctl print')) return st.job ? ok(`gui/501/${LABEL} = {\n${printOf('on')}}`) : ok('Could not find service');
     if (cmd.startsWith('ps -axww')) return ok(procs());
     if (cmd.startsWith('grep -c -E')) return ok(String((st.log.match(new RegExp(words(cmd)[0], 'g')) ?? []).length));
     if (cmd.startsWith('ls -t') && cmd.includes('dyno.*.log')) return bug === 'day-rolls' ? ok(st.rolled ? '/Users/admin/Library/Logs/Dyno/dyno.2026-10-31.log\n' : '/Users/admin/Library/Logs/Dyno/dyno.2026-10-30.log\n') : ok('');
@@ -141,7 +147,7 @@ function fakeGui({ bug = null } = {}) {
       st.app = null; st.agents = []; st.window = false; st.settingsWin = false; st.sectionOpen = false;
       if (wasRunning) startApp();
       else if (st.job) startApp({ login: true });
-      if (wasRunning && st.job) st.agents = [{ pid: ++pid, ppid: 1 }];
+      if (wasRunning && st.job) st.agents = [{ pid: ++pid, ppid: 1, job: 'on' }];
       return true;
     },
   };

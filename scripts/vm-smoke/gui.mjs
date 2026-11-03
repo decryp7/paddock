@@ -352,7 +352,11 @@ export class GuiCheck {
     const helper = this.config.processes.find((s) => s.role === 'helper');
     if (helper && l.helperParentAfterLogin) {
       const hs = instancesOf(r.procs, helper, this.bundle);
-      const want = l.helperParentAfterLogin === 'launchd' ? (p) => p.ppid === 1 : (p) => instancesOf(r.procs, appSpec, this.bundle).some((a) => a.pid === p.ppid);
+      // With `launchdLabels`, launchd as the parent counts only for the login job's own process (its pid in `launchctl print`).
+      const loginJob = helper.launchdLabels ? (await this.job()).pid : null;
+      const want = l.helperParentAfterLogin === 'launchd'
+        ? (p) => p.ppid === 1 && (!helper.launchdLabels || loginJob === p.pid)
+        : (p) => instancesOf(r.procs, appSpec, this.bundle).some((a) => a.pid === p.ppid);
       checks.push({ ok: hs.length === 1 && hs.every(want), detail: `${helper.name} after the login: ${hs.map((p) => `pid ${p.pid} parent ${p.ppid}`).join(', ') || 'none'} (expected one, parent ${l.helperParentAfterLogin})` });
     }
     const job = await this.job();

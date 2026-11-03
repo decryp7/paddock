@@ -1,5 +1,5 @@
 {
-  "$comment": "The processes Dyno may start, for scripts/vm-smoke (docs: scripts/vm-smoke/README.md). Each process is Contents/MacOS/<name> of the installed bundle. parents: who may be its parent (app = the app process; launchd = parent pid 1, allowed only while Launch at login is on). argsPattern keeps the CLI calls of the check itself (dyno-agent status) out of the count. stateFiles name the discovery file the app finds its helper by: the pid in it must be the one live helper, and it is gone after Quit. ready: a command that exits 0 once the helper answers.",
+  "$comment": "The processes Dyno may start, for scripts/vm-smoke (docs: scripts/vm-smoke/README.md). Each process is Contents/MacOS/<name> of the installed bundle. parents: who may be its parent (app = the app process; launchd = parent pid 1). On macOS Dyno's agent is never the app's child (Dyno ADR 0026, amendment 2): with Launch at login on launchd runs it as the login item's job, with it off the app loads it as the launchd job net.decryptology.dyno.agent.ondemand. launchdLabels names both jobs: parent pid 1 counts only when launchd reports that very pid for the job of the current state, and after Quit (Launch at login off) the ondemand job must be gone. argsPattern keeps the CLI calls of the check itself (dyno-agent status) out of the count. stateFiles name the discovery file the app finds its helper by: the pid in it must be the one live helper, and it is gone after Quit. ready: a command that exits 0 once the helper answers.",
   "id": "dyno",
   "app": "Dyno",
   "bundle": "Dyno.app",
@@ -26,9 +26,12 @@
       "max": 1,
       "argsPattern": "^ run( |$)",
       "parents": [
-        "app",
         "launchd"
-      ]
+      ],
+      "launchdLabels": {
+        "on": "net.decryptology.dyno.agent",
+        "off": "net.decryptology.dyno.agent.ondemand"
+      }
     }
   ],
   "stateFiles": [
@@ -55,7 +58,7 @@
   },
   "settleWhy": "The supervisor has no fixed spawn wait any more (SPAWN_WAIT and CONNECT_GRACE are gone). The longest respawn timer is the crash-loop backoff capped at 15 s, plus 3 s END_GRACE before the held child is ended on a Retry or hand-over, plus the 2 s polling: 20 s covers one full respawn cycle. A second agent after that is a bug, not a timer.",
   "gui": {
-    "$comment": "For scripts/vm-smoke --gui (README, GUI mode): how a person sees and drives Dyno. windowOwner is the CGWindowList owner; contentRegex a text of the rendered main window; launchAtLogin the AX path to the Settings switch (open: actions until the switch is there; save: the button that applies it), the launchd label, the Login Items rows the app must have (and no other), the text the app shows when macOS needs approval, and the agent's parent after a login start; loginStart the log lines that record how the app decided to start (ADR 0010).",
+    "$comment": "For scripts/vm-smoke --gui (README, GUI mode): how a person sees and drives Dyno. windowOwner is the CGWindowList owner; contentRegex a text of the rendered main window; launchAtLogin the AX path to the Settings switch (open: actions until the switch is there; save: the button that applies it), the launchd label, the Login Items rows the app must have (and no other), the text the app shows when macOS needs approval, and the agent's parent after a login start (launchd; with launchdLabels its pid must be the login job's own, from launchctl print); loginStart the log lines that record how the app decided to start (ADR 0010).",
     "windowOwner": "Dyno",
     "contentRegex": "^Dashboard( \\||$)",
     "guardSec": 60,

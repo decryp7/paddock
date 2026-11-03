@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { describeTree, distinctCounts, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, peakCounts, renderResult } from './judge.mjs';
+import { describeTree, distinctCounts, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, launchdLabelsOf, orphansAfterQuit, parseLabelledPrints, parseLaunchctlPrint, parsePs, peakCounts, renderResult } from './judge.mjs';
 
 const BUNDLE = '/Applications/Dyno.app';
 const config = {
@@ -171,6 +171,12 @@ test('every app config lists an app process, only known keys, and helpers whose 
     for (const p of c.processes) {
       assert.ok(['app', 'helper'].includes(p.role), `${app}: role of ${p.name}`);
       for (const parent of p.parents ?? []) assert.ok(['app', 'launchd'].includes(parent), `${app}: parent ${parent}`);
+      if (p.launchdLabels) {
+        assert.deepEqual(Object.keys(p.launchdLabels).sort(), ['off', 'on'], `${app}: launchdLabels has on and off`);
+        for (const l of Object.values(p.launchdLabels)) assert.match(l, /^net\.decryptology\./, `${app}: label ${l}`);
+        assert.ok((p.parents ?? []).includes('launchd'), `${app}: a helper with launchd labels lists launchd as a parent`);
+      }
+      if (app === 'dyno' && p.role === 'helper') assert.deepEqual(p.parents, ['launchd'], 'Dyno: the agent is never the app\'s child on macOS (ADR 0026)');
     }
     assert.ok(Number.isInteger(c.readyTimeoutSec) && c.readyTimeoutSec > 0, `${app}: readyTimeoutSec`);
     assert.ok(Number.isInteger(c.settleSec) && c.settleSec >= 20 && typeof c.settleWhy === 'string', `${app}: the observation window and why`);
@@ -208,4 +214,31 @@ test('a fork of the helper is shown in the evidence, and one that never execs fa
   const stuck = ps([[458, 1, '01:03', APP], [666, 1, '01:24', 'dyno-agent run'], [739, 666, '01:00', 'dyno-agent run']]);
   const v = judgeSnapshot(stuck, config, BUNDLE, { running: true, loginService: true });
   assert.ok(!v.ok && v.checks.some((c) => !c.ok && /never exec/.test(c.detail) && /739/.test(c.detail)), JSON.stringify(v.checks));
+});
+
+test('with launchdLabels, parent pid 1 counts only for the pid launchd runs for the label of the current login state', () => {
+  const spec = { name: 'dyno-agent', role: 'helper', max: 1, argsPattern: '^ run( |$)', parents: ['launchd'], launchdLabels: { on: 'l.on', off: 'l.off' } };
+  const cfg = { processes: [config.processes[0], spec] };
+  const p = ps([[10, 1, '00:30', APP], [11, 1, '00:29', `${AGENT} run`]]);
+  const parent = (want) => judgeSnapshot(p, cfg, BUNDLE, { running: true, ...want }).checks.find((c) => c.id.startsWith('parent:'));
+  assert.equal(parent({ loginService: false, launchdPids: { 'l.off': 11, 'l.on': null } }).ok, true);
+  assert.match(parent({ loginService: false, launchdPids: { 'l.off': 11 } }).detail, /launchd, the job l\.off \(pid 11\)/);
+  assert.equal(parent({ loginService: true, launchdPids: { 'l.off': 11, 'l.on': null } }).ok, false, 'the job of the other state');
+  assert.equal(parent({ loginService: true, launchdPids: { 'l.on': 11 } }).ok, true);
+  assert.equal(parent({ loginService: false, launchdPids: { 'l.off': 99 } }).ok, false, 'another pid: an orphan, not the job');
+  assert.match(parent({ loginService: false, launchdPids: {} }).detail, /expected launchd's job l\.off, which runs no process/);
+  // The pids may also ride on the snapshot itself (checks.mjs reads them right after ps).
+  const q = ps([[10, 1, '00:30', APP], [11, 1, '00:29', `${AGENT} run`]]);
+  q.launchdPids = { 'l.off': 11 };
+  assert.equal(judgeSnapshot(q, cfg, BUNDLE, { running: true, loginService: false }).ok, true);
+  // A child of the app is not allowed when the spec lists only launchd.
+  const child = ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]);
+  assert.equal(judgeSnapshot(child, cfg, BUNDLE, { running: true, loginService: false, launchdPids: { 'l.off': 11 } }).ok, false);
+});
+
+test('labelled launchctl prints are read per label; a missing job has no pid', () => {
+  const text = "### a.b\na.b = {\n\tstate = running\n\tpid = 42\n}\n### c.d\nCould not find service \"c.d\" in domain for user gui: 501\n";
+  assert.deepEqual(parseLabelledPrints(text), { 'a.b': 42, 'c.d': null });
+  assert.deepEqual(parseLabelledPrints(''), {});
+  assert.deepEqual(launchdLabelsOf({ processes: [{ name: 'x' }, { name: 'y', launchdLabels: { on: 'a', off: 'b' } }] }), ['a', 'b']);
 });
