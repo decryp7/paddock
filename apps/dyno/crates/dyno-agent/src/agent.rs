@@ -355,6 +355,7 @@ impl Shared {
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
+        let own_tools = dirs.tools();
         let Platform {
             sensors,
             processes,
@@ -397,7 +398,7 @@ impl Shared {
             hardware: crate::hardware::HardwareCentre::new(
                 hardware.signals,
                 if own_folder {
-                    dyno_platform::hardware::disk_wear_with_own_tools(&dirs.tools())
+                    dyno_platform::hardware::disk_wear_with_own_tools(&own_tools)
                 } else {
                     hardware.wear
                 },
