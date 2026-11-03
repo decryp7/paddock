@@ -10,7 +10,9 @@ use crate::parse::btm::{parse_dumpbtm, BtmItem, BtmKind};
 use crate::parse::launchd::{parse_launch_agent, parse_print_disabled, LaunchAgent};
 use dyno_core::ports::{PlatformError, StartupItems};
 use dyno_core::startup::{exe_of_command, ImpactRating, StartupEntry, StartupImpact, StartupLocation, StartupState};
+use paddock_jobs::time::{Clock, SystemClock};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Most plist files read per folder.
@@ -101,6 +103,8 @@ pub struct LaunchAgents {
     /// The last read of the Background Task Management database (slow, and the tool may be refused): kept until it is old or
     /// [`StartupItems::refresh`] is called.
     btm_cache: Option<BtmCache>,
+    /// The time source of the cache's age (a fake in tests: no test waits).
+    clock: Arc<dyn Clock>,
     /// What the last `list` could not read.
     unavailable: Vec<String>,
 }
@@ -109,16 +113,17 @@ pub struct LaunchAgents {
 const BTM_FRESH: Duration = Duration::from_secs(300);
 
 struct BtmCache {
-    at: std::time::Instant,
+    /// The clock's monotonic reading when the answer was read.
+    at: Duration,
     result: Result<Vec<BtmItem>, PlatformError>,
 }
 
 impl BtmCache {
     /// Whether this answer may be reused at `now`: a good read for [`BTM_FRESH`], a refusal until refreshed (asking again cannot
     /// change it). Other failures are asked again at once.
-    fn usable(&self, now: std::time::Instant) -> bool {
+    fn usable(&self, now: Duration) -> bool {
         match &self.result {
-            Ok(_) => now.duration_since(self.at) < BTM_FRESH,
+            Ok(_) => now.saturating_sub(self.at) < BTM_FRESH,
             Err(PlatformError::AccessDenied(_)) => true,
             Err(_) => false,
         }
@@ -148,6 +153,7 @@ impl LaunchAgents {
             // SAFETY: getuid has no preconditions.
             uid: unsafe { libc::getuid() },
             btm_cache: None,
+            clock: Arc::new(SystemClock),
             unavailable: Vec::new(),
         }
     }
@@ -159,6 +165,7 @@ impl LaunchAgents {
         launchctl: Box<dyn Launchctl>,
         btm: Box<dyn BtmSource>,
         uid: u32,
+        clock: Arc<dyn Clock>,
     ) -> Self {
         LaunchAgents {
             user_dir,
@@ -167,6 +174,7 @@ impl LaunchAgents {
             btm,
             uid,
             btm_cache: None,
+            clock,
             unavailable: Vec::new(),
         }
     }
@@ -260,7 +268,7 @@ fn entry_of(agent: &LaunchAgent, location: StartupLocation, disabled: &[(String,
 
 impl StartupItems for LaunchAgents {
     fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError> {
-        let started = std::time::Instant::now();
+        let started = self.clock.monotonic();
         // Without launchctl's answer, the plist's own Disabled key is all we know.
         let disabled = match self.launchctl.print_disabled() {
             Ok(t) => parse_print_disabled(&t),
@@ -288,7 +296,7 @@ impl StartupItems for LaunchAgents {
             }
         }
         let before = out.len();
-        let now = std::time::Instant::now();
+        let now = self.clock.monotonic();
         if !self.btm_cache.as_ref().is_some_and(|c| c.usable(now)) {
             let uid = self.uid;
             let result = self.btm.dump().and_then(|t| {
@@ -315,7 +323,7 @@ impl StartupItems for LaunchAgents {
             None => {}
         }
         self.unavailable = unavailable;
-        log::info!(Entries = out.len(), Problems = problems.len(), Ms = started.elapsed().as_millis() as u64; "Startup items listed");
+        log::info!(Entries = out.len(), Problems = problems.len(), Ms = self.clock.monotonic().saturating_sub(started).as_millis() as u64; "Startup items listed");
         // Never an empty list that hides a failed read: with nothing read and something unreadable, the reason is the answer.
         if out.is_empty() {
             if let Some(first) = problems.into_iter().next() {
@@ -371,7 +379,14 @@ mod tests {
     }
 
     fn agents(user: Option<PathBuf>, system: Option<PathBuf>, btm: Result<String, PlatformError>) -> LaunchAgents {
-        LaunchAgents::with(user, system, Box::new(Fake::default()), Box::new(FakeBtm(btm)), UID)
+        LaunchAgents::with(
+            user,
+            system,
+            Box::new(Fake::default()),
+            Box::new(FakeBtm(btm)),
+            UID,
+            Arc::new(paddock_jobs::time::FakeClock::new()),
+        )
     }
 
     fn setup() -> (tempfile::TempDir, LaunchAgents) {
@@ -389,7 +404,14 @@ mod tests {
         let fake = Fake {
             disabled_text: "disabled services = {\n\t\"com.example.b\" => disabled\n\t\"com.example.a\" => enabled\n}".into(),
         };
-        let la = LaunchAgents::with(Some(user), Some(system), Box::new(fake), Box::new(FakeBtm(Ok(DUMP.into()))), UID);
+        let la = LaunchAgents::with(
+            Some(user),
+            Some(system),
+            Box::new(fake),
+            Box::new(FakeBtm(Ok(DUMP.into()))),
+            UID,
+            Arc::new(paddock_jobs::time::FakeClock::new()),
+        );
         (dir, la)
     }
 
@@ -468,6 +490,23 @@ mod tests {
             2,
             "an explicit refresh reads again"
         );
+    }
+
+    #[test]
+    fn a_good_read_is_reused_for_five_minutes_on_the_injected_clock() {
+        let clock = paddock_jobs::time::FakeClock::new();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut la = agents(None, None, Ok(DUMP.into()));
+        la.clock = Arc::new(clock.clone());
+        la.btm = Box::new(CountingBtm(calls.clone(), Ok(DUMP.into())));
+        let n = || calls.load(std::sync::atomic::Ordering::SeqCst);
+        la.list().unwrap();
+        clock.advance(Duration::from_secs(299));
+        la.list().unwrap();
+        assert_eq!(n(), 1, "still fresh");
+        clock.advance(Duration::from_secs(2));
+        la.list().unwrap();
+        assert_eq!(n(), 2, "older than five minutes: read again");
     }
 
     #[test]
