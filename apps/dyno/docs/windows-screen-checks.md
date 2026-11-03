@@ -58,3 +58,5 @@ read of each icon's rectangle (instead of hand-found pixel columns), the icon-si
 the scale change plus reboot as the "two scales" pass, the alarm-rule seeding in a settings file for an alert state, and the
 pop-up stays-open check over an observation window. Also: the VM image runs at 1024x768 while the ADR says 1920x1080, and its
 shutdown needs the admin account.
+
+The desktop and pop-up pictures are cropped to the tray strip and the bottom right of the screen (the full 1024x768 shots were 1 to 2 MB each); the icon sheets are whole.
