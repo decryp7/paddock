@@ -13,9 +13,28 @@ version = "7.5"
 os = "windows"
 file = "smartmontools-7.5.win32-setup.exe"
 url = "https://github.com/smartmontools/smartmontools/releases/download/RELEASE_7_5/smartmontools-7.5.win32-setup.exe"
+# How it gets onto the machine: "helper" (the helper's InstallTool) or "own-copy" (Dyno runs it from its own folder; not built yet).
+install = "helper"
 size = 1508408
 sha256 = "896337fcc253220614cf8cdbd5cf2321c5aa326a37a04160a672a281e6104c70"
 # github.com redirects release assets to its asset host; only these hosts may be contacted.
+hosts = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
+licence = "GPL-2.0-or-later"
+source_url = "https://www.smartmontools.org"
+key_fingerprint = "0C95 77FD 2C4C FCB4 B9A5 9964 0A30 812E FF3A EFF5"
+verified = "2026-11-03"
+
+# macOS: upstream's own package. ADR 0027 section 7: smartctl reads SMART there without root, so it is to run from the agent's own
+# copy and the helper is not used; the pin is recorded now (signature verified the same way) and the install step is a later change.
+[[tool]]
+id = "smartmontools"
+version = "7.5"
+os = "macos"
+file = "smartmontools-7.5.dmg"
+url = "https://github.com/smartmontools/smartmontools/releases/download/RELEASE_7_5/smartmontools-7.5.dmg"
+install = "own-copy"
+size = 1619514
+sha256 = "4aa176c161612488f3db053fdf3eee47bbc5178c8fe46afb2002d8dbdf563cc5"
 hosts = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
 licence = "GPL-2.0-or-later"
 source_url = "https://www.smartmontools.org"

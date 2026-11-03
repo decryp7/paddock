@@ -3,14 +3,23 @@
 //! file is checked by `scripts/verify-tool-pin.sh` when a pin is added or changed, never by the app.
 
 use dyno_core::helper::HelperHost;
-use dyno_core::helper_requests::MAX_TOOL_BYTES;
 use dyno_core::helper_requests::ToolKind;
+use dyno_core::helper_requests::MAX_TOOL_BYTES;
 use serde::Deserialize;
 
 /// The pack, compiled in.
 const PACK: &str = include_str!("../tools/tool-pins.toml");
 /// The publisher's signing key the pins were verified against (confirmed by a person against smartmontools.org, 2026-11-03).
 pub const SMARTMONTOOLS_KEY: &str = "0C9577FD2C4CFCB4B9A599640A30812EFF3AEFF5";
+
+/// How a pinned file gets onto the machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallVia {
+    /// The helper's `InstallTool` (it holds its own copy of the pin).
+    Helper,
+    /// Dyno runs it from its own folder (no helper; not built yet).
+    OwnCopy,
+}
 
 /// One pinned download.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +46,8 @@ pub struct ToolPin {
     pub source_url: String,
     /// When the signature was verified (`yyyy-mm-dd`).
     pub verified: String,
+    /// How it is installed.
+    pub install: InstallVia,
 }
 
 #[derive(Deserialize)]
@@ -58,6 +69,12 @@ struct Raw {
     source_url: String,
     key_fingerprint: String,
     verified: String,
+    #[serde(default = "helper")]
+    install: String,
+}
+
+fn helper() -> String {
+    "helper".into()
 }
 
 /// Why a pack was not accepted (a developer error: the pack is compiled in).
@@ -113,6 +130,11 @@ pub fn parse(text: &str) -> Result<Vec<ToolPin>, PackError> {
         if !r.url.ends_with(&r.file) {
             return bad(format!("{}: the address does not end in the file name", r.file));
         }
+        let install = match r.install.as_str() {
+            "helper" => InstallVia::Helper,
+            "own-copy" => InstallVia::OwnCopy,
+            other => return bad(format!("{}: unknown install route {other:?}", r.file)),
+        };
         out.push(ToolPin {
             tool,
             version: r.version,
@@ -125,6 +147,7 @@ pub fn parse(text: &str) -> Result<Vec<ToolPin>, PackError> {
             licence: r.licence,
             source_url: r.source_url,
             verified: r.verified,
+            install,
         });
     }
     Ok(out)
@@ -193,6 +216,11 @@ verified = "2026-11-03"
             ("verified = \"2026-11-03\"", "verified = \"yesterday\"", "date"),
             ("id = \"smartmontools\"", "id = \"nmap\"", "unknown tool"),
             ("os = \"windows\"", "os = \"plan9\"", "unknown system"),
+            (
+                "verified = \"2026-11-03\"",
+                "verified = \"2026-11-03\"\ninstall = \"magic\"",
+                "install route",
+            ),
         ];
         for (from, to, word) in cases {
             let e = parse(&GOOD.replace(from, to)).unwrap_err();

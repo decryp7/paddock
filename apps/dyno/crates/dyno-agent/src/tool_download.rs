@@ -214,6 +214,11 @@ pub fn install(shared: &crate::agent::Shared, ctx: &JobContext, tool: ToolKind) 
             "There is no download for this tool on this system. Install it with your package manager.",
         ));
     };
+    if pin.install != crate::tool_pins::InstallVia::Helper {
+        return Err(fail(
+            "Dyno cannot install this tool on this system yet. Install it with your package manager or from the publisher's page.",
+        ));
+    }
     if shared.helper.status().state != HelperState::Ready {
         return Err(fail(
             "Turn on administrator readings first: the helper installs the tool. Then try again.",
@@ -255,6 +260,7 @@ mod tests {
             licence: "GPL-2.0-or-later".into(),
             source_url: "https://example.org".into(),
             verified: "2026-11-03".into(),
+            install: crate::tool_pins::InstallVia::Helper,
         }
     }
 
