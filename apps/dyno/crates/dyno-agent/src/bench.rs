@@ -15,6 +15,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// The executables the agent starts by name for benchmarks, declared once: each must be in `bundle.externalBin`
+/// (`scripts/check-shipped.mjs` reads this list and fails when one is not bundled, ADR 0030 B0).
+pub const RUNNER_NAMES: &[&str] = &["dyno-bench"];
+
+/// What the person sees when the runner is not in the installation (an older install, or a damaged one).
+pub const RUNNER_MISSING: &str =
+    "Benchmarks need the dyno-bench program, which this installation does not include. Install Dyno 1.1 or later, or run the installer again.";
+
 /// How long one kind may run before it is killed. Disk gets more: a slow USB stick writing the capped file.
 pub fn timeout(kind: BenchKind) -> Duration {
     match kind {
@@ -38,7 +46,11 @@ pub struct ProcessLauncher {
 impl ProcessLauncher {
     /// The launcher for the executable beside the running agent.
     pub fn beside_agent() -> ProcessLauncher {
-        let name = if cfg!(windows) { "dyno-bench.exe" } else { "dyno-bench" };
+        let name = if cfg!(windows) {
+            format!("{}.exe", RUNNER_NAMES[0])
+        } else {
+            RUNNER_NAMES[0].to_string()
+        };
         let dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(Path::to_path_buf))
@@ -56,7 +68,7 @@ impl BenchLauncher for ProcessLauncher {
     fn run(&self, kind: BenchKind, scratch: &Path, disk_mib: u32) -> BenchStatus {
         if !self.exe.is_file() {
             return BenchStatus::Unavailable {
-                reason: "The benchmark runner (dyno-bench) is missing from the installation; reinstall Dyno.".into(),
+                reason: RUNNER_MISSING.into(),
             };
         }
         let mut cmd = dyno_platform::process::command(&self.exe);
@@ -129,6 +141,7 @@ impl BenchCentre {
         BenchOverview {
             running: s.running.clone(),
             runs: s.history.runs.clone(),
+            disk_test_enabled: dyno_core::bench::DISK_TEST_ENABLED,
         }
     }
 
@@ -269,7 +282,7 @@ pub const FILE_VERSION: u32 = HISTORY_VERSION;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::bench::{plan, BenchMetric};
+    use dyno_core::bench::{plan_with, BenchMetric};
     use std::sync::atomic::AtomicUsize;
 
     struct Fake {
@@ -325,7 +338,12 @@ mod tests {
     }
 
     fn start(c: &BenchCentre, kinds: &[BenchKind]) -> Result<BenchOverview, AgentError> {
-        c.start(plan(kinds, None, "test run", None).unwrap(), None, LoadAtRun::default(), "m".into())
+        c.start(
+            plan_with(kinds, None, "test run", None, true).unwrap(),
+            None,
+            LoadAtRun::default(),
+            "m".into(),
+        )
     }
 
     #[test]
@@ -408,7 +426,7 @@ mod tests {
     fn a_missing_runner_is_unavailable_with_a_next_step() {
         let tmp = tempfile::tempdir().unwrap();
         let s = ProcessLauncher::at(tmp.path().join("absent")).run(BenchKind::Cpu, tmp.path(), 16);
-        assert!(matches!(s, BenchStatus::Unavailable { reason } if reason.contains("reinstall")));
+        assert!(matches!(s, BenchStatus::Unavailable { reason } if reason == RUNNER_MISSING && !reason.contains("reinstall Dyno")));
     }
 
     #[test]

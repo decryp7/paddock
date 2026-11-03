@@ -61,8 +61,8 @@ const KINDS: { kind: BenchKind; text: string }[] = [
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
                 @for (k of kinds; track k.kind) {
-                  <mat-checkbox class="kind" [attr.data-on]="chosen().has(k.kind)" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)">
-                    <span class="kbody"><dy-icon [name]="icons[k.kind]" /><span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span></span>
+                  <mat-checkbox class="kind" [attr.data-on]="chosen().has(k.kind)" [checked]="chosen().has(k.kind)" [disabled]="k.kind === 'disk' && !o.diskTestEnabled" (change)="toggle(k.kind)">
+                    <span class="kbody"><dy-icon [name]="icons[k.kind]" /><span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.kind === 'disk' && !o.diskTestEnabled ? 'Off for now: being rebuilt to measure the drive, not the memory cache' : k.text }}</span></span></span>
                   </mat-checkbox>
                 }
               </div>
@@ -236,7 +236,7 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly store = inject(BenchStore);
   protected readonly kinds = KINDS;
-  protected readonly chosen = signal<ReadonlySet<BenchKind>>(new Set<BenchKind>(['cpu', 'memory', 'disk']));
+  protected readonly chosen = signal<ReadonlySet<BenchKind>>(new Set<BenchKind>(['cpu', 'memory']));
   protected readonly label = signal('');
   protected readonly change = signal('');
   protected readonly picked = signal<string[]>([]);

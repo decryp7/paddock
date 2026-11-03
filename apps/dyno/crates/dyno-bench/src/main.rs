@@ -40,6 +40,10 @@ fn parse(args: &[String]) -> Result<(BenchKind, Option<PathBuf>, u32, u64), Stri
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("dyno-bench {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let (kind, dir, mib, millis) = match parse(&args) {
         Ok(p) => p,
         Err(e) => {

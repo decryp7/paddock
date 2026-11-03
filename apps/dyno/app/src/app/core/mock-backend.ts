@@ -960,7 +960,7 @@ export class MockBackend implements DynoBackend {
   }
 
   benchmarks(): Promise<BenchOverview> {
-    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs() }));
+    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs(), diskTestEnabled: false }));
   }
 
   startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
@@ -992,7 +992,7 @@ export class MockBackend implements DynoBackend {
         }, 900);
       };
       step(0);
-      return { running: this.benchRunning, runs: this.runs() };
+      return { running: this.benchRunning, runs: this.runs(), diskTestEnabled: false };
     });
   }
 

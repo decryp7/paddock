@@ -10,6 +10,12 @@ pub const DISK_MAX_MIB: u32 = 512;
 pub const DISK_DEFAULT_MIB: u32 = 128;
 /// Smallest scratch file, in MiB (smaller numbers only measure the cache).
 pub const DISK_MIN_MIB: u32 = 16;
+/// Whether the disk test may run. Off until ADR 0030 WP-B3 replaces the 1.0 method, whose reads came from the page cache
+/// (D10: the 1.0 disk test is never shipped). Turn it on in the same change that lands the rebuilt test.
+pub const DISK_TEST_ENABLED: bool = false;
+/// What the person is told while [`DISK_TEST_ENABLED`] is false.
+pub const DISK_TEST_OFF: &str =
+    "The disk test is being rebuilt to measure the drive and not the memory cache; it returns in a later Dyno 1.1 update.";
 /// Runs kept; the oldest are dropped first.
 pub const MAX_RUNS: usize = 50;
 /// Longest label or group name, in characters.
@@ -275,6 +281,20 @@ fn clean(s: &str) -> String {
 
 /// Validates a start request: at least one kind, a bounded scratch file, short printable names.
 pub fn plan(kinds: &[BenchKind], disk_mib: Option<u32>, label: &str, group: Option<&str>) -> Result<RunPlan, String> {
+    plan_with(kinds, disk_mib, label, group, DISK_TEST_ENABLED)
+}
+
+/// [`plan`] with the disk switch passed in, so the rule is testable whichever way the build flag is set.
+pub fn plan_with(
+    kinds: &[BenchKind],
+    disk_mib: Option<u32>,
+    label: &str,
+    group: Option<&str>,
+    disk_enabled: bool,
+) -> Result<RunPlan, String> {
+    if !disk_enabled && kinds.contains(&BenchKind::Disk) {
+        return Err(DISK_TEST_OFF.into());
+    }
     let mut unique: Vec<BenchKind> = Vec::new();
     for k in kinds {
         if !unique.contains(k) {
@@ -426,6 +446,8 @@ pub struct BenchOverview {
     pub running: Option<BenchProgress>,
     /// Saved runs, newest first.
     pub runs: Vec<BenchRun>,
+    /// Whether the disk test can be chosen ([`DISK_TEST_ENABLED`]); the page shows it as off otherwise.
+    pub disk_test_enabled: bool,
 }
 
 /// The saved run history: versioned, bounded and tolerant of damage.
@@ -537,11 +559,12 @@ mod tests {
 
     #[test]
     fn a_plan_is_validated_and_cleaned() {
-        let p = plan(
+        let p = plan_with(
             &[BenchKind::Disk, BenchKind::Disk, BenchKind::Cpu],
             None,
             "  Power\u{7}  plan ",
             Some("  "),
+            true,
         )
         .unwrap();
         assert_eq!(p.kinds, vec![BenchKind::Disk, BenchKind::Cpu]);
@@ -549,14 +572,27 @@ mod tests {
         assert_eq!(p.label, "Power  plan");
         assert_eq!(p.group, None);
         assert!(plan(&[], None, "", None).is_err());
-        assert!(plan(&[BenchKind::Disk], Some(DISK_MAX_MIB + 1), "", None).is_err());
-        assert!(plan(&[BenchKind::Disk], Some(1), "", None).is_err());
+        assert!(plan_with(&[BenchKind::Disk], Some(DISK_MAX_MIB + 1), "", None, true).is_err());
+        assert!(plan_with(&[BenchKind::Disk], Some(1), "", None, true).is_err());
         assert_eq!(plan(&[BenchKind::Cpu], None, "", None).unwrap().label, "Benchmark");
         let long = "a".repeat(500);
         assert_eq!(
             plan(&[BenchKind::Cpu], None, &long, Some(&long)).unwrap().label.chars().count(),
             MAX_LABEL
         );
+    }
+
+    #[test]
+    fn the_disk_test_is_refused_while_it_is_off_and_the_default_build_has_it_off() {
+        // The build flag decides; while it is off (until WP-B3, ADR 0030 D10) a plan with Disk is refused with the plain words.
+        let with_disk = plan(&[BenchKind::Cpu, BenchKind::Disk], None, "", None);
+        assert_eq!(with_disk.is_err(), !DISK_TEST_ENABLED);
+        assert_eq!(
+            plan_with(&[BenchKind::Cpu, BenchKind::Disk], None, "", None, false).unwrap_err(),
+            DISK_TEST_OFF
+        );
+        assert!(plan(&[BenchKind::Cpu, BenchKind::Memory], None, "", None).is_ok());
+        assert!(plan_with(&[BenchKind::Disk], None, "", None, true).is_ok());
     }
 
     #[test]

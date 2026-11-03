@@ -26,7 +26,7 @@ fn main() {
         let ext = if target.contains("windows") { ".exe" } else { "" };
         let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default()).join("binaries");
         let mut placeholders = false;
-        for name in ["dyno-agent", "dyno"] {
+        for name in ["dyno-agent", "dyno", "dyno-bench"] {
             let sidecar = dir.join(format!("{name}-{target}{ext}"));
             if !sidecar.exists() {
                 let _ = std::fs::create_dir_all(&dir);
@@ -54,7 +54,7 @@ fn main() {
             // OUT_DIR is target/<profile>/build/<package>-<hash>/out.
             let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default());
             if let Some(profile_dir) = out.ancestors().nth(3) {
-                for name in ["dyno-agent", "dyno"] {
+                for name in ["dyno-agent", "dyno", "dyno-bench"] {
                     let copy = profile_dir.join(format!("{name}{ext}"));
                     if std::fs::metadata(&copy).is_ok_and(|m| m.is_file() && m.len() == 0) {
                         let _ = std::fs::remove_file(&copy);

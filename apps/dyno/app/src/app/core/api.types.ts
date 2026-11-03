@@ -1148,6 +1148,8 @@ export interface BenchProgress {
 export interface BenchOverview {
   running: BenchProgress | null;
   runs: BenchRun[];
+  /** False while the engine keeps the disk test off (ADR 0030 D10); the page shows it as unavailable. */
+  diskTestEnabled: boolean;
 }
 
 export type BenchVerdict = 'better' | 'worse' | 'same';

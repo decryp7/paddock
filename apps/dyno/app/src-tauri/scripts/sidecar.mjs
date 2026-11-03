@@ -1,4 +1,4 @@
-// Builds dyno-agent and the dyno command (crate dyno-cli) and puts them where Tauri's `externalBin` expects them:
+// Builds dyno-agent, the dyno command (crate dyno-cli) and the benchmark runner dyno-bench (ADR 0030) and puts them where Tauri's `externalBin` expects them:
 // app/src-tauri/binaries/<name>-<target triple>[.exe]. Run by `beforeBuildCommand` / `beforeDevCommand`
 // (tauri.conf.json); `--dev` builds the debug profile. Honours CARGO_TARGET_DIR, a build.target-dir in the cargo configuration (CI's .cargo/ci.toml) and TAURI_ENV_TARGET_TRIPLE.
 import { execFileSync } from 'node:child_process';
@@ -14,7 +14,7 @@ const triple = process.env.TAURI_ENV_TARGET_TRIPLE || host;
 if (!triple) throw new Error('cannot tell the target triple (rustc -vV)');
 const profile = dev ? 'dev' : 'dist';
 // [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`.
-const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli']];
+const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli'], ['dyno-bench', 'dyno-bench']];
 const args = ['build', ...sidecars.flatMap(([, pkg]) => ['-p', pkg]), '--profile', profile];
 if (triple !== host) args.push('--target', triple);
 execFileSync('cargo', args, { cwd: root, stdio: 'inherit' });

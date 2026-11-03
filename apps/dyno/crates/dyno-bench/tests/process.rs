@@ -10,6 +10,13 @@ fn bin() -> Command {
 }
 
 #[test]
+fn version_prints_and_exits_zero_for_the_bundle_check() {
+    let out = bin().arg("--version").output().unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("dyno-bench "));
+}
+
+#[test]
 fn cpu_prints_a_done_status() {
     let out = bin().args(["cpu", "--millis", "20"]).output().unwrap();
     assert!(out.status.success());

@@ -66,6 +66,14 @@ export function elevationOffences(root, dirs) {
   return found;
 }
 
+/** The executables `dyno-agent` starts by name: the one list `RUNNER_NAMES` in `crates/dyno-agent/src/bench.rs` (ADR 0030 B0). */
+export function startedByAgent(root) {
+  const text = readFileSync(join(root, 'crates/dyno-agent/src/bench.rs'), 'utf8');
+  const list = /pub const RUNNER_NAMES: &\[&str\] = &\[([^\]]*)\];/.exec(text);
+  if (!list) throw new Error('crates/dyno-agent/src/bench.rs declares no RUNNER_NAMES list');
+  return [...list[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
 /** The folders of the shipped crates. */
 export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-ipc', 'app/src-tauri/src'];
 
