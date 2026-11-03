@@ -122,31 +122,12 @@ mod windows_dpi {
     }
 }
 
-/// Shows `look` on the icon: macOS gets both representations in one `setImage` (the patched tray-icon), the others one image.
-fn set_picture(tray: &tauri::tray::TrayIcon<Wry>, look: &Look) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let reps: Vec<(Vec<u8>, u32, u32)> = look.pictures.iter().map(|p| (p.rgba.clone(), p.width, p.height)).collect();
-        let size = (f64::from(look.width), f64::from(look.height));
-        let template = look.template;
-        tray.with_inner_tray_icon(move |t| {
-            let refs: Vec<(&[u8], u32, u32)> = reps.iter().map(|(b, w, h)| (b.as_slice(), *w, *h)).collect();
-            t.set_icon_reps(&refs, size, template).map_err(|e| e.to_string())
-        })
-        .map_err(|e| e.to_string())?
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let p = look.pictures.first().ok_or("no picture")?;
-        tray.set_icon(Some(Image::new_owned(p.rgba.clone(), p.width, p.height)))
-            .map_err(|e| e.to_string())
-    }
-}
-
 /// Proof that the code runs on the main thread. AppKit (`NSStatusItem`) and the shell's tray must be created, changed and dropped
-/// there: dropping a `TrayIcon` anywhere else calls `NSStatusItem _uninstall` off the main thread and the app dies with SIGTRAP
-/// (the crash report of the first macOS VM run). The only way to get one is [`on_main`], and it is not `Send`, so a function that
-/// takes `&MainToken` cannot be reached from another thread.
+/// there: a `TrayIcon` handle is reference-counted without atomics, so even cloning or dropping one elsewhere races the main thread,
+/// and the last drop off the main thread calls `NSStatusItem _uninstall` there and kills the app with SIGTRAP (both macOS VM
+/// crashes). The only way to get a token is [`on_main`] (or [`dispatch`]), and it is not `Send`, so nothing that takes
+/// `&MainToken` is reachable from another thread. In debug builds on macOS making a token asserts the thread, so a mistake is a
+/// Rust panic with a stack, not an AppKit trap.
 ///
 /// The guard: a `MainToken` must never become `Send` (this fails to compile if it does).
 ///
@@ -160,11 +141,17 @@ pub struct MainToken {
 
 impl MainToken {
     fn here() -> MainToken {
+        let token = MainToken {
+            _not_send: std::marker::PhantomData,
+        };
+        token.assert_main();
+        token
+    }
+
+    /// Debug builds on macOS: panics (with a stack) if this is not the main thread.
+    fn assert_main(&self) {
         #[cfg(all(target_os = "macos", not(test)))]
         debug_assert!(objc2::MainThreadMarker::new().is_some(), "tray code must run on the main thread");
-        MainToken {
-            _not_send: std::marker::PhantomData,
-        }
     }
 }
 
@@ -178,144 +165,389 @@ pub fn on_main<R: Runtime, T: Send + 'static>(app: &AppHandle<R>, f: impl FnOnce
     rx.recv().map_err(|_| "the main thread dropped the tray work".to_string())
 }
 
-/// Creates the tray icon of one item.
-fn create_item(_main: &MainToken, app: &AppHandle<Wry>, spec: &ItemSpec, initial: Option<&Frame>) -> tauri::Result<()> {
-    let menu = build_menu(app)?;
-    let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))
-        .inspect_err(|e| logging::info(&format!("tray icon {}: the static image could not be read: {e}", tray_id(&spec.id))))?;
-    logging::info(&format!(
-        "tray icon {}: static image set, {}x{} px (dark taskbar: {})",
-        tray_id(&spec.id),
-        icon.width(),
-        icon.height(),
-        dark_taskbar()
-    ));
-    #[cfg(target_os = "macos")]
-    crate::tray_position::restore(&tray_identity::autosave_name(&spec.id));
-    let tray = TrayIconBuilder::with_id(tray_id(&spec.id))
-        .tooltip("Dyno")
-        .icon(icon)
-        .icon_as_template(cfg!(target_os = "macos"))
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| paddock_window::tauri::menu_chosen(app, event.id().as_ref()))
-        .on_tray_icon_event(move |tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = &event {
-                logging::info(&format!("tray click: {button:?} {button_state:?}"));
-            }
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                rect,
-                ..
-            } = event
-            {
-                let p = rect.position.to_physical::<f64>(1.0);
-                let s = rect.size.to_physical::<f64>(1.0);
-                let anchor = Rect {
-                    x: p.x,
-                    y: p.y,
-                    w: s.width,
-                    h: s.height,
-                };
-                if let Err(e) = paddock_window::tauri::toggle_popover(tray.app_handle(), None, anchor) {
-                    logging::info(&format!("could not open the popover: {}", e.message));
-                }
-            }
+/// Sends `f` to the main thread and does not wait (the live pictures: one per item per tick must not block the agent link).
+pub fn dispatch<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&MainToken) + Send + 'static) {
+    if let Err(e) = app.run_on_main_thread(move || f(&MainToken::here())) {
+        logging::info(&format!("could not reach the main thread for the tray: {e}"));
+    }
+}
+
+/// The one handle to a native tray icon. It is not `Send` and every method takes a [`MainToken`], so the agent link's thread can
+/// neither hold nor call one: it sends [`TrayCommand`]s and the main thread applies them. Dropping it checks the thread too.
+///
+/// ```compile_fail
+/// fn needs_send<T: Send>() {}
+/// needs_send::<dyno_app_lib::tray::NativeIcon>();
+/// ```
+pub struct NativeIcon {
+    icon: tauri::tray::TrayIcon<Wry>,
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl Drop for NativeIcon {
+    fn drop(&mut self) {
+        MainToken::here();
+    }
+}
+
+impl NativeIcon {
+    /// The icon of item `id`, when there is one.
+    fn find(main: &MainToken, app: &AppHandle<Wry>, id: &str) -> Option<NativeIcon> {
+        main.assert_main();
+        app.tray_by_id(&tray_id(id)).map(|icon| NativeIcon {
+            icon,
+            _not_send: std::marker::PhantomData,
         })
-        .build(app)
-        .inspect_err(|e| logging::info(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
-    // Start at the item's final width, as unavailable, so nothing resizes when the first live picture arrives.
-    if let Some(frame) = initial {
-        if let Err(e) = set_picture(&tray, &frame.look) {
-            logging::info(&format!("tray icon {}: the first picture was refused: {e}", tray_id(&spec.id)));
-        }
-        let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     }
-    let identity = apply_identity(&tray, &spec.id);
-    logging::info(&format!(
-        "tray icon {} created (metric {}, {identity}; on Windows 11 a new icon may sit in the overflow until it is pinned in Settings > Personalization > Taskbar)",
-        tray_id(&spec.id),
-        crate::tray_model::metric_name(&spec.metric)
+
+    /// Builds the icon of one item (static image first; the item's final picture and identity follow).
+    fn build(main: &MainToken, app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<NativeIcon> {
+        main.assert_main();
+        let menu = build_menu(app)?;
+        let image = Image::from_bytes(static_icon_bytes(dark_taskbar()))
+            .inspect_err(|e| logging::info(&format!("tray icon {}: the static image could not be read: {e}", tray_id(&spec.id))))?;
+        logging::info(&format!(
+            "tray icon {}: static image set, {}x{} px (dark taskbar: {})",
+            tray_id(&spec.id),
+            image.width(),
+            image.height(),
+            dark_taskbar()
+        ));
+        #[cfg(target_os = "macos")]
+        crate::tray_position::restore(&tray_identity::autosave_name(&spec.id));
+        let icon = TrayIconBuilder::with_id(tray_id(&spec.id))
+            .tooltip("Dyno")
+            .icon(image)
+            .icon_as_template(cfg!(target_os = "macos"))
+            .menu(&menu)
+            .show_menu_on_left_click(false)
+            .on_menu_event(|app, event| paddock_window::tauri::menu_chosen(app, event.id().as_ref()))
+            .on_tray_icon_event(move |tray, event| {
+                if let TrayIconEvent::Click { button, button_state, .. } = &event {
+                    logging::info(&format!("tray click: {button:?} {button_state:?}"));
+                }
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    rect,
+                    ..
+                } = event
+                {
+                    let p = rect.position.to_physical::<f64>(1.0);
+                    let s = rect.size.to_physical::<f64>(1.0);
+                    let anchor = Rect {
+                        x: p.x,
+                        y: p.y,
+                        w: s.width,
+                        h: s.height,
+                    };
+                    if let Err(e) = paddock_window::tauri::toggle_popover(tray.app_handle(), None, anchor) {
+                        logging::info(&format!("could not open the popover: {}", e.message));
+                    }
+                }
+            })
+            .build(app)
+            .inspect_err(|e| logging::info(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
+        Ok(NativeIcon {
+            icon,
+            _not_send: std::marker::PhantomData,
+        })
+    }
+
+    /// Removes the icon of item `id` and drops the handle here, on the main thread.
+    fn remove(main: &MainToken, app: &AppHandle<Wry>, id: &str) {
+        main.assert_main();
+        drop(app.remove_tray_by_id(&tray_id(id)));
+    }
+
+    /// Shows `look`: macOS gets both representations in one `setImage` (the patched tray-icon), the others one image.
+    fn set_picture(&self, main: &MainToken, look: &Look) -> Result<(), String> {
+        main.assert_main();
+        #[cfg(target_os = "macos")]
+        {
+            let reps: Vec<(Vec<u8>, u32, u32)> = look.pictures.iter().map(|p| (p.rgba.clone(), p.width, p.height)).collect();
+            let size = (f64::from(look.width), f64::from(look.height));
+            let template = look.template;
+            self.icon
+                .with_inner_tray_icon(move |t| {
+                    let refs: Vec<(&[u8], u32, u32)> = reps.iter().map(|(b, w, h)| (b.as_slice(), *w, *h)).collect();
+                    t.set_icon_reps(&refs, size, template).map_err(|e| e.to_string())
+                })
+                .map_err(|e| e.to_string())?
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let p = look.pictures.first().ok_or("no picture")?;
+            self.icon
+                .set_icon(Some(Image::new_owned(p.rgba.clone(), p.width, p.height)))
+                .map_err(|e| e.to_string())
+        }
+    }
+
+    fn set_tooltip(&self, main: &MainToken, text: &str) {
+        main.assert_main();
+        let _ = self.icon.set_tooltip(Some(text.to_string()));
+    }
+
+    /// Gives the icon its stable OS identity (ADR 0028) and returns what the log says about it. Windows took its GUID when the
+    /// icon was built (the provider registered in [`apply`]); macOS gets its autosave name here; Linux's id is the tray id.
+    fn identity(&self, main: &MainToken, item: &str) -> String {
+        main.assert_main();
+        #[cfg(target_os = "macos")]
+        {
+            let name = tray_identity::autosave_name(item);
+            let for_closure = name.clone();
+            let set = self.icon.with_inner_tray_icon(move |t| match t.ns_status_item() {
+                Some(status_item) => {
+                    status_item.setAutosaveName(Some(&objc2_foundation::NSString::from_str(&for_closure)));
+                    true
+                }
+                None => false,
+            });
+            match set {
+                Ok(true) => format!("autosave name {name}"),
+                Ok(false) => format!("autosave name {name} NOT set: the icon has no status item"),
+                Err(e) => format!("autosave name {name} NOT set: {e}"),
+            }
+        }
+        #[cfg(windows)]
+        {
+            let guid = tray_identity::guid_text(tray_identity::guid_for(item));
+            match self.icon.with_inner_tray_icon(|t| t.guid_status()) {
+                Ok(status) => format!("GUID {guid}: {status:?}"),
+                Err(e) => format!("GUID {guid}: status unknown ({e})"),
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            format!("status notifier id {}", tray_id(item))
+        }
+    }
+}
+
+/// What the agent link's thread asks of the tray. Owned data only: the main thread applies it.
+#[derive(Debug, Clone)]
+pub enum TrayCommand {
+    /// Make the icons match `specs`; `initial` are the frames the new icons start with.
+    Sync {
+        /// The wanted items.
+        specs: Vec<ItemSpec>,
+        /// Unavailable frames by item id.
+        initial: Vec<(String, Frame)>,
+    },
+    /// Draw a frame on an item.
+    Paint {
+        /// The item.
+        item: String,
+        /// What to draw.
+        frame: Frame,
+    },
+    /// The agent is away: show these frames and send every tooltip again with the next live picture.
+    Disconnected {
+        /// The unavailable frame of every item.
+        frames: Vec<(String, Frame)>,
+    },
+}
+
+/// The native operations [`apply`] needs: [`NativeOps`] over real icons, a fake in the tests.
+pub trait IconOps {
+    /// Makes the icon of `spec`, starting with `initial`.
+    fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String>;
+    /// Removes the icon of item `id`.
+    fn remove(&mut self, id: &str);
+    /// Sets the picture of item `id` when `picture`, and its tooltip when `tooltip` (never called with neither).
+    fn draw(&mut self, id: &str, frame: &Frame, picture: bool, tooltip: bool) -> Result<(), String>;
+    /// Copies the OS's saved position of item `id` aside (macOS).
+    fn save_position(&mut self, id: &str);
+}
+
+/// [`IconOps`] over the real icons; only the main thread can make one (it holds a [`MainToken`]).
+pub struct NativeOps<'a> {
+    main: &'a MainToken,
+    app: &'a AppHandle<Wry>,
+}
+
+impl IconOps for NativeOps<'_> {
+    fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String> {
+        let icon = NativeIcon::build(self.main, self.app, spec).map_err(|e| e.to_string())?;
+        // Start at the item's final width, as unavailable, so nothing resizes when the first live picture arrives.
+        if let Some(frame) = initial {
+            if let Err(e) = icon.set_picture(self.main, &frame.look) {
+                logging::info(&format!("tray icon {}: the first picture was refused: {e}", tray_id(&spec.id)));
+            }
+            icon.set_tooltip(self.main, &frame.tooltip);
+        }
+        let identity = icon.identity(self.main, &spec.id);
+        logging::info(&format!(
+            "tray icon {} created (metric {}, {identity}; on Windows 11 a new icon may sit in the overflow until it is pinned in Settings > Personalization > Taskbar)",
+            tray_id(&spec.id),
+            crate::tray_model::metric_name(&spec.metric)
+        ));
+        Ok(())
+    }
+
+    fn remove(&mut self, id: &str) {
+        NativeIcon::remove(self.main, self.app, id);
+    }
+
+    fn draw(&mut self, id: &str, frame: &Frame, picture: bool, tooltip: bool) -> Result<(), String> {
+        let Some(icon) = NativeIcon::find(self.main, self.app, id) else {
+            return Ok(());
+        };
+        let set = if picture {
+            icon.set_picture(self.main, &frame.look)
+        } else {
+            Ok(())
+        };
+        if tooltip {
+            icon.set_tooltip(self.main, &frame.tooltip);
+        }
+        set
+    }
+
+    fn save_position(&mut self, id: &str) {
+        #[cfg(target_os = "macos")]
+        crate::tray_position::save(&tray_identity::autosave_name(id));
+        #[cfg(not(target_os = "macos"))]
+        let _ = id;
+    }
+}
+
+/// Applies one command to the icons and the bookkeeping, in the order commands arrive. This is the only place that decides what
+/// the tray does; it runs on the main thread, and in the tests on a thread standing in for it.
+pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Result<(), String> {
+    match cmd {
+        TrayCommand::Sync { specs, initial } => {
+            let plan = plan_sync(&lock(&state.items), &specs);
+            logging::info(&format!(
+                "tray sync: {} item(s) wanted, removing {:?}, making {:?}",
+                specs.len(),
+                plan.remove,
+                plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()
+            ));
+            for id in &plan.remove {
+                // AppKit may forget the position of a removed status item: keep a copy.
+                ops.save_position(id);
+                ops.remove(id);
+                lock(&state.items).remove(id);
+                lock(&state.painted).remove(id);
+                lock(&state.drawn).remove(id);
+            }
+            for spec in &plan.create {
+                ops.make(spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
+                lock(&state.items).insert(spec.id.clone(), spec.clone());
+            }
+            Ok(())
+        }
+        TrayCommand::Paint { item, frame } => {
+            paint_one(ops, state, &item, &frame);
+            Ok(())
+        }
+        TrayCommand::Disconnected { frames } => {
+            for (id, frame) in &frames {
+                // The next picture's tooltip is always sent again.
+                lock(&state.drawn).remove(id);
+                paint_one(ops, state, id, frame);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn paint_one<O: IconOps>(ops: &mut O, state: &TrayState, item: &str, frame: &Frame) {
+    if !lock(&state.items).contains_key(item) {
+        return;
+    }
+    let (w, h) = (frame.look.width, frame.look.height);
+    let (paint, count) = {
+        let mut map = lock(&state.drawn);
+        let entry = map.entry(item.to_string()).or_default();
+        entry.count += 1;
+        let picture_changed = entry.look.as_ref() != Some(&frame.look);
+        let paint = crate::tray_model::paint_ops(&entry.tooltip, &frame.tooltip, picture_changed, entry.count);
+        if paint.tooltip {
+            entry.tooltip = frame.tooltip.clone();
+        }
+        if paint.image_sets > 0 {
+            entry.look = Some(frame.look.clone());
+        }
+        (paint, entry.count)
+    };
+    // Each picture set redraws the status item (in the window server on macOS): a tooltip-only change sets none, and a frame
+    // with nothing new touches the icon not at all.
+    if paint.image_sets == 0 && !paint.tooltip {
+        return;
+    }
+    let set = ops.draw(item, frame, paint.image_sets > 0, paint.tooltip);
+    // One line per frame, at debug: the flow of image sets per tick (a flicker shows as more than one set per tick).
+    logging::debug(&format!(
+        "tray icon {}: frame #{count}: {} picture set(s) ({} representation(s), {w}x{h}, template {}), tooltip {}",
+        tray_id(item),
+        paint.image_sets,
+        frame.look.pictures.len(),
+        frame.look.template,
+        if paint.tooltip { "sent" } else { "unchanged" }
     ));
-    lock(&app.state::<TrayState>().items).insert(spec.id.clone(), spec.clone());
-    Ok(())
-}
-
-/// Gives the icon its stable OS identity (ADR 0028) and returns what the log says about it. Windows took its GUID when the icon
-/// was built (the provider registered in [`sync_items`]); macOS gets its autosave name here; Linux's id is the tray id.
-#[cfg(target_os = "macos")]
-fn apply_identity(tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
-    let name = tray_identity::autosave_name(item);
-    let for_closure = name.clone();
-    let set = tray.with_inner_tray_icon(move |t| match t.ns_status_item() {
-        Some(status_item) => {
-            status_item.setAutosaveName(Some(&objc2_foundation::NSString::from_str(&for_closure)));
-            true
-        }
-        None => false,
-    });
-    match set {
-        Ok(true) => format!("autosave name {name}"),
-        Ok(false) => format!("autosave name {name} NOT set: the icon has no status item"),
-        Err(e) => format!("autosave name {name} NOT set: {e}"),
+    let first = lock(&state.painted).insert(item.to_string(), true).is_none();
+    // Told once per item and on every failure (a line per second per item would flood the log).
+    if let Err(e) = &set {
+        logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
+    } else if first {
+        logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
+    }
+    if paint.save_position {
+        ops.save_position(item);
     }
 }
 
-/// See the macOS version.
-#[cfg(windows)]
-fn apply_identity(tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
-    let guid = tray_identity::guid_text(tray_identity::guid_for(item));
-    match tray.with_inner_tray_icon(|t| t.guid_status()) {
-        Ok(status) => format!("GUID {guid}: {status:?}"),
-        Err(e) => format!("GUID {guid}: status unknown ({e})"),
-    }
-}
-
-/// See the macOS version.
-#[cfg(not(any(target_os = "macos", windows)))]
-fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
-    format!("status notifier id {}", tray_id(item))
-}
-
-/// Makes the tray icons match `specs`: an unchanged item keeps its icon (so its place in the bar), a changed or removed one is
-/// removed, a new or changed one is made ([`plan_sync`]). Called only when the items changed. Returns the first error.
-pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> tauri::Result<()> {
-    let (specs, initial, handle) = (specs.to_vec(), initial.to_vec(), app.clone());
-    // Every create and remove runs on the main thread (see [`MainToken`]); the caller is the agent link's thread.
-    on_main(app, move |main| sync_on_main(main, &handle, &specs, &initial)).map_err(|e| {
-        logging::info(&format!("could not update the tray items: {e}"));
-        tauri::Error::FailedToReceiveMessage
-    })?
-}
-
-fn sync_on_main(main: &MainToken, app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> tauri::Result<()> {
+fn state_of(app: &AppHandle<Wry>) -> tauri::State<'_, TrayState> {
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
     }
-    #[cfg(windows)]
-    tray_icon::set_guid_provider(tray_identity::guid_for_tray_id);
-    let state = app.state::<TrayState>();
-    let plan = plan_sync(&lock(&state.items), specs);
-    logging::info(&format!(
-        "tray sync: {} item(s) wanted, removing {:?}, making {:?}",
-        specs.len(),
-        plan.remove,
-        plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()
-    ));
-    for id in &plan.remove {
-        // AppKit may forget the position of a removed status item: keep a copy.
-        #[cfg(target_os = "macos")]
-        crate::tray_position::save(&tray_identity::autosave_name(id));
-        let _ = app.remove_tray_by_id(&tray_id(id));
-        lock(&state.items).remove(id);
-        lock(&state.painted).remove(id);
-        lock(&state.drawn).remove(id);
-    }
-    for spec in &plan.create {
-        create_item(main, app, spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
-    }
-    Ok(())
+    app.state::<TrayState>()
+}
+
+/// Makes the tray icons match `specs` (waits for the main thread, which does the work; see [`MainToken`]). Called only when the
+/// items changed. Returns the first error.
+pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> Result<(), String> {
+    let (cmd, handle) = (
+        TrayCommand::Sync {
+            specs: specs.to_vec(),
+            initial: initial.to_vec(),
+        },
+        app.clone(),
+    );
+    on_main(app, move |main| {
+        #[cfg(windows)]
+        tray_icon::set_guid_provider(tray_identity::guid_for_tray_id);
+        let state = state_of(&handle);
+        apply(&mut NativeOps { main, app: &handle }, &state, cmd)
+    })?
+}
+
+/// Draws a frame on an item. Returns at once; the main thread does it.
+pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
+    send(
+        app,
+        TrayCommand::Paint {
+            item: item.to_string(),
+            frame: frame.clone(),
+        },
+    );
+}
+
+/// While the agent is away every item shows its unavailable frame (a dimmed dash at the same width): a frozen bar would look
+/// like a measurement.
+pub fn show_disconnected(app: &AppHandle<Wry>, frames: &[(String, Frame)]) {
+    send(app, TrayCommand::Disconnected { frames: frames.to_vec() });
+}
+
+fn send(app: &AppHandle<Wry>, cmd: TrayCommand) {
+    let handle = app.clone();
+    dispatch(app, move |main| {
+        let Some(state) = handle.try_state::<TrayState>() else { return };
+        let _ = apply(&mut NativeOps { main, app: &handle }, &state, cmd);
+    });
 }
 
 /// macOS: copies the position AppKit holds for every icon to Dyno's own keys (the icons are about to be removed on quit).
@@ -331,77 +563,6 @@ pub fn save_positions(app: &AppHandle<Wry>) {
         "tray positions: {saved} key(s) of {} item(s) saved before the icons go",
         ids.len()
     ));
-}
-
-/// Draws a frame on an item: the pictures in one call when they changed, and the tooltip when it changed.
-pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
-    let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
-    let (w, h) = (frame.look.width, frame.look.height);
-    let Some(state) = app.try_state::<TrayState>() else {
-        let _ = set_picture(&tray, &frame.look);
-        return;
-    };
-    let (ops, count) = {
-        let mut map = lock(&state.drawn);
-        let entry = map.entry(item.to_string()).or_default();
-        entry.count += 1;
-        let ops = crate::tray_model::paint_ops(
-            &entry.tooltip,
-            &frame.tooltip,
-            entry.look.as_ref() != Some(&frame.look),
-            entry.count,
-        );
-        if ops.tooltip {
-            entry.tooltip = frame.tooltip.clone();
-        }
-        if ops.image_sets > 0 {
-            entry.look = Some(frame.look.clone());
-        }
-        (ops, entry.count)
-    };
-    // Each set redraws the status item (in the window server on macOS): a frame whose picture did not change sets none.
-    let set = if ops.image_sets > 0 {
-        set_picture(&tray, &frame.look)
-    } else {
-        Ok(())
-    };
-    if ops.tooltip {
-        let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
-    }
-    // One line per picture, at debug: the flow of image sets per tick (a flicker shows as more than one set per tick).
-    logging::debug(&format!(
-        "tray icon {}: frame #{count}: {} picture set(s) ({} representation(s), {w}x{h}, template {}), tooltip {}",
-        tray_id(item),
-        ops.image_sets,
-        frame.look.pictures.len(),
-        frame.look.template,
-        if ops.tooltip { "sent" } else { "unchanged" }
-    ));
-    let first = lock(&state.painted).insert(item.to_string(), true).is_none();
-    // Told once per item and on every failure (a line per second per item would flood the log).
-    if let Err(e) = &set {
-        logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
-    } else if first {
-        logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
-    }
-    #[cfg(target_os = "macos")]
-    if ops.save_position {
-        crate::tray_position::save(&tray_identity::autosave_name(item));
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = count;
-}
-
-/// While the agent is away every item shows its unavailable frame (a dimmed dash at the same width): a frozen bar would look
-/// like a measurement.
-pub fn show_disconnected(app: &AppHandle<Wry>, frames: &[(String, Frame)]) {
-    for (id, frame) in frames {
-        if let Some(state) = app.try_state::<TrayState>() {
-            // The next picture's tooltip is always sent again.
-            lock(&state.drawn).remove(id);
-        }
-        paint(app, id, frame);
-    }
 }
 
 /// The shell's tray over Dyno's icons: the model is constant (the menu), `create` makes the icons of the items and `update` has
@@ -453,6 +614,164 @@ pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::tray_model::{Env, Platform, TrayItems};
+    use dyno_core::widgets::Metric;
+    use std::collections::BTreeSet;
+    use std::sync::mpsc;
+    use std::thread::ThreadId;
+
+    /// Stands in for the native icons and refuses to be touched from any thread but its owner's, as AppKit does.
+    struct FakeOps {
+        owner: ThreadId,
+        live: BTreeSet<String>,
+        made: usize,
+        removed: usize,
+        drawn: usize,
+        pictures: usize,
+    }
+
+    impl FakeOps {
+        fn here(&self) {
+            assert_eq!(std::thread::current().id(), self.owner, "a native tray call off the owner thread");
+        }
+    }
+
+    impl IconOps for FakeOps {
+        fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String> {
+            self.here();
+            assert!(initial.is_some(), "every new icon starts with its unavailable frame");
+            assert!(self.live.insert(spec.id.clone()), "{} made twice", spec.id);
+            self.made += 1;
+            Ok(())
+        }
+        fn remove(&mut self, id: &str) {
+            self.here();
+            assert!(self.live.remove(id), "{id} removed but not there");
+            self.removed += 1;
+        }
+        fn draw(&mut self, id: &str, _: &Frame, picture: bool, tooltip: bool) -> Result<(), String> {
+            self.here();
+            assert!(self.live.contains(id), "{id} drawn but not there");
+            assert!(picture || tooltip, "{id} drawn with nothing to draw");
+            self.drawn += 1;
+            self.pictures += usize::from(picture);
+            Ok(())
+        }
+        fn save_position(&mut self, _: &str) {
+            self.here();
+        }
+    }
+
+    fn items(n: usize) -> Vec<ItemSpec> {
+        (0..n)
+            .map(|i| ItemSpec::new(&format!("cpu-{i}"), Metric::CpuTotal, crate::tray_model::Glyph::Number))
+            .collect()
+    }
+
+    fn frames(specs: &[ItemSpec]) -> Vec<(String, Frame)> {
+        let env = Env {
+            platform: Platform::Pixels,
+            px: 16,
+            text: std::sync::Arc::new(dyno_core::tray::text::BoxText),
+        };
+        TrayItems::new(specs.to_vec(), env).unavailable_frames(true)
+    }
+
+    #[test]
+    fn a_bulk_change_32_to_6_to_32_goes_through_one_owner_thread_and_stays_consistent() {
+        let (tx, rx) = mpsc::channel::<TrayCommand>();
+        // The "main thread": the only one that owns icons; the test thread plays the agent link and only sends messages.
+        let owner = std::thread::spawn(move || {
+            let state = TrayState::default();
+            let mut ops = FakeOps {
+                owner: std::thread::current().id(),
+                live: BTreeSet::new(),
+                made: 0,
+                removed: 0,
+                drawn: 0,
+                pictures: 0,
+            };
+            for cmd in rx {
+                apply(&mut ops, &state, cmd).unwrap();
+            }
+            let tracked: BTreeSet<String> = lock(&state.items).keys().cloned().collect();
+            (ops, tracked)
+        });
+        let sync = |n: usize| {
+            let specs = items(n);
+            let initial = frames(&specs);
+            tx.send(TrayCommand::Sync { specs, initial }).unwrap();
+        };
+        let paint_all = |n: usize| {
+            for (item, frame) in frames(&items(n)) {
+                tx.send(TrayCommand::Paint { item, frame }).unwrap();
+            }
+        };
+        sync(32);
+        paint_all(32);
+        sync(6);
+        // Pictures for the 26 removed items are still in flight: they must be dropped, not drawn on a dead icon.
+        paint_all(32);
+        sync(32);
+        paint_all(32);
+        drop(tx);
+        let (ops, tracked) = owner.join().unwrap();
+        assert_eq!((ops.made, ops.removed), (32 + 26, 26));
+        assert_eq!(ops.live.len(), 32);
+        assert_eq!(tracked, ops.live, "the bookkeeping and the icons agree");
+        // The 6 kept items get the same frames again and are not redrawn; the 26 made again are.
+        assert_eq!(
+            ops.drawn,
+            32 + 26,
+            "no picture reached a removed icon, and an unchanged one is not set again"
+        );
+    }
+
+    // Each picture set redraws the status item, the window server's main cost for an idle Dyno (docs/performance.md
+    // 2026-11-03): a frame whose only change is the tooltip sends the tooltip and sets no picture.
+    #[test]
+    fn a_tooltip_only_change_sets_no_picture() {
+        let state = TrayState::default();
+        let mut ops = FakeOps {
+            owner: std::thread::current().id(),
+            live: BTreeSet::new(),
+            made: 0,
+            removed: 0,
+            drawn: 0,
+            pictures: 0,
+        };
+        let specs = items(1);
+        let initial = frames(&specs);
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Sync {
+                specs,
+                initial: initial.clone(),
+            },
+        )
+        .unwrap();
+        let (item, frame) = initial[0].clone();
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Paint {
+                item: item.clone(),
+                frame: frame.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!((ops.drawn, ops.pictures), (1, 1));
+        let mut retitled = frame;
+        retitled.tooltip.push_str(" (again)");
+        apply(&mut ops, &state, TrayCommand::Paint { item, frame: retitled }).unwrap();
+        assert_eq!(
+            (ops.drawn, ops.pictures),
+            (2, 1),
+            "the tooltip went out, the picture was not set again"
+        );
+    }
 
     #[test]
     fn the_popup_page_is_the_one_popover_of_the_tray_icons() {
