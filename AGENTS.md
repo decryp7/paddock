@@ -217,4 +217,5 @@ Apply these deliberately. They are not decoration:
   for a screen to fill: requests, probes, a sampler, a page refresh) may use the first two but stays at the normal level
   on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
   starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
+- Wait with `./dev wait`; never `pgrep -f` on a string your own command contains. `./dev wait --plock <name> | --pid <pid> | --file <path> --line <regex> | --ci-run <id> --max <duration>` always ends at `--max` with an `::error::` and the next step (a `pgrep -f` loop matches its own command line and never ends).
 - Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.
