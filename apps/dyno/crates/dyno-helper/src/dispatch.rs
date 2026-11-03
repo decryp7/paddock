@@ -3,7 +3,7 @@
 //! its ports: tests give it a fake [`ProcessTraffic`] and a temporary audit log.
 
 use crate::audit::AuditLog;
-use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, HelperInfo, HelperReply, HelperRequest, MAX_AUDIT_REPLY};
+use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, HelperInfo, HelperReply, HelperRequest};
 use dyno_core::network_traffic::MAX_COUNTERS;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use paddock_ipc::RemoteError;
@@ -60,14 +60,31 @@ impl Dispatcher {
 
     /// Answers one request from the authenticated peer `peer` (its process id).
     pub fn handle(&self, peer: Option<u32>, request: HelperRequest) -> Result<HelperReply, RemoteError> {
+        request.validate().map_err(|e| RemoteError::new(codes::REFUSED, e.to_string()))?;
         match request {
             HelperRequest::Info => Ok(HelperReply::About(self.info.clone())),
-            HelperRequest::Audit(n) => Ok(HelperReply::Entries(self.audit.tail(n.min(MAX_AUDIT_REPLY) as usize))),
+            HelperRequest::Audit(n) => Ok(HelperReply::Entries(self.audit.tail(HelperRequest::audit_len(n)))),
             HelperRequest::Traffic => {
                 let mut counters = self.traffic.counters().map_err(|e| remote(&e))?;
                 counters.truncate(MAX_COUNTERS);
                 Ok(HelperReply::Counters(counters))
             }
+            // The readers and the log tail arrive with their work packages (ADR 0027 WP-4 to WP-10); until then the helper
+            // says so, and the agent shows the reading as unavailable with this reason.
+            HelperRequest::Processes(_)
+            | HelperRequest::SocketOwners
+            | HelperRequest::FileHolders { .. }
+            | HelperRequest::LoginItems
+            | HelperRequest::Counters(_)
+            | HelperRequest::MemoryModules
+            | HelperRequest::Smart(_)
+            | HelperRequest::InstallTool { .. }
+            | HelperRequest::Firewall
+            | HelperRequest::Extras(_)
+            | HelperRequest::LogTail(_) => Err(RemoteError::new(
+                codes::UNSUPPORTED,
+                "This reading is not available in this build of the helper yet.",
+            )),
             HelperRequest::Uninstall => {
                 self.audit
                     .record(&AuditEntry {
@@ -89,6 +106,8 @@ impl Dispatcher {
 mod tests {
     use super::*;
     use dyno_core::helper::HelperHost;
+    use dyno_core::helper_requests::{ProcessQuery, SmartQuery};
+    use dyno_core::helper_wire::MAX_AUDIT_REPLY;
     use dyno_core::network_traffic::TrafficCounter;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -176,6 +195,20 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn invalid_requests_are_refused_and_later_readers_say_unsupported() {
+        let r = rig(HelperHost::Linux, Ok(vec![]));
+        let bad = HelperRequest::Processes(ProcessQuery {
+            limit: 0,
+            ..Default::default()
+        });
+        assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
+        let bad = HelperRequest::Smart(SmartQuery { max_disks: 99 });
+        assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
+        let ok = HelperRequest::Smart(SmartQuery::default());
+        assert_eq!(r.d.handle(None, ok).unwrap_err().code, codes::UNSUPPORTED);
     }
 
     #[test]

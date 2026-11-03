@@ -9,6 +9,7 @@
 
 pub mod access;
 pub mod battery;
+pub mod btm_reader;
 pub mod counters;
 pub mod dev_folders;
 pub mod extras;
