@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: screenshots are checked
+- New in `@decryp7/paddock-e2e`: `expectScreenshotClean(page, label, options)`, `screenshotProblems`, `captureChecked` (check, settled screenshot, check) and the pure
+  `rawTextProblems` / `statusChipProblems`. They fail a page that has text cut without a declared ellipsis, raw `SNAKE_CASE` / `camelCase` / `undefined` / `null` /
+  `NaN` / `[object Object]` text, mock, lorem, TODO or debug strings, or a status chip with neither a word nor an icon. `captureDocScreens` takes `check` (and a
+  per-screen `check`, `false` to skip); the gallery's e2e is the first consumer.
+
 ### `paddock-service`: the app's own login item per OS, the first run and the old launch agent are shared (from Dyno)
 - New `login::AppItem` (an app's login item described once: name, XDG file stem, `Run` value, arguments) with `for_this_os` (`MainAppItem` on macOS, `UserRunEntry` on Windows, `XdgAutostart` elsewhere; the app passes its executable, its environment and the `System`), `xdg` and `windows_run`; `login::xdg_config_dir` (an absolute `$XDG_CONFIG_HOME`, else `~/.config`); `login::UnavailableItem` (refuses every change with its reason).
 - New `login::apply_first_run_with` and `login::FirstRun`: the first sight of the settings with the switch on and no `FirstRunMarker` registers once; an off switch only leaves the marker; a failure leaves none.

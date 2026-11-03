@@ -1476,3 +1476,10 @@ Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and th
 Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
 
 - A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).
+
+## One call checks a photograph before and after it is taken (2026-11-04, the screenshot check)
+
+`expectScreenshotClean` in `@decryp7/paddock-e2e` runs the clipping checks that already existed in `layout.ts` together with
+raw-identifier, placeholder and status-chip checks, so an app calls one function before and after a photograph instead of each
+spec choosing which checks to remember. **Lesson:** a check that is optional per call is skipped by the next author; put the
+checks behind the one call every spec already makes (`captureDocScreens` takes it as `check`, `false` to skip a screen).
