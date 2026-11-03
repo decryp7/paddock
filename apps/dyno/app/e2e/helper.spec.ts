@@ -35,6 +35,12 @@ test.describe('administrator readings', () => {
     await openSettings(page, '&helper=off&jobsteps=6&jobstepms=600000');
     await card(page).getByRole('button', { name: 'Turn on administrator readings' }).click();
     await expect(card(page).locator('pd-status-pill')).toContainText('Turning on');
+    await expect(card(page).getByRole('button', { name: 'Turn on administrator readings' })).toHaveCount(0);
+  });
+
+  test('turning on ends with the helper On; turning off returns it to Off', async ({ page }) => {
+    await openSettings(page, '&helper=off');
+    await card(page).getByRole('button', { name: 'Turn on administrator readings' }).click();
     await expect(card(page).locator('pd-status-pill')).toContainText('On', { timeout: 20_000 });
     await expect(card(page).getByRole('button', { name: 'Turn off administrator readings' })).toBeVisible();
     await card(page).getByRole('button', { name: 'Turn off administrator readings' }).click();
