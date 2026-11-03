@@ -38,6 +38,7 @@ test.describe('Administrator readings card screenshots', () => {
       }
       test('turning on, mid-job (the prompt phase cannot be cancelled)', async ({ page }) => {
         mkdirSync(OUT, { recursive: true });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.setViewportSize({ width: 880, height: 760 });
         await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: '?latency=400&helper=off&jobsteps=40' }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });

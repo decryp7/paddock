@@ -293,6 +293,56 @@ mod tests {
         rig.stop();
     }
 
+    /// One valid request of every kind (defaults at their caps), so a test can send each to the endpoint.
+    #[cfg(unix)]
+    fn sample(kind: dyno_core::helper_policy::RequestKind) -> HelperRequest {
+        use dyno_core::helper_policy::RequestKind as K;
+        use dyno_core::helper_requests::*;
+        match kind {
+            K::Info => HelperRequest::Info,
+            K::Processes => HelperRequest::Processes(ProcessQuery::default()),
+            K::Traffic => HelperRequest::Traffic,
+            K::SocketOwners => HelperRequest::SocketOwners,
+            K::FileHolders => HelperRequest::FileHolders { dev: 1, ino: 2 },
+            K::LoginItems => HelperRequest::LoginItems,
+            K::Counters => HelperRequest::Counters(CounterQuery {
+                ids: vec![CounterId::Thermal],
+                class: RequestClass::User,
+            }),
+            K::MemoryModules => HelperRequest::MemoryModules,
+            K::Smart => HelperRequest::Smart(SmartQuery::default()),
+            K::InstallTool => HelperRequest::InstallTool {
+                tool: ToolKind::Smartmontools,
+                bytes: vec![1],
+            },
+            K::Firewall => HelperRequest::Firewall,
+            K::Extras => HelperRequest::Extras(ExtrasKind::WakeRequests),
+            K::Audit => HelperRequest::Audit(1),
+            K::LogTail => HelperRequest::LogTail(1),
+            K::Uninstall => HelperRequest::Uninstall,
+        }
+    }
+
+    /// The socket is mode 0666, so any local account connects. What makes that safe: the account is read from the kernel's credentials
+    /// of the connection (before a single frame is parsed), and every request is checked against the standing table before it is
+    /// handled. A different uid gets exactly what the table allows: refused where it says Denied, and handled (here: "not available
+    /// yet" or a validation answer, never a refusal) everywhere else.
+    #[cfg(unix)]
+    #[test]
+    fn a_different_account_gets_exactly_what_the_standing_table_allows() {
+        use dyno_core::helper_policy::{access, Access, RequestKind, Standing};
+        if own_uid() == 0 {
+            return; // root is an administrator: the table would allow everything
+        }
+        let rig = Rig::start(HelperUser::Uid(own_uid().wrapping_add(1)), 8);
+        for kind in RequestKind::ALL {
+            let answer = rig.call(sample(kind));
+            let refused = matches!(&answer, Err(IpcError::Remote(r)) if r.code == codes::REFUSED);
+            assert_eq!(refused, access(kind, Standing::Other) == Access::Denied, "{kind:?}: {answer:?}");
+        }
+        rig.stop();
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_reply_sent_as_a_request_is_refused() {

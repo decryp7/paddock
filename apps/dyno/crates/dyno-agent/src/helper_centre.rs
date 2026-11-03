@@ -19,7 +19,7 @@ pub trait HelperInstaller: Send {
     ///
     /// # Errors
     /// What the user did or what went wrong, in words with the next step.
-    fn install(&mut self) -> Result<(), String>;
+    fn install(&mut self, action: HelperAction) -> Result<(), String>;
     /// Removes the installed helper through the prompt (when it cannot remove itself).
     ///
     /// # Errors
@@ -108,7 +108,7 @@ impl<T: HelperTransport> HelperCentre<T> {
         if action == HelperAction::TurnOn && before.state == HelperState::Ready {
             return Ok(before.clone());
         }
-        self.prompt(ctx, "Waiting for the system's permission prompt", |i| i.install())?;
+        self.prompt(ctx, "Waiting for the system's permission prompt", |i| i.install(action))?;
         ctx.phase(Phase::discovering("start", "Starting the helper"));
         for _ in 0..ASKS {
             ctx.check()?;
@@ -223,7 +223,7 @@ mod tests {
         asked: Arc<Mutex<u32>>,
     }
     impl HelperInstaller for Prompt {
-        fn install(&mut self) -> Result<(), String> {
+        fn install(&mut self, _action: HelperAction) -> Result<(), String> {
             *self.asked.lock().unwrap() += 1;
             if self.answer.is_ok() {
                 *self.machine.installed.lock().unwrap() = true;

@@ -30,12 +30,8 @@ export function helperFace(state: HelperState): HelperFace {
   return FACES[state];
 }
 
-/** What turning it on shows, in words (the card lists these before the prompt, so the click is informed). */
-export const HELPER_BENEFITS: readonly string[] = [
-  'Every process on this computer, including other accounts and system services.',
-  'Login items and background tasks (macOS), disk health, and firewall rules where the system hides them.',
-  'It only reads. It changes nothing on this computer except installing or removing itself.',
-];
+/** The assurance under the list of readings. */
+export const HELPER_READS_ONLY = 'It only reads. It changes nothing on this computer except installing or removing itself.';
 
 /** The word on the badge while an action runs ("Turning on"). */
 export function helperActionBadge(action: HelperAction): string {
@@ -54,8 +50,23 @@ export function helperActionBadge(action: HelperAction): string {
 /** The label of the button that turns it off (verb plus object). */
 export const TURN_OFF_LABEL = 'Turn off administrator readings';
 
-/** Whether Cancel works while the system's prompt is open, in words. */
-export const CANCEL_NOTE = 'Cancel works until the system\'s permission prompt appears. While the prompt is open, answer it; Cancel then takes effect.';
+/** What the body says while an action runs (a job sentence, not the state's). */
+export function helperActionSentence(action: HelperAction): string {
+  switch (action) {
+    case 'turnOn':
+      return 'Turning on administrator readings: Dyno asks the system for permission, then starts the helper.';
+    case 'repair':
+      return 'Repairing the helper: Dyno asks the system for permission, then installs it again.';
+    case 'update':
+      return 'Updating the helper: Dyno asks the system for permission, then installs the newer one.';
+    case 'turnOff':
+      return 'Turning off administrator readings: Dyno removes the helper from this computer.';
+  }
+}
+
+/** What Cancel does, and what choosing Cancel or No in the system's prompt does. */
+export const CANCEL_NOTE =
+  "Cancel here works until the system's permission prompt appears. If you choose Cancel or No in the prompt instead, nothing is installed or changed and Dyno stays as it was.";
 
 /** The audit time as a local date and time. */
 export function auditTime(seconds: number): string {

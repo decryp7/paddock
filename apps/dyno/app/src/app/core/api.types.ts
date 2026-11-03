@@ -1899,6 +1899,8 @@ export interface HelperStatus {
   /** What the OS asks for when turning it on, in words (shown before the prompt). */
   prompt: string;
   recent: AuditEntry[];
+  /** What the helper shows, for the card's list (the same list whether it is off or on); empty where the helper cannot exist. */
+  readings: string[];
   /** Technical details for a "Details" disclosure (versions, an owner's account id, the OS's words); never the headline. */
   detail: string | null;
   error: string | null;

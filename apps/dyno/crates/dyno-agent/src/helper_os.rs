@@ -6,7 +6,7 @@ use crate::helper_link::HelperLink;
 use crate::helper_peer::PeerTransport;
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_paths::{HelperPaths, WindowsRoots};
-use dyno_core::helper_wire::HelperUser;
+use dyno_core::helper_wire::{HelperAction, HelperUser};
 use dyno_platform::runner::{tool, SystemRunner, ToolRunner};
 use paddock_env::Os;
 use paddock_jobs::time::SystemClock;
@@ -143,10 +143,18 @@ struct OsInstaller {
 }
 
 impl HelperInstaller for OsInstaller {
-    fn install(&mut self) -> Result<(), String> {
+    fn install(&mut self, action: HelperAction) -> Result<(), String> {
         let owner = self.owner.clone()?;
-        dyno_helper_service::turn_on(os_of(self.host), &self.bundled, &owner, &mut RealSystem::new(), elevator().as_mut())
-            .map_err(|e| e.to_string())
+        let prompt = dyno_helper_service::macos_prompt(action);
+        dyno_helper_service::turn_on_with(
+            os_of(self.host),
+            &self.bundled,
+            &owner,
+            &mut RealSystem::new(),
+            elevator().as_mut(),
+            prompt,
+        )
+        .map_err(|e| e.to_string())
     }
 
     fn uninstall(&mut self) -> Result<(), String> {

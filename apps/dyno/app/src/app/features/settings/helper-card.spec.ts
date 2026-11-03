@@ -25,7 +25,7 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     ['silent', 'Not running', 'did not answer. Repair it', 'Repair the helper'],
     ['foreign', 'Not trusted', 'does not trust it', 'Repair the helper'],
     ['outdated', 'Update available', 'needs helper version 1.1.0 or newer', 'Update the helper'],
-    ['ready', 'On', 'Every process of every account', null],
+    ['ready', 'On', 'The helper only reads', null],
     ['notIncluded', 'Not available here', 'AppImage', null],
   ])('%s', async (variant, chip, message, primary) => {
     const { el, button } = await make(variant);
@@ -39,7 +39,8 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
 
   it('off lists what it shows and what the system will ask, before the click', async () => {
     const { el } = await make('off');
-    expect(el.textContent).toContain('Every process on this computer');
+    expect(el.querySelector('[data-testid="helper-readings"]')?.textContent).toContain('Every process of every account');
+    expect(el.querySelector('.prompt')?.textContent).toContain('Each change asks once.');
     expect(el.querySelector('.prompt')?.textContent).toMatch(/asks/);
   });
 
@@ -48,7 +49,9 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     button('Turn on administrator readings')!.click();
     f.detectChanges();
     expect(el.querySelector('pd-status-pill')?.textContent).toContain('Turning on');
-    expect(el.querySelector('.cancel-note')?.textContent).toMatch(/prompt/);
+    expect(el.querySelector('.cancel-note')?.textContent).toMatch(/Cancel or No in the prompt/);
+    expect(el.querySelector('[data-testid="helper-message"]')?.textContent).toContain('Turning on administrator readings: Dyno asks');
+    expect(el.querySelector('[data-testid="helper-message"]')?.textContent).not.toMatch(/not turned on/);
     await vi.waitFor(() => expect(store.status()?.state).toBe('ready'));
     f.detectChanges();
     expect(el.querySelector('pd-status-pill')?.textContent).toContain('On');
@@ -103,5 +106,17 @@ describe('HelperCard: details and the system', () => {
     TestBed.resetTestingModule();
     const here = await make('notIncluded');
     expect(here.button('Check again')).toBeUndefined();
+  });
+});
+
+describe('HelperCard: one list of readings', () => {
+  it('Off and On list the same readings, and a Windows card lists none of macOS', async () => {
+    const off = await make('off');
+    const offList = off.el.querySelector('[data-testid="helper-readings"]')?.textContent;
+    TestBed.resetTestingModule();
+    const on = await make('ready');
+    expect(on.el.querySelector('[data-testid="helper-readings"]')?.textContent).toBe(offList);
+    expect(on.el.textContent).toContain('Dyno now also shows:');
+    expect(offList).toContain('Login items and background tasks');
   });
 });

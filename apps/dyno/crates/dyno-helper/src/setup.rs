@@ -84,6 +84,9 @@ pub fn uninstall() -> Result<Report, String> {
         Ok(note) => log::info!(note = note.as_str(); "uninstall: the data folder"),
         Err(why) => log::warn!(why = why.as_str(); "uninstall: the data folder was kept"),
     }
+    if let Err(why) = remove_endpoint(&helper_paths()) {
+        log::warn!(why = why.as_str(); "uninstall: the endpoint was kept");
+    }
     Ok(report)
 }
 
@@ -125,8 +128,43 @@ pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
         }
     }
     match std::fs::remove_dir(dir) {
-        Ok(()) => Ok("removed".into()),
+        Ok(()) => {
+            // `.../Dyno` holds the helper's folder and nothing else of ours: it goes when it is empty (never with something in it).
+            if let Some(parent) = dir.parent().filter(|p| p.file_name().is_some_and(|n| n == "Dyno")) {
+                let _ = std::fs::remove_dir(parent);
+            }
+            Ok("removed".into())
+        }
         Err(_) => Ok(format!("left in place: {} holds something the helper did not write", dir.display())),
+    }
+}
+
+/// Removes the helper's socket file (only a socket) and its folder when empty: a killed service cannot unlink its own socket.
+///
+/// # Errors
+/// What could not be removed.
+pub fn remove_endpoint(paths: &HelperPaths) -> Result<String, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        let socket = Path::new(&paths.endpoint);
+        match std::fs::symlink_metadata(socket) {
+            Ok(m) if m.file_type().is_socket() => {
+                std::fs::remove_file(socket).map_err(|e| format!("{} could not be removed: {e}", socket.display()))?;
+            }
+            Ok(_) => return Ok(format!("left in place: {} is not a socket", socket.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("{} cannot be read: {e}", socket.display())),
+        }
+        if let Some(folder) = &paths.endpoint_dir {
+            let _ = std::fs::remove_dir(folder);
+        }
+        Ok("removed".into())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = paths;
+        Ok("nothing to remove (a pipe goes with its process)".into())
     }
 }
 
@@ -139,6 +177,10 @@ pub fn uninstall_self(os: Os) -> Result<Report, String> {
     match remove_data_folder(&helper_paths()) {
         Ok(note) => log::info!(note = note.as_str(); "self-uninstall: the data folder"),
         Err(why) => log::warn!(why = why.as_str(); "self-uninstall: the data folder was kept"),
+    }
+    // The stop that ends this process cannot unlink the socket it serves on: remove it now (the listener's next accept fails once).
+    if let Err(why) = remove_endpoint(&helper_paths()) {
+        log::warn!(why = why.as_str(); "self-uninstall: the endpoint was kept");
     }
     uninstall_self_in_place(os, &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())
 }
@@ -258,5 +300,39 @@ mod tests {
         std::os::unix::fs::symlink(&elsewhere, &paths.data_dir).unwrap();
         assert!(remove_data_folder(&paths).is_err());
         assert!(elsewhere.join("config.json").exists());
+    }
+
+    #[test]
+    fn the_empty_dyno_parent_folder_goes_with_the_data_but_never_something_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = paths_in(dir.path());
+        paths.data_dir = dir.path().join("Dyno").join("Helper");
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        std::fs::write(paths.data_dir.join("config.json"), b"x").unwrap();
+        assert_eq!(remove_data_folder(&paths).unwrap(), "removed");
+        assert!(!dir.path().join("Dyno").exists(), "the empty parent went too");
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        std::fs::write(dir.path().join("Dyno").join("Other app"), b"y").unwrap();
+        assert_eq!(remove_data_folder(&paths).unwrap(), "removed");
+        assert!(dir.path().join("Dyno").join("Other app").exists(), "what else lives there stays");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_socket_and_its_empty_folder_are_removed_but_a_file_that_is_not_a_socket_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = paths_in(dir.path());
+        let run = dir.path().join("run").join("dyno-helper");
+        std::fs::create_dir_all(&run).unwrap();
+        paths.endpoint = run.join("helper.sock").to_string_lossy().into_owned();
+        paths.endpoint_dir = Some(run.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&paths.endpoint).unwrap();
+        drop(listener); // the file stays, as when the process is killed
+        assert_eq!(remove_endpoint(&paths).unwrap(), "removed");
+        assert!(!run.exists());
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(&paths.endpoint, b"not a socket").unwrap();
+        assert!(remove_endpoint(&paths).unwrap().starts_with("left in place"));
+        assert!(std::path::Path::new(&paths.endpoint).exists());
     }
 }

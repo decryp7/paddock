@@ -1,5 +1,5 @@
 import type { HelperState } from '../../core/api.types';
-import { CANCEL_NOTE, HELPER_BENEFITS, TURN_OFF_LABEL, auditTime, helperActionBadge, helperFace } from './helper-model';
+import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperActionBadge, helperActionSentence, helperFace } from './helper-model';
 
 const STATES: HelperState[] = ['notIncluded', 'off', 'notRunning', 'missing', 'foreign', 'outdated', 'ready'];
 
@@ -23,10 +23,11 @@ describe('helperFace', () => {
   });
 
   it('says what the helper shows, that it only reads, names each running action and whether Cancel works at the prompt', () => {
-    expect(HELPER_BENEFITS.join(' ')).toMatch(/only reads/);
+    expect(HELPER_READS_ONLY).toMatch(/only reads/);
+    for (const a of ['turnOn', 'repair', 'update', 'turnOff'] as const) expect(helperActionSentence(a), a).not.toMatch(/not turned on/);
     expect(['turnOn', 'repair', 'update', 'turnOff'].map((a) => helperActionBadge(a as never))).toEqual(['Turning on', 'Repairing', 'Updating', 'Turning off']);
     expect(TURN_OFF_LABEL).toBe('Turn off administrator readings');
-    expect(CANCEL_NOTE).toMatch(/prompt/);
+    expect(CANCEL_NOTE).toMatch(/Cancel or No in the prompt.*nothing is installed or changed/);
     expect(auditTime(0)).toBeTruthy();
   });
 });

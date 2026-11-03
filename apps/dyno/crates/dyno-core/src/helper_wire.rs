@@ -283,6 +283,8 @@ pub struct HelperStatus {
     pub prompt: String,
     /// The last audit entries, newest first.
     pub recent: Vec<AuditEntry>,
+    /// What the helper shows, for the card's list (the same list whether it is off or on); empty where the helper cannot exist.
+    pub readings: Vec<String>,
     /// Technical details for a "Details" disclosure (versions, an owner's account id, the OS's words); never the headline.
     pub detail: Option<String>,
     /// Why the last turn on, update or removal did not work (with what to do), until the next attempt.
@@ -330,16 +332,27 @@ pub fn prompt_text(host: HelperHost) -> &'static str {
     }
 }
 
-/// What the helper shows once it is on, per system (the card lists these instead of repeating a version).
-pub fn readings_on(host: HelperHost) -> &'static str {
+/// What the helper shows once it is on, per system: the one list the card uses both for "turning it on adds" and "Dyno now also shows".
+pub fn readings(host: HelperHost) -> &'static [&'static str] {
     match host {
-        HelperHost::Windows => {
-            "Every process of every account, per-program network traffic, disk health, and what keeps the computer awake and the backup versions."
-        }
-        HelperHost::Macos => "Every process of every account, login items and background tasks, firewall (pf) rules, and temperature and energy readings.",
-        HelperHost::Linux => {
-            "Every process of every account, which program owns each socket and file, firewall (nft) rules, and memory modules."
-        }
+        HelperHost::Windows => &[
+            "Every process of every account",
+            "Per-program network traffic",
+            "Disk health",
+            "What keeps the computer awake, and the backup versions",
+        ],
+        HelperHost::Macos => &[
+            "Every process of every account",
+            "Login items and background tasks",
+            "Firewall (pf) rules",
+            "Temperature and energy readings",
+        ],
+        HelperHost::Linux => &[
+            "Every process of every account",
+            "Which program owns each socket and file",
+            "Firewall (nft) rules",
+            "Memory modules",
+        ],
     }
 }
 
@@ -358,6 +371,11 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
         version,
         prompt: prompt.clone(),
         recent,
+        readings: if state == HelperState::NotIncluded {
+            Vec::new()
+        } else {
+            readings(host).iter().map(|r| (*r).to_string()).collect()
+        },
         detail,
         error: None,
     };
@@ -366,7 +384,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             Err(reason) => status(HelperState::NotIncluded, reason, None, vec![], None),
             Ok(()) => status(
                 HelperState::Off,
-                "Administrator readings are not turned on. Dyno works without them; turn them on to see every process and the few readings that need administrator rights."
+                "Administrator readings are not turned on. Dyno works without them."
                     .into(),
                 None,
                 vec![],
@@ -396,7 +414,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
-            format!("Administrator readings are on. Dyno now shows: {} It only reads and changes nothing on this computer.", readings_on(host)),
+            "Administrator readings are on. The helper only reads and changes nothing on this computer.".to_string(),
             Some(info.version.clone()),
             recent,
             Some(format!("Helper version {}, Dyno {our_version}.", info.version)),
@@ -544,7 +562,7 @@ mod tests {
         let w = HelperHost::Windows;
         let s = assess(w, Ok(()), Probe::Absent, "1.1.0");
         assert_eq!(s.state, HelperState::Off);
-        assert!(s.message.contains("turn them on"));
+        assert!(s.message.contains("not turned on") && !s.readings.is_empty());
         assert!(
             s.prompt.contains("unknown publisher") && !s.prompt.contains("password"),
             "Windows asks about the publisher, not a password"
@@ -584,9 +602,11 @@ mod tests {
         for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
             let ready = assess(host, Ok(()), Probe::Answered(info("1.1.0", HELPER_API), vec![]), "1.1.0");
             assert!(
-                ready.message.contains(readings_on(host)) && !ready.message.contains("1.1.0"),
+                ready.readings.iter().map(String::as_str).eq(readings(host).iter().copied()) && !ready.message.contains("1.1.0"),
                 "{host:?}: the readings now on, not the version"
             );
+            let off = assess(host, Ok(()), Probe::Absent, "1.1.0");
+            assert_eq!(off.readings, ready.readings, "Off and On list the same readings");
         }
         // A newer or older-but-supported helper than the app is Ready: the update is offered, never forced.
         let s = assess(w, Ok(()), Probe::Answered(info(MIN_HELPER_VERSION, HELPER_API), vec![]), "1.3.0");

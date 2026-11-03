@@ -14,8 +14,11 @@ it builds the agent's `HelperCentre` for the machine, prints the state, runs the
   signed in to the console (session 1); `PromptOnSecureDesktop=0` so the prompt can be photographed. The agent side ran as a scheduled task in
   that session (`/it`). The prompt was answered by a click through the VM's VNC (the VM's own input device: a synthetic click from inside the
   session is blocked by UIPI).
-- **Prompt seen.** Yes, the real UAC prompt: "Do you want to allow this app from an unknown publisher to make changes to your device?" for
-  `dyno-helper.exe`, "Publisher: Unknown" (ADR 0027 R1): [turn on](screenshots/helper/windows-uac-turn-on.png), [turn off](screenshots/helper/windows-uac-turn-off.png).
+- **Prompt seen.** Yes, the real UAC prompt, the same words each time because it is for the same program (`dyno-helper.exe`, "Publisher:
+  Unknown": Dyno's Windows helper is unsigned and stays so, so the card tells the user to expect this):
+  - ![UAC prompt shown by Turn on](screenshots/helper/windows-uac-turn-on.png) *Turn on: the elevated `install --for <SID>`.*
+  - ![UAC prompt shown by Turn off](screenshots/helper/windows-uac-turn-off.png) *Turn off: the bundled copy's elevated `uninstall`
+    (Windows cannot delete a running program, so Turn off prompts too).*
 
 | Step | Result |
 | --- | --- |
@@ -53,8 +56,11 @@ Update runs the same code as Repair (install again over the running helper) and 
 - **Machine.** A private clone of the Tart image `vmgui-base-tahoe-4aaa751f` (Apple silicon, the console user `admin` signed in), started with
   `--vnc-experimental`; the clone is deleted. Binaries built natively on the host (`aarch64-apple-darwin`) and shared read-only. The agent side
   ran in the user's session (`launchctl asuser`); the password was typed into the real dialog through the VM's VNC.
-- **Prompt seen.** Yes, the real `osascript` password window ("Dyno wants to install its helper, which shows the readings that need
-  administrator rights."): [turn on](screenshots/helper/macos-password-dialog-turn-on.png), [repair](screenshots/helper/macos-password-dialog-repair.png).
+- **Prompt seen.** Yes, the real `osascript` password window, one per action with its own text (the first shots had a Terminal behind them and
+  the same text for Turn on and Repair; they were taken again on a clean desktop, cropped to the dialog):
+  ![macOS password dialog, Turn on](screenshots/helper/macos-password-dialog-turn-on.png) *Turn on: "Dyno wants to install its helper ...".*
+  ![macOS password dialog, Repair](screenshots/helper/macos-password-dialog-repair.png) *Repair: "Dyno wants to repair its helper ...".*
+  ![macOS password dialog, Update](screenshots/helper/macos-password-dialog-update.png) *Update: "Dyno wants to update its helper ...".*
 
 | Step | Result |
 | --- | --- |
@@ -94,8 +100,9 @@ Update runs the same code as Repair (install again over the running helper) and 
    client check called that an untrusted endpoint (macOS and Linux both showed `Foreign`; after Turn off the job then waited for an `Off` that
    could not come). Fixed in `paddock-ipc` (a missing folder is "nothing listening"), with a test.
 7. **Self-removal left the registration behind.** On macOS `launchctl bootout` of its own job ended the helper before it removed its plist.
-   Fixed: a service removing itself unregisters first and stops last (test). The stale `helper.sock` and an empty `/Library/Application
-   Support/Dyno` folder remain on macOS; both are harmless and are noted for the service crate.
+   Fixed: a service removing itself unregisters first and stops last (test). The stale `helper.sock` (a killed service cannot unlink
+   its socket) and the empty `/Library/Application Support/Dyno` folder were left on macOS: the removal now takes the socket (only a socket)
+   and its empty folder, and the empty `Dyno` parent (never with something in it), each with a test.
 8. **"Installed" on Linux was "the package's program exists".** Without the service enabled the card said "Not running" instead of "Off".
    Fixed: on Linux, installed means `systemctl is-enabled` succeeds.
 9. The helper's data folder is now removed by the elevated `uninstall` and by the self-removal (only its own files and folders, a link is never
@@ -107,6 +114,17 @@ The Windows build of Dyno's helper is unsigned, and stays so (user decision, 202
 whether to let an app from an unknown publisher (`dyno-helper.exe`) make changes to the device, that this is expected, and to choose Yes
 (`prompt_text`, shown on every Windows card state that can turn the helper on; no password line on Windows). The fixes above (the stop race,
 the data folder, the kept connection) were not run again in the Windows VM in this session; the macOS and Linux runs exercise the same code.
+
+## Open items for the release VM matrix
+
+1. **Linux: the polkit prompt.** Turn on, Repair and Update through `pkexec` with a real graphical authentication agent, in a desktop session
+   (Ubuntu 24.04 Desktop VM, not the headless Orb machine): the dialog's text, the account that may authorise, the job's phases, and Cancel
+   while the dialog is open.
+2. **Linux: the sandbox in a real VM.** `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp` and `NoNewPrivileges` read `no` in the Orb
+   machine (its LXC-style drop-in); check `systemctl show` and `/proc/<pid>/status` (`NoNewPrivs: 1`) on a machine without that drop-in.
+3. **Windows: re-run after the fixes** (the stop race, the data folder, the kept connection, the Not trusted card) from a clean snapshot.
+4. **macOS 15 and 27**: the same run; how the plist daemon shows in Login Items on each.
+5. **A second, standard account** on each system: it sees the total only (the table is tested; the account is not).
 
 ## Settings card, every state (mock backend, independent review)
 

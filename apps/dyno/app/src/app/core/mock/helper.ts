@@ -14,26 +14,25 @@ const PROMPTS: Record<MockOs, string> = {
   linux: 'Your desktop asks you to authenticate (polkit) so Dyno can install its helper.',
 };
 
-/** What the helper shows once on (`readings_on`). */
-const READINGS: Record<MockOs, string> = {
-  macos: 'Every process of every account, login items and background tasks, firewall (pf) rules, and temperature and energy readings.',
-  windows: 'Every process of every account, per-program network traffic, disk health, and what keeps the computer awake and the backup versions.',
-  linux: 'Every process of every account, which program owns each socket and file, firewall (nft) rules, and memory modules.',
+/** What the helper shows (`readings`): one list per system, used by the Off and the On card alike. */
+const READINGS: Record<MockOs, string[]> = {
+  macos: ['Every process of every account', 'Login items and background tasks', 'Firewall (pf) rules', 'Temperature and energy readings'],
+  windows: ['Every process of every account', 'Per-program network traffic', 'Disk health', 'What keeps the computer awake, and the backup versions'],
+  linux: ['Every process of every account', 'Which program owns each socket and file', 'Firewall (nft) rules', 'Memory modules'],
 };
 
 /** The sentences the engine's `assess` gives, so the card reads the same against the mock. */
 export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): HelperStatus {
   const prompt = PROMPTS[os];
-  const base = { version: null, prompt, recent: [], detail: null, error: null };
+  const base = { version: null, prompt, recent: [], readings: READINGS[os], detail: null, error: null };
   switch (variant) {
     case 'notIncluded':
-      return { ...base, state: 'notIncluded', message: "This AppImage has no helper. Install Dyno's .deb package to use administrator readings." };
+      return { ...base, readings: [], state: 'notIncluded', message: "This AppImage has no helper. Install Dyno's .deb package to use administrator readings." };
     case 'off':
       return {
         ...base,
         state: 'off',
-        message:
-          'Administrator readings are not turned on. Dyno works without them; turn them on to see every process and the few readings that need administrator rights.',
+        message: 'Administrator readings are not turned on. Dyno works without them.',
       };
     case 'notRunning':
     case 'silent':
@@ -60,7 +59,7 @@ export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): Helper
         ...base,
         state: 'ready',
         version: MOCK_HELPER_VERSION,
-        message: `Administrator readings are on. Dyno now shows: ${READINGS[os]} It only reads and changes nothing on this computer.`,
+        message: 'Administrator readings are on. The helper only reads and changes nothing on this computer.',
         detail: `Helper version ${MOCK_HELPER_VERSION}, Dyno ${MOCK_HELPER_VERSION}.`,
         recent: [{ at: 1_770_000_000, peer: null, what: 'Dyno asked who is calling', verdict: 'done', detail: '' }],
       };

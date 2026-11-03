@@ -106,8 +106,19 @@ pub fn prompt_notice(os: Os) -> &'static str {
     }
 }
 
-/// The dialog text of the macOS password prompt itself.
+/// The dialog text of the macOS password prompt itself (turn on).
 pub const MACOS_PROMPT: &str = "Dyno wants to install its helper, which shows the readings that need administrator rights.";
+
+/// The dialog text of the macOS password prompt for `action`: it says what this change does, so a repair does not look like an install.
+pub fn macos_prompt(action: dyno_core::helper_wire::HelperAction) -> &'static str {
+    use dyno_core::helper_wire::HelperAction as A;
+    match action {
+        A::TurnOn => MACOS_PROMPT,
+        A::Repair => "Dyno wants to repair its helper, which shows the readings that need administrator rights.",
+        A::Update => "Dyno wants to update its helper, which shows the readings that need administrator rights.",
+        A::TurnOff => "Dyno wants to remove its helper from this computer.",
+    }
+}
 
 /// Turns the helper on or updates it: runs `<bundled helper> install` through the OS's one prompt and waits. `bundled`
 /// is the helper next to the agent (macOS and Windows: the program that is copied; Linux: `/usr/bin/dyno-helper`).
@@ -121,9 +132,24 @@ pub fn turn_on(
     sys: &mut dyn System,
     elevator: &mut dyn Elevator,
 ) -> Result<(), ElevationError> {
+    turn_on_with(os, bundled, owner, sys, elevator, MACOS_PROMPT)
+}
+
+/// [`turn_on`] with the macOS dialog's text given ([`macos_prompt`]).
+///
+/// # Errors
+/// What the user did or what went wrong.
+pub fn turn_on_with(
+    os: Os,
+    bundled: &Path,
+    owner: &HelperUser,
+    sys: &mut dyn System,
+    elevator: &mut dyn Elevator,
+    prompt: &str,
+) -> Result<(), ElevationError> {
     log::info!(os:? = os; "turning the helper on");
     let owner = owner.to_arg();
-    run_elevated(os, sys, elevator, bundled, &[INSTALL_VERB, OWNER_FLAG, &owner], MACOS_PROMPT)
+    run_elevated(os, sys, elevator, bundled, &[INSTALL_VERB, OWNER_FLAG, &owner], prompt)
 }
 
 /// Turns the helper off when it does not answer the authenticated `Uninstall` request: runs the installed helper's
@@ -132,8 +158,28 @@ pub fn turn_on(
 /// # Errors
 /// What the user did or what went wrong.
 pub fn turn_off(os: Os, installed: &Path, sys: &mut dyn System, elevator: &mut dyn Elevator) -> Result<(), ElevationError> {
+    turn_off_with(
+        os,
+        installed,
+        sys,
+        elevator,
+        macos_prompt(dyno_core::helper_wire::HelperAction::TurnOff),
+    )
+}
+
+/// [`turn_off`] with the macOS dialog's text given.
+///
+/// # Errors
+/// What the user did or what went wrong.
+pub fn turn_off_with(
+    os: Os,
+    installed: &Path,
+    sys: &mut dyn System,
+    elevator: &mut dyn Elevator,
+    prompt: &str,
+) -> Result<(), ElevationError> {
     log::info!(os:? = os; "turning the helper off");
-    run_elevated(os, sys, elevator, installed, &[UNINSTALL_VERB], MACOS_PROMPT)
+    run_elevated(os, sys, elevator, installed, &[UNINSTALL_VERB], prompt)
 }
 
 /// What the agent does about the helper that answered `answer` (`(version, protocol)`), or about none.

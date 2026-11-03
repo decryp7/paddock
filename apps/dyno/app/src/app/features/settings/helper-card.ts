@@ -5,7 +5,7 @@ import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
 import { HelperStore } from '../../state/helper.store';
-import { CANCEL_NOTE, HELPER_BENEFITS, TURN_OFF_LABEL, auditTime, helperActionBadge, helperFace } from './helper-model';
+import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperActionBadge, helperActionSentence, helperFace } from './helper-model';
 
 /**
  * Settings > Administrator readings (ADR 0027): whether Dyno's helper is on, what turning it on shows and what the system will
@@ -31,25 +31,30 @@ import { CANCEL_NOTE, HELPER_BENEFITS, TURN_OFF_LABEL, auditTime, helperActionBa
               <small class="ver">Version {{ s.version }}</small>
             }
           </div>
-          <p class="msg" data-testid="helper-message">{{ s.message }}</p>
+          <p class="msg" data-testid="helper-message">{{ store.action() ? sentence(store.action()!) : s.message }}</p>
 
-          @if (s.state === 'off') {
-            <ul class="benefits">
-              @for (b of benefits; track b) {
-                <li>{{ b }}</li>
+          @if (!store.action() && s.readings.length && (s.state === 'off' || s.state === 'ready')) {
+            <p class="lead">{{ s.state === 'off' ? 'Turning it on adds:' : 'Dyno now also shows:' }}</p>
+            <ul class="benefits" data-testid="helper-readings">
+              @for (r of s.readings; track r) {
+                <li>{{ r }}</li>
               }
             </ul>
+            <p class="reads-only">{{ readsOnly }}</p>
           }
-          @if (s.state === 'off' || s.state === 'outdated' || s.state === 'foreign' || s.state === 'notRunning' || s.state === 'missing') {
-            <p class="prompt"><dy-icon name="lock" /> <span>{{ s.prompt }} Dyno asks once.</span></p>
+          @if (!store.action() && (s.state === 'off' || s.state === 'outdated' || s.state === 'foreign' || s.state === 'notRunning' || s.state === 'missing')) {
+            <p class="prompt"><dy-icon name="lock" /> <span>{{ s.prompt }} Each change asks once.</span></p>
           }
 
           @if (store.action()) {
             <div class="running" role="status" aria-live="polite">
-              <dy-job-progress [progress]="store.job()" (cancel)="store.cancel()" />
+              <dy-job-progress [progress]="store.job()" />
               @if (!store.job()) {
                 <small>Starting…</small>
               }
+              <div class="buttons">
+                <button type="button" matButton="outlined" (click)="store.cancel()">Cancel</button>
+              </div>
               <small class="cancel-note">{{ cancelNote }}</small>
             </div>
           } @else {
@@ -108,6 +113,9 @@ import { CANCEL_NOTE, HELPER_BENEFITS, TURN_OFF_LABEL, auditTime, helperActionBa
     .detail p { margin: var(--sp-1) 0 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
     .ver { color: var(--text-3); }
     .msg { color: var(--text-2); margin: var(--sp-2) 0; }
+    .lead { margin: var(--sp-2) 0 0; font-weight: var(--fw-semibold); }
+    .reads-only { color: var(--text-3); font-size: var(--fs-sm); margin: 0 0 var(--sp-2); }
+    .running ::ng-deep .pd-cancel, .running ::ng-deep .pd-hint { display: none; }
     .benefits { margin: var(--sp-2) 0; padding-left: var(--sp-5); color: var(--text-2); font-size: var(--fs-sm); }
     .prompt { display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-3); font-size: var(--fs-sm); }
     .prompt dy-icon { --icon-size: 16px; flex: none; margin-top: 1px; }
@@ -125,7 +133,8 @@ import { CANCEL_NOTE, HELPER_BENEFITS, TURN_OFF_LABEL, auditTime, helperActionBa
 })
 export class HelperCard implements OnInit {
   protected readonly store = inject(HelperStore);
-  protected readonly benefits = HELPER_BENEFITS;
+  protected readonly readsOnly = HELPER_READS_ONLY;
+  protected readonly sentence = helperActionSentence;
   protected readonly faceOf = helperFace;
   protected readonly badge = helperActionBadge;
   protected readonly turnOffLabel = TURN_OFF_LABEL;
