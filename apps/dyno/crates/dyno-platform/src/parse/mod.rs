@@ -6,6 +6,7 @@ pub mod desktop_entry;
 pub mod gpu;
 pub mod hardware;
 pub mod ioreg;
+pub mod btm;
 pub mod launchd;
 pub mod linux_hw;
 pub mod linux_net;

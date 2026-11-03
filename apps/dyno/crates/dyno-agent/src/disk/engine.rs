@@ -606,6 +606,26 @@ impl Walk {
         !seen.insert((e.dev, e.ino))
     }
 
+    /// Whether the volume itself is gone, after one folder answered "unreachable" (`detail`, the OS text with its error number).
+    /// The scan root is looked at again: if it answers, the failure belonged to that folder alone and is logged as such; if it
+    /// does not, the link is down. Logged either way so a diagnostic bundle shows which it was (no paths: they are user content).
+    fn volume_lost(&self, detail: &str, stage: &str) -> bool {
+        match self.source.stat(&self.root) {
+            Err(ReadError::Unreachable(root)) => {
+                log::error!(Stage = stage, Detail = detail, RootDetail = root.as_str(); "Disk scan: a folder and the scan root both stopped answering; the volume is lost");
+                true
+            }
+            Ok(_) => {
+                log::warn!(Stage = stage, Detail = detail; "Disk scan: one folder timed out or was unreachable but the volume still answers; the folder is marked incomplete and the scan goes on");
+                false
+            }
+            Err(other) => {
+                log::warn!(Stage = stage, Detail = detail, RootError = other.to_string().as_str(); "Disk scan: one folder was unreachable and the scan root gave another error; the folder is marked incomplete and the scan goes on");
+                false
+            }
+        }
+    }
+
     /// Reads one folder and commits it; returns the child folders to read next.
     fn process(&self, task: &Task, epoch: u64) -> Vec<Task> {
         let notable = self.cfg.limits.notable_bytes;
@@ -672,17 +692,26 @@ impl Walk {
             }
             true
         });
+        // "Unreachable" from one folder is not yet a lost volume: macOS answers ETIMEDOUT for a single File Provider placeholder or
+        // a stuck network-backed folder while the volume is fine. Only when the scan root stops answering too is the volume gone.
         if let Some(detail) = unreachable {
-            self.pending_items.fetch_sub(seen, Ordering::Relaxed);
-            self.fail(ScanFailure::VolumeUnreachable { detail });
-            return Vec::new();
+            if self.volume_lost(&detail, "entry") {
+                self.pending_items.fetch_sub(seen, Ordering::Relaxed);
+                self.fail(ScanFailure::VolumeUnreachable { detail });
+                return Vec::new();
+            }
+            // The listing stopped part way: what was read counts, and the folder is incomplete for good.
+            entry_denied.get_or_insert(ReadError::Other(detail));
         }
         let unreadable_here = match &listed {
             Ok(()) => None,
             Err(ReadError::Unreachable(d)) => {
-                self.pending_items.fetch_sub(seen, Ordering::Relaxed);
-                self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
-                return Vec::new();
+                if self.volume_lost(d, "open") {
+                    self.pending_items.fetch_sub(seen, Ordering::Relaxed);
+                    self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
+                    return Vec::new();
+                }
+                Some(unreadable_reason(&ReadError::Other(d.clone()), &self.cfg.reasons, &task.path))
             }
             // Gone since it was listed: nothing to read. On a retry the path was rebuilt from the index, so "not found" may mean
             // the path is wrong; the folder then stays refused rather than being called complete and empty.
@@ -1746,6 +1775,7 @@ mod tests {
         fs.file(&r, "top", 34);
         let b = fs.dir(&r, "b");
         fs.fail_open(&b, ReadError::Unreachable("ENOTCONN".into()));
+        fs.drop_volume_at(&b);
         let (w, rec, end) = run(Arc::new(fs), r, cfg(1));
         assert_eq!(end, End::Failed(ScanFailure::VolumeUnreachable { detail: "ENOTCONN".into() }));
         assert_eq!(*lock(&rec.ended), vec![end]);
@@ -1763,6 +1793,7 @@ mod tests {
         for n in ["a", "b"] {
             let d = fs.dir(&r, n);
             fs.fail_open(&d, ReadError::Unreachable(format!("lost {n}")));
+            fs.drop_volume_at(&d);
         }
         let gate = crate::disk::testing::Gate::new();
         let g = gate.clone();
@@ -1786,8 +1817,45 @@ mod tests {
         let r = fs.root();
         fs.file(&r, "x", 5);
         fs.fail_entries(&r, vec![ReadError::Unreachable("ETIMEDOUT".into())]);
+        fs.drop_volume_at(&r);
         let (_, _, end) = run(Arc::new(fs), r, cfg(2));
         assert!(matches!(end, End::Failed(ScanFailure::VolumeUnreachable { .. })));
+    }
+
+    /// The reported bug: macOS answered ETIMEDOUT (os error 60) for one folder and the whole scan stopped with "The link to
+    /// Macintosh HD dropped". One folder's timeout marks that folder and the scan goes on.
+    #[test]
+    fn one_folder_timing_out_marks_it_incomplete_and_the_scan_goes_on() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let a = fs.dir(&r, "a");
+        fs.file(&a, "x", 12);
+        fs.file(&r, "top", 34);
+        let slow = fs.dir(&r, "cloud");
+        fs.fail_open(&slow, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+        let c = fs.dir(&r, "c");
+        fs.file(&c, "y", 7);
+        let (w, rec, end) = run(Arc::new(fs), r, cfg(1));
+        assert_eq!(end, End::Done, "the volume still answers");
+        assert_eq!(*lock(&rec.ended), vec![End::Done]);
+        assert_eq!(w.snapshot().progress.unreadable, 1);
+        assert_eq!(level(&w, 0).node.bytes, 34 + 12 + 7, "the other folders were counted");
+        assert!(!w.with_index(DiskIndex::is_complete), "the timed-out folder is incomplete");
+    }
+
+    #[test]
+    fn a_folder_timing_out_mid_listing_is_partial_and_the_scan_goes_on() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let a = fs.dir(&r, "a");
+        fs.file(&a, "x", 12);
+        fs.fail_entries(&a, vec![ReadError::Unreachable("Operation timed out (os error 60)".into())]);
+        let b = fs.dir(&r, "b");
+        fs.file(&b, "y", 5);
+        let (w, _, end) = run(Arc::new(fs), r, cfg(1));
+        assert_eq!(end, End::Done);
+        assert_eq!(level(&w, 0).node.bytes, 17);
+        assert!(!w.with_index(DiskIndex::is_complete));
     }
 
     #[test]

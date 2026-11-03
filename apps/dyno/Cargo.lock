@@ -1272,6 +1272,7 @@ dependencies = [
  "dyno-core",
  "jiff",
  "libc",
+ "log",
  "netstat2",
  "paddock-proc",
  "plist",
