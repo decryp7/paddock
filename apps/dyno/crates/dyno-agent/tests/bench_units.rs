@@ -3,14 +3,13 @@
 //! never pass silently, when run without one. Run them where a manager exists: `scripts/linux-units-check.sh` (release checklist,
 //! `docs/releasing.md`). Nothing here touches anything it did not start: unit names carry this test process's id.
 #![cfg(target_os = "linux")]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use dyno_agent::bench::{BenchLauncher, ProcessLauncher, SystemctlControl};
 use dyno_agent::bench_child::{cleanup_leftovers, write_records, ChildEvents, ChildRequest, Stop};
 use dyno_core::bench::unit::{self, UnitRecord};
 use dyno_core::bench::wire::{Liveness, PhaseProgress};
 use dyno_core::bench::{BenchKind, BenchStatus};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -42,7 +41,7 @@ fn request(run: &str) -> ChildRequest {
 }
 
 fn systemctl(args: &[&str]) -> String {
-    let out = Command::new("systemctl").arg("--user").args(args).output().unwrap();
+    let out = dyno_platform::process::command("systemctl").arg("--user").args(args).output().unwrap();
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -141,7 +140,7 @@ while :; do echo '{"t":"heartbeat"}'; sleep 1; done"#,
     );
     assert!(took < Duration::from_secs(2), "Cancel returned after {took:?}");
     assert!(!active(&unit::unit_name(&format!("{run}-cpu"))), "the unit is gone");
-    let left = Command::new("pgrep").arg("-f").arg(runner.to_str().unwrap()).output().unwrap();
+    let left = dyno_platform::process::command("pgrep").arg("-f").arg(runner.to_str().unwrap()).output().unwrap();
     assert!(
         String::from_utf8_lossy(&left.stdout).trim().is_empty(),
         "burners left: {}",
@@ -169,7 +168,7 @@ fn a_restart_stops_a_recorded_leftover_unit_and_leaves_a_foreign_one() {
                 "300".into(),
             ],
         };
-        assert!(Command::new(c.program).args(&c.args).output().unwrap().status.success());
+        assert!(dyno_platform::process::command(c.program).args(&c.args).output().unwrap().status.success());
     }
     let control = SystemctlControl;
     let mine_id = control.invocation_id(&mine).expect("an invocation id");

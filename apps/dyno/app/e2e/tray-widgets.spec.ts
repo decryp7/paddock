@@ -188,7 +188,7 @@ test.describe('dashboard and menu-bar editors', () => {
     const editor = dialog.locator('dy-menu-bar-items');
     await editor.scrollIntoViewIfNeeded();
     await expect(shown(editor)).toHaveCount(4);
-    await editor.getByRole('button', { name: 'Add Number' }).click();
+    await editor.getByRole('button', { name: 'Add another Number' }).click();
     await expect(shown(editor)).toHaveCount(5);
   });
 });
