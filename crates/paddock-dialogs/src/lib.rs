@@ -42,15 +42,18 @@
 //! ```
 
 pub mod contract;
+pub mod edge;
+pub mod expect;
 pub mod placement;
 pub mod registry;
+pub mod size;
 pub mod table;
 pub mod ts;
 pub mod window;
 
 pub use contract::{
     BASE_COMMANDS, Contract, ContractError, Contracts, Grant, Kind, KindPolicy, Modality,
-    Remembers, Size,
+    Remembers, Shrink, Size, SizeMode,
 };
 pub use paddock_commands::DialogCallable;
 pub use placement::{Bounds, Monitor, Placement, Rect, Remembered, ScreenPosition};
@@ -58,12 +61,16 @@ pub use registry::{CloseDecision, Dialogs, OpenDialog, SHOW_DEADLINE, Scheduler,
 pub use table::{DialogTable, Entry, Shape, Width};
 pub use window::{
     CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
-    DialogRequest, DialogResult, DialogShown, DialogStart, INPUTS_EVENT, Measure, Parenting,
-    RESULT_EVENT, SHOWN_EVENT, ShowMechanism, Theme, WindowConfig, show_mechanism,
+    DialogReadyWire, DialogRemeasureEvent, DialogRequest, DialogResult, DialogShown,
+    DialogSizeModeEvent, DialogStart, INPUTS_EVENT, Measure, Parenting, REMEASURE_EVENT,
+    RESULT_EVENT, SHOWN_EVENT, SIZE_MODE_EVENT, ShowMechanism, SizeModeName, Theme, WindowConfig,
+    show_mechanism,
 };
 
 #[cfg(feature = "tauri")]
 pub mod tauri;
+#[cfg(feature = "probe")]
+pub mod probe;
 
 paddock_commands::command_table! {
     /// The dialog layer's commands (`paddock_dialogs::tauri::invoke_handler` serves them; the shell plugin folds them
@@ -78,7 +85,7 @@ paddock_commands::command_table! {
     /// The calling dialog's page measured itself: sizes its window, makes the minimum content the OS minimum, shows it.
     Quiet [DIALOG] => tauri::dialog_ready,
     /// Refits the calling dialog to a new measure.
-    Quiet [DIALOG] => tauri::dialog_fit,
+    Quiet [DIALOG] => tauri::dialog_measure,
 }
 
 #[cfg(test)]

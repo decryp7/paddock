@@ -82,3 +82,4 @@ export {
   REBUILD_HINT,
   type BuildGuard,
 } from './build-guard.ts';
+export { expectLoopSettles, expectSizeToContent, SIZE_SCALES, type SizeFixture } from './size-to-content.ts';

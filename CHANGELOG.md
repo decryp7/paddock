@@ -17,6 +17,14 @@ Conventional Commits; one semver tag for the whole repo.
   `SleepWakeSource` delivers `PowerEvent::Sleeping`/`Woke` (`IORegisterForSystemPower`, `PowerRegisterSuspendResumeNotification`, logind `PrepareForSleep`).
   `FakePower` and `FakeEvents` are the doubles; the real adapters (`system_power`, `system_events`) run only in VMs (ER-14). The adapters are in
   `native.rs`, which the coverage job leaves out (one declared alternative added to the regex in `ci.yml`).
+### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: dialogs size to their content (ADR 0043)
+- **Breaking.** One wire for sizing: `dialog_measure { epoch, seq, measure }` replaces `dialog_fit { measure }` and `dialog_ready { measure }` is now `dialog_ready { epoch, seq }` (it carries no size). `DialogIo.fit` and
+  `ready(measure)` become `measure(epoch, seq, measure)` and `ready(epoch, seq)`; `DialogStart.epoch` counts page loads, `Measure.overflow` says the body scrolls, and the events `paddock://dialog-size-mode` and
+  `paddock://dialog-remeasure` are new. `BASE_COMMANDS`, the shell's permissions and `shell-commands.ts` follow. No compatibility shim.
+- `SizeMode` (`Height { shrink }` or `Manual`) replaces `fits_content` and `grows_only` in the kind table (generated `sizeMode`, `shrink`); `fitsContent` is `sizeModeOf`. Only a tool remembers its size (D3).
+- `paddock_dialogs::size::SizeState`: the pure state machine (epoch and seq order, a queue of requested physical sizes, user resize versus echo, scale change, monitor move, show gating); its glue (`tauri/sizing.rs`) runs every
+  transition on the main thread and logs one line each. The Windows, Linux and macOS edges read the DPI, the visible frame and the user-resize signal. `SizeLoop` (one measure function, last-sent baseline, at most two sends per change)
+  replaces the handshake measure and the frame's own watch baseline. `data-fit-seq` and `data-size-mode` are set on `<html>`.
 
 ### `paddock-shell`: `files_*` commands always have their service
 

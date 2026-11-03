@@ -1230,3 +1230,25 @@ than 128 bits (one byte of state per node, `O(nodes)`); opening and lookups run 
 target (`apps/dyno/fuzz`) runs the open-and-verify path. **Lesson:** a library's "verify" is not a safe parser for untrusted
 bytes; scan single-byte damage of a valid file with a time limit per case, and do not trust a green proptest that never
 finishes.
+
+## A window's size is a state with one owner, not a sequence of events (2026-11-04, ADR 0043)
+
+Sixteen dialog-size fixes in two weeks each closed one gap between two baselines (a handshake measure, a watch started later, a
+scale-change hook). The class is "nothing states what the size should be at any moment". ADR 0043 makes the size a pure state
+machine (`paddock_dialogs::size`) fed by numbered measures `(epoch, seq)` and the OS's own events, carried out on the main
+thread; the page has one measure loop with a last-sent baseline and a guard of two sends per change. **Lessons:** (1) an
+echo of our own `set_size` is told from the user's resize by a queue of what was asked, and by the OS's signal where it has one
+(`WM_SIZING`, live resize), never by comparing sizes alone; (2) anything that touches a native window (`ns_window`) must be
+left out under the mock runtime, which hands out a dangling pointer (SIGSEGV, not an error); (3) an e2e that fixes the
+viewport to a width other than the contract's asserts the wrong thing: at another width the content wraps differently and
+the loop rightly measures again.
+
+## Tests never wait on `requestAnimationFrame`; they wait on a state the page exposes (2026-11-04, ADR 0043)
+
+The dialog size e2e declared the page quiet after two animation frames. WebKit withholds frames from an occluded window, and
+with four parallel workers a window can get none for seconds: 32 of 200 runs saw one height sent and the loop already quiet,
+then hung waiting for frames that did not come. Refuted first: an oscillating loop (the height history was a single value)
+and load alone. **Fix:** the page exposes `data-fit-pending` (the follow-up frames still owed) and `quiet()` waits for 0
+pending and a sequence number that moved past its value before the change and then held (0 of 200). **Lesson:** a test
+that waits on a rendering callback depends on whether the browser renders that window; wait on a condition the page states
+itself (ER-12), and measure the failure rate before and after (ER-28).

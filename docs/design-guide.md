@@ -329,6 +329,12 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   "The popup holds 8 widgets. Remove one to add another." and every Add is disabled. Reset to defaults is a text button; remove and
   reset show the undo snack bar through the toast area while the engine says `can_undo`. At 880 px and more the real popup is
   previewed beside the lists, with the same area and values. A newer layout is read-only, and a note says why.
+- **Dialog windows size to their content** (ADR 0043, WPF's `SizeToContent`): a decision or a form has its contract's width and
+  the height of its content, shrinking and growing with it (late content, fonts, density, display scale); a viewer opens at
+  least 680 x 560 and only grows; a tool keeps the size it was given and remembers it. A window the user resizes is theirs
+  for that opening. Content never sets a height that follows the window (no `vh`, no `100%`, no `flex: 1` on the block axis).
+  A decision is one continuous surface: its footer has no divider, and gets one (a hairline shadow, never a border) only while the
+  body overflows and scrolls, together with the scroll-edge shadow on the body, so cut-off text never runs into the buttons.
 - **Dialogs**: modal for decisions only; title 18, one sentence, primary on the right, cancel left of it; destructive
   dialog names the thing and the consequence ("Delete 3 runners and their folders"); Esc closes, focus returns to the
   trigger. Prefer inline panels or popovers over dialogs.

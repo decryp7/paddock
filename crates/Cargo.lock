@@ -3346,16 +3346,21 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-workspace-hack",
+ "proptest",
  "serde",
  "serde_json",
  "tauri",
  "tauri-runtime",
  "toml 0.9.12+spec-1.1.0",
  "ts-rs",
+ "windows",
 ]
 
 [[package]]
