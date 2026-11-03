@@ -78,10 +78,7 @@ pub(crate) fn complete(conn: &Connection) -> duckdb::Result<bool> {
 /// the order. The stale mark stays.
 pub(crate) fn append_at_end(conn: &Connection, first_new: u64) -> duckdb::Result<()> {
     let positioned = conn.query_row("SELECT count(*) FROM ord", [], |r| r.get::<_, u64>(0))?;
-    conn.execute(
-        "INSERT INTO ord SELECT (? + row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT, id FROM events WHERE id >= ? ORDER BY 1",
-        params![positioned, first_new],
-    )?;
+    conn.execute(&insert_sql(), params![positioned, first_new])?;
     Ok(())
 }
 
@@ -96,17 +93,27 @@ pub(crate) fn is_stale(conn: &Connection) -> bool {
     crate::writer::meta_u64(conn, STALE) == 1
 }
 
+/// The time order of the events (untimed last; `id` makes it total).
+const KEY: &str = "coalesce(ts, 9223372036854775807), source, line, id";
+
+/// `INSERT` of positions `? + 0, ? + 1, …` for the visible events with ids from `?` on, in time order, stored in position
+/// order. One sort: the ids come sorted from the subquery and `row_number() OVER ()` numbers them in the order they
+/// arrive, which DuckDB preserves for a window with an empty `OVER` clause and for an `INSERT` (preserve_insertion_order,
+/// on by default; <https://duckdb.org/docs/2.0/sql/dialect/order_preservation.html>). A window ordered by the key and then
+/// `ORDER BY pos` sorted twice: 57 s against 12 to 18 s at 56M events (performance.md, "Ordering without the second
+/// sort"). `the_ordering_stores_positions_in_time_order_and_in_position_order` checks both orders.
+fn insert_sql() -> String {
+    format!("INSERT INTO ord SELECT (? + row_number() OVER () - 1)::UBIGINT, id FROM (SELECT id FROM events WHERE id >= ? ORDER BY {KEY})")
+}
+
 /// Renumbers the visible events.
 pub(crate) fn rebuild(conn: &Connection) -> duckdb::Result<()> {
-    conn.execute_batch(
-        "BEGIN TRANSACTION;
-DELETE FROM ord;
-INSERT INTO ord SELECT (row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT AS pos, id FROM events ORDER BY pos;
-COMMIT;",
-    )
-    .inspect_err(|_| {
-        let _ = conn.execute_batch("ROLLBACK");
-    })?;
+    conn.execute_batch("BEGIN TRANSACTION; DELETE FROM ord;")
+        .and_then(|()| conn.execute(&insert_sql(), params![0u64, 0u64]))
+        .and_then(|_| conn.execute_batch("COMMIT"))
+        .inspect_err(|_| {
+            let _ = conn.execute_batch("ROLLBACK");
+        })?;
     remember_last(conn)
 }
 
@@ -167,10 +174,7 @@ pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::
         Some(last) if positioned == before && smallest > last => {}
         _ => return Ok(false),
     }
-    conn.execute(
-        "INSERT INTO ord SELECT (? + row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT, id FROM events WHERE id >= ? ORDER BY 1",
-        params![positioned, first_new],
-    )?;
+    conn.execute(&insert_sql(), params![positioned, first_new])?;
     remember_last(conn)?;
     Ok(true)
 }
@@ -328,6 +332,51 @@ mod tests {
             attempts.set(attempts.get() + 1);
             Err(duckdb::Error::InvalidParameterName(message.into()))
         }
+    }
+
+    /// `rows` events in a shuffled id order (ties on `ts` and `source`, a share untimed) behind the `events` view, on 4
+    /// threads with a small memory limit, so the ordering runs in parallel and spills like a large store.
+    fn shuffled(rows: u64) -> Connection {
+        let conn = catalog();
+        conn.execute_batch(&format!(
+            "SET threads = 4; SET memory_limit = '64MB';
+CREATE TABLE ev AS SELECT CASE WHEN i % 17 = 0 THEN NULL ELSE (hash(i) % 5000)::BIGINT END AS ts, (hash(i * 7) % 9)::UINTEGER AS source,
+  (i % 1000)::UINTEGER AS line, i::UBIGINT AS id FROM range({rows}) t(i) ORDER BY hash(i * 31);
+CREATE OR REPLACE VIEW events AS SELECT * FROM ev;"
+        ))
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn the_ordering_stores_positions_in_time_order_and_in_position_order() {
+        let conn = shuffled(1_500_000);
+        rebuild(&conn).unwrap();
+        // The checks join and sort the whole table: more memory than the ordering had.
+        conn.execute_batch("SET memory_limit = '1GB'").unwrap();
+        let (n, gaps, out_of_place): (u64, u64, u64) = conn
+            .query_row(
+                "SELECT count(*), count(*) FILTER (WHERE pos <> rn), count(*) FILTER (WHERE pos <> rowid)
+                 FROM (SELECT pos, rowid, row_number() OVER (ORDER BY pos) - 1 AS rn FROM ord)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((n, gaps), (1_500_000, 0), "positions 0..n, each once");
+        assert_eq!(
+            out_of_place, 0,
+            "ord is stored in position order (pos = rowid), so a position range is a short scan"
+        );
+        let unordered: u64 = conn
+            .query_row(
+                "SELECT count(*) FROM (SELECT (coalesce(e.ts, 9223372036854775807), e.source, e.line, e.id) AS k,
+                   lag((coalesce(e.ts, 9223372036854775807), e.source, e.line, e.id)) OVER (ORDER BY o.pos) AS prev
+                   FROM ord o JOIN ev e USING (id)) WHERE k < prev",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unordered, 0, "positions follow (ts, source, line, id), untimed last");
     }
 
     #[test]
