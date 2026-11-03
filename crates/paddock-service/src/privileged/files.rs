@@ -1,0 +1,368 @@
+//! The file side of a protected install: the [`ProtectedFiles`] port (what is there, make a folder, copy the program with
+//! one open handle while hashing it, remove), the real adapter, and the rule that decides whether a copy is protected.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+/// What kind of thing a path is (never following a link).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    /// A regular file.
+    File,
+    /// A folder.
+    Dir,
+    /// A symbolic link.
+    Symlink,
+    /// Anything else.
+    Other,
+}
+
+/// What the OS says about a path, without following a link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileFacts {
+    /// What it is.
+    pub kind: FileKind,
+    /// The owner's user id (`None` where the OS has none: Windows, where the ACL is checked instead).
+    pub owner: Option<u32>,
+    /// The permission bits, with setuid, setgid and sticky (`None` on Windows).
+    pub mode: Option<u32>,
+    /// The size in bytes.
+    pub len: u64,
+}
+
+/// The file operations of an install, so tests never touch the real disk.
+pub trait ProtectedFiles: Send {
+    /// What is at `path`; `Ok(None)` when nothing is.
+    fn facts(&mut self, path: &Path) -> io::Result<Option<FileFacts>>;
+    /// Creates the folder (and missing parents) with `mode` where the OS has modes.
+    fn create_dir(&mut self, path: &Path, mode: u32) -> io::Result<()>;
+    /// Copies `from` to `to` through one open handle of the source and a new temporary file next to `to`, hashing what it
+    /// writes, then renames over `to` (a running copy is replaced atomically on Unix). Returns the SHA-256 in hex.
+    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> io::Result<String>;
+    /// The SHA-256 of a file in hex.
+    fn sha256(&mut self, path: &Path) -> io::Result<String>;
+    /// Removes a file; a missing file is `NotFound`.
+    fn remove_file(&mut self, path: &Path) -> io::Result<()>;
+    /// Removes an empty folder; a missing folder is `NotFound`.
+    fn remove_dir(&mut self, path: &Path) -> io::Result<()>;
+}
+
+/// Why a path is not a protected place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Violation {
+    /// It is not there.
+    Missing,
+    /// It is a link, or not the kind of thing it must be.
+    WrongKind(FileKind),
+    /// It belongs to a user id other than root's.
+    NotRoot(u32),
+    /// Its mode lets the group or others change it.
+    Writable(u32),
+}
+
+impl std::fmt::Display for Violation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Violation::Missing => f.write_str("it is not there"),
+            Violation::WrongKind(k) => write!(f, "it is a {k:?}, not what the install expects"),
+            Violation::NotRoot(uid) => write!(f, "it belongs to user id {uid}, not root"),
+            Violation::Writable(m) => {
+                write!(f, "its mode {m:o} lets the group or others change it")
+            }
+        }
+    }
+}
+
+/// The protected-location rule for one path: the right kind (never a link), owned by root and not writable by the group
+/// or others. Where the OS has no owner or mode (Windows) only the kind is checked; the ACL is checked by
+/// [`crate::privileged::windows_acl`].
+///
+/// # Errors
+/// The first [`Violation`].
+pub fn verify_protected(facts: Option<&FileFacts>, want: FileKind) -> Result<(), Violation> {
+    let f = facts.ok_or(Violation::Missing)?;
+    if f.kind != want {
+        return Err(Violation::WrongKind(f.kind));
+    }
+    if let Some(owner) = f.owner
+        && owner != 0
+    {
+        return Err(Violation::NotRoot(owner));
+    }
+    if let Some(mode) = f.mode
+        && mode & 0o022 != 0
+    {
+        return Err(Violation::Writable(mode & 0o7777));
+    }
+    Ok(())
+}
+
+/// The real disk.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RealFiles;
+
+fn kind_of(t: std::fs::FileType) -> FileKind {
+    if t.is_symlink() {
+        FileKind::Symlink
+    } else if t.is_dir() {
+        FileKind::Dir
+    } else if t.is_file() {
+        FileKind::File
+    } else {
+        FileKind::Other
+    }
+}
+
+fn temp_name(to: &Path) -> PathBuf {
+    let name = to
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    to.with_file_name(format!(".{name}.new{}", std::process::id()))
+}
+
+pub fn hash_bytes(bytes: &[u8]) -> String {
+    hash_stream(bytes, None).unwrap_or_default()
+}
+
+fn hash_stream(
+    mut input: impl io::Read,
+    mut output: Option<&mut dyn io::Write>,
+) -> io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = input.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        if let Some(out) = output.as_mut() {
+            out.write_all(&buf[..n])?;
+        }
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
+impl ProtectedFiles for RealFiles {
+    fn facts(&mut self, path: &Path) -> io::Result<Option<FileFacts>> {
+        let meta = match std::fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        #[cfg(unix)]
+        let (owner, mode) = {
+            use std::os::unix::fs::MetadataExt;
+            (Some(meta.uid()), Some(meta.mode() & 0o7777))
+        };
+        #[cfg(not(unix))]
+        let (owner, mode) = (None, None);
+        Ok(Some(FileFacts {
+            kind: kind_of(meta.file_type()),
+            owner,
+            mode,
+            len: meta.len(),
+        }))
+    }
+
+    fn create_dir(&mut self, path: &Path, mode: u32) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(mode)
+                .create(path)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = mode;
+            std::fs::create_dir_all(path)
+        }
+    }
+
+    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> io::Result<String> {
+        let source = std::fs::File::open(from)?;
+        let tmp = temp_name(to);
+        let _ = std::fs::remove_file(&tmp);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(mode);
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+        let mut out = options.open(&tmp)?;
+        let result = hash_stream(&source, Some(&mut out)).and_then(|hash| {
+            out.sync_all()?;
+            Ok(hash)
+        });
+        drop(out);
+        match result {
+            Ok(hash) => {
+                #[cfg(unix)]
+                {
+                    // The creation mode is cut by the umask; the final mode is exactly the one asked for.
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+                }
+                if let Err(e) = std::fs::rename(&tmp, to) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(e);
+                }
+                Ok(hash)
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                Err(e)
+            }
+        }
+    }
+
+    fn sha256(&mut self, path: &Path) -> io::Result<String> {
+        hash_stream(std::fs::File::open(path)?, None)
+    }
+
+    fn remove_file(&mut self, path: &Path) -> io::Result<()> {
+        std::fs::remove_file(path)
+    }
+
+    fn remove_dir(&mut self, path: &Path) -> io::Result<()> {
+        std::fs::remove_dir(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn facts(kind: FileKind, owner: Option<u32>, mode: Option<u32>) -> FileFacts {
+        FileFacts {
+            kind,
+            owner,
+            mode,
+            len: 1,
+        }
+    }
+
+    #[test]
+    fn only_a_root_owned_unwritable_thing_of_the_right_kind_is_protected() {
+        use FileKind::*;
+        assert_eq!(verify_protected(None, File), Err(Violation::Missing));
+        assert_eq!(
+            verify_protected(Some(&facts(Symlink, Some(0), Some(0o755))), File),
+            Err(Violation::WrongKind(Symlink))
+        );
+        assert_eq!(
+            verify_protected(Some(&facts(Dir, Some(0), Some(0o755))), File),
+            Err(Violation::WrongKind(Dir))
+        );
+        assert_eq!(
+            verify_protected(Some(&facts(File, Some(501), Some(0o755))), File),
+            Err(Violation::NotRoot(501))
+        );
+        assert_eq!(
+            verify_protected(Some(&facts(File, Some(0), Some(0o775))), File),
+            Err(Violation::Writable(0o775))
+        );
+        assert_eq!(
+            verify_protected(Some(&facts(File, Some(0), Some(0o757))), File),
+            Err(Violation::Writable(0o757))
+        );
+        assert_eq!(
+            verify_protected(Some(&facts(Dir, Some(0), Some(0o1755))), Dir),
+            Ok(())
+        );
+        assert_eq!(
+            verify_protected(Some(&facts(File, Some(0), Some(0o755))), File),
+            Ok(())
+        );
+        // Windows reports neither: the kind is all that can be checked here.
+        assert_eq!(
+            verify_protected(Some(&facts(File, None, None)), File),
+            Ok(())
+        );
+        for v in [
+            Violation::Missing,
+            Violation::WrongKind(Other),
+            Violation::NotRoot(5),
+            Violation::Writable(0o777),
+        ] {
+            assert!(!v.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn the_real_disk_copies_hashes_and_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = RealFiles;
+        let src = dir.path().join("src");
+        std::fs::write(&src, b"hello").unwrap();
+        let folder = dir.path().join("a").join("b");
+        files.create_dir(&folder, 0o755).unwrap();
+        let dst = folder.join("prog");
+        let hash = files.copy_program(&src, &dst, 0o755).unwrap();
+        // SHA-256("hello")
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        assert_eq!(files.sha256(&dst).unwrap(), hash);
+        let f = files.facts(&dst).unwrap().unwrap();
+        assert_eq!((f.kind, f.len), (FileKind::File, 5));
+        #[cfg(unix)]
+        assert_eq!(f.mode, Some(0o755));
+        assert_eq!(files.facts(&folder).unwrap().unwrap().kind, FileKind::Dir);
+        // Replacing a copy leaves no temporary file behind.
+        std::fs::write(&src, b"hello again").unwrap();
+        files.copy_program(&src, &dst, 0o755).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"hello again");
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
+        files.remove_file(&dst).unwrap();
+        files.remove_dir(&folder).unwrap();
+        assert_eq!(files.facts(&folder).unwrap(), None);
+        assert_eq!(
+            files.remove_file(&dst).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            files
+                .copy_program(&dir.path().join("none"), &dst, 0o755)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_reported_as_a_link_and_a_failed_copy_leaves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = RealFiles;
+        let target = dir.path().join("t");
+        std::fs::write(&target, b"x").unwrap();
+        let link = dir.path().join("l");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(files.facts(&link).unwrap().unwrap().kind, FileKind::Symlink);
+        // The destination folder is missing: the temporary file cannot be made and nothing is left.
+        let err = files
+            .copy_program(&target, &dir.path().join("no/such/prog"), 0o755)
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        // A folder where the program should go: the rename fails and the temporary file is removed.
+        let blocked = dir.path().join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("keep"), b"k").unwrap();
+        assert!(files.copy_program(&target, &blocked, 0o755).is_err());
+        assert!(files.facts(&temp_name(&blocked)).unwrap().is_none());
+        assert_eq!(files.facts(&dir.path().join("x")).unwrap(), None);
+    }
+}

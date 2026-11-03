@@ -1251,6 +1251,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyno-helper"
+version = "1.0.0"
+dependencies = [
+ "dyno-core",
+ "dyno-ipc",
+ "dyno-platform",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "windows",
+ "windows-service",
+]
+
+[[package]]
+name = "dyno-helper-service"
+version = "1.0.0"
+dependencies = [
+ "dyno-core",
+ "log",
+ "paddock-env",
+ "paddock-service",
+]
+
+[[package]]
 name = "dyno-ipc"
 version = "1.0.0"
 dependencies = [
@@ -3696,6 +3721,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "windows",
  "windows-service",

@@ -2,6 +2,8 @@
 members = [
     "crates/dyno-core",
     "crates/dyno-ipc",
+    "crates/dyno-helper-service",
+    "crates/dyno-helper",
     "crates/dyno-plugin-api",
     "crates/dyno-plugin-host",
     "crates/dyno-platform",
@@ -12,8 +14,6 @@ members = [
     "app/src-tauri",
 ]
 resolver = "2"
-# The privileged helper is not part of Dyno 1.0: its source stays for 1.1 (ADR 0022) but is neither built nor bundled.
-exclude = ["crates/dyno-helper"]
 
 # Shared by every member: `edition.workspace = true` etc.
 [workspace.package]

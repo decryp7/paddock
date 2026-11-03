@@ -67,7 +67,7 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
             let _ = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 if let Ok(mut machine) = SystemMachine::new() {
-                    let _ = execute(&mut machine, &uninstall_plan(&paths, &dyno_platform::elevate::windows_roots()));
+                    let _ = execute(&mut machine, &uninstall_plan(&paths, &crate::elevate::windows_roots()));
                 }
                 stop.store(true, Ordering::SeqCst);
             });

@@ -17,6 +17,7 @@ pub mod auth;
 pub mod cli;
 pub mod config;
 pub mod dispatch;
+pub mod elevate;
 pub mod install;
 pub mod paths;
 pub mod serve;

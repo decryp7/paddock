@@ -2862,6 +2862,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "windows",
  "windows-service",

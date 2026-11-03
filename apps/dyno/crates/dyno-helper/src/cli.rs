@@ -67,8 +67,8 @@ fn install(user: HelperUser, agent_exe: PathBuf) -> Result<(), String> {
         .ok()
         .filter(|p| p.is_file())
         .ok_or_else(|| format!("{} is not a program.", agent_exe.display()))?;
-    let windows = dyno_platform::elevate::windows_roots();
-    let paths = dyno_platform::elevate::helper_paths();
+    let windows = crate::elevate::windows_roots();
+    let paths = crate::elevate::helper_paths();
     let plan = install_plan(
         &paths,
         &windows,
@@ -95,13 +95,13 @@ fn uninstall() -> Result<(), String> {
     let mut machine = SystemMachine::new()?;
     execute(
         &mut machine,
-        &uninstall_plan(&dyno_platform::elevate::helper_paths(), &dyno_platform::elevate::windows_roots()),
+        &uninstall_plan(&crate::elevate::helper_paths(), &crate::elevate::windows_roots()),
     )
 }
 
 fn serve() -> Result<(), String> {
     crate::serve::serve(
-        &dyno_platform::elevate::helper_paths(),
+        &crate::elevate::helper_paths(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     )
 }

@@ -372,6 +372,231 @@ impl Elevator for FakeElevator {
     }
 }
 
+/// A [`ProtectedFiles`](crate::privileged::ProtectedFiles) on an in-memory disk: records every call, keeps the owner and
+/// mode of what it creates (root and the mode asked for, unless told otherwise) and hashes content with the real SHA-256.
+#[derive(Clone, Default)]
+pub struct FakeFiles {
+    inner: Arc<Mutex<FilesInner>>,
+}
+
+#[derive(Default)]
+struct FilesInner {
+    entries: BTreeMap<PathBuf, crate::privileged::FileFacts>,
+    content: BTreeMap<PathBuf, Vec<u8>>,
+    calls: Vec<String>,
+    no_owner: bool,
+    new_owner: Option<u32>,
+    tamper: bool,
+    fail: Option<std::io::ErrorKind>,
+}
+
+impl FakeFiles {
+    /// An empty disk on a Unix-like system; new files belong to root.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A disk that reports neither owner nor mode (Windows).
+    pub fn windows() -> Self {
+        let f = Self::default();
+        f.lock().no_owner = true;
+        f
+    }
+
+    fn lock(&self) -> MutexGuard<'_, FilesInner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Puts a file with `content`, owner and mode.
+    pub fn put_file(
+        &self,
+        path: impl Into<PathBuf>,
+        content: &[u8],
+        owner: u32,
+        mode: u32,
+    ) -> &Self {
+        use crate::privileged::{FileFacts, FileKind};
+        let path = path.into();
+        let mut inner = self.lock();
+        let facts = FileFacts {
+            kind: FileKind::File,
+            owner: (!inner.no_owner).then_some(owner),
+            mode: (!inner.no_owner).then_some(mode),
+            len: content.len() as u64,
+        };
+        inner.entries.insert(path.clone(), facts);
+        inner.content.insert(path, content.to_vec());
+        drop(inner);
+        self
+    }
+
+    /// Puts a folder with owner and mode.
+    pub fn put_dir(&self, path: impl Into<PathBuf>, owner: u32, mode: u32) -> &Self {
+        use crate::privileged::{FileFacts, FileKind};
+        let mut inner = self.lock();
+        let facts = FileFacts {
+            kind: FileKind::Dir,
+            owner: (!inner.no_owner).then_some(owner),
+            mode: (!inner.no_owner).then_some(mode),
+            len: 0,
+        };
+        inner.entries.insert(path.into(), facts);
+        drop(inner);
+        self
+    }
+
+    /// Puts a symbolic link.
+    pub fn put_symlink(&self, path: impl Into<PathBuf>) -> &Self {
+        use crate::privileged::{FileFacts, FileKind};
+        self.lock().entries.insert(
+            path.into(),
+            FileFacts {
+                kind: FileKind::Symlink,
+                owner: Some(0),
+                mode: Some(0o777),
+                len: 0,
+            },
+        );
+        self
+    }
+
+    /// The owner new files and folders get (default: root, 0).
+    pub fn new_files_belong_to(&self, uid: u32) -> &Self {
+        self.lock().new_owner = Some(uid);
+        self
+    }
+
+    /// Makes the next hash reads differ from what was written (a copy changed under the installer).
+    pub fn tamper(&self, on: bool) -> &Self {
+        self.lock().tamper = on;
+        self
+    }
+
+    /// Makes every copy and folder creation fail with `kind` (`None` clears it).
+    pub fn fail_with(&self, kind: Option<std::io::ErrorKind>) -> &Self {
+        self.lock().fail = kind;
+        self
+    }
+
+    /// What exists at `path`.
+    pub fn facts_of(&self, path: &Path) -> Option<crate::privileged::FileFacts> {
+        self.lock().entries.get(path).cloned()
+    }
+
+    /// Everything asked so far, as `verb path`.
+    pub fn calls(&self) -> Vec<String> {
+        self.lock().calls.clone()
+    }
+}
+
+impl crate::privileged::ProtectedFiles for FakeFiles {
+    fn facts(&mut self, path: &Path) -> std::io::Result<Option<crate::privileged::FileFacts>> {
+        let mut inner = self.lock();
+        inner.calls.push(format!("facts {}", path.display()));
+        Ok(inner.entries.get(path).cloned())
+    }
+
+    fn create_dir(&mut self, path: &Path, mode: u32) -> std::io::Result<()> {
+        use crate::privileged::{FileFacts, FileKind};
+        let mut inner = self.lock();
+        inner
+            .calls
+            .push(format!("create_dir {} {mode:o}", path.display()));
+        if let Some(kind) = inner.fail {
+            return Err(std::io::Error::from(kind));
+        }
+        let owner = inner.new_owner.unwrap_or(0);
+        let no_owner = inner.no_owner;
+        inner.entries.insert(
+            path.to_path_buf(),
+            FileFacts {
+                kind: FileKind::Dir,
+                owner: (!no_owner).then_some(owner),
+                mode: (!no_owner).then_some(mode),
+                len: 0,
+            },
+        );
+        Ok(())
+    }
+
+    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> std::io::Result<String> {
+        use crate::privileged::{FileFacts, FileKind};
+        let mut inner = self.lock();
+        inner
+            .calls
+            .push(format!("copy {} {}", from.display(), to.display()));
+        if let Some(kind) = inner.fail {
+            return Err(std::io::Error::from(kind));
+        }
+        let bytes = inner
+            .content
+            .get(from)
+            .cloned()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+        let owner = inner.new_owner.unwrap_or(0);
+        let no_owner = inner.no_owner;
+        inner.entries.insert(
+            to.to_path_buf(),
+            FileFacts {
+                kind: FileKind::File,
+                owner: (!no_owner).then_some(owner),
+                mode: (!no_owner).then_some(mode),
+                len: bytes.len() as u64,
+            },
+        );
+        let hash = crate::privileged::files::hash_bytes(&bytes);
+        inner.content.insert(to.to_path_buf(), bytes);
+        Ok(hash)
+    }
+
+    fn sha256(&mut self, path: &Path) -> std::io::Result<String> {
+        let mut inner = self.lock();
+        inner.calls.push(format!("sha256 {}", path.display()));
+        let bytes = inner
+            .content
+            .get(path)
+            .cloned()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+        let mut hash = crate::privileged::files::hash_bytes(&bytes);
+        if inner.tamper {
+            hash.replace_range(0..1, if hash.starts_with('0') { "1" } else { "0" });
+        }
+        Ok(hash)
+    }
+
+    fn remove_file(&mut self, path: &Path) -> std::io::Result<()> {
+        let mut inner = self.lock();
+        inner.calls.push(format!("remove_file {}", path.display()));
+        inner.content.remove(path);
+        inner
+            .entries
+            .remove(path)
+            .map(drop)
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+
+    fn remove_dir(&mut self, path: &Path) -> std::io::Result<()> {
+        let mut inner = self.lock();
+        inner.calls.push(format!("remove_dir {}", path.display()));
+        // Compared as text: a Windows path is not split by a Unix host's separators.
+        let base = path.to_string_lossy().into_owned();
+        let inside = |k: &Path| {
+            let k = k.to_string_lossy();
+            k.len() > base.len()
+                && k.starts_with(base.as_str())
+                && matches!(k.as_bytes()[base.len()], b'/' | b'\\')
+        };
+        if inner.entries.keys().any(|k| inside(k)) {
+            return Err(std::io::Error::other("the folder is not empty"));
+        }
+        inner
+            .entries
+            .remove(path)
+            .map(drop)
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

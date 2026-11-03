@@ -1,0 +1,19 @@
+[package]
+name = "dyno-helper-service"
+description = "Dyno's helper as a system service: its ServiceSpec, the protected install, update and removal, the one OS prompt and the version and protocol check (ADR 0027 WP-2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+dyno-core.workspace = true
+# The registration, the protected copy and the OS prompt are the family's one implementation (rule 55, ER-22).
+paddock-service = { path = "../../../../crates/paddock-service" }
+paddock-env = { path = "../../../../crates/paddock-env" }
+log = { version = "0.4", features = ["kv"] }
+
+[lints]
+workspace = true
