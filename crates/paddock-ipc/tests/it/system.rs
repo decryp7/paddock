@@ -185,13 +185,54 @@ fn a_pipe_not_owned_by_system_is_refused_before_anything_is_sent() {
             matches!(&e, SystemConnectError::Untrusted(Untrusted::PipeOwner { owner }) if owner != "S-1-5-18"),
             "{e}"
         ),
-        // Run as SYSTEM (the local VM does), the test's own pipe is SYSTEM's and a client rightly trusts it.
-        Ok(_) => assert_eq!(
-            std::env::var("PADDOCK_EXPECT_SID").as_deref(),
-            Ok("S-1-5-18")
+        // Run as SYSTEM (the local VM does), the test's own pipe is SYSTEM's and a client rightly trusts it: the precondition
+        // "a foreign owner" does not hold, so this must be the SYSTEM account (read from the token, not from the environment).
+        Ok(_) => assert!(
+            runs_as_system(),
+            "a pipe of this account was trusted although this account is not SYSTEM"
         ),
     }
     let _ = t.join();
+}
+
+/// Whether this process runs as LocalSystem, read from its own token (through a connected pair, as the server side sees it).
+#[cfg(windows)]
+fn runs_as_system() -> bool {
+    let (server, _client) = served_pair();
+    matches!(server.raw_peer().map(|r| r.account), Ok(AccountId::Sid(sid)) if sid == "S-1-5-18")
+}
+
+/// A pipe that names another owner than SYSTEM (Administrators). SYSTEM and an elevated administrator can create it, a standard
+/// user cannot (ERROR_INVALID_OWNER); where it exists, the client refuses it before sending anything and names that owner.
+#[cfg(windows)]
+#[test]
+fn a_pipe_with_an_explicit_other_owner_is_refused_by_the_client_where_it_can_be_made() {
+    let name = format!(r"\\.\pipe\paddock-test-other-owner-{}", std::process::id());
+    let access = Access {
+        mode: 0o600,
+        sddl: "O:BAD:P(A;;GA;;;SY)(A;;GA;;;WD)".into(),
+    };
+    match Listener::bind_fixed(&name, &access) {
+        Err(e) => assert!(
+            e.raw_os_error() == Some(1307) || e.to_string().contains("1307"),
+            "{e}"
+        ),
+        Ok(mut listener) => {
+            let t = std::thread::spawn(move || {
+                listener
+                    .accept(Duration::from_secs(2))
+                    .err()
+                    .map(|e| e.kind())
+            });
+            let refused = Stream::connect_system(&name, T);
+            assert!(
+                matches!(&refused, Err(SystemConnectError::Untrusted(Untrusted::PipeOwner { owner })) if owner == "S-1-5-32-544"),
+                "{:?}",
+                refused.err().map(|e| e.to_string())
+            );
+            let _ = t.join();
+        }
+    }
 }
 
 #[cfg(windows)]
