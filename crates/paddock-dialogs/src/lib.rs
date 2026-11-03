@@ -69,6 +69,8 @@ pub use window::{
 
 #[cfg(feature = "tauri")]
 pub mod tauri;
+#[cfg(feature = "probe")]
+pub mod probe;
 
 paddock_commands::command_table! {
     /// The dialog layer's commands (`paddock_dialogs::tauri::invoke_handler` serves them; the shell plugin folds them

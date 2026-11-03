@@ -9,7 +9,9 @@ publish = ["decryp7"]
 
 [features]
 # The Tauri adapter (`paddock_dialogs::tauri`); the core above it never depends on Tauri.
-tauri = ["dep:tauri", "dep:log", "dep:objc2-app-kit", "dep:windows"]
+tauri = ["dep:tauri", "dep:log", "dep:objc2-app-kit", "dep:objc2", "dep:objc2-foundation", "dep:block2", "dep:windows"]
+# The real-window probe (`paddock_dialogs::probe`): any app can check its dialogs' opening geometry in a real window.
+probe = ["tauri", "tauri/test", "tauri/wry", "dep:toml"]
 # For other crates' tests on Tauri's mock runtime: dialogs are not parented to a native window. Never in an app.
 mock-runtime = ["tauri"]
 
@@ -19,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { workspace = true, optional = true }
 log = { version = "0.4", features = ["kv"], optional = true }
+toml = { version = "0.9", optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 # Windows: the edge (ADR 0043 §3): DPI, frames, work area and the window subclass (`edge/windows.rs`). Already in every app's
@@ -53,12 +56,10 @@ log = { version = "0.4", features = ["kv"] }
 ts-rs = "11.1"
 # Property tests of the size state machine (ADR 0043 check 2).
 proptest = "1"
-# The real-window probe resolves the app's dialog capability against the shell plugin's permission files.
-toml = "0.9"
 
 # The §6 real-window probe: a Tauri app needs the main thread, so no libtest harness. Exits 0 at once unless
 # PADDOCK_REAL_WINDOWS=1 (see crates/README.md).
 [[test]]
 name = "show_probe"
 harness = false
-required-features = ["tauri"]
+required-features = ["probe"]
