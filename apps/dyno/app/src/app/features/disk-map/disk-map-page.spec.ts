@@ -597,4 +597,118 @@ describe('dy-disk-map-page', () => {
     expect(r.el.querySelector('.job')).not.toBeNull();
     expect(r.el.querySelector('.callout.bad[role="alert"]')).toBeNull();
   });
+
+  describe('saved maps (ADR 0029)', () => {
+    const DAY = 86_400_000;
+    const opts = { savedMaps: [{ target: { volume: { id: '/' } }, ageMs: 3 * DAY, changedBytes: 12_000_000_000 }] };
+
+    async function opened() {
+      const r = render(opts);
+      await settle(r.f);
+      await settle(r.f);
+      return r;
+    }
+
+    it('shows the saved map at once with "saved", its age and the net change in used space', async () => {
+      const { f, el } = await opened();
+      expect(f).toBeTruthy();
+      expect(text(el, '.page-head p')).toContain('scanned 3 days ago (saved)');
+      const note = text(el, '[data-testid="saved-map"]')!;
+      expect(note).toContain('Saved map, scanned 3 days ago.');
+      expect(note).toContain(`Net change in used space since: +${formatBytes(12_000_000_000)}`);
+      expect(note).toContain('a net figure');
+      expect(names(el)).toContain('Users');
+      expect(btn(el, 'Forget this map')).toBeDefined();
+      expect(el.querySelector('.job')).toBeNull();
+    });
+
+    it('keeps the saved map during a Rescan, with progress, Show progress and Cancel, and swaps when it is done', async () => {
+      const { f, el, store } = await opened();
+      const old = store.status()!.scan;
+      btn(el, 'Rescan Macintosh HD')!.click();
+      await settle(f);
+      expect(store.status()!.scan).toBe(old);
+      expect(text(el, '[aria-label="Rescan progress"] .job-title')).toContain('the map below stays until this is done');
+      expect(btn(el, 'Show progress')).toBeDefined();
+      expect(btn(el, 'Cancel rescan')).toBeDefined();
+      expect((btn(el, 'Rescan Macintosh HD') as HTMLButtonElement).disabled).toBe(true);
+      expect(names(el)).toContain('Users');
+      await settle(f, true);
+      expect(store.status()!.scan).not.toBe(old);
+      expect(el.querySelector('[aria-label="Rescan progress"]')).toBeNull();
+      expect(el.querySelector('[data-testid="saved-map"]')).toBeNull();
+      expect(text(el, '.page-head p')).not.toContain('(saved)');
+    });
+
+    it('keeps the saved map when the Rescan is cancelled', async () => {
+      const { f, el, store } = await opened();
+      const old = store.status()!.scan;
+      btn(el, 'Rescan Macintosh HD')!.click();
+      await settle(f);
+      btn(el, 'Cancel rescan')!.click();
+      await settle(f);
+      expect(store.status()!.scan).toBe(old);
+      expect(el.querySelector('[aria-label="Rescan progress"]')).toBeNull();
+      expect(el.querySelector('[data-testid="saved-map"]')).not.toBeNull();
+      expect(names(el)).toContain('Users');
+    });
+
+    it('shows the growing tree on request', async () => {
+      const { f, el, store } = await opened();
+      const old = store.status()!.scan;
+      btn(el, 'Rescan Macintosh HD')!.click();
+      await settle(f);
+      btn(el, 'Show progress')!.click();
+      await settle(f);
+      expect(store.status()!.scan).not.toBe(old);
+      expect(el.querySelector('[aria-label="Scan progress"]')).not.toBeNull();
+    });
+
+    it('forgets the saved map and shows the empty state', async () => {
+      const { f, el, mock } = await opened();
+      btn(el, 'Forget this map')!.click();
+      await settle(f);
+      expect(el.querySelector('[data-testid="saved-map"]')).toBeNull();
+      expect(el.querySelector('[aria-label="Not scanned"]')).not.toBeNull();
+      expect(await mock.diskScans()).toEqual([]);
+    });
+
+    it('says why a finished scan was not kept', async () => {
+      const { f, el, store } = await opened();
+      store.receive({ ...store.status()!, seq: store.status()!.seq + 1, notSaved: 'tooBig' });
+      await settle(f);
+      expect(text(el, '[data-testid="not-saved"]')).toBe('Too big to keep; raise the limit in Settings.');
+      store.receive({ ...store.status()!, seq: store.status()!.seq + 1, notSaved: 'noSpace' });
+      await settle(f);
+      expect(text(el, '[data-testid="not-saved"]')).toContain('too little free space');
+      store.receive({ ...store.status()!, seq: store.status()!.seq + 1, notSaved: 'failed' });
+      await settle(f);
+      expect(text(el, '[data-testid="not-saved"]')).toContain('The earlier saved map is unchanged');
+    });
+
+    it('says no change when the used space is the same, and omits the figure for a folder', async () => {
+      const { f, el, store } = await opened();
+      store.receive({ ...store.status()!, seq: store.status()!.seq + 1, changedBytes: 0 });
+      await settle(f);
+      expect(text(el, '[data-testid="saved-map"]')).toContain('Used space is the same');
+      store.receive({ ...store.status()!, seq: store.status()!.seq + 1, changedBytes: null });
+      await settle(f);
+      const note = text(el, '[data-testid="saved-map"]')!;
+      expect(note).not.toContain('Net change');
+      store.receive({ ...store.status()!, seq: store.status()!.seq + 1, changedBytes: -2_000_000_000 });
+      await settle(f);
+      expect(text(el, '[data-testid="saved-map"]')).toContain(`\u2212${formatBytes(2_000_000_000)}`);
+    });
+
+    it('says the Rescan stopped and keeps the map', async () => {
+      const r = render({ savedMaps: [{ target: { volume: { id: '/Volumes/Media' } }, ageMs: DAY, changedBytes: null }] });
+      await settle(r.f);
+      await r.store.selectVolume('/Volumes/Media');
+      await settle(r.f);
+      btn(r.el, 'Rescan Media')!.click();
+      await settle(r.f, true);
+      expect(text(r.el, '.callout.bad')).toContain('The rescan stopped.');
+      expect(r.el.querySelector('[data-testid="saved-map"]')).not.toBeNull();
+    });
+  });
 });
