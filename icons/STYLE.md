@@ -137,6 +137,40 @@ No icon uses another shadow colour, blur or opacity.
 
 Rule: a part that cannot be drawn on whole pixels at a size is dropped at that size, never blurred.
 
+### 6a. Proposal (2026-11-03, awaiting the user's pick): smooth small frames
+
+The user found the small icons "pixelated" in every app. Where that comes from (sheets in `docs/design/icons-small/`):
+
+- **macOS on a Retina screen** shows the 32 px pixel-art frame at 16 pt (Finder lists and sidebar: `.icns` `ic11`) and the same frame
+  doubled at 32 pt (Finder icon view, Spotlight, a small Dock: `ic12`, 76 to 80 % of its pixels an exact 2x of the 32 frame). Pixel art
+  by design, made coarser by the doubling.
+- **Menu bar:** the 18 pt @2x template is the 16 grid at 2x: every pixel a 2 x 2 block, so arcs and diagonals step.
+- **Windows:** `icon.ico` has 16, 24, 32, 48 and 256; at 125 % (20, 30 px) Windows resamples the 24 or 32 pixel-art frame, which
+  blurs its stairs; the tray at 125 and 150 % resamples the 32 px whole-pixel PNG.
+- **Linux:** `32x32.png` is the pixel-art frame; 16 to 24 px launchers resample it.
+- **In-app:** `favicon.svg` of Pitwall and Spotter is the crisp 32 frame, and Dyno's and Spotter's tray pages show the 16 frame at
+  16 CSS px (2 x 2 blocks on Retina).
+
+Two treatments, built by `tools/small-smooth.mjs` on the shared helpers (`smoothIso`, `smallShadow`, and the `proj` parameter of
+`ring`, `disc`, `arcPts` and `cylinder` in `tools/iso.mjs`); `node tools/small-sheet.mjs` renders the sheets and `measurements.json`:
+
+| | Option A: smooth isometric | Option B: flat front view |
+|---|---|---|
+| 16, 24, 32 | the 2:1 isometric object of the pixel frames as anti-aliased vector: vertical edges on whole pixels (`smoothIso` snaps x), diagonals and curves smooth; flat faces, a top gradient, the family shadow scaled down (no long shadow at 16); 16 drawn at 0.56 of the 32 drawing (Pitwall 0.62, Pacenotes 0.66) | the object from the front (`FLAT_B`): one glyph in the tile's ink with tile-coloured cut-outs and a soft glyph shadow in the tile's deep colour; straight edges on whole pixels at every size, curves smooth; Paddock keeps its band of hues |
+| 48 | the simple isometric frame on the small tile (`iso48`; Paddock's too, today its 32 pixel frame scaled) | the same |
+| `.icns` `ic11` (16 pt @2x) | the 32 drawing | the 32 glyph |
+| `.icns` `ic12` (32 pt @2x) | the 32 drawing rendered at 64, not doubled | the 48 frame rendered at 64 (isometric from 48 physical pixels up) |
+| Windows `.ico` | add 20 and 40, rendered from the vector frames | the same |
+
+**Trays (with either option):** the 1x templates stay on whole pixels; the @2x templates (36 px for 18 pt, and the Windows 32 px)
+become the option B glyph in one tone, anti-aliased, with vector badges (`smoothTray`). This bends section 9's tray-alpha rule at
+@2x only: partial alpha on edges is what every Retina menu-bar symbol has; a whole-glyph dim stays the only translucent fill.
+
+Coverage at 16 stays within section 9 for both options (A 18 to 26 %, B 21 to 25 %); contrast and the tile CVD distances are
+unchanged (same tiles, same face values and inks). Once the user picks, section 6's rows for 32, 24, 16 and the tray and section 9's
+"whole pixels" and "tray alpha" checks change to match, and `tools/build.mjs` writes the new frames into the `.icns`, `.ico`,
+`32x32.png` and the in-app copies.
+
 ## 7. Accents
 
 - **One accent per app**, small and saturated, on the object (never on the tile), from the app's own hue (`PALETTE[app].light` or
