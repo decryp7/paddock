@@ -2,16 +2,18 @@
 //! damaged), open the fixed endpoint and serve until stopped.
 
 use crate::audit::AuditLog;
-use crate::auth::{OsImages, Policy};
-use crate::config::{load_token, HelperConfig};
+use crate::config::HelperConfig;
 use crate::dispatch::{Dispatcher, Parts};
-use crate::install::{execute, uninstall_plan, SystemMachine};
-use crate::paths::{endpoint_access, HelperPaths};
-use crate::server::{wire, Daemon};
-use dyno_core::helper_wire::{HelperInfo, HELPER_API, MAX_FRAME};
+use crate::paths::HelperPaths;
+use crate::server::Daemon;
+use dyno_core::helper::HelperHost;
+use dyno_core::helper_wire::{HelperInfo, HELPER_API};
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
-use paddock_ipc::{FrameLimit, Host};
+use paddock_env::Os;
+use paddock_ipc::endpoint::{Access, Listener};
+use paddock_ipc::AccountLimits;
+use paddock_jobs::time::SystemClock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -39,56 +41,71 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Opens the endpoint and serves until `stop` is set.
+/// The OS the helper runs on, in `paddock-service`'s words.
+pub fn os_of(host: HelperHost) -> Os {
+    match host {
+        HelperHost::Windows => Os::Windows,
+        HelperHost::Macos => Os::MacOs,
+        HelperHost::Linux => Os::Linux,
+    }
+}
+
+/// Opens the system endpoint and serves until `stop` is set. The endpoint is bound as the first instance in a folder only
+/// this account can change (a squatter's earlier pipe or socket is an error, not a hijack), and clients check the same
+/// before they send anything.
+///
+/// # Errors
+/// Why the helper will not start.
 pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
     let config = HelperConfig::load(&paths.config).map_err(|e| format!("The helper will not start: {e}"))?;
-    let token = load_token(&paths.token).map_err(|e| format!("The helper will not start: {e}"))?;
     if let Some(dir) = &paths.endpoint_dir {
-        // systemd creates it (RuntimeDirectory); elsewhere the daemon does.
-        std::fs::create_dir_all(dir).map_err(|e| format!("The helper cannot create {}: {e}", dir.display()))?;
+        // systemd creates it (RuntimeDirectory); elsewhere the daemon does, root's and closed to others.
+        create_endpoint_dir(dir).map_err(|e| format!("The helper cannot create {}: {e}", dir.display()))?;
     }
-    let host = Host::listen_at(
-        &paths.endpoint,
-        &endpoint_access(&config.user),
-        token,
-        FrameLimit::new(MAX_FRAME),
-        wire(),
-    )
-    .map(|host| host.named("Dyno helper"))
-    .map_err(|e| format!("The helper cannot open its endpoint {}: {e}", paths.endpoint))?;
-    let host_kind = paths.host;
+    let listener = Listener::bind_system(&paths.endpoint, &Access::system_for_all_users())
+        .map_err(|e| format!("The helper cannot open its endpoint {}: {e}", paths.endpoint))?;
+    log::info!(endpoint = paths.endpoint.as_str(), owner = config.owner.to_arg().as_str(), version = crate::VERSION; "Helper: serving");
     let (remove_paths, stop_on_removal) = (paths.clone(), stop.clone());
     let dispatcher = Arc::new(Dispatcher::new(Parts {
         info: HelperInfo {
             version: crate::VERSION.to_string(),
             api: HELPER_API,
-            host: host_kind,
-            agent_exe: config.agent_exe.to_string_lossy().into_owned(),
+            host: paths.host,
+            agent_exe: String::new(),
         },
         traffic: Box::new(HelperTraffic),
         audit: AuditLog::new(paths.audit.clone()),
         clock: Box::new(now),
         on_uninstall: Box::new(move || {
             let (paths, stop) = (remove_paths.clone(), stop_on_removal.clone());
-            // The caller gets its answer first; the removal runs a moment later and its last step ends this process.
+            // The caller gets its answer first; the removal runs a moment later and ends with the stop of this very job.
             let _ = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                if let Ok(mut machine) = SystemMachine::new() {
-                    let _ = execute(&mut machine, &uninstall_plan(&paths, &crate::elevate::windows_roots()));
+                if let Err(e) = crate::setup::uninstall_self(os_of(paths.host)) {
+                    log::error!(error = e.as_str(); "Helper: removing itself failed");
                 }
                 stop.store(true, Ordering::SeqCst);
             });
         }),
     }));
     Daemon {
-        host,
-        policy: Policy {
-            user: config.user,
-            agent_exe: config.agent_exe,
-        },
-        images: Arc::new(OsImages),
+        listener,
+        owner: config.owner,
+        admin_rule: crate::sys::admin_rule(),
+        limits: AccountLimits::new(Arc::new(SystemClock)),
         dispatcher,
         stop,
     }
     .run()
+}
+
+#[cfg(unix)]
+fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().recursive(true).mode(0o755).create(dir)
+}
+
+#[cfg(not(unix))]
+fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
 }

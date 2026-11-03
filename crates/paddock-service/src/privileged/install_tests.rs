@@ -948,3 +948,70 @@ fn linux_enables_the_unit_the_package_shipped_and_leaves_the_file_alone() {
         (Registration::Registered, Job::Running, None)
     );
 }
+
+#[test]
+fn a_service_removing_itself_deletes_its_files_first_and_stops_last() {
+    use Step::*;
+    assert_eq!(
+        plan_uninstall_self(&layout_for(Os::MacOs)),
+        [RemoveProgram, RemoveFolder, StopExisting]
+    );
+    assert_eq!(plan_uninstall_self(&layout_for(Os::Linux)), [StopExisting]);
+    let files = mac_disk();
+    files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+    });
+    let layout = layout_for(Os::MacOs);
+    let (mut f, mut b, mut s) = (files.clone(), backend.clone(), FakeSystem::new());
+    let report = Installer::new(&layout, &mut f, &mut b, &mut s)
+        .uninstall_self()
+        .unwrap();
+    assert_eq!(phases(&report), [RemoveProgram, RemoveFolder, StopExisting]);
+    assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
+    assert_eq!(
+        backend
+            .log()
+            .iter()
+            .find(|l| *l == "evict" || *l == "unregister"),
+        Some(&"evict".to_string())
+    );
+}
+
+#[test]
+fn a_program_the_os_will_not_delete_while_it_runs_is_left_and_the_registration_still_goes() {
+    struct Busy(FakeFiles);
+    impl ProtectedFiles for Busy {
+        fn facts(&mut self, p: &Path) -> std::io::Result<Option<crate::privileged::FileFacts>> {
+            self.0.clone().facts(p)
+        }
+        fn create_dir(&mut self, p: &Path, m: u32) -> std::io::Result<()> {
+            self.0.create_dir(p, m)
+        }
+        fn copy_program(&mut self, a: &Path, b: &Path, m: u32) -> std::io::Result<String> {
+            self.0.copy_program(a, b, m)
+        }
+        fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
+            self.0.sha256(p)
+        }
+        fn remove_file(&mut self, _: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }
+        fn remove_dir(&mut self, p: &Path) -> std::io::Result<()> {
+            self.0.remove_dir(p)
+        }
+    }
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| s.registered = true);
+    let (mut f, mut b, mut s) = (Busy(mac_disk()), backend.clone(), FakeSystem::new());
+    let report = Installer::new(&layout, &mut f, &mut b, &mut s)
+        .uninstall_self()
+        .unwrap();
+    assert!(
+        report.phases[0]
+            .detail
+            .starts_with("left in place while it runs")
+    );
+    assert!(backend.log().contains(&"unregister".to_string()));
+}

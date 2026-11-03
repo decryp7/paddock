@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-service`: `privileged` (protected install, update and removal of a system service) and `hardening`
+- New `Hardening` on `ServiceSpec` (system services only): the Windows token privileges the SCM keeps (`sc privs`, checked with `sc qprivs` before the service starts), the service DACL that lets interactive users start it (`sc sdset`), and the systemd sandbox keys of ADR 0027. `Systemd::packaged()` enables and disables a unit a package ships without writing or removing it.
+- New `privileged` module: `layout` and `backend_for` per OS, `Installer` (plan, `ProtectedFiles` port, root-owned and not-group-or-world-writable checks, hash of the copy, Windows ACL by SID, bounded confirm, self-removal with the stop last), `run_elevated` (osascript, pkexec, UAC), `assess` (ask only when the protocol or the minimum version changed). `ScmConfig` gains `privileges` and `sddl`. No change for specs without hardening.
+
 ### `paddock-shell`: `files_*` commands always have their service
 
 An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).

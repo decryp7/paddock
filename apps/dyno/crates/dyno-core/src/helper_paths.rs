@@ -10,8 +10,8 @@ pub const MAC_LABEL: &str = "net.decryptology.dyno.helper";
 pub const LINUX_UNIT: &str = "dyno-helper.service";
 /// The Windows service name.
 pub const WINDOWS_SERVICE: &str = "DynoHelper";
-/// The Windows pipe the daemon listens on.
-pub const WINDOWS_PIPE: &str = r"\\.\pipe\dyno-helper";
+/// The Windows pipe the daemon listens on (named after the launchd label, ADR 0027 §1).
+pub const WINDOWS_PIPE: &str = r"\\.\pipe\net.decryptology.dyno.helper";
 
 /// The folders Windows names (read from the environment at run time; tests pass their own).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,12 +54,10 @@ pub struct HelperPaths {
     pub host: HelperHost,
     /// The installed program (the daemon runs from here, never from the app's folder).
     pub binary: PathBuf,
-    /// The helper's data folder (root-owned): configuration, token, audit log.
+    /// The helper's data folder (root-owned): configuration, audit log.
     pub data_dir: PathBuf,
     /// `config.json`.
     pub config: PathBuf,
-    /// The token file (owned by the authorised user).
-    pub token: PathBuf,
     /// `audit.jsonl`.
     pub audit: PathBuf,
     /// The socket path or pipe name clients connect to.
@@ -75,62 +73,48 @@ impl HelperPaths {
     pub fn for_host(host: HelperHost, windows: &WindowsRoots) -> HelperPaths {
         let in_dir = |dir: PathBuf| {
             if host == HelperHost::Windows {
-                (
-                    join_windows(&dir, "config.json"),
-                    join_windows(&dir, "token"),
-                    join_windows(&dir, "audit.jsonl"),
-                )
+                (join_windows(&dir, "config.json"), join_windows(&dir, "audit.jsonl"))
             } else {
-                (
-                    join_unix(&dir, "config.json"),
-                    join_unix(&dir, "token"),
-                    join_unix(&dir, "audit.jsonl"),
-                )
+                (join_unix(&dir, "config.json"), join_unix(&dir, "audit.jsonl"))
             }
         };
         match host {
             HelperHost::Macos => {
                 let data_dir = PathBuf::from("/Library/Application Support/Dyno/Helper");
-                let (config, token, audit) = in_dir(data_dir.clone());
+                let (config, audit) = in_dir(data_dir.clone());
                 HelperPaths {
                     host,
                     binary: join_unix(Path::new("/Library/PrivilegedHelperTools"), MAC_LABEL),
                     data_dir,
                     config,
-                    token,
                     audit,
-                    endpoint: format!("/var/run/{MAC_LABEL}.sock"),
-                    endpoint_dir: None,
+                    endpoint: "/var/run/dyno-helper/helper.sock".into(),
+                    endpoint_dir: Some(PathBuf::from("/var/run/dyno-helper")),
                     registration: Some(PathBuf::from(format!("/Library/LaunchDaemons/{MAC_LABEL}.plist"))),
                 }
             }
             HelperHost::Linux => {
                 let data_dir = PathBuf::from("/var/lib/dyno-helper");
-                let (config, token, audit) = in_dir(data_dir.clone());
+                let (config, audit) = in_dir(data_dir.clone());
                 HelperPaths {
                     host,
-                    binary: PathBuf::from("/usr/local/libexec/dyno-helper"),
+                    binary: PathBuf::from("/usr/bin/dyno-helper"),
                     data_dir,
                     config,
-                    token,
                     audit,
                     endpoint: "/run/dyno-helper/helper.sock".into(),
                     endpoint_dir: Some(PathBuf::from("/run/dyno-helper")),
-                    registration: Some(PathBuf::from(format!("/etc/systemd/system/{LINUX_UNIT}"))),
+                    registration: Some(PathBuf::from(format!("/usr/lib/systemd/system/{LINUX_UNIT}"))),
                 }
             }
             HelperHost::Windows => {
                 let data_dir = join_windows(&join_windows(&windows.program_data, "Dyno"), "Helper");
-                let (config, token, audit) = in_dir(data_dir.clone());
+                let (config, audit) = in_dir(data_dir.clone());
                 HelperPaths {
                     host,
-                    binary: join_windows(
-                        &join_windows(&join_windows(&windows.program_files, "Dyno"), "Helper"),
-                        "dyno-helper.exe",
-                    ),
+                    binary: join_windows(&join_windows(&windows.program_files, "Dyno Helper"), "dyno-helper.exe"),
                     data_dir,
                     config,
-                    token,
                     audit,
                     endpoint: WINDOWS_PIPE.into(),
                     endpoint_dir: None,
@@ -164,16 +148,16 @@ mod tests {
             mac.registration,
             Some(PathBuf::from("/Library/LaunchDaemons/net.decryptology.dyno.helper.plist"))
         );
-        assert_eq!(mac.token, PathBuf::from("/Library/Application Support/Dyno/Helper/token"));
-        assert!(mac.endpoint.starts_with("/var/run/") && mac.endpoint.len() < 100);
+        assert_eq!(mac.endpoint, "/var/run/dyno-helper/helper.sock");
+        assert_eq!(mac.endpoint_dir, Some(PathBuf::from("/var/run/dyno-helper")));
         let lin = HelperPaths::for_host(HelperHost::Linux, &roots());
-        assert_eq!(lin.binary, PathBuf::from("/usr/local/libexec/dyno-helper"));
+        assert_eq!(lin.binary, PathBuf::from("/usr/bin/dyno-helper"));
         assert_eq!(lin.endpoint_dir, Some(PathBuf::from("/run/dyno-helper")));
         assert!(lin.registration.unwrap().ends_with("dyno-helper.service"));
         let win = HelperPaths::for_host(HelperHost::Windows, &roots());
-        assert_eq!(win.binary, PathBuf::from(r"C:\Program Files\Dyno\Helper\dyno-helper.exe"));
+        assert_eq!(win.binary, PathBuf::from(r"C:\Program Files\Dyno Helper\dyno-helper.exe"));
         assert_eq!(win.config, PathBuf::from(r"C:\ProgramData\Dyno\Helper\config.json"));
-        assert_eq!(win.endpoint, r"\\.\pipe\dyno-helper");
+        assert_eq!(win.endpoint, r"\\.\pipe\net.decryptology.dyno.helper");
         assert!(win.registration.is_none());
         assert_eq!(win.audit, PathBuf::from(r"C:\ProgramData\Dyno\Helper\audit.jsonl"));
     }
@@ -197,7 +181,7 @@ mod tests {
         // The paths of the Unix systems use slashes only, even when computed on Windows.
         for host in [HelperHost::Macos, HelperHost::Linux] {
             let p = HelperPaths::for_host(host, &roots());
-            for path in [&p.binary, &p.data_dir, &p.config, &p.token, &p.audit] {
+            for path in [&p.binary, &p.data_dir, &p.config, &p.audit] {
                 assert!(!path.to_string_lossy().contains('\\'), "{path:?}");
             }
         }

@@ -24,5 +24,8 @@ pub mod windows_acl;
 pub use assess::{Assessment, BundledHelper, InstalledHelper, UpdateReason, assess};
 pub use elevate::{ElevatedCommand, ElevationError, run_elevated};
 pub use files::{FileFacts, FileKind, ProtectedFiles, RealFiles, Violation, verify_protected};
-pub use install::{InstallError, Installer, Phase, PhaseRecord, Report, Step, Waits};
+pub use install::{
+    InstallError, Installer, Phase, PhaseRecord, Report, Step, Waits, plan_install, plan_uninstall,
+    plan_uninstall_self,
+};
 pub use layout::{CopyTarget, Layout, Roots, backend_for, layout};

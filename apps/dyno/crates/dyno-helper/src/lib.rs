@@ -1,13 +1,12 @@
 //! Dyno's privileged helper (ADR 0006, 0016): a small program that answers the few read-only questions that need
-//! administrator rights (per-program traffic, its own audit log) for one authorised user, and installs or removes
-//! itself. It changes no setting of the machine.
+//! administrator rights (per-program traffic, its own audit log) for the local accounts the OS says may ask, and
+//! installs or removes itself. It changes no setting of the machine.
 //!
 //! - [`dispatch`] decides what a request may do and audits refusals and removal ([`audit`]). Pure over its ports, so
 //!   tests use fakes.
-//! - [`auth`] decides who may call (the authorised user, the recorded agent program).
-//! - [`server`] accepts connections on the fixed endpoint ([`paths`]) over `paddock-ipc`.
-//! - [`install`] is the typed install and uninstall plan per OS (launchd, systemd, the Windows service) and the
-//!   machine that carries it out.
+//! - [`auth`] decides what each caller may ask (the caller is the account the OS reports; never a pid or a program).
+//! - [`server`] accepts connections on the system endpoint ([`paths`]) over `paddock-ipc`, with per-account limits.
+//! - [`setup`] installs and removes the helper through `dyno-helper-service` (and so `paddock-service`).
 //!
 //! The binary (`main.rs`) is three commands: `serve`, `install` and `uninstall`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
@@ -18,10 +17,10 @@ pub mod cli;
 pub mod config;
 pub mod dispatch;
 pub mod elevate;
-pub mod install;
 pub mod paths;
 pub mod serve;
 pub mod server;
+pub mod setup;
 pub mod sys;
 #[cfg(windows)]
 pub mod winsvc;

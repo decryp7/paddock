@@ -58,15 +58,16 @@ fn every_prompt_is_announced_in_the_words_the_user_will_see() {
 
 #[test]
 fn turning_on_and_off_asks_once_through_the_os_prompt() {
+    let owner = HelperUser::Uid(501);
     let (log, mut elevator) = (FakeSystem::new(), FakeElevator::new(&FakeSystem::new()));
     let mut sys = log.clone();
     let helper = Path::new("/Applications/Dyno.app/Contents/MacOS/dyno-helper");
-    turn_on(Os::MacOs, helper, &mut sys, &mut elevator).unwrap();
+    turn_on(Os::MacOs, helper, &owner, &mut sys, &mut elevator).unwrap();
     let commands = log.commands();
     assert_eq!(commands.len(), 1);
     assert!(
         commands[0]
-            .starts_with("/usr/bin/osascript -e do shell script \"'/Applications/Dyno.app/Contents/MacOS/dyno-helper' 'install' 2>&1\""),
+            .starts_with("/usr/bin/osascript -e do shell script \"'/Applications/Dyno.app/Contents/MacOS/dyno-helper' 'install' '--for' 'uid:501' 2>&1\""),
         "{}",
         commands[0]
     );
@@ -76,14 +77,14 @@ fn turning_on_and_off_asks_once_through_the_os_prompt() {
     assert_eq!(log.commands(), ["pkexec /usr/bin/dyno-helper uninstall"]);
     let windows_log = FakeSystem::new();
     let mut elevator = FakeElevator::new(&windows_log);
-    turn_on(Os::Windows, Path::new("C:\\Dyno\\dyno-helper.exe"), &mut sys, &mut elevator).unwrap();
+    turn_on(Os::Windows, Path::new("C:\\Dyno\\dyno-helper.exe"), &owner, &mut sys, &mut elevator).unwrap();
     assert!(windows_log
         .calls()
         .iter()
-        .any(|c| matches!(c, paddock_service::testing::Call::Os(s) if s == "elevated C:\\Dyno\\dyno-helper.exe install")));
+        .any(|c| matches!(c, paddock_service::testing::Call::Os(s) if s == "elevated C:\\Dyno\\dyno-helper.exe install --for uid:501")));
     elevator.results([Err(paddock_service::RegisterError::Declined)]);
     assert_eq!(
-        turn_on(Os::Windows, Path::new("C:\\x.exe"), &mut sys, &mut elevator),
+        turn_on(Os::Windows, Path::new("C:\\x.exe"), &owner, &mut sys, &mut elevator),
         Err(ElevationError::Declined)
     );
 }
@@ -174,4 +175,23 @@ fn the_helper_refuses_to_install_where_it_is_not_protected() {
     .unwrap_err();
     assert!(matches!(err, InstallError::Refused(_)), "{err}");
     assert!(!sys.commands().iter().any(|c| c.contains("bootstrap")), "nothing was registered");
+}
+
+#[test]
+fn the_helper_removes_itself_files_first_and_stops_last() {
+    let (sys, mut files) = (FakeSystem::new(), FakeFiles::new());
+    let program = "/Library/PrivilegedHelperTools/net.decryptology.dyno.helper";
+    files
+        .put_dir("/Library/PrivilegedHelperTools", 0, 0o755)
+        .put_file(program, b"x", 0, 0o755);
+    let report = uninstall_self_in_place(Os::MacOs, &roots(), &mut files, &make_system(&sys)).unwrap();
+    assert_eq!(report.phases.len(), 3);
+    assert!(files.facts_of(Path::new(program)).is_none());
+    let commands = sys.commands();
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.starts_with("/bin/launchctl bootout system/net.decryptology.dyno.helper")),
+        "{commands:?}"
+    );
 }

@@ -7,10 +7,12 @@
 //! - The **helper** (elevated by that prompt) runs [`install_in_place`] and [`uninstall_in_place`]: the protected copy,
 //!   the registration and their checks, all in `paddock-service`.
 //!
+//! The agent reaches the running helper through [`client::connect`] (the trust check of `paddock-ipc`'s system endpoint).
+//!
 //! Registration goes through `paddock-service` (rule 55): this crate only says what Dyno's helper is ([`spec`]) and
 //! where Dyno keeps it ([`windows_roots`]).
 
-use dyno_core::helper_wire::HELPER_API;
+use dyno_core::helper_wire::{HelperUser, HELPER_API};
 use paddock_env::{Os, Vars};
 use paddock_service::hardening::{Hardening, Sandbox};
 use paddock_service::privileged::{
@@ -34,6 +36,8 @@ pub const WINDOWS_FOLDER: &str = "Dyno Helper";
 pub const MIN_HELPER_VERSION: &str = "1.1.0";
 /// The verbs of the helper program that this crate runs elevated.
 pub const INSTALL_VERB: &str = "install";
+/// The flag that carries the owner to `install`.
+pub const OWNER_FLAG: &str = "--for";
 /// See [`INSTALL_VERB`].
 pub const UNINSTALL_VERB: &str = "uninstall";
 
@@ -110,9 +114,16 @@ pub const MACOS_PROMPT: &str = "Dyno wants to install its helper, which shows th
 ///
 /// # Errors
 /// What the user did or what went wrong.
-pub fn turn_on(os: Os, bundled: &Path, sys: &mut dyn System, elevator: &mut dyn Elevator) -> Result<(), ElevationError> {
+pub fn turn_on(
+    os: Os,
+    bundled: &Path,
+    owner: &HelperUser,
+    sys: &mut dyn System,
+    elevator: &mut dyn Elevator,
+) -> Result<(), ElevationError> {
     log::info!(os:? = os; "turning the helper on");
-    run_elevated(os, sys, elevator, bundled, &[INSTALL_VERB], MACOS_PROMPT)
+    let owner = owner.to_arg();
+    run_elevated(os, sys, elevator, bundled, &[INSTALL_VERB, OWNER_FLAG, &owner], MACOS_PROMPT)
 }
 
 /// Turns the helper off when it does not answer the authenticated `Uninstall` request: runs the installed helper's
@@ -188,6 +199,25 @@ pub fn uninstall_in_place(
     log::info!(os:? = os; "the helper was removed");
     Ok(report)
 }
+
+/// The service removing itself (its own `Uninstall` request): files first, the stop last (the process ends with it).
+///
+/// # Errors
+/// An [`InstallError`].
+pub fn uninstall_self_in_place(
+    os: Os,
+    roots: &Roots,
+    files: &mut dyn ProtectedFiles,
+    make_system: &dyn Fn() -> Box<dyn System>,
+) -> Result<Report, InstallError> {
+    let spec = spec();
+    let layout = helper_layout(os, roots).map_err(|e| InstallError::Refused(e.to_string()))?;
+    let mut backend = backend_for(&layout, &spec, make_system()).map_err(|e| InstallError::Refused(e.to_string()))?;
+    let mut sys = make_system();
+    Installer::new(&layout, files, backend.as_mut(), sys.as_mut()).uninstall_self()
+}
+
+pub mod client;
 
 #[cfg(test)]
 mod tests;

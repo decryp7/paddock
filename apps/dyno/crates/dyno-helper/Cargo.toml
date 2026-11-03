@@ -18,6 +18,10 @@ path = "src/main.rs"
 
 [dependencies]
 dyno-core.workspace = true
+dyno-helper-service = { path = "../dyno-helper-service" }
+paddock-service = { path = "../../../../crates/paddock-service" }
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+paddock-env = { path = "../../../../crates/paddock-env" }
 paddock-ipc.workspace = true
 log = { version = "0.4", features = ["kv"] }
 dyno-platform.workspace = true

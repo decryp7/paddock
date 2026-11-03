@@ -13,6 +13,7 @@ dyno-core.workspace = true
 # The registration, the protected copy and the OS prompt are the family's one implementation (rule 55, ER-22).
 paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-env = { path = "../../../../crates/paddock-env" }
+paddock-ipc.workspace = true
 log = { version = "0.4", features = ["kv"] }
 
 [lints]

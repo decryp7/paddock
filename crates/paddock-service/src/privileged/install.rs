@@ -67,6 +67,17 @@ pub fn plan_uninstall(layout: &Layout) -> Vec<Step> {
     steps
 }
 
+/// The removal of the service by the service itself (its own `Uninstall` request): the files go first, the stop and the
+/// unregistering last, because stopping the job ends the process that is running these steps.
+pub fn plan_uninstall_self(layout: &Layout) -> Vec<Step> {
+    let mut steps = Vec::new();
+    if layout.copy.is_some() {
+        steps.extend([Step::RemoveProgram, Step::RemoveFolder]);
+    }
+    steps.push(Step::StopExisting);
+    steps
+}
+
 /// The bounded waits of an install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Waits {
@@ -161,6 +172,7 @@ pub struct Installer<'a> {
     sys: &'a mut dyn System,
     waits: Waits,
     report: Report,
+    running_here: bool,
 }
 
 impl<'a> Installer<'a> {
@@ -178,6 +190,7 @@ impl<'a> Installer<'a> {
             sys,
             waits: Waits::default(),
             report: Report::default(),
+            running_here: false,
         }
     }
 
@@ -221,6 +234,23 @@ impl<'a> Installer<'a> {
         for step in plan {
             self.run_step(step, None)
                 .inspect_err(|e| log::error!(step:? = step, error:% = e; "uninstall failed"))?;
+        }
+        Ok(self.report)
+    }
+
+    /// Removes the service from inside the service (see [`plan_uninstall_self`]). A program file the OS will not let go of
+    /// while it runs (Windows) is left in place and said so; the registration is removed all the same.
+    ///
+    /// # Errors
+    /// An [`InstallError`].
+    pub fn uninstall_self(mut self) -> Result<Report, InstallError> {
+        self.running_here = true;
+        let plan = plan_uninstall_self(self.layout);
+        log::info!(os:? = self.layout.os, steps = plan.len(); "self-uninstall starts");
+        for step in plan {
+            self.run_step(step, None).inspect_err(
+                |e| log::error!(step:? = step, error:% = e; "self-uninstall failed"),
+            )?;
         }
         Ok(self.report)
     }
@@ -464,6 +494,7 @@ impl<'a> Installer<'a> {
         match self.files.remove_file(&file) {
             Ok(()) => Ok("removed".into()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("was not there".into()),
+            Err(e) if self.running_here => Ok(format!("left in place while it runs: {e}")),
             Err(e) => Err(failed(
                 Step::RemoveProgram,
                 format!("{}: {e}", file.display()),
