@@ -1,5 +1,5 @@
 import { ISO_CODES, SMALL_PLACES } from './iso-countries';
-import { EQUATOR_Y, OUTLINE_CODES, arcPath, arcsFor, centreOf, countryPath, drawnAs, greatCircle, project, stepOf, worldPaths } from './map-geometry';
+import { MAX_ARCS, EQUATOR_Y, OUTLINE_CODES, arcPath, arcsFor, centreOf, countryPath, drawnAs, greatCircle, project, stepOf, worldPaths, spherePath } from './map-geometry';
 import { COUNTRY_RINGS, MAP_SOURCE_SHA256, MAP_VIEW } from './world-map.data';
 
 describe('the offline world map', () => {
@@ -44,6 +44,17 @@ describe('the offline world map', () => {
     expect(Object.keys(worldPaths(0)).sort()).toEqual([...OUTLINE_CODES].sort());
   });
 
+  it('shows exactly 360 degrees: the outline of the world reaches both edges of the frame at the equator and curves in towards the poles', () => {
+    const d = spherePath(104);
+    const xs = [...d.matchAll(/[ML]([\d.]+) ([\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+    const equator = xs.filter((p) => Math.abs(p.y - EQUATOR_Y) < 3);
+    expect(Math.min(...equator.map((p) => p.x))).toBeLessThan(2);
+    expect(Math.max(...equator.map((p) => p.x))).toBeGreaterThan(MAP_VIEW.width - 2);
+    const top = xs.filter((p) => p.y < 4);
+    expect(Math.max(...top.map((p) => p.x))).toBeLessThan(MAP_VIEW.width * 0.8);
+    expect(d.endsWith('Z')).toBe(true);
+  });
+
   it('keeps the route from Singapore to the United States whole across the Pacific when the map is centred on Singapore', () => {
     const sg = centreOf('SG')!;
     const us = centreOf('US')!;
@@ -73,12 +84,13 @@ describe('the offline world map', () => {
     expect(arcPath([10, 10], [10, 10])).toBe('');
   });
 
-  it('draws at most 250 arcs, busiest first, and says how many it left out', () => {
+  it('draws arcs for the busiest destinations only (the rest are dots) and says how many it left out', () => {
     const countries = ISO_CODES.filter((c) => centreOf(c)).map((code, i) => ({ code, connections: i + 1 }));
-    const { arcs, hidden } = arcsFor('SG', countries, 250);
-    expect(arcs.length).toBe(Math.min(250, countries.length - 1));
+    const { arcs, hidden } = arcsFor('SG', countries);
+    expect(MAX_ARCS).toBe(30);
+    expect(arcs.length).toBe(MAX_ARCS);
     expect(arcs[0]!.connections).toBeGreaterThanOrEqual(arcs[arcs.length - 1]!.connections);
-    expect(hidden).toBe(Math.max(0, countries.length - 1 - 250));
+    expect(hidden).toBe(countries.length - 1 - MAX_ARCS);
     expect(arcsFor(null, countries).arcs).toEqual([]);
     expect(arcsFor('ZZ', countries).arcs).toEqual([]);
   });

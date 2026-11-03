@@ -154,11 +154,14 @@ export interface Arc {
   readonly connections: number;
 }
 
+/** Arcs are drawn for the busiest destinations only; the rest are dots (a spec checks the cap). */
+export const MAX_ARCS = 30;
+
 /** At most `limit` arcs: the busiest destinations first, the rest left to the table (the map says how many). */
 export function arcsFor(
   home: string | null,
   countries: readonly { code: string; connections: number }[],
-  limit = 250,
+  limit = MAX_ARCS,
 ): { arcs: Arc[]; hidden: number } {
   const from = home ? centreOf(home) : null;
   if (!from) return { arcs: [], hidden: 0 };
@@ -170,6 +173,21 @@ export function arcsFor(
     .sort((a, b) => b.c.connections - a.c.connections);
   const arcs = all.slice(0, limit).map(({ c, to }) => ({ code: c.code, d: arcPath(from, to, centre), connections: c.connections }));
   return { arcs, hidden: Math.max(0, all.length - arcs.length) };
+}
+
+/**
+ * The outline of the world in the projection centred on `centre`: the left and right edges are the meridians 180 degrees either
+ * side of it (curved in Equal Earth), so the map shows exactly 360 degrees and the extra copies of the outlines are clipped away.
+ */
+export function spherePath(centre: number): string {
+  const right: Point[] = [];
+  const left: Point[] = [];
+  for (let lat = 90; lat >= -90; lat -= 3) {
+    right.push(project(centre + 180, lat, centre, true));
+    left.push(project(centre - 180, lat, centre, true));
+  }
+  const pts = [...right, ...left.reverse()];
+  return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('') + 'Z';
 }
 
 /** Five steps of the legend: "1–2, 3–9, 10–49, 50–199, 200+" (ADR 0031 section 3.3). */

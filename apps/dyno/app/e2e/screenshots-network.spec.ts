@@ -29,9 +29,11 @@ test.describe('Dyno network screenshots', () => {
         await shot(page, 'map-table');
       });
 
-      test('map, a country focused with the keyboard', async ({ page }) => {
+      test('map, a country focused with the keyboard (focus ring, tooltip)', async ({ page }) => {
         await page.goto('/?latency=0#/map');
-        await page.getByRole('button', { name: /^United States: 54 connections/ }).focus();
+        await page.getByTestId('world-map').waitFor();
+        await page.getByRole('button', { name: /^Ireland: 18 connections/ }).focus();
+        await page.getByTestId('country-tip').waitFor();
         await shot(page, 'map-focus');
       });
 
@@ -49,11 +51,12 @@ test.describe('Dyno network screenshots', () => {
         await page.screenshot({ path: `${OUT}/map-loading-${scheme}.png`, fullPage: true });
       });
 
-      test('map, a marker with the tooltip', async ({ page }) => {
+      test('map, the tooltip of a flagged country under the pointer', async ({ page }) => {
         await page.goto('/?latency=0#/map');
-        await page.getByRole('button', { name: /^United States: 54 connections/ }).focus();
+        const us = page.locator('g.spot[data-country="US"] circle.dot');
+        await us.hover({ force: true });
         await page.getByTestId('country-tip').waitFor();
-        await shot(page, 'map-tooltip');
+        await shot(page, 'map-tooltip-flagged');
       });
 
       test('map, error with Retry', async ({ page }) => {

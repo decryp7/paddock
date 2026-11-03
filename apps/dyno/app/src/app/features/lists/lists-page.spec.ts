@@ -103,7 +103,8 @@ describe('ListsPage', () => {
     await click('[data-testid="add-list"]');
     await click('[data-testid="list-list-2"] [data-testid="dedupe"]');
     const preview = q('[data-testid="preview"]')!;
-    expect(q('[data-testid="preview-numbers"]')!.textContent!.replace(/\s+/g, ' ')).toContain('5 entries become 2: 1 exact duplicate and 2 covered by a wider entry go');
+    expect(q('[data-testid="preview-numbers"]')!.textContent!.replace(/\s+/g, ' ')).toContain('5 entries · 1 duplicate · 2 covered by a wider range. 2 stay.');
+    expect(preview.textContent).toContain('8.8.8.8 appears twice');
     expect(q('[data-testid="apply-dedupe"]')!.textContent).toContain('Remove 3 entries');
     expect(preview.textContent).toContain('is covered by');
     expect(mock.intel.status().lists[1]!.text).toContain('y.x.example');
@@ -121,7 +122,7 @@ describe('ListsPage', () => {
 
   it('shows the error with Retry when the lists cannot be read', async () => {
     const { el, q, mock, settle } = await open({ fail: ['intelStatus'] });
-    expect(el.querySelector('[role="alert"]')!.textContent).toContain('intelStatus');
+    expect(el.querySelector('[role="alert"]')!.textContent).toContain('could not read your IP lists');
     expect(q('[data-testid="no-lists"]')).toBeNull();
     expect(mock).toBeTruthy();
     await settle();

@@ -50,13 +50,9 @@ export function rulesLine(s: FirewallSource): string {
           @for (s of v.sources; track s.source) {
             <section class="source" [attr.data-source]="s.source" [attr.aria-label]="name(s.source)">
               <h2>{{ name(s.source) }}</h2>
-              @if (s.states.length > 0) {
+              @if (s.states.length > 0 || s.switches.length > 0) {
                 <p class="states">
                   @for (st of s.states; track st.profile) { <span class="chip" [attr.data-on]="st.enabled">{{ profileWord(st.profile) }}: {{ st.enabled ? 'On' : 'Off' }}</span> }
-                </p>
-              }
-              @if (s.switches.length > 0) {
-                <p class="states">
                   @for (sw of s.switches; track sw[0]) { <span class="chip" [attr.data-on]="sw[1]">{{ sw[0] === 'blockAll' ? 'Block all incoming' : 'Stealth mode' }}: {{ sw[1] ? 'On' : 'Off' }}</span> }
                 </p>
               }

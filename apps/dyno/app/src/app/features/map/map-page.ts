@@ -7,7 +7,7 @@ import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { MapStore } from '../../state/map.store';
 import { NetworkStore } from '../../state/network.store';
-import { LEGEND_STEPS, OUTLINE_CODES, arcsFor, centreOf, drawnAs, project, stepOf, worldPaths } from './map-geometry';
+import { LEGEND_STEPS, OUTLINE_CODES, arcsFor, spherePath, centreOf, drawnAs, project, stepOf, worldPaths } from './map-geometry';
 import { MAP_VIEW } from './world-map.data';
 
 type View = 'map' | 'table';
@@ -52,7 +52,11 @@ export function countryLabel(c: CountryCount): string {
         </div>
       </header>
 
-      <dy-async [loaded]="!!store.summary()" [error]="store.error()" what="the map" [rows]="5" (retry)="store.load()">
+      <dy-async [loaded]="!!store.summary()" [error]="store.error()" what="the map" [rows]="0" (retry)="store.load()">
+        <div skeleton class="map-skeleton" role="status" aria-live="polite" data-testid="map-loading">
+          <svg [attr.viewBox]="'0 0 ' + size.width + ' ' + size.height" aria-hidden="true"><path class="ph" [attr.d]="sphere()" /></svg>
+          <span>Loading connections…</span>
+        </div>
         @if (store.summary(); as s) {
           <div class="bar">
             <pd-segmented-control label="View" [options]="views" [value]="view()" (valueChange)="view.set($event === 'table' ? 'table' : 'map')" />
@@ -72,30 +76,44 @@ export function countryLabel(c: CountryCount): string {
                 <svg [attr.viewBox]="'0 0 ' + size.width + ' ' + size.height" role="group" aria-label="World map of connections by country" data-testid="world-map">
                   <defs>
                     <pattern id="flagged-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2.2" height="5" class="hatch-bar" /></pattern>
+                    <clipPath id="sphere"><path [attr.d]="sphere()" /></clipPath>
                   </defs>
-                  @for (p of shapes(); track p.code) {
-                    <path class="land" [attr.d]="p.d" [attr.data-code]="p.code" [attr.data-step]="stepFor(p.code)" />
-                  }
-                  @for (a of arcs().arcs; track a.code) {
-                    <path class="arc" [attr.d]="a.d" [attr.stroke-width]="0.8 + step(a.connections) * 0.7" [attr.opacity]="0.35 + step(a.connections) * 0.15" fill="none" [attr.data-arc]="a.code" />
-                  }
-                  @if (home(); as h) {
-                    <g class="home"><circle [attr.cx]="h.x" [attr.cy]="h.y" r="5" /><rect class="pill" [attr.x]="h.x + 7" [attr.y]="h.y - 8" width="30" height="16" rx="4" /><text [attr.x]="h.x + 11" [attr.y]="h.y + 4">You</text></g>
-                  }
-                  @for (c of s.countries; track c.code) {
+                  <path class="sea" [attr.d]="sphere()" />
+                  <g clip-path="url(#sphere)">
+                    @for (p of shapes(); track p.code) {
+                      <path class="land" [attr.d]="p.d" [attr.data-code]="p.code" [attr.data-step]="stepFor(p.code)" />
+                    }
+                    @for (a of arcs().arcs; track a.code) {
+                      <path class="arc" [attr.d]="a.d" [attr.stroke-width]="1.4 + step(a.connections) * 0.7" [attr.opacity]="0.55 + step(a.connections) * 0.1" fill="none" [attr.data-arc]="a.code" />
+                    }
+                  </g>
+                  @for (c of plain(); track c.code) {
                     @if (marker(c.code); as m) {
                       <g class="spot" tabindex="0" role="button" [attr.aria-label]="label(c)" [attr.data-country]="c.code" (keydown.enter)="showConnections(c.code)" (click)="showConnections(c.code)" (focus)="tip.set(c.code)" (blur)="tip.set(null)" (mouseenter)="tip.set(c.code)" (mouseleave)="tip.set(null)">
-                        @if (c.flagged > 0) {
-                          <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="9 + step(c.connections)" fill="url(#flagged-hatch)" class="flag" />
-                          <g class="flagmark" [attr.transform]="'translate(' + (m.x + 9 + step(c.connections)) + ' ' + (m.y - 9 - step(c.connections)) + ')'">
-                            <path d="M0 0v14M0 1h9l-2.5 3.5L9 8H0" />
-                            <rect class="pill" x="11" y="-2" width="50" height="16" rx="4" />
-                            <text x="15" y="10">flagged</text>
-                          </g>
-                        }
-                        <circle class="dot" [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="4 + step(c.connections) * 1.5" [attr.data-step]="step(c.connections)" />
+                        <circle class="dot" [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="dotRadius(c.connections)" [attr.data-step]="step(c.connections)" />
                       </g>
                     }
+                  }
+                  @for (c of flaggedCountries(); track c.code) {
+                    @if (marker(c.code); as m) {
+                      <g class="spot" tabindex="0" role="button" [attr.aria-label]="label(c)" [attr.data-country]="c.code" (keydown.enter)="showConnections(c.code)" (click)="showConnections(c.code)" (focus)="tip.set(c.code)" (blur)="tip.set(null)" (mouseenter)="tip.set(c.code)" (mouseleave)="tip.set(null)">
+                        <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="dotRadius(c.connections) + 5" fill="url(#flagged-hatch)" class="flag" />
+                        <g class="flagmark" [attr.transform]="'translate(' + (m.x + (m.x > size.width - 70 ? -9 : 7) ) + ' ' + (m.y - 20) + ')'">
+                          <path d="M0 0v14M0 1h9l-2.5 3.5L9 8H0" />
+                          @if (flaggedCountries().length <= 3) {
+                            <rect class="pill" [attr.x]="m.x > size.width - 70 ? -58 : 11" y="-2" width="50" height="16" rx="4" />
+                            <text [attr.x]="m.x > size.width - 70 ? -54 : 15" y="10">flagged</text>
+                          }
+                        </g>
+                        <circle class="dot" [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="dotRadius(c.connections)" [attr.data-step]="step(c.connections)" />
+                      </g>
+                    }
+                  }
+                  @if (flaggedCountries().length > 3) {
+                    <g class="callout"><rect class="pill" x="10" y="10" width="236" height="22" rx="5" /><text x="18" y="25">⚑ {{ flaggedCountries().length }} countries with flagged connections</text></g>
+                  }
+                  @if (home(); as h) {
+                    <g class="home"><circle [attr.cx]="h.x" [attr.cy]="h.y" r="6" /><rect class="pill" [attr.x]="h.x + 8" [attr.y]="h.y - 8" width="30" height="16" rx="4" /><text [attr.x]="h.x + 12" [attr.y]="h.y + 4">You</text></g>
                   }
                 </svg>
                 @if (tipFor(); as t) {
@@ -106,8 +124,8 @@ export function countryLabel(c: CountryCount): string {
                   </div>
                 }
               </div>
-              <figcaption class="faint credit" data-testid="credit">IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0@if (s.dbDate) { , database of {{ s.dbDate }} }. Map: Natural Earth, public domain.</figcaption>
-              @if (arcs().hidden > 0) { <figcaption class="faint">{{ arcs().hidden }} smaller destinations are in the table, not drawn as arcs.</figcaption> }
+              <figcaption class="faint credit" data-testid="credit">{{ credit(s) }}</figcaption>
+              @if (arcs().hidden > 0) { <figcaption class="faint">Arcs are drawn for the {{ arcs().arcs.length }} busiest destinations; {{ arcs().hidden }} more are dots. The table lists every country.</figcaption> }
               <figcaption class="legend" aria-label="Legend: connections per country" data-testid="legend">
                 @for (l of legend; track l.label; let i = $index) { <span class="key"><i [attr.data-step]="i"></i> {{ l.label }}</span> }
                 <span class="key"><i class="hatch"></i> ⚑ flagged by one of your lists</span>
@@ -136,7 +154,7 @@ export function countryLabel(c: CountryCount): string {
                 }
               </tbody>
             </table>
-            <p class="faint credit" data-testid="credit-table">IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0@if (s.dbDate) { , database of {{ s.dbDate }} }. Map: Natural Earth, public domain.</p>
+            <p class="faint credit" data-testid="credit-table">{{ credit(s) }}</p>
           }
 
           <section aria-labelledby="local-h" class="block">
@@ -160,7 +178,11 @@ export function countryLabel(c: CountryCount): string {
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .mapbox { margin: 0; display: grid; gap: var(--sp-2); }
     .frame { position: relative; }
-    svg { display: block; width: 100%; height: auto; max-height: 70vh; background: var(--sea); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--accent); }
+    .map-skeleton { position: relative; }
+    .map-skeleton svg { display: block; width: 100%; height: auto; max-height: 70vh; }
+    .map-skeleton .ph { fill: var(--surface-active); stroke: var(--border-strong); stroke-width: 1; }
+    .map-skeleton span { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: var(--fs-md); }
+    svg { display: block; width: 100%; height: auto; max-height: 70vh; color: var(--accent); }
     .hatch-bar { fill: var(--warn); }
     .tip { position: absolute; display: grid; gap: 2px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font-size: var(--fs-xs); box-shadow: 0 2px 8px rgb(0 0 0 / 25%); pointer-events: none; max-width: 240px; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -178,7 +200,9 @@ export function countryLabel(c: CountryCount): string {
     .land[data-step='2'], .key i[data-step='2'] { fill: color-mix(in srgb, var(--accent) var(--b2), var(--land)); background: color-mix(in srgb, var(--accent) var(--b2), var(--land)); }
     .land[data-step='3'], .key i[data-step='3'] { fill: color-mix(in srgb, var(--accent) var(--b3), var(--land)); background: color-mix(in srgb, var(--accent) var(--b3), var(--land)); }
     .land[data-step='4'], .key i[data-step='4'] { fill: color-mix(in srgb, var(--accent) var(--b4), var(--land)); background: color-mix(in srgb, var(--accent) var(--b4), var(--land)); }
+    .sea { fill: var(--sea); stroke: var(--border); stroke-width: 1; }
     .arc { stroke: var(--accent); stroke-linecap: round; }
+    .callout text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); }
     .spot { cursor: pointer; outline: none; }
     .spot .dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
     .spot:focus-visible .dot { stroke: var(--text-1); stroke-width: 3; }
@@ -232,6 +256,11 @@ export class MapPage implements OnInit, OnDestroy {
     { key: 'flagged', label: 'Flagged' },
   ];
   protected readonly tip = signal<string | null>(null);
+  protected readonly sphere = computed(() => spherePath(this.centre()));
+  protected readonly flaggedCountries = computed(() => (this.store.summary()?.countries ?? []).filter((c) => c.flagged > 0));
+  protected readonly plain = computed(() => (this.store.summary()?.countries ?? []).filter((c) => c.flagged === 0));
+  /** A marker's radius, capped so a busy country does not cover its neighbours. */
+  protected dotRadius = (connections: number): number => 3 + stepOf(connections);
   protected readonly view = signal<View>('map');
   protected readonly sort = signal<SortKey>('connections');
   protected readonly desc = signal(true);
@@ -263,6 +292,11 @@ export class MapPage implements OnInit, OnDestroy {
 
   protected step = stepOf;
   protected label = countryLabel;
+  /** The data credit: DB-IP's licence asks for it, Natural Earth does not but gets it. */
+  protected credit(s: { dbDate: string | null }): string {
+    return `IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0${s.dbDate ? `, database of ${s.dbDate}` : ''}. Map: Natural Earth, public domain.`;
+  }
+
   protected classText = (c: AddressClass): string => CLASS_TEXT[c];
 
   /** "Your location: Singapore, from your public IP (via Cloudflare)": the country is named in words, not only coded. */

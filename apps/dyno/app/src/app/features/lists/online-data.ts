@@ -15,7 +15,7 @@ import { IntelStore } from '../../state/intel.store';
     @if (store.status(); as s) {
       <section class="card" aria-labelledby="online-h">
         <h2 id="online-h">What goes online</h2>
-        <p class="note"><dy-icon name="info" /> <span data-testid="first-run-note">{{ s.firstRunNote }}</span></p>
+        <p class="note"><dy-icon name="info" /> <span data-testid="first-run-note">@for (part of noteParts(s.firstRunNote); track $index) { @if (part === host) { <span class="nobr">{{ part }}</span> } @else { {{ part }} } }</span></p>
         <div class="switches" role="group" aria-label="Network features">
           <mat-checkbox data-testid="switch-databases" [checked]="s.geo.switches.locationDatabases" (change)="set('locationDatabases', !s.geo.switches.locationDatabases)">
             Download the location databases (DB-IP, monthly)
@@ -38,6 +38,7 @@ import { IntelStore } from '../../state/intel.store';
     h2 { margin: 0; font-size: var(--fs-md); }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
     .switches { display: grid; gap: var(--sp-1); }
+    .nobr { white-space: nowrap; hyphens: none; }
     .faint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
   `,
 })
@@ -45,6 +46,13 @@ export class OnlineData {
   protected readonly store = inject(IntelStore);
   /** Raised after a switch changed. */
   readonly changed = output<void>();
+
+  protected readonly host = 'download.db-ip.com';
+
+  /** The note in pieces, so the download address is never broken across lines at its hyphen. */
+  protected noteParts(text: string): string[] {
+    return text.split(/(download\.db-ip\.com)/);
+  }
 
   protected set(which: 'locationDatabases' | 'ownLocation', on: boolean): void {
     const s = this.store.status();

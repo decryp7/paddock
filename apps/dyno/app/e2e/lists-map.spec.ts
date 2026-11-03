@@ -19,6 +19,7 @@ test.describe('IP lists', () => {
     await expect(messy).toContainText('Messy');
 
     await messy.getByTestId('dedupe').click();
+    await expect(page.getByTestId('preview')).toContainText('appears twice');
     await expect(page.getByTestId('preview')).toContainText('is covered by');
     await page.getByTestId('apply-dedupe').click();
     await expect(page.getByTestId('preview')).toHaveCount(0);
@@ -114,7 +115,7 @@ for (const scheme of ['light', 'dark'] as const) {
           const [x, y] = [lum(rgb(a)), lum(rgb(b))];
           return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
         };
-        const sea = getComputedStyle(document.querySelector('svg[data-testid="world-map"]')!).backgroundColor;
+        const sea = getComputedStyle(document.querySelector('path.sea')!).fill;
         const plain = getComputedStyle(document.querySelector('path.land[data-step="-1"]')!).fill;
         const band0 = getComputedStyle(document.querySelector('path.land[data-step="0"]')!).fill;
         return { seaVsLand: ratio(sea, plain), band0VsLand: ratio(band0, plain), band0VsSea: ratio(band0, sea) };

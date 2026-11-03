@@ -42,6 +42,13 @@ describe('FirewallPage', () => {
     expect(pf.querySelector('table')).toBeNull();
   });
 
+  it('puts the state and the switches of a source on one row of chips', async () => {
+    const { el } = await open();
+    const rows = el.querySelectorAll('[data-source="applicationFirewall"] .states');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelectorAll('.chip')).toHaveLength(3);
+  });
+
   it('is read-only: the only controls are Refresh and a way to the helper setting; none changes a rule', async () => {
     const { el } = await open();
     const buttons = [...el.querySelectorAll('button')].map((b) => b.textContent!.trim());
@@ -50,7 +57,7 @@ describe('FirewallPage', () => {
 
   it('shows an error with Retry when the firewall cannot be read, and no Refresh beside it', async () => {
     const { el } = await open(['firewall']);
-    expect(el.querySelector('[role="alert"]')!.textContent).toContain('firewall');
+    expect(el.querySelector('[role="alert"]')!.textContent).toContain('The firewall could not be read');
     expect([...el.querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Retry']);
   });
 

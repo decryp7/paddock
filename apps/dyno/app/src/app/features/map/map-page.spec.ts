@@ -7,6 +7,7 @@ import { MockBackend } from '../../core/mock-backend';
 import type { GeoSummary } from '../../core/api.types';
 import { provideIcons } from '../../shared/icons';
 import { nextFrame } from '../../testing/frame';
+import { ISO_CODES } from './iso-countries';
 import { MapPage, countryLabel } from './map-page';
 
 const NOW = 1_700_000_000_000;
@@ -48,12 +49,12 @@ describe('MapPage', () => {
   it('names every country with connections, focusable, with the numbers in its label (never colour alone)', async () => {
     const { all } = await open();
     const spots = all('g.spot');
-    expect(spots.map((s) => s.dataset['country'])).toEqual(['US', 'IE', 'DE', 'JP', 'SG', 'BR']);
+    expect(spots.map((s) => s.dataset['country']).sort()).toEqual(['BR', 'DE', 'IE', 'JP', 'SG', 'US']);
     for (const s of spots) {
       expect(s.getAttribute('role')).toBe('button');
       expect(s.tabIndex).toBe(0);
     }
-    expect(spots[0]!.getAttribute('aria-label')).toBe('United States: 54 connections from 6 programs, 1 flagged by your lists, includes content-network addresses');
+    expect(spots.find((s) => s.dataset['country'] === 'US')!.getAttribute('aria-label')).toBe('United States: 54 connections from 6 programs, 1 flagged by your lists, includes content-network addresses');
     // The flag is drawn (a hatched ring, a flag and the word), not only a colour.
     expect(all('circle.flag')).toHaveLength(1);
     expect(all('g.flagmark')).toHaveLength(1);
@@ -88,7 +89,7 @@ describe('MapPage', () => {
 
   it('Enter or a click on a country opens the Connections table filtered to that country', async () => {
     const { all, settle } = await open();
-    all('g.spot')[2]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    all('g.spot').find((s) => s.dataset['country'] === 'DE')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
     expect(TestBed.inject(NetworkStore).query().country).toBe('DE');
     expect(TestBed.inject(Router).url).toBe('/network');
@@ -122,21 +123,72 @@ describe('MapPage', () => {
 
   it('shows an error with Retry when the map cannot be read', async () => {
     const { el } = await open((s) => s, ['geoSummary']);
-    expect(el.querySelector('[role="alert"]')!.textContent).toContain('geoSummary');
+    expect(el.querySelector('[role="alert"]')!.textContent).toContain('could not read the current connections');
   });
 
   it('shows the country, its count and its busiest programs when a marker has focus', async () => {
     const { all, q, settle } = await open();
-    all('g.spot')[0]!.dispatchEvent(new Event('focus'));
+    all('g.spot').find((s) => s.dataset['country'] === 'US')!.dispatchEvent(new Event('focus'));
     await settle();
     const tip = q('[data-testid="country-tip"]')!;
     expect(tip.textContent).toContain('United States');
     expect(tip.textContent).toContain('54 connections');
     expect(tip.textContent).toContain('1 flagged');
     expect(tip.textContent).toContain('Google Chrome, Slack, Spotify');
-    all('g.spot')[0]!.dispatchEvent(new Event('blur'));
+    all('g.spot').find((s) => s.dataset['country'] === 'US')!.dispatchEvent(new Event('blur'));
     await settle();
     expect(q('[data-testid="country-tip"]')).toBeNull();
+  });
+
+  it('keeps 250 destinations readable: arcs for the busiest few, dots for the rest, markers capped, flagged ones called out once', async () => {
+    const many = (s: GeoSummary): GeoSummary => ({
+      ...s,
+      countries: ISO_CODES.filter((c) => c !== 'SG').map((code, i) => ({
+        code,
+        name: code,
+        connections: ((i * 7) % 230) + 1,
+        programs: 1,
+        hosts: 1,
+        flagged: i % 25 === 0 ? 1 : 0,
+        includesContentNetworks: false,
+        topPrograms: [],
+      })),
+    });
+    const { all, q } = await open(many);
+    expect(all('path.arc').length).toBe(30);
+    expect(all('g.spot').length).toBeGreaterThan(200);
+    const radii = all('g.spot circle.dot').map((c) => Number(c.getAttribute('r')));
+    expect(Math.max(...radii)).toBeLessThanOrEqual(8);
+    // More than three flagged countries: one callout in words, no per-marker word that could collide or be clipped.
+    expect(all('g.flagmark text')).toHaveLength(0);
+    expect(q('.callout')!.textContent).toMatch(/\d+ countries with flagged connections/);
+    expect(all('circle.flag').length).toBeGreaterThan(3);
+    // The home marker and the flagged markers are drawn after (above) the plain ones.
+    const order = all('svg > g, svg > path').map((n) => n.getAttribute('class') ?? n.tagName);
+    expect(order.lastIndexOf('home')).toBeGreaterThan(order.lastIndexOf('spot'));
+  });
+
+  it('shows a map-shaped placeholder labelled "Loading connections…" while the first answer is awaited', async () => {
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+    let release: (s: GeoSummary) => void = () => undefined;
+    mock.geoSummary = () => new Promise<GeoSummary>((r) => (release = r));
+    TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([{ path: 'network', component: Stub }]), { provide: BACKEND, useValue: mock }] });
+    const f = TestBed.createComponent(MapPage);
+    f.detectChanges();
+    await f.whenStable();
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="map-loading"]')!.textContent).toContain('Loading connections…');
+    expect(el.querySelector('[data-testid="map-loading"] svg path.ph')).toBeTruthy();
+    release({ countries: [], local: [], unknown: 0, dbDate: null, truncated: 0, databaseOn: false, homeCountry: null, homeSource: '' });
+    await f.whenStable();
+    f.detectChanges();
+    expect(el.querySelector('[data-testid="map-loading"]')).toBeNull();
+  });
+
+  it('keeps the credit line free of stray spaces', async () => {
+    const { q } = await open();
+    expect(q('[data-testid="credit"]')!.textContent).toBe('IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0, database of 2026-11-01. Map: Natural Earth, public domain.');
   });
 
   it('words a country label with singular and plural', () => {

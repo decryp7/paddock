@@ -93,12 +93,14 @@ const MAX_IMPORT = 16 * 1024 * 1024;
                           <div class="row-end"><button type="button" matButton="outlined" (click)="store.cancelPreview()">Close</button></div>
                         } @else {
                           <p data-testid="preview-numbers">
-                            <b>{{ p.preview.before }}</b> {{ p.preview.before === 1 ? 'entry becomes' : 'entries become' }} <b>{{ p.preview.after }}</b>:
-                            {{ p.preview.duplicates }} exact {{ p.preview.duplicates === 1 ? 'duplicate' : 'duplicates' }} and
-                            {{ p.preview.covered }} covered by a wider entry go. Notes of removed entries go with them.
+                            <b>{{ p.preview.before }}</b> {{ p.preview.before === 1 ? 'entry' : 'entries' }} · {{ p.preview.duplicates }}
+                            {{ p.preview.duplicates === 1 ? 'duplicate' : 'duplicates' }} · {{ p.preview.covered }} covered by a wider range.
+                            {{ p.preview.after }} {{ p.preview.after === 1 ? 'stays' : 'stay' }}. Notes of removed entries go with them.
                           </p>
                           <ul class="faint">
-                            @for (e of p.preview.examples; track $index) { <li><code>{{ e[0] }}</code> is covered by <code>{{ e[1] }}</code></li> }
+                            @for (e of p.preview.examples; track $index) {
+                              @if (e[0] === e[1]) { <li><code>{{ e[0] }}</code> appears twice</li> } @else { <li><code>{{ e[0] }}</code> is covered by <code>{{ e[1] }}</code></li> }
+                            }
                           </ul>
                           <div class="row-end">
                             <button type="button" matButton="text" (click)="store.cancelPreview()">Keep everything</button>

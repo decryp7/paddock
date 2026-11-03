@@ -174,6 +174,13 @@ export function mockOptionsFromUrl(search: string): MockOptions {
   };
 }
 
+/** What the real engine says when these fail: the cause and the next step. */
+const FAIL_TEXT: Readonly<Record<string, string>> = {
+  intelStatus: 'Dyno could not read your IP lists: the agent did not answer. Check that Dyno is running, then try again.',
+  geoSummary: 'Dyno could not read the current connections: the system refused the list of sockets. Try again; if it keeps failing, restart Dyno.',
+  firewall: 'The firewall could not be read: the system tool did not answer in time. Try again; if it keeps failing, restart Dyno.',
+};
+
 const copy = <T>(v: T): T => structuredClone(v);
 
 /** `localStorage` when the browser build asked for it and it can be used. */
@@ -1516,7 +1523,7 @@ export class MockBackend implements DynoBackend {
       const gate = this.holds.get(name);
       const run = () => {
         try {
-          if (this.fail.has(name)) throw err('internal', `The mock was asked to fail “${name}”.`);
+          if (this.fail.has(name)) throw err('internal', FAIL_TEXT[name] ?? `The mock was asked to fail “${name}”.`);
           resolve(this.localize(copy(body())));
         } catch (e) {
           reject(e);
