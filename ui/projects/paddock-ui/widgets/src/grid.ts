@@ -362,6 +362,10 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     const byId = new Map(v.layout.placements.map((p) => [p.id, p] as const));
     const index = this.arrangementIndex();
     const rects = new Map((v.arrangements[index]?.placements ?? []).map((p) => [p.id, p.rect] as const));
+    // The dragged widget keeps its stored cells: its transform already carries it to the pointer (the placeholder shows the preview).
+    const dragged = this.gesture()?.id;
+    const storedRect = dragged === undefined ? undefined : this.view_()?.arrangements[index]?.placements.find((p) => p.id === dragged)?.rect;
+    if (dragged !== undefined && storedRect) rects.set(dragged, storedRect);
     // The DOM keeps the stored reading order while a preview is drawn: moving the dragged node would drop its pointer capture.
     const stored = (this.view_()?.arrangements[index]?.placements ?? []).map((p) => p.id);
     const order: { id: string; rect: Rect }[] = [];
@@ -414,7 +418,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   protected readonly placeholder = computed<Rect | null>(() => {
     const g = this.gesture();
     if (!g) return null;
-    return this.rows().find((r) => r.id === g.id)?.rect ?? g.rect;
+    return this.previewed()?.arrangements[this.arrangementIndex()]?.placements.find((p) => p.id === g.id)?.rect ?? g.rect;
   });
   protected readonly chip = computed(() => {
     const g = this.gesture();

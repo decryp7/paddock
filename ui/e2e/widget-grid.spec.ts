@@ -36,7 +36,8 @@ async function previewCaughtUp(page: Page, id: string): Promise<void> {
       const ph = await board(page).locator('.pd-wg-ph').boundingBox();
       const fr = await cell(page, id).boundingBox();
       const p = await pitch(page);
-      return !!ph && !!fr && Math.abs(ph.x - fr.x) <= p.col * 0.75 && Math.abs(ph.y - fr.y) <= p.row * 4;
+      // Gravity (the engine's) may lift the placeholder above the pointer, so only the column is compared.
+      return !!ph && !!fr && Math.abs(ph.x - fr.x) <= p.col * 0.75;
     })
     .toBe(true);
 }
@@ -79,7 +80,9 @@ for (const theme of THEMES) {
             const a = (await cell(page, 'e').boundingBox())!;
             await page.mouse.move(a.x + 20, a.y + 20);
             await page.mouse.down();
-            await page.mouse.move(a.x + 20 + p.col * 3, a.y + 20 + p.row, { steps: 6 });
+            // Toward the middle, so the target never needs clamping at the grid's edge.
+            const toward = a.x < 400 ? 3 : -3;
+            await page.mouse.move(a.x + 20 + p.col * toward, a.y + 20 + p.row, { steps: 6 });
             await expect(board(page).locator('.pd-wg-ph')).toBeVisible();
             await previewCaughtUp(page, 'e');
             await animationsDone(page);
@@ -180,8 +183,7 @@ test('Widget grid: the corner resizes in cells and the size chip says how big', 
   await page.mouse.move(corner.x + 12 + p.col * 2, corner.y + 12 + p.row * 2, { steps: 6 });
   await expect(board(page).locator('.pd-wg-chip')).toHaveText('6 × 6');
   await page.mouse.up();
-  expect((await lines(cell(page, 'a'))).column).toBe('1 / span 6');
-  expect((await lines(cell(page, 'a'))).row).toBe('1 / span 6');
+  await expect.poll(() => lines(cell(page, 'a'))).toEqual({ column: '1 / span 6', row: '1 / span 6' });
 });
 
 test('Widget grid: the keys move, resize and undo, and a refused key says why', async ({ page }) => {

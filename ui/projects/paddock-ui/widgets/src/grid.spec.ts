@@ -653,7 +653,10 @@ describe('PdWidgetGrid', () => {
       expect(cell('a').style.gridColumn).toBe('1 / span 6');
       pending[1]!(replyFor(moved(), 2));
       await settle(f);
-      expect(cell('a').style.gridColumn).toBe('7 / span 6');
+      expect(q('.pd-wg-ph')!.style.gridColumn).toBe('7 / span 6');
+      // The dragged widget keeps its stored cells (its transform carries it), the others take the preview.
+      expect(cell('a').style.gridColumn).toBe('1 / span 6');
+      expect(cell('b').style.gridColumn).toBe('1 / span 6');
     });
 
     it('a resize shows the size chip and the engine limit in words', async () => {
