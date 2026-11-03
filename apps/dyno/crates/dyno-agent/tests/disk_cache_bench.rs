@@ -7,8 +7,8 @@
 //! live one of the same size.
 //!
 //! The budgets of the ADR (start-up listing under 20 ms; the first level of a 1M-node map under 300 ms from the request;
-//! saving 1M nodes under 2 s; a loaded map within 10 % of a live one) are asserted in release builds only: a debug build runs
-//! the same code on a small tree to prove it round-trips. Run the measurement by hand:
+//! saving 1M nodes under 2 s; a loaded map within 10 % of a live one) are asserted by the ignored test (run by hand in a
+//! release build on a quiet machine); the ordinary run proves the round trip and the footprint on a small tree. Run the measurement by hand:
 //!
 //! ```sh
 //! cargo test --release -p dyno-agent --test disk_cache_bench -- --nocapture --include-ignored
@@ -270,20 +270,26 @@ fn measure(nodes: u32) -> (f64, f64, f64, f64) {
     out
 }
 
+/// The round trip and the footprint on a small tree: no clock is asserted, so this runs with the ordinary tests.
 #[test]
 fn a_generated_map_saves_and_loads_back_the_same() {
-    // Small in a debug build; the budgets below apply to release builds of the million-node tree.
-    let nodes = if cfg!(debug_assertions) { 30_000 } else { 1_000_000 };
-    let (first_level, save, ratio, listing) = measure(nodes);
-    if !cfg!(debug_assertions) {
-        assert!(listing < 0.020, "the start-up listing took {listing:.4} s (budget 20 ms)");
-        assert!(
-            first_level < 0.300,
-            "the first level of a 1M-node saved map took {first_level:.3} s (budget 300 ms)"
-        );
-        assert!(save < 2.0, "saving 1M nodes took {save:.3} s (budget 2 s)");
-        assert!(ratio < 1.10, "a loaded map holds {ratio:.3}x a live one (budget 1.10x)");
-    }
+    let (_, _, ratio, _) = measure(30_000);
+    assert!(ratio < 1.10, "a loaded map holds {ratio:.3}x a live one (budget 1.10x)");
+}
+
+/// The budgets of the ADR on the million-node tree. They assert wall-clock time, which depends on the machine and its load, so the
+/// test is not part of the ordinary run (rule 12): run it by hand in release mode, on a quiet machine.
+#[test]
+#[ignore = "asserts wall-clock budgets: run it by hand in release mode on a quiet machine"]
+fn the_budgets_hold_at_one_million_nodes() {
+    let (first_level, save, ratio, listing) = measure(1_000_000);
+    assert!(listing < 0.020, "the start-up listing took {listing:.4} s (budget 20 ms)");
+    assert!(
+        first_level < 0.300,
+        "the first level of a 1M-node saved map took {first_level:.3} s (budget 300 ms)"
+    );
+    assert!(save < 2.0, "saving 1M nodes took {save:.3} s (budget 2 s)");
+    assert!(ratio < 1.10, "a loaded map holds {ratio:.3}x a live one (budget 1.10x)");
 }
 
 #[test]

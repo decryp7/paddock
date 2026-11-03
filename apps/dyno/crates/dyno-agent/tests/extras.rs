@@ -468,16 +468,12 @@ fn the_software_list_is_saved_and_shown_at_once_after_a_restart() {
     );
     assert_eq!(saved.items.len(), 2, "the saved list answers at once");
     assert!(saved.saved_at.is_some_and(|t| t.millis() > 0), "with the time it was saved");
-    // The background read ends and the next ask has the fresh list (a bounded wait on the result, not on time).
-    let fresh = loop {
-        let JobOutput::Software(sw) = run_job(&h.client(), JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
-            panic!("software")
-        };
-        if sw.saved_at.is_none() {
-            break sw;
-        }
-        std::thread::yield_now();
+    // The background read ends (joined, not polled) and the next ask has the fresh list.
+    s.extras.wait_background_software();
+    let JobOutput::Software(fresh) = run_job(&h.client(), JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
+        panic!("software")
     };
+    assert_eq!(fresh.saved_at, None);
     assert_eq!(fresh.items.len(), 3);
     s.cache.as_ref().unwrap().flush();
     let (_, _, data) = s.cache.as_ref().unwrap().view("extras.software").unwrap();

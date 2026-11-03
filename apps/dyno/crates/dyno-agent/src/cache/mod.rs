@@ -397,12 +397,26 @@ impl Writer {
                 }
                 Cmd::ForgetAll { done } => {
                     self.db = None;
-                    db::delete_files(&self.path);
+                    // Say what really happened: deleted, emptied in place (a file another handle holds open cannot be deleted
+                    // on Windows), or neither.
+                    let how = match db::delete_files(&self.path) {
+                        Ok(()) => "the cache files were deleted",
+                        Err(why) => match db::wipe_in_place(&self.path) {
+                            Ok(()) => {
+                                log::warn!(Cause = why.to_string(); "Cache files could not be deleted");
+                                "the cache files could not be deleted, so every table was emptied in place"
+                            }
+                            Err(e) => {
+                                log::error!(Cause = e.to_string(); "Cache files could not be deleted or emptied; next step: restart Dyno");
+                                "the saved maps could NOT be removed"
+                            }
+                        },
+                    };
                     self.db = match CacheDb::open(&self.path) {
                         Ok(Opened::Ready(d, _)) => Some(d),
                         _ => None,
                     };
-                    log::info!("All saved disk maps forgotten; the cache files were deleted");
+                    log::info!("All saved disk maps forgotten; {how}");
                     if let Some(tx) = done {
                         let _ = tx.send(());
                     }

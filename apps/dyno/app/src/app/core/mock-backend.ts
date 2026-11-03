@@ -138,6 +138,8 @@ export interface MockOptions {
    * set (ADR 0029); the next ask has the list read just now (`savedAt` null), as after the agent's background read.
    */
   savedListsAgeMs?: number;
+  /** Scans wait where they are until `window.__dynoReleaseScans()` is called (e2e flows that look at a running scan; `?gate=scans`). */
+  holdScans?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -156,7 +158,7 @@ export interface MockOptions {
  * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
  * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps,
  * `saved=3` starts with a saved disk map of the startup disk scanned 3 days ago (ADR 0029) and the counter and software lists as the
- * earlier run saved them.
+ * earlier run saved them, `gate=scans` holds every scan where it is until `window.__dynoReleaseScans()` is called.
  */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
@@ -176,6 +178,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     widgets: mockWidgetOptionsFromUrl(search),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
     ...savedFromUrl(q.get('saved')),
+    ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -292,6 +295,10 @@ export class MockBackend implements DynoBackend {
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
     for (const m of options.savedMaps ?? []) this.disk.seedSaved(m.target, m.ageMs, m.changedBytes);
+    if (options.holdScans) {
+      this.disk.hold();
+      if (typeof window !== 'undefined') (window as unknown as { __dynoReleaseScans?: () => void }).__dynoReleaseScans = () => this.disk.release();
+    }
     this.start = this.now();
     this.backupVariant = options.backup ?? 'mixed';
     this.backupCheckedAt = this.start - 40 * MIN;

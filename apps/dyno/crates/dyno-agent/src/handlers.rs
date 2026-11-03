@@ -141,10 +141,12 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
             shared.disk.set_read_threads(core.settings.disk.read_threads);
-            shared.disk.apply_saved_maps(core.settings.disk.saved_maps);
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
+            // After the core lock is released: switching saved maps off waits for the cache writer (a save in progress can take
+            // seconds), and the sampler takes the core lock every tick.
+            shared.disk.apply_saved_maps(s.disk.saved_maps);
             shared.wake_sampler();
             Ok(Reply::Settings(Box::new(s)))
         }

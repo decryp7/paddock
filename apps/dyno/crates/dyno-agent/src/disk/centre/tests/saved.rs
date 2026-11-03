@@ -373,10 +373,12 @@ fn rescan_keeps_the_saved_map_until_the_new_pass_is_done_and_then_replaces_it() 
     let rows = cache.list();
     assert_eq!(rows.len(), 1);
     assert_ne!(rows[0].id, old_row.id, "the row was replaced");
-    assert!(
-        r.centre.children(old.scan, None, 0, 10, 0.0).is_ok(),
-        "an old id still answers until it is dropped"
+    assert_eq!(
+        r.centre.children(old.scan, None, 0, 10, 0.0).unwrap_err().code,
+        ErrorCode::NotFound,
+        "the replaced map is dropped, not just hidden: it cannot come back"
     );
+    assert!(lock(&r.centre.scans).iter().all(|e| e.scan != old.scan));
 }
 
 #[test]
@@ -428,10 +430,8 @@ fn a_map_of_a_different_disk_is_not_offered_and_comes_back_with_its_disk() {
     let mut a = vol("Macintosh HD", &fs.root(), VolumeLocation::Internal);
     a.identity = Some("DISK-A".into());
     *lock(&r.lister.0) = vec![a];
-    r.centre.refresh_in_background();
-    while r.centre.hidden(&lock(&r.centre.scans)[0].clone()) {
-        std::thread::yield_now();
-    }
+    r.centre.refresh();
+    assert!(!r.centre.hidden(&lock(&r.centre.scans)[0].clone()));
     assert_eq!(r.centre.scans().len(), 1);
 }
 
@@ -470,13 +470,13 @@ fn a_map_too_big_for_the_limit_says_so_in_its_status() {
     let s = r.centre.start(volume_target()).unwrap();
     wait_final(&r, s.scan);
     cache.flush();
-    // The note arrives as a later event of the same scan.
-    let told = loop {
-        if let Some(e) = r.events.all().into_iter().find(|e| e.not_saved.is_some()) {
-            break e;
-        }
-        std::thread::yield_now();
-    };
+    // The note arrives as a later event of the same scan, sent by the writer before it answers the flush.
+    let told = r
+        .events
+        .all()
+        .into_iter()
+        .find(|e| e.not_saved.is_some())
+        .expect("an event says why it was not kept");
     assert_eq!(told.not_saved, Some(NotSaved::TooBig));
     assert_eq!(told.state, ScanState::Done);
     assert!(cache.list().is_empty());

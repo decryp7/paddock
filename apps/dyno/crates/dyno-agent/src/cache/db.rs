@@ -256,10 +256,38 @@ pub fn files_of(path: &Path) -> [PathBuf; 3] {
 }
 
 /// Removes the database and its `-wal` and `-shm`.
-pub fn delete_files(path: &Path) {
+///
+/// Every file is tried; the first failure other than "not there" is returned (Windows refuses to delete a file another handle holds
+/// open). The caller then empties the database in place ([`wipe_in_place`]) instead of claiming the files are gone.
+pub fn delete_files(path: &Path) -> std::io::Result<()> {
+    let mut first = Ok(());
     for f in files_of(path) {
-        let _ = std::fs::remove_file(f);
+        match std::fs::remove_file(f) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound && first.is_ok() => first = Err(e),
+            _ => {}
+        }
     }
+    first
+}
+
+/// Empties a database that could not be deleted: every table dropped with `secure_delete` on (freed pages overwritten), the
+/// log truncated and the file vacuumed. Works on a file of any schema; fails on a file that is not a database.
+pub fn wipe_in_place(path: &Path) -> Result<(), CacheError> {
+    let conn = Connection::open(path)?;
+    conn.busy_timeout(std::time::Duration::from_millis(1500))?;
+    conn.execute_batch("PRAGMA secure_delete = ON;")?;
+    let tables: Vec<String> = {
+        let mut q = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")?;
+        let rows = q.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for t in tables {
+        conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{}\";", t.replace('"', "\"\"")))?;
+    }
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    conn.execute_batch("VACUUM;")?;
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    Ok(())
 }
 
 fn prepare_folder(path: &Path) -> Result<(), CacheError> {
@@ -294,7 +322,13 @@ impl CacheDb {
             Err(CacheError::Busy) => Ok(Opened::Busy),
             Err(e) => {
                 log::warn!(Cause = e.to_string(); "Saved views database cleared and started again; next step: scan again to see a map");
-                delete_files(path);
+                if let Err(why) = delete_files(path) {
+                    log::warn!(Cause = why.to_string(); "Cache files could not be deleted; emptying the database in place instead");
+                    if let Err(e) = wipe_in_place(path) {
+                        log::warn!(Cause = e.to_string(); "Cache database could not be emptied either; caching is off for this run");
+                        return Ok(Opened::Busy);
+                    }
+                }
                 prepare_folder(path)?;
                 Ok(Opened::Ready(Self::try_open(path, STEPS)?, Some(CLEARED_NOTE)))
             }
@@ -1092,5 +1126,36 @@ pub(crate) mod tests {
         assert!(shrunk < grown / 2, "{shrunk} bytes after forgetting against {grown} before");
         let wal = std::fs::metadata(&files_of(db.path())[1]).map_or(0, |m| m.len());
         assert_eq!(wal, 0, "the write-ahead log is empty after a forget");
+    }
+
+    /// A file that cannot be deleted (Windows, another handle open) is emptied in place, and no name is left in it.
+    #[test]
+    fn a_database_that_cannot_be_deleted_is_emptied_in_place_without_leaving_a_name() {
+        let d = tempfile::tempdir().unwrap();
+        let mut db = open_in(d.path());
+        let raw = CacheLimits {
+            max_bytes: 1 << 30,
+            compress: false,
+        };
+        db.save_disk(&private_params("kept"), &tree("__PRIVATE_kept__", 30), 1, raw, &Roomy)
+            .unwrap();
+        let path = db.path().to_path_buf();
+        drop(db);
+        assert!(holds(&on_disk(&path), "__PRIVATE_kept__"));
+        wipe_in_place(&path).unwrap();
+        assert!(!holds(&on_disk(&path), "__PRIVATE_kept__"), "no name after the wipe");
+        let db = open_in(d.path());
+        assert!(db.list().unwrap().is_empty(), "and it opens as an empty cache");
+        // A file that is not a database cannot be emptied, and says so.
+        std::fs::write(d.path().join("junk.db"), vec![7u8; 3000]).unwrap();
+        assert!(wipe_in_place(&d.path().join("junk.db")).is_err());
+        // Deleting reports a failure instead of hiding it: a folder where a file should be cannot be removed as a file.
+        let dir_as_db = d.path().join("x.db");
+        std::fs::create_dir(&dir_as_db).unwrap();
+        assert!(delete_files(&dir_as_db).is_err());
+        assert!(
+            delete_files(&d.path().join("never-existed.db")).is_ok(),
+            "nothing there is not a failure"
+        );
     }
 }

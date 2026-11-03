@@ -75,8 +75,8 @@ test.describe('disk map', () => {
   });
 
   test('a saved map opens at once, stays during a Rescan and is swapped when the new pass is done', async ({ page }) => {
-    // A little latency, so the rescan's pass takes steps the test can look at.
-    await page.goto(url('&saved=3').replace('latency=0', 'latency=300'));
+    // The rescan's pass is held where it starts until the test lets it go: no timing to guess.
+    await page.goto(url('&saved=3&gate=scans'));
     await expect(page.getByText('scanned 3 days ago (saved)')).toBeVisible();
     const note = page.getByTestId('saved-map');
     await expect(note).toContainText('Net change in used space since: +12.4 GB');
@@ -92,14 +92,15 @@ test.describe('disk map', () => {
     await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeDisabled();
 
     // Done: the page swaps to the new map and the saved note goes.
-    await expect(page.getByRole('region', { name: 'Rescan progress' })).toBeHidden({ timeout: 30_000 });
+    await page.evaluate(() => (window as unknown as { __dynoReleaseScans: () => void }).__dynoReleaseScans());
+    await expect(page.getByRole('region', { name: 'Rescan progress' })).toBeHidden();
     await expect(page.getByTestId('saved-map')).toBeHidden();
     await expect(page.getByText('(saved)')).toBeHidden();
     await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeEnabled();
   });
 
   test('a cancelled Rescan keeps the saved map, and Forget this map clears the page', async ({ page }) => {
-    await page.goto(url('&saved=2').replace('latency=0', 'latency=400'));
+    await page.goto(url('&saved=2&gate=scans'));
     await expect(page.getByTestId('saved-map')).toBeVisible();
     await page.getByRole('button', { name: 'Rescan Macintosh HD' }).click();
     await page.getByRole('region', { name: 'Rescan progress' }).getByRole('button', { name: 'Cancel rescan' }).click();

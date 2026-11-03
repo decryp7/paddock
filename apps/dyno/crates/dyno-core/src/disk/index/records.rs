@@ -499,6 +499,9 @@ impl RecordDecoder {
         if root.bytes != h.root_bytes || root.items != h.root_items || needing != h.needing_fda {
             return Err(RecordError::Totals);
         }
+        // The arrays grew by doubling as they were read (nothing is reserved from a header); give back the slack.
+        self.nodes.shrink_to_fit();
+        self.names.shrink_to_fit();
         Ok(DiskIndex {
             nodes: self.nodes,
             names: self.names,
@@ -515,6 +518,7 @@ mod tests {
     use super::*;
     use crate::disk::index::Sizes;
     use crate::time::Timestamp;
+    #[cfg(unix)]
     use std::ffi::OsString;
 
     const MB: u64 = 1024 * 1024;

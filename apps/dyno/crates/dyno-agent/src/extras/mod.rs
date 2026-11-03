@@ -61,6 +61,8 @@ pub struct ExtrasCentre {
     software: Arc<Mutex<Option<(Instant, SoftwareInventory)>>>,
     /// A read of the software list for the saved one is under way in the background.
     software_refreshing: Arc<std::sync::atomic::AtomicBool>,
+    /// Its thread, so a test can wait for it to end.
+    software_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
     /// Signalled when a backup check ends and when a job waiting for one is cancelled.
     pub(crate) backup_done: Arc<std::sync::Condvar>,
@@ -78,9 +80,18 @@ impl ExtrasCentre {
             own_folder,
             software: Arc::new(Mutex::new(None)),
             software_refreshing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            software_thread: Mutex::new(None),
             backup: Arc::new(Mutex::new(backup_check::Slot::default())),
             backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
+        }
+    }
+
+    /// Waits for the background read of the software list (started to replace a saved list), if one is running.
+    pub fn wait_background_software(&self) {
+        let handle = lock(&self.software_thread).take();
+        if let Some(h) = handle {
+            let _ = h.join();
         }
     }
 
@@ -191,8 +202,9 @@ pub fn software_for_page(shared: &Shared) -> SoftwareInventory {
                 flag.store(false, std::sync::atomic::Ordering::SeqCst);
             }
         });
-        if spawned.is_err() {
-            flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        match spawned {
+            Ok(h) => *lock(&x.software_thread) = Some(h),
+            Err(_) => flag.store(false, std::sync::atomic::Ordering::SeqCst),
         }
     }
     saved

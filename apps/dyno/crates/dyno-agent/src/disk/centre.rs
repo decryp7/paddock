@@ -802,6 +802,7 @@ impl DiskCentre {
     /// `incoming` is the size of the scan about to be added; `None` when a saved map was just loaded (room is then made for
     /// no one else, and the map just loaded counts).
     fn evict(&self, scans: &mut Vec<Arc<Entry>>, incoming: Option<u32>, protect: Option<u64>) {
+        Self::drop_superseded(scans);
         loop {
             let loaded: Vec<&Arc<Entry>> = scans.iter().filter(|e| e.loaded()).collect();
             let nodes: usize = loaded.iter().map(|e| e.memory_nodes()).sum::<usize>() + incoming.unwrap_or(0) as usize;
@@ -832,10 +833,11 @@ impl DiskCentre {
     /// that is not in memory then has nothing left to load and is dropped; one in memory stays readable without a row.
     fn apply_removed(&self) {
         let removed = self.keeper.take_removed();
+        let mut scans = lock(&self.scans);
+        Self::drop_superseded(&mut scans);
         if removed.is_empty() {
             return;
         }
-        let mut scans = lock(&self.scans);
         scans.retain(|e| {
             if e.kept.row().is_some_and(|r| removed.contains(&r)) {
                 e.kept.clear_row();
@@ -863,6 +865,14 @@ impl DiskCentre {
         scans.iter().any(|f| {
             f.meta.as_ref().is_some_and(|m| m.replaces == Some(e.scan)) && f.walk().is_some_and(|w| w.outcome() == Some(End::Done))
         })
+    }
+
+    /// Drops the maps a finished Rescan has taken the place of, so a stale one cannot come back into the list or answer a query.
+    fn drop_superseded(scans: &mut Vec<Arc<Entry>>) {
+        let gone: Vec<u64> = scans.iter().filter(|e| Self::superseded(scans, e)).map(|e| e.scan).collect();
+        if !gone.is_empty() {
+            scans.retain(|e| !gone.contains(&e.scan));
+        }
     }
 
     fn entry(&self, scan: u64) -> Result<Arc<Entry>, AgentError> {
@@ -1128,11 +1138,7 @@ impl DiskCentre {
         if let Some(cache) = self.keeper.cache() {
             cache.forget_all();
         }
-        let mut scans = lock(&self.scans);
-        for e in scans.iter() {
-            e.kept.clear_row();
-        }
-        scans.retain(|e| e.meta.is_some());
+        self.drop_saved_entries();
         log::info!("All saved disk maps forgotten");
     }
 
@@ -1141,12 +1147,22 @@ impl DiskCentre {
     pub fn apply_saved_maps(&self, s: dyno_core::disk::settings::SavedMapsSettings) {
         let s = s.clamped();
         let was_on = self.saved_on.swap(s.enabled, Ordering::SeqCst);
-        if was_on && !s.enabled {
-            self.forget_all_saved();
-        }
+        // The cache switches saving off first, then deletes its files (it forgets everything itself when it goes from on to off).
         if let Some(cache) = self.keeper.cache() {
             cache.set_settings(crate::cache::CacheSettings::from(s));
         }
+        if was_on && !s.enabled {
+            self.drop_saved_entries();
+        }
+    }
+
+    /// Removes the maps read back from the cache from the list, and the row of every scan of this run.
+    fn drop_saved_entries(&self) {
+        let mut scans = lock(&self.scans);
+        for e in scans.iter() {
+            e.kept.clear_row();
+        }
+        scans.retain(|e| e.meta.is_some());
     }
 
     /// The saved-maps cache, when there is one.

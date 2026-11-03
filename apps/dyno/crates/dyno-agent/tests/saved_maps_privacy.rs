@@ -99,13 +99,10 @@ fn the_log_of_a_whole_run_over_saved_maps_names_no_path_and_no_folder() {
             panic!("a scan")
         };
         running.shared.disk.wait_finished(s.scan).unwrap();
-        // The save is written before the next scan starts: eviction order is then the order of the scans. (The pass hands its
-        // map to the cache writer as it ends; the test waits for the row, not for a time.)
-        let cache = running.shared.cache.as_ref().unwrap();
-        let key = format!("folder:{}", folder.to_string_lossy());
-        while !cache.list().iter().any(|r| r.params.target_key == key) {
-            std::thread::yield_now();
-        }
+        // The save is written before the next scan starts: eviction order is then the order of the scans.
+        // The pass hands its map to the cache writer before `wait_finished` returns (the hook runs first), so a flush, which
+        // queues behind that save, is the barrier.
+        running.shared.cache.as_ref().unwrap().flush();
     }
     // A map that was unloaded to make room answers again: it is loaded.
     let first_run = scans(&running, &dirs);

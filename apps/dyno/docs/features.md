@@ -257,7 +257,7 @@ lists the same level with the keyboard. It is a map to look at: Dyno deletes, mo
 Reveal in the file manager and Copy path.
 
 **Saved maps (1.1, ADR 0029).** A finished scan is kept on this computer, in the
-system cache folder (outside backups), so the disk map opens on the last map at once after a restart, an update or a login,
+system cache folder (on macOS marked out of Time Machine backups; on Windows and Linux the cache folder, which backup tools usually skip, is not enforced), so the disk map opens on the last map at once after a restart, an update or a login,
 with its age ("scanned 3 days ago", "saved") and, for a whole volume, the net change in used space since the scan (a net
 figure: files deleted and files written add up). A cancelled or failed scan is kept too and marked partial. Nothing is read
 again unless you press **Rescan**, or choose "Refresh when opened" in Settings (off by default: scanning a volume is the
@@ -265,7 +265,7 @@ heaviest thing Dyno does). **Rescan changed in 1.1:** the map you were looking a
 pass's progress above it and **Show progress** for the growing tree; the page swaps to the new map when the pass is done, and
 Cancel or a failed rescan keeps the old map. The counter list and the installed-software list are kept the same way and
 shown at once as "last known", with their age, while Dyno reads them again. In Settings > Saved disk maps: keep them or not
-(off forgets them all), the space they may take (1,024 MB by default, 64 to 8,192), refresh when opened, and **Forget saved
+(off forgets them all, with the saved counter list and software list), the space they may take (1,024 MB by default, 64 to 8,192), refresh when opened, and **Forget saved
 maps**; each map has **Forget this map**. Sixteen maps at most, one per volume or folder; a map of a different disk
 mounted under the same name is not shown.
 

@@ -242,6 +242,9 @@ export class MockDiskMap {
   private readonly scans = new Map<number, Scan>();
   private readonly listeners = new Set<(s: DiskScanStatus) => void>();
   private nextScan = 1;
+  /** While true, a scan's steps wait (a test or an e2e flow holds the scan where it is and lets it go itself). */
+  private held = false;
+  private readonly waiting: Array<() => void> = [];
   /** The paths "revealed", for tests. */
   readonly revealed: string[] = [];
 
@@ -286,6 +289,17 @@ export class MockDiskMap {
       changedBytes,
     });
     return structuredClone(scan.status);
+  }
+
+  /** Holds every scan step from now on until [`release`](MockDiskMap.release). */
+  hold(): void {
+    this.held = true;
+  }
+
+  /** Lets the held steps run, and stops holding. */
+  release(): void {
+    this.held = false;
+    for (const run of this.waiting.splice(0)) run();
   }
 
   /** Forgets one saved map (a scan of this run stays). */
@@ -340,7 +354,8 @@ export class MockDiskMap {
     this.scans.set(scan.status.scan, scan);
     this.emit(scan, {});
     STEPS.forEach((share, i) => {
-      scan.timers.push(this.later(() => this.step(scan, share, i === STEPS.length - 1), i + 1));
+      const run = () => this.step(scan, share, i === STEPS.length - 1);
+      scan.timers.push(this.later(() => (this.held ? void this.waiting.push(run) : run()), i + 1));
     });
     return structuredClone(scan.status);
   }

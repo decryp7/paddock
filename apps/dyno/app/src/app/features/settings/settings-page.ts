@@ -138,7 +138,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <h2>Saved disk maps</h2>
               <p class="sub">A finished scan is kept on this computer so the disk map opens on it at once, with its age, after a restart. Nothing is refreshed unless you press Rescan, or choose below.</p>
               <div class="row">
-                <div class="lbl"><strong>Keep disk maps</strong><small>Off forgets every saved map. They are stored in the system cache folder, outside backups, and never leave this computer.</small></div>
+                <div class="lbl"><strong>Keep disk maps</strong><small>Off forgets every saved map, and the saved counter list and software list too, and keeps none. They are stored in the system cache folder and never leave this computer. On macOS Dyno marks them out of Time Machine backups; on Windows and Linux they sit in the cache folder, which backup tools usually skip, but Dyno does not enforce it.</small></div>
                 <mat-slide-toggle [checked]="savedMaps().enabled !== false" aria-label="Keep disk maps" (change)="setSavedMaps({ enabled: $event.checked })" />
               </div>
               <div class="row" [class.off]="savedMaps().enabled === false">

@@ -72,6 +72,8 @@ struct Inner {
     saved: Mutex<Option<(Timestamp, Arc<CounterCatalog>)>>,
     /// A background listing for the saved catalog is under way.
     refreshing: AtomicBool,
+    /// Its thread, so a test can wait for it to end.
+    refresh_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 /// One listing of every counter: its result once it ended.
@@ -161,6 +163,7 @@ impl CounterCentre {
                 cache: Mutex::new(None),
                 saved: Mutex::new(None),
                 refreshing: AtomicBool::new(false),
+                refresh_thread: Mutex::new(None),
             }),
         }
     }
@@ -254,8 +257,17 @@ impl CounterCentre {
             }
             me.inner.refreshing.store(false, Ordering::SeqCst);
         });
-        if spawned.is_err() {
-            self.inner.refreshing.store(false, Ordering::SeqCst);
+        match spawned {
+            Ok(h) => *lock(&self.inner.refresh_thread) = Some(h),
+            Err(_) => self.inner.refreshing.store(false, Ordering::SeqCst),
+        }
+    }
+
+    /// Waits for the background listing of the saved catalog to end, if one is running.
+    pub fn wait_background_listing(&self) {
+        let handle = lock(&self.inner.refresh_thread).take();
+        if let Some(h) = handle {
+            let _ = h.join();
         }
     }
 
@@ -791,10 +803,9 @@ mod tests {
         assert!(!second.search("free", 5).unwrap().is_empty());
         *lock(&src.released) = true;
         src.changed.notify_all();
-        // The background listing ends (bounded by the test harness, not by a sleep): the next answer is fresh.
-        while second.objects().unwrap().saved_at.is_some() {
-            std::thread::yield_now();
-        }
+        // The background listing ends (joined, not polled): the next answer is fresh.
+        second.wait_background_listing();
+        assert_eq!(second.objects().unwrap().saved_at, None);
         assert_eq!(src.calls.load(Ordering::SeqCst), 1, "listed once, in the background");
         cache.flush();
         assert_eq!(

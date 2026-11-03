@@ -91,6 +91,16 @@ pub fn linux_traits(sys_root: &Path, device: &str) -> MediaTraits {
     }
 }
 
+/// Windows: the identity of a volume from its GUID path and its serial number. The GUID path survives a reformat (the partition
+/// keeps it), the serial changes with it, so both together tell a reformatted disk from the one that was scanned. Built here (not
+/// in the Windows module) so every OS tests the composition.
+pub fn compose_windows_identity(guid_path: &str, serial: Option<u32>) -> String {
+    match serial {
+        Some(s) => format!("{guid_path}|{s:08x}"),
+        None => guid_path.to_string(),
+    }
+}
+
 /// Linux: the file system UUID of the device `source` (`/dev/sda1`), from the links in `by_uuid` (`/dev/disk/by-uuid`), each of
 /// which points at the device that holds that UUID. `None` for a device without one (or an unreadable folder).
 pub fn linux_identity(by_uuid: &Path, source: &str) -> Option<String> {
@@ -325,7 +335,20 @@ mod win {
         let mut buf = [0u16; 64];
         // SAFETY: `root` is NUL-terminated; the buffer is valid for its length.
         unsafe { GetVolumeNameForVolumeMountPointW(PCWSTR(root.as_ptr()), &mut buf) }.ok()?;
-        Some(text(&buf)).filter(|t| !t.is_empty())
+        let guid = Some(text(&buf)).filter(|t| !t.is_empty())?;
+        let mut raw_serial = 0u32;
+        // SAFETY: `root` is NUL-terminated and the serial out pointer is valid for the call.
+        let read = unsafe {
+            GetVolumeInformationW(
+                PCWSTR(root.as_ptr()),
+                None,
+                Some(std::ptr::addr_of_mut!(raw_serial)),
+                None,
+                None,
+                None,
+            )
+        };
+        Some(super::compose_windows_identity(&guid, read.ok().map(|()| raw_serial)))
     }
 
     pub(super) fn traits(m: &RawMount) -> MediaTraits {
@@ -450,6 +473,37 @@ mod tests {
         assert_eq!(linux_identity(&by_uuid, &lone.to_string_lossy()), None, "no link points at it");
         assert_eq!(linux_identity(&t.path().join("missing"), &dev.to_string_lossy()), None);
         assert_eq!(linux_identity(&by_uuid, "/no/such/device"), None);
+    }
+
+    #[test]
+    fn a_windows_identity_is_the_guid_path_and_the_serial_so_a_reformat_changes_it() {
+        let guid = "\\\\?\\Volume{11111111-2222-3333-4444-555555555555}\\";
+        let before = compose_windows_identity(guid, Some(0xCAFE_F00D));
+        assert_eq!(before, format!("{guid}|cafef00d"));
+        assert_ne!(
+            before,
+            compose_windows_identity(guid, Some(0x0000_0001)),
+            "same partition, new serial after a format"
+        );
+        assert_ne!(before, compose_windows_identity("\\\\?\\Volume{other}\\", Some(0xCAFE_F00D)));
+        assert_eq!(compose_windows_identity(guid, None), guid, "no serial: the GUID alone");
+    }
+
+    #[test]
+    fn a_macos_answer_without_a_volume_uuid_has_no_identity() {
+        let p = br#"<?xml version="1.0"?><plist version="1.0"><dict><key>Internal</key><true/></dict></plist>"#;
+        assert_eq!(parse_diskutil_info(p).unwrap().identity, None);
+    }
+
+    /// The Windows CI leg: the drive holding the temp folder has an identity, the same one twice, with the serial in it.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_has_a_stable_identity_with_its_serial() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().ancestors().last().unwrap().to_string_lossy().into_owned();
+        let id = win::identity(&root).expect("the system drive has a volume GUID");
+        assert!(id.starts_with("\\\\?\\Volume{") && id.contains('|'), "{id}");
+        assert_eq!(win::identity(&root), Some(id));
     }
 
     #[test]
