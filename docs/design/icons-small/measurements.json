@@ -1,0 +1,212 @@
+{
+  "paddock": {
+    "coverage16": {
+      "current": 23,
+      "mix": 22
+    },
+    "contrast": {
+      "isoFront": 8.53,
+      "flatInk": 13.27
+    },
+    "blockiness64": {
+      "current": 20,
+      "mix": 2
+    },
+    "tray": {
+      "current32": {
+        "coverage": 21,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 24,
+        "partialEdge": 0
+      }
+    }
+  },
+  "debrief": {
+    "coverage16": {
+      "current": 22,
+      "mix": 26
+    },
+    "contrast": {
+      "isoFront": 3.09,
+      "flatInk": 4.69
+    },
+    "blockiness64": {
+      "current": 21,
+      "mix": 0
+    },
+    "tray": {
+      "current32": {
+        "coverage": 22,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 24,
+        "partialEdge": 20
+      }
+    }
+  },
+  "pitwall": {
+    "coverage16": {
+      "current": 24,
+      "mix": 20
+    },
+    "contrast": {
+      "isoFront": 4.6,
+      "flatInk": 9.08
+    },
+    "blockiness64": {
+      "current": 18,
+      "mix": 1
+    },
+    "tray": {
+      "current32": {
+        "coverage": 24,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 20,
+        "partialEdge": 10
+      }
+    }
+  },
+  "sighter": {
+    "coverage16": {
+      "current": 20,
+      "mix": 25
+    },
+    "contrast": {
+      "isoFront": 4.05,
+      "flatInk": 5.12
+    },
+    "blockiness64": {
+      "current": 26,
+      "mix": 0
+    },
+    "tray": {
+      "current32": {
+        "coverage": 25,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 30,
+        "partialEdge": 31
+      }
+    }
+  },
+  "pitcrew": {
+    "coverage16": {
+      "current": 29,
+      "mix": 26
+    },
+    "contrast": {
+      "isoFront": 2.7,
+      "flatInk": 3.32
+    },
+    "blockiness64": {
+      "current": 13,
+      "mix": 4
+    },
+    "tray": {
+      "current32": {
+        "coverage": 29,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 30,
+        "partialEdge": 8
+      }
+    }
+  },
+  "spotter": {
+    "coverage16": {
+      "current": 19,
+      "mix": 23
+    },
+    "contrast": {
+      "isoFront": 5.89,
+      "flatInk": 7.76
+    },
+    "blockiness64": {
+      "current": 25,
+      "mix": 2
+    },
+    "tray": {
+      "current32": {
+        "coverage": 21,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 26,
+        "partialEdge": 32
+      }
+    }
+  },
+  "pacenotes": {
+    "coverage16": {
+      "current": 20,
+      "mix": 26
+    },
+    "contrast": {
+      "isoFront": 3.5,
+      "flatInk": 6.76
+    },
+    "blockiness64": {
+      "current": 27,
+      "mix": 1
+    },
+    "tray": {
+      "current32": {
+        "coverage": 21,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 24,
+        "partialEdge": 24
+      }
+    }
+  },
+  "dyno": {
+    "coverage16": {
+      "current": 18,
+      "mix": 19
+    },
+    "contrast": {
+      "isoFront": 3.38,
+      "flatInk": 5.21
+    },
+    "blockiness64": {
+      "current": 34,
+      "mix": 1
+    },
+    "tray": {
+      "current32": {
+        "coverage": 18,
+        "partialEdge": 0
+      },
+      "smooth32": {
+        "coverage": 22,
+        "partialEdge": 46
+      }
+    }
+  },
+  "tileCvd": {
+    "normal": {
+      "minDeltaE": 17.7,
+      "closest": "debrief~pitwall"
+    },
+    "protan": {
+      "minDeltaE": 11.6,
+      "closest": "pitwall~dyno"
+    },
+    "deutan": {
+      "minDeltaE": 13.6,
+      "closest": "sighter~dyno"
+    },
+    "tritan": {
+      "minDeltaE": 10.7,
+      "closest": "pitcrew~dyno"
+    }
+  }
+}

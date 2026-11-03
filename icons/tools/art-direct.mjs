@@ -77,6 +77,10 @@ export function binoculars({ simple = false, ink = INK.spotter, deep = PALETTE.s
         g.push(`<g clip-path="url(#${kit.id('bc' + k)})"><path d="${pathOf(arcPts([sc, 64, tc], X, Z, R, -Math.PI * 0.25, Math.PI * 0.75))}" fill="none" stroke="${M.wall}" stroke-opacity="0.75" stroke-width="5"/><path d="${pathOf(arcPts([sc, 60, tc], X, Z, R, Math.PI * 0.2, Math.PI * 0.75))}" fill="none" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="3"/></g>`);
       }
       // Front: the rubber lip, the satin metal rim, the dark retaining ring, the recessed lens.
+      // A light rim along the barrel's top, fading at both ends: the dark armour's top edge reads against the amber tile.
+      const tr = fadeStroke(kit, 'tr' + k, [P(sc - R * 0.2, 6, tc + R * 0.97), P(sc - R * 0.2, len - 6, tc + R * 0.97)], simple ? 8 : 5, atL(ink, 66, 0.5), 0.9);
+      defs.push(tr.def);
+      g.push(`<g clip-path="url(#${kit.id('bc' + k)})">${tr.el}</g>`);
       g.push(`<path d="${bar.cap}" fill="${rub(lit(bar.capN))}"/>`);
       const capCol = met(lit(bar.capN));
       defs.push(kit.lin('rim' + k, P(sc - rimR, 0, tc + rimR), P(sc + rimR, 0, tc - rimR), [[0, tint(capCol, '#FFFFFF', 0.3)], [0.5, capCol], [1, tint(capCol, M.wall, 0.4)]]));
@@ -211,9 +215,9 @@ export function tablet({ simple = false, deep = PALETTE.pacenotes.deep, route = 
 // ---------------------------------------------------------------- Dyno: tachometer pod
 
 /** Dyno's gauge geometry (iso units) shared by the master and the pixel frames. */
-const POD = { R: 150, len: 112, baseH: 46, sweep: [225, -45], red: 0.74, needle: 0.82 };
+export const POD = { R: 150, len: 112, baseH: 46, sweep: [225, -45], red: 0.74, needle: 0.82 };
 /** Angle (degrees, counter-clockwise from +s in the dial plane) at a fraction k of the gauge sweep. */
-const podAngle = k => POD.sweep[0] + (POD.sweep[1] - POD.sweep[0]) * k;
+export const podAngle = k => POD.sweep[0] + (POD.sweep[1] - POD.sweep[0]) * k;
 
 export function pod({ simple = false, deep = PALETTE.dyno.deep, accent = PALETTE.dyno.top, weight = 0.68, dx = -2, dy = 14 } = {}) {
   const { R, len, baseH } = POD, tc = baseH + R, rd = R - 34, recess = 18;

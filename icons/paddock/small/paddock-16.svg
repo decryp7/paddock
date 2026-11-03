@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Paddock 16px</title>
   <defs>
-    <linearGradient id="paddock-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    <linearGradient id="paddock-fl16-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
     
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#paddock-16-bg)"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#paddock-fl16-16-bg)"/>
   <path d="M4 1H12A3 3 0 0 1 15 4V12A3 3 0 0 1 12 15H4A3 3 0 0 1 1 12V4A3 3 0 0 1 4 1Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1"/>
-  <path d="M1 3h2v2h-2Z" fill="#5590FF"/><path d="M3 3h2v2h-2Z" fill="#8A5AE6"/><path d="M5 3h2v2h-2Z" fill="#BFA2EE"/><path d="M7 3h2v2h-2Z" fill="#DE559F"/><path d="M9 3h2v2h-2Z" fill="#FF8A4C"/><path d="M11 3h2v2h-2Z" fill="#FFD257"/><path d="M13 3h2v2h-2Z" fill="#C2A845"/><path d="M3 5h1v8h-1ZM12 5h1v8h-1ZM5 5h6v1h-6ZM5 7h6v1h-6ZM5 9h6v1h-6Z" fill="#FFFFFF"/>
+  
+<g transform="scale(1)"><defs><mask id="paddock-fl16-16-am" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#000"/><rect x="3" y="5" width="1" height="8" fill="#fff"/><rect x="12" y="5" width="1" height="8" fill="#fff"/><rect x="5" y="5" width="6" height="1" fill="#fff"/><rect x="5" y="8" width="6" height="1" fill="#fff"/></mask></defs><g transform="translate(1 1)"><rect width="16" height="16" fill="#07080A" opacity="0.4" mask="url(#paddock-fl16-16-am)" transform="translate(0 0.5)"/><rect width="16" height="16" fill="#FFFFFF" mask="url(#paddock-fl16-16-am)"/><rect x="1" y="3" width="2" height="2" fill="#5590FF"/><rect x="3" y="3" width="2" height="2" fill="#8A5AE6"/><rect x="5" y="3" width="2" height="2" fill="#BFA2EE"/><rect x="7" y="3" width="2" height="2" fill="#DE559F"/><rect x="9" y="3" width="2" height="2" fill="#FF8A4C"/><rect x="11" y="3" width="2" height="2" fill="#FFD257"/><rect x="13" y="3" width="2" height="2" fill="#C2A845"/></g></g>
 </svg>

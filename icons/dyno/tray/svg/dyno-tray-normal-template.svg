@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
-  <title>Dyno tray (normal)</title>
-  <defs></defs>
-  <g><path d="M5 2H11V3H5ZM3 3H6V4H3ZM10 3H13V4H10ZM2 4H4V5H2ZM12 4H14V5H12ZM2 5H3V6H2ZM5 5H7V6H5ZM13 5H14V6H13ZM1 6H3V7H1ZM6 6H8V7H6ZM13 6H15V7H13ZM1 7H3V8H1ZM7 7H10V8H7ZM13 7H15V8H13ZM1 8H3V9H1ZM7 8H9V9H7ZM13 8H15V9H13ZM2 9H3V10H2ZM13 9H14V10H13ZM2 10H4V11H2ZM12 10H14V11H12ZM3 11H4V12H3ZM12 11H13V12H12Z" fill="#000000"/></g>
-  
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>Dyno tray</title>
+  <defs><mask id="dyno-st-template-32-normal-b-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(2 1)"><path d="M3.69 12.71A6.1 6.1 0 1 1 12.53 4.32" transform="scale(2)" fill="none" stroke="#fff" stroke-width="1.79" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.03 7.51A6.1 6.1 0 0 1 12.31 12.71" transform="scale(2)" fill="none" stroke="#fff" stroke-width="1.79" stroke-linecap="round" stroke-linejoin="round"/><path d="M15.08 16.33L20.18 8.6L16.92 17.27Z" fill="#fff"/><path d="M13.9 17a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0Z" fill="#fff"/></g></mask></defs>
+  <rect x="-4" y="-4" width="40" height="40" fill="#000000" mask="url(#dyno-st-template-32-normal-b-g)"/>
 </svg>

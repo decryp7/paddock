@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16">
+  <title>Sighter 16px</title>
+  <defs>
+    <linearGradient id="sighter-fl20-20-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BFA2EE"/><stop offset="1" stop-color="#8B6DB5"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#sighter-fl20-20-bg)"/>
+  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#3C2D52" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="sighter-fl20-20-am" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20"><rect width="20" height="20" fill="#000"/><path d="M10.5 13.5L5.5 18.5" fill="none" stroke="#fff" stroke-width="1" stroke-linecap="square" stroke-linejoin="round"/><path d="M10.5 13.5L14.5 18.5" fill="none" stroke="#fff" stroke-width="1" stroke-linecap="square" stroke-linejoin="round"/><path d="M10.5 13.5L10.5 18.5" fill="none" stroke="#fff" stroke-width="1" stroke-linecap="square" stroke-linejoin="round"/><rect x="8" y="4" width="5" height="3" rx="0.63" fill="#fff"/><rect x="3" y="6" width="15" height="8" rx="1.5" fill="#fff"/><path d="M6.19 10.5a3.81 3.81 0 1 0 7.62 0a3.81 3.81 0 1 0 -7.62 0Z" fill="#000"/><path d="M8.06 10.5a1.94 1.94 0 1 0 3.88 0a1.94 1.94 0 1 0 -3.88 0Z" fill="#fff"/><path d="M8.87 9.5a0.63 0.63 0 1 0 1.26 0a0.63 0.63 0 1 0 -1.26 0Z" fill="#000"/></mask></defs><g transform="translate(-1 -1)"><rect width="20" height="20" fill="#2D1D43" mask="url(#sighter-fl20-20-am)"/></g></g>
+</svg>
