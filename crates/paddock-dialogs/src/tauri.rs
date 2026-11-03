@@ -428,6 +428,7 @@ fn build_window<R: Runtime>(
     if let Some(f) = hooks.as_ref().and_then(|h| h.built.as_ref()) {
         f(&window);
     }
+    sizing::install_edge(app, window.as_ref().window());
     // Where logical coordinates are not one global space (Windows, Linux with mixed DPI), the builder converted them
     // with some monitor's scale: set the exact physical place (on the parent's monitor) and size now. The size is the placed one rounded up once. Both values come from a monitor
     // rectangle (i32/u32) plus a clamped offset, so they fit.
@@ -602,6 +603,8 @@ pub fn on_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
 }
 
 fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
+    #[cfg(all(target_os = "macos", not(any(test, feature = "mock-runtime"))))]
+    crate::edge::macos::remove(label);
     let Some(dialogs) = app.try_state::<Dialogs>() else {
         return;
     };

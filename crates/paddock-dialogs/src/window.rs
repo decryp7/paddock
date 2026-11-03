@@ -613,7 +613,6 @@ mod tests {
         Size { width, height }
     }
 
-
     /// The `--pd-surface-2` of the `@mixin dark` or `@mixin light` block of `_tokens.scss`, as RGB.
     fn token_surface(mixin: &str) -> (u8, u8, u8) {
         let scss = include_str!("../../../ui/projects/paddock-ui/scss/_tokens.scss");

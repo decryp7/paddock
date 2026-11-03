@@ -8,9 +8,7 @@
 use crate::contract::{Contracts, Grant, Kind, Modality};
 use crate::placement::Bounds;
 use crate::size::SizeState;
-use crate::window::{
-    DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST,
-};
+use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST};
 use paddock_commands::labels::{DIALOG_PREFIX, Label};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -432,11 +430,27 @@ mod tests {
         assert!(d.next_epoch("nope").is_none());
         let state = crate::size::SizeState::new(
             crate::SizeMode::Manual,
-            crate::Size { width: 320.0, height: 200.0 },
+            crate::Size {
+                width: 320.0,
+                height: 200.0,
+            },
             0.0,
             false,
-            crate::size::Env { scale: 1.0, work: crate::Size { width: 1000.0, height: 800.0 }, frame: crate::Size { width: 0.0, height: 0.0 } },
-            crate::size::Request { width: 400, height: 300 },
+            crate::size::Env {
+                scale: 1.0,
+                work: crate::Size {
+                    width: 1000.0,
+                    height: 800.0,
+                },
+                frame: crate::Size {
+                    width: 0.0,
+                    height: 0.0,
+                },
+            },
+            crate::size::Request {
+                width: 400,
+                height: 300,
+            },
         );
         d.put_size(&label, state.clone());
         d.put_size("nope", state.clone());

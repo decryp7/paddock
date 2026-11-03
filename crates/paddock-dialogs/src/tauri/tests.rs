@@ -505,7 +505,18 @@ fn ready(
 ) -> Result<(), DialogError> {
     let seq = next_seq();
     sizing::measure(h, w, 1, seq, m, os)?;
-    sizing::resized(w, w.inner_size().unwrap());
+    // The OS answers the request with the size it was given (the mock window keeps no size of its own).
+    let asked = match h.state::<Dialogs>().take_size(w.label()) {
+        Some(Some(s)) => {
+            let r = s.last_request();
+            h.state::<Dialogs>().put_size(w.label(), s);
+            r
+        }
+        _ => None,
+    };
+    if let Some(r) = asked {
+        sizing::resized(w, PhysicalSize::new(r.width, r.height));
+    }
     sizing::ready(h, w, 1, seq, os)
 }
 
@@ -524,11 +535,22 @@ fn a_measure_sizes_the_window_and_is_refused_when_it_is_not_a_size() {
     };
     assert_eq!(size.mode(), crate::Kind::Viewer.policy().size_mode);
     assert!(size.is_shown());
-    let e = sizing::measure(&h, &dialog, 1, next_seq(), measure(f64::NAN, 200.0), "linux").unwrap_err();
+    let e = sizing::measure(
+        &h,
+        &dialog,
+        1,
+        next_seq(),
+        measure(f64::NAN, 200.0),
+        "linux",
+    )
+    .unwrap_err();
     assert_eq!(e.code, DialogErrorCode::Invalid);
     // A window that is not a dialog is only logged: the command has already answered.
     let main = os_window(&app, "main");
-    assert_eq!(sizing::measure(&h, &main, 1, next_seq(), measure(300.0, 100.0), "linux"), Ok(()));
+    assert_eq!(
+        sizing::measure(&h, &main, 1, next_seq(), measure(300.0, 100.0), "linux"),
+        Ok(())
+    );
     assert_eq!(state(&app).take_size("main"), None);
 }
 
@@ -895,9 +917,16 @@ fn a_scale_change_posts_one_refit_and_tells_the_page_to_measure_again() {
     ready(&h, &dialog, measure(300.0, 100.0), "linux").unwrap();
     timer.deadline_passes();
     scale_changed(&dialog);
-    assert!(remeasure.lock().unwrap().is_empty(), "nothing happens inside the event");
+    assert!(
+        remeasure.lock().unwrap().is_empty(),
+        "nothing happens inside the event"
+    );
     timer.deadline_passes();
-    assert_eq!(remeasure.lock().unwrap().len(), 1, "one remeasure per scale change");
+    assert_eq!(
+        remeasure.lock().unwrap().len(),
+        1,
+        "one remeasure per scale change"
+    );
     // A window that is not a dialog has nothing to refit.
     scale_changed(&os_window(&app, "main"));
     timer.deadline_passes();
@@ -1033,7 +1062,11 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     assert_eq!(invoke(&dialog, "app_status", json!({})), Ok(json!("ok")));
     let measure = json!({ "content": { "width": 960, "height": 400 }, "minContent": { "width": 500, "height": 200 } });
     assert_eq!(
-        invoke(&dialog, "dialog_measure", json!({ "epoch": 1, "seq": 1, "measure": measure })),
+        invoke(
+            &dialog,
+            "dialog_measure",
+            json!({ "epoch": 1, "seq": 1, "measure": measure })
+        ),
         Ok(Value::Null)
     );
     assert_eq!(
@@ -1077,7 +1110,12 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     );
     let nan = json!({ "content": { "width": 1, "height": 0 }, "minContent": { "width": 1, "height": 1 } });
     assert_eq!(
-        invoke(&dialog, "dialog_measure", json!({ "epoch": 1, "seq": 3, "measure": nan })).unwrap_err()["code"],
+        invoke(
+            &dialog,
+            "dialog_measure",
+            json!({ "epoch": 1, "seq": 3, "measure": nan })
+        )
+        .unwrap_err()["code"],
         "invalid"
     );
     // A dialog's own command errors come back typed.

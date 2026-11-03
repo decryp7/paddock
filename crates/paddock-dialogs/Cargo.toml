@@ -38,6 +38,10 @@ windows = { version = "0.62", optional = true, features = [
 # through Tauri.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSGraphics"], optional = true }
+# The live-resize observer of the macOS edge (`NSNotificationCenter` with a block, ADR 0043 §3). Already in every app's tree.
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSNotification", "NSString", "NSObject", "NSOperation"], optional = true }
+block2 = { version = "0.6", optional = true }
 
 [dev-dependencies]
 # The Tauri adapter is tested on Tauri's mock runtime; `tauri-runtime` builds monitors for the placement on it.

@@ -170,6 +170,11 @@ impl SizeState {
         self.min
     }
 
+    /// The newest request still waiting for its `Resized`.
+    pub fn last_request(&self) -> Option<Request> {
+        self.pending.back().copied()
+    }
+
     /// The inner size the window has or will have once every queued request is applied, logical px.
     pub fn effective(&self) -> Size {
         let r = self.pending.back().copied().unwrap_or(self.current);

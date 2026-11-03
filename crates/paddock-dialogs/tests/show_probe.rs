@@ -365,11 +365,23 @@ fn main() {
             // the layout of a just-shown window can take a moment, and neither is awaited by sleeping.
             let code = match report_rx.recv() {
                 Ok(first) => {
-                    let mut failures = check(&handle, &first, &hidden_at_ready, &saw_ready, &measured_content);
+                    let mut failures = check(
+                        &handle,
+                        &first,
+                        &hidden_at_ready,
+                        &saw_ready,
+                        &measured_content,
+                    );
                     if !failures.is_empty()
                         && let Ok(second) = report_rx.recv()
                     {
-                        failures = check(&handle, &second, &hidden_at_ready, &saw_ready, &measured_content);
+                        failures = check(
+                            &handle,
+                            &second,
+                            &hidden_at_ready,
+                            &saw_ready,
+                            &measured_content,
+                        );
                     }
                     finish(&failures)
                 }
