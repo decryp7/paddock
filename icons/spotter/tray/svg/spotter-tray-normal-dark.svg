@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
-  <title>Spotter tray (normal)</title>
-  <defs></defs>
-  <g><path d="M4 3H5V4H4ZM11 3H12V4H11ZM3 4H6V5H3ZM10 4H13V5H10ZM3 5H6V6H3ZM10 5H13V6H10ZM3 6H6V7H3ZM10 6H13V7H10ZM3 7H13V8H3ZM3 8H6V9H3ZM10 8H13V9H10ZM2 9H3V10H2ZM6 9H7V10H6ZM9 9H10V10H9ZM13 9H14V10H13ZM2 10H3V11H2ZM6 10H7V11H6ZM9 10H10V11H9ZM13 10H14V11H13ZM2 11H3V12H2ZM6 11H7V12H6ZM9 11H10V12H9ZM13 11H14V12H13ZM3 12H6V13H3ZM10 12H13V13H10Z" fill="#FFFFFF"/></g>
-  
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>Spotter tray</title>
+  <defs><mask id="spotter-st-dark-32-normal-b-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(0 -1)"><rect x="8" y="6" width="4" height="3" rx="0.8" fill="#fff"/><rect x="20" y="6" width="4" height="3" rx="0.8" fill="#fff"/><rect x="7" y="8" width="6" height="9" rx="1.6" fill="#fff"/><rect x="19" y="8" width="6" height="9" rx="1.6" fill="#fff"/><rect x="13" y="11" width="6" height="3" fill="#fff"/><path d="M4 21a6 6 0 1 0 12 0a6 6 0 1 0 -12 0Z" fill="#fff"/><path d="M16 21a6 6 0 1 0 12 0a6 6 0 1 0 -12 0Z" fill="#fff"/><path d="M6.5 21a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0Z" fill="#000"/><path d="M18.5 21a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0Z" fill="#000"/></g></mask></defs>
+  <rect x="-4" y="-4" width="40" height="40" fill="#FFFFFF" mask="url(#spotter-st-dark-32-normal-b-g)"/>
 </svg>

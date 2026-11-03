@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 32 32">
+  <title>Sighter 32px</title>
+  <defs>
+    <linearGradient id="sighter-fl40-40-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BFA2EE"/><stop offset="1" stop-color="#8B6DB5"/></linearGradient>
+    
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#sighter-fl40-40-bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#3C2D52" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="sighter-fl40-40-am" maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40"><rect width="40" height="40" fill="#000"/><path d="M20.5 27.5L11.5 37.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="square" stroke-linejoin="round"/><path d="M20.5 27.5L28.5 37.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="square" stroke-linejoin="round"/><path d="M20.5 27.5L20.5 37.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="square" stroke-linejoin="round"/><rect x="15" y="8" width="10" height="6" rx="1.25" fill="#fff"/><rect x="5" y="13" width="30" height="16" rx="3" fill="#fff"/><path d="M12.37 20.5a7.63 7.63 0 1 0 15.26 0a7.63 7.63 0 1 0 -15.26 0Z" fill="#000"/><path d="M16.12 20.5a3.88 3.88 0 1 0 7.76 0a3.88 3.88 0 1 0 -7.76 0Z" fill="#fff"/><path d="M17.25 19.5a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0 -2.5 0Z" fill="#000"/></mask></defs><g transform="translate(0 -2)"><rect width="40" height="40" fill="#2D1D43" mask="url(#sighter-fl40-40-am)"/></g></g>
+</svg>

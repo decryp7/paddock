@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Pacenotes 16px</title>
   <defs>
-    <linearGradient id="pacenotes-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9A8228"/><stop offset="1" stop-color="#6A5500"/></linearGradient>
+    <linearGradient id="pacenotes-fl16-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9C8112"/><stop offset="1" stop-color="#6C5400"/></linearGradient>
     
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pacenotes-16-bg)"/>
-  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#302501" stroke-opacity="0.35" stroke-width="0.5"/>
-  <path d="M5 2H11V3H5ZM4 3H5V4H4ZM11 3H12V4H11ZM4 4H5V5H4ZM7 4H10V5H7ZM11 4H12V5H11ZM4 5H5V6H4ZM6 5H7V6H6ZM11 5H12V6H11ZM4 6H5V7H4ZM6 6H7V7H6ZM11 6H12V7H11ZM4 7H5V8H4ZM7 7H9V8H7ZM11 7H12V8H11ZM4 8H5V9H4ZM9 8H10V9H9ZM11 8H12V9H11ZM4 9H5V10H4ZM9 9H10V10H9ZM11 9H12V10H11ZM4 10H5V11H4ZM6 10H9V11H6ZM11 10H12V11H11ZM4 11H5V12H4ZM11 11H12V12H11ZM4 12H12V13H4ZM5 13H11V14H5Z" fill="#FFFFFF"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pacenotes-fl16-16-bg)"/>
+  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#312500" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(1)"><defs><mask id="pacenotes-fl16-16-am" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#000"/><rect x="4" y="2" width="9" height="13" rx="1.4" fill="#fff"/><rect x="5" y="3" width="7" height="10" rx="0.8" fill="#000"/><path d="M6.68 13L6.68 9.2C6.68 7 7.73 6.2 8.75 6.2" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="butt" stroke-linejoin="round"/><path d="M11.25 6.2L8.25 3.95L8.25 8.45Z" fill="#fff"/></mask></defs><g transform="translate(0 0)"><rect width="16" height="16" fill="#312500" opacity="0.4" mask="url(#pacenotes-fl16-16-am)" transform="translate(0 0.5)"/><rect width="16" height="16" fill="#FFFFFF" mask="url(#pacenotes-fl16-16-am)"/></g></g>
 </svg>

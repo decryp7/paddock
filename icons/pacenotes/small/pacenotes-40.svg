@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 32 32">
+  <title>Pacenotes 32px</title>
+  <defs>
+    <linearGradient id="pacenotes-fl40-40-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9C8112"/><stop offset="1" stop-color="#6C5400"/></linearGradient>
+    
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#pacenotes-fl40-40-bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#312500" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="pacenotes-fl40-40-am" maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40"><rect width="40" height="40" fill="#000"/><rect x="9" y="4" width="22" height="32" rx="3.5" fill="#fff"/><rect x="12" y="7" width="16" height="23" rx="1.7" fill="#000"/><path d="M15.84 30L15.84 21.26C15.84 16.2 18.24 14.36 21.35 14.36" fill="none" stroke="#fff" stroke-width="3.09" stroke-linecap="butt" stroke-linejoin="round"/><path d="M27.25 14.36L20.85 9.56L20.85 19.16Z" fill="#fff"/></mask></defs><g transform="translate(0 1)"><rect width="40" height="40" fill="#312500" opacity="0.4" mask="url(#pacenotes-fl40-40-am)" transform="translate(0 1.25)"/><rect width="40" height="40" fill="#FFFFFF" mask="url(#pacenotes-fl40-40-am)"/></g></g>
+</svg>

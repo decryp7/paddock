@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="-1 -1 18 18" shape-rendering="crispEdges">
-  <title>Pitcrew tray (ok)</title>
-  <defs></defs>
-  <g><path d="M4 4h5v1h-5ZM2 5h9v3h-9ZM4 8h5v1h-5ZM11 5h1v3h-1ZM12 6h1v2h-1ZM13 5h2v4h-2ZM4 9h4v2h-4ZM3 11h4v2h-4ZM2 13h4v1h-4ZM3 14h2v1h-2ZM9 9h1v1h-1Z" fill="#000000" shape-rendering="crispEdges"/></g>
-  
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-2 -2 36 36">
+  <title>Pitcrew tray</title>
+  <defs><mask id="pitcrew-st-template-36-ok-b-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(1 -2)"><path d="M10 8H20V9H23V11H28V16H23V17H20V19H22V26H14.12L13.32 29H6.82L9.02 20.8Q9.5 19 8.7 18.82A5.5 5.5 0 0 1 10 8Z" fill="#fff"/><path d="M16.46 21H20V24H15.66Z" fill="#000"/></g></mask></defs>
+  <rect x="-4" y="-4" width="40" height="40" fill="#000000" mask="url(#pitcrew-st-template-36-ok-b-g)"/>
 </svg>

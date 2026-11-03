@@ -1,4 +1,4 @@
-<img src="docs/images/spotter-icon.svg?v=110d7e34" alt="Spotter icon" width="96" height="96">
+<img src="docs/images/spotter-icon.svg?v=99f8361c" alt="Spotter icon" width="96" height="96">
 
 # Spotter
 
@@ -8,7 +8,7 @@ in a local database on your machine.
 
 **Status: v1.0.0.** Releases are built and published by the tag workflow; the roadmap lists what is still open ([docs/roadmap.md](docs/roadmap.md)).
 
-![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=6ece8415)
+![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=f9fd7017)
 
 
 ![Spotter architecture: release places and a supervised Chromium outside; the engine schedules checks, fetches politely, renders JavaScript pages, decides and notifies; the app shows and controls it; a pure Rust core holds the rules](docs/diagrams/spotter-overview.svg)
@@ -16,9 +16,9 @@ in a local database on your machine.
 
 ## What it does
 
-![Spotter features](docs/images/spotter-features.svg?v=6b1303ce)
+![Spotter features](docs/images/spotter-features.svg?v=397c3f4b)
 
-![How Spotter works](docs/images/spotter-how-it-works.svg?v=0ba02b09)
+![How Spotter works](docs/images/spotter-how-it-works.svg?v=750540ae)
 
 ## What it watches
 

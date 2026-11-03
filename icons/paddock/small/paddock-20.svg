@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16">
+  <title>Paddock 16px</title>
+  <defs>
+    <linearGradient id="paddock-fl20-20-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#paddock-fl20-20-bg)"/>
+  <path d="M4 1H12A3 3 0 0 1 15 4V12A3 3 0 0 1 12 15H4A3 3 0 0 1 1 12V4A3 3 0 0 1 4 1Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1"/>
+  
+<g transform="scale(0.8)"><defs><mask id="paddock-fl20-20-am" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20"><rect width="20" height="20" fill="#000"/><rect x="4" y="7" width="1" height="9" fill="#fff"/><rect x="15" y="7" width="1" height="9" fill="#fff"/><rect x="6" y="7" width="8" height="1" fill="#fff"/><rect x="6" y="10" width="8" height="1" fill="#fff"/></mask></defs><g transform="translate(1 1)"><rect width="20" height="20" fill="#07080A" opacity="0.4" mask="url(#paddock-fl20-20-am)" transform="translate(0 0.63)"/><rect width="20" height="20" fill="#FFFFFF" mask="url(#paddock-fl20-20-am)"/><rect x="1" y="4" width="3" height="3" fill="#5590FF"/><rect x="4" y="4" width="2" height="3" fill="#8A5AE6"/><rect x="6" y="4" width="3" height="3" fill="#BFA2EE"/><rect x="9" y="4" width="2" height="3" fill="#DE559F"/><rect x="11" y="4" width="3" height="3" fill="#FF8A4C"/><rect x="14" y="4" width="2" height="3" fill="#FFD257"/><rect x="16" y="4" width="3" height="3" fill="#C2A845"/></g></g>
+</svg>

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/pitcrew-icon.svg?v=9fd403d4" alt="Pitcrew icon" width="96" height="96">
+<img src="docs/images/pitcrew-icon.svg?v=9a9f9451" alt="Pitcrew icon" width="96" height="96">
 
 # Pitcrew
 
@@ -13,7 +13,7 @@ updates it between jobs, so the builds keep running.
 
 </div>
 
-![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg?v=222220b7)
+![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg?v=db53d812)
 
 
 > **Status: v1.0.2.** Supervisor, watchdog, safe updates with roll-back, housekeeping, insights, disk guard, pause
@@ -50,9 +50,9 @@ going on, and adds what the scripts lack:
 
 ## Key features
 
-![Pitcrew features](docs/images/pitcrew-features.svg?v=7242a492)
+![Pitcrew features](docs/images/pitcrew-features.svg?v=3eb2f7a2)
 
-![How Pitcrew works](docs/images/pitcrew-how-it-works.svg?v=e25fe44d)
+![How Pitcrew works](docs/images/pitcrew-how-it-works.svg?v=15e45069)
 
 Every feature, with screenshots, is in [docs/features.md](docs/features.md).
 
