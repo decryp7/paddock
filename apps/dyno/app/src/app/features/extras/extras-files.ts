@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, viewChild } from '@angular/core';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { FoundFile } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -11,6 +11,7 @@ import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
+import { TreeActions } from '../../shared/tree-actions';
 
 interface FileLine {
   readonly key: string;
@@ -25,7 +26,7 @@ interface FileLine {
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [AsyncState, Icon, PdTable, PdCell, MatTooltip, SuSegmentedControl, MatButton, JobProgressCard],
+  imports: [AsyncState, Icon, PdTable, PdCell, MatTooltip, SuSegmentedControl, MatButton, JobProgressCard, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
@@ -64,7 +65,8 @@ interface FileLine {
               <span>No file is at least {{ minLabel() }} and no files with identical content were found. {{ scanned() }}</span>
             </div>
           } @else {
-            <pd-table [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="620" groupBy="group" [groupSummary]="groupSummary">
+            <div class="bar"><dy-tree-actions what="groups" (expandAll)="gridRef()?.expandAllGroups()" (collapseAll)="gridRef()?.collapseAllGroups()" /></div>
+            <pd-table #pdgrid [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="620" groupBy="group" [groupSummary]="groupSummary">
               <ng-template pdCell="file" let-f><span class="fcell"><strong class="fname">{{ base(f.file.path) }}</strong><span class="dir path">{{ short(dir(f.file.path), 56) }}</span></span></ng-template>
             </pd-table>
             <p class="faint muted">{{ scanned() }} @if (r.duplicates.length > 0) { Copies are listed oldest first. }</p>
@@ -108,6 +110,7 @@ export class ExtrasFiles {
     return out;
   });
   protected readonly fileKey = (f: FileLine): string => f.key;
+  protected readonly gridRef = viewChild<PdTable<FileLine>>('pdgrid');
   protected readonly groupSummary = (rows: readonly FileLine[]): Record<string, string> => ({ size: rows[0]?.detail ?? '' });
   protected readonly columns: PdColumn<FileLine>[] = [
     { key: 'group', header: 'Group', value: (f) => f.group, hidden: true, sortable: false },

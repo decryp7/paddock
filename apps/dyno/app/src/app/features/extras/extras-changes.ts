@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, viewChild } from '@angular/core';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { Change } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -7,6 +7,7 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { CHANGE_KIND_LABEL, CHANGE_WINDOWS, changeRows, changeTone, watchingNote } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { TreeActions } from '../../shared/tree-actions';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 interface ChangeLine extends Change {
@@ -17,11 +18,12 @@ interface ChangeLine extends Change {
 /** What changed on this computer: installs, updates, new start-up items and setting changes, grouped by day. */
 @Component({
   selector: 'dy-extras-changes',
-  imports: [AsyncState, Icon, PdTable, PdCell, SuSegmentedControl],
+  imports: [AsyncState, Icon, PdTable, PdCell, SuSegmentedControl, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Window">
       <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.hours() + ''" (valueChange)="store.setHours(+$event)" />
+      <dy-tree-actions what="days" [disabled]="rows().length === 0" (expandAll)="gridRef()?.expandAllGroups()" (collapseAll)="gridRef()?.collapseAllGroups()" />
       <span class="grow"></span>
       @if (watching()) { <span class="faint muted">{{ watching() }}</span> }
     </div>
@@ -34,7 +36,7 @@ interface ChangeLine extends Change {
             <span>No installs, updates, start-up items or setting changes were recorded. {{ watching() }}</span>
           </div>
         } @else {
-          <pd-table [toolbar]="false" label="What changed" [rows]="rows()" [columns]="columns" [rowKey]="changeKey" [filterable]="false" [maxHeight]="620" groupBy="day">
+          <pd-table #pdgrid [toolbar]="false" label="What changed" [rows]="rows()" [columns]="columns" [rowKey]="changeKey" [filterable]="false" [maxHeight]="620" groupBy="day">
             <ng-template pdCell="kind" let-c><span class="dot" [attr.data-tone]="tone(c.kind)" aria-hidden="true"></span>{{ kindLabel(c.kind) }}</ng-template>
           </pd-table>
         }
@@ -60,6 +62,7 @@ export class ExtrasChanges implements OnInit {
     }
     return out;
   });
+  protected readonly gridRef = viewChild<PdTable<ChangeLine>>('pdgrid');
   protected readonly changeKey = (c: ChangeLine): string => c.key;
   protected readonly columns: PdColumn<ChangeLine>[] = [
     { key: 'day', header: 'Day', value: (c) => c.day, hidden: true, sortable: false },

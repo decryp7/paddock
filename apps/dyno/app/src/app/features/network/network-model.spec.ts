@@ -1,5 +1,5 @@
 import type { ConnectionRow, ListenerRow } from '../../core/api.types';
-import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, middleEllipsis, sortListeners, stateView, summarise, tableRows } from './network-model';
+import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, middleEllipsis, sortListeners, stateView, summarise, tableRows, allGroupKeys } from './network-model';
 
 const owner = { kind: 'process', pid: 1, name: 'node', path: null } as const;
 const unknown = { kind: 'unknown', reason: 'because' } as const;
@@ -9,6 +9,13 @@ const c = (remote: string, o: ConnectionRow['owner'] = owner, lookupOk = true): 
 const l = (port: number, exposure: ListenerRow['exposure']): ListenerRow => ({ proto: 'tcp', ipv6: false, local: '0.0.0.0', port, exposure, owner, firstSeen: null });
 
 describe('network model', () => {
+  it('lists every group key for Collapse all, none without a grouping', () => {
+    const rows = [c('1.1.1.1'), c('2.2.2.2'), c('1.1.1.1', unknown)];
+    expect(allGroupKeys('process', rows).sort()).toEqual(['Owner unknown', 'node']);
+    expect(allGroupKeys('host', rows).sort()).toEqual(['1.1.1.1', '2.2.2.2']);
+    expect(allGroupKeys('none', rows)).toEqual([]);
+  });
+
   it('names owners and explains unknown ones', () => {
     expect(ownerName(owner)).toBe('node');
     expect(ownerName(unknown)).toBe('Owner unknown');

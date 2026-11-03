@@ -91,6 +91,11 @@ function groupKeyOf(item: Socketish, by: GroupBy): string {
   return by === 'host' ? (item.remote ?? ownerName(item.owner)) : ownerName(item.owner);
 }
 
+/** The key of every group `tableRows` would make for `items` (what "Collapse all" folds). None without a grouping. */
+export function allGroupKeys(by: GroupBy, items: readonly Socketish[]): string[] {
+  return by === 'none' ? [] : [...new Set(items.map((it) => groupKeyOf(it, by)))];
+}
+
 /**
  * The flat list the table shows. With a grouping, each group is a header row followed by its items unless collapsed;
  * with `none` it is the items alone (really flat). Groups are ordered by size, then name; items keep the engine's order.

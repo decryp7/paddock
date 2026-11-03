@@ -111,6 +111,24 @@ describe('ProcessesStore: view state', () => {
     store.toggle(open);
     expect(store.expanded()).toEqual([]);
   });
+  it('expandAll and collapseAll open and fold the groups, and the tree', () => {
+    const { mock, store } = setup();
+    feed(mock, store);
+    const collapsed = store.rows().length;
+    store.expandAll();
+    expect(store.rows().length).toBeGreaterThan(collapsed);
+    expect(store.rows().filter((r) => r.expandable).every((r) => r.expanded)).toBe(true);
+    store.collapseAll();
+    expect(store.rows()).toHaveLength(collapsed);
+    store.setMode('tree');
+    store.expandAll();
+    expect(store.rows().filter((r) => r.expandable).every((r) => r.expanded)).toBe(true);
+    store.collapseAll();
+    expect(store.rows().filter((r) => r.depth > 0)).toEqual([]);
+    store.setMode('flat');
+    store.expandAll();
+    expect(store.expanded()).toEqual([]);
+  });
   it('toggle in tree mode remembers an explicit collapse of a root', () => {
     const { mock, store } = setup();
     feed(mock, store);

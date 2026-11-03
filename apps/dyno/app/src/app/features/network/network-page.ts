@@ -1,4 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
+import { TreeActions } from '../../shared/tree-actions';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
@@ -10,7 +11,7 @@ import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { NetworkStore } from '../../state/network.store';
 import { Lookups } from '../lookup/lookups';
-import { type GroupBy, type TableRow, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, middleEllipsis, ownerName, ownerReason, portService, protoText, reachTone, sortListeners, stateView, summarise, tableRows } from './network-model';
+import { type GroupBy, allGroupKeys, type TableRow, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, middleEllipsis, ownerName, ownerReason, portService, protoText, reachTone, sortListeners, stateView, summarise, tableRows } from './network-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
@@ -40,7 +41,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton],
+  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -70,6 +71,7 @@ function readCollapsed(): Set<string> {
         <mat-checkbox [checked]="store.query().exposedOnly" (change)="store.setQuery({ exposedOnly: !store.query().exposedOnly })">Exposed only</mat-checkbox>
         <pd-segmented-control label="Protocol" [options]="protoSegs" [value]="store.query().proto ?? ''" (valueChange)="proto($event)" />
         <pd-segmented-control label="Group by" [options]="groupSegs()" [value]="group()" (valueChange)="setGroup($event)" />
+        <dy-tree-actions [what]="group() === 'host' ? 'remote hosts' : 'programs'" [disabled]="!tree()" (expandAll)="setAllOpen(true)" (collapseAll)="setAllOpen(false)" />
         @if (tab() === 'connections') {
           <mat-checkbox [checked]="store.resolveNames()" (change)="store.setResolveNames(!store.resolveNames())" matTooltip="Look up host names through your DNS resolver. Off by default: each address is sent to it.">Host names</mat-checkbox>
         }
@@ -378,11 +380,21 @@ export class NetworkPage implements OnInit, OnDestroy {
     const next = new Set(this.collapsed());
     if (!next.delete(title)) next.add(title);
     this.collapsed.set(next);
+    this.saveCollapsed();
+  }
+
+  private saveCollapsed(): void {
     try {
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next].slice(0, 500)));
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...this.collapsed()].slice(0, 500)));
     } catch {
       // Storage may be blocked: the state is then only kept for this visit.
     }
+  }
+
+  /** Opens every group (nothing folded) or folds them all; kept like a single fold, so it survives a reload. */
+  protected setAllOpen(open: boolean): void {
+    this.collapsed.set(open ? new Set() : new Set(allGroupKeys(this.group() === 'host' ? 'host' : 'process', this.tab() === 'connections' ? this.connections() : this.listeners())));
+    this.saveCollapsed();
   }
 
   /** A row was opened (a click, Enter or Space): a group folds, anything else is the one the side panel shows. */

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Notifications: select messages (checkboxes, Shift-click for a range) and delete the selected ones, or delete all after a confirmation. Deleted messages stay gone after a restart (shared `paddock-health` commands).
+- Expand all and Collapse all (icon buttons with tooltips) in the toolbars of Network (programs or remote hosts), Processes (Apps and Tree views), and the grouped lists of What changed (days) and Files (groups). Interaction state only; Network keeps its fold in the same saved list as a single fold.
+- Processes: the Tree view no longer searches the whole process list for every row it draws (a map lookup), so opening a tree of thousands of processes is quick.
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed
