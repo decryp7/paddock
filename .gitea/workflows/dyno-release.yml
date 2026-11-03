@@ -101,6 +101,7 @@ jobs:
         dyno:--version
         dyno-bench:--version
         dyno-bench-gpu:--version
+        dyno-helper:--version
       # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
       # also measures once from the built app (read-only).
       bundle-check: apps/dyno/scripts/check-bundle.sh
@@ -148,6 +149,7 @@ jobs:
         dyno:--version
         dyno-bench:--version
         dyno-bench-gpu:--version
+        dyno-helper:--version
       # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
       # also measures once from the built app (read-only).
       bundle-check: apps/dyno/scripts/check-bundle.sh
