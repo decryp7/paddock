@@ -14,6 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 dyno-core.workspace = true
+# The clock the repetition driver takes (ManualClock in tests).
+paddock-bench = { path = "../../../../crates/paddock-bench" }
 serde_json.workspace = true
 
 [dev-dependencies]

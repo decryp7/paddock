@@ -61,3 +61,14 @@ export function barPair(m: BenchMetric, ref: number | undefined): { fill: number
   const top = Math.max(cur, old);
   return { fill: cur / top, marker: old / top };
 }
+
+/** The spread of a metric's repetitions as plain words: "2,380 to 2,440", or '' for a single measurement. */
+export function spreadText(m: BenchMetric, format: (v: number) => string): string {
+  if (m.samples.length < 2 || !Number.isFinite(m.min) || !Number.isFinite(m.max)) return '';
+  return `${format(m.min)} to ${format(m.max)}`;
+}
+
+/** What to say about a run measured with an earlier method (Dyno 1.0's); '' for a current run. */
+export function methodNote(run: BenchRun): string {
+  return run.oldWay ? 'Measured the old way (Dyno 1.0); not compared with newer runs' : '';
+}

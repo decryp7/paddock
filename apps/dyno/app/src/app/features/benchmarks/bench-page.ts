@@ -9,7 +9,7 @@ import { Icon } from '../../shared/icon';
 import { BenchStore } from '../../state/bench.store';
 import { DeviceArt } from '../inventory/device-art';
 import { BenchArt } from './bench-art';
-import { barPair, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
+import { barPair, bestValues, kindTitle, methodNote, spreadText, statusNote, verdictWord } from './bench-model';
 import { MatButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
@@ -94,6 +94,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 <span class="spacer"></span>
                 <span class="sub">{{ day(run.startedAt) }}</span>
               </div>
+              @if (oldWay(run); as note) { <p class="load"><span class="badge">Old method</span> {{ note }}</p> }
               <p class="load" aria-label="Machine load when the run started">
                 Machine at the start: <span class="num">{{ pct(run.load.cpuPercent) }}</span> CPU, <span class="num">{{ pct(run.load.memoryPercent) }}</span> memory{{ run.load.onBattery === true ? ', on battery' : run.load.onBattery === false ? ', on mains power' : '' }}
                 @if (run.load.cpuPercent > 20) { <span class="badge" data-tone="warn">Busy machine: numbers may be low</span> }
@@ -114,7 +115,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                         <ul class="metrics">
                           @for (m of ms; track m.id) {
                             <li>
-                              <span class="label">{{ m.label }}</span>
+                              <span class="label">{{ m.label }}@if (spread(m); as sp) { <small class="spread num">{{ sp }}</small> }@if (m.unsteady) { <span class="badge" data-tone="warn">Unsteady</span> }</span>
                               <span class="value num">{{ metric(m.value) }} <small>{{ m.unit }}</small></span>
                               <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" matTooltip="Best earlier run"></b> }</span>
                             </li>
@@ -216,6 +217,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .metrics { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
     .metrics li { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--sp-3); }
     .metrics .label { color: var(--text-2); font-size: var(--fs-sm); }
+    .metrics .spread { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .metrics .value { font: var(--fw-semibold) var(--fs-lg) / 1.2 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; }
     .metrics .value small { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-sans); color: var(--text-3); }
     .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--surface-active); }
@@ -245,6 +247,8 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly day = formatDayTime;
   protected readonly note = statusNote;
+  protected readonly spread = (m: BenchMetric): string => spreadText(m, formatMetric);
+  protected readonly oldWay = methodNote;
   protected readonly deltaKey = (d: MetricDelta): string => d.kind + d.id;
   protected readonly runKey = (r: BenchRun): string => r.id;
   protected readonly deltaColumns: PdColumn<MetricDelta>[] = [

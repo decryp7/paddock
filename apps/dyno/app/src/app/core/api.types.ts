@@ -1106,6 +1106,14 @@ export interface BenchMetric {
   value: number;
   unit: string;
   higherIsBetter: boolean;
+  /** Every repetition, in the order measured; `value` is their median. */
+  samples: number[];
+  min: number;
+  max: number;
+  /** Coefficient of variation of the repetitions (null where the mean is zero). */
+  cv: number | null;
+  /** True when the repetitions varied by more than 10 %. */
+  unsteady: boolean;
 }
 
 export type BenchStatus =
@@ -1118,6 +1126,8 @@ export interface BenchKindResult {
   kind: BenchKind;
   status: BenchStatus;
   millis: number;
+  /** The method version it was measured with; 1 is Dyno 1.0's. */
+  method: number;
 }
 
 export interface LoadAtRun {
@@ -1135,6 +1145,8 @@ export interface BenchRun {
   load: LoadAtRun;
   machine: string;
   results: BenchKindResult[];
+  /** Measured the 1.0 way: kept, shown as "measured the old way", never compared with a current run. */
+  oldWay: boolean;
 }
 
 export interface BenchProgress {
@@ -1163,6 +1175,10 @@ export interface MetricDelta {
   before: number;
   after: number;
   changePercent: number;
+  /** How widely each run's repetitions varied (max minus min). */
+  beforeSpread: number;
+  afterSpread: number;
+  unsteady: boolean;
   verdict: BenchVerdict;
 }
 

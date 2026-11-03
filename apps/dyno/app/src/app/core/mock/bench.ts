@@ -2,7 +2,11 @@ import type { BenchComparison, BenchKind, BenchKindResult, BenchMetric, BenchRun
 
 const NOISE_PERCENT = 3;
 
-const m = (id: string, label: string, value: number, unit: string, higherIsBetter = true): BenchMetric => ({ id, label, value, unit, higherIsBetter });
+/** A metric with five repetitions around `value` (a spread of about 1 %), as the engine's `BenchMetric::measured` gives. */
+const m = (id: string, label: string, value: number, unit: string, higherIsBetter = true): BenchMetric => {
+  const samples = [0.99, 1.0, 1.01, 0.995, 1.005].map((f) => value * f);
+  return { id, label, value, unit, higherIsBetter, samples, min: value * 0.99, max: value * 1.01, cv: 0.008, unsteady: false };
+};
 
 /** Plausible numbers for one kind; `scale` moves them together (1 = baseline) so a "tuned" run differs from a baseline. */
 export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cores = 14): BenchKindResult {
@@ -11,6 +15,7 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cor
       return {
         kind,
         millis: 3400,
+        method: 2,
         status: {
           state: 'done',
           metrics: [m('cpu-single', 'Single core', 612 * scale, 'M rounds/s'), m('cpu-multi', `All ${cores} cores`, 612 * cores * 0.62 * scale, 'M rounds/s'), m('cpu-scaling', 'Multi-core scaling', Math.round(cores * 6.2) / 10, 'x')],
@@ -20,12 +25,14 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cor
       return {
         kind,
         millis: 2300,
+        method: 2,
         status: { state: 'done', metrics: [m('mem-copy', 'Copy bandwidth', 118 * scale, 'GB/s'), m('mem-latency', 'Random access latency', 96 / scale, 'ns', false)] },
       };
     case 'disk':
       return {
         kind,
         millis: 4100,
+        method: 1,
         status: {
           state: 'done',
           metrics: [
@@ -37,8 +44,8 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cor
       };
     case 'gpu':
       return gpu
-        ? { kind, millis: 0, status: { state: 'done', metrics: [m('gpu-compute', 'Compute', 9200 * scale, 'GFLOPS')] } }
-        : { kind, millis: 0, status: { state: 'unavailable', reason: 'GPU compute tests need a graphics API that this build does not include, so none is run.' } };
+        ? { kind, millis: 0, method: 1, status: { state: 'done', metrics: [m('gpu-compute', 'Compute', 9200 * scale, 'GFLOPS')] } }
+        : { kind, millis: 0, method: 1, status: { state: 'unavailable', reason: 'GPU compute tests need a graphics API that this build does not include, so none is run.' } };
   }
 }
 
@@ -52,6 +59,7 @@ export function mockRun(id: string, startedAt: number, label: string, scale: num
     load: { cpuPercent: 6, memoryPercent: 52, onBattery: false },
     machine: 'macOS 15 · Apple M4 Pro',
     results: (['cpu', 'memory', 'disk', 'gpu'] as BenchKind[]).map((k) => mockKindResult(k, scale, false, cores)),
+    oldWay: false,
     ...extra,
   };
 }
@@ -77,7 +85,10 @@ export function mockCompare(before: BenchRun, after: BenchRun): BenchComparison 
         before: b.value,
         after: a.value,
         changePercent: change,
-        verdict: Math.abs(improved) < NOISE_PERCENT ? 'same' : improved > 0 ? 'better' : 'worse',
+        beforeSpread: b.max - b.min,
+        afterSpread: a.max - a.min,
+        unsteady: b.unsteady || a.unsteady,
+        verdict: Math.abs(a.value - b.value) <= (Math.abs(b.value) * NOISE_PERCENT) / 100 || Math.abs(a.value - b.value) <= b.max - b.min + (a.max - a.min) ? 'same' : improved > 0 ? 'better' : 'worse',
       });
     }
   }

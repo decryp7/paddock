@@ -14,6 +14,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 # The family's job model: a job's status travels between the agent and the app in its postcard-safe wire form.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+# Median, spread and CV of the benchmark repetitions: one implementation, tested once (ER-22).
+paddock-bench = { path = "../../../../crates/paddock-bench" }
 # Widget layouts (family ADR 0035): the closed catalogues of the popup, the dashboard and the menu bar live here.
 paddock-widgets = { path = "../../../../crates/paddock-widgets", features = ["ts"] }
 # TypeScript for the catalogue types (generated into the UI's core/generated/widgets.ts).

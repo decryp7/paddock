@@ -1218,6 +1218,7 @@ name = "dyno-bench"
 version = "1.0.0"
 dependencies = [
  "dyno-core",
+ "paddock-bench",
  "serde_json",
  "tempfile",
 ]
@@ -1239,6 +1240,7 @@ dependencies = [
 name = "dyno-core"
 version = "1.0.0"
 dependencies = [
+ "paddock-bench",
  "paddock-commands",
  "paddock-jobs",
  "paddock-widgets",
@@ -3425,6 +3427,18 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "paddock-bench"
+version = "0.1.0"
+dependencies = [
+ "paddock-cli",
+ "paddock-env",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

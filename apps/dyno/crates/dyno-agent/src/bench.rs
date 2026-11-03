@@ -215,6 +215,7 @@ impl BenchCentre {
                 results.push(KindResult {
                     kind: *kind,
                     millis: 0,
+                    method: kind.method_version(),
                     status: BenchStatus::Stopped {
                         reason: "Cancelled before it started.".into(),
                     },
@@ -228,6 +229,7 @@ impl BenchCentre {
             let status = self.measure(run_id, *kind, plan.disk_mib);
             results.push(KindResult {
                 kind: *kind,
+                method: kind.method_version(),
                 millis: u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX),
                 status,
             });
@@ -245,6 +247,7 @@ impl BenchCentre {
             load,
             machine,
             results,
+            old_way: false,
         };
         let mut s = lock(&self.inner.state);
         s.history.push(run);
@@ -432,6 +435,6 @@ mod tests {
     #[test]
     fn timeouts_are_bounded() {
         assert!(timeout(BenchKind::Disk) > timeout(BenchKind::Cpu));
-        assert_eq!(FILE_VERSION, 1);
+        assert_eq!(FILE_VERSION, 2);
     }
 }

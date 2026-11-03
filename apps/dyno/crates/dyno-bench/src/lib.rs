@@ -6,8 +6,11 @@
 pub mod cpu;
 pub mod disk;
 pub mod memory;
+pub mod repeat;
 
 use dyno_core::bench::{BenchKind, BenchMetric};
+use paddock_bench::SystemClock;
+use repeat::{Repeats, SleepPace};
 use std::path::Path;
 use std::time::Duration;
 
@@ -16,6 +19,8 @@ use std::time::Duration;
 pub struct Settings<'a> {
     /// The time budget of each timed section.
     pub budget: Duration,
+    /// Warm-up, repetitions and the gap between them.
+    pub repeats: Repeats,
     /// The scratch folder for the disk test (created and removed by the caller).
     pub dir: Option<&'a Path>,
     /// The scratch file size for the disk test, MiB.
@@ -34,8 +39,8 @@ pub enum Outcome {
 /// Runs one kind.
 pub fn run(kind: BenchKind, s: &Settings<'_>) -> Result<Vec<BenchMetric>, Outcome> {
     match kind {
-        BenchKind::Cpu => Ok(cpu::run(s.budget)),
-        BenchKind::Memory => Ok(memory::run(s.budget)),
+        BenchKind::Cpu => Ok(cpu::run(s.budget, s.repeats, &SystemClock::new(), &SleepPace)),
+        BenchKind::Memory => Ok(memory::run(s.budget, s.repeats, &SystemClock::new(), &SleepPace)),
         BenchKind::Disk => {
             let dir = s
                 .dir

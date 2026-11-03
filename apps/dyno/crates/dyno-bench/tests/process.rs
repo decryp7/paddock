@@ -9,6 +9,9 @@ fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dyno-bench"))
 }
 
+/// One repetition, no warm-up and no gap, so a test of the real binary does not wait.
+const FAST: [&str; 6] = ["--reps", "1", "--warmup-ms", "0", "--gap-ms", "0"];
+
 #[test]
 fn version_prints_and_exits_zero_for_the_bundle_check() {
     let out = bin().arg("--version").output().unwrap();
@@ -18,7 +21,7 @@ fn version_prints_and_exits_zero_for_the_bundle_check() {
 
 #[test]
 fn cpu_prints_a_done_status() {
-    let out = bin().args(["cpu", "--millis", "20"]).output().unwrap();
+    let out = bin().args(["cpu", "--millis", "20"]).args(FAST).output().unwrap();
     assert!(out.status.success());
     let s: BenchStatus = serde_json::from_slice(&out.stdout).unwrap();
     assert!(matches!(s, BenchStatus::Done { metrics } if metrics.len() == 3));

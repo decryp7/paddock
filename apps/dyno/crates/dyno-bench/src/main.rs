@@ -5,37 +5,58 @@
 //! `{"state":"unavailable"|"failed","reason":"..."}`. The agent starts it with a timeout and kills it when it
 //! overruns; it never starts on its own. It reads no files except its scratch file.
 
+use dyno_bench::repeat::Repeats;
 use dyno_bench::{run, Outcome, Settings};
-use dyno_core::bench::{BenchKind, BenchStatus, DISK_DEFAULT_MIB};
+use dyno_core::bench::{BenchKind, BenchStatus, DISK_DEFAULT_MIB, SECTION_MILLIS};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 /// The longest time budget per timed section a caller may ask for, ms.
 const MAX_MILLIS: u64 = 5_000;
+/// The most repetitions a caller may ask for.
+const MAX_REPS: u32 = 20;
+/// The longest warm-up or gap a caller may ask for, ms.
+const MAX_PAUSE_MILLIS: u64 = 10_000;
+const USAGE: &str = "usage: dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>]";
 
-fn parse(args: &[String]) -> Result<(BenchKind, Option<PathBuf>, u32, u64), String> {
-    let kind = args
-        .first()
-        .and_then(|a| BenchKind::parse(a))
-        .ok_or("usage: dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--millis <n>]")?;
-    let (mut dir, mut mib, mut millis) = (None, DISK_DEFAULT_MIB, 1_000_u64);
+/// What the command line asked for.
+#[derive(Debug, PartialEq)]
+struct Args {
+    kind: BenchKind,
+    dir: Option<PathBuf>,
+    mib: u32,
+    millis: u64,
+    repeats: Repeats,
+}
+
+fn number<T: std::str::FromStr>(flag: &str, value: &str) -> Result<T, String> {
+    value.parse().map_err(|_| format!("{flag} must be a number"))
+}
+
+fn parse(args: &[String]) -> Result<Args, String> {
+    let kind = args.first().and_then(|a| BenchKind::parse(a)).ok_or(USAGE)?;
+    let mut out = Args {
+        kind,
+        dir: None,
+        mib: DISK_DEFAULT_MIB,
+        millis: SECTION_MILLIS,
+        repeats: Repeats::STANDARD,
+    };
     let mut it = args[1..].iter();
     while let Some(flag) = it.next() {
         let value = it.next().ok_or(format!("{flag} needs a value"))?;
         match flag.as_str() {
-            "--dir" => dir = Some(PathBuf::from(value)),
-            "--disk-mib" => mib = value.parse().map_err(|_| "--disk-mib must be a number".to_string())?,
-            "--millis" => {
-                millis = value
-                    .parse::<u64>()
-                    .map_err(|_| "--millis must be a number".to_string())?
-                    .clamp(10, MAX_MILLIS)
-            }
+            "--dir" => out.dir = Some(PathBuf::from(value)),
+            "--disk-mib" => out.mib = number(flag, value)?,
+            "--millis" => out.millis = number::<u64>(flag, value)?.clamp(10, MAX_MILLIS),
+            "--reps" => out.repeats.reps = number::<u32>(flag, value)?.clamp(1, MAX_REPS),
+            "--warmup-ms" => out.repeats.warmup = Duration::from_millis(number::<u64>(flag, value)?.min(MAX_PAUSE_MILLIS)),
+            "--gap-ms" => out.repeats.gap = Duration::from_millis(number::<u64>(flag, value)?.min(MAX_PAUSE_MILLIS)),
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok((kind, dir, mib, millis))
+    Ok(out)
 }
 
 fn main() -> ExitCode {
@@ -44,7 +65,7 @@ fn main() -> ExitCode {
         println!("dyno-bench {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
-    let (kind, dir, mib, millis) = match parse(&args) {
+    let parsed = match parse(&args) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("dyno-bench: {e}");
@@ -52,11 +73,12 @@ fn main() -> ExitCode {
         }
     };
     let settings = Settings {
-        budget: Duration::from_millis(millis),
-        dir: dir.as_deref(),
-        disk_mib: mib,
+        budget: Duration::from_millis(parsed.millis),
+        repeats: parsed.repeats,
+        dir: parsed.dir.as_deref(),
+        disk_mib: parsed.mib,
     };
-    let status = match run(kind, &settings) {
+    let status = match run(parsed.kind, &settings) {
         Ok(metrics) => BenchStatus::Done { metrics },
         Err(Outcome::Unavailable(reason)) => BenchStatus::Unavailable { reason },
         Err(Outcome::Failed(reason)) => BenchStatus::Failed { reason },
@@ -83,8 +105,21 @@ mod tests {
 
     #[test]
     fn arguments_are_parsed_strictly() {
-        let (k, d, m, ms) = parse(&a(&["disk", "--dir", "/x", "--disk-mib", "32", "--millis", "99999"])).unwrap();
-        assert_eq!((k, d, m, ms), (BenchKind::Disk, Some(PathBuf::from("/x")), 32, MAX_MILLIS));
+        let p = parse(&a(&["disk", "--dir", "/x", "--disk-mib", "32", "--millis", "99999"])).unwrap();
+        assert_eq!(
+            (p.kind, p.dir, p.mib, p.millis),
+            (BenchKind::Disk, Some(PathBuf::from("/x")), 32, MAX_MILLIS)
+        );
+        assert_eq!(p.repeats, Repeats::STANDARD, "the method's repetitions unless asked otherwise");
+        let r = parse(&a(&["cpu", "--reps", "99", "--warmup-ms", "0", "--gap-ms", "99999999"]))
+            .unwrap()
+            .repeats;
+        assert_eq!(
+            (r.reps, r.warmup, r.gap),
+            (MAX_REPS, Duration::ZERO, Duration::from_millis(MAX_PAUSE_MILLIS))
+        );
+        assert_eq!(parse(&a(&["cpu", "--reps", "0"])).unwrap().repeats.reps, 1);
+        assert!(parse(&a(&["cpu", "--reps", "x"])).is_err());
         assert!(parse(&a(&[])).is_err());
         assert!(parse(&a(&["nope"])).is_err());
         assert!(parse(&a(&["cpu", "--bogus", "1"])).is_err());
