@@ -1,7 +1,8 @@
 # 40. A Windows GUI test session as standard: auto-logon, an in-session runner, and vm-smoke's GUI steps on Windows
 
-- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 2). No work starts
-  before it is accepted.
+- Status: Proposed (2026-11-03). The user approved drafting it on 2026-11-03 (ER-21 redesigns, item 2).
+  The user decided its open points on 2026-11-03 (Decisions of the user); it is accepted after a delta review. No
+  work starts before then.
 - Date: 2026-11-03
 - Related: ER-14 / rule 7 (tests never touch the user's machine), ER-21 / rule 40, ER-24 / rule 41 (machine load), ER-27 /
   rule 56 (logs explain every failure, on branch `ci/publish-tools`), rule 17 (every dialog is a real OS window, sized by
@@ -134,7 +135,7 @@ observation windows.
 | Tray click opens the popover and it stays | a real left click on the icon; the popover window appears, takes focus, and receives **no** `WindowClosed` during the observation window that follows the click's input sequence; screenshot. Fails on the Dyno 1.0.0 popup |
 | Click outside closes the popover | a click on the desktop; the popover closes (blur still works) |
 | Tray menu | a right click; the declared items exist; each item that opens a window opens it (re-targeting an open one, ADR 0037) |
-| Dialogs at two scales | every dialog in the app's dialog contract (ADR 0026, the manifest ADR 0037 reads) opened once at 100 % and once at 150 %: the window's size equals the contract's size times the scale (within a pixel per edge), is inside the work area, and its last focusable element lies inside the client rectangle (nothing clipped); screenshot each |
+| Dialogs at two scales | every dialog in the app's dialog contract (ADR 0026, the manifest ADR 0037 reads) opened once at 100 % and once at 150 %: the window's **logical** size (its physical rectangle divided by `GetDpiForWindow` / 96) equals the contract's size, within 2 physical pixels per edge for rounding at 150 %, is inside the work area, and its last focusable element lies inside the client rectangle (nothing clipped); screenshot each |
 | Second launch | the shortcut again: same pids, one window shown (single instance) |
 | Start at login | the app's own Settings switch through UI Automation; the login item points at the declared program and arguments; sign out and back in (auto-logon); then: the app runs hidden, its tray icon is there, no window, no console, the helpers once |
 | Quit from the tray | the tray menu's Quit; the whole tree ends by itself (no kill), discovery files removed; leftovers listed with parents, then ended by identity |
@@ -160,9 +161,13 @@ app with no window on Windows, with the reason.
 | C70, launch targets | every program named by the Windows bundle's shortcuts and by the app's login-item spec (`WINDOWS_RUN_KEY` and kin) is `mainBinaryName` or a program built with `windows_subsystem = "windows"` | Dyno's `Run` key naming `dyno-agent.exe` (console subsystem), if the VM confirms the cause |
 | ADR 0039's Windows artifact leg (extended by this ADR) | the PE subsystem of every `.exe` in the built installer that a shortcut or login item names | a console-subsystem launch target in the shipped installer |
 | `gui-win.test.mjs` | the whole step list against a fake Windows guest with seeded faults: the popover closes after the click, a console window of the agent, a shortcut to the sidecar, no tray icon, a dialog 1.5× too small at 150 %, a leftover after Quit, a locked session, a job run in session 0 | the harness itself |
-| Rule 54 amendment (c) | a tag of an app with a window on Windows needs a `--os windows --gui` result for the tagged head with no FAIL, in the steward's tag checklist (and in `./dev release tag` once ADR 0039's tag gate exists) | every past tag |
+| Rule 54 amendment (c) | a tag of an app gated by D2 needs a `--os windows --gui` result for the tagged head with no FAIL, in the steward's tag checklist (and in `./dev release tag` once ADR 0039's tag gate exists) | every past tag |
 
-The tag check is a local result file, because VMs are local only; it is checked by the tag step, not by CI.
+The tag check is a local result file, because VMs are local only; it is checked by the tag step, not by CI. The result
+file names, in its header, the **head SHA** of the tested installer's CI run, the **image stamp** of the `gui-baseline`
+snapshot (§2) and the **harness commit** of `vm-smoke` that ran it; the tag step refuses a file whose SHA is not the
+tagged head, and prints the stamp and harness commit in the tag's checklist so a later reader knows what was proven with
+what.
 
 ## Rollout and order
 
@@ -226,11 +231,10 @@ in `docs/benchmarks.md` (rule 48) before anyone quotes it.
 - **RDP into the VM.** An RDP session is a different session from the console the auto-logon gives; disconnecting it locks
   that session and UI Automation stops. Rejected.
 
-## Decisions for the user
+## Decisions of the user (2026-11-03)
 
-- **D1:** SmartScreen: keep it MANUAL (recommended for now; its reputation call needs Microsoft's service, and Smart App
-  Control may block an unsigned app outright on a fresh Windows 11), or automate the Edge download and "Run anyway"
-  (+2-4 days, network from the VM)?
-- **D2:** does the Windows GUI result **gate** the tag of every app with a Windows window (recommended: from Dyno 1.1.0
-  on), or only Dyno 1.1.0 for now?
-- **D3:** the 150 % dialog pass in every run (recommended), or only when a dialog's contract changed?
+The user accepted the reviewer's recommendations on 2026-11-03. The status stays Proposed until the delta review.
+- **D1:** SmartScreen stays **MANUAL**; the Edge download and "Run anyway" are not automated.
+- **D2:** the Windows GUI result **gates the Dyno 1.1.0 tag now**; it gates another app's tags once C70 shows that app's
+  `windows.gui` block (not `null`, every tray item and dialog covered or listed as manual).
+- **D3:** the **150 % dialog pass runs in every run**.
