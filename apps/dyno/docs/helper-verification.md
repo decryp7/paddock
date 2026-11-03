@@ -34,7 +34,7 @@ it builds the agent's `HelperCentre` for the machine, prints the state, runs the
 
 ### Findings from this run (and what was done)
 
-1. **A development build is older than `MIN_HELPER_VERSION`.** The workspace version is 1.0.0 and the minimum is 1.1.0, so a freshly installed
+1. **A development build is older than `MIN_HELPER_VERSION`.** The workspace version was 1.0.0 (it is 1.1.0 from the release bump) and the minimum is 1.1.0, so a freshly installed
    helper answers and is `Outdated`; the turn-on job waited its whole minute for a state it could never reach. Fixed: the job now stops at once
    when the helper answers but is `Outdated`, and says so ("The helper started but this Dyno cannot use it. ..."). The `Ready` rows above were
    taken with the minimum lowered to 1.0.0 in a local build; it is 1.1.0 in the commit.

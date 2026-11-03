@@ -497,7 +497,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-agent"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dyno-core",
  "dyno-ipc",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "paddock-jobs",
  "paddock-widgets",
