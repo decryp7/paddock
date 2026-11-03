@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 pub fn on_start(store: &Store, t: Timestamp) -> Option<Timestamp> {
     if let Ok(Some(raw)) = store.meta(FIRST_SEEN_KEY) {
         if raw.parse::<i64>().is_err() {
-            log::warn!(Raw = raw.as_str(); "Baselines: stored first-seen time unreadable; learning starts from now");
+            log::warn!(RawLen = raw.len(); "Baselines: stored first-seen time unreadable; learning starts from now");
         }
     }
     match store.first_seen(t) {
