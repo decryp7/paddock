@@ -14,14 +14,14 @@ fn now_secs() -> i64 {
 }
 
 fn waketimers() -> String {
-    let out = std::process::Command::new("powercfg").arg("/waketimers").output().unwrap();
+    let out = dyno_platform::process::command("powercfg").arg("/waketimers").output().unwrap();
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Whether this machine has any sleep state a timer could wake it from. A VM with none (Fusion's Windows 11 Arm guest) never lists a
 /// wake timer in `powercfg /waketimers`, however the timer was set.
 fn can_sleep() -> bool {
-    let out = std::process::Command::new("powercfg").arg("/a").output().unwrap();
+    let out = dyno_platform::process::command("powercfg").arg("/a").output().unwrap();
     String::from_utf8_lossy(&out.stdout).contains("The following sleep states are available")
 }
 
