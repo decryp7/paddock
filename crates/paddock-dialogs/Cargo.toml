@@ -9,7 +9,7 @@ publish = ["decryp7"]
 
 [features]
 # The Tauri adapter (`paddock_dialogs::tauri`); the core above it never depends on Tauri.
-tauri = ["dep:tauri", "dep:log", "dep:objc2-app-kit"]
+tauri = ["dep:tauri", "dep:log", "dep:objc2-app-kit", "dep:windows"]
 # For other crates' tests on Tauri's mock runtime: dialogs are not parented to a native window. Never in an app.
 mock-runtime = ["tauri"]
 
@@ -20,6 +20,18 @@ serde_json = "1"
 tauri = { workspace = true, optional = true }
 log = { version = "0.4", features = ["kv"], optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# Windows: the edge (ADR 0043 §3): DPI, frames, work area and the window subclass (`edge/windows.rs`). Already in every app's
+# tree through Tauri.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 # macOS: a dialog window is attached to its parent when it is shown, not when it is created (`addChildWindow:ordered:`;
 # AppKit orders a child in with its parent at once, ADR 0026 §4.6 and the 1.1-0 spike). Already in every app's tree
