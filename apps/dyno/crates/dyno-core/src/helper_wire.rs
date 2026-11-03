@@ -169,6 +169,8 @@ pub enum HelperReply {
     WakeCancelled(bool),
     /// Answer to `WolState`.
     Wol(WolReply),
+    /// Answer to `Processes`: one page, scoped to the caller.
+    Processes(crate::helper_processes::ProcessPage),
     /// Answer to `Smart`.
     Smart(SmartReply),
     /// Answer to `InstallTool`: the tool is now installed.
@@ -372,7 +374,7 @@ pub fn readings(host: HelperHost) -> &'static [&'static str] {
             "Per-program network traffic",
             "Disk health",
             "What is keeping the computer awake",
-            "Windows Backup versions (the restore points of the built-in backup)",
+            "Windows Backup versions (the backups of Backup and Restore)",
         ],
         HelperHost::Macos => &[
             "Every process of every account",
