@@ -23,9 +23,11 @@ pub enum Command {
     Uninstall,
     /// Print the version.
     Version,
+    /// Check that this build can run (release gate: started from the extracted artifact).
+    SelfTest,
 }
 
-const USAGE: &str = "usage: dyno-helper serve | service | install --for <uid:N|sid:S-1-…> | uninstall | --version";
+const USAGE: &str = "usage: dyno-helper serve | service | install --for <uid:N|sid:S-1-…> | uninstall | --self-test | --version";
 
 /// Parses the arguments after the program name.
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -35,6 +37,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         Some("service" | "--service") if it.next().is_none() => Ok(Command::Service),
         Some("uninstall") if it.next().is_none() => Ok(Command::Uninstall),
         Some("--version" | "version") if it.next().is_none() => Ok(Command::Version),
+        Some("--self-test") if it.next().is_none() => Ok(Command::SelfTest),
         Some("install") => match (it.next(), it.next(), it.next()) {
             (Some("--for"), Some(owner), None) => Ok(Command::Install {
                 owner: HelperUser::parse(owner)?,
@@ -51,6 +54,32 @@ fn report(done: &str, r: &paddock_service::privileged::Report) {
     }
 }
 
+/// The release gate's probe: nothing is installed, started or changed. It checks that the program can hash itself, that its
+/// paths, configuration, policy and log formats work, and says which API it speaks.
+///
+/// # Errors
+/// What does not work, in words.
+pub fn self_test() -> Result<String, String> {
+    use dyno_core::helper_wire::{HelperUser, HELPER_API};
+    use paddock_service::privileged::{ProtectedFiles, RealFiles};
+    let exe = std::env::current_exe().map_err(|e| format!("own path: {e}"))?;
+    let hash = RealFiles.sha256(&exe).map_err(|e| format!("cannot read itself: {e}"))?;
+    let paths = crate::elevate::helper_paths();
+    if paths.endpoint.is_empty() || paths.config.as_os_str().is_empty() {
+        return Err("the helper's places are empty".into());
+    }
+    let config = crate::config::HelperConfig::new(HelperUser::Uid(1), crate::VERSION);
+    if crate::config::HelperConfig::parse(&config.to_text()).as_ref() != Ok(&config) {
+        return Err("the configuration does not survive a round trip".into());
+    }
+    crate::policy::parse("others = \"total\"").map_err(|e| format!("policy: {e}"))?;
+    Ok(format!(
+        "dyno-helper {} ok: api {HELPER_API}, sha256 {}",
+        crate::VERSION,
+        hash.chars().take(12).collect::<String>()
+    ))
+}
+
 fn serve() -> Result<(), String> {
     crate::serve::serve(
         &crate::elevate::helper_paths(),
@@ -65,6 +94,7 @@ pub fn run(command: Command) -> i32 {
             println!("dyno-helper {}", crate::VERSION);
             Ok(())
         }
+        Command::SelfTest => self_test().map(|line| println!("{line}")),
         Command::Serve => serve(),
         #[cfg(windows)]
         Command::Service => crate::winsvc::run_as_service(),
@@ -98,6 +128,7 @@ mod tests {
         assert_eq!(parse(&args(&["--service"])), Ok(Command::Service));
         assert_eq!(parse(&args(&["uninstall"])), Ok(Command::Uninstall));
         assert_eq!(parse(&args(&["--version"])), Ok(Command::Version));
+        assert_eq!(parse(&args(&["--self-test"])), Ok(Command::SelfTest));
         assert_eq!(
             parse(&args(&["install", "--for", "uid:501"])),
             Ok(Command::Install {
@@ -105,6 +136,14 @@ mod tests {
             })
         );
         assert!(parse(&args(&["install", "--for", "sid:S-1-5-21-1"])).is_ok());
+    }
+
+    #[test]
+    fn the_self_test_passes_without_touching_anything() {
+        let line = self_test().unwrap();
+        assert!(line.contains("ok: api 2"), "{line}");
+        assert_eq!(run(Command::SelfTest), 0);
+        assert_eq!(run(Command::Version), 0);
     }
 
     #[test]

@@ -17,10 +17,14 @@ pub mod cli;
 pub mod config;
 pub mod dispatch;
 pub mod elevate;
+pub mod logfile;
+pub mod orphan;
 pub mod paths;
+pub mod policy;
 pub mod serve;
 pub mod server;
 pub mod setup;
+pub mod startup;
 pub mod sys;
 #[cfg(windows)]
 pub mod winsvc;

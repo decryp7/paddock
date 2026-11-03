@@ -41,6 +41,10 @@ pub trait ProtectedFiles: Send {
     fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> io::Result<String>;
     /// The SHA-256 of a file in hex.
     fn sha256(&mut self, path: &Path) -> io::Result<String>;
+    /// Opens `path`, takes its facts from the open handle (so they describe the file that is read, not a path that may
+    /// change) and reads at most `max` bytes as text. `Ok(None)` when nothing is there; a link is reported as a link and not
+    /// followed (empty text); a file over `max` is `InvalidData`.
+    fn read_checked(&mut self, path: &Path, max: u64) -> io::Result<Option<(FileFacts, String)>>;
     /// Removes a file; a missing file is `NotFound`.
     fn remove_file(&mut self, path: &Path) -> io::Result<()>;
     /// Removes an empty folder; a missing folder is `NotFound`.
@@ -149,26 +153,52 @@ fn hash_stream(
         .collect())
 }
 
+fn facts_of(meta: &std::fs::Metadata) -> FileFacts {
+    #[cfg(unix)]
+    let (owner, mode) = {
+        use std::os::unix::fs::MetadataExt;
+        (Some(meta.uid()), Some(meta.mode() & 0o7777))
+    };
+    #[cfg(not(unix))]
+    let (owner, mode) = (None, None);
+    FileFacts {
+        kind: kind_of(meta.file_type()),
+        owner,
+        mode,
+        len: meta.len(),
+    }
+}
+
 impl ProtectedFiles for RealFiles {
     fn facts(&mut self, path: &Path) -> io::Result<Option<FileFacts>> {
-        let meta = match std::fs::symlink_metadata(path) {
+        match std::fs::symlink_metadata(path) {
+            Ok(m) => Ok(Some(facts_of(&m))),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn read_checked(&mut self, path: &Path, max: u64) -> io::Result<Option<(FileFacts, String)>> {
+        use io::Read;
+        let link = match std::fs::symlink_metadata(path) {
             Ok(m) => m,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
         };
-        #[cfg(unix)]
-        let (owner, mode) = {
-            use std::os::unix::fs::MetadataExt;
-            (Some(meta.uid()), Some(meta.mode() & 0o7777))
-        };
-        #[cfg(not(unix))]
-        let (owner, mode) = (None, None);
-        Ok(Some(FileFacts {
-            kind: kind_of(meta.file_type()),
-            owner,
-            mode,
-            len: meta.len(),
-        }))
+        if link.file_type().is_symlink() {
+            return Ok(Some((facts_of(&link), String::new())));
+        }
+        let file = std::fs::File::open(path)?;
+        let facts = facts_of(&file.metadata()?);
+        if facts.len > max {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is larger than {max} bytes", path.display()),
+            ));
+        }
+        let mut text = String::new();
+        file.take(max).read_to_string(&mut text)?;
+        Ok(Some((facts, text)))
     }
 
     fn create_dir(&mut self, path: &Path, mode: u32) -> io::Result<()> {
@@ -340,6 +370,33 @@ mod tests {
                 .kind(),
             io::ErrorKind::NotFound
         );
+    }
+
+    #[test]
+    fn a_file_is_read_with_the_facts_of_the_open_handle_and_a_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = RealFiles;
+        let path = dir.path().join("policy.toml");
+        assert_eq!(files.read_checked(&path, 10).unwrap(), None);
+        std::fs::write(&path, "others = 1").unwrap();
+        let (facts, text) = files.read_checked(&path, 10).unwrap().unwrap();
+        assert_eq!(
+            (facts.kind, facts.len, text.as_str()),
+            (FileKind::File, 10, "others = 1")
+        );
+        assert_eq!(
+            files.read_checked(&path, 9).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert!(files.read_checked(&path, 10).is_err());
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("l");
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            let (facts, text) = files.read_checked(&link, 10).unwrap().unwrap();
+            assert_eq!((facts.kind, text.as_str()), (FileKind::Symlink, ""));
+        }
     }
 
     #[cfg(unix)]

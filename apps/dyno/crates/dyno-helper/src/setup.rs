@@ -61,7 +61,8 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
         .map_err(|e| format!("This program's own path cannot be read: {e}"))?;
     let (host, paths) = (this_host(), helper_paths());
     let mut files = RealFiles;
-    write_config(&paths, &HelperConfig::new(owner, crate::VERSION), &mut files)?;
+    let config = HelperConfig::new(owner, crate::VERSION).with_app(crate::orphan::app_location(&source));
+    write_config(&paths, &config, &mut files)?;
     let roots = windows_roots(&ProcessVars);
     install_in_place(os_of(host), &roots, &source, &mut files, &system).map_err(|e| e.to_string())
 }

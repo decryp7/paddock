@@ -564,6 +564,23 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
         Ok(hash)
     }
 
+    fn read_checked(
+        &mut self,
+        path: &Path,
+        max: u64,
+    ) -> std::io::Result<Option<(crate::privileged::FileFacts, String)>> {
+        let mut inner = self.lock();
+        inner.calls.push(format!("read {}", path.display()));
+        let Some(facts) = inner.entries.get(path).cloned() else {
+            return Ok(None);
+        };
+        let bytes = inner.content.get(path).cloned().unwrap_or_default();
+        if bytes.len() as u64 > max {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+        }
+        Ok(Some((facts, String::from_utf8_lossy(&bytes).into_owned())))
+    }
+
     fn remove_file(&mut self, path: &Path) -> std::io::Result<()> {
         let mut inner = self.lock();
         inner.calls.push(format!("remove_file {}", path.display()));
@@ -685,5 +702,18 @@ mod tests {
             log.calls()
                 .contains(&Call::Os("elevated /p install".into()))
         );
+    }
+
+    #[test]
+    fn the_fake_disk_reads_with_facts_and_a_bound() {
+        use crate::privileged::ProtectedFiles;
+        let files = FakeFiles::new();
+        let mut disk = files.clone();
+        assert_eq!(disk.read_checked(Path::new("/p"), 9).unwrap(), None);
+        files.put_file("/p", b"others", 0, 0o644);
+        let (facts, text) = disk.read_checked(Path::new("/p"), 9).unwrap().unwrap();
+        assert_eq!((facts.owner, text.as_str()), (Some(0), "others"));
+        assert!(disk.read_checked(Path::new("/p"), 3).is_err());
+        assert!(files.calls().iter().any(|c| c == "read /p"));
     }
 }

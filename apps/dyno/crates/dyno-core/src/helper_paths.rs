@@ -60,6 +60,10 @@ pub struct HelperPaths {
     pub config: PathBuf,
     /// `audit.jsonl`.
     pub audit: PathBuf,
+    /// The administrator-edited policy file (`others = "total" | "detail" | "hidden"`).
+    pub policy: PathBuf,
+    /// The helper's own log (`helper.log`), read back by `LogTail`.
+    pub log: PathBuf,
     /// The socket path or pipe name clients connect to.
     pub endpoint: String,
     /// The folder the endpoint's socket lives in (Unix), created by the service manager or the installer.
@@ -85,9 +89,11 @@ impl HelperPaths {
                 HelperPaths {
                     host,
                     binary: join_unix(Path::new("/Library/PrivilegedHelperTools"), MAC_LABEL),
-                    data_dir,
+                    data_dir: data_dir.clone(),
                     config,
                     audit,
+                    policy: PathBuf::from("/etc/dyno/helper.toml"),
+                    log: join_unix(&data_dir, "helper.log"),
                     endpoint: "/var/run/dyno-helper/helper.sock".into(),
                     endpoint_dir: Some(PathBuf::from("/var/run/dyno-helper")),
                     registration: Some(PathBuf::from(format!("/Library/LaunchDaemons/{MAC_LABEL}.plist"))),
@@ -99,9 +105,11 @@ impl HelperPaths {
                 HelperPaths {
                     host,
                     binary: PathBuf::from("/usr/bin/dyno-helper"),
-                    data_dir,
+                    data_dir: data_dir.clone(),
                     config,
                     audit,
+                    policy: PathBuf::from("/etc/dyno/helper.toml"),
+                    log: join_unix(&data_dir, "helper.log"),
                     endpoint: "/run/dyno-helper/helper.sock".into(),
                     endpoint_dir: Some(PathBuf::from("/run/dyno-helper")),
                     registration: Some(PathBuf::from(format!("/usr/lib/systemd/system/{LINUX_UNIT}"))),
@@ -113,9 +121,11 @@ impl HelperPaths {
                 HelperPaths {
                     host,
                     binary: join_windows(&join_windows(&windows.program_files, "Dyno Helper"), "dyno-helper.exe"),
-                    data_dir,
+                    data_dir: data_dir.clone(),
                     config,
                     audit,
+                    policy: join_windows(&data_dir, "policy.toml"),
+                    log: join_windows(&data_dir, "helper.log"),
                     endpoint: WINDOWS_PIPE.into(),
                     endpoint_dir: None,
                     registration: None,

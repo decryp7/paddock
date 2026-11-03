@@ -20,6 +20,9 @@ pub struct HelperConfig {
     pub owner: HelperUser,
     /// The Dyno version that installed it.
     pub version: String,
+    /// Where the app it serves is (the orphan watch removes the helper when it stays gone); none on Linux.
+    #[serde(default)]
+    pub app: Option<std::path::PathBuf>,
 }
 
 /// Why the daemon cannot start.
@@ -48,7 +51,15 @@ impl HelperConfig {
             schema: SCHEMA,
             owner,
             version: version.to_string(),
+            app: None,
         }
+    }
+
+    /// With the app location the orphan watch looks for.
+    #[must_use]
+    pub fn with_app(mut self, app: Option<std::path::PathBuf>) -> Self {
+        self.app = app;
+        self
     }
 
     /// Parses the configuration text.

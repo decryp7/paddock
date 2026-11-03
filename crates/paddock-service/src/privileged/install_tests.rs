@@ -747,6 +747,13 @@ fn uninstall_fails_loudly_when_the_os_keeps_the_job() {
         fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
             self.0.sha256(p)
         }
+        fn read_checked(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<(crate::privileged::FileFacts, String)>> {
+            self.0.read_checked(p, m)
+        }
         fn remove_file(&mut self, _: &Path) -> std::io::Result<()> {
             Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
         }
@@ -994,6 +1001,13 @@ fn a_program_the_os_will_not_delete_while_it_runs_is_left_and_the_registration_s
         }
         fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
             self.0.sha256(p)
+        }
+        fn read_checked(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<(crate::privileged::FileFacts, String)>> {
+            self.0.read_checked(p, m)
         }
         fn remove_file(&mut self, _: &Path) -> std::io::Result<()> {
             Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))

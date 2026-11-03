@@ -4,13 +4,16 @@
 //! slot of its account's allowance ([`AccountLimits`]: more is refused as busy at once) before the [`Dispatcher`] runs
 //! it. The request handlers are the dispatcher's; this file owns the connection, the identity and the limits.
 
-use crate::auth::{authorize, weight};
-use crate::dispatch::Dispatcher;
-use dyno_core::helper_wire::{codes, HelperMessage, HelperUser, MAX_FRAME};
+use crate::auth::{authorize, scope, weight};
+use crate::dispatch::{Ctx, Dispatcher};
+use crate::policy::HelperPolicy;
+use dyno_core::helper_wire::{codes, CallerView, HelperMessage, HelperUser, MAX_FRAME};
 use paddock_ipc::endpoint::Listener;
-use paddock_ipc::{caller_of, AccountLimits, AdminRule, BodyHandler, BodyOptions, BodyPeer, Caller, Connection, FrameLimit, RemoteError};
+use paddock_ipc::{
+    caller_of, AccountId, AccountLimits, AdminRule, BodyHandler, BodyOptions, BodyPeer, Caller, Connection, FrameLimit, RemoteError,
+};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How long one connection may stay open.
@@ -32,6 +35,8 @@ pub struct Daemon {
     pub limits: AccountLimits,
     /// What to do with requests.
     pub dispatcher: Arc<Dispatcher>,
+    /// The policy in force (replaced when the policy file changes).
+    pub policy: Arc<Mutex<HelperPolicy>>,
     /// Set to end the loop (service stop, uninstall).
     pub stop: Arc<AtomicBool>,
 }
@@ -41,6 +46,7 @@ struct Session {
     caller: Caller,
     owner: HelperUser,
     limits: AccountLimits,
+    policy: Arc<Mutex<HelperPolicy>>,
 }
 
 impl BodyHandler<HelperMessage> for Session {
@@ -49,19 +55,36 @@ impl BodyHandler<HelperMessage> for Session {
             return Err(RemoteError::new(codes::REFUSED, "The helper only answers requests."));
         };
         let pid = self.caller.audit().pid_for_log();
-        if let Err(refusal) = authorize(&self.caller, &self.owner, &request) {
-            log::warn!(account = self.caller.account().to_string().as_str(), reason = refusal.to_string().as_str(); "Helper: a request was refused");
-            self.dispatcher.record_refused_caller(pid, &refusal.to_string());
-            return Err(RemoteError::new(
-                codes::REFUSED,
-                "This request is for the owner of the helper or an administrator.",
-            ));
-        }
+        let access = match authorize(&self.caller, &self.owner, &request) {
+            Ok(access) => access,
+            Err(refusal) => {
+                log::warn!(account = self.caller.account().to_string().as_str(), reason = refusal.to_string().as_str(); "Helper: a request was refused");
+                self.dispatcher.record_refused_caller(pid, &refusal.to_string());
+                return Err(RemoteError::new(
+                    codes::REFUSED,
+                    "This request is for the owner of the helper or an administrator.",
+                ));
+            }
+        };
         let _slot = self.limits.try_acquire(self.caller.account(), weight(&request)).map_err(|busy| {
             log::warn!(account = self.caller.account().to_string().as_str(), reason = busy.to_string().as_str(); "Helper: a request was turned away as busy");
             RemoteError::new(paddock_ipc::codes::BUSY, busy.to_string())
         })?;
-        self.dispatcher.handle(pid, request).map(HelperMessage::Reply)
+        let policy = *self.policy.lock().unwrap_or_else(|p| p.into_inner());
+        let uid = match self.caller.account() {
+            AccountId::Uid(uid) => Some(*uid),
+            AccountId::Sid(_) => None,
+        };
+        let ctx = Ctx {
+            pid,
+            uid,
+            access,
+            view: CallerView {
+                scope: scope(&self.caller, &self.owner, &policy),
+                tools: vec![],
+            },
+        };
+        self.dispatcher.handle_for(&ctx, request).map(HelperMessage::Reply)
     }
 }
 
@@ -102,6 +125,7 @@ impl Daemon {
                         caller,
                         owner: self.owner.clone(),
                         limits: self.limits.clone(),
+                        policy: self.policy.clone(),
                     };
                     let count = active.clone();
                     let spawned = std::thread::Builder::new().name("helper-session".into()).spawn(move || {
@@ -150,6 +174,13 @@ mod tests {
         }
     }
 
+    struct NoItems;
+    impl dyno_core::btm::LoginItemsReader for NoItems {
+        fn read(&self, _: u32) -> Result<dyno_core::btm::LoginItemsReply, PlatformError> {
+            Err(PlatformError::Unsupported("none".into()))
+        }
+    }
+
     struct Rig {
         name: String,
         dispatcher: Arc<Dispatcher>,
@@ -174,6 +205,8 @@ mod tests {
                 audit: AuditLog::new(dir.path().join("audit.jsonl")),
                 clock: Box::new(|| 42),
                 on_uninstall: Box::new(|| {}),
+                login_items: Box::new(NoItems),
+                log_tail: Box::new(|_| vec![]),
             }));
             let stop = Arc::new(AtomicBool::new(false));
             let daemon = Daemon {
@@ -182,6 +215,7 @@ mod tests {
                 admin_rule: AdminRule::default(),
                 limits: AccountLimits::with_max_total(max_total, Arc::new(SystemClock)),
                 dispatcher: dispatcher.clone(),
+                policy: Arc::new(Mutex::new(HelperPolicy::default())),
                 stop: stop.clone(),
             };
             Rig {
@@ -223,7 +257,9 @@ mod tests {
     #[test]
     fn the_owner_is_answered_by_the_os_identity_not_by_a_secret() {
         let rig = Rig::start(HelperUser::Uid(own_uid()), 4);
-        assert!(matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(i) if i.version == "1.0.0"));
+        assert!(
+            matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(i, v) if v.scope == dyno_core::helper_policy::Visibility::Full && i.version == "1.0.0")
+        );
         assert!(matches!(rig.call(HelperRequest::Traffic).unwrap_err(), IpcError::Remote(e) if e.code == codes::UNSUPPORTED));
         rig.stop();
     }
@@ -237,8 +273,13 @@ mod tests {
             rig.stop();
             return;
         }
-        assert!(rig.call(HelperRequest::Info).is_ok());
+        assert!(
+            matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(_, v) if v.scope == dyno_core::helper_policy::Visibility::Own(dyno_core::helper_policy::OthersPolicy::Total))
+        );
+        // Readings are for everyone (scoped); the audit log and removal are not.
         let e = rig.call(HelperRequest::Traffic).unwrap_err();
+        assert!(matches!(&e, IpcError::Remote(r) if r.code == codes::UNSUPPORTED), "{e:?}");
+        let e = rig.call(HelperRequest::Audit(5)).unwrap_err();
         assert!(matches!(&e, IpcError::Remote(r) if r.code == codes::REFUSED), "{e:?}");
         let e = rig.call(HelperRequest::Uninstall).unwrap_err();
         assert!(matches!(&e, IpcError::Remote(r) if r.code == codes::REFUSED), "{e:?}");
