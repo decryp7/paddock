@@ -1,4 +1,4 @@
-import type { DiskChildren, DiskRings, DiskSettings, RingNode, DiskScanStatus, DiskTarget, ScanPhase, Volume } from './api.types';
+import type { DiskChildren, DiskRings, DiskSettings, NotSaved, RingNode, DiskScanStatus, DiskTarget, ScanPhase, Volume } from './api.types';
 import wire from './disk-map.wire.json';
 
 /**
@@ -39,6 +39,20 @@ const status = (state: DiskScanStatus['state'], volume: Volume | null): DiskScan
   etaSeconds: null,
   hiddenBytes: 40,
   scannedAt: 1_700_000_100_000,
+  origin: 'live',
+  changedBytes: null,
+  replaces: null,
+  notSaved: null,
+});
+
+/** A finished scan read back from the cache, or a live one that could not be kept. */
+const savedStatus = (scan: number, changedBytes: number | null, replaces: number | null, notSaved: NotSaved | null): DiskScanStatus => ({
+  ...status('done', null),
+  scan,
+  origin: notSaved === null ? { saved: { savedAt: 1_700_000_200_000 } } : 'live',
+  changedBytes,
+  replaces,
+  notSaved,
 });
 
 const phases: ScanPhase[] = ['readingVolumeFacts', 'readingFolders'];
@@ -94,8 +108,11 @@ const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, rea
 const expected = {
   requests: {
     diskVolumes: 'diskVolumes',
-    startVolume: { startDiskScan: { target: volumeTarget } },
-    startFolder: { startDiskScan: { target: { folder: { path: '/Users/alex' } } satisfies DiskTarget } },
+    startVolume: { startDiskScan: { target: volumeTarget, replaces: null } },
+    rescanVolume: { startDiskScan: { target: volumeTarget, replaces: 7 } },
+    startFolder: { startDiskScan: { target: { folder: { path: '/Users/alex' } } satisfies DiskTarget, replaces: null } },
+    forgetSaved: { forgetSavedDiskMap: { scan: 7 } },
+    forgetAllSaved: 'forgetSavedDiskMaps',
     cancel: { cancelDiskScan: { scan: 7 } },
     scans: 'diskScans',
     children: { diskChildren: { scan: 7, node: 4, offset: 0, limit: 48, minFraction: 0.004 } },
@@ -115,6 +132,10 @@ const expected = {
     status({ failed: { failure: { volumeUnreachable: { detail: 'the share stopped answering' } } } }, null),
     status({ failed: { failure: { cannotStart: { reason: 'no' } } } }, null),
     status({ failed: { failure: { internal: { detail: 'bug' } } } }, null),
+    savedStatus(8, -120, null, null),
+    savedStatus(9, null, 8, 'tooBig'),
+    savedStatus(10, 4096, null, 'noSpace'),
+    savedStatus(11, null, null, 'failed'),
   ],
   settings,
   rings,
@@ -130,6 +151,6 @@ describe('the disk map wire contract with the engine', () => {
   it('covers every variant the engine can send', () => {
     const kinds = new Set(wire.children.children.map((c) => c.kind));
     expect([...kinds].sort()).toEqual(['file', 'folder', 'mountPoint', 'unreadable']);
-    expect(wire.statuses.map((s) => (typeof s.state === 'string' ? s.state : Object.keys(s.state)[0]))).toEqual(['running', 'done', 'cancelled', 'failed', 'failed', 'failed']);
+    expect(wire.statuses.map((s) => (typeof s.state === 'string' ? s.state : Object.keys(s.state)[0]))).toEqual(['running', 'done', 'cancelled', 'failed', 'failed', 'failed', 'done', 'done', 'done', 'done']);
   });
 });

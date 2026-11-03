@@ -311,6 +311,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Baselines => Ok(Reply::Baselines(Box::new(shared.baselines.overview(shared)))),
         r @ (Request::DiskVolumes
         | Request::StartDiskScan { .. }
+        | Request::ForgetSavedDiskMap { .. }
+        | Request::ForgetSavedDiskMaps
         | Request::CancelDiskScan { .. }
         | Request::DiskScans
         | Request::DiskChildren { .. }

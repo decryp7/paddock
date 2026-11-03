@@ -40,6 +40,7 @@ impl VolumeLister for OneVolume {
                 whole_volume: true,
             },
             root: self.0.clone(),
+            identity: None,
         }]
     }
 }
@@ -148,6 +149,7 @@ fn a_folder_scan_is_pushed_and_read_one_level_at_a_time() {
         &peer,
         Request::StartDiskScan {
             target: DiskTarget::Folder { path: work.clone() },
+            replaces: None,
         },
     )
     .unwrap() else {
@@ -229,7 +231,8 @@ fn unknown_scans_and_bad_folders_answer_with_typed_errors() {
     assert_eq!(code(Request::DiskPath { scan: 7, node: 0 }), ErrorCode::NotFound);
     assert_eq!(
         code(Request::StartDiskScan {
-            target: DiskTarget::Folder { path: "relative".into() }
+            target: DiskTarget::Folder { path: "relative".into() },
+            replaces: None
         }),
         ErrorCode::BadRequest
     );
@@ -237,7 +240,8 @@ fn unknown_scans_and_bad_folders_answer_with_typed_errors() {
         code(Request::StartDiskScan {
             target: DiskTarget::Volume {
                 id: "no-such-volume".into()
-            }
+            },
+            replaces: None
         }),
         ErrorCode::NotFound
     );
@@ -256,6 +260,7 @@ fn a_node_is_revealed_by_id_and_only_a_node_of_a_kept_scan_can_be() {
     let Reply::DiskScan(started) = ask(
         &peer,
         Request::StartDiskScan {
+            replaces: None,
             target: DiskTarget::Folder {
                 path: work.to_string_lossy().into_owned(),
             },
@@ -336,7 +341,7 @@ fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_no
     let target = DiskTarget::Folder {
         path: work.to_string_lossy().into_owned(),
     };
-    let Reply::DiskScan(started) = ask(&peer, Request::StartDiskScan { target }).unwrap() else {
+    let Reply::DiskScan(started) = ask(&peer, Request::StartDiskScan { target, replaces: None }).unwrap() else {
         panic!("a scan status")
     };
     let first = final_status(&running, &statuses, started.scan);

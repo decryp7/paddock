@@ -106,6 +106,7 @@ impl Node {
     }
 }
 
+#[derive(Clone)]
 struct Node {
     parent: u32,
     first_child: u32,
@@ -192,7 +193,8 @@ pub struct DiskChildren {
     pub next_offset: Option<u32>,
 }
 
-/// The arena.
+/// The arena. Cloning copies every node: the walk clones only when it changes a tree that a pending save still reads.
+#[derive(Clone)]
 pub struct DiskIndex {
     nodes: Vec<Node>,
     names: Vec<u8>,

@@ -191,6 +191,10 @@ mod tests {
             eta_seconds: None,
             hidden_bytes: None,
             scanned_at: None,
+            origin: ScanOrigin::Live,
+            changed_bytes: None,
+            replaces: None,
+            not_saved: None,
         }
     }
 

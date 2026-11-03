@@ -281,6 +281,7 @@ fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), Command
         } => &query.folder,
         Request::StartDiskScan {
             target: dyno_core::disk::scan::DiskTarget::Folder { path },
+            ..
         } => path,
         _ => return Ok(()),
     };

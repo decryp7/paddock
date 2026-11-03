@@ -93,6 +93,32 @@ pub struct ScanProgress {
     pub unreadable: u64,
 }
 
+/// Where a scan's tree came from.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ScanOrigin {
+    /// Scanned in this run of the agent.
+    #[default]
+    Live,
+    /// Read back from the saved-maps cache (ADR 0029): it may be old; its age is `scanned_at`.
+    Saved {
+        /// When the map was written to the cache.
+        saved_at: crate::time::Timestamp,
+    },
+}
+
+/// Why a finished scan was not kept in the saved-maps cache; the page says so in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotSaved {
+    /// Larger than the limit on its own ("Too big to keep; raise the limit in Settings").
+    TooBig,
+    /// The disk would be left with too little free space.
+    NoSpace,
+    /// Writing it failed; the earlier saved map (if any) is unchanged.
+    Failed,
+}
+
 /// One scan's status: the reply to starting it and the pushed event while it runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +155,19 @@ pub struct DiskScanStatus {
     pub hidden_bytes: Option<u64>,
     /// When the latest pass ended (the "scanned 2 min ago" line); `None` while the first pass runs.
     pub scanned_at: Option<crate::time::Timestamp>,
+    /// Scanned in this run, or read back from the saved-maps cache.
+    #[serde(default)]
+    pub origin: ScanOrigin,
+    /// For a saved whole-volume map: the net change in used space since the scan (used now minus used then; a net figure,
+    /// ten GB deleted and ten GB written show as none). `None` for folder maps, live scans, or when either figure is unknown.
+    #[serde(default)]
+    pub changed_bytes: Option<i64>,
+    /// The kept scan this one replaces (a Rescan): that map stays on screen until this pass is done.
+    #[serde(default)]
+    pub replaces: Option<u64>,
+    /// Why the finished scan was not saved, when it was not.
+    #[serde(default)]
+    pub not_saved: Option<NotSaved>,
 }
 
 /// Rates and estimates are not given before this much of the scan has run.

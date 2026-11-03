@@ -168,7 +168,8 @@ struct Problems {
 /// A running (or finished) walk.
 pub struct Walk {
     source: Arc<dyn DirSource>,
-    index: Mutex<DiskIndex>,
+    /// Shared read-only with a pending save once the pass has ended; a change after that copies it first ([`Walk::edit_index`]).
+    index: Mutex<Arc<DiskIndex>>,
     queue: Mutex<Queue>,
     wake: Condvar,
     stopped: AtomicBool,
@@ -199,6 +200,23 @@ pub struct Walk {
     problems: Mutex<Problems>,
     end: (Mutex<Option<End>>, Condvar),
     hooks: Arc<dyn WalkHooks>,
+}
+
+/// The tree locked for changing: a change copies it first when somebody else (a pending save) still shares it.
+struct IndexEdit<'a>(MutexGuard<'a, Arc<DiskIndex>>);
+
+impl std::ops::Deref for IndexEdit<'_> {
+    type Target = DiskIndex;
+
+    fn deref(&self) -> &DiskIndex {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for IndexEdit<'_> {
+    fn deref_mut(&mut self) -> &mut DiskIndex {
+        Arc::make_mut(&mut self.0)
+    }
 }
 
 /// A consistent copy of the live numbers.
@@ -247,7 +265,7 @@ impl Walk {
         let walk = Arc::new(Walk {
             root: root.clone(),
             source,
-            index: Mutex::new(index),
+            index: Mutex::new(Arc::new(index)),
             queue: Mutex::new(Queue::for_pass(
                 0,
                 vec![Task {
@@ -349,7 +367,7 @@ impl Walk {
         }
         // The folders the OS refused (counted as refused), then the ones an earlier cut-short retry made and did not read.
         let (refused, unread) = {
-            let mut i = lock(&self.index);
+            let mut i = self.edit_index();
             (i.reopen_unreadable(), i.reopen_unread())
         };
         let ids: Vec<NodeId> = refused.iter().chain(unread.iter()).copied().collect();
@@ -357,7 +375,7 @@ impl Walk {
             return Err(RetryError::NothingToRetry);
         }
         let tasks: Vec<Task> = {
-            let i = lock(&self.index);
+            let i = self.read_index();
             ids.iter()
                 .filter_map(|id| i.path_components(*id).ok().map(|names| (*id, names)))
                 .map(|(node, names)| Task {
@@ -414,7 +432,7 @@ impl Walk {
             return;
         }
         {
-            let mut i = lock(&self.index);
+            let mut i = self.edit_index();
             for (id, (_, refused)) in &left {
                 if *refused {
                     i.restore_unreadable(*id);
@@ -435,7 +453,7 @@ impl Walk {
     /// The numbers as of now, consistent with the index.
     pub fn snapshot(&self) -> Snapshot {
         let (bytes, items, truncated) = {
-            let i = lock(&self.index);
+            let i = self.read_index();
             let (b, it) = i.totals();
             // What folders still being listed hold so far is counted too, and the count never goes back.
             let now = it.saturating_add(self.pending_items.load(Ordering::Relaxed));
@@ -451,13 +469,28 @@ impl Walk {
             },
             truncated,
             unreadable_first: lock(&self.problems).unreadable_first.clone(),
-            needs_full_disk_access: self.cfg.reasons.fda_missing && lock(&self.index).needing_full_disk_access() > 0,
+            needs_full_disk_access: self.cfg.reasons.fda_missing && self.read_index().needing_full_disk_access() > 0,
         }
     }
 
     /// Runs `f` on the index (queries).
     pub fn with_index<R>(&self, f: impl FnOnce(&DiskIndex) -> R) -> R {
-        f(&lock(&self.index))
+        f(&self.read_index())
+    }
+
+    /// The tree as it is now, shared read-only (a pending save reads it from its own thread). Meant for a finished pass: a
+    /// retry or a refresh that changes the tree afterwards works on a copy, so the one handed out never changes under a reader.
+    pub fn shared_index(&self) -> Arc<DiskIndex> {
+        lock(&self.index).clone()
+    }
+
+    fn read_index(&self) -> MutexGuard<'_, Arc<DiskIndex>> {
+        lock(&self.index)
+    }
+
+    /// The tree for changing: copied first when a pending save still holds it.
+    fn edit_index(&self) -> IndexEdit<'_> {
+        IndexEdit(lock(&self.index))
     }
 
     /// How the walk ended, or `None` while it runs.
@@ -695,7 +728,7 @@ impl Walk {
         let mut next = Vec::with_capacity(dirs.len());
         let refused: bool;
         {
-            let mut i = lock(&self.index);
+            let mut i = self.edit_index();
             if self.stopped.load(Ordering::SeqCst) || self.epoch.load(Ordering::SeqCst) != epoch {
                 self.pending_items.fetch_sub(seen, Ordering::Relaxed);
                 return Vec::new();

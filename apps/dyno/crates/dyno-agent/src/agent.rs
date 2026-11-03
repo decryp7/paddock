@@ -315,6 +315,18 @@ impl Shared {
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
+        // The saved-maps cache (ADR 0029): a second, rebuildable file in the OS cache folder. Off for this run (said once) when its
+        // folder cannot be written or another process holds the file; the disk map then works without it.
+        let started = crate::cache::Cache::start(
+            dirs.cache_db(),
+            crate::cache::CacheSettings::default(),
+            crate::cache::CacheDeps {
+                clock: Arc::new(crate::disk::centre::SystemClock::default()),
+                free: Arc::new(crate::cache::db::OsFreeSpace),
+            },
+        );
+        notes.extend(started.note);
+        let saved_maps = started.cache;
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let zone = platform.zone.clone();
@@ -403,6 +415,7 @@ impl Shared {
             next_conn: AtomicU64::new(1),
         });
         shared.disk.set_read_threads(read_threads);
+        shared.disk.attach_cache(saved_maps);
         Ok((shared, sensors, processes))
     }
 

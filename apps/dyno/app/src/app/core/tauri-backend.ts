@@ -274,8 +274,16 @@ export class TauriBackend implements DynoBackend {
     return this.request('diskVolumes');
   }
 
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
-    return this.request({ startDiskScan: { target } });
+  startDiskScan(target: DiskTarget, replaces: number | null = null): Promise<DiskScanStatus> {
+    return this.request({ startDiskScan: { target, replaces } });
+  }
+
+  forgetSavedDiskMap(scan: number): Promise<void> {
+    return this.request({ forgetSavedDiskMap: { scan } });
+  }
+
+  forgetSavedDiskMaps(): Promise<void> {
+    return this.request('forgetSavedDiskMaps');
   }
 
   cancelDiskScan(scan: number): Promise<void> {

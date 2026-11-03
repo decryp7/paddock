@@ -540,7 +540,21 @@ export interface DiskScanStatus {
   hiddenBytes: number | null;
   /** When the latest pass ended; `null` while the first pass runs. */
   scannedAt: Timestamp | null;
+  /** Scanned in this run, or read back from the saved-maps cache (ADR 0029), where it may be old (its age is `scannedAt`). */
+  origin: ScanOrigin;
+  /** For a saved whole-volume map: the net change in used space since the scan (used now minus used then); `null` otherwise. */
+  changedBytes: number | null;
+  /** The kept scan this one replaces (a Rescan): that map stays on screen until this pass is done. */
+  replaces: number | null;
+  /** Why the finished scan was not saved; `null` when it was, or saving is off. */
+  notSaved: NotSaved | null;
 }
+
+/** Where a scan's tree came from. */
+export type ScanOrigin = 'live' | { saved: { savedAt: Timestamp } };
+
+/** Why a finished scan was not kept in the saved-maps cache. */
+export type NotSaved = 'tooBig' | 'noSpace' | 'failed';
 
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 

@@ -107,11 +107,27 @@
       }
     },
     "diskVolumes": "diskVolumes",
+    "forgetAllSaved": "forgetSavedDiskMaps",
+    "forgetSaved": {
+      "forgetSavedDiskMap": {
+        "scan": 7
+      }
+    },
     "openFullDiskAccess": "openFullDiskAccessSettings",
     "path": {
       "diskPath": {
         "node": 4,
         "scan": 7
+      }
+    },
+    "rescanVolume": {
+      "startDiskScan": {
+        "replaces": 7,
+        "target": {
+          "volume": {
+            "id": "Macintosh HD"
+          }
+        }
       }
     },
     "retry": {
@@ -146,6 +162,7 @@
     "scans": "diskScans",
     "startFolder": {
       "startDiskScan": {
+        "replaces": null,
         "target": {
           "folder": {
             "path": "/Users/alex"
@@ -155,6 +172,7 @@
     },
     "startVolume": {
       "startDiskScan": {
+        "replaces": null,
         "target": {
           "volume": {
             "id": "Macintosh HD"
@@ -287,11 +305,14 @@
   },
   "statuses": [
     {
+      "changedBytes": null,
       "etaSeconds": null,
       "hiddenBytes": 40,
       "itemsPerSecond": 1200,
       "name": "Macintosh HD",
       "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": "live",
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -300,6 +321,7 @@
         "totalBytes": 600,
         "unreadable": 1
       },
+      "replaces": null,
       "scan": 7,
       "scannedAt": 1700000100000,
       "seq": 3,
@@ -328,11 +350,14 @@
       }
     },
     {
+      "changedBytes": null,
       "etaSeconds": null,
       "hiddenBytes": 40,
       "itemsPerSecond": 1200,
       "name": "Macintosh HD",
       "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": "live",
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -341,6 +366,7 @@
         "totalBytes": 600,
         "unreadable": 1
       },
+      "replaces": null,
       "scan": 7,
       "scannedAt": 1700000100000,
       "seq": 3,
@@ -357,11 +383,14 @@
       "volume": null
     },
     {
+      "changedBytes": null,
       "etaSeconds": null,
       "hiddenBytes": 40,
       "itemsPerSecond": 1200,
       "name": "Macintosh HD",
       "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": "live",
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -370,6 +399,7 @@
         "totalBytes": 600,
         "unreadable": 1
       },
+      "replaces": null,
       "scan": 7,
       "scannedAt": 1700000100000,
       "seq": 3,
@@ -386,11 +416,14 @@
       "volume": null
     },
     {
+      "changedBytes": null,
       "etaSeconds": null,
       "hiddenBytes": 40,
       "itemsPerSecond": 1200,
       "name": "Macintosh HD",
       "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": "live",
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -399,6 +432,7 @@
         "totalBytes": 600,
         "unreadable": 1
       },
+      "replaces": null,
       "scan": 7,
       "scannedAt": 1700000100000,
       "seq": 3,
@@ -423,11 +457,14 @@
       "volume": null
     },
     {
+      "changedBytes": null,
       "etaSeconds": null,
       "hiddenBytes": 40,
       "itemsPerSecond": 1200,
       "name": "Macintosh HD",
       "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": "live",
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -436,6 +473,7 @@
         "totalBytes": 600,
         "unreadable": 1
       },
+      "replaces": null,
       "scan": 7,
       "scannedAt": 1700000100000,
       "seq": 3,
@@ -460,11 +498,14 @@
       "volume": null
     },
     {
+      "changedBytes": null,
       "etaSeconds": null,
       "hiddenBytes": 40,
       "itemsPerSecond": 1200,
       "name": "Macintosh HD",
       "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": "live",
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -473,6 +514,7 @@
         "totalBytes": 600,
         "unreadable": 1
       },
+      "replaces": null,
       "scan": 7,
       "scannedAt": 1700000100000,
       "seq": 3,
@@ -485,6 +527,142 @@
           }
         }
       },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "changedBytes": -120,
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "notSaved": null,
+      "origin": {
+        "saved": {
+          "savedAt": 1700000200000
+        }
+      },
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "replaces": null,
+      "scan": 8,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "done",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "changedBytes": null,
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "notSaved": "tooBig",
+      "origin": "live",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "replaces": 8,
+      "scan": 9,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "done",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "changedBytes": 4096,
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "notSaved": "noSpace",
+      "origin": "live",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "replaces": null,
+      "scan": 10,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "done",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "changedBytes": null,
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "notSaved": "failed",
+      "origin": "live",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "replaces": null,
+      "scan": 11,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "done",
       "target": {
         "volume": {
           "id": "Macintosh HD"

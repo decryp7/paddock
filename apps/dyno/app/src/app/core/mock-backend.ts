@@ -131,6 +131,8 @@ export interface MockOptions {
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
   now?: () => number;
+  /** Disk maps the agent "offers from its cache" at start (ADR 0029), as after a restart: a finished scan, `ageMs` old. */
+  savedMaps?: ReadonlyArray<{ target: DiskTarget; ageMs: number; changedBytes: number | null }>;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -260,6 +262,7 @@ export class MockBackend implements DynoBackend {
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
+    for (const m of options.savedMaps ?? []) this.disk.seedSaved(m.target, m.ageMs, m.changedBytes);
     this.start = this.now();
     this.backupVariant = options.backup ?? 'mixed';
     this.backupCheckedAt = this.start - 40 * MIN;
@@ -688,8 +691,16 @@ export class MockBackend implements DynoBackend {
     return this.reply('diskVolumes', () => this.disk.volumes());
   }
 
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
-    return this.reply('startDiskScan', () => this.disk.start(target));
+  startDiskScan(target: DiskTarget, replaces: number | null = null): Promise<DiskScanStatus> {
+    return this.reply('startDiskScan', () => this.disk.start(target, replaces));
+  }
+
+  forgetSavedDiskMap(scan: number): Promise<void> {
+    return this.reply('forgetSavedDiskMap', () => this.disk.forgetSaved(scan));
+  }
+
+  forgetSavedDiskMaps(): Promise<void> {
+    return this.reply('forgetSavedDiskMaps', () => this.disk.forgetAllSaved());
   }
 
   cancelDiskScan(scan: number): Promise<void> {

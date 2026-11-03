@@ -24,7 +24,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// 4: saved disk maps (ADR 0029): `DiskScanStatus` gained `origin`, `changed_bytes`, `replaces` and `not_saved`,
+/// `StartDiskScan` gained `replaces`; `ForgetSavedDiskMap` and `ForgetSavedDiskMaps` are new.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -370,6 +373,9 @@ pub enum Request {
     StartDiskScan {
         /// What to scan.
         target: crate::disk::scan::DiskTarget,
+        /// The kept scan of the same target this one replaces (Rescan, ADR 0029): the old map stays readable until the new
+        /// pass is done. `None` for a first scan.
+        replaces: Option<u64>,
     },
     /// Stops a scan and returns at once; what was counted stays. Appended.
     CancelDiskScan {
@@ -460,6 +466,14 @@ pub enum Request {
         /// Which placements.
         placements: Vec<paddock_widgets::PlacementId>,
     },
+    /// Forgets one saved disk map (ADR 0029): its row is deleted and its pages overwritten. A map that is also scanning or
+    /// finished in this run stays in memory. Answers [`Reply::Ok`].
+    ForgetSavedDiskMap {
+        /// The scan.
+        scan: u64,
+    },
+    /// Forgets every saved disk map: the cache files are deleted outright. Answers [`Reply::Ok`].
+    ForgetSavedDiskMaps,
 }
 
 /// Dyno's own cost.
@@ -1079,6 +1093,12 @@ mod tests {
             eta_seconds: None,
             hidden_bytes: None,
             scanned_at: None,
+            origin: ScanOrigin::Saved {
+                saved_at: Timestamp(5),
+            },
+            changed_bytes: Some(-7),
+            replaces: Some(3),
+            not_saved: Some(NotSaved::TooBig),
         }
     }
 
@@ -1106,7 +1126,10 @@ mod tests {
             Request::DiskVolumes,
             Request::StartDiskScan {
                 target: crate::disk::scan::DiskTarget::Volume { id: "/".into() },
+                replaces: Some(2),
             },
+            Request::ForgetSavedDiskMap { scan: 1 },
+            Request::ForgetSavedDiskMaps,
             Request::CancelDiskScan { scan: 1 },
             Request::DiskScans,
             Request::DiskChildren {

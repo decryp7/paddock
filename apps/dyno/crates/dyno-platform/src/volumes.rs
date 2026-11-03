@@ -57,6 +57,7 @@ pub fn parse_diskutil_info(bytes: &[u8]) -> Option<MediaTraits> {
         removable: removable.filter(|_| internal != Some(true)),
         rotational: d.get("SolidState").and_then(plist::Value::as_boolean).map(|ssd| !ssd),
         bus: d.get("BusProtocol").and_then(plist::Value::as_string).map(str::to_string),
+        identity: d.get("VolumeUUID").and_then(plist::Value::as_string).map(str::to_string),
     })
 }
 
@@ -86,7 +87,18 @@ pub fn linux_traits(sys_root: &Path, device: &str) -> MediaTraits {
         removable: flag("removable").filter(|r| *r).or(bus.as_ref().map(|_| true)),
         rotational: flag("queue/rotational"),
         bus,
+        identity: None,
     }
+}
+
+/// Linux: the file system UUID of the device `source` (`/dev/sda1`), from the links in `by_uuid` (`/dev/disk/by-uuid`), each of
+/// which points at the device that holds that UUID. `None` for a device without one (or an unreadable folder).
+pub fn linux_identity(by_uuid: &Path, source: &str) -> Option<String> {
+    let want = std::fs::canonicalize(source).ok()?;
+    std::fs::read_dir(by_uuid).ok()?.flatten().find_map(|e| {
+        let target = std::fs::canonicalize(e.path()).ok()?;
+        (target == want).then(|| e.file_name().to_string_lossy().into_owned())
+    })
 }
 
 // The field types of `statvfs` differ per OS (32 or 64 bits), so the widening is needed on some and a no-op on others.
@@ -162,7 +174,9 @@ pub fn media_traits(m: &RawMount) -> MediaTraits {
     }
     #[cfg(target_os = "linux")]
     {
-        m.device.as_deref().map(|d| linux_traits(Path::new("/sys"), d)).unwrap_or_default()
+        let mut t = m.device.as_deref().map(|d| linux_traits(Path::new("/sys"), d)).unwrap_or_default();
+        t.identity = linux_identity(Path::new("/dev/disk/by-uuid"), &m.source);
+        t
     }
     #[cfg(windows)]
     {
@@ -230,7 +244,9 @@ mod win {
     use super::{MediaTraits, RawMount};
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
-    use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW};
+    use windows::Win32::Storage::FileSystem::{
+        GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
+    };
 
     // The `GetDriveTypeW` results (winbase.h).
     const DRIVE_REMOVABLE: u32 = 2;
@@ -302,6 +318,16 @@ mod win {
             .collect()
     }
 
+    /// The volume GUID path (`\\?\Volume{...}\`) of the volume mounted at `mount`: it stays the same for a disk whatever
+    /// drive letter it gets, and differs between disks.
+    pub(super) fn identity(mount: &str) -> Option<String> {
+        let root = wide(mount);
+        let mut buf = [0u16; 64];
+        // SAFETY: `root` is NUL-terminated; the buffer is valid for its length.
+        unsafe { GetVolumeNameForVolumeMountPointW(PCWSTR(root.as_ptr()), &mut buf) }.ok()?;
+        Some(text(&buf)).filter(|t| !t.is_empty())
+    }
+
     pub(super) fn traits(m: &RawMount) -> MediaTraits {
         let root = wide(&m.mount);
         // SAFETY: `root` is NUL-terminated.
@@ -309,6 +335,7 @@ mod win {
         MediaTraits {
             internal: (kind == DRIVE_FIXED).then_some(true),
             removable: (kind == DRIVE_REMOVABLE).then_some(true),
+            identity: if kind == DRIVE_REMOTE { None } else { identity(&m.mount) },
             ..MediaTraits::default()
         }
     }
@@ -357,12 +384,14 @@ mod tests {
 <key>RemovableMediaOrExternalDevice</key><true/>
 <key>SolidState</key><true/>
 <key>BusProtocol</key><string>USB</string>
+<key>VolumeUUID</key><string>6F0A1B2C-0000-4A00-8000-000000000001</string>
 </dict></plist>"#;
         let t = parse_diskutil_info(plist).unwrap();
         assert_eq!(t.internal, Some(false));
         assert_eq!(t.removable, Some(true));
         assert_eq!(t.rotational, Some(false));
         assert_eq!(t.bus.as_deref(), Some("USB"));
+        assert_eq!(t.identity.as_deref(), Some("6F0A1B2C-0000-4A00-8000-000000000001"));
         let internal = br#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>Internal</key><true/><key>RemovableMediaOrExternalDevice</key><true/></dict></plist>"#;
         let t = parse_diskutil_info(internal).unwrap();
@@ -400,6 +429,27 @@ mod tests {
             MediaTraits::default(),
             "an unknown device says nothing"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linux_device_is_found_by_the_uuid_link_that_points_at_it() {
+        let t = tempfile::tempdir().unwrap();
+        let dev = t.path().join("sda1");
+        let other = t.path().join("sdb1");
+        std::fs::write(&dev, b"").unwrap();
+        std::fs::write(&other, b"").unwrap();
+        let by_uuid = t.path().join("by-uuid");
+        std::fs::create_dir(&by_uuid).unwrap();
+        std::os::unix::fs::symlink(&dev, by_uuid.join("1111-AAAA")).unwrap();
+        std::os::unix::fs::symlink(&other, by_uuid.join("2222-BBBB")).unwrap();
+        assert_eq!(linux_identity(&by_uuid, &dev.to_string_lossy()).as_deref(), Some("1111-AAAA"));
+        assert_eq!(linux_identity(&by_uuid, &other.to_string_lossy()).as_deref(), Some("2222-BBBB"));
+        let lone = t.path().join("sdc1");
+        std::fs::write(&lone, b"").unwrap();
+        assert_eq!(linux_identity(&by_uuid, &lone.to_string_lossy()), None, "no link points at it");
+        assert_eq!(linux_identity(&t.path().join("missing"), &dev.to_string_lossy()), None);
+        assert_eq!(linux_identity(&by_uuid, "/no/such/device"), None);
     }
 
     #[test]
