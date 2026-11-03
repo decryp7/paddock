@@ -8,6 +8,7 @@ pub mod gpu;
 pub mod hardware;
 pub mod ioreg;
 pub mod launchd;
+pub mod smart;
 pub mod linux_hw;
 pub mod linux_net;
 pub mod linux_proc;

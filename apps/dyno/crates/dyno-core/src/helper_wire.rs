@@ -12,6 +12,7 @@ use crate::helper_requests::{
     validate_tool_bytes, CounterQuery, ExtrasKind, ProcessQuery, RequestError, SmartQuery, ToolKind, MAX_LOG_REPLY,
 };
 use crate::network_traffic::TrafficCounter;
+use crate::smart::SmartReply;
 use serde::{Deserialize, Serialize};
 
 /// The version of the helper's request set. A different value is refused by the agent with "update the helper".
@@ -134,6 +135,10 @@ pub enum HelperReply {
     Counters(Vec<TrafficCounter>),
     /// Answer to `Audit`.
     Entries(Vec<AuditEntry>),
+    /// Answer to `Smart`.
+    Smart(SmartReply),
+    /// Answer to `InstallTool`: the tool is now installed.
+    Installed(ToolStatus),
     /// Answer to `LoginItems`.
     LoginItems(LoginItemsReply),
     /// Answer to `LogTail`: the last lines, oldest first.

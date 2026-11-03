@@ -47,6 +47,7 @@ pub mod recorder;
 pub mod report;
 pub mod sampling;
 pub mod settings;
+pub mod smart;
 pub mod snapshot;
 pub mod startup;
 pub mod stats;
