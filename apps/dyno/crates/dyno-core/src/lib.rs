@@ -52,6 +52,7 @@ pub mod network_traffic;
 pub mod os;
 pub mod others;
 pub mod ports;
+pub mod power;
 pub mod process;
 pub mod protocol;
 pub mod recorder;

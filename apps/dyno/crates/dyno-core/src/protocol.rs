@@ -45,6 +45,8 @@ use serde::{Deserialize, Serialize};
 ///   on the link);
 /// - benchmarks B3-B8: `Request::{SaveBenchmarks, BenchGpuAdapters, BenchEstimate}` and `Reply::{GpuAdapters, BenchEstimate}` are new,
 ///   `StartBenchmark` also gained `disk_folders` and `gpu_adapter`;
+/// - power (ADR 0032): `Request::{PowerState, PowerKeepAwake, PowerStopKeepAwake, PowerIdleCancel, PowerIdleSnooze, EnergyReport}`,
+///   `Reply::{Power, Energy}` and `Message::PowerChanged` are new;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -584,6 +586,30 @@ pub enum Request {
         /// What is chosen.
         request: crate::bench::estimate::EstimateRequest,
     },
+    /// The power view: keep-awake state and what works here (ADR 0032). Answers [`Reply::Power`]; also pushed as
+    /// [`Message::PowerChanged`] on every change.
+    PowerState,
+    /// Holds the computer awake as `spec` says, replacing a hold already taken. Answers [`Reply::Power`] or `BadRequest`
+    /// (the message says what to fix).
+    PowerKeepAwake {
+        /// The request.
+        spec: crate::power::awake::AwakeSpec,
+    },
+    /// Releases the keep-awake hold (and clears a notice that it ended). Answers [`Reply::Power`].
+    PowerStopKeepAwake,
+    /// Cancels the idle or timed countdown, or the wait after the system was asked (the rule acts again only after new
+    /// activity). Answers [`Reply::Power`]. Appended.
+    PowerIdleCancel,
+    /// Snoozes the countdown for this many minutes (1 to 1440). Answers [`Reply::Power`]. Appended.
+    PowerIdleSnooze {
+        /// Minutes.
+        minutes: u32,
+    },
+    /// The energy report for the last `days` local days (1 to 366). Answers [`Reply::Energy`]. Appended.
+    EnergyReport {
+        /// How many days.
+        days: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -893,6 +919,12 @@ pub enum Reply {
     GpuAdapters(Vec<crate::bench::gpu::GpuAdapter>),
     /// The estimate for a chosen run; `None` until a drive is chosen.
     BenchEstimate(Option<crate::bench::estimate::RunEstimate>),
+
+    // ---- power ----
+    /// The power view.
+    Power(Box<crate::power::PowerView>),
+    /// The energy report. Appended.
+    Energy(Box<crate::power::energy::EnergyReport>),
 }
 
 /// The inventory report that was written.
@@ -981,6 +1013,8 @@ impl Reply {
             Reply::Firewall(x) => v(x),
             Reply::GpuAdapters(x) => v(x),
             Reply::BenchEstimate(x) => v(x),
+            Reply::Power(x) => v(x),
+            Reply::Energy(x) => v(x),
         }
     }
 }
@@ -1071,6 +1105,8 @@ pub enum Message {
     Job(Box<paddock_jobs::wire::WireSnapshot>),
     /// Agent -> app: a surface's layout changed (an edit from any window). Appended.
     WidgetLayoutChanged(crate::widgets::DynoSurface),
+    /// Agent -> app: the power view changed (a hold started, ended, was ended by the OS). Appended.
+    PowerChanged(Box<crate::power::PowerView>),
 }
 
 #[cfg(test)]
@@ -1123,6 +1159,82 @@ mod tests {
     }
 
     #[test]
+    fn power_requests_replies_and_pushes_survive_postcard() {
+        use crate::power::awake::{AwakeScope, AwakeSpec, AwakeUntil, AwakeView, BusyCond};
+        use crate::power::{Capability, PowerCaps, PowerView};
+        let spec = |until| AwakeSpec {
+            scope: AwakeScope::SystemAndDisplay,
+            until,
+        };
+        let untils = [
+            AwakeUntil::Indefinite,
+            AwakeUntil::For { minutes: 5 },
+            AwakeUntil::At { minute_of_day: 600 },
+            AwakeUntil::WhileProcess {
+                process: ProcessRef {
+                    pid: 1,
+                    started: Some(Timestamp(2)),
+                },
+            },
+            AwakeUntil::WhileBusy {
+                conds: vec![BusyCond::Cpu { above_pct: 5.0 }, BusyCond::Process { program: "a".into() }],
+                grace_secs: 30,
+            },
+        ];
+        for u in untils {
+            let m = Message::Request(Box::new(Request::PowerKeepAwake { spec: spec(u.clone()) }));
+            assert_eq!(round(&m), m);
+            let view = |awake| PowerView {
+                awake,
+                ..Default::default()
+            };
+            for awake in [
+                AwakeView::Off,
+                AwakeView::Holding {
+                    spec: spec(u.clone()),
+                    since: Timestamp(1),
+                    ends: None,
+                    os_ref: "r".into(),
+                    busy: Some(crate::power::awake::BusyNow {
+                        active: false,
+                        detail: "quiet".into(),
+                        quiet_secs: 1,
+                        release_in_secs: Some(2),
+                    }),
+                },
+                AwakeView::Waiting {
+                    spec: spec(u.clone()),
+                    why: "w".into(),
+                    since: Timestamp(1),
+                    ends: None,
+                },
+                AwakeView::Ended {
+                    why: "w".into(),
+                    at: Timestamp(3),
+                },
+            ] {
+                let push = Message::PowerChanged(Box::new(view(awake.clone())));
+                assert_eq!(round(&push), push);
+                let reply = Message::Reply(Box::new(Ok(Reply::Power(Box::new(view(awake))))));
+                assert_eq!(round(&reply), reply);
+            }
+        }
+        let cant = Message::PowerChanged(Box::new(PowerView {
+            awake: AwakeView::Off,
+            caps: PowerCaps {
+                keep_awake: Capability::CantTell { reason: "r".into() },
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+        assert_eq!(round(&cant), cant);
+        for r in [Request::PowerState, Request::PowerStopKeepAwake, Request::EnergyReport { days: 30 }] {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+    }
+
+    #[test]
     fn messages_survive_postcard() {
         let live = LiveUpdate {
             system: sample(1),
@@ -1169,6 +1281,21 @@ mod tests {
             Reply::AlarmChanges(vec![]),
             Reply::Benchmarks(Box::default()),
             Reply::Network(Box::default()),
+            Reply::Power(Box::new(crate::power::PowerView {
+                awake: crate::power::awake::AwakeView::Off,
+                caps: crate::power::PowerCaps {
+                    keep_awake: crate::power::Capability::Known,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })),
+            Reply::Energy(Box::new(crate::power::energy::report(
+                &[],
+                1,
+                Timestamp(0),
+                &crate::time::FixedZone::UTC,
+                &Default::default(),
+            ))),
             Reply::HostNames(vec![]),
             Reply::Changes(Box::default()),
             Reply::Gpu(Box::default()),

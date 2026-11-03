@@ -233,6 +233,12 @@ impl Fake {
                     "The fake machine has no battery.",
                 ))),
             },
+            power: crate::PowerPorts {
+                os: std::sync::Arc::new(paddock_power::FakePower::new()),
+                events: std::sync::Arc::new(paddock_power::FakeEvents::new()),
+                actions: std::sync::Arc::new(FakePowerActions::default()),
+                signals: std::sync::Arc::new(FakeIdleSignals::default()),
+            },
         }
     }
 }
@@ -328,6 +334,93 @@ impl UserActivity for Fake {
 
     fn foreground_pid(&mut self) -> Option<Pid> {
         self.lock().foreground
+    }
+}
+
+/// A [`PowerActions`](dyno_core::ports::PowerActions) for tests: records every request and never calls the OS, so no test can put a
+/// real machine to sleep or shut it down (ER-14).
+#[derive(Default)]
+pub struct FakePowerActions {
+    requests: Mutex<Vec<dyno_core::power::idle::IdleAction>>,
+    fail: Mutex<Option<PlatformError>>,
+    unavailable: Mutex<Vec<(dyno_core::power::idle::IdleAction, String)>>,
+}
+
+impl FakePowerActions {
+    /// Every action asked for, in order.
+    pub fn requests(&self) -> Vec<dyno_core::power::idle::IdleAction> {
+        self.requests.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// Makes the next requests fail with `error` until [`succeed`](Self::succeed).
+    pub fn fail_with(&self, error: PlatformError) {
+        *self.fail.lock().unwrap_or_else(|p| p.into_inner()) = Some(error);
+    }
+
+    /// Makes requests succeed again.
+    pub fn succeed(&self) {
+        *self.fail.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    /// Makes `action` unavailable here, with `reason`.
+    pub fn make_unavailable(&self, action: dyno_core::power::idle::IdleAction, reason: &str) {
+        self.unavailable
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push((action, reason.into()));
+    }
+}
+
+impl dyno_core::ports::PowerActions for FakePowerActions {
+    fn can(&self, action: dyno_core::power::idle::IdleAction) -> Reading<()> {
+        match self
+            .unavailable
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .find(|(a, _)| *a == action)
+        {
+            Some((_, why)) => Reading::Unavailable(why.clone()),
+            None => Reading::Available(()),
+        }
+    }
+
+    fn request(&self, action: dyno_core::power::idle::IdleAction) -> Result<(), PlatformError> {
+        self.requests.lock().unwrap_or_else(|p| p.into_inner()).push(action);
+        match self.fail.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+/// An [`IdleSignals`](dyno_core::ports::IdleSignals) for tests: a quiet machine until a test says otherwise.
+pub struct FakeIdleSignals {
+    reading: Mutex<dyno_core::ports::IdleSignalsReading>,
+}
+
+impl Default for FakeIdleSignals {
+    fn default() -> Self {
+        Self {
+            reading: Mutex::new(dyno_core::ports::IdleSignalsReading {
+                audio: Reading::Available(false),
+                full_screen: Reading::Available(false),
+                stay_awake: Reading::Available(Vec::new()),
+            }),
+        }
+    }
+}
+
+impl FakeIdleSignals {
+    /// Changes what the signals read.
+    pub fn set(&self, f: impl FnOnce(&mut dyno_core::ports::IdleSignalsReading)) {
+        f(&mut self.reading.lock().unwrap_or_else(|p| p.into_inner()));
+    }
+}
+
+impl dyno_core::ports::IdleSignals for FakeIdleSignals {
+    fn read(&self) -> dyno_core::ports::IdleSignalsReading {
+        self.reading.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 }
 

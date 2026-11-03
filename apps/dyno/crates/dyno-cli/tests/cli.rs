@@ -210,3 +210,52 @@ fn commands_that_used_to_change_something_are_gone() {
         assert!(out.is_empty());
     }
 }
+
+#[test]
+fn awake_holds_shows_and_lets_go_through_the_agent_and_never_touches_this_machine() {
+    // The fake platform's power port records the hold and calls no OS (ER-14).
+    let h = Harness::start();
+    let (code, out, _) = h.dyno("awake");
+    assert_eq!((code, out.as_str()), (0, "Not keeping the computer awake.\n"));
+    let (code, out, err) = h.dyno("awake on --for 30m --display");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "Keeping the computer awake for 30 min, display kept on (fake#1).\n");
+    assert!(h.dyno("awake status").1.starts_with("Keeping the computer awake for 30 min"));
+    let (_, json, _) = h.dyno("awake status --json");
+    assert!(json.contains("\"holding\"") && json.contains("\"osRef\": \"fake#1\""), "{json}");
+    let (code, out, _) = h.dyno("awake on --until 23:59");
+    assert_eq!(code, 0);
+    assert!(out.starts_with("Keeping the computer awake until 23:59"), "{out}");
+    let (code, out, _) = h.dyno("awake off");
+    assert_eq!((code, out.as_str()), (0, "Not keeping the computer awake.\n"));
+}
+
+#[test]
+fn awake_shows_the_agents_refusal_with_what_to_fix() {
+    let h = Harness::start();
+    let (code, out, err) = h.dyno("awake on --for 99999m");
+    assert_eq!(code, 1);
+    assert!(out.is_empty());
+    assert!(err.contains("Keep awake for 1 minute up to 7 days."), "{err}");
+}
+
+#[test]
+fn awake_while_busy_uses_the_limits_from_settings_and_a_program_needs_a_running_pid() {
+    let h = Harness::start();
+    let (code, out, err) = h.dyno("awake on --busy cpu,network");
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("Keeping the computer awake while the computer is busy"), "{out}");
+    let (code, _, err) = h.dyno("awake on --while-pid 999999");
+    assert_eq!(code, 1);
+    assert!(err.contains("not running"), "{err}");
+}
+
+#[test]
+fn idle_says_the_rules_are_off_and_cancel_is_harmless() {
+    let h = Harness::start();
+    assert_eq!(h.dyno("idle").1, "Sleep and shut down rules are off.\n");
+    let (code, out, _) = h.dyno("idle cancel");
+    assert_eq!((code, out.as_str()), (0, "Sleep and shut down rules are off.\n"));
+    let (code, _, err) = h.dyno("idle snooze 0");
+    assert_eq!(code, 2, "{err}");
+}

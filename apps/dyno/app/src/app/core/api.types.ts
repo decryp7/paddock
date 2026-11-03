@@ -829,6 +829,8 @@ export interface Settings {
   maintenance: MaintenanceSettings;
   /** Backup health checks. */
   backup: BackupSettings;
+  /** Power: keep awake (ADR 0032). */
+  power: PowerSettings;
 }
 
 export interface PluginInfo {
@@ -2344,4 +2346,158 @@ export interface ToolOffer {
   licence: string;
   sourceUrl: string;
   state: OfferState;
+// ---------------------------------------------------------------------------------------------------- power (ADR 0032)
+
+/** What stays awake. */
+export type AwakeScope = 'system' | 'systemAndDisplay';
+
+/** One "busy" condition of a "while busy" hold (externally tagged, like the engine's enums: postcard carries them). */
+export type BusyCond =
+  | { cpu: { abovePct: number } }
+  | { network: { aboveBytesPerS: number } }
+  | { disk: { aboveBytesPerS: number } }
+  | { process: { program: string } };
+
+/** Until when to keep awake. */
+export type AwakeUntil =
+  | 'indefinite'
+  | { for: { minutes: number } }
+  | { at: { minuteOfDay: number } }
+  | { whileProcess: { process: ProcessRef } }
+  | { whileBusy: { conds: BusyCond[]; graceSecs: number } };
+
+/** A keep-awake request; one is active at a time and a new one replaces it. */
+export interface AwakeSpec {
+  scope: AwakeScope;
+  until: AwakeUntil;
+}
+
+/** Where a "while busy" hold stands: busy now (and why) or quiet, with the time left before it lets go. */
+export interface BusyNow {
+  active: boolean;
+  detail: string;
+  quietSecs: number;
+  releaseInSecs: number | null;
+}
+
+/** The keep-awake state. */
+export type AwakeView =
+  | 'off'
+  | { holding: { spec: AwakeSpec; since: Timestamp; ends: Timestamp | null; osRef: string; busy: BusyNow | null } }
+  | { waiting: { spec: AwakeSpec; why: string; since: Timestamp; ends: Timestamp | null } }
+  | { ended: { why: string; at: Timestamp } };
+
+/** Whether a power feature works here; the UI never guesses. */
+export type Capability = 'known' | { cantTell: { reason: string } };
+
+/** Everything the Power page shows. */
+export interface PowerView {
+  awake: AwakeView;
+  idle: IdleView;
+  caps: { keepAwake: Capability; sleep: Capability; hibernate: Capability; shutDown: Capability };
+}
+
+export interface KeepAwakeSettings {
+  enabled: boolean;
+  display: boolean;
+  graceSecs: number;
+  cpuPct: number;
+  netBytesPerS: number;
+  diskBytesPerS: number;
+  trayItem: boolean;
+}
+
+export interface EnergySettings {
+  enabled: boolean;
+  wattsOn: number | null;
+  wattsSleep: number | null;
+  tariffPerKwh: number | null;
+  currency: string | null;
+  co2GPerKwh: number | null;
+}
+
+export type IdleAction = 'sleep' | 'hibernate' | 'shutDown';
+
+export interface IdleExceptions {
+  audio: boolean;
+  fullScreen: boolean;
+  otherStayAwake: boolean;
+  cpuPct: number | null;
+  diskBytesPerS: number | null;
+  netBytesPerS: number | null;
+  programs: string[];
+}
+
+export interface IdleSettings {
+  enabled: boolean;
+  action: IdleAction;
+  afterSecs: number;
+  countdownSecs: number;
+  acOnly: boolean;
+  exceptions: IdleExceptions;
+}
+
+/** How often a timed action repeats (externally tagged like the engine's enum). */
+export type Repeat = 'once' | 'daily' | { weekdays: number };
+
+export interface TimedAction {
+  id: number;
+  action: IdleAction;
+  atMinute: number;
+  repeat: Repeat;
+  lastDay: number | null;
+  done: boolean;
+}
+
+export interface TimedSettings {
+  enabled: boolean;
+  entries: TimedAction[];
+}
+
+export interface PowerSettings {
+  keepAwake: KeepAwakeSettings;
+  energy: EnergySettings;
+  idle: IdleSettings;
+  timed: TimedSettings;
+}
+
+export type BlockerKind = 'audio' | 'fullScreen' | 'stayAwake' | 'cpu' | 'disk' | 'network' | 'program' | 'battery';
+
+/** One reason the action waits; `cantTell` means Dyno could not read it, which blocks too. */
+export interface Blocker {
+  kind: BlockerKind;
+  reason: string;
+  cantTell: boolean;
+}
+
+/** The idle and timed actions' state (externally tagged). */
+export type IdleView =
+  | 'disabled'
+  | { unavailable: { reason: string } }
+  | { watching: { idleSecs: number; blockers: Blocker[]; snoozedUntil: Timestamp | null } }
+  | { countdown: { action: IdleAction; deadline: Timestamp; cause: 'idle' | 'timed' } }
+  | { acting: { action: IdleAction; since: Timestamp } }
+  | { stopped: { why: string } };
+
+/** One day (or the whole range) of the energy report. */
+export interface EnergyDay {
+  dayStart: Timestamp;
+  onSecs: number;
+  sleepSecs: number;
+  /** Seconds Dyno was not running, so it does not know. */
+  unknownSecs: number;
+  kwh: number | null;
+  cost: number | null;
+  co2Kg: number | null;
+}
+
+/** The energy report: the person's own watts times the time Dyno saw, labelled as an estimate. */
+export interface EnergyReport {
+  enabled: boolean;
+  days: EnergyDay[];
+  totals: EnergyDay;
+  source: 'estimated' | 'notSet';
+  sleepEnergyCounted: boolean;
+  currency: string | null;
+  trackingSince: Timestamp | null;
 }

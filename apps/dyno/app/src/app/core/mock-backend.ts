@@ -72,7 +72,10 @@ import type {
   BenchExportFormat,
   BenchEstimateRequest,
   BenchRunEstimate,
+  AwakeSpec,
+  EnergyReport,
   BackupReport,
+  PowerView,
   ChangeTimeline,
   ChangesQuery,
   FinderQuery,
@@ -112,6 +115,7 @@ import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, moc
 import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
 import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
+import { type MockIdleVariant, MockPower, type MockPowerVariant, mockEnergy } from './mock/power';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { MOCK_ESTIMATES, mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
@@ -159,6 +163,12 @@ export interface MockOptions {
   backup?: MockBackupVariant;
   /** The helper's state at the start (`?helper=ready`, `off`, `silent`, `foreign`, `outdated`, `missing`, `notIncluded`; default `off`). */
   helper?: MockHelperVariant;
+  /** Which keep-awake state the mock starts in (`?power=unavailable|ended|waiting`; default off). */
+  power?: MockPowerVariant;
+  /** Start with the energy numbers filled in (`?energy=priced`): watts, tariff, currency and a CO2 factor. */
+  energyPriced?: boolean;
+  /** Which idle state the mock starts in (`?idle=countdown|watching|blocked|acting|stopped|unavailable`). */
+  idle?: MockIdleVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
   /** Keep the widget layouts in `localStorage` (the browser build; unit tests keep them in memory). */
@@ -200,6 +210,9 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
     ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
     ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
+    ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
+    ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
+    ...(['unavailable', 'ended', 'waiting', 'busy', 'quiet'].includes(q.get('power') ?? '') ? { power: q.get('power') as MockPowerVariant } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -291,6 +304,8 @@ export class MockBackend implements DynoBackend {
   private helperVariant: MockHelperVariant;
   private toolInstalled = false;
   private backupCheckedAt: number;
+  private readonly keepAwake: MockPower;
+  private readonly powerListeners = new Set<(v: PowerView) => void>();
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -337,6 +352,16 @@ export class MockBackend implements DynoBackend {
     this.backupVariant = options.backup ?? 'mixed';
     this.helperVariant = options.helper ?? 'off';
     this.backupCheckedAt = this.start - 40 * MIN;
+    this.keepAwake = new MockPower(options.power ?? 'normal', this.now, options.idle);
+    if (options.idle && options.idle !== 'disabled') {
+      // The engine is the single source: a state that says the rule is running comes with the rule switched on and its action.
+      const p = this.settingsValue.power;
+      this.settingsValue = { ...this.settingsValue, power: { ...p, idle: { ...p.idle, enabled: true, action: options.idle === 'acting' || options.idle === 'stopped' ? 'shutDown' : 'sleep' } } };
+    }
+    if (options.energyPriced) {
+      const p = this.settingsValue.power;
+      this.settingsValue = { ...this.settingsValue, power: { ...p, energy: { ...p.energy, wattsOn: 65, wattsSleep: 1.5, tariffPerKwh: 0.32, currency: 'S$', co2GPerKwh: 408 } } };
+    }
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
     this.activityLog = demoActivity(this.start);
     this.alertLog = demoAlerts(this.start);
@@ -1302,6 +1327,43 @@ export class MockBackend implements DynoBackend {
       this.settingsValue = copy(settings);
       return this.settingsValue;
     });
+  }
+
+  powerState(): Promise<PowerView> {
+    return this.reply('powerState', () => this.keepAwake.view());
+  }
+
+  powerKeepAwake(spec: AwakeSpec): Promise<PowerView> {
+    return this.reply('powerKeepAwake', () => {
+      if (!this.settingsValue.power.keepAwake.enabled) throw err('badRequest', 'Keep awake is turned off in Settings.');
+      return this.pushPower(this.keepAwake.start(spec));
+    });
+  }
+
+  powerIdleCancel(): Promise<PowerView> {
+    return this.reply('powerIdleCancel', () => this.pushPower(this.keepAwake.idleCancel()));
+  }
+
+  powerIdleSnooze(minutes: number): Promise<PowerView> {
+    return this.reply('powerIdleSnooze', () => this.pushPower(this.keepAwake.idleSnooze(minutes)));
+  }
+
+  energyReport(days: number): Promise<EnergyReport> {
+    return this.reply('energyReport', () => mockEnergy(days, this.now(), this.settingsValue.power.energy));
+  }
+
+  powerStopKeepAwake(): Promise<PowerView> {
+    return this.reply('powerStopKeepAwake', () => this.pushPower(this.keepAwake.stop()));
+  }
+
+  onPower(listener: (v: PowerView) => void): Unsubscribe {
+    this.powerListeners.add(listener);
+    return () => this.powerListeners.delete(listener);
+  }
+
+  private pushPower(view: PowerView): PowerView {
+    for (const l of [...this.powerListeners]) l(view);
+    return view;
   }
 
   upsertAlertRule(rule: CustomAlertRule): Promise<Settings> {

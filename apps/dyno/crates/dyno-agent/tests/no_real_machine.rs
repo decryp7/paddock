@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-const NEEDLES: [&str; 8] = [
+const NEEDLES: [&str; 11] = [
     "OsVolumes",
     "DiskPorts::os",
     "start_os",
@@ -17,6 +17,9 @@ const NEEDLES: [&str; 8] = [
     "OsReverseDns",
     "OsTraffic",
     "OsCounters",
+    "PowerPorts::os",
+    "system_power",
+    "system_events",
 ];
 
 /// Where the real ones are defined or chosen: the production code of exactly these files.

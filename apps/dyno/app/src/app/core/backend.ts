@@ -48,6 +48,9 @@ import type {
   CounterObjectList,
   CounterReading,
   NetworkQuery,
+  AwakeSpec,
+  EnergyReport,
+  PowerView,
   NetworkSnapshot,
   BenchOverview,
   StartBenchmark,
@@ -172,6 +175,16 @@ export interface DynoBackend {
   throttling(): Promise<ThrottleOverview>;
   lifespan(): Promise<LifespanOverview>;
   baselines(): Promise<BaselineOverview>;
+
+  // Power (ADR 0032): keep awake. The agent holds the OS object; a change is pushed to every window.
+  powerState(): Promise<PowerView>;
+  powerKeepAwake(spec: AwakeSpec): Promise<PowerView>;
+  powerStopKeepAwake(): Promise<PowerView>;
+  powerIdleCancel(): Promise<PowerView>;
+  powerIdleSnooze(minutes: number): Promise<PowerView>;
+  onPower(listener: (v: PowerView) => void): Unsubscribe;
+  /** The energy report for the last `days` local days (1 to 366). */
+  energyReport(days: number): Promise<EnergyReport>;
 
   // Open ports and connections (observe-only), and "Look up IP" (the shell opens the browser; Dyno never fetches).
   network(query: NetworkQuery): Promise<NetworkSnapshot>;

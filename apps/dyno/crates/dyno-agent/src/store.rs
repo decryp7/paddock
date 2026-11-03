@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS alerts (id TEXT PRIMARY KEY, at INTEGER NOT NULL, dat
 CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, at INTEGER NOT NULL, info TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS boots (at INTEGER PRIMARY KEY, boot_secs REAL, ready_secs REAL);
 CREATE TABLE IF NOT EXISTS scores (at INTEGER PRIMARY KEY, score INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS power_events (at INTEGER NOT NULL, kind TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS power_events_at ON power_events (at);
 ";
 
 fn tier_id(t: Tier) -> i64 {
@@ -364,6 +366,38 @@ impl Store {
         Ok(rows.filter_map(|r| r.ok()).filter_map(|e| parse(&e)).collect())
     }
 
+    /// Notes a power event (the energy report reads them back).
+    pub fn put_power_event(&self, e: &dyno_core::power::energy::PowerLogEntry) -> Result<()> {
+        let kind = serde_json::to_value(e.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default();
+        self.conn
+            .execute("INSERT INTO power_events (at, kind) VALUES (?1, ?2)", params![e.at.millis(), kind])?;
+        Ok(())
+    }
+
+    /// The power events at or after `since`, oldest first, and the one note before it (it says what the state was at `since`).
+    pub fn power_events(&self, since: Timestamp) -> Result<Vec<dyno_core::power::energy::PowerLogEntry>> {
+        let parse_row = |r: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, String)> { Ok((r.get(0)?, r.get(1)?)) };
+        let mut rows: Vec<(i64, String)> = Vec::new();
+        let mut before = self
+            .conn
+            .prepare_cached("SELECT at, kind FROM power_events WHERE at < ?1 ORDER BY at DESC LIMIT 1")?;
+        rows.extend(before.query_map([since.millis()], parse_row)?.filter_map(|r| r.ok()));
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT at, kind FROM power_events WHERE at >= ?1 ORDER BY at ASC, rowid ASC LIMIT 200000")?;
+        rows.extend(st.query_map([since.millis()], parse_row)?.filter_map(|r| r.ok()));
+        Ok(rows
+            .into_iter()
+            .filter_map(|(at, kind)| {
+                let kind = serde_json::from_value(serde_json::Value::String(kind)).ok()?;
+                Some(dyno_core::power::energy::PowerLogEntry { at: Timestamp(at), kind })
+            })
+            .collect())
+    }
+
     /// Stores an alert.
     pub fn put_alert(&self, a: &Alert) -> Result<()> {
         self.conn.execute(
@@ -512,7 +546,7 @@ impl Store {
         let long = r.cutoff(Tier::Hour, now).millis();
         let minute = r.cutoff(Tier::Minute, now).millis();
         self.conn.execute("DELETE FROM app_minutes WHERE at < ?1", [minute])?;
-        for table in ["disk_free", "events", "boots", "scores", "alerts", "issues"] {
+        for table in ["disk_free", "events", "boots", "scores", "alerts", "issues", "power_events"] {
             self.conn.execute(&format!("DELETE FROM {table} WHERE at < ?1"), [long])?;
         }
         self.conn.execute(
@@ -532,6 +566,31 @@ mod tests {
     use super::*;
     use dyno_core::activity::ActivityKind;
     use dyno_core::time::{HOUR, MINUTE};
+
+    #[test]
+    fn power_events_come_back_in_order_with_the_note_before_the_range() {
+        use dyno_core::power::energy::{PowerLogEntry, PowerLogKind};
+        let store = Store::memory().unwrap();
+        for (at, kind) in [
+            (10, PowerLogKind::AgentStarted),
+            (20, PowerLogKind::Slept),
+            (30, PowerLogKind::Woke),
+            (40, PowerLogKind::Alive),
+        ] {
+            store.put_power_event(&PowerLogEntry { at: Timestamp(at), kind }).unwrap();
+        }
+        let got = store.power_events(Timestamp(30)).unwrap();
+        assert_eq!(
+            got.iter().map(|e| (e.at.millis(), e.kind)).collect::<Vec<_>>(),
+            [(20, PowerLogKind::Slept), (30, PowerLogKind::Woke), (40, PowerLogKind::Alive)]
+        );
+        assert_eq!(store.power_events(Timestamp(0)).unwrap().len(), 4);
+        store.prune(Default::default(), Timestamp(10 * 365 * 86_400_000)).unwrap();
+        assert!(
+            store.power_events(Timestamp(0)).unwrap().is_empty(),
+            "old notes are pruned with the history"
+        );
+    }
 
     fn point(at: i64) -> HistoryPoint {
         HistoryPoint {

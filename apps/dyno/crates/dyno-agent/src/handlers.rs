@@ -139,6 +139,19 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             incoming.dashboard_v1 = core.settings.dashboard_v1.clone();
             incoming.menu_bar = core.settings.menu_bar.clone();
             incoming.popover = core.settings.popover.clone();
+            // What the timed actions did (last day run, done) is the agent's own: a window's copy never rewinds it.
+            for e in &mut incoming.power.timed.entries {
+                if let Some(cur) = core
+                    .settings
+                    .power
+                    .timed
+                    .entries
+                    .iter()
+                    .find(|c| c.id == e.id && c.at_minute == e.at_minute && c.repeat == e.repeat)
+                {
+                    (e.last_day, e.done) = (cur.last_day, cur.done);
+                }
+            }
             core.settings = incoming;
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
@@ -150,6 +163,11 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             // After the core lock is released: switching saved maps off waits for the cache writer (a save in progress can take
             // seconds), and the sampler takes the core lock every tick.
             shared.disk.apply_saved_maps(s.disk.saved_maps);
+            shared.power.configure_idle(shared);
+            if !s.power.keep_awake.enabled {
+                // Turning the feature off ends a hold already taken (and clears a notice).
+                shared.power.stop(shared);
+            }
             shared.wake_sampler();
             Ok(Reply::Settings(Box::new(s)))
         }
@@ -380,6 +398,23 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             startup.refresh();
             Ok(Reply::Startup(startup.list()?))
         }
+        Request::PowerState => Ok(Reply::Power(Box::new(shared.power.view()))),
+        Request::PowerKeepAwake { spec } => {
+            let enabled = lock(&shared.core).settings.power.keep_awake.enabled;
+            shared
+                .power
+                .start(shared, spec, enabled)
+                .map(|v| Reply::Power(Box::new(v)))
+                .map_err(bad)
+        }
+        Request::EnergyReport { days } => shared
+            .power
+            .energy(shared, days)
+            .map(|r| Reply::Energy(Box::new(r)))
+            .map_err(internal),
+        Request::PowerIdleCancel => Ok(Reply::Power(Box::new(shared.power.idle_cancel(shared)))),
+        Request::PowerIdleSnooze { minutes } => Ok(Reply::Power(Box::new(shared.power.idle_snooze(shared, minutes)))),
+        Request::PowerStopKeepAwake => Ok(Reply::Power(Box::new(shared.power.stop(shared)))),
         Request::Shutdown => {
             log::info!("Shutdown requested by a client");
             shared.request_stop();

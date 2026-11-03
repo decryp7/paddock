@@ -44,6 +44,8 @@ pub mod events {
     pub const WIDGET_LAYOUT: &str = "dyno://widget-layout";
     /// `Navigate`: a widget's button asks the main window to open a page or a Settings section.
     pub const NAVIGATE: &str = "dyno://navigate";
+    /// `PowerView`: the keep-awake state changed.
+    pub const POWER: &str = "dyno://power";
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -116,6 +118,8 @@ pub trait TrayPixels<R: Runtime>: Send + Sync {
     fn paint(&self, app: &AppHandle<R>, item: &str, frame: &crate::tray_model::Frame);
     /// Shows that the agent is not connected.
     fn show_disconnected(&self, app: &AppHandle<R>, frames: &[(String, crate::tray_model::Frame)]);
+    /// The tray menu's Keep awake entries follow `menu` (`None`: the menu has none).
+    fn set_power_menu(&self, app: &AppHandle<R>, menu: Option<&crate::power_menu::Menu>);
 }
 
 /// The tray icons of the menu bar or notification area.
@@ -136,6 +140,9 @@ impl TrayPixels<Wry> for NativePixels {
     fn show_disconnected(&self, app: &AppHandle<Wry>, frames: &[(String, crate::tray_model::Frame)]) {
         crate::tray::show_disconnected(app, frames);
     }
+    fn set_power_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::power_menu::Menu>) {
+        crate::tray::set_power_menu(app, menu);
+    }
 }
 
 /// Draws nothing (a test: no icon reaches the desktop).
@@ -152,6 +159,7 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
     }
     fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Frame) {}
     fn show_disconnected(&self, _: &AppHandle<R>, _: &[(String, crate::tray_model::Frame)]) {}
+    fn set_power_menu(&self, _: &AppHandle<R>, _: Option<&crate::power_menu::Menu>) {}
 }
 
 /// The installed app's shell glue (the commands' state).
@@ -197,6 +205,14 @@ pub struct ShellOf<R: Runtime> {
     open_alarms: Mutex<crate::tray_look::OpenAlarms>,
     /// The delay before the tray items show the agent is away (on the injected clock).
     away: crate::tray_away::AwayTimer,
+    /// The agent's last power view (the tray's Keep awake entries follow it).
+    power: Mutex<Option<dyno_core::power::PowerView>>,
+    /// `power.keepAwake.trayItem` and `.display` as last read from the settings.
+    power_tray: AtomicBool,
+    power_display: AtomicBool,
+    power_keep: Mutex<dyno_core::power::settings::KeepAwakeSettings>,
+    /// When the tray menu's time left was last drawn (it is drawn again after a minute, while a hold runs).
+    power_drawn_at: std::sync::atomic::AtomicI64,
 }
 
 impl<R: Runtime> ShellOf<R> {
@@ -229,6 +245,11 @@ impl<R: Runtime> ShellOf<R> {
             navigation: Mutex::new(None),
             popover_gate: Mutex::new(None),
             first_data: crate::first_data::FirstData::default(),
+            power: Mutex::new(None),
+            power_tray: AtomicBool::new(false),
+            power_display: AtomicBool::new(false),
+            power_keep: Mutex::new(Default::default()),
+            power_drawn_at: std::sync::atomic::AtomicI64::new(0),
         })
     }
 
@@ -260,6 +281,69 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
+    /// Draws the tray menu's Keep awake entries from the last power view (none when the setting is off).
+    fn draw_power_menu(&self) {
+        let now = now_millis();
+        self.power_drawn_at.store(now, Ordering::Relaxed);
+        let show_keep_awake = self.power_tray.load(Ordering::Relaxed);
+        let menu = lock(&self.power).as_ref().and_then(|v| {
+            let programs = if show_keep_awake { self.busiest_programs() } else { Vec::new() };
+            let mut m = crate::power_menu::menu(v, now, &programs, self.power_display.load(Ordering::Relaxed));
+            if show_keep_awake {
+                return Some(m);
+            }
+            // The Keep awake submenu is off, but a countdown to sleep or shut down always shows its line and Cancel (safety).
+            m.entries.clear();
+            m.header = None;
+            m.countdown_header.is_some().then_some(m)
+        });
+        self.pixels.set_power_menu(&self.app, menu.as_ref());
+    }
+
+    /// The busiest programs in the newest live update (root process of each app), for the "until a program quits" entries.
+    fn busiest_programs(&self) -> Vec<(u32, String)> {
+        lock(&self.last_live)
+            .as_ref()
+            .map(|l| {
+                l.top_cpu
+                    .iter()
+                    .filter_map(|g| g.pids.first().map(|p| (*p, g.name.clone())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A Keep awake entry of the tray menu was chosen: ask the agent (it answers with the new view, which is pushed back).
+    pub fn power_menu_chosen(&self, id: &str) {
+        let keep = lock(&self.power_keep).clone();
+        let Some(action) = crate::power_menu::action_of(id, self.power_display.load(Ordering::Relaxed), &keep) else {
+            return;
+        };
+        if action == crate::power_menu::Action::ToggleDisplay {
+            self.power_display.fetch_xor(true, Ordering::Relaxed);
+            self.draw_power_menu();
+            return;
+        }
+        let Some(link) = lock(&self.link).clone() else {
+            logging::info("keep awake from the tray: the agent is not connected");
+            return;
+        };
+        let request = match action {
+            crate::power_menu::Action::Start(spec) => Request::PowerKeepAwake { spec },
+            crate::power_menu::Action::Stop => Request::PowerStopKeepAwake,
+            crate::power_menu::Action::ToggleDisplay => return,
+            crate::power_menu::Action::CancelIdle => Request::PowerIdleCancel,
+            crate::power_menu::Action::SnoozeIdle => Request::PowerIdleSnooze { minutes: 30 },
+        };
+        let id = id.to_string();
+        let _ = std::thread::Builder::new()
+            .name("dyno-power-menu".into())
+            .spawn(move || match link.call(request) {
+                Ok(_) => logging::info(&format!("keep awake from the tray: {id} done")),
+                Err(e) => logging::info(&format!("keep awake from the tray: {id} failed: {}", e.message)),
+            });
+    }
+
     /// How many live updates arrived (for the log and tests).
     pub fn updates(&self) -> u64 {
         self.updates.load(Ordering::SeqCst)
@@ -276,6 +360,13 @@ impl<R: Runtime> ShellOf<R> {
             .set_policy(crate::tray_look::AlertPolicy::from_settings(settings));
         lock(&self.popover).set_layout(settings.popover.layout().placements.clone());
         self.notifications.store(settings.notifications, Ordering::Relaxed);
+        self.power_tray.store(
+            settings.power.keep_awake.tray_item && settings.power.keep_awake.enabled,
+            Ordering::Relaxed,
+        );
+        self.power_display.store(settings.power.keep_awake.display, Ordering::Relaxed);
+        *lock(&self.power_keep) = settings.power.keep_awake.clone();
+        self.draw_power_menu();
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
         let wanted = settings.launch_at_login;
         match previous {
@@ -537,6 +628,17 @@ impl<R: Runtime> ShellOf<R> {
 
 impl<R: Runtime> Sink for ShellOf<R> {
     fn live(&self, update: LiveUpdate) {
+        // The tray's "N min left" is drawn again after a minute while a hold with an end runs.
+        let (counting, holding) = lock(&self.power).as_ref().map_or((false, false), |v| {
+            (
+                matches!(v.idle, dyno_core::power::idle::IdleView::Countdown { .. }),
+                matches!(v.awake, dyno_core::power::awake::AwakeView::Holding { ends: Some(_), .. }),
+            )
+        });
+        // A countdown's seconds are drawn again every ten.
+        if now_millis() - self.power_drawn_at.load(Ordering::Relaxed) >= if counting { 10_000 } else { 60_000 } && (counting || holding) {
+            self.draw_power_menu();
+        }
         let n = self.updates.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(ms) = self.first_data.first_update(Instant::now()) {
             logging::info(&format!("first data {ms} ms after the connection"));
@@ -601,6 +703,32 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.emit(events::ALARM, change);
     }
 
+    fn power_changed(&self, view: dyno_core::power::PowerView) {
+        let was_counting = lock(&self.power)
+            .as_ref()
+            .is_some_and(|v| matches!(v.idle, dyno_core::power::idle::IdleView::Countdown { .. }));
+        if let (false, dyno_core::power::idle::IdleView::Countdown { action, deadline, .. }) = (was_counting, &view.idle) {
+            // The warning before anything happens: what, how long, and where to cancel.
+            use tauri_plugin_notification::NotificationExt;
+            let secs = (deadline.since(Timestamp(now_millis())) / 1000).max(0);
+            let verb = action.verb();
+            let body = format!("Dyno will {verb} this computer in {secs} seconds. Open Dyno's menu and choose Cancel {verb} to stop it.");
+            if let Err(e) = self
+                .app
+                .notification()
+                .builder()
+                .title(format!("Dyno is about to {verb}"))
+                .body(body)
+                .show()
+            {
+                logging::info(&format!("could not show the countdown notification: {e}"));
+            }
+        }
+        *lock(&self.power) = Some(view.clone());
+        self.draw_power_menu();
+        self.emit(events::POWER, view);
+    }
+
     fn disk_scan(&self, status: dyno_core::disk::scan::DiskScanStatus) {
         self.emit(events::DISK_SCAN, status);
     }
@@ -650,6 +778,11 @@ impl<R: Runtime> Sink for ShellOf<R> {
     fn connected(&self, link: &Arc<AgentLink>) {
         *lock(&self.link) = Some(link.clone());
         self.use_votes(link.clone());
+        match link.call(Request::PowerState) {
+            Ok(Reply::Power(v)) => self.power_changed(*v),
+            Ok(_) => {}
+            Err(e) => logging::info(&format!("could not read the power state: {}", e.message)),
+        }
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
             Ok(Reply::Settings(s)) => {

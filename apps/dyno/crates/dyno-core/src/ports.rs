@@ -7,7 +7,7 @@
 //! fails with [`PlatformError::NotFound`] (the pid was reused).
 
 use crate::facts::SystemFacts;
-use crate::metrics::SystemSample;
+use crate::metrics::{Reading, SystemSample};
 use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
 use crate::startup::StartupEntry;
 use crate::time::Timestamp;
@@ -138,6 +138,32 @@ pub trait UserActivity: Send {
     fn idle_secs(&mut self) -> Option<u64>;
     /// The process that owns the foreground window, when the OS tells (rules never throttle it).
     fn foreground_pid(&mut self) -> Option<crate::process::Pid>;
+}
+
+/// Puts the computer to sleep, hibernates it or shuts it down, always by the OS's normal path (never forced: an app with unsaved
+/// work may stop a shutdown). Tests never use a real one (ER-14): they use the fake, which records the request.
+pub trait PowerActions: Send + Sync {
+    /// Whether this action can be asked for here: `Available(())`, or why not (shown as is).
+    fn can(&self, action: crate::power::idle::IdleAction) -> Reading<()>;
+    /// Asks the OS to do it. `Ok` means the OS took the request, not that it happened.
+    fn request(&self, action: crate::power::idle::IdleAction) -> Result<(), PlatformError>;
+}
+
+/// What the idle rule's exceptions read from the OS: each is a value or "cannot tell" with the reason.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdleSignalsReading {
+    /// Whether audio is playing.
+    pub audio: Reading<bool>,
+    /// Whether a full-screen app or a presentation shows.
+    pub full_screen: Reading<bool>,
+    /// The names of the other programs that asked the computer to stay awake (Dyno's own hold is left out).
+    pub stay_awake: Reading<Vec<String>>,
+}
+
+/// The exceptions of the idle rule. One call may run an external tool, so the agent reads it only when it matters.
+pub trait IdleSignals: Send + Sync {
+    /// Reads every signal now.
+    fn read(&self) -> IdleSignalsReading;
 }
 
 #[cfg(test)]

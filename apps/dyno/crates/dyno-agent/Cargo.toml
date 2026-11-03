@@ -35,6 +35,8 @@ paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-net = { path = "../../../../crates/paddock-net" }
 paddock-download = { path = "../../../../crates/paddock-download", default-features = false }
 toml.workspace = true
+# The keep-awake guard over the platform's power port (ADR 0032).
+paddock-power = { path = "../../../../crates/paddock-power" }
 log = { version = "0.4", features = ["kv"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true

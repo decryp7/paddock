@@ -10,6 +10,13 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-service`: `privileged` (protected install, update and removal of a system service) and `hardening`
 - New `Hardening` on `ServiceSpec` (system services only): the Windows token privileges the SCM keeps (`sc privs`, checked with `sc qprivs` before the service starts), the service DACL that lets interactive users start it (`sc sdset`), and the systemd sandbox keys of ADR 0027. `Systemd::packaged()` enables and disables a unit a package ships without writing or removing it.
 - New `privileged` module: `layout` and `backend_for` per OS, `Installer` (plan, `ProtectedFiles` port, root-owned and not-group-or-world-writable checks, hash of the copy, Windows ACL by SID, bounded confirm, self-removal with the stop last), `run_elevated` (osascript, pkexec, UAC), `assess` (ask only when the protocol or the minimum version changed). `ScmConfig` gains `privileges` and `sddl`. No change for specs without hardening.
+### `paddock-power` (new): keep-awake guard and sleep/wake notifications
+- `KeepAwake` holds at most one OS sleep-prevention object behind the `PowerOs`/`Hold` ports (macOS `IOPMAssertionCreateWithName`, Windows `PowerCreateRequest`
+  with `SystemRequired` and, for `Scope::SystemAndDisplay`, `DisplayRequired`; Linux logind `Inhibit("sleep:idle", ...)` and, for the display, the desktop's
+  `org.freedesktop.ScreenSaver` when it offers one). A new hold is taken before the old one is released; the OS drops a hold with the process.
+  `SleepWakeSource` delivers `PowerEvent::Sleeping`/`Woke` (`IORegisterForSystemPower`, `PowerRegisterSuspendResumeNotification`, logind `PrepareForSleep`).
+  `FakePower` and `FakeEvents` are the doubles; the real adapters (`system_power`, `system_events`) run only in VMs (ER-14). The adapters are in
+  `native.rs`, which the coverage job leaves out (one declared alternative added to the regex in `ci.yml`).
 
 ### `paddock-shell`: `files_*` commands always have their service
 

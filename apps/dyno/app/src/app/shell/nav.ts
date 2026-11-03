@@ -29,6 +29,7 @@ export const NAV: NavItem[] = [
   { path: '/recorder', label: 'Flight recorder', icon: 'camera', load: () => import('../features/recorder/recorder-page').then((m) => m.RecorderPage) },
   { path: '/health', label: 'Health', icon: 'health', load: () => import('../features/health/health-page').then((m) => m.HealthPage) },
   { path: '/backup', label: 'Backup health', icon: 'restore', load: () => import('../features/backup/backup-page').then((m) => m.BackupPage) },
+  { path: '/power', label: 'Power', icon: 'power', load: () => import('../features/power/power-page').then((m) => m.PowerPage) },
   { path: '/extras', label: 'Extras', icon: 'layers', load: () => import('../features/extras/extras-page').then((m) => m.ExtrasPage) },
   { path: '/lifespan', label: 'Lifespan', icon: 'battery', load: () => import('../features/lifespan/lifespan-page').then((m) => m.LifespanPage) },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', load: () => import('../features/diagnostics/diagnostics-page').then((m) => m.DiagnosticsPage) },

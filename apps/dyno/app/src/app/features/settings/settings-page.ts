@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import { DEFAULT_POWER } from '../power/power-model';
+import type { EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -278,6 +279,64 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 </div>
               }
             </section>
+
+            <section class="card" aria-label="Power" id="power">
+              <h2>Power</h2>
+              <p class="sub">Dyno can keep your computer awake when you ask, from the Power page or the tray. It never changes your power settings, and it lets go when it stops.</p>
+              <div class="row">
+                <div class="lbl"><strong>Allow keep awake</strong><small>Off ends a hold in progress and turns the Power page's options off. Dyno holds only after you ask.</small></div>
+                <mat-slide-toggle [checked]="power().enabled" aria-label="Allow keep awake" (change)="setPower({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Keep the display on too</strong><small>The default for a new hold; you can change it each time.</small></div>
+                <mat-slide-toggle [checked]="power().display" [disabled]="!power().enabled" aria-label="Keep the display on too" (change)="setPower({ display: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Busy means CPU above</strong><small>For "while busy" holds (1 to 100 percent).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="100" [disabled]="!power().enabled" aria-label="CPU percent that counts as busy" [ngModel]="power().cpuPct" (ngModelChange)="setPower({ cpuPct: +$event })" /><span matTextSuffix>%</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Busy means network above</strong><small>Both directions added.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" [disabled]="!power().enabled" aria-label="Network kilobytes per second that count as busy" [ngModel]="kb(power().netBytesPerS)" (ngModelChange)="setPower({ netBytesPerS: +$event * 1024 })" /><span matTextSuffix>KB/s</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Busy means disk above</strong><small>Reads and writes added.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" [disabled]="!power().enabled" aria-label="Disk megabytes per second that count as busy" [ngModel]="mb(power().diskBytesPerS)" (ngModelChange)="setPower({ diskBytesPerS: +$event * 1048576 })" /><span matTextSuffix>MB/s</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Let go after it was quiet for</strong><small>How long none of the busy conditions may hold before a "while busy" hold ends (10 seconds to 1 hour).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10" max="3600" [disabled]="!power().enabled" aria-label="Seconds of quiet before a busy hold ends" [ngModel]="power().graceSecs" (ngModelChange)="setPower({ graceSecs: +$event })" /><span matTextSuffix>seconds</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Show Keep awake in the tray menu</strong><small>A submenu with the usual durations and a line saying how long is left.</small></div>
+                <mat-slide-toggle [checked]="power().trayItem" [disabled]="!power().enabled" aria-label="Show Keep awake in the tray menu" (change)="setPower({ trayItem: $event.checked })" />
+              </div>
+              <h3 class="sub-h">Energy</h3>
+              <div class="row">
+                <div class="lbl"><strong>Note when this computer is on or asleep</strong><small>Dyno records its own starts, stops, sleeps and wakes for the Energy tab. Off stops recording.</small></div>
+                <mat-slide-toggle [checked]="energy().enabled" aria-label="Note when this computer is on or asleep" (change)="setEnergy({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Watts when on</strong><small>Look at the power brick or a plug meter. Empty: no energy figures.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="10000" [disabled]="!energy().enabled" aria-label="Watts when the computer is on" [ngModel]="energy().wattsOn" (ngModelChange)="setEnergy({ wattsOn: num($event) })" /><span matTextSuffix>W</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Watts when asleep</strong><small>Empty: time asleep counts as 0 W.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="10000" [disabled]="!energy().enabled" aria-label="Watts when the computer is asleep" [ngModel]="energy().wattsSleep" (ngModelChange)="setEnergy({ wattsSleep: num($event) })" /><span matTextSuffix>W</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Price of one kWh</strong><small>Shows a cost. Empty: no cost.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="1000" step="0.01" [disabled]="!energy().enabled" aria-label="Price of one kilowatt hour" [ngModel]="energy().tariffPerKwh" (ngModelChange)="setEnergy({ tariffPerKwh: num($event) })" /></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Currency</strong><small>Shown before the cost, for example S$ or EUR.</small></div>
+                <mat-form-field class="num-in"><input matInput maxlength="8" [disabled]="!energy().enabled" aria-label="Currency" [ngModel]="energy().currency ?? ''" (ngModelChange)="setEnergy({ currency: $event ? $event : null })" /></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>CO₂ per kWh</strong><small>Your grid's figure. Empty: no CO₂.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="2000" [disabled]="!energy().enabled" aria-label="Grams of CO2 per kilowatt hour" [ngModel]="energy().co2GPerKwh" (ngModelChange)="setEnergy({ co2GPerKwh: num($event) })" /><span matTextSuffix>g</span></mat-form-field>
+              </div>
+            </section>
           </div>
         }
       </dy-async>
@@ -480,6 +539,24 @@ export class SettingsPage implements OnInit {
   /** What the person typed in each folder box (kept as typed, so a new line is not swallowed while they type). */
   private readonly rawOverrides = signal<Partial<Record<BackupTool, string>>>({});
   protected readonly backupProblem = computed(() => validateBackup(this.backup()));
+  protected readonly power = computed<KeepAwakeSettings>(() => this.draft()?.power?.keepAwake ?? DEFAULT_POWER.keepAwake);
+  protected setPower(p: Partial<KeepAwakeSettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), keepAwake: { ...this.power(), ...p } } } : d));
+  }
+  protected readonly energy = computed<EnergySettings>(() => this.draft()?.power?.energy ?? DEFAULT_POWER.energy);
+  protected setEnergy(p: Partial<EnergySettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), energy: { ...this.energy(), ...p } } } : d));
+  }
+  /** A number box's value, or null when it is empty (an unset figure is not 0). */
+  protected num(v: unknown): number | null {
+    return v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
+  }
+  protected kb(bytes: number): number {
+    return Math.round(bytes / 1024);
+  }
+  protected mb(bytes: number): number {
+    return Math.round(bytes / 1048576);
+  }
   protected setBackup(p: Partial<BackupSettings>): void {
     this.draft.update((d) => (d ? { ...d, backup: { ...this.backup(), ...p } } : d));
   }

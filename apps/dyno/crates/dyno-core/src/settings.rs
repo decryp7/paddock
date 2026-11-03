@@ -112,6 +112,8 @@ pub struct Settings {
     pub maintenance: crate::extras::maintenance::MaintenanceSettings,
     /// Backup health checks: how stale is too stale, and where to find the tools.
     pub backup: crate::backup::BackupSettings,
+    /// Power: keep awake (ADR 0032).
+    pub power: crate::power::settings::PowerSettings,
 }
 
 /// Which hardware findings may raise an alarm (the pages always show them).
@@ -160,6 +162,7 @@ impl Default for Settings {
             jobs: Default::default(),
             maintenance: Default::default(),
             backup: Default::default(),
+            power: Default::default(),
         }
     }
 }
@@ -183,6 +186,7 @@ impl Settings {
             .clamp(1_000, 30_000)
             .max(self.sampling.interval_ms);
         self.retention = self.retention.clamped();
+        self.power = self.power.normalised();
         self.alerts = self.alerts.clamped();
         self.baselines = self.baselines.clamped();
         self.web_api.port = self.web_api.port.max(1024);
@@ -208,6 +212,7 @@ impl Settings {
     /// it): a maintenance window or a backup override that does not make sense.
     pub fn check_extras(&self) -> Result<(), String> {
         self.maintenance.validate()?;
+        self.power.timed.validate()?;
         self.backup.validate()
     }
 }

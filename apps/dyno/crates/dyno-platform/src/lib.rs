@@ -28,6 +28,7 @@ pub mod links;
 pub mod network;
 pub mod nt;
 pub mod parse;
+pub mod power_actions;
 pub mod priority;
 pub mod process;
 pub mod processes;
@@ -86,6 +87,32 @@ pub struct Platform {
     pub network: NetworkPorts,
     /// The throttle, SSD wear and battery readers.
     pub hardware: HardwareReaders,
+    /// Keep awake and sleep/wake notifications (ADR 0032).
+    pub power: PowerPorts,
+}
+
+/// The power ports of a [`Platform`]: the OS's sleep-prevention object and its sleep and wake notifications.
+pub struct PowerPorts {
+    /// Takes the OS hold that keeps the computer awake.
+    pub os: std::sync::Arc<dyn paddock_power::PowerOs>,
+    /// Sleep, hibernate and shut down by the OS's normal path.
+    pub actions: std::sync::Arc<dyn dyno_core::ports::PowerActions>,
+    /// The idle rule's exceptions (audio, full screen, other programs' stay-awake requests).
+    pub signals: std::sync::Arc<dyn dyno_core::ports::IdleSignals>,
+    /// Sleep and wake notifications.
+    pub events: std::sync::Arc<dyn paddock_power::SleepWakeSource>,
+}
+
+impl PowerPorts {
+    /// This machine's own adapters. Only the real wiring of each OS uses it, never a test (ER-14).
+    pub fn os() -> PowerPorts {
+        PowerPorts {
+            os: std::sync::Arc::from(paddock_power::system_power()),
+            actions: std::sync::Arc::new(power_actions::OsPowerActions),
+            signals: std::sync::Arc::new(power_actions::OsIdleSignals),
+            events: std::sync::Arc::from(paddock_power::system_events()),
+        }
+    }
 }
 
 /// The network ports of a [`Platform`]: what the Network page reads.

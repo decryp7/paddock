@@ -62,7 +62,10 @@ import type {
   BenchExportFormat,
   BenchEstimateRequest,
   BenchRunEstimate,
+  AwakeSpec,
+  EnergyReport,
   BackupReport,
+  PowerView,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
@@ -106,6 +109,7 @@ export const EVENTS = {
   alert: 'dyno://alert',
   activity: 'dyno://activity',
   agent: 'dyno://agent',
+  power: 'dyno://power',
   alarm: 'dyno://alarm',
   diskScan: 'dyno://disk-scan',
   diskVolumes: 'dyno://disk-volumes',
@@ -152,6 +156,7 @@ export class TauriBackend implements DynoBackend {
   private readonly alertChannel: EventChannel<Alert>;
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
+  private readonly powerChannel: EventChannel<PowerView>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
   private readonly diskScanChannel: EventChannel<DiskScanStatus>;
   private readonly diskVolumesChannel: EventChannel<Volume[]>;
@@ -171,6 +176,7 @@ export class TauriBackend implements DynoBackend {
     this.alertChannel = new EventChannel(listenFn, EVENTS.alert);
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
+    this.powerChannel = new EventChannel(listenFn, EVENTS.power);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
     this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
     this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
@@ -203,6 +209,10 @@ export class TauriBackend implements DynoBackend {
 
   onActivity(listener: (a: ActivityEntry) => void): Unsubscribe {
     return this.activityChannel.add(listener);
+  }
+
+  onPower(listener: (v: PowerView) => void): Unsubscribe {
+    return this.powerChannel.add(listener);
   }
 
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe {
@@ -677,6 +687,32 @@ export class TauriBackend implements DynoBackend {
 
   backup(): Promise<BackupReport> {
     return this.request('backup');
+  }
+
+  // ----------------------------------------------------------------------------------------------------- power
+
+  powerState(): Promise<PowerView> {
+    return this.request('powerState');
+  }
+
+  powerKeepAwake(spec: AwakeSpec): Promise<PowerView> {
+    return this.request({ powerKeepAwake: { spec } });
+  }
+
+  powerIdleCancel(): Promise<PowerView> {
+    return this.request('powerIdleCancel');
+  }
+
+  powerIdleSnooze(minutes: number): Promise<PowerView> {
+    return this.request({ powerIdleSnooze: { minutes } });
+  }
+
+  energyReport(days: number): Promise<EnergyReport> {
+    return this.request({ energyReport: { days } });
+  }
+
+  powerStopKeepAwake(): Promise<PowerView> {
+    return this.request('powerStopKeepAwake');
   }
 
   // ------------------------------------------------------------------------------------------------------ jobs

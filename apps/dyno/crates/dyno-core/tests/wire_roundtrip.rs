@@ -96,6 +96,7 @@ fn tag_message(v: &Message) -> &'static str {
         Message::DiskVolumes(_) => "DiskVolumes",
         Message::Job(_) => "Job",
         Message::WidgetLayoutChanged(_) => "WidgetLayoutChanged",
+        Message::PowerChanged(_) => "PowerChanged",
     }
 }
 
@@ -261,6 +262,12 @@ fn tag_request(v: &Request) -> &'static str {
         Request::ForgetSavedDiskMap { .. } => "ForgetSavedDiskMap",
         Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
         Request::HelperStatus => "HelperStatus",
+        Request::PowerState => "PowerState",
+        Request::PowerKeepAwake { .. } => "PowerKeepAwake",
+        Request::PowerStopKeepAwake => "PowerStopKeepAwake",
+        Request::PowerIdleCancel => "PowerIdleCancel",
+        Request::PowerIdleSnooze { .. } => "PowerIdleSnooze",
+        Request::EnergyReport { .. } => "EnergyReport",
         Request::SaveBenchmarks { .. } => "SaveBenchmarks",
         Request::BenchGpuAdapters => "BenchGpuAdapters",
         Request::BenchEstimate { .. } => "BenchEstimate",
@@ -351,6 +358,8 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::WidgetLayout(_) => "WidgetLayout",
         Reply::PopoverValues(_) => "PopoverValues",
         Reply::HelperStatus(_) => "HelperStatus",
+        Reply::Power(_) => "Power",
+        Reply::Energy(_) => "Energy",
         Reply::GpuAdapters(_) => "GpuAdapters",
         Reply::BenchEstimate(_) => "BenchEstimate",
         Reply::Intel(_) => "Intel",
@@ -644,6 +653,12 @@ fn request_samples() -> Vec<Request> {
         Request::ForgetSavedDiskMap { scan: 1 },
         Request::ForgetSavedDiskMaps,
         Request::HelperStatus,
+        Request::PowerState,
+        Request::PowerKeepAwake { spec: zero() },
+        Request::PowerStopKeepAwake,
+        Request::PowerIdleCancel,
+        Request::PowerIdleSnooze { minutes: 5 },
+        Request::EnergyReport { days: 30 },
         Request::IntelStatus,
         Request::IntelEdit { edit: zero() },
         Request::GeoSummary,
@@ -824,6 +839,8 @@ fn reply_samples() -> Vec<Reply> {
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),
+        Reply::Power(Box::default()),
+        Reply::Energy(Box::new(zero())),
         Reply::GpuAdapters(vec![]),
         Reply::BenchEstimate(None),
         Reply::Intel(Box::default()),
@@ -856,6 +873,7 @@ fn message_samples() -> Vec<Message> {
         Message::DiskVolumes(vec![]),
         Message::Job(Box::new(wire_job())),
         Message::WidgetLayoutChanged(dyno_core::widgets::DynoSurface::Popover),
+        Message::PowerChanged(Box::default()),
     ]
 }
 

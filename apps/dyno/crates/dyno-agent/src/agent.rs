@@ -290,6 +290,8 @@ pub struct Shared {
     pub cache: Option<crate::cache::Cache>,
     /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
     pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
+    /// Keep awake: the OS hold and its state machine (ADR 0032).
+    pub power: Arc<crate::power::PowerCentre>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -448,6 +450,7 @@ impl Shared {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
+        let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
         let own_tools = dirs.tools();
@@ -464,6 +467,7 @@ impl Shared {
             counters,
             network,
             hardware,
+            power,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
             firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
@@ -511,6 +515,13 @@ impl Shared {
                 settings_limits,
             )),
             helper: crate::helper_os::centre(),
+            power: Arc::new(crate::power::PowerCentre::new(
+                power.os,
+                power.events,
+                power.actions,
+                power.signals,
+                power_marker,
+            )),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
@@ -538,6 +549,7 @@ impl Shared {
     pub fn request_stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
         self.wake_sampler();
+        self.power.wake();
     }
 
     /// Cuts the sampler's sleep short (a subscriber arrived, settings changed, the agent is stopping).

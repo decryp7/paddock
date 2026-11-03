@@ -1,6 +1,6 @@
 # Dyno — engineering rules for coding agents and contributors
 
-Dyno watches your PC and changes nothing on it ([ADR 0021](docs/adr/0021-monitoring-only.md)): a pure Rust core (`crates/dyno-core`), OS adapters
+Dyno watches your PC and, when you ask, manages its power and nothing else ([ADR 0021](docs/adr/0021-monitoring-only.md), amended by [ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)): a pure Rust core (`crates/dyno-core`), OS adapters
 (`crates/dyno-platform`), a background agent that samples, keeps history and raises alarms (`crates/dyno-agent`), one IPC (the family's `paddock-ipc`) shared with out-of-process plugins
 (`crates/dyno-plugin-api`, `crates/dyno-plugin-host`), a Tauri 2 shell (`app/src-tauri`) and an Angular UI
 (`app/src`). See README.md for what it does and `docs/adr/` for why it is built this way.
@@ -50,9 +50,9 @@ Apply these deliberately. They are not decoration:
 
 ## Safety
 
-Dyno 1.0.0 only watches ([ADR 0021](docs/adr/0021-monitoring-only.md)). Therefore:
+Dyno only watches ([ADR 0021](docs/adr/0021-monitoring-only.md)), with one exception: power state, on the person's request ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md): keep awake, and later sleep and shut down by the normal path, never forced). Therefore:
 
-- **Never change the machine.** No process action (end, suspend, cap, priority), no delete, move or restore of files, no
+- **Never change the machine** (power state on request is the one exception; tests never hold, sleep or wake a real machine: fakes behind `paddock_power::PowerOs`). No process action (end, suspend, cap, priority), no delete, move or restore of files, no
   setting or startup change, no tuning. Code that does any of this is removed, not hidden behind a flag. What Dyno writes is its
   own data: history, settings, alarm acknowledgements, mutes and notes, snapshots, baselines and the exports the user saves.
 - **Reads are bounded.** External tools and OS calls run with timeouts; a missing tool or right is an unavailable reading with a

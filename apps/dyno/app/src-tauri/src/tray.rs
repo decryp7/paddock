@@ -16,7 +16,7 @@ use paddock_window::tray::{item, TrayView, QUIT_ID, SHOW_ID};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime, Wry};
 
@@ -30,6 +30,8 @@ pub fn tray_id(item: &str) -> String {
 pub struct TrayState {
     /// The spec each existing icon was made from (what [`plan_sync`] compares the wanted items with).
     items: Mutex<HashMap<String, ItemSpec>>,
+    /// The Keep awake entries every icon's menu carries (none: the menu is Open and Quit only).
+    power: Mutex<Option<crate::power_menu::Menu>>,
     painted: Mutex<HashMap<String, bool>>,
     /// Per item: what was last sent and how many frames were drawn (the tooltip changes rarely, a picture every second).
     drawn: Mutex<HashMap<String, Drawn>>,
@@ -78,14 +80,71 @@ pub fn dark_taskbar() -> bool {
 }
 
 fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
-    Menu::with_items(
-        app,
-        &[
-            &MenuItem::with_id(app, SHOW_ID, "Open Dyno", true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, QUIT_ID, "Quit Dyno", true, None::<&str>)?,
-        ],
-    )
+    let power = app.try_state::<TrayState>().and_then(|s| lock(&s.power).clone());
+    let menu = Menu::new(app)?;
+    menu.append(&MenuItem::with_id(app, SHOW_ID, "Open Dyno", true, None::<&str>)?)?;
+    if let Some(power) = power {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+        if let Some(header) = &power.countdown_header {
+            menu.append(&MenuItem::with_id(app, "dy.awake.idle-header", header, false, None::<&str>)?)?;
+            for e in &power.countdown {
+                menu.append(&MenuItem::with_id(app, &e.id, &e.text, e.enabled, None::<&str>)?)?;
+            }
+        }
+        if let Some(header) = &power.header {
+            menu.append(&MenuItem::with_id(app, "dy.awake.header", header, false, None::<&str>)?)?;
+        }
+        if !power.entries.is_empty() {
+            let sub = Submenu::with_id(app, "dy.awake", "Keep awake", true)?;
+            for e in &power.entries {
+                sub.append(&CheckMenuItem::with_id(app, &e.id, &e.text, e.enabled, e.checked, None::<&str>)?)?;
+            }
+            sub.append(&PredefinedMenuItem::separator(app)?)?;
+            sub.append(&CheckMenuItem::with_id(
+                app,
+                &power.display.id,
+                &power.display.text,
+                power.display.enabled,
+                power.display.checked,
+                None::<&str>,
+            )?)?;
+            for (id, title, entries) in [
+                ("dy.awake.busy", "While busy", &power.busy),
+                ("dy.awake.prog", "Until a program quits", &power.programs),
+            ] {
+                let inner = Submenu::with_id(app, id, title, !entries.is_empty())?;
+                for e in entries {
+                    inner.append(&MenuItem::with_id(app, &e.id, &e.text, e.enabled, None::<&str>)?)?;
+                }
+                sub.append(&inner)?;
+            }
+            menu.append(&sub)?;
+        }
+    }
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(app, QUIT_ID, "Quit Dyno", true, None::<&str>)?)?;
+    Ok(menu)
+}
+
+/// The Keep awake entries changed: every icon's menu is rebuilt (`None`: the menu has none).
+pub fn set_power_menu(app: &AppHandle<Wry>, menu: Option<&crate::power_menu::Menu>) {
+    if app.try_state::<TrayState>().is_none() {
+        app.manage(TrayState::default());
+    }
+    let state = app.state::<TrayState>();
+    *lock(&state.power) = menu.cloned();
+    let ids: Vec<String> = lock(&state.items).keys().cloned().collect();
+    for id in ids {
+        let Some(tray) = app.tray_by_id(&tray_id(&id)) else { continue };
+        match build_menu(app) {
+            Ok(m) => {
+                if let Err(e) = tray.set_menu(Some(m)) {
+                    logging::info(&format!("tray icon {}: the menu could not be updated: {e}", tray_id(&id)));
+                }
+            }
+            Err(e) => logging::info(&format!("tray icon {}: the menu could not be built: {e}", tray_id(&id))),
+        }
+    }
 }
 
 /// The notification-area icon size now: the taskbar's DPI on Windows (queried from the taskbar window, cheap enough for every

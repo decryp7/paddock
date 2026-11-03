@@ -88,6 +88,8 @@ pub trait Sink: Send + Sync {
     fn job(&self, _status: paddock_jobs::wire::WireSnapshot) {}
     /// A surface's widget layout was edited (by any window).
     fn widget_layout_changed(&self, _surface: dyno_core::widgets::DynoSurface) {}
+    /// The power view changed (a hold started, ended or was ended by the OS).
+    fn power_changed(&self, _view: dyno_core::power::PowerView) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.

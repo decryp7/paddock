@@ -40,6 +40,7 @@ pub mod netwatch;
 pub mod network;
 pub mod paths;
 pub mod popover;
+pub mod power;
 pub mod recorder;
 pub mod region;
 pub mod rollup;
@@ -275,6 +276,13 @@ impl Running {
                     netwatch::run(&s)
                 })
                 .map_err(|e| format!("could not start the network change watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-power".into())
+                .spawn(move || power::run(&s))
+                .map_err(|e| format!("could not start the power watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

@@ -1239,6 +1239,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-net",
+ "paddock-power",
  "paddock-proc",
  "paddock-service",
  "paddock-widgets",
@@ -1414,6 +1415,7 @@ dependencies = [
  "log",
  "netstat2",
  "paddock-jobs",
+ "paddock-power",
  "paddock-proc",
  "plist",
  "serde",
@@ -4050,6 +4052,18 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "paddock-power"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

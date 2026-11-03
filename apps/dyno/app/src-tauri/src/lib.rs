@@ -17,6 +17,7 @@ pub mod logging;
 pub mod login;
 pub mod login_item;
 pub mod popover;
+pub mod power_menu;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -251,7 +252,11 @@ pub fn app<R: Runtime>(
     shell
         .tray(move |app| {
             tauri::Manager::manage(app, tray::popovers());
-            tray::tray(tray_backend)
+            tray::tray(tray_backend).on_action(|app, id| {
+                if let Some(shell) = tauri::Manager::try_state::<Arc<shell::ShellOf<R>>>(app) {
+                    shell.power_menu_chosen(id);
+                }
+            })
         })
         .launch(launch)
         .add_to(builder)

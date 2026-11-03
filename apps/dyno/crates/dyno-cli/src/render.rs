@@ -311,6 +311,73 @@ fn trim_number(x: f64) -> String {
     }
 }
 
+/// The keep-awake state in words (the CLI's `dyno awake`).
+pub fn awake_text(v: &dyno_core::power::PowerView) -> String {
+    use dyno_core::power::awake::{AwakeScope, AwakeUntil, AwakeView};
+    let display = |s: AwakeScope| {
+        if s == AwakeScope::SystemAndDisplay {
+            ", display kept on"
+        } else {
+            ""
+        }
+    };
+    let until = |u: &AwakeUntil| match u {
+        AwakeUntil::Indefinite => "until `dyno awake off`".to_string(),
+        AwakeUntil::For { minutes } => format!("for {minutes} min"),
+        AwakeUntil::At { minute_of_day } => format!("until {:02}:{:02}", minute_of_day / 60, minute_of_day % 60),
+        AwakeUntil::WhileProcess { .. } => "while the program you chose runs".to_string(),
+        AwakeUntil::WhileBusy { .. } => "while the computer is busy".to_string(),
+    };
+    let mut text = match &v.awake {
+        AwakeView::Off => "Not keeping the computer awake.\n".to_string(),
+        AwakeView::Holding { spec, os_ref, .. } => format!(
+            "Keeping the computer awake {}{} ({os_ref}).\n",
+            until(&spec.until),
+            display(spec.scope)
+        ),
+        AwakeView::Waiting { why, .. } => format!("Keep awake is paused: {why}. It is taken again when the computer wakes.\n"),
+        AwakeView::Ended { why, .. } => format!("Keep awake ended: {why}. Turn it on again with: dyno awake on\n"),
+    };
+    if let dyno_core::power::Capability::CantTell { reason } = &v.caps.keep_awake {
+        text.push_str(&format!("Keep awake is not available here: {reason}.\n"));
+    }
+    text
+}
+
+/// The idle and timed rules' state in words (the CLI's `dyno idle`).
+pub fn idle_text(v: &dyno_core::power::idle::IdleView) -> String {
+    use dyno_core::power::idle::{Cause, IdleView};
+    match v {
+        IdleView::Disabled => "Sleep and shut down rules are off.\n".to_string(),
+        IdleView::Unavailable { reason } => format!("The idle rule cannot work here: {reason}\n"),
+        IdleView::Watching {
+            idle_secs,
+            blockers,
+            snoozed_until,
+        } => {
+            let mut t = format!("Watching: idle for {idle_secs} s.\n");
+            if snoozed_until.is_some() {
+                t.push_str("Snoozed for now.\n");
+            }
+            for b in blockers {
+                t.push_str(&format!("Waiting because {}.\n", b.reason));
+            }
+            t
+        }
+        IdleView::Countdown { action, cause, .. } => format!(
+            "Counting down to {} ({}). Stop it with: dyno idle cancel\n",
+            action.verb(),
+            if *cause == Cause::Timed {
+                "a timed action"
+            } else {
+                "the computer is idle"
+            }
+        ),
+        IdleView::Acting { action, .. } => format!("Asked the system to {}; waiting for it.\n", action.verb()),
+        IdleView::Stopped { why } => format!("{}. It will not try again until the computer is used.\n", why.trim_end_matches('.')),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +476,21 @@ mod tests {
         assert!(vals.contains("\\M\\F  1234 B"));
         assert!(vals.contains("not available: gone"));
         assert!(vals.contains("\\M\\H  0.50"));
+    }
+
+    #[test]
+    fn a_stopped_idle_rule_reads_with_one_full_stop() {
+        use dyno_core::power::idle::IdleView;
+        let t = idle_text(&IdleView::Stopped {
+            why: "Windows did not go to sleep.".into(),
+        });
+        assert_eq!(
+            t,
+            "Windows did not go to sleep. It will not try again until the computer is used.\n"
+        );
+        let t = idle_text(&IdleView::Stopped {
+            why: "Shutdown did not happen: an app may be asking you to save".into(),
+        });
+        assert!(t.starts_with("Shutdown did not happen: an app may be asking you to save. It will not"));
     }
 }
