@@ -1,9 +1,12 @@
 # 27. Dyno 1.1.0: the privileged helper, switched on by the user, started with the OS
 
-- Status: Proposed (2026-11-03). Open decisions D1 to D9 below; the recommendation for each is marked.
+- Status: Accepted (2026-11-03; user decisions 2026-11-03; independent review approved, round 1 and a delta review).
+  Decisions: D1 = L; D1a = the full plan ships in Dyno 1.1.0, and the slice list is the landing order only; D2 to D8 as
+  recommended; D9 yes.
 - Revision 2 (2026-11-03): answers the independent review (P1: caller identity never from a pid; callers restricted per
   request; `SeDebugPrivilege` measured or dropped. P2: family ADR links, ADR 0042 landing plan, release order, R1 wording, tool
   pins, R3, systemd hardening, log levels, the DMG ownership argument, ADR 0041, the smallest first slice).
+- Revision 3 (2026-11-03): the delta review's P2 (pipe squatting on Windows) and the user's decisions; accepted.
 - Date: 2026-11-03
 - Related:
   - Amends ADR [0016](0016-privileged-helper-install-and-ipc.md) (install on a click and the closed request list stay; the
@@ -88,7 +91,7 @@ for the unsigned `.pkg`.
 | Helper updates | from the app's new copy, one prompt, only when needed (section 4) | the helper installs Dyno's signed updates with no prompt |
 | Signing keys | none new | a Dyno-only update key in a separate repository (D7 of 0022, reversed by the user on 2026-10-28) |
 | Residual risk | the one elevated run starts from the app folder, which the same user can write (section 3, R1) | none for install and update; first install trusted like any download |
-| Agent-days | 42.5 to 64.5 (Work packages) | add 13 to 20.5 (0022 rows 7, 15, 17, 21, plus the 1.0 migration) |
+| Agent-days | 43 to 65 (Work packages) | add 13 to 20.5 (0022 rows 7, 15, 17, 21, plus the 1.0 migration) |
 
 **Recommendation: L for 1.1.0.** It ships the user's request without a forced reinstall, a second signing key or a new
 Gatekeeper flow, and every part that P adds can be added later without changing the wire or the scope (P's packaging builds on
@@ -153,6 +156,13 @@ Items & Extensions; switching it off there is the `NotRunning` state with its ow
     account SID and Administrators membership come from the caller's own token, never from `GetNamedPipeClientProcessId`. The
     client pid is logged as a hint only, never used for a decision.
   - If a fact cannot be read the connection is refused (fail closed).
+- **The agent checks the helper too (Windows pipe squatting).** While the helper is not running, any local process can create
+  `\\.\pipe\net.decryptology.dyno.helper` first and answer in its place. The agent therefore opens the pipe with
+  `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` (a squatter can at most identify the agent's account, never impersonate it)
+  and, before trusting any answer, reads the pipe's owner with `GetSecurityInfo` on its own handle: it must be SYSTEM
+  (`S-1-5-18`). Anything else is `Missing` with "Something other than Dyno's helper answered on its pipe" and an audit-style log
+  line naming the owner SID. On Unix the socket's folder is root-owned, so the same check is `fstat` of the folder and an
+  owner of root.
 - **No token, any local user.** ADR 0016's per-user token is dropped (0022 §2.2).
 - **Scope (0022 §6, U3) plus the owner.** Membership of Administrators counts even when UAC filtered the token (R3). Full detail for administrators and for the **owner**, the account that turned the
   helper on (recorded by `install --for <uid|SID>`, which the agent passes; a different account turning it on again becomes the
@@ -332,7 +342,9 @@ state's reason and its button, never 0.
   (serials stripped), `nft -j`, `pfctl`, `powermetrics`, DMI, `powercfg`, `wbadmin`.
 - Tool runs through a fake runner: timeouts fire on a `FakeClock`, exit codes and stderr reach the reply and the log.
 - `InstallTool`: wrong hash, one byte over the pinned size, a non-owner caller, a second concurrent install, `TEMP` inside staging.
-- `paddock-ipc`: peer facts with fakes per OS; the Windows pipe refuses a remote client on the
+- `paddock-ipc`: peer facts with fakes per OS; a pipe created by the test's own (non-SYSTEM) account under the helper's name is
+  refused by the client with the owner SID in the error, and the client's open flags carry `SECURITY_IDENTIFICATION`, on the
+  Windows runner; the Windows pipe refuses a remote client on the
   Windows runner with a pipe the test creates.
 - `.deb`: maintainer scripts in a throwaway container (install, upgrade with and without the helper enabled, remove, purge, no
   systemd), `shellcheck`, the polkit rule text.
@@ -364,7 +376,7 @@ Agent-days are ranges for one agent. **crates/** marks packages that change shar
 | WP | Package | Depends on | crates/ | Days |
 | --- | --- | --- | --- | --- |
 | 0 | VM spikes: whether C1 needs `SeDebugPrivilege` on Windows (and what `wbadmin` and the SMART installer need); `sfltool dumpbtm` as root from a LaunchDaemon (no SecurityAgent?); `smartctl` rights on macOS; the NSIS `/SO` component names; firewall reads without admin on Windows and the macOS Application Firewall; how macOS 15 and 27 show a plist-file daemon in Login Items | – | | 2 |
-| 1a | `paddock-ipc`: a fixed system endpoint (Unix path and mode; pipe name, SDDL, remote clients refused), peer facts per OS without pids (audit token; `SO_PEERCRED`, `SO_PEERGROUPS`, `SO_PEERPIDFD`; `ImpersonateNamedPipeClient` and `OpenThreadToken`), a bounded byte stream for one call | – | yes | 2–3 |
+| 1a | `paddock-ipc`: a fixed system endpoint (Unix path and mode; pipe name, SDDL, remote clients refused), peer facts per OS without pids (audit token; `SO_PEERCRED`, `SO_PEERGROUPS`, `SO_PEERPIDFD`; `ImpersonateNamedPipeClient` and `OpenThreadToken`), a bounded byte stream for one call; on the client side, `SECURITY_SQOS_PRESENT \| SECURITY_IDENTIFICATION` and the SYSTEM-owner check of the server pipe (root-owned folder on Unix) | – | yes | 2.5–3.5 |
 | 1b | Dyno moves from `dyno-ipc` to `paddock-ipc` (agent, CLI, plugin host, helper); `dyno-ipc` deleted and its `known-copies.toml` entries removed (due `dyno-v1.1.0` anyway) | 1a | | 2–3 |
 | 2 | `paddock-service`: daemon plist for a root-owned copy, Windows required privileges and the start DACL, systemd hardening keys from the spec, goldens | – | yes | 1.5–2.5 |
 | 3 | `dyno_core::helper_wire` v2: `HELPER_API` 2, the requests of section 5 with caps, `HelperState` with `Off`, scope types, `MIN_HELPER_VERSION` | – | | 1.5–2 |
@@ -382,21 +394,21 @@ Agent-days are ranges for one agent. **crates/** marks packages that change shar
 | 15 | Docs: ADR 0016/0022 status lines, user guide, `docs/{macos,linux}.md`, About and notices text for the downloaded tool, privacy text | all | | 1 |
 | – | VM runs before the tag (a first pass, then a re-run after fixes) | 14 | | 4–6 |
 
-**Total: 38.5 to 58.5 agent-days of implementation, plus 4 to 6 days of VM runs: 42.5 to 64.5.** The crates/ packages (1a, 2,
-maybe 8) total 3.5 to 5.5 (plus 8 if it applies) and go first, in one window between the Spotter 1.0 and Pitwall 1.1 tags; 1b is required
+**Total: 39 to 59 agent-days of implementation, plus 4 to 6 days of VM runs: 43 to 65.** The crates/ packages (1a, 2,
+maybe 8) total 4 to 6 (plus 8 if it applies) and go first, in one window between the Spotter 1.0 and Pitwall 1.1 tags; 1b is required
 by `known-copies.toml` whatever this record decides. With up to five agents (the Mac's limit) the critical path is
 1a → 1b → 11 → 12 → 14 → VM runs, about 15 to 22 working days.
 
-### The smallest first slice (D1a)
+### The smallest first slice (D1a): the landing order
 
-If the user wants the request itself first, the reviewer's slice is:
+Decided 2026-11-03: the full plan ships in Dyno 1.1.0. The slice below is only the order in which the work lands:
 
 1. **First:** WP-0, 1a, 1b, 2, 3, 4, 5, 7, 11, 12, 13, 14, 15 and the VM runs: about **33 to 49 agent-days**. This is "run as
    administrator, also at start-up" (every process in detail from login on) plus macOS login items.
 2. **Then:** WP-8 (SMART through smartmontools) and the agent's unprivileged firewall readers of WP-9 (Windows, the macOS
    Application Firewall).
-3. **Deferred:** WP-6 (counters and memory slots), WP-10 (socket owners, file holders, Windows extras) and the helper's `pf`
-   and `nft` reads.
+3. **Last:** WP-6 (counters and memory slots), WP-10 (socket owners, file holders, Windows extras) and the helper's `pf` and
+   `nft` reads. All three are in 1.1.0.
 
 The wire (`HELPER_API` 2) is declared whole in WP-3; requests of a later step answer `NotSupported` until they land, so the
 slices need no API change between them.
@@ -411,7 +423,7 @@ slices need no API change between them.
   constraint. Both go first and land together with their adoption by every app that uses them (rule 43).
 - **Batches.** Each landing to main stays within ADR 0042's caps: at most 60 commits, 200 files and 72 hours of age. Planned
   batches: (1) WP-1a and WP-2 with their app adoptions; (2) WP-1b, WP-3; (3) WP-4, WP-5, WP-7; (4) WP-11, WP-12, WP-13;
-  (5) WP-8 and WP-9; (6) WP-6 and WP-10 if not deferred. WP-14 lands on `tools/vm-smoke` by the agent holding that lease, and
+  (5) WP-8 and WP-9; (6) WP-6 and WP-10. WP-14 lands on `tools/vm-smoke` by the agent holding that lease, and
   reaches main with that home's own landing, never from a Dyno branch.
 
 ## Consequences
@@ -423,20 +435,20 @@ slices need no API change between them.
 - R1 and R2 (section 3) are the accepted residual risks and are stated in the user guide.
 - `dyno-ipc` is gone and the helper's registration is `paddock-service`'s, so the family keeps one implementation each.
 
-## Decisions for the user
+## Decisions (the user, 2026-11-03)
 
-| # | Question | Recommendation |
+| # | Question | Recommendation, and the user's decision |
 | --- | --- | --- |
-| D1 | How the helper is installed in 1.1.0: L (switched on in Settings, packaging unchanged) or P (ADR 0022: per-machine, `.pkg`, helper-run updates) | **L.** No forced reinstall from 1.0, no new key, no Gatekeeper `.pkg` flow; P later with a signing identity |
-| D1a | Ship the smallest first slice (section above) first, SMART and firewall after it | **Yes**, if 1.1.0's date matters more than shipping every reading at once |
-| D2 | macOS mechanism: a LaunchDaemon plist file with a root-owned copy, or `SMAppService.daemon` | **Plist file.** `SMAppService` daemons want an Apple-issued identity and would run from the admin-writable bundle; revisit with a Developer ID |
-| D3 | smartmontools (GPL-2.0-or-later): downloaded from upstream on a click on Windows and macOS, the distribution package through PackageKit on Linux, never bundled or mirrored, as a named licence exception | **Yes** |
-| D4 | Scope: 0022's U3 plus the owner (the account that turned it on) in full detail, with the administrator policy file | **Yes** |
-| D5 | Helper updates: a prompt only when `HELPER_API` changes or a fix raises `MIN_HELPER_VERSION`; otherwise offered, not forced. A new smartmontools pin is a helper update too, so it arrives through this same offer | **Yes** |
-| D6 | Leave Defender exclusions, event logs and the journal, the disk map of unreadable folders and per-app energy out of the helper | **Yes**, reasons in section 6 |
-| D7 | ADR 0022's helper-run updates and the Dyno-only key: deferred with P | **Defer** |
-| D8 | Linux: helper for the `.deb` only; the AppImage shows `NotIncluded` | **Yes** |
-| D9 | Windows: a UAC-filtered administrator token counts as an administrator for the scope (R3) | **Yes** (the account can elevate anyway); the policy file can narrow it |
+| D1 | How the helper is installed in 1.1.0: L (switched on in Settings, packaging unchanged) or P (ADR 0022: per-machine, `.pkg`, helper-run updates) | **L.** No forced reinstall from 1.0, no new key, no Gatekeeper `.pkg` flow; P later with a signing identity Decided: as recommended. |
+| D1a | Ship the smallest first slice (section above) first, SMART and firewall after it | **Yes**, if 1.1.0's date matters more than shipping every reading at once Decided: the full plan ships in 1.1.0; the slice is the landing order only. |
+| D2 | macOS mechanism: a LaunchDaemon plist file with a root-owned copy, or `SMAppService.daemon` | **Plist file.** `SMAppService` daemons want an Apple-issued identity and would run from the admin-writable bundle; revisit with a Developer ID Decided: as recommended. |
+| D3 | smartmontools (GPL-2.0-or-later): downloaded from upstream on a click on Windows and macOS, the distribution package through PackageKit on Linux, never bundled or mirrored, as a named licence exception | **Yes** Decided: as recommended. |
+| D4 | Scope: 0022's U3 plus the owner (the account that turned it on) in full detail, with the administrator policy file | **Yes** Decided: as recommended. |
+| D5 | Helper updates: a prompt only when `HELPER_API` changes or a fix raises `MIN_HELPER_VERSION`; otherwise offered, not forced. A new smartmontools pin is a helper update too, so it arrives through this same offer | **Yes** Decided: as recommended. |
+| D6 | Leave Defender exclusions, event logs and the journal, the disk map of unreadable folders and per-app energy out of the helper | **Yes**, reasons in section 6 Decided: as recommended. |
+| D7 | ADR 0022's helper-run updates and the Dyno-only key: deferred with P | **Defer** Decided: as recommended. |
+| D8 | Linux: helper for the `.deb` only; the AppImage shows `NotIncluded` | **Yes** Decided: as recommended. |
+| D9 | Windows: a UAC-filtered administrator token counts as an administrator for the scope (R3) | **Yes** (the account can elevate anyway); the policy file can narrow it Decided: yes. |
 
 ## Sources (read 2026-11-03 unless stated)
 

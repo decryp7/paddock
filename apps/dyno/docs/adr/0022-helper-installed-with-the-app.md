@@ -4,8 +4,8 @@
   without the privileged helper. It runs with the user's rights only, is signed with the family updater key, and
   updates per user through the normal Tauri updater. The design below, including the decisions it records for "1.0"
   (D1, D2, D5, D6), now applies to Dyno 1.1 and must be confirmed again for it.
-- 2026-11-03: ADR 0027 (Proposed) is the 1.1.0 plan. It adopts sections 2.1, 2.2 (without the program pin as a
-  boundary), 4, 5 and 6 of this record, and, if the user chooses its D1 = L, defers the per-machine packaging, the `.pkg` and
+- 2026-11-03: ADR 0027 (Accepted 2026-11-03) is the 1.1.0 plan. It adopts sections 2.1, 2.2 (without the program pin as a
+  boundary), 4, 5 and 6 of this record, and, as the user chose (its D1 = L), defers the per-machine packaging, the `.pkg` and
   the helper-run updates (sections 1 and 3, D2, D5, D7) until a signing identity exists.
 - Revision 2 (2026-10-28): adds the user's decisions of 2026-10-28 (all processes and administrator-only counters in
   1.0, the helper on all three OS, per-machine Windows, no signing purchases, any local user) and the first
@@ -244,7 +244,7 @@ Windows.
 
 | Option | What it means | For | Against |
 | --- | --- | --- | --- |
-| **P1. The helper installs updates.** The agent downloads the package and its update signature into the user's cache and asks the helper `Update`. The helper copies the bytes into a folder only it can write, **verifies the copy** against a public key compiled into the helper, checks that the signed version is newer, and runs the copy as SYSTEM or root | Nothing is checked or run in a user-writable place. No prompt at updates on any OS. Works without any certificate. On macOS it also solves "a DMG/app update cannot run `postinstall`": the update *is* the `.pkg`, run by `installer` as root | The helper gains one write action (installing a signed, newer Dyno), a named exception to ADR 0021 (D5, decided). Package-manager details per OS (below) |
+| **P1. The helper installs updates** | The agent downloads the package and its update signature into the user's cache and asks the helper `Update`. The helper copies the bytes into a folder only it can write, **verifies the copy** against a public key compiled into the helper, checks that the signed version is newer, and runs the copy as SYSTEM or root | Nothing is checked or run in a user-writable place. No prompt at updates on any OS. Works without any certificate. On macOS it also solves "a DMG/app update cannot run `postinstall`": the update *is* the `.pkg`, run by `installer` as root | The helper gains one write action (installing a signed, newer Dyno), a named exception to ADR 0021 (D5, decided). Package-manager details per OS (below) |
 | P2. Keep the Tauri updater's install | Unchanged | No new code | Problem 1 at every update, on Windows and Linux; on macOS the helper and the programs outside the bundle go stale. Only D3/D4 (signing) would make the prompt honest, and even then the swap race stays |
 | P3. Updates only by downloading the installer by hand | No in-app update | Simple | Same race (the file sits in Downloads); worse experience |
 
