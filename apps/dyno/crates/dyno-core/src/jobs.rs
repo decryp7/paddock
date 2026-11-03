@@ -79,6 +79,11 @@ pub enum JobSpec {
         /// What to do.
         action: crate::helper_wire::HelperAction,
     },
+    /// Downloads the pinned tool (the user clicked "Download"), checks it and has the helper install it.
+    InstallTool {
+        /// Which tool.
+        tool: crate::helper_requests::ToolKind,
+    },
 }
 
 impl JobSpec {
@@ -93,6 +98,7 @@ impl JobSpec {
             JobSpec::BootAnalysis => JobKind::BootAnalysis,
             JobSpec::AppUsage => JobKind::AppUsage,
             JobSpec::SoftwareInventory => JobKind::SoftwareInventory,
+            JobSpec::InstallTool { .. } => JobKind::InstallTool,
             JobSpec::Helper { .. } => JobKind::Helper,
         }
     }
@@ -120,6 +126,8 @@ pub enum JobKind {
     SoftwareInventory,
     /// Setting up the privileged helper.
     Helper,
+    /// Downloading the pinned disk-health tool and handing it to the helper.
+    InstallTool,
 }
 
 impl JobKind {
@@ -134,6 +142,7 @@ impl JobKind {
             JobKind::BootAnalysis => "Analysing boots",
             JobKind::AppUsage => "Reading app usage",
             JobKind::SoftwareInventory => "Listing installed software",
+            JobKind::InstallTool => "Installing the disk-health tool",
             JobKind::Helper => "Setting up administrator readings",
         }
     }
@@ -149,6 +158,7 @@ impl JobKind {
             JobKind::BootAnalysis => "boot-analysis",
             JobKind::AppUsage => "app-usage",
             JobKind::SoftwareInventory => "software-inventory",
+            JobKind::InstallTool => "install-tool",
             JobKind::Helper => "helper",
         }
     }
@@ -165,6 +175,7 @@ impl JobKind {
             JobKind::AppUsage,
             JobKind::SoftwareInventory,
             JobKind::Helper,
+            JobKind::InstallTool,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -191,6 +202,8 @@ pub enum JobOutput {
     AppUsage(Box<UsageReport>),
     /// From [`JobSpec::SoftwareInventory`].
     Software(Box<SoftwareInventory>),
+    /// From [`JobSpec::InstallTool`]: what the helper holds of the tool now.
+    Tool(Box<crate::helper_wire::ToolStatus>),
     /// From [`JobSpec::Helper`]: the helper as it is now.
     Helper(Box<crate::helper_wire::HelperStatus>),
 }

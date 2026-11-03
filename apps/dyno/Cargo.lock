@@ -1150,10 +1150,12 @@ dependencies = [
  "dyno-plugin-host",
  "libc",
  "log",
+ "paddock-download",
  "paddock-env",
  "paddock-ipc",
  "paddock-jobs",
  "paddock-log",
+ "paddock-net",
  "paddock-proc",
  "paddock-service",
  "paddock-widgets",
@@ -1165,6 +1167,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
  "zip",
 ]
 

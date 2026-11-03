@@ -36,6 +36,8 @@ pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
+pub mod tool_download;
+pub mod tool_pins;
 pub mod unusual;
 pub mod wire;
 

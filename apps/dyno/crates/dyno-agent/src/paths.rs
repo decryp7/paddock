@@ -49,6 +49,11 @@ impl Dirs {
         self.root.join("dyno.db")
     }
 
+    /// Where a tool download is staged before the helper gets it (rebuildable, so never user data); the job empties it.
+    pub fn tool_staging(&self) -> PathBuf {
+        self.root.join("cache").join("tools")
+    }
+
     /// The user's settings.
     pub fn settings(&self) -> PathBuf {
         self.root.join("settings.json")

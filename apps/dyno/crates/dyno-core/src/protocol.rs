@@ -475,6 +475,8 @@ pub enum Request {
     /// Whether the privileged helper is off, running, outdated and so on, with the audit entries this account may read
     /// (ADR 0027). A query; answers [`Reply::HelperStatus`]. Appended (needs the protocol bump the steward makes).
     HelperStatus,
+    /// What Settings offers for the disk-health tool (answers [`Reply::ToolOffer`]). Appended (the steward's protocol bump covers it).
+    ToolOffer,
 }
 
 /// Dyno's own cost.
@@ -767,6 +769,8 @@ pub enum Reply {
     PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
     /// The helper's state. Appended.
     HelperStatus(Box<crate::helper_wire::HelperStatus>),
+    /// The disk-health tool as offered.
+    ToolOffer(Box<crate::tool_offer::ToolOffer>),
 }
 
 /// The inventory report that was written.
@@ -847,6 +851,7 @@ impl Reply {
             Reply::JobOutput(x) => v(x),
             Reply::WidgetLayout(x) => v(x),
             Reply::PopoverValues(x) => v(x),
+            Reply::ToolOffer(x) => v(x),
             Reply::HelperStatus(x) => v(x),
         }
     }
@@ -1147,6 +1152,7 @@ mod tests {
             Request::PopoverValues {
                 placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
             },
+            Request::ToolOffer,
             Request::DiskRings {
                 scan: 1,
                 node: Some(2),
@@ -1171,6 +1177,12 @@ mod tests {
                 crate::widgets::DynoSurface::Popover,
             ))),
             Reply::PopoverValues(crate::widgets::JsonOnLink(vec![])),
+            Reply::ToolOffer(Box::new(crate::tool_offer::smartmontools_offer(
+                crate::helper::HelperHost::Linux,
+                None,
+                false,
+                None,
+            ))),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);

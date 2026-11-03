@@ -71,6 +71,7 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  ToolOffer,
 } from './api.types';
 import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
@@ -141,6 +142,8 @@ export interface DynoBackend {
 
   /** Whether the privileged helper is off, running, outdated and so on (it never blocks: an absent helper is a state). */
   helperStatus(): Promise<HelperStatus>;
+  /** What Settings offers for the disk-health tool (smartmontools): the pinned download, or why not. */
+  toolOffer(): Promise<ToolOffer>;
 
   // Performance counters (observe-only): browse, search, read now, and the readings kept with the app's events.
   counterObjects(): Promise<CounterObjectList>;

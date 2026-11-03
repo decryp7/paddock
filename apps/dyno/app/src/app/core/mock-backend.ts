@@ -73,6 +73,7 @@ import type {
   GpuReport,
   InventoryFormat,
   HelperAction,
+  ToolOffer,
   MaintenanceStatus,
   SavedInventory,
   IssuesOverview,
@@ -103,6 +104,7 @@ import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
 import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
+import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
@@ -243,6 +245,7 @@ export class MockBackend implements DynoBackend {
   pickedFolders = 0;
   private readonly backupVariant: MockBackupVariant;
   private helperVariant: MockHelperVariant;
+  private toolInstalled = false;
   private backupCheckedAt: number;
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
@@ -752,6 +755,10 @@ export class MockBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.reply('inventory', () => mockInventory(this.profile.os));
+  }
+
+  toolOffer(): Promise<ToolOffer> {
+    return this.reply('toolOffer', () => mockToolOffer(this.helperVariant, this.profile.os, this.toolInstalled));
   }
 
   helperStatus(): Promise<HelperStatus> {
@@ -1383,6 +1390,7 @@ export class MockBackend implements DynoBackend {
       if (problem) this.change(job, { state: 'failed', message: problem });
       else {
         if (job.status.kind === 'refresh-backup') this.backupCheckedAt = this.now();
+        if (job.status.kind === 'install-tool') this.toolInstalled = true;
         if (job.status.kind === 'helper') this.helperVariant = afterHelperAction((objectOf(job.spec)['helper'] as { action: HelperAction }).action);
         this.change(job, { state: 'done' });
       }
@@ -1425,6 +1433,7 @@ export class MockBackend implements DynoBackend {
     if ('appUsage' in o) return { appUsage: mockUsage() };
     if ('softwareInventory' in o) return { software: mockSoftware() };
     if ('helper' in o) return { helper: mockHelperStatus(this.helperVariant, this.profile.os) };
+    if ('installTool' in o) return { tool: { tool: 'smartmontools', installed: '7.5' } };
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
@@ -1532,7 +1541,7 @@ interface MockJob {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'helper';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'helper' | 'install-tool';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1547,6 +1556,7 @@ const JOB_TITLES: Record<JobKindSlug, string> = {
   'app-usage': 'Reading app usage',
   'software-inventory': 'Listing installed software',
   helper: 'Setting up administrator readings',
+  'install-tool': 'Installing the disk-health tool',
 };
 
 const SPEC_KIND: Record<string, JobKindSlug> = {
@@ -1559,6 +1569,7 @@ const SPEC_KIND: Record<string, JobKindSlug> = {
   appUsage: 'app-usage',
   softwareInventory: 'software-inventory',
   helper: 'helper',
+  installTool: 'install-tool',
 };
 
 /** The variant of a job spec as an object (a unit variant is a string on the wire). */
@@ -1612,6 +1623,14 @@ function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
     case 'helper': {
       const phase = HELPER_PHASES[Math.min(HELPER_PHASES.length - 1, Math.floor(part * HELPER_PHASES.length))] as { id: string; label: string };
       return { id: phase.id, label: phase.label, unit: 'items', done: 0, total: null };
+    }
+    case 'install-tool': {
+      const phases = [
+        { id: 'download', label: 'Downloading smartmontools', unit: 'bytes' as const, done: Math.floor(part * 1_508_408), total: 1_508_408 },
+        { id: 'check', label: 'Checking the download', unit: 'items' as const, done: 0, total: 1 },
+        { id: 'install', label: 'Installing it through the helper', unit: 'items' as const, done: 0, total: 1 },
+      ];
+      return phases[Math.min(2, Math.floor(part * 3))]!;
     }
     default:
       return { id: 'read', label: JOB_TITLES[kind], unit: 'items', done: 0, total: null };

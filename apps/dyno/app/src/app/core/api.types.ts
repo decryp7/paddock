@@ -1852,7 +1852,8 @@ export type JobSpec =
   | 'bootAnalysis'
   | 'appUsage'
   | 'softwareInventory'
-  | { helper: { action: HelperAction } };
+  | { helper: { action: HelperAction } }
+  | { installTool: { tool: ToolKind } };
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
@@ -1864,7 +1865,8 @@ export type JobOutput =
   | { boot: BootReport }
   | { appUsage: UsageReport }
   | { software: SoftwareInventory }
-  | { helper: HelperStatus };
+  | { helper: HelperStatus }
+  | { tool: ToolStatus };
 
 // ------------------------------------------------------------------------------------- the privileged helper (ADR 0027)
 
@@ -1963,4 +1965,30 @@ export interface BackupSettings {
   /** A backup older than this many hours is stale (1 to 2160). */
   staleAfterHours: number;
   overrides: ToolOverride[];
+}
+
+// ------------------------------------------------------------------------------------- the disk-health tool (ADR 0027 section 7)
+
+/** A tool the helper can hold. */
+export type ToolKind = 'smartmontools';
+
+/** What the helper holds of one tool. */
+export interface ToolStatus {
+  tool: ToolKind;
+  installed: string | null;
+}
+
+/** Where the offer stands: downloadable, installed (the version), needs the helper first, or not offered here (what to do instead). */
+export type OfferState = 'available' | { installed: string } | { needsHelper: string } | { notHere: string };
+
+/** What the Settings card shows for the disk-health tool. */
+export interface ToolOffer {
+  tool: ToolKind;
+  name: string;
+  version: string;
+  size: number;
+  from: string;
+  licence: string;
+  sourceUrl: string;
+  state: OfferState;
 }

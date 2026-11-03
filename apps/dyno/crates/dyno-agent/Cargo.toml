@@ -29,6 +29,10 @@ paddock-env = { path = "../../../../crates/paddock-env" }
 # Turning the helper on and off (the OS's one prompt) and the trusted connection to its endpoint (ADR 0027).
 dyno-helper-service = { path = "../dyno-helper-service" }
 paddock-service = { path = "../../../../crates/paddock-service" }
+# The pinned download of the disk-health tool: one outbound door (https, a host allow-list) and the family's downloader.
+paddock-net = { path = "../../../../crates/paddock-net" }
+paddock-download = { path = "../../../../crates/paddock-download", default-features = false }
+toml.workspace = true
 log = { version = "0.4", features = ["kv"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true

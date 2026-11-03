@@ -1,0 +1,23 @@
+# The disk-health tool Dyno downloads on a click (ADR 0027 section 7). One entry per tool and system: the file, its address, its exact
+# size and SHA-256. The download job checks all three itself before the helper sees a byte (the helper checks its own copy of the
+# table again, and the agent's table is never trusted by root). Dyno never bundles or mirrors the tool: smartmontools is
+# GPL-2.0-or-later and runs as a separate program.
+#
+# A pin is added or changed only by `apps/dyno/scripts/verify-tool-pin.sh`, which checks the publisher's OpenPGP signature of the
+# downloaded file against `key_fingerprint` with the system's gpg and prints the lines below; the app itself carries no OpenPGP
+# code. `verified` is the date that was done.
+
+[[tool]]
+id = "smartmontools"
+version = "7.5"
+os = "windows"
+file = "smartmontools-7.5.win32-setup.exe"
+url = "https://github.com/smartmontools/smartmontools/releases/download/RELEASE_7_5/smartmontools-7.5.win32-setup.exe"
+size = 1508408
+sha256 = "896337fcc253220614cf8cdbd5cf2321c5aa326a37a04160a672a281e6104c70"
+# github.com redirects release assets to its asset host; only these hosts may be contacted.
+hosts = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
+licence = "GPL-2.0-or-later"
+source_url = "https://www.smartmontools.org"
+key_fingerprint = "0C95 77FD 2C4C FCB4 B9A5 9964 0A30 812E FF3A EFF5"
+verified = "2026-11-03"

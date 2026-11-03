@@ -74,6 +74,7 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  ToolOffer,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -329,6 +330,10 @@ export class TauriBackend implements DynoBackend {
 
   helperStatus(): Promise<HelperStatus> {
     return this.request('helperStatus');
+  }
+
+  toolOffer(): Promise<ToolOffer> {
+    return this.request('toolOffer');
   }
 
   counterObjects(): Promise<CounterObjectList> {
