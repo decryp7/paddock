@@ -1,7 +1,8 @@
-//! The proposed Windows notification-area and Linux appindicator items: square icons drawn for each exact pixel size
-//! (16, 20, 24, 32 on Windows at 100 to 200 %; 22 on Linux), in Dyno's dash numerals. Straight strokes sit on whole pixels;
-//! only arcs are anti-aliased.
+//! Windows notification-area and Linux appindicator items: square icons drawn for each exact pixel size (16, 20, 24, 32 on
+//! Windows at 100 to 200 %; 22 on Linux) in Dyno's dash numerals (design: `docs/design/dyno-tray/README.md`). Straight
+//! strokes sit on whole pixels; only arcs are anti-aliased. No font is needed.
 
+use super::Icon;
 use tiny_skia::{Color, LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 /// A colour.
@@ -10,6 +11,7 @@ pub type Rgba = [u8; 4];
 /// Taskbar or panel theme.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
+    /// A dark taskbar or panel.
     pub dark: bool,
 }
 
@@ -49,15 +51,21 @@ impl Theme {
 /// The dash numerals at one size: height, width, stroke.
 #[derive(Clone, Copy, Debug)]
 pub struct Numerals {
+    /// Height in pixels.
     pub h: i32,
+    /// Width in pixels.
     pub w: i32,
+    /// Stroke in pixels.
     pub s: i32,
 }
 
 /// A 1-bit glyph.
 pub struct Glyph {
+    /// Width in pixels.
     pub w: i32,
+    /// Height in pixels.
     pub h: i32,
+    /// Row-major: set or not.
     pub bits: Vec<bool>,
 }
 
@@ -81,6 +89,7 @@ impl Glyph {
             self.bits[(y * self.w + x) as usize] = false;
         }
     }
+    /// Whether the pixel at (x, y) is set (false outside).
     pub fn at(&self, x: i32, y: i32) -> bool {
         x >= 0 && y >= 0 && x < self.w && y < self.h && self.bits[(y * self.w + x) as usize]
     }
@@ -238,7 +247,9 @@ pub fn cap(ch: char, rows: i32) -> Glyph {
 
 /// A square icon being drawn.
 pub struct Canvas {
+    /// The pixels.
     pub pm: Pixmap,
+    /// Width and height.
     pub size: i32,
 }
 
@@ -250,17 +261,21 @@ fn paint(c: Rgba) -> Paint<'static> {
 }
 
 impl Canvas {
-    pub fn new(size: i32) -> Canvas {
-        Canvas {
-            pm: Pixmap::new(size as u32, size as u32).unwrap(),
+    /// A transparent canvas, `None` for a size of zero.
+    pub fn new(size: i32) -> Option<Canvas> {
+        Some(Canvas {
+            pm: Pixmap::new(size.max(0) as u32, size.max(0) as u32)?,
             size,
-        }
+        })
     }
+    /// Fills whole pixels from (x0, y0) to (x1, y1), exclusive.
     pub fn rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: Rgba) {
         if x1 <= x0 || y1 <= y0 {
             return;
         }
-        let r = tiny_skia::Rect::from_ltrb(x0 as f32, y0 as f32, x1 as f32, y1 as f32).unwrap();
+        let Some(r) = tiny_skia::Rect::from_ltrb(x0 as f32, y0 as f32, x1 as f32, y1 as f32) else {
+            return;
+        };
         let mut p = paint(c);
         p.anti_alias = false;
         self.pm.fill_rect(r, &p, Transform::identity(), None);
@@ -275,6 +290,7 @@ impl Canvas {
             self.rect(x0, y0, x1, y1, c);
         }
     }
+    /// Draws a glyph with its top left at (x, y).
     pub fn glyph(&mut self, g: &Glyph, x: i32, y: i32, c: Rgba) {
         for gy in 0..g.h {
             for gx in 0..g.w {
@@ -284,6 +300,8 @@ impl Canvas {
             }
         }
     }
+    /// Strokes an arc with round caps (angles in degrees, clockwise from +x).
+    #[allow(clippy::too_many_arguments)]
     pub fn arc(&mut self, cx: f32, cy: f32, r: f32, from: f32, sweep: f32, w: f32, c: Rgba) {
         if sweep <= 0.0 {
             return;
@@ -308,6 +326,7 @@ impl Canvas {
             self.pm.stroke_path(&p, &paint(c), &st, Transform::identity(), None);
         }
     }
+    /// Fills a polygon (anti-aliased).
     pub fn poly(&mut self, pts: &[(f32, f32)], c: Rgba) {
         let mut pb = PathBuilder::new();
         for (i, (x, y)) in pts.iter().enumerate() {
@@ -319,7 +338,8 @@ impl Canvas {
         }
         pb.close();
         if let Some(p) = pb.finish() {
-            self.pm.fill_path(&p, &paint(c), tiny_skia::FillRule::Winding, Transform::identity(), None);
+            self.pm
+                .fill_path(&p, &paint(c), tiny_skia::FillRule::Winding, Transform::identity(), None);
         }
     }
 }
@@ -327,15 +347,21 @@ impl Canvas {
 /// The layout of one size.
 #[derive(Clone, Copy, Debug)]
 pub struct Layout {
+    /// The icon's size in pixels.
     pub size: i32,
     /// Label caps rows (0: no label at this size).
     pub label_rows: i32,
+    /// Top row of the label.
     pub label_y: i32,
+    /// The numerals.
     pub digits: Numerals,
+    /// Top row of the numerals.
     pub digits_y: i32,
     /// Gap between numerals.
     pub tracking: i32,
+    /// Top row of the meter.
     pub meter_y: i32,
+    /// Height of the meter.
     pub meter_h: i32,
     /// Small numerals for the network pair.
     pub small: Numerals,
@@ -444,39 +470,74 @@ pub fn label(cv: &mut Canvas, text: &str, rows: i32, right: i32, y: i32, c: Rgba
 /// The kinds on Windows and Linux.
 #[derive(Clone, Debug)]
 pub enum Kind {
-    Percent { label: String },
-    Meter { label: String },
+    /// A percentage and its meter, with a label from 22 px.
+    Percent {
+        /// Up to three capitals.
+        label: String,
+    },
+    /// A meter, with a label from 22 px.
+    Meter {
+        /// Up to three capitals.
+        label: String,
+    },
+    /// One column per core.
     Cores,
-    Graph { label: String },
-    Ring { letter: char },
+    /// An area graph, with a label from 22 px.
+    Graph {
+        /// Up to three capitals.
+        label: String,
+    },
+    /// A 270-degree gauge with the metric's letter.
+    Ring {
+        /// The letter.
+        letter: char,
+    },
+    /// Upload over download.
     Network,
+    /// Degrees and a meter from 20 to 110.
     Temperature,
 }
 
 /// What an item shows now (same meaning as on macOS).
 #[derive(Clone, Debug, Default)]
 pub struct Reading {
+    /// The value; `None` when unavailable.
     pub value: Option<f32>,
+    /// Recent values, oldest first.
     pub history: Vec<f32>,
+    /// Per-core loads.
     pub cores: Vec<f32>,
+    /// Bytes per second up.
     pub up: f64,
+    /// Bytes per second down.
     pub down: f64,
 }
 
+/// The item's state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
+    /// As measured.
     Normal,
+    /// Over the threshold: below 24 px a corner notch and a danger bar under solid digits; from 24 px the number on a
+    /// danger plate with a 1 px margin.
     Alert,
+    /// No value: a dash, the icon at 45 %.
     Unavailable,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn meter(cv: &mut Canvas, l: &Layout, v: Option<f32>, t: Theme, x0: i32, x1: i32, y: i32, h: i32) {
+    meter_in(cv, l, v, t.track(), t.accent(), x0, x1, y, h);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn meter_in(cv: &mut Canvas, l: &Layout, v: Option<f32>, track: Rgba, fill: Rgba, x0: i32, x1: i32, y: i32, h: i32) {
     // Square ends on whole pixels: at 2 to 4 px high a rounded end only notches the corners.
-    cv.rect(x0, y, x1, y + h, t.track());
+    cv.rect(x0, y, x1, y + h, track);
     if let Some(v) = v {
         let w = ((x1 - x0) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
         let w = if v > 0.5 { w.max(1) } else { w };
-        cv.rect(x0, y, x0 + w, y + h, t.accent());
+        cv.rect(x0, y, x0 + w, y + h, fill);
     }
     let _ = l;
 }
@@ -490,23 +551,53 @@ pub fn short_rate(bps: f64) -> (String, char) {
         v /= 1000.0;
         i += 1;
     }
-    let t = if v < 9.95 && i > 0 { format!("{v:.1}") } else { format!("{}", v.round() as u64) };
+    let t = if v < 9.95 && i > 0 {
+        format!("{v:.1}")
+    } else {
+        format!("{}", v.round() as u64)
+    };
     (t, units[i])
 }
 
 /// Renders one item at `size` pixels for a light or dark taskbar.
-pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pixmap {
+pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Icon {
     let l = layout(size);
-    let mut cv = Canvas::new(l.size);
+    let Some(mut cv) = Canvas::new(l.size) else {
+        return Icon::new(l.size.max(0) as u32);
+    };
     let s = l.size;
     let value = if state == State::Unavailable { None } else { r.value };
     let ink = t.ink();
     let right = if l.size <= 16 { s } else { s - 1 };
     let (plate, plate_ink) = t.alert();
+    let small_alert = l.size < 24;
+    let danger_track = {
+        let mut c = plate;
+        c[3] = 0x59;
+        c
+    };
+    let notch = |cv: &mut Canvas| {
+        let k = if l.size <= 16 { 4 } else { 5 };
+        for y in 0..k {
+            cv.rect(0, y, k - y, y + 1, plate);
+        }
+    };
+    let bar = |cv: &mut Canvas, v: Option<f32>, y: i32, h: i32| {
+        if state == State::Alert && small_alert {
+            meter_in(cv, &l, v, danger_track, plate, 1, right, y, h);
+        } else {
+            meter_in(cv, &l, v, t.track(), t.accent(), 1, right, y, h);
+        }
+    };
     // The number with its alert plate.
-    let mut num = |cv: &mut Canvas, text: &str| {
+    let num = |cv: &mut Canvas, text: &str| {
         let n = l.digits;
-        if state == State::Alert {
+        if state == State::Alert && small_alert {
+            // Below 24 px a knocked-out plate smears the digits: they stay solid ink and the alert is the corner notch and
+            // the danger bar under them.
+            notch(cv);
+            digits(cv, text, n, l.tracking, right, l.digits_y, ink);
+        } else if state == State::Alert {
             let w = text_width(text, n, l.tracking);
             let (x0, x1) = ((right - w - 1).max(0), s);
             cv.rounded(x0, l.digits_y - 1, x1, l.digits_y + n.h + 1, plate);
@@ -522,7 +613,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
             }
             let text = value.map_or("-".to_string(), |v| format!("{}", v.clamp(0.0, 100.0).round() as u32));
             num(&mut cv, &text);
-            meter(&mut cv, &l, value, t, 1, right, l.meter_y, l.meter_h);
+            bar(&mut cv, value, l.meter_y, l.meter_h);
         }
         Kind::Temperature => {
             if l.label_rows > 0 {
@@ -531,12 +622,10 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
             if l.size <= 20 {
                 // 16 and 20 px: two bold digits and a 3 px degree ring tucked into the top right (no gap would fit).
                 let text = value.map_or("-".to_string(), |v| format!("{}", v.round().min(99.0) as u32));
-                let c = if state == State::Alert {
-                    cv.rect(0, l.digits_y - 1, s, l.digits_y + l.digits.h + 1, plate);
-                    plate_ink
-                } else {
-                    ink
-                };
+                if state == State::Alert {
+                    notch(&mut cv);
+                }
+                let c = ink;
                 digits(&mut cv, &text, l.digits, l.tracking, s - 3, l.digits_y, c);
                 if value.is_some() {
                     cv.glyph(&numeral('°', Numerals { h: 3, w: 3, s: 1 }), s - 3, l.digits_y, c);
@@ -549,17 +638,21 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
                 };
                 num(&mut cv, &text);
             }
-            meter(&mut cv, &l, value.map(|v| (v - 20.0) / 0.9), t, 1, right, l.meter_y, l.meter_h);
+            bar(&mut cv, value.map(|v| (v - 20.0) / 0.9), l.meter_y, l.meter_h);
         }
         Kind::Meter { label: lb } => {
             let mh = (s / 4).max(4);
-            let my = if l.label_rows > 0 { l.label_y + l.label_rows + (s - l.label_rows - mh) / 2 } else { (s - mh) / 2 };
+            let my = if l.label_rows > 0 {
+                l.label_y + l.label_rows + (s - l.label_rows - mh) / 2
+            } else {
+                (s - mh) / 2
+            };
             if l.label_rows > 0 {
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
-            meter(&mut cv, &l, value, t, 1, right, my, mh);
+            bar(&mut cv, value, my, mh);
             if state == State::Alert {
-                cv.rounded(right - 3, my - 3, s, my, plate);
+                notch(&mut cv);
             }
         }
         Kind::Cores => {
@@ -586,7 +679,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
             let (x0, x1, bot) = (1, right, s - 1);
-            cv.rect(x0, top, x1, bot, {
+            cv.rect(x0, top, x1, bot - 1, {
                 let mut c = t.ink();
                 c[3] = 0x18;
                 c
@@ -598,6 +691,8 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
                 let start = x1 - recent.len() as i32;
                 for (i, v) in recent.iter().enumerate() {
                     let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
+                    // A sample above zero shows at least one pixel above the baseline track.
+                    let h = if *v > 0.5 { h.max(2) } else { h };
                     cv.rect(start + i as i32, bot - h, start + i as i32 + 1, bot, t.accent());
                 }
             }
@@ -613,7 +708,10 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
             let rows = if s >= 32 { 7 } else { 5 };
             let g = cap(*letter, rows);
             let (gx, gy) = ((s - g.w) / 2, (s - g.h) / 2);
-            if state == State::Alert {
+            if state == State::Alert && small_alert {
+                notch(&mut cv);
+                cv.glyph(&g, gx, gy, ink);
+            } else if state == State::Alert {
                 cv.rounded(gx - 2, gy - 2, gx + g.w + 2, gy + g.h + 2, plate);
                 cv.glyph(&g, gx, gy, plate_ink);
             } else {
@@ -647,7 +745,11 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
                     let y = if row == 0 { (s / 2 - n.h) / 2 } else { s / 2 + (s / 2 - n.h) / 2 };
                     let aw = (n.w + 1) as f32;
                     arrow(&mut cv, 0.0, y as f32 + (n.h as f32 - aw / 2.0) / 2.0, aw, up);
-                    let (text, unit) = if state == State::Unavailable { ("-".to_string(), ' ') } else { short_rate(bps) };
+                    let (text, unit) = if state == State::Unavailable {
+                        ("-".to_string(), ' ')
+                    } else {
+                        short_rate(bps)
+                    };
                     let ug = cap(if unit == 'B' { 'B' } else { unit }, if n.h >= 7 { 7 } else { 5 });
                     let ux = right - ug.w;
                     let uy = y + n.h - ug.h;
@@ -659,8 +761,123 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Pi
             }
         }
     }
-    if state == State::Unavailable {
-        crate::mac::dim(&mut cv.pm, 0.45);
+    let dim = if state == State::Unavailable { 0.45 } else { 1.0 };
+    let size = l.size as u32;
+    let rgba = cv
+        .pm
+        .pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), (f32::from(c.alpha()) * dim).round() as u8]
+        })
+        .collect();
+    Icon { size, rgba }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn px(i: &Icon, x: u32, y: u32) -> [u8; 4] {
+        let k = ((y * i.size + x) * 4) as usize;
+        [i.rgba[k], i.rgba[k + 1], i.rgba[k + 2], i.rgba[k + 3]]
     }
-    cv.pm
+
+    #[test]
+    fn every_size_draws_its_own_square_and_three_digits_fit_16_px() {
+        for size in [16, 20, 22, 24, 32] {
+            let i = render(
+                &Kind::Percent { label: "CPU".into() },
+                &Reading {
+                    value: Some(100.0),
+                    ..Reading::default()
+                },
+                State::Normal,
+                size,
+                Theme { dark: true },
+            );
+            assert_eq!(i.size, size as u32);
+            assert_eq!(i.rgba.len(), (size * size * 4) as usize);
+        }
+        let n = layout(16);
+        assert!(text_width("100", n.digits, n.tracking) > 16, "with flags it would not fit");
+        assert_eq!(
+            glyphs("100", n.digits, n.tracking, 16).iter().map(|g| g.w).sum::<i32>() + 2 * n.tracking,
+            16
+        );
+    }
+
+    #[test]
+    fn below_24_px_an_alert_keeps_solid_digits_and_adds_a_notch_and_a_danger_bar() {
+        for dark in [false, true] {
+            let t = Theme { dark };
+            let (plate, _) = t.alert();
+            for size in [16, 20, 22] {
+                let i = render(
+                    &Kind::Percent { label: "MEM".into() },
+                    &Reading {
+                        value: Some(93.0),
+                        ..Reading::default()
+                    },
+                    State::Alert,
+                    size,
+                    t,
+                );
+                assert_eq!(px(&i, 0, 0), plate, "the notch, {size}");
+                let l = layout(size);
+                assert_eq!(px(&i, 1, l.meter_y as u32), plate, "the danger bar, {size}");
+                let ink = (0..i.size * i.size)
+                    .filter(|k| i.rgba[(*k * 4) as usize..(*k * 4 + 4) as usize] == t.ink())
+                    .count();
+                assert!(ink > 20, "the digits stay in ink, {size}");
+            }
+        }
+    }
+
+    #[test]
+    fn straight_parts_are_whole_pixels() {
+        for size in [16, 20, 24, 32] {
+            for k in [
+                Kind::Percent { label: "CPU".into() },
+                Kind::Cores,
+                Kind::Graph { label: "DSK".into() },
+                Kind::Temperature,
+            ] {
+                let r = Reading {
+                    value: Some(37.0),
+                    history: vec![12.0, 60.0, 3.0],
+                    cores: vec![10.0, 90.0, 40.0, 0.0],
+                    ..Reading::default()
+                };
+                let i = render(&k, &r, State::Normal, size, Theme { dark: false });
+                // Tracks are translucent by design; nothing else is partial.
+                let partial = i
+                    .rgba
+                    .chunks(4)
+                    .filter(|p| p[3] != 0 && p[3] != 0xff && p[3] != 0x4d && p[3] != 0x18)
+                    .count();
+                assert_eq!(partial, 0, "{k:?} at {size}");
+            }
+        }
+    }
+
+    #[test]
+    fn odd_input_draws_a_defined_state() {
+        for v in [f32::NAN, -5.0, 1e9] {
+            let i = render(
+                &Kind::Percent { label: "CPU".into() },
+                &Reading {
+                    value: Some(v),
+                    ..Reading::default()
+                },
+                State::Normal,
+                16,
+                Theme { dark: true },
+            );
+            assert_eq!(i.size, 16);
+        }
+        let i = render(&Kind::Cores, &Reading::default(), State::Normal, 16, Theme { dark: true });
+        assert_eq!(i.size, 16);
+    }
 }

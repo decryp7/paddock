@@ -1,11 +1,57 @@
-//! Sheet composition: wallpapers, bars, system items drawn as vectors, captions, zoomed crops. Only the mockups use this;
-//! the items themselves come from `mac` and `pix`.
+//! Sheet composition: wallpapers, bars, system items drawn as vector stand-ins, captions, close-ups.
 
-use crate::font::{Font, Style};
+use crate::coretext::CoreText;
+use dyno_core::tray::text::{TextRaster, TextStyle as Style};
 use tiny_skia::{
     Color, FillRule, FilterQuality, GradientStop, LineCap, LinearGradient, Paint, PathBuilder, Pixmap, PixmapPaint, Point, Rect,
-    Shader, SpreadMode, Stroke, Transform,
+    SpreadMode, Stroke, Transform,
 };
+
+/// Sheet text through the CoreText adapter.
+pub struct Font {
+    ct: CoreText,
+}
+
+/// A CSS-like weight (400, 600, 700) on AppKit's scale.
+pub fn weight(w: f32) -> f32 {
+    match w as u32 {
+        0..=449 => 0.0,
+        450..=549 => 0.23,
+        550..=649 => 0.3,
+        _ => 0.4,
+    }
+}
+
+impl Font {
+    pub fn system() -> Font {
+        Font { ct: CoreText }
+    }
+    pub fn raster(&self) -> &dyn TextRaster {
+        &self.ct
+    }
+    pub fn measure(&self, t: &str, s: &Style) -> f32 {
+        self.ct.advance(t, s)
+    }
+    /// Draws `t` in `c` with its pen at (`x`, `y`) points, `scale` pixels per point; returns the advance in points.
+    pub fn draw(&self, pm: &mut Pixmap, t: &str, s: &Style, x: f32, y: f32, scale: f32, c: Color) -> f32 {
+        let m = self.ct.mask(t, s, scale);
+        let ox = (x * scale).round() as i32 - m.origin as i32;
+        let oy = (y * scale).round() as i32 - m.baseline as i32;
+        let mut src = Pixmap::new(m.width.max(1), m.height.max(1)).unwrap();
+        for (k, p) in src.pixels_mut().iter_mut().enumerate() {
+            let a = f32::from(m.alpha[k]) / 255.0 * c.alpha();
+            *p = tiny_skia::ColorU8::from_rgba(
+                (c.red() * 255.0) as u8,
+                (c.green() * 255.0) as u8,
+                (c.blue() * 255.0) as u8,
+                (a * 255.0).round() as u8,
+            )
+            .premultiply();
+        }
+        pm.draw_pixmap(ox, oy, src.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        self.measure(t, s)
+    }
+}
 
 pub fn rgba(hex: u32, a: f32) -> Color {
     Color::from_rgba8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8, (a * 255.0).round() as u8)
@@ -42,7 +88,13 @@ pub fn rrect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path {
 }
 
 pub fn fill_rrect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, c: Color) {
-    pm.fill_path(&rrect_path(x, y, w, h, r), &solid(c), FillRule::Winding, Transform::identity(), None);
+    pm.fill_path(
+        &rrect_path(x, y, w, h, r),
+        &solid(c),
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
 }
 
 /// A diagonal gradient wallpaper with a second soft glow.
@@ -151,7 +203,7 @@ pub fn resample(src: &Pixmap, w: u32, h: u32) -> Pixmap {
 
 /// Caption text in sheet pixels.
 pub fn text(pm: &mut Pixmap, font: &Font, s: &str, size: f32, weight: f32, x: f32, y: f32, c: Color) -> f32 {
-    font.draw(pm, s, &Style::new(size).weight(weight), x, y, 1.0, &solid(c))
+    font.draw(pm, s, &Style::new(size).weight(crate::sheet::weight(weight)), x, y, 1.0, c)
 }
 
 // ------------------------------------------------------------------------------------- macOS system items (stand-ins)
@@ -166,7 +218,7 @@ pub fn mac_system(pm: &mut Pixmap, font: &Font, right: f32, cy: f32, scale: f32,
     let cw = font.measure(clock, &cs);
     let mut x = right - cw * s;
     let base = (cy / s - 12.0 + 16.5) * s;
-    font.draw(pm, clock, &cs, x / s, ((base / s) * s).round() / s, s, &p);
+    font.draw(pm, clock, &cs, x / s, ((base / s) * s).round() / s, s, c);
     x -= 16.0 * s;
     // Control Centre: two capsule toggles.
     let w = 15.0 * s;
@@ -189,7 +241,16 @@ pub fn mac_system(pm: &mut Pixmap, font: &Font, right: f32, cy: f32, scale: f32,
     x -= 14.0 * s;
     let mut pb = PathBuilder::new();
     pb.push_circle(x + r + 1.0 * s, cy - 1.5 * s, r);
-    pm.stroke_path(&pb.finish().unwrap(), &p, &Stroke { width: 1.6 * s, ..Stroke::default() }, Transform::identity(), None);
+    pm.stroke_path(
+        &pb.finish().unwrap(),
+        &p,
+        &Stroke {
+            width: 1.6 * s,
+            ..Stroke::default()
+        },
+        Transform::identity(),
+        None,
+    );
     let mut pb = PathBuilder::new();
     pb.move_to(x + 2.0 * r - 0.5 * s, cy + 2.5 * s);
     pb.line_to(x + 13.5 * s, cy + 6.5 * s);
@@ -243,9 +304,30 @@ pub fn mac_system(pm: &mut Pixmap, font: &Font, right: f32, cy: f32, scale: f32,
     let by = cy - bh / 2.0;
     let mut dim = c;
     dim.set_alpha(c.alpha() * 0.45);
-    pm.stroke_path(&rrect_path(x, by, bw, bh, 3.5 * s), &solid(dim), &Stroke { width: 1.0 * s, ..Stroke::default() }, Transform::identity(), None);
-    pm.fill_path(&rrect_path(x + 2.0 * s, by + 2.0 * s, (bw - 4.0 * s) * 0.78, bh - 4.0 * s, 2.0 * s), &p, FillRule::Winding, Transform::identity(), None);
-    pm.fill_path(&rrect_path(x + bw + 1.0 * s, cy - 2.0 * s, 1.5 * s, 4.0 * s, 0.75 * s), &solid(dim), FillRule::Winding, Transform::identity(), None);
+    pm.stroke_path(
+        &rrect_path(x, by, bw, bh, 3.5 * s),
+        &solid(dim),
+        &Stroke {
+            width: 1.0 * s,
+            ..Stroke::default()
+        },
+        Transform::identity(),
+        None,
+    );
+    pm.fill_path(
+        &rrect_path(x + 2.0 * s, by + 2.0 * s, (bw - 4.0 * s) * 0.78, bh - 4.0 * s, 2.0 * s),
+        &p,
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
+    pm.fill_path(
+        &rrect_path(x + bw + 1.0 * s, cy - 2.0 * s, 1.5 * s, 4.0 * s, 0.75 * s),
+        &solid(dim),
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
     x
 }
 
@@ -254,12 +336,8 @@ pub fn mac_menus(pm: &mut Pixmap, font: &Font, x: f32, cy: f32, scale: f32, c: C
     let base = (cy / scale - 12.0 + 16.5) * scale;
     let mut x = x;
     for (i, m) in ["Finder", "File", "Edit", "View", "Go", "Window", "Help"].iter().enumerate() {
-        let st = Style::new(13.0).weight(if i == 0 { 700.0 } else { 400.0 }).tnum(false);
-        let w = font.draw(pm, m, &st, x / scale, base / scale, scale, &solid(c));
+        let st = Style::new(13.0).weight(if i == 0 { 0.4 } else { 0.0 }).proportional();
+        let w = font.draw(pm, m, &st, x / scale, base / scale, scale, c);
         x += (w + 20.0) * scale;
     }
-}
-
-pub fn shader_none() -> Shader<'static> {
-    Shader::SolidColor(Color::BLACK)
 }
