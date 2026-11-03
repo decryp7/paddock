@@ -288,7 +288,7 @@ fn the_start_sets_up_the_user_files_service_the_about_link_needs() {
                 // One iteration runs Tauri's set-up (the mock runtime has no event loop).
                 #[allow(deprecated)]
                 app.run_iteration(|_, _| {});
-                paddock_files::tauri::files(app.handle()).is_some()
+                tauri::Manager::try_state::<std::sync::Arc<paddock_files::Files>>(app.handle()).is_some()
             })
             .map_err(|e| e.to_string());
         let _ = tx.send(has);

@@ -50,12 +50,14 @@ export class Chart {
   private readonly ready = signal(false);
 
   /**
-   * Gives the chart the size its container has now. A container with no size (the panel's skeleton is showing, so the
-   * projected chart is detached) is ignored: resizing to 0 would leave a 0 px canvas that a later resize did not restore.
+   * Gives the chart the size its container has now, only when that differs from the chart's own. A container with no size
+   * (the panel's skeleton is showing, so the projected chart is detached) is ignored: resizing to 0 left a 0 px canvas.
    */
   private fit(): void {
     const el = this.host().nativeElement;
-    if (this.chart && el.clientWidth > 0 && el.clientHeight > 0) this.chart.resize({ width: el.clientWidth, height: el.clientHeight });
+    const chart = this.chart;
+    if (!chart || el.clientWidth <= 0 || el.clientHeight <= 0) return;
+    if (el.clientWidth !== chart.getWidth() || el.clientHeight !== chart.getHeight()) chart.resize({ width: el.clientWidth, height: el.clientHeight });
   }
 
   constructor() {

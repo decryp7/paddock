@@ -145,21 +145,23 @@ test.describe('dashboard', () => {
   });
 
   test('switching the history range keeps a drawn chart (it went empty until the view was reopened)', async ({ page }) => {
-    // The engine answers after a moment (as the agent does), so the panel shows its skeleton between ranges.
-    await page.goto('/?latency=300#/');
+    await page.goto('/?latency=0&gates#/');
     const history = page.getByRole('region', { name: 'History' });
     const range = history.getByRole('radiogroup', { name: 'Range' });
     const drawn = history.locator('dy-chart canvas').first();
     await expect(drawn).toBeVisible();
     for (const label of ['7d', '30d', '24h']) {
+      // Hold the answer: the panel shows its skeleton (the chart is detached) until the test lets the answer through.
+      await page.evaluate(() => (window as unknown as { __mockHold(n: string): void }).__mockHold('history'));
       await range.getByRole('radio', { name: label }).click();
       await expect(range.getByRole('radio', { name: label })).toBeChecked();
+      await expect(history.getByLabel('Loading history')).toBeVisible();
+      await page.evaluate(() => (window as unknown as { __mockRelease(n: string): void }).__mockRelease('history'));
+      await expect(history.getByLabel('Loading history')).toHaveCount(0);
       await expect(history.getByText('No history yet')).toHaveCount(0);
       await expect(drawn).toBeVisible();
-      // A chart that lost its size shows a canvas of 0 x 0 pixels.
-      await expect
-        .poll(async () => (await drawn.boundingBox())?.height ?? 0)
-        .toBeGreaterThan(100);
+      // A chart that lost its size shows a canvas of 0 px height.
+      await expect.poll(async () => (await drawn.boundingBox())?.height ?? 0).toBeGreaterThan(100);
     }
   });
 
