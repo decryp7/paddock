@@ -67,7 +67,7 @@ export const FRAME_STYLES = `
     .pd-frame-alert .pd-frame-btn:focus { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
     .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
-    .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--pd-space-4, 16px); outline: none; }
+    .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: var(--pd-space-4, 16px); outline: none; }
     .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
     .pd-frame-body--decision { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--pd-space-4, 16px); align-items: start; padding-block-end: var(--pd-space-2, 8px); }
     .pd-frame-icon { display: inline-grid; place-items: center; inline-size: 40px; block-size: 40px; border-radius: 50%; background: var(--pd-info-tint); color: var(--pd-info); }
