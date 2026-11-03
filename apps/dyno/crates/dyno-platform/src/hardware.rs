@@ -56,7 +56,33 @@ pub fn battery_capacity() -> Box<dyn BatteryCapacitySource> {
     }
 }
 
+/// The SSD wear reader that tries Dyno's own copy of smartctl first (`<tools>/smartmontools-*/smartctl`, newest name first), then
+/// the usual places on the PATH and in Homebrew.
+pub fn disk_wear_with_own_tools(tools: &Path) -> Box<dyn DiskWearSource> {
+    Box::new(SmartctlWear::new(smartctl_candidates_with(Some(tools))))
+}
+
 fn smartctl_candidates() -> Vec<PathBuf> {
+    smartctl_candidates_with(None)
+}
+
+/// The places to look for smartctl: Dyno's own copies under `own_tools` first, then the system's.
+fn smartctl_candidates_with(own_tools: Option<&Path>) -> Vec<PathBuf> {
+    let mut own: Vec<PathBuf> = own_tools
+        .and_then(|t| std::fs::read_dir(t).ok())
+        .map(|d| {
+            d.flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("smartmontools-"))
+                .map(|e| e.path().join(if cfg!(windows) { "smartctl.exe" } else { "smartctl" }))
+                .collect()
+        })
+        .unwrap_or_default();
+    own.sort();
+    own.reverse();
+    own.into_iter().chain(system_smartctl()).collect()
+}
+
+fn system_smartctl() -> Vec<PathBuf> {
     [
         "/opt/homebrew/sbin/smartctl",
         "/opt/homebrew/bin/smartctl",
@@ -455,6 +481,25 @@ mod tests {
             SysfsBattery::new(PathBuf::from("/dyno/none")).read(),
             Reading::unavailable(NO_BATTERY)
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dynos_own_copy_is_tried_before_the_system_places_and_the_newest_first() {
+        let dir = temp("own-tools");
+        for v in ["smartmontools-7.4", "smartmontools-7.5"] {
+            std::fs::create_dir_all(dir.join(v)).unwrap();
+        }
+        std::fs::create_dir_all(dir.join("other-tool")).unwrap();
+        let c = smartctl_candidates_with(Some(&dir));
+        let name = |i: usize| c[i].parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(
+            (name(0), name(1)),
+            ("smartmontools-7.5".to_string(), "smartmontools-7.4".to_string())
+        );
+        assert!(c.iter().all(|p| !p.to_string_lossy().contains("other-tool")));
+        assert_eq!(&c[2..], &smartctl_candidates()[..], "then the system places, unchanged");
+        assert_eq!(smartctl_candidates_with(Some(&dir.join("missing"))), smartctl_candidates());
         let _ = std::fs::remove_dir_all(dir);
     }
 

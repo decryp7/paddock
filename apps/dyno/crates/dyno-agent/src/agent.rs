@@ -394,7 +394,15 @@ impl Shared {
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
             network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
-            hardware: crate::hardware::HardwareCentre::new(hardware.signals, hardware.wear, hardware.battery),
+            hardware: crate::hardware::HardwareCentre::new(
+                hardware.signals,
+                if own_folder {
+                    dyno_platform::hardware::disk_wear_with_own_tools(&dirs.tools())
+                } else {
+                    hardware.wear
+                },
+                hardware.battery,
+            ),
             baselines: crate::baselines::BaselineCentre::new(),
             disk: Arc::new(crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),
