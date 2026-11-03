@@ -442,7 +442,7 @@ The push check is one short job: git queries on a partial clone, rustfmt on a fe
 parallelises nothing; its cost is the container start and the clone. On 11-02 and 11-03 the remote branches gained 277
 non-merge commits across 52 heads, so it runs tens of times a day; the first measured run (WP-1) sets the budget. What it
 saves: a red landing run is about 1 to 1.5 hours of the shared runners (log 727; memory `ci-economy`). The schema and golden
-runs in the crate's tests, in milliseconds, with no extra build.
+tests run with the crate's other tests, with no extra build (their time is measured in WP-7).
 
 ## Consequences
 
