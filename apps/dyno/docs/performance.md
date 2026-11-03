@@ -57,7 +57,9 @@ Dyno has two things called "bench":
   | Decode the records (Python `struct`) | — | 0.093 s | 0.091 s | — | — |
 
 - **Memory measure:** not measured (Python process; the Rust bench of WP-5 measures footprint, rule 26)
-- **Notes:** Python's per-row cost dominates the row layout's read; rusqlite is faster per row but still builds 1M rows
+- **Notes:** Like for like (read and decode to node values): chunks 0.135 s (0.042 + 0.093) against rows 0.89 s, about
+  6.5x; the chunk read alone is not comparable with the row read. The records here have fewer fields than `Node`
+  (no `reason`, `unread`, `child_count`); WP-5 uses the real ones. Python's per-row cost dominates the row layout's read; rusqlite is faster per row but still builds 1M rows
   where the chunks are 22 SQLite rows. The names compress far better than real names would (they are regular), so the
   zlib size is optimistic; WP-5 repeats this in Rust with realistic name lengths and a 5M-node tree before D3 is final.
   Raw output was not kept beyond this block.
