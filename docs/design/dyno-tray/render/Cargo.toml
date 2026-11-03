@@ -1,0 +1,16 @@
+[package]
+name = "dyno-tray-render"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Design renders for Dyno's menu-bar and tray items (docs/design/dyno-tray): the drawing route the app can use."
+
+[workspace]
+
+[dependencies]
+rustybuzz = "0.20"
+ttf-parser = "0.25"
+# Outlines of the variable system font (ttf-parser 0.25 returns none through SF's gvar).
+skrifa = "0.44"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+dyno-core = { path = "../../../../apps/dyno/crates/dyno-core" }
