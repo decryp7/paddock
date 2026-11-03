@@ -41,10 +41,35 @@ export async function dialogFitProblems(browser: Browser, id: string, contract: 
           const page = await context.newPage();
           await page.goto(dialogWindowUrl(id, input, { title: id }));
           await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-          const asked = await page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
+          // The height the frame last asked for: a dialog that loads its data refits after the handshake, so wait until it is steady.
+          const askedNow = () => page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
+          // Steady: unchanged over three animation frames (frames, not wall time: rule 60), so a refit after the handshake is seen.
+          await page.evaluate(
+            () =>
+              new Promise<void>((done) => {
+                const read = () => `${document.documentElement.dataset['fittedHeight']}/${document.documentElement.dataset['minContent']}`;
+                let seen = read();
+                let steady = 0;
+                const frame = () => {
+                  const now = read();
+                  steady = now === seen ? steady + 1 : 0;
+                  seen = now;
+                  if (steady >= 3) done();
+                  else requestAnimationFrame(frame);
+                };
+                requestAnimationFrame(frame);
+              }),
+          );
+          const asked = await askedNow();
           const minH = Number(asked.min.split('x')[1] ?? '0');
           const height = contract.kind === 'tool' ? Math.min(contract.height ?? capH, capH) : Math.max(Math.min(asked.h, capH), minH);
           await page.setViewportSize({ width, height });
+          // A window sized to its content shows all of it: the body scrolls only when the content is taller than the cap.
+          const body = await page.evaluate(() => {
+            const el = document.querySelector('[data-testid=dialog-body]');
+            return el ? { scroll: el.scrollHeight, client: el.clientHeight } : null;
+          });
+          if (body && body.scroll > body.client + 1 && height < capH) problems.push(`${where}: the body scrolls (${body.scroll} px of content in ${body.client} px) in a window below the cap`);
           const buttons = page.locator('[data-testid=dialog-footer] button');
           const n = await buttons.count();
           if (n === 0) problems.push(`${where}: no footer button`);

@@ -975,6 +975,44 @@ mod tests {
     }
 
     #[test]
+    fn a_short_form_is_its_content_inner_height_whatever_the_windows_frame_and_scale() {
+        // Windows: the frame (title bar and borders) is outside the inner size that `set_size` takes, so the fitted inner
+        // height is the content, never the content less the frame, and it is a whole number of physical px.
+        for (scale, frame_px) in [(1.0, 39.0), (1.25, 48.0), (1.5, 55.0)] {
+            let m = Monitor {
+                work: Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1920.0,
+                    height: 1040.0,
+                },
+                scale,
+            };
+            let decor = size(16.0 / scale, frame_px / scale);
+            let fit = plan_fit(
+                Kind::Form,
+                measure(560.0, 163.0, 400.0, 120.0),
+                0.0,
+                &around(size(560.0, 560.0), decor, Some(m), "windows"),
+            )
+            .unwrap();
+            assert_eq!(fit.size.height, 163.0, "scale {scale}");
+            assert!(fit.resize, "scale {scale}");
+            let physical = placement::physical_ceil(fit.size.height, scale);
+            assert!(
+                f64::from(physical) >= 163.0 * scale,
+                "scale {scale}: {physical}"
+            );
+            assert!(
+                f64::from(physical) < 163.0 * scale + 1.0,
+                "scale {scale}: {physical}"
+            );
+            // The outer window is the inner one plus the frame; it is the frame that is added, never taken from the content.
+            assert!((fit.size.height + decor.height) * scale >= 163.0 * scale + frame_px - 1e-6);
+        }
+    }
+
+    #[test]
     fn the_cap_is_three_quarters_of_the_work_area_less_the_windows_own_decorations() {
         // A 1920x1080 display at 1x: cap = 0.75 * 1080 - 28 = 782.
         let m = Monitor {

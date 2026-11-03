@@ -892,8 +892,12 @@ fn fit<R: Runtime>(
     }
     log::info!(
         target: TARGET,
-        Dialog = entry.dialog_id.as_str(), Content = measure.content.height, Height = plan.size.height;
-        "Dialog window fitted to its content"
+        Dialog = entry.dialog_id.as_str(), Content = measure.content.height, Height = plan.size.height,
+        Delta = viewport_delta, Current = around.current.height, Decor = around.decor.height, Scale = scale,
+        Zoom = zoom, Resized = plan.resize;
+        "Dialog window fitted to its content: requested inner {}x{} (content {}x{}), was {}x{}, scale {}",
+        plan.size.width, plan.size.height, measure.content.width, measure.content.height,
+        around.current.width, around.current.height, scale
     );
     Ok(())
 }

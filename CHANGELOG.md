@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: a dialog that loads its data is fitted to it (Dyno 1.0.1)
+- The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has answered, and sends a refit when it
+  differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so a dialog whose content arrived meanwhile (Updates
+  asks the engine for its status) was taken as already fitted: the window kept the height of the empty first state and showed the real content behind a scrollbar.
+- `dialog_ready` and `dialog_fit` log the requested inner size, the size it was, the window's decorations, the viewport delta, the scale and the zoom.
+- `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for the fitted height to be steady and reports a body that scrolls in a window below the cap.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

@@ -170,6 +170,11 @@ export class DialogShell implements AfterViewInit {
     }
     this.readied = true;
     await this.io.ready(measure).catch(() => undefined);
+    // The content may have changed while the window system answered (a dialog that loads its data): that is read at the
+    // same pinned width the measure was taken at, and sent as a refit. Left to `watch`, whose baseline is read after the
+    // pin is released, it would be taken as already fitted and the window would keep its first, empty size.
+    const after = frame.measure();
+    if (after.content.height !== measure.content.height || after.minContent.height !== measure.minContent.height) this.fit(after);
     // Shown at its size now: the window's own width rules again.
     frame.pinWidth(null);
     frame.watch();
