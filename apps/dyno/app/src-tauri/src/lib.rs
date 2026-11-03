@@ -311,7 +311,7 @@ fn agent_setup<R: Runtime>(
         dyno_agent::logging::arch(),
         logging::uptime_ms()
     ));
-    let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels);
+    let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels, shell::saved_items(&dirs.settings()));
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {
@@ -408,7 +408,8 @@ pub fn run() {
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         Some(vec![paddock_window::launch::HIDDEN_FLAG]),
     ));
-    let items = shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements);
+    // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
+    let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]

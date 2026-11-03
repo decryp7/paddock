@@ -53,7 +53,7 @@ Sheets, rendered by the code that would ship (§1):
 | Stack: value line | 11 pt | medium | tabular | 0 |
 | Network pair | 9 pt | medium | tabular | 0 |
 
-- **Baseline** of one-line text 13.5 pt below the image top (@2x 27 px, 1x 14 px): 16.5 pt below the 24 pt bar's top, the caps
+- **Baseline** of one-line text 13.5 pt below the image top, rounded down to a whole device pixel (@2x 27 px, 1x 13 px; the first macOS VM run measured the 1x digits one pixel low with 14, ink rows 11 to 19 against the clock's 9 to 18; @2x could not be measured in Tart, which has no HiDPI): 16.5 pt below the 24 pt bar's top, the caps
   of 13 pt text centred like the clock's. Stack baselines 7 and 16.5 pt; network 7.5 and 16.5 pt. **To verify during the VM
   run** with a screenshot overlay against the real clock at 1x and @2x.
 - Tabular figures: every digit is 8.112 pt at 13 pt; a proportional "1" is 5.954 pt, so "11%" against "18%" would move 2.16 pt.
