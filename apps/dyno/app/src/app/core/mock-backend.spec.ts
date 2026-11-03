@@ -1,7 +1,8 @@
 import { readValue } from './measured';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import type { Alert, BackupReport, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
-import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
+import { SPARK_CAPACITY, appendSeries, type Series } from '../state/live.store';
+import { LIVE_BACKLOG, MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
@@ -130,6 +131,25 @@ describe('OS differences', () => {
 });
 
 describe('live data', () => {
+  it('opens a summary subscriber with a full minute of wandering samples, the same every time for one clock', async () => {
+    const collect = async (): Promise<Series> => {
+      const b = make();
+      const got: Parameters<typeof appendSeries>[1][] = [];
+      const stop = b.onLive('summary', (u) => got.push(u));
+      await new Promise((r) => setTimeout(r, 5));
+      stop();
+      return got.reduce<Series>((s, u) => appendSeries(s, u), { cpu: [], memory: [], diskRead: [], diskWrite: [], diskBusy: [], netRx: [], netTx: [], gpu: [] });
+    };
+    expect(LIVE_BACKLOG + 1).toBe(SPARK_CAPACITY);
+    const a = await collect();
+    for (const key of ['cpu', 'memory', 'diskRead', 'diskWrite', 'netRx', 'netTx'] as const) {
+      expect(a[key].length, key).toBe(SPARK_CAPACITY);
+      expect(new Set(a[key]).size, `${key} wanders`).toBeGreaterThan(5);
+    }
+    expect(a.gpu.length).toBe(SPARK_CAPACITY);
+    expect(await collect()).toEqual(a);
+  });
+
   it('is deterministic for a frozen clock and includes processes only on request', () => {
     const a = make().liveUpdate('summary');
     expect(a).toEqual(make().liveUpdate('summary'));
@@ -169,7 +189,7 @@ describe('live data', () => {
       vi.useRealTimers();
     }
   });
-  it('onLive delivers a first update asynchronously, then on the timer; unsubscribing stops both', () => {
+  it('onLive delivers the last minute and the current update asynchronously, then one a second on the timer; unsubscribing stops both', () => {
     vi.useFakeTimers();
     try {
       const b = make();
@@ -177,12 +197,13 @@ describe('live data', () => {
       const stop = b.onLive('summary', l);
       expect(l).not.toHaveBeenCalled();
       vi.advanceTimersByTime(0);
-      expect(l).toHaveBeenCalledTimes(1);
+      const first = LIVE_BACKLOG + 1;
+      expect(l).toHaveBeenCalledTimes(first);
       vi.advanceTimersByTime(2000);
-      expect(l).toHaveBeenCalledTimes(3);
+      expect(l).toHaveBeenCalledTimes(first + 2);
       stop();
       vi.advanceTimersByTime(5000);
-      expect(l).toHaveBeenCalledTimes(3);
+      expect(l).toHaveBeenCalledTimes(first + 2);
       expect(vi.getTimerCount()).toBe(0);
       const gone = vi.fn();
       b.onLive('summary', gone)();

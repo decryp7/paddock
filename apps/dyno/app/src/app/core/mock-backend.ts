@@ -199,6 +199,9 @@ export function applyMockPlatform(search: string, root: HTMLElement): void {
 /** A mock reading as a plain number: the mock reads everything. */
 const num = (m: Measured<number>): number => readValue(m) ?? 0;
 
+/** How many seconds of live samples a new summary subscriber gets first (the live store keeps SPARK_CAPACITY = 60 including the current one). */
+export const LIVE_BACKLOG = 59;
+
 export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
   private readonly latencyMs: number;
@@ -280,7 +283,10 @@ export class MockBackend implements DynoBackend {
   onLive(detail: LiveDetail, listener: (u: LiveUpdate) => void): Unsubscribe {
     this.liveListeners.set(listener, detail);
     setTimeout(() => {
-      if (this.liveListeners.has(listener)) listener(this.liveUpdate(detail));
+      if (!this.liveListeners.has(listener)) return;
+      // The summary subscriber (the shared live store) opens with the last minute already measured, so its sparklines are full width.
+      if (detail === 'summary') for (const u of this.liveBacklog()) listener(u);
+      listener(this.liveUpdate(detail));
     }, 0);
     this.timer ??= setInterval(() => this.tick(), 1000);
     return () => {
@@ -322,9 +328,20 @@ export class MockBackend implements DynoBackend {
     for (const [listener, detail] of this.liveListeners) listener(detail === 'processes' || !wantsProcesses ? update : { ...update, processes: null, groups: null });
   }
 
+  /** The summary updates of the {@link LIVE_BACKLOG} seconds before the current one, oldest first (time comes from the injected clock). */
+  liveBacklog(): LiveUpdate[] {
+    const t = Math.floor(this.now() / 1000);
+    const out: LiveUpdate[] = [];
+    for (let s = t - LIVE_BACKLOG; s < t; s++) out.push(this.liveUpdateAt(s, 'summary'));
+    return out;
+  }
+
   /** The live sample at the current second. */
   liveUpdate(detail: LiveDetail): LiveUpdate {
-    const t = Math.floor(this.now() / 1000);
+    return this.liveUpdateAt(Math.floor(this.now() / 1000), detail);
+  }
+
+  private liveUpdateAt(t: number, detail: LiveDetail): LiveUpdate {
     const samples = this.samplesAt(t);
     const groups = groupSamples(this.processes, samples);
     const system = this.system(t, samples);
