@@ -926,6 +926,50 @@ describe('PdWidgetGrid', () => {
       expect((document.querySelector('.pd-wg-savepreset') as HTMLButtonElement).disabled).toBe(true);
     });
 
+    it('says nothing of success when a reset, a save or a preset fails or the grid is busy; own presets have no Built in tag', async () => {
+      await create();
+      await edit();
+      const own = { id: 'mine', name: 'Mine', builtin: false, placements: [] };
+      f.componentInstance.view.set(mkView({ layout: { ...mkView().layout, presets: [own] } }));
+      await settle(f);
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      expect(document.querySelector('.pd-wg-preset .pd-wg-key')).toBeNull();
+      document.body.click();
+      backend.edit.mockRejectedValue(new Error('down'));
+      await grid().reset();
+      await grid().applyPreset('mine', 'Mine');
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-savepreset') as HTMLElement).click();
+      await settle(f);
+      const input = q('.pd-wg-savename') as HTMLInputElement;
+      input.value = 'Work';
+      input.dispatchEvent(new Event('input'));
+      await settle(f);
+      (q('.pd-wg-savego') as HTMLElement).click();
+      await settle(f);
+      expect(q('.pd-wg-save')).not.toBeNull();
+      expect(say).not.toHaveBeenCalledWith('Applied the preset Mine.', 'polite');
+      let done: (v: View) => void = () => undefined;
+      backend.edit.mockImplementation(() => new Promise<View>((r) => (done = r)));
+      const before = backend.edit.mock.calls.length;
+      void grid().reset();
+      await grid().applyPreset('mine', 'Mine');
+      expect(backend.edit).toHaveBeenCalledTimes(before + 1);
+      done(mkView());
+    });
+
+    it('a move to last with nothing after it names only what is before', async () => {
+      await create();
+      await edit();
+      const v = moved();
+      backend.edit.mockResolvedValue({ ...v, outcome: { ...(v.outcome as NonNullable<View['outcome']>), before: null } });
+      key(cell('a'), 'End');
+      await settle(f);
+      expect(say).toHaveBeenCalledWith('CPU moved to last, after Network. Position 2 of 3.', 'polite');
+    });
+
     it('passes a widget state action up', async () => {
       await create();
       f.componentInstance.values.set({ notice: null, placements: [{ id: 'a', state: { state: 'error', title: 'Failed', cause: null, next: { action: 'retry', label: 'Retry' } } }] });
