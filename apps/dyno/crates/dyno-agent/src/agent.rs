@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 /// Locks, recovering from poisoning: a panic in one request must not wedge the agent.
@@ -278,6 +278,23 @@ pub struct Shared {
     next_conn: AtomicU64,
 }
 
+/// What the benchmark centre gets from the agent: a job in the Jobs view and the latest power source.
+struct AgentBenchEnv(Weak<Shared>);
+
+impl crate::bench::BenchEnv for AgentBenchEnv {
+    fn register_job(&self, title: &str, subject: Option<&str>) -> Option<paddock_jobs::JobContext> {
+        Some(self.0.upgrade()?.jobs.register_external("benchmark", title, subject))
+    }
+
+    fn on_battery(&self) -> Option<bool> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent
+            .back()
+            .and_then(|s| s.battery.value().map(|b| b.source == dyno_core::metrics::PowerSource::Battery))
+    }
+}
+
 impl Shared {
     /// Builds the state: opens the store (moving a damaged one aside), loads settings (falling back to
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
@@ -341,7 +358,7 @@ impl Shared {
         let (bench, bench_note) = crate::bench::BenchCentre::load(
             dirs.benchmarks(),
             std::env::temp_dir(),
-            Box::new(crate::bench::ProcessLauncher::beside_agent()),
+            Box::new(crate::bench::ProcessLauncher::beside_agent(&dirs.benchmarks())),
         );
         if let Some(n) = bench_note {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
@@ -403,6 +420,7 @@ impl Shared {
             next_conn: AtomicU64::new(1),
         });
         shared.disk.set_read_threads(read_threads);
+        shared.bench.attach(Arc::new(AgentBenchEnv(Arc::downgrade(&shared))));
         Ok((shared, sensors, processes))
     }
 

@@ -1,6 +1,7 @@
 //! Memory: copy bandwidth over a buffer much larger than the caches, and random-access latency by chasing a
 //! shuffled cycle through a buffer of the same size.
 
+use crate::emit::{phase, Progress};
 use crate::repeat::{repeated, Pace, Repeats, Step};
 use dyno_core::bench::BenchMetric;
 use paddock_bench::Clock;
@@ -55,13 +56,16 @@ pub fn latency_ns(slots: usize, budget: Duration) -> f64 {
 }
 
 /// The memory metrics, each from every repetition. The warm-up runs both for half its time each and is not counted.
-pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace) -> Vec<BenchMetric> {
+pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace, progress: &dyn Progress) -> Vec<BenchMetric> {
     let reps = repeated(clock, pace, repeats, |step| {
-        let b = match step {
-            Step::Warmup(d) => d / 2,
-            Step::Rep { .. } => budget,
+        let (b, rep, of) = match step {
+            Step::Warmup(d) => (d / 2, 0, repeats.reps),
+            Step::Rep { n, of } => (budget, n, of),
         };
-        (copy_bandwidth(COPY_BYTES, b), latency_ns(CHAIN_SLOTS, b))
+        progress.report(phase("mem-copy", "Copy bandwidth", rep, of));
+        let copy = copy_bandwidth(COPY_BYTES, b);
+        progress.report(phase("mem-latency", "Random access latency", rep, of));
+        (copy, latency_ns(CHAIN_SLOTS, b))
     });
     let copy: Vec<f64> = reps.iter().map(|(c, _)| *c).collect();
     let latency: Vec<f64> = reps.iter().map(|(_, l)| *l).collect();

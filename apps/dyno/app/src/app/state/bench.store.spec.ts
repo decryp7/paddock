@@ -50,6 +50,25 @@ describe('BenchStore', () => {
     store.stop();
   });
 
+  it('on battery the engine asks first; agreeing starts the held run for that run only', async () => {
+    vi.useFakeTimers();
+    const { mock, store } = setup();
+    const start = mock.startBenchmark.bind(mock);
+    mock.startBenchmark = (r) => (r.allowBattery ? start(r) : Promise.reject({ code: 'needsConsent', message: 'On battery. Run anyway?' }));
+    await store.start({ kinds: ['cpu'], label: 'a' });
+    expect(store.error()).toBeNull();
+    expect(store.consent()?.message).toBe('On battery. Run anyway?');
+    expect(store.overview()?.running ?? null).toBeNull();
+    store.declineBattery();
+    expect(store.consent()).toBeNull();
+    await store.start({ kinds: ['cpu'], label: 'a' });
+    await store.allowBattery();
+    expect(store.consent()).toBeNull();
+    expect(store.overview()?.running?.kinds).toEqual(['cpu']);
+    await store.allowBattery();
+    store.stop();
+  });
+
   it('compares two runs and clears the comparison; deleting an unknown run reports it', async () => {
     const { store } = setup();
     await store.load();

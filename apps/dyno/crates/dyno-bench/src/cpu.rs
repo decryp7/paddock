@@ -1,6 +1,7 @@
 //! Integer work: a xorshift-and-multiply mix whose result is consumed, so it can't be optimised away. Reported as
 //! million rounds per second on one core and on every core at once.
 
+use crate::emit::{phase, Progress};
 use crate::repeat::{repeated, Pace, Repeats, Step};
 use dyno_core::bench::BenchMetric;
 use paddock_bench::Clock;
@@ -36,10 +37,12 @@ pub fn rounds_per_second(budget: Duration) -> f64 {
 
 /// The CPU metrics, each from every repetition: one core, all cores and the scaling between them. The warm-up runs both for
 /// half its time each and is not counted.
-pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace) -> Vec<BenchMetric> {
+pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace, progress: &dyn Progress) -> Vec<BenchMetric> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(256);
-    let both = |b: Duration| {
+    let both = |b: Duration, rep: u32, of: u32| {
+        progress.report(phase("cpu-single", "Single core", rep, of));
         let single = rounds_per_second(b);
+        progress.report(phase("cpu-multi", &format!("All {threads} cores"), rep, of));
         let multi: f64 = std::thread::scope(|s| {
             let handles: Vec<_> = (0..threads).map(|_| s.spawn(|| rounds_per_second(b))).collect();
             handles.into_iter().filter_map(|h| h.join().ok()).sum()
@@ -47,8 +50,8 @@ pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pac
         (single, multi)
     };
     let reps = repeated(clock, pace, repeats, |step| match step {
-        Step::Warmup(d) => both(d / 2),
-        Step::Rep { .. } => both(budget),
+        Step::Warmup(d) => both(d / 2, 0, repeats.reps),
+        Step::Rep { n, of } => both(budget, n, of),
     });
     let single: Vec<f64> = reps.iter().map(|(s, _)| s / 1e6).collect();
     let multi: Vec<f64> = reps.iter().map(|(_, m)| m / 1e6).collect();
@@ -63,6 +66,7 @@ pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::emit::NoProgress;
 
     #[test]
     fn the_mix_is_deterministic_and_moves() {
@@ -83,6 +87,7 @@ mod tests {
             repeats,
             &paddock_bench::SystemClock::new(),
             &crate::repeat::SleepPace,
+            &NoProgress,
         );
         assert_eq!(m.len(), 3);
         assert!(m.iter().all(|x| x.value > 0.0 && x.higher_is_better));

@@ -1150,6 +1150,7 @@ dependencies = [
  "dyno-plugin-host",
  "libc",
  "log",
+ "paddock-bench",
  "paddock-env",
  "paddock-jobs",
  "paddock-log",

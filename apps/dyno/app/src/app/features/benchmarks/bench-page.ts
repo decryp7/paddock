@@ -9,7 +9,7 @@ import { Icon } from '../../shared/icon';
 import { BenchStore } from '../../state/bench.store';
 import { DeviceArt } from '../inventory/device-art';
 import { BenchArt } from './bench-art';
-import { barPair, bestValues, kindTitle, methodNote, spreadText, statusNote, verdictWord } from './bench-model';
+import { barPair, bestValues, kindTitle, livenessNote, methodNote, phaseText, spreadText, statusNote, verdictWord } from './bench-model';
 import { MatButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
@@ -44,7 +44,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <h2><dy-icon name="gauge" /> Run</h2>
               <span class="spacer"></span>
               @if (o.running) {
-                <button type="button" matButton="outlined" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
+                <button type="button" [matButton]="o.running.liveness === 'notResponding' ? 'filled' : 'outlined'" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
               }
             </div>
             @if (o.running; as r) {
@@ -57,6 +57,14 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                   </li>
                 }
               </ol>
+              @if (r.phase; as ph) {
+                <p class="phase" aria-live="polite">
+                  <span>{{ r.current ? title(r.current) + ' · ' : '' }}{{ ph.label }} · {{ phaseWhere(ph) }}</span>
+                  <progress class="bar-live" [attr.value]="ph.rep > 0 ? ph.rep : null" [max]="ph.of" [attr.aria-label]="ph.label + ', ' + phaseWhere(ph)"></progress>
+                </p>
+              }
+              @if (liveNote(r.liveness); as ln) { <p class="note" [attr.data-tone]="r.liveness === 'notResponding' ? 'bad' : 'warn'" role="status"><dy-icon name="info" /> {{ ln }}</p> }
+              @if (r.limited) { <p class="note"><dy-icon name="info" /> {{ r.limited }}</p> }
               <p class="note">Keep the computer otherwise idle while this runs; any other work lowers the numbers.</p>
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
@@ -66,6 +74,15 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                   </mat-checkbox>
                 }
               </div>
+              @if (store.consent(); as c) {
+                <div class="consent" role="alert">
+                  <p><dy-icon name="info" /> {{ c.message }}</p>
+                  <div class="consent-actions">
+                    <button type="button" matButton="filled" (click)="store.allowBattery()">Run on battery</button>
+                    <button type="button" matButton="outlined" (click)="store.declineBattery()">Don't run</button>
+                  </div>
+                </div>
+              }
               <div class="runbar">
                 <div class="field grow">
                   <label for="bench-label">Name this run</label>
@@ -222,6 +239,11 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .metrics .value small { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-sans); color: var(--text-3); }
     .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--surface-active); }
     .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; min-width: 2px; }
+    .phase { display: grid; gap: var(--sp-1); margin: var(--sp-3) 0 0; color: var(--text-2); font-size: var(--fs-sm); }
+    .bar-live { width: 100%; height: 6px; accent-color: var(--accent); }
+    .consent { margin: var(--sp-3) 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); display: grid; gap: var(--sp-2); }
+    .consent p { margin: 0; }
+    .consent-actions { display: flex; gap: var(--sp-2); }
     .took { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .why { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
     .tablewrap { margin: 0 var(--sp-4) var(--sp-3); }
@@ -249,6 +271,8 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly note = statusNote;
   protected readonly spread = (m: BenchMetric): string => spreadText(m, formatMetric);
   protected readonly oldWay = methodNote;
+  protected readonly phaseWhere = phaseText;
+  protected readonly liveNote = livenessNote;
   protected readonly deltaKey = (d: MetricDelta): string => d.kind + d.id;
   protected readonly runKey = (r: BenchRun): string => r.id;
   protected readonly deltaColumns: PdColumn<MetricDelta>[] = [

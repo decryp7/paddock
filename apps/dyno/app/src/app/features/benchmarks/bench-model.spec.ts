@@ -1,10 +1,19 @@
 import type { BenchMetric, BenchRun } from '../../core/api.types';
 import { mockRun } from '../../core/mock/bench';
-import { barPair, barFraction, bestValues, kindTitle, methodNote, spreadText, statusNote, verdictWord } from './bench-model';
+import { barPair, barFraction, bestValues, kindTitle, livenessNote, methodNote, phaseText, spreadText, statusNote, verdictWord } from './bench-model';
 
 const metric = (id: string, value: number, higherIsBetter = true): BenchMetric => ({ id, label: id, value, unit: 'u', higherIsBetter, samples: [value], min: value, max: value, cv: 0, unsteady: false });
 
 describe('bench model', () => {
+  it('says where a phase is, and how a slow or quiet run is shown', () => {
+    expect(phaseText({ phase: 'p', label: 'Single core', rep: 0, of: 5, count: 0, total: null })).toBe('warming up');
+    expect(phaseText({ phase: 'p', label: 'Single core', rep: 2, of: 5, count: 2, total: 5 })).toBe('pass 2 of 5');
+    expect(livenessNote('running')).toBe('');
+    expect(livenessNote('stillWorking')).toContain('Still working');
+    expect(livenessNote('notResponding')).toContain('Not responding');
+    expect(livenessNote('notResponding')).toContain('Cancel');
+  });
+
   it('shows the spread of repetitions in words, and nothing for a single measurement', () => {
     const fmt = (v: number): string => String(v);
     expect(spreadText({ ...metric('x', 100), samples: [98, 100, 102], min: 98, max: 102 }, fmt)).toBe('98 to 102');

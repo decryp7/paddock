@@ -6,6 +6,7 @@ pub mod agent;
 pub mod alarms;
 pub mod baselines;
 pub mod bench;
+pub mod bench_child;
 pub mod cli;
 pub mod counters;
 pub mod diagnostics;
@@ -278,6 +279,8 @@ impl Running {
         for t in self.threads {
             let _ = t.join();
         }
+        // A benchmark in progress is cancelled and its child (and Linux unit) ended before the agent goes.
+        self.shared.bench.shutdown(std::time::Duration::from_secs(5));
         drop(self.instance);
     }
 }

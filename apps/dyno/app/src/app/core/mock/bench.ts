@@ -60,6 +60,7 @@ export function mockRun(id: string, startedAt: number, label: string, scale: num
     machine: 'macOS 15 · Apple M4 Pro',
     results: (['cpu', 'memory', 'disk', 'gpu'] as BenchKind[]).map((k) => mockKindResult(k, scale, false, cores)),
     oldWay: false,
+    limited: null,
     ...extra,
   };
 }

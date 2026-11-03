@@ -117,6 +117,12 @@ impl JobCentre {
             .ok_or_else(|| AgentError::new(ErrorCode::Internal, "The job vanished."))
     }
 
+    /// Registers a job that its owner runs itself (a benchmark run keeps its own thread and process): the job appears in the
+    /// Jobs view, reports phases and honours Cancel like any other, and the owner calls [`JobContext::run`] on it.
+    pub fn register_external(&self, slug: &str, title: &str, subject: Option<&str>) -> JobContext {
+        self.registry.register(slug, title, subject)
+    }
+
     /// Every job that has not ended and the last few that did, oldest first.
     pub fn statuses(&self) -> Vec<WireSnapshot> {
         let mut all: Vec<WireSnapshot> = self

@@ -207,6 +207,9 @@ pub enum Request {
         phase: Option<crate::bench::BenchPhase>,
         /// Scratch file size for the disk test, MiB (default and cap in `bench`).
         disk_mib: Option<u32>,
+        /// The person agreed to run on battery, for this run only (ADR 0030 D6). Without it a run on battery answers `NeedsConsent`.
+        #[serde(default)]
+        allow_battery: bool,
     },
     /// Stops the run in progress after the current kind (that kind is stopped at once). Appended.
     CancelBenchmark,
@@ -854,6 +857,8 @@ pub enum ErrorCode {
     Busy,
     /// A bug.
     Internal,
+    /// The person has to agree first (a benchmark on battery); ask, then send the request again with the consent. Appended.
+    NeedsConsent,
 }
 
 /// A failed request.

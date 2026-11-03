@@ -78,6 +78,30 @@ list says in one line that the system hides other accounts' processes. DMI memor
 
 Dyno 1.0 runs only with your own rights; elevation is planned for 1.1 (ADR 0022).
 
+## Benchmarks (ADR 0030, work package B2)
+
+The benchmark runner (`dyno-bench`) is started on a click, never on its own. On Linux with a systemd user manager it runs as a
+named transient unit, outside the agent's cgroup and nice value, so its result is the machine's speed and not the agent's
+lowered share:
+
+```
+systemd-run --user --unit=dyno-bench-<run id>-<kind> --collect --wait --pipe --service-type=exec -- dyno-bench <kind> ... --wait-go
+```
+
+- Cancel, "Not responding" Cancel, a safety stop (the computer switched to battery without consent) and the agent's shutdown all
+  run `systemctl --user stop dyno-bench-<run id>-<kind>.service`; killing the `systemd-run` client would leave the unit running.
+- Before the runner measures, the agent writes the unit's name and `InvocationID` to `bench-units.json` beside the benchmark
+  history and then writes `go` on the runner's stdin. On its next start the agent stops a `dyno-bench-*` unit only if a record
+  has its name and its InvocationID (rule 53: a reused name could be someone else's unit); any other is left alone and logged.
+- Without a user manager the runner is an ordinary supervised child of the agent, and the run records "limited: nice 10, memory
+  limit 256 MiB" and is shown as low confidence.
+
+What is tested: the command lines, the output parsers and the cleanup decisions are pure functions with unit tests
+(`dyno_core::bench::unit`), the restart cleanup runs against a fake manager, and Cancel, silence and safety stops run against a
+scripted child. What is **not** yet proven on a real systemd (the spike's open points, to be checked in a container created for
+the purpose, never on the developer's session): that the unit gets nice 0 and no memory limit, that Cancel stops an all-core
+burner within 2 s, and that killing the agent mid-run and restarting it stops the leftover unit.
+
 ## Removing Dyno
 
 Turn off Launch at login (or `dyno-agent service uninstall`), `sudo apt remove dyno`, delete the data folders above.

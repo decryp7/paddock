@@ -826,6 +826,7 @@ export type ErrorCode =
   | 'badRequest'
   | 'timeout'
   | 'busy'
+  | 'needsConsent'
   | 'internal';
 
 /** What every failed backend call rejects with. */
@@ -1147,7 +1148,22 @@ export interface BenchRun {
   results: BenchKindResult[];
   /** Measured the 1.0 way: kept, shown as "measured the old way", never compared with a current run. */
   oldWay: boolean;
+  /** Why this run's numbers are low confidence, when they are. */
+  limited: string | null;
 }
+
+/** Where the measuring program is, as it reports it. `rep` 0 is the warm-up; `total` is null while unknown. */
+export interface BenchPhaseProgress {
+  phase: string;
+  label: string;
+  rep: number;
+  of: number;
+  count: number;
+  total: number | null;
+}
+
+/** How alive a run looks: nothing ends it but the person's Cancel (or a named safety stop). */
+export type BenchLiveness = 'running' | 'stillWorking' | 'notResponding';
 
 export interface BenchProgress {
   runId: string;
@@ -1155,6 +1171,11 @@ export interface BenchProgress {
   kinds: BenchKind[];
   current: BenchKind | null;
   done: BenchKind[];
+  /** The phase being measured now (null between phases and kinds). */
+  phase: BenchPhaseProgress | null;
+  liveness: BenchLiveness;
+  /** Set when the run cannot have full-confidence conditions (Linux without a user manager). */
+  limited: string | null;
 }
 
 export interface BenchOverview {
@@ -1195,6 +1216,8 @@ export interface StartBenchmark {
   group?: string | null;
   phase?: BenchPhase | null;
   diskMib?: number | null;
+  /** The person agreed to run on battery, for this run only. */
+  allowBattery?: boolean;
 }
 
 // -------------------------------------------------------------------------------------------------------- network

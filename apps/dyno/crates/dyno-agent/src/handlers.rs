@@ -51,6 +51,7 @@ fn start_benchmark(
     group: Option<&str>,
     phase: Option<dyno_core::bench::BenchPhase>,
     disk_mib: Option<u32>,
+    allow_battery: bool,
 ) -> Answer {
     let plan = dyno_core::bench::plan(kinds, disk_mib, label, group).map_err(bad)?;
     let load = {
@@ -68,7 +69,7 @@ fn start_benchmark(
     let machine = format!("{} · {}", inv.os, inv.cpu.name);
     shared
         .bench
-        .start(plan, phase, load, machine)
+        .start(plan, phase, load, machine, allow_battery)
         .map(|o| Reply::Benchmarks(Box::new(o)))
 }
 
@@ -198,7 +199,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             group,
             phase,
             disk_mib,
-        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib),
+            allow_battery,
+        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib, allow_battery),
         Request::CancelBenchmark => {
             shared.bench.cancel();
             Ok(Reply::Ok)

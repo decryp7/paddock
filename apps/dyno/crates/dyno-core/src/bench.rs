@@ -1,8 +1,12 @@
 //! Benchmarks: what is measured, how a run is recorded and how two runs are compared. Pure types and functions; the
 //! measuring itself runs out of process (`dyno-bench`) and is started by the agent only when the user clicks.
 
+pub mod unit;
+pub mod wire;
+
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
+use wire::{Liveness, PhaseProgress};
 
 /// Largest scratch file the disk benchmark may write, in MiB. The agent refuses a bigger request.
 pub const DISK_MAX_MIB: u32 = 512;
@@ -73,6 +77,16 @@ impl BenchKind {
             BenchKind::Cpu | BenchKind::Memory => 2,
             // The disk method is rebuilt by WP-B3; the test stays off until then.
             BenchKind::Disk | BenchKind::Gpu => LEGACY_METHOD,
+        }
+    }
+
+    /// The plain-language name of the kind (sentence case), for job phases and messages.
+    pub fn title(self) -> &'static str {
+        match self {
+            BenchKind::Cpu => "Processor",
+            BenchKind::Memory => "Memory",
+            BenchKind::Disk => "Disk",
+            BenchKind::Gpu => "Graphics",
         }
     }
 
@@ -329,6 +343,10 @@ pub struct BenchRun {
     /// with a run of the current method (ADR 0030 D9).
     #[serde(default)]
     pub old_way: bool,
+    /// Why the numbers are low confidence, when the run could not have full-confidence conditions (Linux without a systemd
+    /// user manager: [`unit::LIMITED_NOTE`]).
+    #[serde(default)]
+    pub limited: Option<String>,
 }
 
 impl BenchRun {
@@ -576,6 +594,12 @@ pub struct BenchProgress {
     pub current: Option<BenchKind>,
     /// Kinds already finished.
     pub done: Vec<BenchKind>,
+    /// The phase being measured now, as the measuring program reports it (`None` between phases and kinds).
+    pub phase: Option<PhaseProgress>,
+    /// How alive the run looks. Only the person's Cancel (or a named safety stop) ends a slow or quiet run.
+    pub liveness: Liveness,
+    /// Set when the run could not have full-confidence conditions (see [`BenchRun::limited`]).
+    pub limited: Option<String>,
 }
 
 /// What the benchmarks page shows.
@@ -683,6 +707,7 @@ mod tests {
             },
             machine: "m".into(),
             old_way: false,
+            limited: None,
             results: vec![KindResult {
                 kind: BenchKind::Cpu,
                 millis: 10,

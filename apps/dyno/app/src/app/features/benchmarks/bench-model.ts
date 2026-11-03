@@ -1,4 +1,4 @@
-import type { BenchKind, BenchMetric, BenchRun, BenchStatus, BenchVerdict } from '../../core/api.types';
+import type { BenchKind, BenchLiveness, BenchMetric, BenchPhaseProgress, BenchRun, BenchStatus, BenchVerdict } from '../../core/api.types';
 
 const TITLES: Record<BenchKind, string> = { cpu: 'Processor', memory: 'Memory', disk: 'Disk', gpu: 'Graphics' };
 
@@ -71,4 +71,21 @@ export function spreadText(m: BenchMetric, format: (v: number) => string): strin
 /** What to say about a run measured with an earlier method (Dyno 1.0's); '' for a current run. */
 export function methodNote(run: BenchRun): string {
   return run.oldWay ? 'Measured the old way (Dyno 1.0); not compared with newer runs' : '';
+}
+
+/** Where a phase is in words: the warm-up (repetition 0) has no count, the rest are "pass 2 of 5". */
+export function phaseText(p: BenchPhaseProgress): string {
+  return p.rep === 0 ? 'warming up' : `pass ${p.rep} of ${p.of}`;
+}
+
+/** What to tell the person when a run is slow or quiet; '' while it is on plan. Nothing ends the run but their Cancel. */
+export function livenessNote(l: BenchLiveness): string {
+  switch (l) {
+    case 'stillWorking':
+      return 'Still working. This is taking longer than planned; Cancel stops it.';
+    case 'notResponding':
+      return 'Not responding. The measuring program has been quiet for 30 seconds. Wait, or Cancel to stop it.';
+    case 'running':
+      return '';
+  }
 }
