@@ -206,3 +206,23 @@ So about 200 times less work per status. It was never slow enough to notice once
 Maintenance view opens and the minute scan grew with the number of windows. **Memory:** not measured (a vector of at most 504
 instants).
 
+
+## Bad-IP check: building and querying the range index (`dyno_core::intel`)
+
+User lists of addresses, CIDR ranges and host names become one in-memory sorted-segment index (ADR 0031, amendment 1). A lookup
+is one binary search; nothing is queried from a database per connection. The test `intel::tests::bench_index`
+(`cargo test -p dyno-core --release --lib -- --ignored --nocapture bench_index`) builds the index from a deterministic
+pseudo-random spread of /16 to /32 IPv4 ranges (nested now and then) in one list, then times 200,000 lookups.
+
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; rustc 1.99.1; release build; load 15 to 22 from other agents
+- **Memory** is a count from the element sizes (`IntelIndex::approx_bytes`), not an allocator reading.
+
+| Entries | Build (single thread) | Segments | Memory (counted) | Lookup p50 | Lookup p99 |
+|---|---|---|---|---|---|
+| 100,000 | 19 ms | 133,085 | about 39 MB | 208 ns | 875 ns |
+| 1,000,000 | 283 ms | 1,601,926 | about 327 MB | 1,166 ns | 1,708 ns |
+
+Reading: 2,000 rows per look cost about 2 ms at the million-entry limit, so no extra thread is needed. The start-up rebuild is
+under the 200 ms line (persisting a packed index) up to roughly 700,000 entries and over it at 1,000,000 (283 ms); the
+persisted index is therefore not built now and is the first thing to add if a list of that size is common. At the limit the
+index is large (327 MB, mostly the per-range owner vector); shrinking `Stored` is the first memory step.
