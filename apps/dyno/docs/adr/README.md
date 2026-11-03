@@ -30,6 +30,7 @@ so the numbering is fixed.
 | [0024](0024-local-days-through-a-zone-port.md) | Local days, hours and minutes come from a time-zone port read from the OS (daylight saving included), never a stored offset |
 | [0025](0025-supervisor-state-machine.md) | The agent supervisor is a pure state machine with one owner thread: explicit phases, numbered answers, quit decided once, a bounded model check with the five historical bugs as mutants |
 | [0026](0026-macos-sockets-from-the-kernel-list.md) | macOS sockets come from the kernel's `pcblist_n` lists, never from a sweep over other programs' descriptors (Accepted) |
+| [0032](0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) | Power: keep awake, Wake-on-LAN, idle and timed sleep or shut down, scheduled wake and an energy report; amends 0021 and 0027 (Proposed) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.
