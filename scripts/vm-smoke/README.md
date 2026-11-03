@@ -74,6 +74,22 @@ are not counted). `stateFiles[]`: a discovery file (`path`, `helper`, `jsonPidFi
 `loginService`, `quit.appleScriptName`, `updateHost`, `readyTimeoutSec`, `settleSec`, `logs`. Adding a helper to an app means
 adding it here; `scripts/vm-smoke/judge.test.mjs` checks the shape.
 
+## Power checks (`--suite power`, Dyno 1.1.0)
+
+`scripts/vm-smoke/vm-smoke.sh --app dyno --suite power --run <id>` installs the same installer, cold-starts Dyno and runs the
+hardware-free power checks of [ADR 0032](../../apps/dyno/docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md), step 3b of
+`apps/dyno/docs/releasing.md`. Dyno's CLI is the actuator; the verdict is always the OS's own table (`power-probes.mjs`):
+
+| Step | Actuator | Judged by |
+|---|---|---|
+| Keep awake | `dyno awake on --for 1h`, `off` | macOS `pmset -g assertions`, Windows `powercfg /requests`, Linux `systemd-inhibit --list`: a Dyno hold appears, then is gone |
+| Scheduled wake | `dyno wake-schedule add --at <now+5 min> --repeat once`, `cancel` | `pmset -g sched` (owner `net.decryptology.dyno.*`, 3 to 7 min ahead), `powercfg /waketimers`, `systemctl list-timers`/wakealarm. SKIP when the helper is needed and off, or the guest has no sleep state (Windows VM) |
+| Wake-on-LAN | `dyno wake 02:aa:bb:cc:dd:ee` | `tcpdump -xx` in the guest: UDP port 9 or 7, payload 6 x FF then the address 16 times |
+
+Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/power-checks.test.mjs`). The macOS guest path was run
+end to end; the Windows and Linux adapters (`ADAPTERS` in `power-checks.mjs`) are written and parser-tested but not yet run in a VM.
+Not automated yet (printed as MANUAL): the admin helper OS prompts, the idle action UI and "Audio is playing", and all screenshot rows.
+
 ## Not covered here
 
 - **Windows guests** (VMware Fusion, Windows 11 Arm): `scripts/vm-win.sh` on `origin/tools/win-test-vm` drives it (`revert`,

@@ -11,6 +11,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
 import { renderResult } from './judge.mjs';
+import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -24,7 +25,7 @@ const MANUAL = [
 ];
 
 export function parseArgs(argv) {
-  const o = { guest: 'macos', out: null, base: null, keep: false, maxLoad: Number(process.env.PADDOCK_VM_MAX_LOAD ?? 16) };
+  const o = { guest: 'macos', suite: 'start', out: null, base: null, keep: false, maxLoad: Number(process.env.PADDOCK_VM_MAX_LOAD ?? 16) };
   const take = (i, name) => { if (i + 1 >= argv.length) throw new Error(`${name} needs a value`); return argv[i + 1]; };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -35,9 +36,11 @@ export function parseArgs(argv) {
     else if (a === '--out') o.out = take(i++, a);
     else if (a === '--base') o.base = take(i++, a);
     else if (a === '--guest') o.guest = take(i++, a);
+    else if (a === '--suite') o.suite = take(i++, a);
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
+  if (!['start', 'power'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default) or power`);
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
   if (!o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
@@ -199,10 +202,13 @@ async function main(argv) {
     const guest = { exec, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
     const check = new Check(guest, config, { log });
     const started = new Date().toISOString();
-    const { steps, version } = await runAll(check, { stagedDmg: `${SHARE}/installer.dmg`, manual: MANUAL });
+    const staged = `${SHARE}/installer.dmg`;
+    const { steps, version } = o.suite === 'power'
+      ? await runPowerSuite(check, () => new PowerChecks(guest, 'macos', { bundle: `/Applications/${config.bundle}`, log }), { stagedDmg: staged })
+      : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
     const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
-    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}.md`);
+    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}${o.suite === 'power' ? '-power' : ''}.md`);
     writeFileSync(file, md);
     log(`result: ${file}`);
     console.log(file);
