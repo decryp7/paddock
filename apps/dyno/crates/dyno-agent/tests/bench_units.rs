@@ -41,7 +41,11 @@ fn request(run: &str) -> ChildRequest {
 }
 
 fn systemctl(args: &[&str]) -> String {
-    let out = dyno_platform::process::command("systemctl").arg("--user").args(args).output().unwrap();
+    let out = dyno_platform::process::command("systemctl")
+        .arg("--user")
+        .args(args)
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -140,7 +144,11 @@ while :; do echo '{"t":"heartbeat"}'; sleep 1; done"#,
     );
     assert!(took < Duration::from_secs(2), "Cancel returned after {took:?}");
     assert!(!active(&unit::unit_name(&format!("{run}-cpu"))), "the unit is gone");
-    let left = dyno_platform::process::command("pgrep").arg("-f").arg(runner.to_str().unwrap()).output().unwrap();
+    let left = dyno_platform::process::command("pgrep")
+        .arg("-f")
+        .arg(runner.to_str().unwrap())
+        .output()
+        .unwrap();
     assert!(
         String::from_utf8_lossy(&left.stdout).trim().is_empty(),
         "burners left: {}",
@@ -168,7 +176,12 @@ fn a_restart_stops_a_recorded_leftover_unit_and_leaves_a_foreign_one() {
                 "300".into(),
             ],
         };
-        assert!(dyno_platform::process::command(c.program).args(&c.args).output().unwrap().status.success());
+        assert!(dyno_platform::process::command(c.program)
+            .args(&c.args)
+            .output()
+            .unwrap()
+            .status
+            .success());
     }
     let control = SystemctlControl;
     let mine_id = control.invocation_id(&mine).expect("an invocation id");

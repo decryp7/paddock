@@ -1218,3 +1218,7 @@ fonts (same content height in the later fit). Found on the way: tao resizes the 
 so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
+
+## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
+
+I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.
