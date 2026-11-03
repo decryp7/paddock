@@ -397,7 +397,7 @@ pub fn layout(size: i32) -> Layout {
             label_rows: 0,
             label_y: 0,
             digits: Numerals { h: 10, w: 6, s: 2 },
-            digits_y: 1,
+            digits_y: 2,
             tracking: 1,
             meter_y: 13,
             meter_h: 2,
@@ -499,26 +499,22 @@ pub struct Fit {
     pub k: i32,
 }
 
-/// The numerals, row and notch size that keep a 1 px gutter between the notch and every glyph pixel: the full 5 px notch first,
-/// with the digits narrowing (see [`ladder`]) or dropping one row before the notch shrinks to 4 px.
+/// The numerals and notch size that keep a 1 px gutter between the notch and every glyph pixel: the full 5 px notch first, with
+/// the digits narrowing (see [`ladder`]) before the notch shrinks to 4 px. The row never moves, so an alert does not make the
+/// digits jump.
 pub fn fit(text: &str, l: &Layout, right: i32) -> Fit {
+    let y = l.digits_y;
     for k in [5, 4] {
         for n in ladder(l.digits) {
-            for y in [l.digits_y, l.digits_y + 1] {
-                let clear = place(text, n, l.tracking, right)
-                    .iter()
-                    .all(|(g, x)| (0..g.h).all(|gy| (0..g.w).all(|gx| !g.at(gx, gy) || !in_notch_zone(k, x + gx, y + gy))));
-                if clear {
-                    return Fit { n, y, k };
-                }
+            let clear = place(text, n, l.tracking, right)
+                .iter()
+                .all(|(g, x)| (0..g.h).all(|gy| (0..g.w).all(|gx| !g.at(gx, gy) || !in_notch_zone(k, x + gx, y + gy))));
+            if clear {
+                return Fit { n, y, k };
             }
         }
     }
-    Fit {
-        n: l.digits,
-        y: l.digits_y,
-        k: 4,
-    }
+    Fit { n: l.digits, y, k: 4 }
 }
 
 /// Draws a label right-aligned at `right`.
@@ -652,6 +648,8 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             meter_in(cv, &l, v, t.track(), t.accent(), x0, x1, y, h);
         }
     };
+    // From 24 px the digits are centred in the tile, in both states (the right edge of the box they are drawn against).
+    let centred = |text: &str| (tile_x0 + (tile_w + text_width(text, l.digits, l.tracking)) / 2).min(s);
     // The number with its alert notch (small) or plate (from 24 px).
     let num = |cv: &mut Canvas, text: &str| {
         let n = l.digits;
@@ -663,9 +661,11 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             digits(cv, text, f.n, l.tracking, right, f.y, ink);
         } else if state == State::Alert {
             cv.rounded(tile_x0, l.digits_y - 1, s, l.digits_y + n.h + 1, plate);
-            digits(cv, text, n, l.tracking, right, l.digits_y, plate_ink);
-        } else {
+            digits(cv, text, n, l.tracking, centred(text), l.digits_y, plate_ink);
+        } else if small_alert {
             digits(cv, text, n, l.tracking, right, l.digits_y, ink);
+        } else {
+            digits(cv, text, n, l.tracking, centred(text), l.digits_y, ink);
         }
     };
     match kind {
@@ -1134,6 +1134,64 @@ mod tests {
                 has(true, [0xff, 0xff, 0xff, 0xff]) && !has(true, [0x1b, 0x1b, 0x1f, 0xff]),
                 "dark taskbar: white ink, {size}"
             );
+        }
+    }
+
+    /// First and last column and row of the pixels of colour `c` at or below row `from`.
+    fn extent(i: &Icon, c: Rgba, from: u32) -> Option<(u32, u32, u32, u32)> {
+        let pts: Vec<(u32, u32)> = (from..i.size)
+            .flat_map(|y| (0..i.size).map(move |x| (x, y)))
+            .filter(|&(x, y)| px(i, x, y) == c)
+            .collect();
+        let f = |g: fn(&(u32, u32)) -> u32| (pts.iter().map(g).min(), pts.iter().map(g).max());
+        let ((x0, x1), (y0, y1)) = (f(|p| p.0), f(|p| p.1));
+        Some((x0?, x1?, y0?, y1?))
+    }
+
+    #[test]
+    fn the_digits_keep_their_rows_when_an_alert_starts_below_24_px() {
+        for size in [16, 20, 22] {
+            let l = layout(size);
+            let t = Theme { dark: false };
+            for v in 0..=100 {
+                let r = Reading {
+                    value: Some(v as f32),
+                    ..Reading::default()
+                };
+                let k = Kind::Percent { label: "CPU".into() };
+                let from = (l.label_rows + 1) as u32;
+                let rows = |st| {
+                    let e = extent(&render(&k, &r, st, size, t), t.ink(), from).unwrap();
+                    (e.2, e.3)
+                };
+                assert_eq!(rows(State::Normal), rows(State::Alert), "{v} at {size}");
+            }
+        }
+    }
+
+    #[test]
+    fn from_24_px_the_digits_are_centred_in_the_fixed_tile() {
+        for size in [24, 32] {
+            let l = layout(size);
+            let t = Theme { dark: false };
+            let (plate, plate_ink) = t.alert();
+            for v in [0.0, 7.0, 17.0, 33.0, 88.0, 100.0] {
+                let r = Reading {
+                    value: Some(v),
+                    ..Reading::default()
+                };
+                let k = Kind::Percent { label: "CPU".into() };
+                let a = render(&k, &r, State::Alert, size, t);
+                let (_, _, y0, _) = extent(&a, plate, 0).unwrap();
+                let tile = extent(&a, plate, y0).unwrap();
+                let ink = extent(&a, plate_ink, l.digits_y as u32 - 1).unwrap();
+                let (left, right) = (ink.0 - tile.0, tile.1 - ink.1);
+                assert!(left.abs_diff(right) <= 1, "alert {v} at {size}: gaps {left} and {right}");
+                // The same digits sit in the same place when there is no alert.
+                let n = render(&k, &r, State::Normal, size, t);
+                let ni = extent(&n, t.ink(), l.digits_y as u32 - 1).unwrap();
+                assert_eq!((ni.0, ni.1), (ink.0, ink.1), "normal {v} at {size}");
+            }
         }
     }
 }
