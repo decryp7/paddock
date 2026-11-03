@@ -1,4 +1,4 @@
-import { TRAY_HINT_ACTION, TRAY_HINT_KEY, TRAY_HINT_TEXT, readSeen, showTrayHintOnce, trayHintDue, unseenItems, writeSeen, type TrayHintPorts } from './tray-hint';
+import { livePorts, TRAY_HINT_FAILED, TRAY_HINT_ACTION, TRAY_HINT_KEY, TRAY_HINT_TEXT, readSeen, showTrayHintOnce, trayHintDue, unseenItems, writeSeen, type TrayHintPorts } from './tray-hint';
 
 function ports(platform: TrayHintPorts['platform'], seen: string[] = []) {
   const shown: { text: string; label: string }[] = [];
@@ -72,5 +72,16 @@ describe('the taskbar hint', () => {
     expect(readSeen(blocked)).toEqual([]);
     expect(() => writeSeen(['cpu'], blocked)).not.toThrow();
     expect(readSeen(null)).toEqual([]);
+  });
+
+  it('logs a failed opening of the taskbar settings and shows a short note instead of swallowing it', async () => {
+    const shown: string[] = [];
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const notifier = { show: (text: string) => void shown.push(text) } as never;
+    const ports = livePorts('windows', notifier, { openTaskbarSettings: () => Promise.reject(new Error('refused')) });
+    ports.openSettings();
+    await vi.waitFor(() => expect(shown).toEqual([TRAY_HINT_FAILED]));
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });

@@ -33,6 +33,9 @@ export interface TrayHintPorts {
   readonly openSettings: () => void;
 }
 
+/** The note shown when the taskbar settings could not be opened. */
+export const TRAY_HINT_FAILED = 'Could not open the taskbar settings. Open Settings > Personalization > Taskbar.';
+
 /** Shows the hint once for `ids` when it is due and remembers them; returns whether it was shown. */
 export function showTrayHintOnce(ports: TrayHintPorts, ids: readonly string[]): boolean {
   const seen = ports.readSeen();
@@ -76,7 +79,11 @@ export function livePorts(platform: WindowPlatform, notifier: Notifier, backend:
     readSeen: () => readSeen(),
     writeSeen: (ids) => writeSeen(ids),
     notify: (text, action) => notifier.show(text, 'info', action),
-    openSettings: () => void backend.openTaskbarSettings().catch(() => undefined),
+    openSettings: () =>
+      void backend.openTaskbarSettings().catch((e: unknown) => {
+        console.error('open_taskbar_settings failed', e);
+        notifier.show(TRAY_HINT_FAILED, 'warn');
+      }),
   };
 }
 

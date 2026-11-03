@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { CONSOLE, GUI, problems, specsFor, subsystemOf } from './check-pe-subsystem.mjs';
 
@@ -36,4 +40,19 @@ test('files that are not programs fail with a reason, never throw', () => {
 test('--dir names the release list in that folder', () => {
   assert.deepEqual(specsFor(['--dir', 'C:/b/dist/']), ['C:/b/dist/dyno-agent.exe=2', 'C:/b/dist/dyno.exe=3']);
   assert.deepEqual(specsFor(['x.exe=2']), ['x.exe=2']);
+});
+
+test('run as a program it exits 1 for a console agent and 0 for a GUI one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dyno-pe-'));
+  const bad = join(dir, 'dyno-agent.exe');
+  const cli = join(dir, 'dyno.exe');
+  writeFileSync(bad, pe(CONSOLE));
+  writeFileSync(cli, pe(CONSOLE));
+  const script = new URL('./check-pe-subsystem.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
+  const failed = run('--dir', dir);
+  assert.equal(failed.status, 1);
+  assert.match(failed.stdout, /::error::.*dyno-agent\.exe has PE subsystem 3, expected 2/);
+  writeFileSync(bad, pe(GUI));
+  assert.equal(run('--dir', dir).status, 0);
 });
