@@ -4,6 +4,7 @@
 
 ### Added
 
+- Tests: `crates/dyno-core/tests/wire_roundtrip.rs` round-trips a sample of every variant of the app-agent wire enums (`Message`, `Request`, `Reply`, `ErrorCode`, `LiveDetail`, `JobSpec`, `JobOutput`, `HelperRequest`, `HelperReply`, `HelperMessage`) through postcard, fails with the type named when a type postcard cannot carry (internally tagged enum, `flatten`, `untagged`, `skip_serializing_if`) reaches the wire, and fails at compile time (an exhaustive match) or in the test (a source scan) when a new variant has no sample. It is written against the types on `main`: a branch that adds variants adds their samples when it merges.
 - Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
 
 ### Fixed
