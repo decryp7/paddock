@@ -32,6 +32,7 @@ pub mod sensors;
 pub mod smart_reader;
 pub mod tool_install;
 pub mod toolpath;
+pub mod windows_firewall;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;

@@ -1,6 +1,6 @@
 //! One model of a firewall for every OS (ADR 0027 WP-9): per-profile state, default policies, and bounded rules with a direction,
 //! an action, a program, ports, addresses, a profile, whether the rule is on, and where it came from. The OS readers (the
-//! agent's Windows and macOS Application Firewall readers, the helper's `pf` and `nft` readers) all produce a [`FirewallView`].
+//! agent's Windows and macOS Application Firewall readers, the helper's `pf` and `nft` readers) all produce a [`FirewallSource`].
 
 use crate::helper_policy::Access;
 use crate::ports::PlatformError;
@@ -105,10 +105,10 @@ pub enum FirewallSwitch {
     Stealth,
 }
 
-/// The firewall as one OS reports it.
+/// One firewall as one reader reports it (ADR 0031 section 4: a view has one source per reader).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FirewallView {
+pub struct FirewallSource {
     /// Where the data came from.
     pub source: RuleSource,
     /// On or off per profile.
@@ -127,12 +127,14 @@ pub struct FirewallView {
     pub truncated: u32,
     /// The rules were withheld because the asking account may see only states and counts.
     pub rules_hidden: bool,
+    /// A sentence about this source for the page (for example "Another firewall may be in charge"), or none.
+    pub note: Option<String>,
 }
 
-impl FirewallView {
+impl FirewallSource {
     /// A view of `source` with no rules yet.
-    pub fn new(source: RuleSource) -> FirewallView {
-        FirewallView {
+    pub fn new(source: RuleSource) -> FirewallSource {
+        FirewallSource {
             source,
             states: Vec::new(),
             switches: Vec::new(),
@@ -142,11 +144,12 @@ impl FirewallView {
             rules: Vec::new(),
             truncated: 0,
             rules_hidden: false,
+            note: None,
         }
     }
 
     /// Takes `rules`, keeping the count and capping the list.
-    pub fn with_rules(mut self, mut rules: Vec<FirewallRule>) -> FirewallView {
+    pub fn with_rules(mut self, mut rules: Vec<FirewallRule>) -> FirewallSource {
         self.rule_count = u32::try_from(rules.len()).unwrap_or(u32::MAX);
         self.truncated = u32::try_from(rules.len().saturating_sub(MAX_FIREWALL_RULES)).unwrap_or(u32::MAX);
         rules.truncate(MAX_FIREWALL_RULES);
@@ -155,7 +158,7 @@ impl FirewallView {
     }
 
     /// States and counts only.
-    pub fn counts_only(mut self) -> FirewallView {
+    pub fn counts_only(mut self) -> FirewallSource {
         self.rules = Vec::new();
         self.truncated = 0;
         self.rules_hidden = true;
@@ -163,7 +166,7 @@ impl FirewallView {
     }
 
     /// What `access` (the restriction table) lets a caller have of this view; `None` when denied.
-    pub fn for_access(self, access: Access) -> Option<FirewallView> {
+    pub fn for_access(self, access: Access) -> Option<FirewallSource> {
         match access {
             Access::Full => Some(self),
             Access::CountsOnly => Some(self.counts_only()),
@@ -172,10 +175,20 @@ impl FirewallView {
     }
 }
 
+/// What the Firewall page shows: every source the machine has (ADR 0031 section 4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirewallView {
+    /// The system.
+    pub os: crate::helper::HelperHost,
+    /// One entry per reader that answered (or said why not, in its `note`).
+    pub sources: Vec<FirewallSource>,
+}
+
 /// Reads a firewall. Implemented per OS: the agent's readers need no rights, the helper's need root.
 pub trait FirewallReader: Send + Sync {
     /// The firewall as the OS reports it.
-    fn read(&self) -> Result<FirewallView, PlatformError>;
+    fn read(&self) -> Result<FirewallSource, PlatformError>;
 }
 
 /// Cuts a text field to [`MAX_RULE_TEXT`] characters.
@@ -203,7 +216,7 @@ mod tests {
 
     #[test]
     fn rules_are_capped_but_counted() {
-        let v = FirewallView::new(RuleSource::Nftables).with_rules((0..MAX_FIREWALL_RULES + 5).map(rule).collect());
+        let v = FirewallSource::new(RuleSource::Nftables).with_rules((0..MAX_FIREWALL_RULES + 5).map(rule).collect());
         assert_eq!(
             (v.rules.len(), v.rule_count, v.truncated),
             (MAX_FIREWALL_RULES, MAX_FIREWALL_RULES as u32 + 5, 5)
@@ -212,7 +225,7 @@ mod tests {
 
     #[test]
     fn the_restriction_table_decides_what_a_caller_gets() {
-        let v = FirewallView::new(RuleSource::Pf).with_rules(vec![rule(1), rule(2)]);
+        let v = FirewallSource::new(RuleSource::Pf).with_rules(vec![rule(1), rule(2)]);
         let full = v.clone().for_access(Access::Full).unwrap();
         assert_eq!((full.rules.len(), full.rules_hidden), (2, false));
         let counts = v.clone().for_access(Access::CountsOnly).unwrap();

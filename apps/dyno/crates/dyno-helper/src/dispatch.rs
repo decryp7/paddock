@@ -69,6 +69,7 @@ impl Dispatcher {
                 counters.truncate(MAX_COUNTERS);
                 Ok(HelperReply::Counters(counters))
             }
+            // TODO(WP-2 agent): the Firewall arm needs the caller's Standing: `reader.read()?.for_access(access(kind, standing))`.
             // The readers and the log tail arrive with their work packages (ADR 0027 WP-4 to WP-10); until then the helper
             // says so, and the agent shows the reading as unavailable with this reason.
             HelperRequest::Processes(_)

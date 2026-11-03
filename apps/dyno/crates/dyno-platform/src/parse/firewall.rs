@@ -3,7 +3,7 @@
 //! output. Rule addresses are data for the answer only: nothing here logs them.
 
 use dyno_core::firewall::{
-    clip, FirewallProfile, FirewallRule, FirewallSwitch, FirewallView, ProfileState, RuleAction, RuleDirection, RuleSource,
+    clip, FirewallProfile, FirewallRule, FirewallSource, FirewallSwitch, ProfileState, RuleAction, RuleDirection, RuleSource,
     MAX_FIREWALL_RULES,
 };
 use serde_json::Value;
@@ -112,9 +112,9 @@ pub fn parse_alf_apps(text: &str) -> Vec<FirewallRule> {
 }
 
 /// The Application Firewall as a view from the four outputs.
-pub fn alf_view(global: &str, block_all: &str, stealth: &str, apps: &str) -> Result<FirewallView, FirewallParseError> {
+pub fn alf_view(global: &str, block_all: &str, stealth: &str, apps: &str) -> Result<FirewallSource, FirewallParseError> {
     let enabled = parse_alf_global_state(global).ok_or_else(|| FirewallParseError::Unrecognised(first_line(global)))?;
-    let mut v = FirewallView::new(RuleSource::ApplicationFirewall).with_rules(parse_alf_apps(apps));
+    let mut v = FirewallSource::new(RuleSource::ApplicationFirewall).with_rules(parse_alf_apps(apps));
     v.states.push(ProfileState {
         profile: FirewallProfile::All,
         enabled,
@@ -222,9 +222,9 @@ pub fn parse_pf_rules(text: &str) -> Vec<FirewallRule> {
 }
 
 /// `pfctl -s info` plus `pfctl -s rules` as a view.
-pub fn pf_view(info: &str, rules: &str) -> Result<FirewallView, FirewallParseError> {
+pub fn pf_view(info: &str, rules: &str) -> Result<FirewallSource, FirewallParseError> {
     let enabled = parse_pf_status(info).ok_or_else(|| FirewallParseError::Unrecognised(first_line(info)))?;
-    let mut v = FirewallView::new(RuleSource::Pf).with_rules(parse_pf_rules(rules));
+    let mut v = FirewallSource::new(RuleSource::Pf).with_rules(parse_pf_rules(rules));
     v.states.push(ProfileState {
         profile: FirewallProfile::All,
         enabled,
@@ -265,7 +265,7 @@ fn nft_policy(p: Option<&str>) -> Option<RuleAction> {
 }
 
 /// `nft -j list ruleset` as a view: rules of base chains with a hook (`input`, `output`, `forward`) and their policies.
-pub fn parse_nft(json: &str) -> Result<FirewallView, FirewallParseError> {
+pub fn parse_nft(json: &str) -> Result<FirewallSource, FirewallParseError> {
     if json.len() > MAX_NFT_BYTES {
         return Err(FirewallParseError::TooLarge);
     }
@@ -275,7 +275,7 @@ pub fn parse_nft(json: &str) -> Result<FirewallView, FirewallParseError> {
         .ok_or_else(|| FirewallParseError::Unrecognised(first_line(json)))?;
     // First pass: which chains are hooked, and with which policy.
     let mut hooks: Vec<(String, String, String, String, Option<RuleAction>)> = Vec::new();
-    let mut view = FirewallView::new(RuleSource::Nftables);
+    let mut view = FirewallSource::new(RuleSource::Nftables);
     for item in items.iter().take(MAX_ITEMS) {
         let Some(c) = item.get("chain") else { continue };
         let Some(hook) = c["hook"].as_str() else { continue };

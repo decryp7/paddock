@@ -6,7 +6,7 @@
 //! them changes a setting of the machine. The request arguments and their caps are in `helper_requests`.
 
 use crate::btm::LoginItemsReply;
-use crate::firewall::FirewallView;
+use crate::firewall::FirewallSource;
 use crate::helper::HelperHost;
 use crate::helper_policy::{RequestKind, Visibility};
 use crate::helper_requests::{
@@ -137,7 +137,7 @@ pub enum HelperReply {
     /// Answer to `Audit`.
     Entries(Vec<AuditEntry>),
     /// Answer to `Firewall`, already reduced to what the caller may have.
-    Firewall(FirewallView),
+    Firewall(FirewallSource),
     /// Answer to `Smart`.
     Smart(SmartReply),
     /// Answer to `InstallTool`: the tool is now installed.

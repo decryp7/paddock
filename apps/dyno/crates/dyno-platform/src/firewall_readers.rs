@@ -4,7 +4,7 @@
 
 use crate::parse::firewall::{alf_view, parse_nft, pf_view, FirewallParseError};
 use crate::runner::{tool, ToolOutput, ToolRunner};
-use dyno_core::firewall::{FirewallReader, FirewallView};
+use dyno_core::firewall::{FirewallReader, FirewallSource};
 use dyno_core::ports::PlatformError;
 use paddock_jobs::time::Clock;
 use std::sync::{Arc, Mutex};
@@ -59,7 +59,7 @@ fn parse_err(e: FirewallParseError) -> PlatformError {
     PlatformError::Failed(e.to_string())
 }
 
-fn log_view(what: &str, v: &FirewallView) {
+fn log_view(what: &str, v: &FirewallSource) {
     log::info!(Rules = v.rule_count, Truncated = v.truncated; "{what} read");
 }
 
@@ -74,7 +74,7 @@ impl AlfReader {
 }
 
 impl FirewallReader for AlfReader {
-    fn read(&self) -> Result<FirewallView, PlatformError> {
+    fn read(&self) -> Result<FirewallSource, PlatformError> {
         let mut r = self.0.lock();
         let hint = "The Application Firewall could not be read.";
         let global = self.0.run_ok(&mut **r, SOCKETFILTERFW, &["--getglobalstate"], hint)?;
@@ -104,7 +104,7 @@ impl PfReader {
 }
 
 impl FirewallReader for PfReader {
-    fn read(&self) -> Result<FirewallView, PlatformError> {
+    fn read(&self) -> Result<FirewallSource, PlatformError> {
         let mut r = self.0.lock();
         let hint = "pf can only be read with administrator rights; turn on administrator readings.";
         let info = self.0.run_ok(&mut **r, PFCTL, &["-s", "info"], hint)?;
@@ -132,7 +132,7 @@ impl NftReader {
 }
 
 impl FirewallReader for NftReader {
-    fn read(&self) -> Result<FirewallView, PlatformError> {
+    fn read(&self) -> Result<FirewallSource, PlatformError> {
         let mut r = self.runs.lock();
         let json = self.runs.run_ok(
             &mut **r,
