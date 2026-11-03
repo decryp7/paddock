@@ -326,7 +326,7 @@ mod tests {
     use dyno_core::time::Timestamp;
     use dyno_core::widgets::MenuBarCatalogue;
     use dyno_platform::fake::quiet_sample;
-    use paddock_widgets::{assign_ids, Catalogue};
+    use paddock_widgets::{assign_spans, Catalogue};
 
     fn update(cpu: f32) -> LiveUpdate {
         let mut system = quiet_sample(Timestamp(0));
@@ -368,7 +368,7 @@ mod tests {
         assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Bars, &Metric::CpuTotal));
         assert_eq!(default[0].id, "vertical-bars");
         assert_eq!(default[1].id, "vertical-bars-2");
-        let s = assign_ids([
+        let s = assign_spans([
             (
                 1,
                 MenuBarItem::VerticalBars {

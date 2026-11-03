@@ -12,7 +12,7 @@ mod steps;
 
 pub use derive::derive;
 pub(crate) use derive::first_free;
-pub use keys::{Moves, moves};
+pub use keys::{Moves, moves, moves_all};
 pub use model::{Block, Dir, GridError, GridGesture, Item, MAX_ROWS, Rect, Size};
 pub use settle::{arrange, compact, reading_order};
 pub use steps::{SizeRule, Steps};

@@ -1,7 +1,7 @@
 //! The tray popup's catalogue: which widgets it offers, their options, spans, limits and the defaults.
 
 use super::DynoSurface;
-use paddock_widgets::{assign_ids, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
+use paddock_widgets::{assign_spans, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
 use serde::{Deserialize, Serialize};
 
 /// Which volume a disk space widget shows.
@@ -113,7 +113,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Active alarms",
         summary: "What needs attention now, the most severe first",
         icon: "alarm",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -122,7 +122,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Disk space",
         summary: "Free space on your volumes",
         icon: "disk",
-        spans: &[2],
+        size: &[2],
         max_instances: 4,
         refresh: Refresh::Every { secs: 60 },
     },
@@ -131,7 +131,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "CPU and memory",
         summary: "Load and use now, with the last minute",
         icon: "cpu",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -140,7 +140,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Network",
         summary: "Download and upload now, with the last minute",
         icon: "network",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -149,7 +149,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Backup",
         summary: "When your last backup ran and whether it is healthy",
         icon: "backup",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -158,7 +158,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Last issue",
         summary: "The newest problem the system recorded",
         icon: "issue",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -167,7 +167,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Pinned counters",
         summary: "Your own performance counters",
         icon: "counters",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -176,7 +176,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Top apps",
         summary: "The apps using the most CPU",
         icon: "apps",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -185,6 +185,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
 impl Catalogue for PopoverCatalogue {
     type SurfaceId = DynoSurface;
     type Widget = PopoverWidget;
+    type Place = paddock_widgets::Span;
     const SURFACE_ID: DynoSurface = DynoSurface::Popover;
     const SURFACE: Surface = Surface {
         noun: "popup",
@@ -202,7 +203,7 @@ impl Catalogue for PopoverCatalogue {
     }
 
     fn defaults() -> Vec<Placement<PopoverWidget>> {
-        assign_ids([
+        assign_spans([
             (2, PopoverWidget::ActiveAlarms),
             (2, PopoverWidget::disk(VolumeChoice::All)),
             (2, PopoverWidget::CpuMemory),
@@ -224,7 +225,7 @@ mod tests {
     fn the_defaults_are_alarms_disk_space_and_cpu_memory() {
         let kinds: Vec<PopoverKind> = PopoverCatalogue::defaults().iter().map(|p| p.widget.kind()).collect();
         assert_eq!(kinds, [PopoverKind::ActiveAlarms, PopoverKind::DiskSpace, PopoverKind::CpuMemory]);
-        assert!(PopoverCatalogue::defaults().iter().all(|p| p.span == 2));
+        assert!(PopoverCatalogue::defaults().iter().all(|p| p.place.span == 2));
     }
 
     #[test]

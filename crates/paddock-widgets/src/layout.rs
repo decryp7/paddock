@@ -191,12 +191,15 @@ pub(crate) fn derive_id<W: Widget, P>(existing: &[Placement<W, P>], widget: &W) 
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_default();
-    PlacementId(unique_id(&slug(&name, "widget"), |c| {
-        existing.iter().any(|p| p.id.as_str() == c)
-    }))
+    PlacementId(
+        unique_id(&slug(&name, "widget"), |c| {
+            existing.iter().any(|p| p.id.as_str() == c)
+        })
+        .into(),
+    )
 }
 
 /// A free preset id for `name` among `taken`.
 pub(crate) fn derive_preset_id(name: &str, taken: impl Fn(&str) -> bool) -> PresetId {
-    PresetId(unique_id(&slug(name, "layout"), taken))
+    PresetId(unique_id(&slug(name, "layout"), taken).into())
 }

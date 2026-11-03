@@ -236,9 +236,10 @@ pub fn view<C: Catalogue>(stored: &Stored<C>) -> ViewOf<C> {
             arrangements::<C>(items),
             items
                 .iter()
-                .map(|i| PlacementMoves {
+                .zip(grid::moves_all(items, C::SURFACE.columns))
+                .map(|(i, moves)| PlacementMoves {
                     id: i.id.clone(),
-                    moves: grid::moves(items, C::SURFACE.columns, &i.id),
+                    moves,
                 })
                 .collect(),
         ),

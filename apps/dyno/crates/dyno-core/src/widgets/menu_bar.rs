@@ -2,7 +2,7 @@
 
 use super::metric::Metric;
 use super::DynoSurface;
-use paddock_widgets::{assign_ids, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
+use paddock_widgets::{assign_spans, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
 use serde::{Deserialize, Serialize};
 
 /// Longest unit of a number item ("%", "°C"), in characters.
@@ -127,7 +127,7 @@ const fn spec(kind: MenuBarKind, title: &'static str, summary: &'static str, ico
         title,
         summary,
         icon,
-        spans: &[1],
+        size: &[1],
         max_instances: 4,
         refresh: Refresh::Live,
     }
@@ -150,6 +150,7 @@ const KINDS: &[KindSpec<MenuBarKind>] = &[
 impl Catalogue for MenuBarCatalogue {
     type SurfaceId = DynoSurface;
     type Widget = MenuBarItem;
+    type Place = paddock_widgets::Span;
     const SURFACE_ID: DynoSurface = DynoSurface::MenuBar;
     const SURFACE: Surface = Surface {
         noun: "menu bar",
@@ -167,7 +168,7 @@ impl Catalogue for MenuBarCatalogue {
     }
 
     fn defaults() -> Vec<Placement<MenuBarItem>> {
-        assign_ids([
+        assign_spans([
             (1, MenuBarItem::VerticalBars { metric: Metric::CpuTotal }),
             (1, MenuBarItem::VerticalBars { metric: Metric::Memory }),
         ])

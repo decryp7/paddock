@@ -66,6 +66,8 @@ paddock_commands::command_table! {
     Query [MAIN | TRAY | DIALOG] => commands::widget_layout,
     /// Edits one surface's widget layout in the agent; answers the new layout, or why it was refused.
     Mutation [MAIN | DIALOG] => commands::edit_widget_layout,
+    /// What an arrangement gesture on the dashboard would give, answered in this process from the last view the agent sent; applies nothing.
+    Query [MAIN] => commands::preview_widget_layout,
     /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`); the Settings window's preview reads it too.
     Query [MAIN | TRAY | DIALOG] => commands::popover_values,
     /// A button of a widget: open a page, retry, start the backup check, restart the agent.
@@ -287,6 +289,9 @@ fn agent_setup<R: Runtime>(
     app.manage(events.clone());
     app.manage(link.clone());
     app.manage(commands::PickedFolders::default());
+    app.manage(Arc::new(
+        paddock_widgets::Previews::new().grid::<dyno_core::widgets::DashboardCatalogue>(),
+    ));
     link.spawn()?;
     if !installed {
         return Ok(());
