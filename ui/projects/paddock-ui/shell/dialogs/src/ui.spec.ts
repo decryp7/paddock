@@ -1,5 +1,5 @@
 import { instanceKey } from './kind';
-import { ChangeDetectionStrategy, Component, computed, ErrorHandler, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ErrorHandler, inject, Injectable, input, PendingTasks, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { fakeDialogContract, FakeDialogIo, renderFramed } from '@decryp7/paddock-ui/shell/testing';
@@ -1134,6 +1134,31 @@ describe('a dialog window', () => {
       expect(io.fitted.at(-1)).toBeGreaterThanOrEqual(900);
     } finally {
       raf.mockRestore();
+    }
+  });
+
+  it('is settled (data-fit-settled) only after the content\'s pending work is done and its last size is sent', async () => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => (queueMicrotask(() => cb(0)), 1));
+    delete document.documentElement.dataset['fitSettled'];
+    try {
+      const { io, root } = boot(VIEWER);
+      // The content has data in flight (a store registered a pending task, as a job or a request does).
+      const done = TestBed.inject(PendingTasks).add();
+      // The window is not stable while the task runs: wait for the handshake, not for stability.
+      await vi.waitFor(() => expect(io.readied).not.toBeNull());
+      for (let i = 0; i < 3; i++) await new Promise<void>((r) => setTimeout(r, 0));
+      // The handshake is through, but the content is still loading: not settled, a check must not read the size yet.
+      expect(document.documentElement.dataset['fitSettled']).toBeUndefined();
+      // The data arrives and the content grows in the same turn as the task ends (no observer has seen it yet).
+      const content = root.querySelector('.pd-frame-content') as HTMLElement;
+      vi.spyOn(content, 'getBoundingClientRect').mockReturnValue({ height: 900, width: 700 } as DOMRect);
+      done();
+      await vi.waitFor(() => expect(document.documentElement.dataset['fitSettled']).toBe('true'));
+      // Its size was sent before the marker was set.
+      expect(io.fitted.at(-1)).toBeGreaterThanOrEqual(900);
+    } finally {
+      raf.mockRestore();
+      delete document.documentElement.dataset['fitSettled'];
     }
   });
 
