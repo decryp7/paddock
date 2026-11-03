@@ -3,8 +3,8 @@
 - Status: Proposed (2026-11-04), revision 3. The user approved the direction on 2026-11-04 and accepted decisions D1 to D6
   as recommended in revision 1; revision 2 answered the independent review (verdict "needs rework") and adjusted D1, D2,
   D3 and D5 where the fixes required it; revision 3 answers the re-review ("needs another round": the wire schema, the
-  helper and plugin wires, the freeze's enforcement). No user decision changed in revision 3; D7 (the release freeze) is
-  still open.
+  helper and plugin wires, the freeze's enforcement). The user accepted D7 (the release freeze, with dormant wire changes
+  bumping the shipped protocol) on 2026-11-04; no other decision changed in revision 3.
 - Date: 2026-11-04
 - Related: ER-1 / rule 1 (one release at a time), ER-4 (Conventional Commits), ER-8 / rule 3 (the full suite once on the
   combined result), ER-14 / rule 7 and rule 49 (tests never read the user's environment; no leaked state), ER-21 / rule
@@ -169,7 +169,7 @@ approved: <coordinator|user>: <reason>` (user for a later release line).
   batch the steward merges hot-file parts first, so every other open line merges them from `main` at its next daily merge.
 - Making the hot files additive (one file per feature, registered by a generated list) is WP-8 (below).
 
-### 3. Release freeze (D7)
+### 3. Release freeze (D7, accepted)
 
 **Opening and closing.** The coordinator opens an app's freeze when it cuts the release batch. The steward's merge
 commit on `main` that lands that batch (or its first part) carries the trailer `Freeze: <app> <version>`. The tag
@@ -498,10 +498,11 @@ Accepted by the user on 2026-11-04 (revision 1), adjusted by revision 2 as marke
 - **D5:** union plus C82 now, fragments only if WP-7 shows it fails. *Adjusted:* CHANGELOGs are not union files.
 - **D6:** squash landing copies end once the push check is in (ADR 0042 §4).
 
-Open:
-- **D7 (new):** the release freeze of §3, with dormant wire changes bumping the shipped protocol. Recommended: accept. The
-  alternative (unfinished parts of the same app land during its release) puts untested dormant code and possibly a
-  protocol bump into the release tree after its gates ran.
+Accepted by the user on 2026-11-04 (revision 3):
+- **D7:** the release freeze of §3: from `Freeze: <app> <version>` until the tag, only that release's parts land for the
+  app, enforced at landing by C81 with `Release-part:`; dormant wire changes bump the shipped protocol (postcard encodes
+  a field behind an off switch anyway). The alternative, unfinished parts of the same app landing during its release,
+  would put untested dormant code and possibly a protocol bump into the release tree after its gates ran.
 
 ## Rollback
 
