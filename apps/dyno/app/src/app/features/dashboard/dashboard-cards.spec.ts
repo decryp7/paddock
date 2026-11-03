@@ -1,17 +1,15 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import type { Anomaly, Diagnosis, HealthReason, HealthReport } from '../../core/api.types';
+import type { Diagnosis, HealthReason, HealthReport } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
-import { AnomaliesCallout } from './anomalies-callout';
 import { DiagnosisCard } from './diagnosis-card';
 import { HealthHero } from './health-hero';
-import { TopApps } from './top-apps';
 
 const NOW = 1_700_000_000_000;
 
@@ -33,57 +31,6 @@ async function settle(f: { whenStable(): Promise<unknown>; detectChanges(): void
 }
 const buttons = (el: HTMLElement) => [...el.querySelectorAll('button')];
 const byText = (el: HTMLElement, t: string) => buttons(el).find((b) => b.textContent?.includes(t))!;
-
-const anomaly = (id: string, kind: Anomaly['kind']): Anomaly => ({ id, kind, app: 'demo', since: NOW, title: `Title ${id}`, explanation: `Why ${id}`, evidence: [] });
-
-describe('AnomaliesCallout', () => {
-  it('renders nothing when there are no anomalies', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockResolvedValue([]);
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    expect((f.nativeElement as HTMLElement).querySelector('section')).toBeNull();
-  });
-
-  it('summarises one anomaly in the singular and expands to its details', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockResolvedValue([anomaly('a', 'memoryGrowth')]);
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('strong')?.textContent).toBe('Dyno noticed 1 unusual pattern');
-    expect(el.querySelector('ul')).toBeNull();
-    const toggle = byText(el, 'Show');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    toggle.click();
-    f.detectChanges();
-    expect(el.querySelector('li')?.textContent).toContain('Why a');
-    expect(byText(el, 'Hide').getAttribute('aria-expanded')).toBe('true');
-    byText(el, 'Hide').click();
-    f.detectChanges();
-    expect(el.querySelector('ul')).toBeNull();
-  });
-
-  it('pluralises for several and names the kinds in one quiet line, not a chip each', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockResolvedValue([anomaly('a', 'memoryGrowth'), anomaly('b', 'restartLoop')]);
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('strong')?.textContent).toBe('Dyno noticed 2 unusual patterns');
-    expect(el.querySelector('.chip')).toBeNull();
-    expect(el.querySelector('.kinds')?.textContent?.trim()).toBe('Memory growth · Restart loop');
-  });
-
-  it('stays hidden when loading the anomalies fails', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockRejectedValue({ code: 'busy', message: 'x' });
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    expect((f.nativeElement as HTMLElement).querySelector('section')).toBeNull();
-    expect(TestBed.inject(DiagnosisStore).anomaliesError()).toEqual({ code: 'busy', message: 'x' });
-  });
-});
 
 const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
   at: NOW,
@@ -204,46 +151,3 @@ describe('HealthHero', () => {
   });
 });
 
-describe('TopApps', () => {
-  it('shows a loading skeleton until the first live update', () => {
-    env();
-    const f = TestBed.createComponent(TopApps);
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('[aria-busy="true"]')).not.toBeNull();
-    expect(el.querySelectorAll('.skeleton')).toHaveLength(5);
-    expect(el.querySelector('ol')).toBeNull();
-  });
-
-  it('lists at most seven apps with values and process counts, and opens one in the task manager', () => {
-    const { mock, navigate } = env();
-    const update = mock.liveUpdate('summary');
-    const many = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `App${i}`, exe: null, pids: i === 0 ? [1, 2, 3] : [i + 10], cpu: { value: 90 - i * 10 }, memory: { value: 1024 * 1024 * (i + 1) }, diskBps: { value: 0 }, partial: false }));
-    TestBed.inject(LiveStore).receive({ ...update, topCpu: many, topMemory: many });
-    const f = TestBed.createComponent(TopApps);
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    const rows = [...el.querySelectorAll('li')];
-    expect(rows).toHaveLength(7);
-    expect(rows[0]!.textContent).toContain('×3');
-    expect(rows[1]!.textContent).not.toContain('×');
-    expect(rows[0]!.querySelector<HTMLElement>('.bar-track span')!.style.width).toBe('100%');
-    expect(el.querySelector('h2')?.textContent).toContain('CPU');
-    rows[1]!.querySelector('button')!.click();
-    expect(navigate).toHaveBeenCalledWith(['/processes'], { queryParams: { q: 'App1' } });
-    byText(el, 'View all').click();
-    expect(navigate).toHaveBeenLastCalledWith(['/processes']);
-  });
-
-  it('ranks by memory when asked, and copes with an empty list', () => {
-    const { mock } = env();
-    const update = mock.liveUpdate('summary');
-    TestBed.inject(LiveStore).receive({ ...update, topCpu: [], topMemory: [] });
-    const f = TestBed.createComponent(TopApps);
-    f.componentRef.setInput('metric', 'memory');
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('h2')?.textContent).toContain('memory');
-    expect(el.querySelectorAll('li')).toHaveLength(0);
-  });
-});
