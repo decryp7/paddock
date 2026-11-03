@@ -265,7 +265,12 @@ test('Widget grid: a drag across a 32-widget board stays under the frame budget'
   const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] as number;
   test.info().annotations.push({ type: 'frame-cost', description: `p95 ${p95.toFixed(1)} ms, max ${sorted.at(-1)!.toFixed(1)} ms over ${frames.length} frames` });
   expect(frames.length).toBeGreaterThan(30);
-  expect(p95).toBeLessThan(16.7);
+  // ADR 0044 §7 sets the budget for the CI Mac, where the page is composited by the GPU. A Linux runner draws it with a software
+  // rasteriser (CI run 7485: p95 31.6 ms for the same drag that costs under 16.7 ms on the Mac), so there the frame cost measures the
+  // runner, not the grid. The cost is still recorded above on every platform and the budget is enforced on macOS (Chromium locally,
+  // WebKit in the macOS CI job); the annotation says when it was not.
+  if (process.platform === 'darwin') expect(p95).toBeLessThan(16.7);
+  else test.info().annotations.push({ type: 'frame-budget', description: `not enforced on ${process.platform}: software rendering (ADR 0044 §7 names the CI Mac)` });
 });
 
 test('Widget grid: the add sheet lists the kinds and adds one; Options is in the menu of a kind that has it', async ({ page }) => {

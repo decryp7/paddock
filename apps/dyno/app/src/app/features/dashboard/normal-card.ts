@@ -49,9 +49,10 @@ import { MatTooltip } from '@angular/material/tooltip';
     ul { list-style: none; margin: 0; padding: 0 0 var(--sp-2); display: grid; border-top: 1px solid var(--border-subtle); }
     li { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: 0; min-height: 36px; padding-block: var(--sp-1); font-size: var(--fs-sm); border-top: 1px solid var(--border-subtle); }
     li:first-child { border-top: 0; }
-    .what { flex: 1 1 16rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* The sentence wraps instead of being cut: a long metric name and phrase at a narrow width stay readable in full. */
+    .what { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
     .what strong { font-weight: var(--fw-medium); }
-    /* The values are never cut: when the row is too narrow they wrap under the sentence (which may ellipsize, its tooltip has the whole text). */
+    /* The values are never cut: when the row is too narrow they wrap under the sentence (which wraps). */
     .vals { margin-inline-start: auto; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
   `,
 })

@@ -115,7 +115,9 @@ fn a_plugin_that_exits_at_once_fails_to_start_and_is_quarantined() {
         "the exit is noticed before the start timeout"
     );
     assert_eq!((e.plugin.as_str(), e.kind), ("exit", ErrorKind::Crashed));
-    assert!(e.message.contains("before it connected"), "{}", e.message);
+    // A plugin that exits at once may be gone before the host writes its bootstrap line ("exited before it took its bootstrap") or after
+    // ("exited before it connected"): which one is a race between the two processes, and both say the plugin exited.
+    assert!(e.message.contains("exited before it"), "{}", e.message);
     assert_eq!(host.start_all()[0].kind, ErrorKind::Crashed);
     assert_eq!(host.start_all()[0].kind, ErrorKind::Quarantined);
     assert_eq!(state(&host, "exit"), PluginState::Quarantined);

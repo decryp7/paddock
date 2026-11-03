@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn linux_infers_the_user_from_an_unexplained_resize() {
-        assert!(INFER_USER_RESIZE);
+        const { assert!(INFER_USER_RESIZE) };
     }
 
     #[test]

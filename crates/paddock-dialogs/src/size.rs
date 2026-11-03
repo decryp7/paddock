@@ -98,6 +98,9 @@ pub enum Missing {
     Nothing,
 }
 
+/// How many requests taken off the queue by a later equal-sized echo are remembered for their own late echoes.
+const LATE_ECHOES: usize = 8;
+
 /// The state of one dialog window's size.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizeState {
@@ -111,6 +114,9 @@ pub struct SizeState {
     last: Option<Measured>,
     ready: Option<(u64, u64)>,
     pending: VecDeque<Request>,
+    /// Requests taken off `pending` by a later, equal-sized echo (it matched the newest of them): their own echoes are still on
+    /// the way, in order, and are neither unexplained nor the user. Bounded by [`LATE_ECHOES`].
+    late: VecDeque<Request>,
     current: Request,
     min: Size,
     shown: bool,
@@ -144,6 +150,7 @@ impl SizeState {
             last: None,
             ready: None,
             pending: VecDeque::new(),
+            late: VecDeque::new(),
             current: created,
             min: floor,
             shown: false,
@@ -294,9 +301,33 @@ impl SizeState {
         let matched = self.pending.iter().rposition(|r| r.matches(width, height));
         match matched {
             Some(i) => {
-                self.pending.drain(..=i);
+                // An echo equal to several queued requests takes the newest off the queue (the OS may have merged the ones in
+                // between), but it may be the echo of the oldest of them: the equal ones after the oldest, and what lies between,
+                // can still echo in order, so they are remembered for that.
+                let first = self
+                    .pending
+                    .iter()
+                    .position(|r| r.matches(width, height))
+                    .unwrap_or(i);
+                for (n, still) in self.pending.drain(..=i).enumerate() {
+                    if n > first {
+                        if self.late.len() == LATE_ECHOES {
+                            self.late.pop_front();
+                        }
+                        self.late.push_back(still);
+                    }
+                }
             }
             None if self.current.matches(width, height) => {}
+            None if self.late.iter().any(|r| r.matches(width, height)) => {
+                if let Some(k) = self.late.iter().position(|r| r.matches(width, height)) {
+                    self.late.drain(..=k);
+                }
+                // The window now has this older size; the newer requests are already off the queue, so nothing is asked again.
+                self.current = Request { width, height };
+                plan.show = self.try_show();
+                return plan;
+            }
             None => {
                 plan.unexplained = true;
                 if self.pending.is_empty()
@@ -344,6 +375,7 @@ impl SizeState {
         self.env = env;
         let _ = old;
         self.pending.clear();
+        self.late.clear();
         self.current = Request {
             width: physical(keep.width, env.scale),
             height: physical(keep.height, env.scale),
@@ -604,6 +636,47 @@ mod tests {
             ..env(1.0)
         });
         assert_eq!(plan.inner.unwrap().height, 500.0 * 0.75 - 39.0);
+    }
+
+    /// CI proptest seed `ef445c8e` (2026-11-04): requests A, B, A queue up; the OS echoes the first A, which matches the newest A
+    /// and so takes B and the second A off the queue; the echo of B then arrived with nothing pending and was taken for the user.
+    #[test]
+    fn the_late_echo_of_an_older_request_after_an_identical_newer_one_is_not_the_user() {
+        let e = Env {
+            scale: 1.0,
+            work: size(800.0, 600.0),
+            frame: size(0.0, 0.0),
+        };
+        let p = Kind::Decision.policy();
+        let mut s = SizeState::new(
+            p.size_mode,
+            size(320.0, 200.0),
+            p.default_height.unwrap_or(0.0),
+            true,
+            e,
+            Request {
+                width: physical(400.0, 1.0),
+                height: physical(520.0, 1.0),
+            },
+        );
+        let mut asked = Vec::new();
+        for (seq, min_h) in [(0, 855.4955628329033), (1, 50.0), (2, 818.3636692580089)] {
+            let m = Measured {
+                content: size(400.0, 50.0),
+                min_content: size(320.0, min_h),
+                overflow: false,
+            };
+            if let Some(r) = s.on_measure(1, seq, m).request {
+                asked.push(r);
+            }
+        }
+        assert!(asked.len() >= 3 && asked[0] == asked[2], "{asked:?}");
+        let before = s.mode();
+        for r in &asked {
+            let plan = s.on_resized(r.width, r.height);
+            assert!(!plan.unexplained && plan.mode_change.is_none(), "{plan:?}");
+        }
+        assert_eq!(s.mode(), before);
     }
 
     #[derive(Debug, Clone)]

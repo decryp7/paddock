@@ -252,7 +252,7 @@ interface Active {
     .pd-wg-grid { position: relative; display: grid; gap: var(--pd-card-gap); grid-auto-rows: var(--pd-widget-row); min-width: 0; }
     .pd-wg-cell { position: relative; z-index: 1; min-width: 0; min-height: 0; border-radius: var(--pd-radius-card); }
     .pd-wg-cell > .pd-widget-frame { height: 100%; }
-    .pd-wg-grid--editing .pd-wg-cell { cursor: grab; touch-action: none; user-select: none; }
+    .pd-wg-grid--editing .pd-wg-cell { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
     .pd-wg-grid--editing .pd-wg-cell:focus, .pd-wg-cell:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-wg-cell.pd-wg-lifted { z-index: 3; cursor: grabbing; box-shadow: var(--pd-shadow-3); }
     .pd-wg-cell.pd-wg-resizing { z-index: 3; justify-self: start; align-self: start; }

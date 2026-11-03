@@ -203,11 +203,11 @@ function readCollapsed(): Set<string> {
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .muted { color: var(--text-2); }
-    .truncate { overflow: hidden; text-overflow: ellipsis; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     h1:focus { outline: none; }
-    .flagged { margin-inline-start: 6px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 4px; color: var(--text-1); font: var(--fw-semibold) var(--fs-xs) / 1.5 var(--font-sans); }
-    .cc { margin-inline-start: 6px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); font: var(--fw-regular) var(--fs-xs) / 1.4 var(--font-mono); }
-    .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
+    .flagged { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 6px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 4px; color: var(--text-1); font: var(--fw-semibold) var(--fs-xs) / 1.5 var(--font-sans); }
+    .cc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 6px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); font: var(--fw-regular) var(--fs-xs) / 1.4 var(--font-mono); }
+    .addr { flex: none; white-space: nowrap; font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
     .gname { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; }
     .meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }

@@ -184,16 +184,27 @@ fn a_client_finding_no_folder_or_no_socket_sees_nothing_listening_not_an_untrust
         matches!(&e, SystemConnectError::Connect(io) if io.kind() == std::io::ErrorKind::NotFound),
         "{e}"
     );
-    // A folder that exists and is the client's own is still refused (not root's), whether or not a socket is in it.
+    // A folder that exists and is the client's own is still refused (not root's), whether or not a socket is in it. Root owns
+    // its own folders, so under root (the CI containers) the folder is the service's and the answer is "nothing listening".
+    // SAFETY: a plain getter.
+    #[allow(unsafe_code)]
+    let me = unsafe { libc::geteuid() };
     let own = dir.path().join("own.sock").to_string_lossy().into_owned();
     let e = Stream::connect_system(&own, T).err().unwrap();
-    assert!(
-        matches!(
-            e,
-            SystemConnectError::Untrusted(Untrusted::FolderOwner { .. })
-        ),
-        "{e}"
-    );
+    if me != 0 {
+        assert!(
+            matches!(
+                e,
+                SystemConnectError::Untrusted(Untrusted::FolderOwner { .. })
+            ),
+            "{e}"
+        );
+    } else {
+        assert!(
+            matches!(&e, SystemConnectError::Connect(io) if io.kind() == std::io::ErrorKind::NotFound),
+            "{e}"
+        );
+    }
 }
 
 #[cfg(windows)]

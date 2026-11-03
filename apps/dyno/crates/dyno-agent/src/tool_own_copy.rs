@@ -256,13 +256,16 @@ mod tests {
 
     impl ToolRunner for Fake {
         fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
-            self.calls.lock().unwrap().push(format!(
-                "{} {}",
-                t.program.rsplit('/').next().unwrap(),
-                t.args.first().cloned().unwrap_or_default()
-            ));
-            let prog = t.program.rsplit('/').next().unwrap();
-            match (prog, t.args.first().map(String::as_str)) {
+            // The file name by the host's own separator: the staged tool's path is built with backslashes on Windows.
+            let prog = std::path::Path::new(&t.program)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", prog, t.args.first().cloned().unwrap_or_default()));
+            match (prog.as_str(), t.args.first().map(String::as_str)) {
                 ("hdiutil", Some("attach")) => {
                     if self.fault == Fault::AttachFails {
                         return Ok(ToolOutput {

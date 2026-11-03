@@ -1256,3 +1256,28 @@ itself (ER-12), and measure the failure rate before and after (ER-28).
 ## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
 
 I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.
+
+## land-f's first CI run: eight causes, none visible on the Mac (2026-11-04; runs 7485 and 7486)
+
+Everything below passed locally on the macOS dev machine and failed on the Linux or Windows runners. **Lesson:** a Mac-only local run
+proves little for code that depends on the user id, the path separator, the font or the rasteriser; the checks that would have
+caught each one are named.
+- `paddock-dialogs` `any_interleaving_keeps_the_size_rules` (proptest, seed `ef445c8e`): the OS echoes requests A, B, A in order, but the
+  echo of the first A matched the newest A (`rposition`) and took B and the second A off the queue, so B's echo arrived with nothing
+  pending and was read as the user resizing. The state now remembers the requests an equal-sized echo took off the queue (`late`) and
+  explains their own echoes. Regression: `the_late_echo_of_an_older_request_after_an_identical_newer_one_is_not_the_user`.
+  A proptest with a random seed is a flaky test until its counterexample is a fixed test; run it with `PROPTEST_CASES=30000` after a change.
+- `paddock-ipc` `a_client_finding_no_folder_...`: the second half assumed the test user is not root; the CI containers run as root,
+  where a folder the client owns is the service's folder. Guarded as the test above it already was (`geteuid() != 0`).
+- `paddock-service` and `dyno-agent` tests built paths with a hard-coded `/` (`"/Library/LaunchDaemons/x.plist"`, `rsplit('/')`),
+  which differ from the code's `Path::join` on Windows: use `Path::join` and `file_name` in tests that compare paths.
+- `dyno-plugin-host`: a plugin that exits at once may be gone before the bootstrap line is written ("exited before it took its
+  bootstrap") or after ("exited before it connected"): a race, so the test accepts both.
+- Clippy `assertions_on_constants` (Linux-only `edge/linux.rs`), `-webkit-user-select` missing on one rule (`webkit-prefix` test),
+  `THIRD_PARTY_NOTICES.md` out of date for Dyno (`scripts/notices.sh dyno`): run the CI's cheap checks (`notices.sh <app> --check`,
+  `node --test scripts/*.test.mjs`) before pushing a batch that adds crates or CSS.
+- Dyno e2e at 500 and 900x600: the "Is this normal?" sentence ended in an ellipsis with its tooltip on the parent, and the network
+  row's `flagged` and country chips could not shrink inside a clipping cell. The sentence now wraps and both chips ellipsize with their
+  titles. Both pass on the Mac with the old CSS (narrower font): layout checks need the Linux run.
+- `widget-grid.spec` "frame budget": ADR 0044 §7 sets 16.7 ms for the CI Mac; the Linux runner's software rasteriser measured 31.6 ms
+  for the same drag. The budget is now asserted on macOS and only recorded (annotation) elsewhere.

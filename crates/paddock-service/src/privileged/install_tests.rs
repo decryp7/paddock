@@ -858,7 +858,7 @@ fn macos_registers_a_daemon_plist_that_runs_the_protected_copy() {
         ),
         "{err}"
     );
-    let plist = PathBuf::from("/Library/LaunchDaemons/net.decryptology.dyno.helper.plist");
+    let plist = PathBuf::from("/Library/LaunchDaemons").join("net.decryptology.dyno.helper.plist");
     let commands = sys.commands();
     assert!(
         commands.contains(&format!(
