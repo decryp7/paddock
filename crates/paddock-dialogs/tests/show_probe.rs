@@ -334,7 +334,7 @@ fn main() {
         )
         .invoke_handler(move |invoke| app_invoke(invoke))
         // The app forwards window events to the dialogs (its `Resized` is what lets a measured dialog be shown, ADR 0043 §3).
-        .on_window_event(|window, event| paddock_dialogs::tauri::on_window_event(window, event))
+        .on_window_event(paddock_dialogs::tauri::on_window_event)
         .build(context)
         .unwrap_or_else(|e| die("the real-runtime app does not build", e));
     let rename = Entry::new("sd.rename", Shape::Form(paddock_dialogs::Modality::Modal));
