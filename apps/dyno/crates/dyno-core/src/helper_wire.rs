@@ -5,6 +5,7 @@
 //! [`HelperRequest`]s, from any local account, each restricted by who asks (`helper_policy`, ADR 0027 section 2). None of
 //! them changes a setting of the machine. The request arguments and their caps are in `helper_requests`.
 
+use crate::btm::LoginItemsReply;
 use crate::helper::HelperHost;
 use crate::helper_policy::{RequestKind, Visibility};
 use crate::helper_requests::{
@@ -133,6 +134,8 @@ pub enum HelperReply {
     Counters(Vec<TrafficCounter>),
     /// Answer to `Audit`.
     Entries(Vec<AuditEntry>),
+    /// Answer to `LoginItems`.
+    LoginItems(LoginItemsReply),
     /// Answer to `LogTail`: the last lines, oldest first.
     Log(Vec<String>),
     /// Answer to `Uninstall`: the helper is going away.
@@ -457,6 +460,11 @@ mod tests {
             }])),
             HelperMessage::Reply(HelperReply::About(info("1", 1))),
             HelperMessage::Reply(HelperReply::Log(vec!["a".into()])),
+            HelperMessage::Reply(HelperReply::LoginItems(LoginItemsReply {
+                items: vec![],
+                truncated: 0,
+                other_accounts: 2,
+            })),
             HelperMessage::Reply(HelperReply::Bye),
         ];
         for m in all {

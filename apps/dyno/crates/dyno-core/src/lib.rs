@@ -9,6 +9,7 @@ pub mod alerts;
 pub mod anomaly;
 pub mod backup;
 pub mod baseline;
+pub mod btm;
 pub mod bench;
 pub mod counters;
 pub mod diagnosis;
