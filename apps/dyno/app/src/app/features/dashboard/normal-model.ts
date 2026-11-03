@@ -1,5 +1,5 @@
 import type { BaselineItem, BaselineOverview, BaselineStrength } from '../../core/api.types';
-import { formatDate } from '../../shared/format';
+import { formatClock, formatDate } from '../../shared/format';
 
 /** Most unusual items the dashboard card lists. */
 export const MAX_UNUSUAL = 4;
@@ -30,10 +30,12 @@ export function normalLine(o: BaselineOverview, unusualCount: number): string | 
   const l = o.learning;
   if (l === 'off') return null;
   if ('learning' in l) {
-    // The engine counts local calendar days from the first sighting: the day Dyno first ran is day 1.
-    const { day, daysNeeded, since } = l.learning;
-    const from = since === null ? '' : `, since ${formatDate(since, o.at)}`;
-    return `Learning what is normal for this computer: day ${day} of ${daysNeeded}${from}`;
+    // The engine counts local calendar days from the first sighting (day 1 is the day Dyno first ran) and holds the last
+    // day until a full week of hours has passed too: then the line says when.
+    const { day, daysNeeded, since, readyAt } = l.learning;
+    const head = `Learning what is normal for this computer: day ${day} of ${daysNeeded}`;
+    if (day >= daysNeeded && readyAt !== null) return `${head} · ready at ${formatClock(readyAt)}`;
+    return since === null ? head : `${head}, since ${formatDate(since, o.at)}`;
   }
   return unusualCount === 0 ? 'Everything looks usual for this time of the week' : null;
 }

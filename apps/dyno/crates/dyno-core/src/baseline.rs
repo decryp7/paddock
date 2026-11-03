@@ -8,7 +8,7 @@
 
 use crate::hardware::Confidence;
 use crate::stats::{median, quantile};
-use crate::time::{local_epoch_day, to_local, LocalZone, Timestamp, DAY, HOUR};
+use crate::time::{from_local, local_epoch_day, to_local, LocalZone, Timestamp, DAY, HOUR};
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -151,12 +151,15 @@ pub enum Learning {
     /// Still collecting; nothing is highlighted yet.
     Learning {
         /// Today's number in the learning, by local calendar day: 1 on the day Dyno first saw this machine, 2 the next
-        /// day, whether or not the computer was on in between.
+        /// day, whether or not the computer was on in between; it stays at `days_needed` until `ready_at`.
         day: u32,
         /// Days needed.
         days_needed: u32,
         /// When Dyno first saw this machine (none when the store could not say).
         since: Option<Timestamp>,
+        /// When learning ends: the later of the end of the last learning day and the full hours since `since` (none
+        /// without `since`).
+        ready_at: Option<Timestamp>,
     },
     /// Ready to judge.
     Ready {
@@ -172,19 +175,28 @@ pub fn learning_status(settings: &BaselineSettings, first_seen: Option<Timestamp
     }
     let needed = settings.clamped().learning_days;
     let done = first_seen.map_or(0, |f| learning_days(f, now, zone));
-    if done >= needed {
-        Learning::Ready { days: done }
-    } else {
-        Learning::Learning {
-            day: done + 1,
+    let ready_at = first_seen.map(|f| ready_time(f, needed, zone));
+    match ready_at {
+        Some(r) if now >= r => Learning::Ready { days: done },
+        _ => Learning::Learning {
+            day: done.saturating_add(1).min(needed),
             days_needed: needed,
             since: first_seen,
-        }
+            ready_at,
+        },
     }
 }
 
 /// The rule, for the logs.
-pub const LEARNING_RULE: &str = "local calendar days since first seen";
+pub const LEARNING_RULE: &str = "local calendar days since first seen, and at least that many times 24 hours";
+
+/// When learning `needed` days from `first_seen` ends: both `needed` complete local days and `needed` times 24 hours have
+/// passed. The hours decide unless a clock change moved the local day boundary past them.
+pub fn ready_time(first_seen: Timestamp, needed: u32, zone: &dyn LocalZone) -> Timestamp {
+    let hours = first_seen.plus(i64::from(needed) * DAY);
+    let days = from_local((local_epoch_day(first_seen, zone) + i64::from(needed)) * DAY, zone);
+    hours.max(days)
+}
 
 /// Complete local calendar days since `first_seen`: 0 on the first day, 1 from the next local midnight on, whatever the
 /// computer did in between (asleep, off, restarted). A clock set back before the first sighting counts 0.
@@ -633,7 +645,8 @@ mod tests {
             Learning::Learning {
                 day: 4,
                 days_needed: 7,
-                since: Some(first)
+                since: Some(first),
+                ready_at: Some(at(7, 0))
             }
         );
         assert_eq!(learning_status(&s, Some(first), at(7, 1), UTC), Learning::Ready { days: 7 });
@@ -642,13 +655,18 @@ mod tests {
             Learning::Learning {
                 day: 1,
                 days_needed: 7,
-                since: None
+                since: None,
+                ready_at: None
             }
         );
         // Late on the first day, then just after the next local midnight: a new day, though under an hour has passed.
         let late = first.plus(23 * HOUR + 30 * crate::time::MINUTE);
         assert_eq!(learning_days(late, late.plus(HOUR), UTC), 1);
         assert_eq!(learning_days(late, late, UTC), 0);
+        // Both conditions: a start late in the day waits for the hours, a start just after midnight in a week that ends
+        // with the clocks set back waits for the local midnight.
+        assert_eq!(ready_time(late, 7, UTC), late.plus(7 * DAY));
+        assert_eq!(ready_time(first, 7, UTC), at(7, 0));
         // The day follows the zone, not UTC: 20:00 UTC is already the next day at UTC+8.
         let zone = crate::time::FixedZone(480);
         assert_eq!(learning_days(first.plus(10 * HOUR), first.plus(20 * HOUR), &zone), 1);
@@ -666,7 +684,8 @@ mod tests {
             Learning::Learning {
                 day: 1,
                 days_needed: 7,
-                since: Some(at(10, 0))
+                since: Some(at(10, 0)),
+                ready_at: Some(at(17, 0))
             }
         );
     }

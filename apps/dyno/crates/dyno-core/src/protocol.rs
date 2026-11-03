@@ -1234,6 +1234,7 @@ mod tests {
                 day: 3,
                 days_needed: 7,
                 since: Some(Timestamp(1)),
+                ready_at: Some(Timestamp(2)),
             },
             items: vec![],
         }));
@@ -1241,6 +1242,7 @@ mod tests {
         assert_eq!(j["learning"]["learning"]["daysNeeded"], 7);
         assert_eq!(j["learning"]["learning"]["day"], 3);
         assert_eq!(j["learning"]["learning"]["since"], 1);
+        assert_eq!(j["learning"]["learning"]["readyAt"], 2);
     }
 }
 

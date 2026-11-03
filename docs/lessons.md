@@ -1172,3 +1172,6 @@ shown as 1, expected 2). Contributing: `firstSeen` was stored lazily on the firs
 logon without a window did not start the count, and nothing in the log said what the learning counted from. **Lesson:** a
 progress count shown to people is defined once in the engine in the unit people read (local calendar days, 1-based) and sent
 as such; the UI never clamps or offsets it, and the start of the count is recorded and logged when the process starts.
+The decided rule (user, 2026-11-03): the card counts local calendar days, and Ready also needs 7 times 24 hours since the
+first sighting; on the last day the card says when it will be ready, and the engine sends that time (`ready_at`), so a clock
+change moves it by exactly the hour the clock moved.

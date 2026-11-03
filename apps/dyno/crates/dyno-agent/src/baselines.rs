@@ -7,8 +7,8 @@ use crate::agent::{lock, now, Shared};
 use crate::store::Store;
 use dyno_core::alarms::feed::from_baseline;
 use dyno_core::baseline::{
-    judge, learn, learning_days, learning_status, Baseline, BaselineItem, BaselineMetric, BaselineOverview, BaselineSettings, Judgement,
-    Learning, Persistence, State, Strength,
+    judge, learn, learning_days, learning_status, ready_time, Baseline, BaselineItem, BaselineMetric, BaselineOverview, BaselineSettings,
+    Judgement, Learning, Persistence, State, Strength,
 };
 use dyno_core::hardware::Confidence;
 use dyno_core::history::{AppMinute, HistoryPoint, Tier};
@@ -41,12 +41,15 @@ pub fn log_start(
     zone: &dyn LocalZone,
 ) {
     let days = first_seen.map_or(0, |f| learning_days(f, t, zone));
+    let needed = settings.clamped().learning_days;
+    let ready_at = first_seen.map_or(-1, |f| ready_time(f, needed, zone).millis());
     log::info!(
         DataFolder = folder,
         Store = store,
         FirstSeenMs = first_seen.map_or(-1, |f| f.millis()),
         DaysDone = days,
-        DaysNeeded = settings.clamped().learning_days,
+        DaysNeeded = needed,
+        ReadyAtMs = ready_at,
         Enabled = settings.enabled,
         Rule = dyno_core::baseline::LEARNING_RULE;
         "Baselines learning at start"
