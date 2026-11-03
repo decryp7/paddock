@@ -2323,6 +2323,7 @@ export interface FirewallSource {
 export interface FirewallView {
   os: 'windows' | 'macos' | 'linux';
   sources: FirewallSource[];
+}
 
 // ------------------------------------------------------------------------------------- the disk-health tool (ADR 0027 section 7)
 
@@ -2348,6 +2349,8 @@ export interface ToolOffer {
   licence: string;
   sourceUrl: string;
   state: OfferState;
+}
+
 // ---------------------------------------------------------------------------------------------------- power (ADR 0032)
 
 /** What stays awake. */

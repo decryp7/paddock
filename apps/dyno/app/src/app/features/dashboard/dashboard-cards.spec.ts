@@ -165,6 +165,7 @@ describe('HealthHero', () => {
     const alarm: HealthReason = { id: 'alarm:7', title: 'Disk is failing', detail: 'Back up now.', impact: 0, severity: 'critical', since: NOW - 2 * 3_600_000 };
     vi.spyOn(mock, 'health').mockResolvedValue({ at: NOW, score: 59, grade: 'poor', performanceScore: 100, cappedBy: 'critical', reasons: [alarm] });
     const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
     await settle(f);
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.num')?.textContent).toBe('59');

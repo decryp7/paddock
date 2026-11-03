@@ -335,6 +335,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <div class="row" [class.off]="!energy().enabled">
                 <div class="lbl"><strong>CO₂ per kWh</strong><small>Your grid's figure. Empty: no CO₂.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="0" max="2000" [disabled]="!energy().enabled" aria-label="Grams of CO2 per kilowatt hour" [ngModel]="energy().co2GPerKwh" (ngModelChange)="setEnergy({ co2GPerKwh: num($event) })" /><span matTextSuffix>g</span></mat-form-field>
+              </div>
               <h3 class="sub-h">Wake-on-LAN</h3>
               <div class="row">
                 <div class="lbl"><strong>Allow Wake-on-LAN</strong><small>Wake packets go out only when you click Wake or Test wake (or an AI client you allowed asks to). Off hides the list and the tray's Wake menu.</small></div>
