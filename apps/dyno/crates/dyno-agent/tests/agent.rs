@@ -170,12 +170,18 @@ fn a_tray_subscriber_keeps_the_system_pace_and_the_process_table_slows_down() {
 
 #[test]
 fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
-    let h = Harness::start();
-    for pid in [200, 201] {
-        let mut p = process(pid, "theirs", 3.0);
-        p.owner = dyno_core::process::Owner::Other;
-        h.fake.add_process(p);
-    }
+    // Both are on the fake machine before the agent first looks at it: adding them one by one to a running agent let a sample land
+    // between the two adds (a count of 1 on the first update that had other users at all).
+    let h = Harness::start_seeded(
+        |fake| {
+            for pid in [200, 201] {
+                let mut p = process(pid, "theirs", 3.0);
+                p.owner = dyno_core::process::Owner::Other;
+                fake.add_process(p);
+            }
+        },
+        |platform| platform,
+    );
     let (_p, rx) = h.subscriber(LiveDetail::Processes);
     let live = loop {
         let l = rx.recv_timeout(Duration::from_secs(10)).expect("a live update");
