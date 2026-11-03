@@ -35,6 +35,33 @@ Dyno has two things called "bench":
 
 ## Results (newest first)
 
+### 2026-11-03, a saved disk-map tree of 1M nodes in SQLite: rows against packed chunks (docs/dyno-cached-views)
+
+- **Commit:** a18e18801 (origin/main; design measurement for [ADR 0029](adr/0029-saved-views-disk-map-cache.md), no Dyno code)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, internal SSD
+- **Load:** 1-minute load 19.5 at the start of the run (other agents building); the numbers are upper bounds
+- **Build:** CPython 3.12.5 with its SQLite 3.45.3 (Dyno bundles SQLite through `libsqlite3-sys` 0.38.2); WAL,
+  `synchronous = NORMAL`, as ADR 0008; `zlib` level 1 as the stand-in for `flate2`/`miniz_oxide`
+- **Corpus:** [`perf/disk_cache_sqlite_bench.py`](perf/disk_cache_sqlite_bench.py) `1000000 <dir>`: 1,000,000 nodes, a
+  random parent among the previous 5,000, invented names of 12 to 21 bytes, random sizes (seed 42); a 64-byte record per
+  node plus the names (88.9 MB raw); synthetic
+- **Command:** `nice -n 10 python3 -I disk_cache_sqlite_bench.py 1000000 .`
+- **Runs:** single run, cold process, warm page cache (the file was just written)
+- **Numbers:**
+
+  | Measure | One row per node | Packed 4 MiB chunks | Chunks, zlib 1 | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Write 1M nodes (one transaction) | 1.24 s | 0.38 s (+0.13 s packing) | 0.52 s (+0.13 s) | < 2 s, off the UI and sampling threads | all pass |
+  | File size | 74.2 MB | 89.0 MB | 27.3 MB | — | — |
+  | Read the whole tree back | 0.89 s (Python row objects) | 0.042 s | 0.101 s | < 0.3 s to the first answer | chunks pass; rows fail in Python |
+  | Decode the records (Python `struct`) | — | 0.093 s | 0.091 s | — | — |
+
+- **Memory measure:** not measured (Python process; the Rust bench of WP-5 measures footprint, rule 26)
+- **Notes:** Python's per-row cost dominates the row layout's read; rusqlite is faster per row but still builds 1M rows
+  where the chunks are 22 SQLite rows. The names compress far better than real names would (they are regular), so the
+  zlib size is optimistic; WP-5 repeats this in Rust with realistic name lengths and a 5M-node tree before D3 is final.
+  Raw output was not kept beyond this block.
+
 ### 2026-10-30, ld-prime against rust-lld for incremental debug rebuilds (ci/build-parallelism)
 
 The family results block is in [docs/benchmarks.md](../../../docs/benchmarks.md#2026-10-30-linker-for-dynos-incremental-debug-rebuilds-ld-prime-against-rust-lld-cibuild-parallelism)
