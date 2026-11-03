@@ -797,11 +797,10 @@ fn calls_over_the_limit_wait_in_order_in_the_call_queue_and_past_it_are_busy() {
 fn closing_ends_calls_that_were_still_waiting_in_the_queue() {
     let gate = Gate::default();
     let g = gate.clone();
-    let ran = Arc::new(AtomicUsize::new(0));
-    let r = ran.clone();
+    let (ran_tx, ran) = mpsc::channel::<()>();
     let slow: Arc<dyn Handler> = Arc::new(
         move |_: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
-            r.fetch_add(1, Ordering::SeqCst);
+            let _ = ran_tx.send(());
             g.wait();
             Ok(Vec::new())
         },
@@ -824,9 +823,75 @@ fn closing_ends_calls_that_were_still_waiting_in_the_queue() {
         Frame::Fail { id: 4, error } => assert_eq!(error.code, codes::BUSY),
         other => panic!("{other:?}"),
     }
+    // The running call has started (its handler reported in) before the connection closes.
+    ran.recv_timeout(GUARD).unwrap();
     peer.close();
     gate.open();
     assert!(peer.wait_closed(Some(GUARD)));
-    // Only the running call ran; the two that waited were dropped with the connection.
-    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    // Every thread that holds the handler ends once the running call is done and the queue is dropped; the handler's sender
+    // goes with the last of them, so the channel disconnecting is the condition "nothing else will run". The two calls that
+    // waited never ran.
+    assert!(matches!(
+        ran.recv_timeout(GUARD),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+}
+
+#[test]
+fn a_call_cancelled_while_it_waits_is_answered_as_cancelled_and_never_runs_and_queued_bytes_are_capped()
+ {
+    let gate = Gate::default();
+    let g = gate.clone();
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let r = ran.clone();
+    let slow: Arc<dyn Handler> = Arc::new(
+        move |_: &CallCtx, body: &[u8]| -> Result<Vec<u8>, RemoteError> {
+            r.lock().unwrap().push(body.to_vec());
+            g.wait();
+            Ok(Vec::new())
+        },
+    );
+    let mut one = PeerOptions::new("b");
+    one.max_concurrent_calls = 1;
+    one.call_queue = 4;
+    one.call_queue_bytes = 8;
+    let limit = FrameLimit::default();
+    let (_peer, mut raw) = raw(slow, one, limit);
+    let call = |id: u64, len: usize| Frame::Call {
+        id,
+        credit: 0,
+        body: vec![b'x'; len],
+    };
+    // 1 runs; 2 (5 bytes) waits; 3 (5 bytes) would make 10 > 8 queued bytes and is refused.
+    frame::write_frame(&mut raw, &call(1, 1), limit).unwrap();
+    frame::write_frame(&mut raw, &call(2, 5), limit).unwrap();
+    frame::write_frame(&mut raw, &call(3, 5), limit).unwrap();
+    match frame::read_frame(&mut raw, limit).unwrap() {
+        Frame::Fail { id: 3, error } => assert_eq!(error.code, codes::BUSY),
+        other => panic!("{other:?}"),
+    }
+    // The caller cancels 2 while it waits. A fourth call that the byte cap refuses is answered after the cancel was taken (one
+    // reader, frames in order), so its refusal is the condition "the cancel is in" before the running call is let go.
+    frame::write_frame(&mut raw, &Frame::Cancel { id: 2 }, limit).unwrap();
+    frame::write_frame(&mut raw, &call(4, 5), limit).unwrap();
+    match frame::read_frame(&mut raw, limit).unwrap() {
+        Frame::Fail { id: 4, error } => assert_eq!(error.code, codes::BUSY),
+        other => panic!("{other:?}"),
+    }
+    gate.open();
+    let mut answers = Vec::new();
+    while answers.len() < 2 {
+        match frame::read_frame(&mut raw, limit).unwrap() {
+            Frame::Reply { id, .. } => answers.push((id, true)),
+            Frame::Fail { id, error } => {
+                assert_eq!((id, error.code.as_str()), (2, codes::CANCELLED));
+                answers.push((id, false));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    answers.sort_unstable();
+    assert_eq!(answers, vec![(1, true), (2, false)]);
+    // Only the first call ran; 2 was answered as cancelled without running.
+    assert_eq!(*ran.lock().unwrap(), vec![vec![b'x']]);
 }

@@ -164,8 +164,12 @@ mod os {
         .ok_or_else(|| unreadable("SO_PEERGROUPS"))
     }
 
-    /// The caller's program, for the audit line only: through the pidfd the kernel pinned at `connect`, so the entry cannot
-    /// have moved to another process. `None` on kernels before 6.5 (no `SO_PEERPIDFD`) or when `/proc` is hidden.
+    /// The caller's program, for the audit line only. The kernel pinned the process at `connect` (`SO_PEERPIDFD`); the pid is
+    /// read from the descriptor's fdinfo and `/proc/<pid>/exe` is read **while the descriptor is open**, then the process is
+    /// confirmed to be still there by signalling it through the descriptor (signal 0). The pid names that process for as long as
+    /// the descriptor exists, but only while it has not exited: once it is gone the number can be handed on, so an entry read
+    /// from a gone process is dropped (`None`) rather than risk another program's path in the log. `None` on kernels before 6.5
+    /// (no `SO_PEERPIDFD`) or when `/proc` is hidden.
     fn program_through_pidfd(s: &UnixStream) -> Option<String> {
         let mut fd: libc::c_int = -1;
         let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
@@ -182,18 +186,29 @@ mod os {
         if rc != 0 || fd < 0 {
             return None;
         }
-        let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{fd}"));
+        let program = (|| {
+            let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{fd}")).ok()?;
+            let pid = info
+                .lines()
+                .find_map(|l| l.strip_prefix("Pid:")?.trim().parse::<u32>().ok())?;
+            let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+            // SAFETY: `pidfd_send_signal(fd, 0, NULL, 0)` only asks whether the process behind the descriptor exists.
+            let alive = unsafe {
+                libc::syscall(
+                    libc::SYS_pidfd_send_signal,
+                    fd,
+                    0,
+                    std::ptr::null::<libc::siginfo_t>(),
+                    0u32,
+                )
+            } == 0;
+            alive.then(|| exe.to_string_lossy().into_owned())
+        })();
         // SAFETY: `fd` came from the kernel above and is closed exactly once.
         unsafe {
             libc::close(fd);
         }
-        let pid = info
-            .ok()?
-            .lines()
-            .find_map(|l| l.strip_prefix("Pid:")?.trim().parse::<u32>().ok())?;
-        std::fs::read_link(format!("/proc/{pid}/exe"))
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned())
+        program
     }
 }
 

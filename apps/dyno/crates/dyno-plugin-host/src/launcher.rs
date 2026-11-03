@@ -39,7 +39,10 @@ impl Launcher for ProcessLauncher {
         let mut spec = ChildSpec::new(&plugin.executable, format!("plugin \"{}\"", plugin.id));
         spec.envs.push(("DYNO_PLUGIN_ID".into(), plugin.id.clone().into()));
         spec.envs.push(("DYNO_PLUGIN_DIR".into(), plugin.dir.clone().into_os_string()));
-        spec.clean_env = false;
+        // An allow-list, not the agent's whole environment: a plugin is third-party code and gets the system variables a program
+        // needs (`paddock_proc::KEPT_ENV`: PATH, the temp and home folders, the locale) plus the two Dyno sets above, and none of the
+        // agent's other variables (tokens, proxies, credentials).
+        spec.clean_env = true;
         spec.current_dir = Some(plugin.dir.clone());
         spec.memory_limit = config.memory_limit;
         // The Windows job object's hard commit limit, as in Dyno 1.0: an allocation past it fails in the plugin at once.
