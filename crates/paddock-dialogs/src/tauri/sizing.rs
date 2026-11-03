@@ -90,7 +90,7 @@ fn new_state<R: Runtime>(
         p.size_mode,
         floor,
         p.min_size.map_or(0.0, |s| s.height),
-        !crate::edge::has_resize_signal(os),
+        crate::edge::infers_user_resize(os),
         env,
         Request {
             width: inner.width,

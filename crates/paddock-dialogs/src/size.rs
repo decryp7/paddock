@@ -108,6 +108,9 @@ pub struct SizeState {
     floor: Size,
     preferred_floor: f64,
     infer_user_resize: bool,
+    /// A scale change was reported and the OS's own resize for it (tao's `SetWindowPos` after `WM_DPICHANGED`) has not
+    /// arrived yet: that one resize is not the user's.
+    scale_grace: bool,
     env: Env,
     epoch: u64,
     last_seq: Option<u64>,
@@ -144,6 +147,7 @@ impl SizeState {
             floor,
             preferred_floor,
             infer_user_resize,
+            scale_grace: false,
             env,
             epoch: 0,
             last_seq: None,
@@ -299,6 +303,7 @@ impl SizeState {
     pub fn on_resized(&mut self, width: u32, height: u32) -> Plan {
         let mut plan = Plan::default();
         let matched = self.pending.iter().rposition(|r| r.matches(width, height));
+        let grace = std::mem::take(&mut self.scale_grace);
         match matched {
             Some(i) => {
                 // An echo equal to several queued requests takes the newest off the queue (the OS may have merged the ones in
@@ -332,6 +337,7 @@ impl SizeState {
                 plan.unexplained = true;
                 if self.pending.is_empty()
                     && self.infer_user_resize
+                    && !grace
                     && self.mode != SizeMode::Manual
                 {
                     self.mode = SizeMode::Manual;
@@ -380,6 +386,7 @@ impl SizeState {
             width: physical(keep.width, env.scale),
             height: physical(keep.height, env.scale),
         };
+        self.scale_grace = true;
         self.refit(&mut plan);
         plan.refit_posted = true;
         plan.remeasure = true;
@@ -573,6 +580,32 @@ mod tests {
         let again = s.on_resized(r.width, r.height);
         assert!(!again.unexplained && again.mode_change.is_none());
         assert_eq!(s.mode(), Kind::Form.policy().size_mode);
+    }
+
+    #[test]
+    fn a_snap_is_a_user_resize_but_the_resize_tao_makes_after_a_dpi_change_is_not() {
+        // Windows: an Aero snap sends neither WM_SIZING nor SC_SIZE, so the state infers it (D6), as on Linux.
+        let mut s = state(Kind::Form, 1.0, true);
+        let p = s.on_measure(1, 1, measured(300.0));
+        apply(&mut s, &p);
+        let snap = s.on_resized(510, 688);
+        assert!(snap.unexplained);
+        assert_eq!(
+            snap.mode_change,
+            Some(SizeMode::Manual),
+            "a snap is the user's"
+        );
+        // tao's own SetWindowPos after WM_DPICHANGED (ScaleFactorChanged comes first, the Resized after it) is not.
+        let mut s = state(Kind::Form, 1.0, true);
+        let p = s.on_measure(1, 1, measured(300.0));
+        apply(&mut s, &p);
+        s.on_scale_changed(env(1.5));
+        let dpi = s.on_resized(614, 460);
+        assert!(dpi.unexplained && dpi.mode_change.is_none(), "{dpi:?}");
+        assert_ne!(s.mode(), SizeMode::Manual);
+        // The excuse is for that one resize: the next unexplained one is the user's.
+        let snap = s.on_resized(700, 800);
+        assert_eq!(snap.mode_change, Some(SizeMode::Manual));
     }
 
     #[test]
