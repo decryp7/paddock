@@ -210,6 +210,8 @@ mod tests {
                 clock: Box::new(|| 42),
                 on_uninstall: Box::new(|| {}),
                 login_items: Box::new(NoItems),
+                counters: Box::new(dyno_core::helper_counters::NoCounters),
+                memory: Box::new(dyno_core::helper_memory::NoMemory),
                 processes: Box::new(dyno_core::helper_processes::NoProcesses),
                 smart: Box::new(crate::tools::NotHere("none")),
                 tools: Box::new(crate::tools::NotHere("none")),

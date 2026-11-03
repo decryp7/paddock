@@ -169,6 +169,10 @@ pub enum HelperReply {
     WakeCancelled(bool),
     /// Answer to `WolState`.
     Wol(WolReply),
+    /// Answer to `Counters`: one outcome per requested id.
+    CounterValues(Vec<crate::helper_counters::CounterAnswer>),
+    /// Answer to `MemoryModules`: the slots and what sits in them (no serial numbers).
+    Memory(crate::inventory::MemoryLayout),
     /// Answer to `Processes`: one page, scoped to the caller.
     Processes(crate::helper_processes::ProcessPage),
     /// Answer to `Smart`.

@@ -4,6 +4,8 @@
 
 use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
+use dyno_core::helper_counters::{answer, CounterReader, CounterValue};
+use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
 use dyno_core::helper_processes::{build_page, ProcessSweeper};
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest, HelperUser};
@@ -25,6 +27,10 @@ pub struct Parts {
     pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
     /// The macOS login-items reader (`sfltool dumpbtm` as the helper's account, parsed here).
     pub login_items: Box<dyn LoginItemsReader>,
+    /// The sensor reader of this system.
+    pub counters: Box<dyn CounterReader>,
+    /// The memory slot reader of this system.
+    pub memory: Box<dyn MemoryReader>,
     /// The process sweep of this system.
     pub processes: Box<dyn ProcessSweeper>,
     /// The SMART reader of this system.
@@ -51,6 +57,8 @@ pub struct Dispatcher {
     login_items: Box<dyn LoginItemsReader>,
     wakes: Box<dyn WakeScheduler>,
     wol: Box<dyn WolReader>,
+    counters: Box<dyn CounterReader>,
+    memory: Box<dyn MemoryReader>,
     processes: Box<dyn ProcessSweeper>,
     smart: Box<dyn SmartReader>,
     tools: Box<dyn ToolInstaller>,
@@ -104,6 +112,8 @@ impl Dispatcher {
             login_items: parts.login_items,
             wakes: parts.wakes,
             wol: parts.wol,
+            counters: parts.counters,
+            memory: parts.memory,
             processes: parts.processes,
             smart: parts.smart,
             tools: parts.tools,
@@ -188,6 +198,16 @@ impl Dispatcher {
                 log::info!(items = page.items.len(), more = page.next.is_some(); "Helper: processes answered");
                 Ok(HelperReply::Processes(page))
             }
+            HelperRequest::Counters(q) => {
+                let answers = answer(self.counters.as_ref(), &q);
+                log::info!(
+                    ids = answers.len(),
+                    unavailable = answers.iter().filter(|a| matches!(a.value, CounterValue::Unavailable(_))).count();
+                    "Helper: counters answered"
+                );
+                Ok(HelperReply::CounterValues(answers))
+            }
+            HelperRequest::MemoryModules => Ok(HelperReply::Memory(self.memory.read())),
             HelperRequest::Smart(q) => self.smart.read(q).map(HelperReply::Smart).map_err(|e| remote(&e)),
             HelperRequest::InstallTool { tool, bytes } => {
                 let outcome = self.tools.install(tool, &bytes);
@@ -216,15 +236,9 @@ impl Dispatcher {
             }
             // The readers arrive with their work packages (ADR 0027 WP-4 to WP-10); until then the helper
             // says so, and the agent shows the reading as unavailable with this reason.
-            HelperRequest::SocketOwners
-            | HelperRequest::FileHolders { .. }
-            | HelperRequest::Counters(_)
-            | HelperRequest::MemoryModules
-            | HelperRequest::Firewall
-            | HelperRequest::Extras(_) => Err(RemoteError::new(
-                codes::UNSUPPORTED,
-                "This reading is not available in this build of the helper yet.",
-            )),
+            HelperRequest::SocketOwners | HelperRequest::FileHolders { .. } | HelperRequest::Firewall | HelperRequest::Extras(_) => Err(
+                RemoteError::new(codes::UNSUPPORTED, "This reading is not available in this build of the helper yet."),
+            ),
             HelperRequest::Uninstall => {
                 self.audit
                     .record(&AuditEntry {
@@ -333,6 +347,8 @@ mod tests {
             clock: Box::new(|| 1_000),
             on_uninstall: Box::new(move || flag.store(true, Ordering::SeqCst)),
             login_items: Box::new(Items(Ok(items_reply()))),
+            counters: Box::new(dyno_core::helper_counters::NoCounters),
+            memory: Box::new(dyno_core::helper_memory::NoMemory),
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
@@ -433,6 +449,8 @@ mod tests {
             clock: Box::new(|| 5),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Ok(items_reply()))),
+            counters: Box::new(dyno_core::helper_counters::NoCounters),
+            memory: Box::new(dyno_core::helper_memory::NoMemory),
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
@@ -484,6 +502,8 @@ mod tests {
             clock: Box::new(|| 1),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Err(PlatformError::AccessDenied("no".into())))),
+            counters: Box::new(dyno_core::helper_counters::NoCounters),
+            memory: Box::new(dyno_core::helper_memory::NoMemory),
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
@@ -708,5 +728,57 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(e.code, codes::UNSUPPORTED);
+    }
+
+    struct Sensors;
+    impl CounterReader for Sensors {
+        fn read(&self, id: dyno_core::helper_requests::CounterId) -> Result<CounterValue, PlatformError> {
+            match id {
+                dyno_core::helper_requests::CounterId::Fans => Err(PlatformError::Unsupported("No fans.".into())),
+                _ => Ok(CounterValue::Thermal(vec![])),
+            }
+        }
+    }
+
+    struct OneStick;
+    impl MemoryReader for OneStick {
+        fn read(&self) -> dyno_core::inventory::MemoryLayout {
+            dyno_core::inventory::MemoryLayout::TotalOnly {
+                total: 8,
+                reason: dyno_core::inventory::Unavailable::failed("test"),
+            }
+        }
+    }
+
+    #[test]
+    fn counters_answer_per_id_and_memory_modules_come_from_the_reader() {
+        use dyno_core::helper_requests::{CounterId, CounterQuery, RequestClass};
+        let mut r = rig(HelperHost::Linux, Ok(vec![]));
+        r.d.counters = Box::new(Sensors);
+        r.d.memory = Box::new(OneStick);
+        let q = CounterQuery {
+            ids: vec![CounterId::Fans, CounterId::Thermal],
+            class: RequestClass::User,
+        };
+        match r.d.handle(None, HelperRequest::Counters(q)).unwrap() {
+            HelperReply::CounterValues(a) => {
+                assert!(matches!(&a[0].value, CounterValue::Unavailable(m) if m == "No fans."));
+                assert!(matches!(a[1].value, CounterValue::Thermal(_)));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            r.d.handle(None, HelperRequest::MemoryModules).unwrap(),
+            HelperReply::Memory(_)
+        ));
+        // Without readers the helper says each id is unavailable, and the memory reader says why.
+        let none = rig(HelperHost::Windows, Ok(vec![]));
+        let q = CounterQuery {
+            ids: vec![CounterId::Thermal],
+            class: RequestClass::User,
+        };
+        assert!(
+            matches!(none.d.handle(None, HelperRequest::Counters(q)).unwrap(), HelperReply::CounterValues(a) if matches!(a[0].value, CounterValue::Unavailable(_)))
+        );
     }
 }

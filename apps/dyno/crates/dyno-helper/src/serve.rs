@@ -109,6 +109,8 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         audit,
         clock: Box::new(now),
         login_items: login_items_reader(),
+        counters: crate::tools::counter_reader(paths.host),
+        memory: Box::new(dyno_platform::helper_counters::SystemMemory),
         processes: crate::tools::process_sweeper(paths.host),
         smart: crate::tools::smart_reader(paths.host, &paths.data_dir.join("tools"), Arc::new(SystemClock)),
         tools: crate::tools::installer(paths.host, &paths.data_dir, Arc::new(SystemClock)),

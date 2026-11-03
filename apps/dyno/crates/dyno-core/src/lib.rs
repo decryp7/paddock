@@ -24,6 +24,8 @@ pub mod hardware;
 pub mod health;
 pub mod helper;
 pub mod helper_paths;
+pub mod helper_counters;
+pub mod helper_memory;
 pub mod helper_policy;
 pub mod helper_processes;
 pub mod helper_requests;
