@@ -64,11 +64,22 @@ export function aboutBackend(): AboutBackend {
   return about;
 }
 
+/**
+ * Browser build only, for the e2e: a page that sets `__pdHoldUpdatesStatus` before it loads gets its first status only when
+ * it calls `__pdReleaseUpdatesStatus()`, so a window sees the status arrive after its first measure (as on a slow IPC).
+ */
+function heldStatus(): Promise<void> | undefined {
+  const g = globalThis as { __pdHoldUpdatesStatus?: boolean; __pdReleaseUpdatesStatus?: () => void };
+  if (!g.__pdHoldUpdatesStatus) return undefined;
+  return new Promise<void>((release) => (g.__pdReleaseUpdatesStatus = release));
+}
+
 /** The updater over Tauri in the app; in the browser a fake update server. */
 export function updatesBackend(): UpdatesBackend {
   const ipc = tauriIpc();
   if (ipc) return new TauriUpdatesBackend(ipc);
   updates ??= new MemoryUpdatesBackend({
+    holdStatus: heldStatus(),
     currentVersion: BROWSER_VERSION,
     server: 'none',
     host: 'dev.decryptology.net',

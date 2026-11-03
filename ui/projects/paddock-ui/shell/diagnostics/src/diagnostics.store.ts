@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, injectTrackLoad, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { PreviewReply, RedactionCounts, Saved, SaveOutcome } from '../generated/diagnostics';
 import { DiagnosticsBackend, type Unlisten } from './backend';
 import { asDiagError, diagMessage } from './wire';
@@ -126,17 +126,21 @@ export const DiagnosticsStore = signalStore(
       },
     };
   }),
-  withHooks((store, backend = inject(DiagnosticsBackend)) => {
+  withHooks((store, backend = inject(DiagnosticsBackend), trackLoad = injectTrackLoad()) => {
     let off: Unlisten | undefined;
     let destroyed = false;
     return {
       onInit() {
         // Listen first, then collect: an outcome can only follow a save, which needs the preview.
-        void backend
-          .listen((o) => store._outcome(o))
-          .then((u) => (destroyed ? u() : (off = u)))
-          .catch((e: unknown) => console.warn(`[paddock-diagnostics] cannot listen for save outcomes: ${errorMessage(e, 'unknown error')}`));
-        void store.load();
+        void trackLoad(() =>
+          Promise.all([
+            backend
+              .listen((o) => store._outcome(o))
+              .then((u) => (destroyed ? u() : (off = u)))
+              .catch((e: unknown) => console.warn(`[paddock-diagnostics] cannot listen for save outcomes: ${errorMessage(e, 'unknown error')}`)),
+            store.load(),
+          ]),
+        );
       },
       onDestroy() {
         destroyed = true;

@@ -7,6 +7,7 @@ import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
 import { LookupStore } from '../../state/lookup.store';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { injectTrackLoad } from '@decryp7/paddock-ui/shell/store';
 
 /**
  * "Search this file's hash on VirusTotal": Dyno reads the file on this computer, shows its SHA-256, and only then, on a click,
@@ -63,6 +64,7 @@ export class HashSearchDialog implements DialogContent<true>, OnInit, OnDestroy 
   /** The program's name, for the heading. */
   readonly name = input('');
   protected readonly store = inject(LookupStore);
+  private readonly trackLoad = injectTrackLoad();
   protected readonly size = computed(() => formatBytes(this.store.hash()?.bytes ?? 0));
   protected readonly hint = computed(() => {
     const e = this.store.error();
@@ -84,7 +86,8 @@ export class HashSearchDialog implements DialogContent<true>, OnInit, OnDestroy 
 
   ngOnInit(): void {
     this.store.reset();
-    void this.load();
+    // A pending task: the window is settled (sized to the hash) only after the file is read.
+    void this.trackLoad(() => this.load());
   }
 
   /** Closing the dialog stops reading a file that is still being read. */

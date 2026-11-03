@@ -3,6 +3,7 @@ import { form, FormField } from '@angular/forms/signals';
 import { copyText } from '@decryp7/paddock-ui';
 import { McpBackend, mcpMessage } from '@decryp7/paddock-ui/shell/mcp';
 import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
+import { injectTrackLoad } from '@decryp7/paddock-ui/shell/store';
 
 /**
  * The key dialog (a modal form, the credential dialog of the AI access page): step one names the client; Create asks the engine
@@ -65,6 +66,7 @@ import { DialogActionError, type DialogAction, type DialogContent } from '@decry
 })
 export class PdMcpKeyDialog implements DialogContent<boolean> {
   private readonly backend = inject(McpBackend);
+  private readonly trackLoad = injectTrackLoad();
 
   protected readonly model = signal({ client: '' });
   protected readonly f = form(this.model);
@@ -76,11 +78,13 @@ export class PdMcpKeyDialog implements DialogContent<boolean> {
 
   constructor() {
     // The limit is known before anything is typed: a full list is a validation error, not a failed Create.
-    void this.backend.get().then(
-      (view) => {
-        if (view.keys.filter((k) => !k.revoked).length >= view.maxKeys) this.limit.set(this.t.limit(view.maxKeys));
-      },
-      () => undefined,
+    void this.trackLoad(() =>
+      this.backend.get().then(
+        (view) => {
+          if (view.keys.filter((k) => !k.revoked).length >= view.maxKeys) this.limit.set(this.t.limit(view.maxKeys));
+        },
+        () => undefined,
+      ),
     );
   }
 
