@@ -284,11 +284,11 @@ from `17bae21b1` stays.
     `[/S] [/SO component,...] [/D=INSTDIR]` (`os_win32/installer.nsi`, tag `RELEASE_7_5`, read 2026-11-03); components chosen so
     no `smartd` service, no Start-menu entries and no uninstaller registry key are written: `/SO x64,smartctl,drivedb` (WP-0,
     measured: writes only `bin\smartctl.exe`, `bin\drivedb.h`, `bin\update-smart-drivedb.ps1`; no registry, service, menu or
-    PATH change). WP-0 also found NVMe SMART readable on Windows **without** administrator rights, so for NVMe disks the agent
-    could run `smartctl` itself; the helper stays the reader for SATA (ATA pass-through) and for one code path.
+    PATH change). WP-0 also found NVMe SMART readable on Windows **without** administrator rights, but the user decided (O2,
+    2026-11-03) that the Windows install always goes through the helper: one mechanism for NVMe and SATA.
   - macOS: `hdiutil attach -readonly -nobrowse -mountrandom <staging>`, `pkgutil --expand-full` of the package inside into
     staging, copy `smartctl` and `drivedb.h` into `tools/smartmontools-7.5/`, detach. Nothing is installed system-wide. If WP-0
-    shows `smartctl` reads SMART on macOS without root, the agent instead runs it from its own `paddock-runtime` store and the
+    shows `smartctl` reads SMART on macOS without root (it does: WP-0 point 2), the agent instead runs it from its own `paddock-runtime` store and the
     helper is not used for SMART on macOS.
 - **Linux.** The agent asks PackageKit to install the distribution's `smartmontools` package (`InstallPackages` over D-Bus; the
   user authenticates through PackageKit's own polkit action). The helper then runs `/usr/sbin/smartctl` (protected path). Without
@@ -438,15 +438,24 @@ show it stays open). **Settles:** WP-7 goes ahead as designed; the "still asks a
 macOS versions. **New for WP-7:** `parse/btm.rs` knows only `login item` and `agent`; system-wide items arrive as `legacy daemon`
 (and presumably `daemon`) records under UID 0 and -2, so the parser needs those kinds or it under-reports system items.
 
-**2. `smartctl` on macOS: not settled for real hardware.** The upstream universal `smartctl` 7.5 (from the DMG, run in place
-with `-B drivedb.h`) in the VM: `--scan-open -j` exits 0 with no devices, as user and as root; `-a -j disk0` exits 2 with
-`Smartctl open device: disk0 failed: Operation not supported by device`, as user and as root. The VM's disk is
-`AppleVirtIODiskStorageDevice`, which has no SMART at all, so a VM cannot answer whether an Apple silicon internal SSD needs
-root. Upstream's `os_darwin.cpp` (tag `RELEASE_7_5`) reads NVMe through the IOKit `IONVMeSMARTUserClient` plug-in
-(`GetIdentifyData`, `GetLogPage`) with no uid check of its own (read, not measured). **Plan:** keep section 7 as written (helper
-copy on macOS); the one remaining measurement is a single read-only `smartctl -a -j disk0` without `sudo` on a real Apple
-silicon Mac, which only the user can allow (open item O1 below). If it works, macOS SMART moves to the agent and the helper's
-macOS `InstallTool` drops out.
+**2. `smartctl` on macOS: no root needed on Apple silicon internal NVMe.** In the VM the disk is
+`AppleVirtIODiskStorageDevice` with no SMART (`--scan-open` finds nothing, `-a -j disk0` exits 2 "Operation not supported by
+device", as user and as root), so the user allowed one read-only run on the build Mac (a one-off exception to ER-14,
+2026-11-03): the DMG downloaded into an empty scratch folder, SHA-256 equal to the value in point 3, its `.asc` byte-identical
+(SHA-256 `b41430e2...7044`) to the one verified in the VM (no `gpg` on the host, none installed), mounted read-only, the pkg
+expanded with `pkgutil --expand-full`, nothing installed; folder deleted afterwards. macOS 27.2, Apple M4 Pro, uid 501, no
+`sudo`:
+
+| Command | exit | Result |
+| --- | --- | --- |
+| `smartctl --scan -j` | 0 | the internal SSD as `IOService:/.../AppleANS3CGv2Controller/NS_01@1`, type `nvme`, plus USB NVMe enclosures |
+| `smartctl -a -j disk0` | **4** | `smart_status.passed: true` and the full `nvme_smart_health_information_log` (temperature, available spare, percentage used, media errors, power-on hours, unsafe shutdowns, ...); one message: `Read 1 entries from Error Information Log failed: GetLogPage failed: system=0x38, sub=0x0, code=745` |
+
+Exit 4 is bit 2 ("some SMART command failed"): Apple's controller refuses the error-information log page; everything Dyno
+shows was read. Upstream's `os_darwin.cpp` reads NVMe through the IOKit `IONVMeSMARTUserClient` plug-in with no uid check.
+The output also carries `model_name` and `serial_number`; none was kept. **Settles:** per section 7, macOS SMART runs in the
+agent from its own `paddock-runtime` store, and the helper has no macOS `InstallTool` or `Smart`. **For WP-8:** the parser
+treats exit bit 2 with a health log present as a good read (not as a failure), and drops serial numbers and WWN in every case.
 
 **3. smartmontools 7.5 artefacts.** Downloaded from the GitHub release `RELEASE_7_5` inside the VMs (the Windows installer in
 both VMs; hashes agree):
@@ -486,8 +495,8 @@ x86-64, runs under emulation on Arm64), `bin\drivedb.h` and `bin\update-smart-dr
 hours, unsafe shutdowns, temperature) on the VM's `VMware Virtual NVMe Disk`. NVMe health goes through the in-box `stornvme`
 storage query, which Windows allows without administrator rights; SATA SMART (ATA pass-through) needs administrator rights according to
 upstream's Windows notes (not re-read, not measured: the VM has no SATA disk). **Plan change for WP-8:** on Windows, NVMe SMART can be
-read by the agent; the helper's `Smart` request is needed for SATA disks. Whether `InstallTool` stays in the helper on
-Windows is open item O2 below.
+read by the agent; the helper's `Smart` request is needed for SATA disks. Decided (O2): the Windows install always goes
+through the helper's `InstallTool`.
 
 **4. `SeDebugPrivilege` and C1: drop it.** Readable processes (`OpenProcess` limited, then owner and command line; the three
 pseudo-processes `System`, `Registry`, `Memory Compression` have no command line for anyone):
@@ -545,15 +554,13 @@ of the squatting refusal of revision 3.
 
 **What changes in the plan.** WP-2: the Windows required-privileges list is `SeChangeNotifyPrivilege` alone. WP-1a: `O:SY`
 in the system endpoint's SDDL and an owner test. WP-7: parser learns daemon kinds. WP-8: Windows `/SO x64,smartctl,drivedb`;
-NVMe SMART on Windows needs no helper; macOS open until one real-hardware read; the pinning record expects an expired key and a
+NVMe SMART on Windows needs no helper; macOS SMART in the agent (no root needed), exit bit 2 is a good read; the pinning record expects an expired key and a
 new key for the next release. WP-9: `INetFwPolicy2` for Windows, `socketfilterfw` for macOS, both in the agent. WP-0's two
 days are spent; the estimates of the other packages do not change by more than half a day each (WP-8 may shrink).
 
-**Open after WP-0 (for the user).** O1: allow one read-only `smartctl -a -j disk0` without `sudo` on a real Apple silicon Mac
-(the upstream binary run from a scratch folder, nothing installed), or accept the helper path on macOS untested on hardware
-until the VM runs. O2: on Windows, keep `InstallTool` in the helper (one tool for NVMe and SATA, installed under Program
-Files) or let the agent fetch `smartctl` into its own `paddock-runtime` store for NVMe and use the helper only for SATA.
-Recommended: O2 keeps the helper path (one mechanism, rule 55), with the agent reading NVMe itself when the helper is off.
+**Decided after WP-0 (the user, 2026-11-03).** O1: one read-only SMART read on the build Mac was allowed; result in point 2
+(no root needed). O2: on Windows, the `smartctl` install **always goes through the helper** (`InstallTool`, one mechanism for
+NVMe and SATA, under Program Files); the agent does not keep its own Windows copy.
 
 ### The smallest first slice (D1a): the landing order
 
