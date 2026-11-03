@@ -274,6 +274,29 @@ fn the_start_registers_the_tray_popover_a_click_opens() {
     );
 }
 
+/// About's "See all releases" calls `files_open_url`, which needs the shell's user-files service: without `Builder::files` the
+/// command fails with a missing-state error and the link does nothing (the 1.0.0 report).
+#[test]
+fn the_start_sets_up_the_user_files_service_the_about_link_needs() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let has = composed(&data, paddock_window::launch::LaunchArgs::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .map(|mut app| {
+                // One iteration runs Tauri's set-up (the mock runtime has no event loop).
+                #[allow(deprecated)]
+                app.run_iteration(|_, _| {});
+                paddock_files::tauri::files(app.handle()).is_some()
+            })
+            .map_err(|e| e.to_string());
+        let _ = tx.send(has);
+    });
+    let has = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the start finished");
+    assert_eq!(has, Ok(true), "files_open_url has no service: About's releases link cannot open the browser");
+}
+
 /// Started at log-in (`--hidden`) with a tray: Dyno stays in the tray without a window.
 #[test]
 fn a_hidden_start_stays_in_the_tray() {

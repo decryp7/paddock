@@ -597,6 +597,10 @@ impl<R: Runtime> Builder<R> {
                 }
             };
             paddock_files::tauri::install(app, files);
+        } else {
+            // The shell serves the `files_*` commands to every app (About's releases link is `files_open_url`), so it manages a
+            // minimal service when the app set up none: no folders, no recent lists, web addresses only.
+            paddock_files::tauri::install(app, paddock_files::Files::new(paddock_files::recent::Recents::open(None, &[])));
         }
 
         if let Some(f) = self.storage {

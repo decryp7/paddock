@@ -757,6 +757,19 @@ fn the_knowledge_packs_bring_their_commands_event_and_health_entry() {
     assert!(invoke(&main, "packs_reload", json!({})).is_ok());
 }
 
+
+/// An app that never calls `Builder::files` still serves `files_open_url` (About's releases link): the shell manages a minimal
+/// service for the commands it registers, so no app can register the command without its state (the Dyno 1.0.0 report:
+/// "state not managed for field `state` on command `files_open_url`").
+#[test]
+fn files_open_url_has_its_state_without_builder_files() {
+    let app = app(Builder::new(identity()).in_memory().native_menu(false));
+    let main = window(&app, "main");
+    let r = invoke(&main, "files_open_url", json!({ "url": "ftp://example.org" }));
+    let msg = format!("{r:?}");
+    assert!(!msg.contains("not managed"), "{msg}");
+}
+
 #[test]
 fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
     use paddock_files::open::{Invocation, Launcher};

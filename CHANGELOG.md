@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-shell`: `files_*` commands always have their service
+
+An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a minimal service (web addresses only) when the app set up none.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

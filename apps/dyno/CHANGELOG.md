@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- About: "See all releases" opens the releases page in the browser (it failed with "state not managed ... `files_open_url`" because the shell served the command without its service; fixed in `paddock-shell`).
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed
