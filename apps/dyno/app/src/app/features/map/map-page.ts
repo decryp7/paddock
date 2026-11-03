@@ -7,8 +7,8 @@ import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { MapStore } from '../../state/map.store';
 import { NetworkStore } from '../../state/network.store';
-import { LEGEND_STEPS, arcsFor, centreOf, drawnAs, project, stepOf } from './map-geometry';
-import { COUNTRY_PATHS, MAP_VIEW } from './world-map.data';
+import { LEGEND_STEPS, OUTLINE_CODES, arcsFor, centreOf, drawnAs, project, stepOf, worldPaths } from './map-geometry';
+import { MAP_VIEW } from './world-map.data';
 
 type View = 'map' | 'table';
 type SortKey = 'name' | 'connections' | 'programs' | 'hosts' | 'flagged';
@@ -27,7 +27,7 @@ const CLASS_TEXT: Record<AddressClass, string> = {
 /** The sentence for a country's focus label and tooltip. */
 export function countryLabel(c: CountryCount): string {
   const n = (v: number, one: string, many: string) => `${v} ${v === 1 ? one : many}`;
-  const flagged = c.flagged > 0 ? `, ${c.flagged} flagged` : '';
+  const flagged = c.flagged > 0 ? `, ${c.flagged} flagged by your lists` : '';
   const cdn = c.includesContentNetworks ? ', includes content-network addresses' : '';
   return `${c.name}: ${n(c.connections, 'connection', 'connections')} from ${n(c.programs, 'program', 'programs')}${flagged}${cdn}`;
 }
@@ -56,7 +56,7 @@ export function countryLabel(c: CountryCount): string {
         @if (store.summary(); as s) {
           <div class="bar">
             <pd-segmented-control label="View" [options]="views" [value]="view()" (valueChange)="view.set($event === 'table' ? 'table' : 'map')" />
-            <span class="faint" data-testid="home-source">{{ s.homeSource }}@if (s.homeCountry) { ({{ s.homeCountry }}) }</span>
+            <span class="faint" data-testid="home-source">{{ homeText(s) }}</span>
           </div>
 
           @if (!s.databaseOn) {
@@ -68,33 +68,49 @@ export function countryLabel(c: CountryCount): string {
 
           @if (view() === 'map') {
             <figure class="mapbox">
-              <svg [attr.viewBox]="'0 0 ' + size.width + ' ' + size.height" role="group" aria-label="World map of connections by country" data-testid="world-map">
-                <defs>
-                  <pattern id="flagged-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="currentColor" opacity="0.55" /></pattern>
-                </defs>
-                @for (p of shapes; track p.code) {
-                  <path class="land" [attr.d]="p.d" [attr.data-code]="p.code" [attr.data-step]="stepFor(p.code)" />
-                }
-                @for (a of arcs().arcs; track a.code) {
-                  <path class="arc" [attr.d]="a.d" [attr.stroke-width]="0.8 + step(a.connections) * 0.7" [attr.opacity]="0.35 + step(a.connections) * 0.15" fill="none" [attr.data-arc]="a.code" />
-                }
-                @if (home(); as h) {
-                  <g class="home"><circle [attr.cx]="h.x" [attr.cy]="h.y" r="5" /><text [attr.x]="h.x + 8" [attr.y]="h.y + 4">You</text></g>
-                }
-                @for (c of s.countries; track c.code) {
-                  @if (marker(c.code); as m) {
-                    <g class="spot" tabindex="0" role="button" [attr.aria-label]="label(c)" [attr.data-country]="c.code" (keydown.enter)="showConnections(c.code)" (click)="showConnections(c.code)">
-                      <title>{{ label(c) }}</title>
-                      <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="4 + step(c.connections) * 1.5" [attr.data-step]="step(c.connections)" />
-                      @if (c.flagged > 0) { <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="8 + step(c.connections)" fill="url(#flagged-hatch)" class="flag" /> }
-                    </g>
+              <div class="frame">
+                <svg [attr.viewBox]="'0 0 ' + size.width + ' ' + size.height" role="group" aria-label="World map of connections by country" data-testid="world-map">
+                  <defs>
+                    <pattern id="flagged-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2.2" height="5" class="hatch-bar" /></pattern>
+                  </defs>
+                  @for (p of shapes(); track p.code) {
+                    <path class="land" [attr.d]="p.d" [attr.data-code]="p.code" [attr.data-step]="stepFor(p.code)" />
                   }
+                  @for (a of arcs().arcs; track a.code) {
+                    <path class="arc" [attr.d]="a.d" [attr.stroke-width]="0.8 + step(a.connections) * 0.7" [attr.opacity]="0.35 + step(a.connections) * 0.15" fill="none" [attr.data-arc]="a.code" />
+                  }
+                  @if (home(); as h) {
+                    <g class="home"><circle [attr.cx]="h.x" [attr.cy]="h.y" r="5" /><rect class="pill" [attr.x]="h.x + 7" [attr.y]="h.y - 8" width="30" height="16" rx="4" /><text [attr.x]="h.x + 11" [attr.y]="h.y + 4">You</text></g>
+                  }
+                  @for (c of s.countries; track c.code) {
+                    @if (marker(c.code); as m) {
+                      <g class="spot" tabindex="0" role="button" [attr.aria-label]="label(c)" [attr.data-country]="c.code" (keydown.enter)="showConnections(c.code)" (click)="showConnections(c.code)" (focus)="tip.set(c.code)" (blur)="tip.set(null)" (mouseenter)="tip.set(c.code)" (mouseleave)="tip.set(null)">
+                        @if (c.flagged > 0) {
+                          <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="9 + step(c.connections)" fill="url(#flagged-hatch)" class="flag" />
+                          <g class="flagmark" [attr.transform]="'translate(' + (m.x + 9 + step(c.connections)) + ' ' + (m.y - 9 - step(c.connections)) + ')'">
+                            <path d="M0 0v14M0 1h9l-2.5 3.5L9 8H0" />
+                            <rect class="pill" x="11" y="-2" width="50" height="16" rx="4" />
+                            <text x="15" y="10">flagged</text>
+                          </g>
+                        }
+                        <circle class="dot" [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="4 + step(c.connections) * 1.5" [attr.data-step]="step(c.connections)" />
+                      </g>
+                    }
+                  }
+                </svg>
+                @if (tipFor(); as t) {
+                  <div class="tip" role="status" data-testid="country-tip" [style.left.%]="t.left" [style.top.%]="t.top">
+                    <strong>{{ t.country.name }}</strong>
+                    <span>{{ t.country.connections }} {{ t.country.connections === 1 ? 'connection' : 'connections' }}@if (t.country.flagged > 0) { · {{ t.country.flagged }} flagged }</span>
+                    @if (t.country.topPrograms.length > 0) { <span class="faint">{{ t.country.topPrograms.join(', ') }}</span> }
+                  </div>
                 }
-              </svg>
+              </div>
+              <figcaption class="faint credit" data-testid="credit">IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0@if (s.dbDate) { , database of {{ s.dbDate }} }. Map: Natural Earth, public domain.</figcaption>
               @if (arcs().hidden > 0) { <figcaption class="faint">{{ arcs().hidden }} smaller destinations are in the table, not drawn as arcs.</figcaption> }
               <figcaption class="legend" aria-label="Legend: connections per country" data-testid="legend">
                 @for (l of legend; track l.label; let i = $index) { <span class="key"><i [attr.data-step]="i"></i> {{ l.label }}</span> }
-                <span class="key"><i class="hatch"></i> flagged by a list</span>
+                <span class="key"><i class="hatch"></i> ⚑ flagged by one of your lists</span>
               </figcaption>
             </figure>
           } @else {
@@ -104,20 +120,23 @@ export function countryLabel(c: CountryCount): string {
                   @for (h of headers; track h.key) {
                     <th scope="col" [attr.aria-sort]="sort() === h.key ? (desc() ? 'descending' : 'ascending') : 'none'"><button type="button" matButton="text" (click)="sortBy(h.key)">{{ h.label }}</button></th>
                   }
+                  <th scope="col" class="act"><span class="sr-only">Connections</span></th>
                 </tr>
               </thead>
               <tbody>
                 @for (c of rows(); track c.code) {
                   <tr [attr.data-country]="c.code" [class.picked]="picked() === c.code">
-                    <th scope="row">{{ c.name }} <span class="faint">{{ c.code }}</span>@if (c.includesContentNetworks) { <span class="faint"> · includes content networks</span> } <button type="button" matButton="text" class="show" (click)="showConnections(c.code)" [attr.aria-label]="'Show connections to ' + c.name">Show connections</button></th>
+                    <th scope="row">{{ c.name }} <span class="faint">{{ c.code }}</span>@if (c.includesContentNetworks) { <span class="faint"> · includes content networks</span> }</th>
                     <td class="num">{{ c.connections }}</td><td class="num">{{ c.programs }}</td><td class="num">{{ c.hosts }}</td>
                     <td class="num">@if (c.flagged > 0) { <b class="flagword">⚑ {{ c.flagged }} flagged</b> } @else { 0 }</td>
+                    <td class="act"><button type="button" matButton="text" class="show" (click)="showConnections(c.code)" [attr.aria-label]="'Show connections to ' + c.name">Show connections</button></td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="5" class="empty">No connections to public addresses right now.</td></tr>
+                  <tr><td colspan="6" class="empty">No connections to public addresses right now.</td></tr>
                 }
               </tbody>
             </table>
+            <p class="faint credit" data-testid="credit-table">IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0@if (s.dbDate) { , database of {{ s.dbDate }} }. Map: Natural Earth, public domain.</p>
           }
 
           <section aria-labelledby="local-h" class="block">
@@ -127,7 +146,7 @@ export function countryLabel(c: CountryCount): string {
               @if (s.unknown > 0) { <li><b class="num">{{ s.unknown }}</b> {{ s.unknown === 1 ? 'connection' : 'connections' }} · location unknown</li> }
             </ul>
           </section>
-          <p class="faint credit" data-testid="credit">IP Geolocation by DB-IP (https://db-ip.com), CC-BY-4.0@if (s.dbDate) { · database of {{ s.dbDate }} }. Map: Natural Earth, public domain.</p>
+
         }
       </dy-async>
     </div>
@@ -140,28 +159,38 @@ export function countryLabel(c: CountryCount): string {
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .mapbox { margin: 0; display: grid; gap: var(--sp-2); }
-    svg { width: 100%; height: auto; max-height: 70vh; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--accent); }
-    .land { fill: var(--surface-3); stroke: var(--border); stroke-width: 0.5; }
-    .land[data-step='0'] { fill: color-mix(in srgb, var(--accent) 18%, var(--surface-3)); }
-    .land[data-step='1'] { fill: color-mix(in srgb, var(--accent) 32%, var(--surface-3)); }
-    .land[data-step='2'] { fill: color-mix(in srgb, var(--accent) 48%, var(--surface-3)); }
-    .land[data-step='3'] { fill: color-mix(in srgb, var(--accent) 66%, var(--surface-3)); }
-    .land[data-step='4'] { fill: color-mix(in srgb, var(--accent) 85%, var(--surface-3)); }
+    .frame { position: relative; }
+    svg { display: block; width: 100%; height: auto; max-height: 70vh; background: var(--sea); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--accent); }
+    .hatch-bar { fill: var(--warn); }
+    .tip { position: absolute; display: grid; gap: 2px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font-size: var(--fs-xs); box-shadow: 0 2px 8px rgb(0 0 0 / 25%); pointer-events: none; max-width: 240px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .act { text-align: right; white-space: nowrap; }
+    /* Three separate levels: the sea is the page's own surface, the land sits one step away from it (1.5 to 1), and the lowest
+       connection band one more step; a spec measures the ratios in both themes. */
+    :host { --land-mix: 17%; --b0: 66%; --b1: 74%; --b2: 82%; --b3: 90%; --b4: 96%; --sea: var(--surface-1); --land: color-mix(in srgb, var(--text-1) var(--land-mix), var(--surface-1)); }
+    @media (prefers-color-scheme: light) {
+      :host-context(:root:not([data-theme='dark'])) { --land-mix: 20%; --b0: 52%; --b1: 62%; --b2: 72%; --b3: 82%; --b4: 92%; }
+    }
+    :host-context(:root[data-theme='light']) { --land-mix: 20%; --b0: 52%; --b1: 62%; --b2: 72%; --b3: 82%; --b4: 92%; }
+    .land { fill: var(--land); stroke: var(--sea); stroke-width: 0.4; }
+    .land[data-step='0'], .key i[data-step='0'] { fill: color-mix(in srgb, var(--accent) var(--b0), var(--land)); background: color-mix(in srgb, var(--accent) var(--b0), var(--land)); }
+    .land[data-step='1'], .key i[data-step='1'] { fill: color-mix(in srgb, var(--accent) var(--b1), var(--land)); background: color-mix(in srgb, var(--accent) var(--b1), var(--land)); }
+    .land[data-step='2'], .key i[data-step='2'] { fill: color-mix(in srgb, var(--accent) var(--b2), var(--land)); background: color-mix(in srgb, var(--accent) var(--b2), var(--land)); }
+    .land[data-step='3'], .key i[data-step='3'] { fill: color-mix(in srgb, var(--accent) var(--b3), var(--land)); background: color-mix(in srgb, var(--accent) var(--b3), var(--land)); }
+    .land[data-step='4'], .key i[data-step='4'] { fill: color-mix(in srgb, var(--accent) var(--b4), var(--land)); background: color-mix(in srgb, var(--accent) var(--b4), var(--land)); }
     .arc { stroke: var(--accent); stroke-linecap: round; }
     .spot { cursor: pointer; outline: none; }
-    .spot circle { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
-    .spot:focus-visible circle { stroke: var(--text-1); stroke-width: 3; }
-    .spot .flag { fill: var(--warn); stroke: none; }
+    .spot .dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
+    .spot:focus-visible .dot { stroke: var(--text-1); stroke-width: 3; }
+    .spot .flag { stroke: var(--warn); stroke-width: 1.5; color: var(--warn); }
+    .flagmark path { fill: var(--warn); stroke: var(--warn); stroke-width: 1.4; stroke-linejoin: round; }
+    .flagmark text { fill: var(--text-1); font: var(--fw-semibold) 11px var(--font-sans); }
     .home circle { fill: var(--text-1); stroke: var(--surface-1); stroke-width: 2; }
-    .home text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; }
+    .pill { fill: var(--surface-1); stroke: var(--border-strong); stroke-width: 0.8; }
+    .home text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); }
     .legend { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-2); }
     .key { display: inline-flex; gap: 6px; align-items: center; }
     .key i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; }
-    .key i[data-step='0'] { background: color-mix(in srgb, var(--accent) 18%, var(--surface-3)); }
-    .key i[data-step='1'] { background: color-mix(in srgb, var(--accent) 32%, var(--surface-3)); }
-    .key i[data-step='2'] { background: color-mix(in srgb, var(--accent) 48%, var(--surface-3)); }
-    .key i[data-step='3'] { background: color-mix(in srgb, var(--accent) 66%, var(--surface-3)); }
-    .key i[data-step='4'] { background: color-mix(in srgb, var(--accent) 85%, var(--surface-3)); }
     .key i.hatch { background: repeating-linear-gradient(45deg, var(--warn) 0 3px, transparent 3px 6px); }
     table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
     .grid th, .grid td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
@@ -182,7 +211,15 @@ export class MapPage implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   protected readonly size = MAP_VIEW;
   protected readonly legend = LEGEND_STEPS;
-  protected readonly shapes = Object.entries(COUNTRY_PATHS).map(([code, d]) => ({ code, d }));
+  /** The longitude in the middle of the map: the user's own, so a route from home stays whole across the Pacific. */
+  protected readonly centre = computed(() => {
+    const code = this.store.summary()?.homeCountry;
+    return (code ? centreOf(code)?.[0] : null) ?? 0;
+  });
+  protected readonly shapes = computed(() => {
+    const paths = worldPaths(this.centre());
+    return OUTLINE_CODES.map((code) => ({ code, d: paths[code] ?? '' }));
+  });
   protected readonly views: SuSegment[] = [
     { value: 'map', label: 'Map' },
     { value: 'table', label: 'Table' },
@@ -194,6 +231,7 @@ export class MapPage implements OnInit, OnDestroy {
     { key: 'hosts', label: 'Hosts' },
     { key: 'flagged', label: 'Flagged' },
   ];
+  protected readonly tip = signal<string | null>(null);
   protected readonly view = signal<View>('map');
   protected readonly sort = signal<SortKey>('connections');
   protected readonly desc = signal(true);
@@ -206,7 +244,7 @@ export class MapPage implements OnInit, OnDestroy {
   protected readonly home = computed(() => {
     const code = this.store.summary()?.homeCountry;
     const c = code ? centreOf(code) : null;
-    return c ? project(c[0], c[1]) : null;
+    return c ? project(c[0], c[1], this.centre()) : null;
   });
   protected readonly rows = computed(() => {
     const list = [...(this.store.summary()?.countries ?? [])];
@@ -227,6 +265,26 @@ export class MapPage implements OnInit, OnDestroy {
   protected label = countryLabel;
   protected classText = (c: AddressClass): string => CLASS_TEXT[c];
 
+  /** "Your location: Singapore, from your public IP (via Cloudflare)": the country is named in words, not only coded. */
+  protected homeText(s: { homeCountry: string | null; homeSource: string }): string {
+    if (!s.homeCountry) return s.homeSource;
+    let name = s.homeCountry;
+    try {
+      name = new Intl.DisplayNames(['en'], { type: 'region' }).of(s.homeCountry) ?? name;
+    } catch {
+      // keep the code
+    }
+    return s.homeSource.replace(/^Your location:\s*/, `Your location: ${name}, `);
+  }
+
+  /** The tooltip of the focused or hovered country: where it sits (in percent of the map) and its numbers. */
+  protected readonly tipFor = computed(() => {
+    const code = this.tip();
+    const country = this.store.summary()?.countries.find((c) => c.code === code);
+    const m = code ? this.marker(code) : null;
+    return country && m ? { country, left: Math.min(78, (m.x / this.size.width) * 100), top: Math.max(2, (m.y / this.size.height) * 100 - 14) } : null;
+  });
+
   /** The step (0 to 4) of a drawn country with connections, or -1. */
   protected stepFor(code: string): number {
     const c = this.store.summary()?.countries.find((x) => x.code === code);
@@ -236,7 +294,7 @@ export class MapPage implements OnInit, OnDestroy {
   /** Where a country's focusable marker goes: its centre on the map. */
   protected marker(code: string): { x: number; y: number } | null {
     const c = centreOf(code);
-    return c && drawnAs(code) ? project(c[0], c[1]) : null;
+    return c && drawnAs(code) ? project(c[0], c[1], this.centre()) : null;
   }
 
   protected sortBy(k: SortKey): void {

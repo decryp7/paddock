@@ -37,8 +37,7 @@ pub const MAX_INFLATED: u64 = MAX_GZ * 8;
 /// From this day of the month a new month's file is looked for.
 pub const FIRST_CHECK_DAY: u32 = 3;
 /// The credit DB-IP's CC-BY-4.0 licence asks for, shown under the map and in About.
-pub const ATTRIBUTION: &str = "IP Geolocation by DB-IP (https://db-ip.com), licensed CC-BY-4.0. Dyno downloads the files once a month and \
-     uses them on this computer only; no address ever leaves it.";
+pub const ATTRIBUTION: &str = "IP Geolocation by DB-IP (https://db-ip.com), licensed CC-BY-4.0.";
 
 /// A database to keep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

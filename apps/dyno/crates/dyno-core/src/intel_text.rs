@@ -229,8 +229,21 @@ pub struct Deduped {
 pub fn dedupe(entries: Vec<Entry>) -> Deduped {
     let n = entries.len();
     let mut removed: Vec<Option<(bool, usize)>> = vec![None; n]; // (is_duplicate, kept index)
-                                                                 // Ranges: sort by start, widest first; a range inside the last kept one is covered.
-    let mut ranges: Vec<usize> = (0..n).filter(|&i| matches!(entries[i].target, Target::Range(_))).collect();
+                                                                 // Exact repeats first (the same normalised target as an earlier entry), so each removal is counted once and a repeat is a
+                                                                 // duplicate even when a wider entry also covers it.
+    let mut first: std::collections::HashMap<&Target, usize> = std::collections::HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        match first.get(&e.target) {
+            Some(&k) => removed[i] = Some((true, k)),
+            None => {
+                first.insert(&e.target, i);
+            }
+        }
+    }
+    // Ranges: sort by start, widest first; a range inside the last kept one is covered.
+    let mut ranges: Vec<usize> = (0..n)
+        .filter(|&i| removed[i].is_none() && matches!(entries[i].target, Target::Range(_)))
+        .collect();
     let r = |i: usize| match &entries[i].target {
         Target::Range(r) => *r,
         Target::Host(_) => unreachable_range(),
@@ -249,7 +262,9 @@ pub fn dedupe(entries: Vec<Entry>) -> Deduped {
         }
     }
     // Hosts: broader names first; a name with a kept proper suffix is covered.
-    let mut hosts: Vec<usize> = (0..n).filter(|&i| matches!(entries[i].target, Target::Host(_))).collect();
+    let mut hosts: Vec<usize> = (0..n)
+        .filter(|&i| removed[i].is_none() && matches!(entries[i].target, Target::Host(_)))
+        .collect();
     let h = |i: usize| match &entries[i].target {
         Target::Host(h) => h.as_str(),
         Target::Range(_) => "",

@@ -37,6 +37,7 @@ const conn = (name: string, pid: number, path: string, remote: string, port: num
   owner: proc(pid, name, path),
   firstSeen: ago * MIN,
   country: mockCountry(remote),
+  flaggedBy: remote === '151.101.129.91' ? ['Work blocklist'] : [],
 });
 
 const CONNECTIONS: ConnectionRow[] = [

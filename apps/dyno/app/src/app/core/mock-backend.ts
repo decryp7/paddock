@@ -132,6 +132,8 @@ export interface MockOptions {
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
   now?: () => number;
+  /** A destination in every country on the map (`?geo=many`), to see the most arcs it draws. */
+  geoMany?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -167,6 +169,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     widgetStorage: true,
     widgets: mockWidgetOptionsFromUrl(search),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
+    ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -252,6 +255,7 @@ export class MockBackend implements DynoBackend {
     this.counters = new MockCounters(this.profile.os);
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
+    this.intel.many = options.geoMany ?? false;
     this.jobSink = options.jobs;
     this.jobSteps = options.jobSteps ?? 1;
     this.jobStepMs = this.latencyMs === 0 ? 0 : 400;

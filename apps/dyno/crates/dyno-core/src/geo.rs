@@ -67,6 +67,9 @@ pub struct CountryCount {
     pub flagged: u32,
     /// Whether some of the addresses belong to a network in the CDN or cloud group (reserved for the page's honesty note).
     pub includes_content_networks: bool,
+    /// The programs with most connections to it, at most three, busiest first (for the focus tooltip).
+    #[serde(default)]
+    pub top_programs: Vec<String>,
 }
 
 /// A group of non-public remote addresses.
@@ -109,7 +112,7 @@ struct Acc {
     name: Option<String>,
     connections: u32,
     flagged: u32,
-    programs: HashSet<String>,
+    programs: HashMap<String, u32>,
     hosts: HashSet<IpAddr>,
     content: bool,
 }
@@ -155,7 +158,7 @@ pub fn summarise(
         a.name = a.name.take().or(tag.country_name);
         a.connections = a.connections.saturating_add(1);
         a.flagged = a.flagged.saturating_add(u32::from(row.flagged));
-        a.programs.insert(row.program.clone());
+        *a.programs.entry(row.program.clone()).or_insert(0) += 1;
         a.hosts.insert(ip);
         a.content |= tag.asn.is_some_and(|n| content_asns.contains(&n));
     }
@@ -169,6 +172,11 @@ pub fn summarise(
             hosts: u32::try_from(a.hosts.len()).unwrap_or(u32::MAX),
             flagged: a.flagged,
             includes_content_networks: a.content,
+            top_programs: {
+                let mut p: Vec<(&String, &u32)> = a.programs.iter().collect();
+                p.sort_by(|x, y| y.1.cmp(x.1).then_with(|| x.0.cmp(y.0)));
+                p.into_iter().take(3).map(|(n, _)| n.clone()).collect()
+            },
         })
         .collect();
     countries.sort_by(|a, b| b.connections.cmp(&a.connections).then_with(|| a.code.cmp(&b.code)));
@@ -237,6 +245,7 @@ mod tests {
         let us = &s.countries[0];
         assert_eq!((us.code.as_str(), us.name.as_str()), ("US", "United States"));
         assert_eq!((us.connections, us.programs, us.hosts, us.flagged), (4, 2, 3, 1));
+        assert_eq!(us.top_programs, ["Firefox", "Slack"], "busiest first");
         assert!(us.includes_content_networks);
         assert_eq!(s.countries[1].code, "DE");
         assert!(!s.countries[1].includes_content_networks);

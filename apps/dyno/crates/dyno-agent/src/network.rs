@@ -166,6 +166,7 @@ impl NetCentre {
                 &query.normalised(),
                 &s.tracker,
                 geo.is_on().then_some(&*geo as &dyn dyno_core::geo::GeoLookup),
+                Some(&|ip: &IpAddr| shared.intel.flagged_by(ip)),
             )
         };
         (snapshot.traffic, snapshot.traffic_note) = self.traffic();

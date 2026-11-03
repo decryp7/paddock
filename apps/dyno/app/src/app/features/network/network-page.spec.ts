@@ -148,4 +148,17 @@ describe('NetworkPage', () => {
     await settle();
     expect(el.querySelector('[data-testid="country-filter"]')).toBeNull();
   });
+
+  it('marks a flagged connection in its row with the word and names the lists, and counts programs of what the filter shows', async () => {
+    const { el, settle, store } = await open();
+    const flagged = [...el.querySelectorAll<HTMLElement>('.flagged')];
+    expect(flagged.length).toBe(1);
+    expect(flagged[0]!.textContent).toContain('flagged');
+    expect(flagged[0]!.title).toBe('Flagged by Work blocklist');
+    await store.setQuery({ country: 'IE' });
+    await settle();
+    const summary = el.querySelector('.summary')!.textContent!;
+    const programs = new Set(store.snapshot()!.connections.map((c) => (c.owner.kind === 'process' ? c.owner.name : 'unknown'))).size;
+    expect(summary).toContain(`${programs} programs`);
+  });
 });

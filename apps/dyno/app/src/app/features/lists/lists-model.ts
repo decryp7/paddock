@@ -12,7 +12,7 @@ export function countsLine(c: SubscriptionStatus): string {
 
 /** What kind of list this is, in words. */
 export function sourceText(s: ListSource): string {
-  if (s === 'manual') return 'Typed';
+  if (s === 'manual') return 'Typed by you';
   if ('file' in s) return `Imported from ${s.file.name}`;
   return 'Subscription';
 }

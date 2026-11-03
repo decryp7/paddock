@@ -270,6 +270,9 @@ pub struct ConnectionRow {
     /// The ISO country the location database gives the remote address, when one is loaded and knows it (public addresses only).
     #[serde(default)]
     pub country: Option<String>,
+    /// The names of the user's lists that flag the remote address (empty: none does). A flag is a hint, not proof.
+    #[serde(default)]
+    pub flagged_by: Vec<String>,
 }
 
 /// What the page asks for.
@@ -340,11 +343,12 @@ pub struct NetworkSnapshot {
 /// Builds the view: names owners from `processes`, applies `query`, sorts (listeners by port, connections by program) and
 /// caps each list. `seen` supplies first-seen times from the tracker.
 pub fn build(at: Timestamp, rows: &[SocketRow], processes: &[ProcessSample], query: &NetworkQuery, seen: &Tracker) -> NetworkSnapshot {
-    build_with_geo(at, rows, processes, query, seen, None)
+    build_with_geo(at, rows, processes, query, seen, None, None)
 }
 
 /// [`build`] with the location database: each connection row names its country, and `query.country` keeps only the connections to
 /// that country (applied before the row cap, so the filter sees every connection).
+#[allow(clippy::type_complexity)] // `flagged` names the user's lists that flag an address (empty: none)
 pub fn build_with_geo(
     at: Timestamp,
     rows: &[SocketRow],
@@ -352,6 +356,7 @@ pub fn build_with_geo(
     query: &NetworkQuery,
     seen: &Tracker,
     geo: Option<&dyn crate::geo::GeoLookup>,
+    flagged: Option<&dyn Fn(&IpAddr) -> Vec<String>>,
 ) -> NetworkSnapshot {
     let names: HashMap<u32, (&str, Option<&str>)> = processes.iter().map(|p| (p.pid, (p.name.as_str(), p.exe.as_deref()))).collect();
     let mut listeners = Vec::new();
@@ -422,6 +427,7 @@ pub fn build_with_geo(
                     owner,
                     first_seen: seen.connection_seen(r),
                     country,
+                    flagged_by: flagged.map(|f| f(ip)).unwrap_or_default(),
                 });
             }
         }
@@ -887,7 +893,7 @@ mod tests {
         ];
         let procs = [proc(10, "firefox")];
         let q = NetworkQuery::default();
-        let all = build_with_geo(Timestamp(0), &rows, &procs, &q, &Tracker::new(), Some(&Countries));
+        let all = build_with_geo(Timestamp(0), &rows, &procs, &q, &Tracker::new(), Some(&Countries), None);
         let by: Vec<(String, Option<String>)> = all.connections.iter().map(|c| (c.remote.clone(), c.country.clone())).collect();
         assert!(by.contains(&("8.8.8.8".into(), Some("US".into()))));
         assert!(by.contains(&("77.1.1.1".into(), None)), "the database does not know it");
@@ -898,9 +904,9 @@ mod tests {
         }
         .normalised();
         assert_eq!(de.country.as_deref(), Some("DE"));
-        let s = build_with_geo(Timestamp(0), &rows, &procs, &de, &Tracker::new(), Some(&Countries));
+        let s = build_with_geo(Timestamp(0), &rows, &procs, &de, &Tracker::new(), Some(&Countries), None);
         assert_eq!(s.connections.iter().map(|c| c.remote.as_str()).collect::<Vec<_>>(), ["9.9.9.9"]);
-        let none = build_with_geo(Timestamp(0), &rows, &procs, &de, &Tracker::new(), None);
+        let none = build_with_geo(Timestamp(0), &rows, &procs, &de, &Tracker::new(), None, None);
         assert!(none.connections.is_empty(), "without a database no connection has a country");
         let junk = NetworkQuery {
             country: Some("Germany".into()),
@@ -908,5 +914,32 @@ mod tests {
         }
         .normalised();
         assert_eq!(junk.country, None, "only a two-letter code is a country filter");
+    }
+
+    #[test]
+    fn a_connection_to_a_flagged_address_names_the_lists_that_flag_it() {
+        let rows = vec![
+            conn(v4(8, 8, 8, 8), 443, Some(10), SocketState::Established),
+            conn(v4(9, 9, 9, 9), 443, Some(10), SocketState::Established),
+        ];
+        let flag = |ip: &IpAddr| {
+            if *ip == v4(8, 8, 8, 8) {
+                vec!["Work blocklist".to_string()]
+            } else {
+                Vec::new()
+            }
+        };
+        let s = build_with_geo(
+            Timestamp(0),
+            &rows,
+            &[proc(10, "firefox")],
+            &NetworkQuery::default(),
+            &Tracker::new(),
+            None,
+            Some(&flag),
+        );
+        let by: Vec<(&str, &[String])> = s.connections.iter().map(|c| (c.remote.as_str(), c.flagged_by.as_slice())).collect();
+        assert!(by.contains(&("8.8.8.8", &["Work blocklist".to_string()][..])));
+        assert!(by.contains(&("9.9.9.9", &[][..])));
     }
 }

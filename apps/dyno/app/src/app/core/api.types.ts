@@ -1214,6 +1214,8 @@ export interface ConnectionRow {
   firstSeen: Timestamp | null;
   /** The ISO country the location database gives the remote address; null when none is loaded or it does not know it. */
   country: string | null;
+  /** The names of your lists that flag the remote address (empty: none does). A flag is a hint, not proof. */
+  flaggedBy: string[];
 }
 
 export interface NetworkQuery {
@@ -2043,6 +2045,8 @@ export interface CountryCount {
   hosts: number;
   flagged: number;
   includesContentNetworks: boolean;
+  /** The programs with most connections to it (at most three, busiest first). */
+  topPrograms: string[];
 }
 
 /** Non-public destinations of one class. */

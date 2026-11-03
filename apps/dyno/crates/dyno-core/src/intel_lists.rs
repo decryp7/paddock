@@ -20,10 +20,11 @@ pub const EDITABLE_TEXT_BYTES: usize = 64 << 10;
 pub const PREVIEW_EXAMPLES: usize = 20;
 /// What the first-run note says goes online (shown once, then under Settings; there is no Offline mode).
 pub const FIRST_RUN_NOTE: &str =
-    "The network map downloads two location databases from DB-IP once a month (download.db-ip.com) and asks Cloudflare, or \
-     ipify if Cloudflare does not answer, for your public address to place you on the map; the address is then located on this \
-     computer. Each has its own switch in Settings. Lists you subscribe to are fetched from the address you give. Nothing else \
-     leaves this computer for these features.";
+    "The map downloads two location databases from DB-IP once a month (download.db-ip.com) and asks Cloudflare, or ipify \
+     if Cloudflare does not answer, for your public IP so it can place you on the map; that service sees your public IP when Dyno \
+     asks for it, as any website would. The addresses your programs connect to never leave this computer: they are located \
+     here, in the downloaded databases. A list you subscribe to is fetched from the address you give, and its owner sees your public \
+     IP too.";
 
 /// Where a list's entries come from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -698,8 +699,10 @@ mod tests {
         let EditOutcome::Preview(p) = apply_edit(&mut l, IntelEdit::DedupePreview { id: id.clone() }).unwrap() else {
             panic!()
         };
-        assert_eq!((p.before, p.after, p.duplicates, p.covered), (6, 3, 0, 3));
+        assert_eq!((p.before, p.after, p.duplicates, p.covered), (6, 3, 1, 2));
         assert!(p.examples.iter().any(|(r, by)| r == "y.x.example" && by == "x.example"));
+        assert_eq!(p.examples.len() as u32, p.duplicates + p.covered, "each removal is listed once");
+        assert_eq!(p.after + p.duplicates + p.covered, p.before, "the numbers add up");
         assert!(l.lists[0].text.contains("y.x.example"), "a preview changes nothing");
         apply_edit(&mut l, IntelEdit::DedupeApply { id }).unwrap();
         assert_eq!(l.lists[0].text, "8.8.0.0/16 # wide\nx.example\n9.9.9.9");
@@ -792,6 +795,7 @@ mod tests {
                 hosts: 1,
                 flagged: 0,
                 includes_content_networks: false,
+                top_programs: vec!["Firefox".into()],
             }],
             local: vec![crate::geo::LocalGroup {
                 class: crate::ip_lookup::AddressClass::Private,

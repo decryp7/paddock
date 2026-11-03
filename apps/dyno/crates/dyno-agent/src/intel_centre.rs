@@ -478,6 +478,18 @@ impl IntelCentre {
         summarise(&rows, geo.is_on().then_some(&*geo as &dyn GeoLookup), date, left_out, &[])
     }
 
+    /// The names of the lists that flag `ip` (empty when none does or the address is allowed); no name is looked up.
+    pub fn flagged_by(&self, ip: &IpAddr) -> Vec<String> {
+        match self.index().check(ip, None) {
+            dyno_core::intel::Verdict::Flagged { matches } => {
+                let mut names: Vec<String> = matches.into_iter().map(|m| m.list_name).collect();
+                names.dedup();
+                names
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// The folder of a list's cached text.
     pub fn cache_of(&self, id: &str) -> std::path::PathBuf {
         self.dirs.intel_cache(id)

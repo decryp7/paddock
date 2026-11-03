@@ -28,7 +28,7 @@ describe('FirewallPage', () => {
     const { el } = await open();
     const alf = el.querySelector('[data-source="applicationFirewall"]')!;
     expect(alf.textContent).toContain('macOS Application Firewall');
-    expect(alf.textContent).toContain('All networks: On');
+    expect(alf.textContent).toContain('Firewall: On');
     expect(alf.textContent).toContain('Stealth mode: On');
     expect(alf.textContent).toContain('Block all incoming: Off');
     expect(alf.querySelectorAll('tbody tr')).toHaveLength(2);
@@ -42,15 +42,16 @@ describe('FirewallPage', () => {
     expect(pf.querySelector('table')).toBeNull();
   });
 
-  it('is read-only: no control changes a rule', async () => {
+  it('is read-only: the only controls are Refresh and a way to the helper setting; none changes a rule', async () => {
     const { el } = await open();
     const buttons = [...el.querySelectorAll('button')].map((b) => b.textContent!.trim());
-    expect(buttons).toEqual(['Refresh']);
+    expect(buttons).toEqual(['Refresh', 'Open settings']);
   });
 
-  it('shows an error with Retry when the firewall cannot be read', async () => {
+  it('shows an error with Retry when the firewall cannot be read, and no Refresh beside it', async () => {
     const { el } = await open(['firewall']);
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('firewall');
+    expect([...el.querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Retry']);
   });
 
   it('words the names and the counts', () => {

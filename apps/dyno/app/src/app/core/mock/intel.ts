@@ -1,3 +1,4 @@
+import { ISO_CODES } from '../../features/map/iso-countries';
 import type {
   CommandError,
   CountryCount,
@@ -20,10 +21,10 @@ const NOW_FALLBACK = 1_700_000_000_000;
 const err = (code: CommandError['code'], message: string): CommandError => ({ code, message });
 
 const FIRST_RUN_NOTE =
-  'The network map downloads two location databases from DB-IP once a month (download.db-ip.com) and asks Cloudflare, or ipify if Cloudflare does not answer, for your public address to place you on the map; the address is then located on this computer. Each has its own switch in Settings. Lists you subscribe to are fetched from the address you give. Nothing else leaves this computer for these features.';
+  'The map downloads two location databases from DB-IP once a month (download.db-ip.com) and asks Cloudflare, or ipify if Cloudflare does not answer, for your public IP so it can place you on the map; that service sees your public IP when Dyno asks for it, as any website would. The addresses your programs connect to never leave this computer: they are located here, in the downloaded databases. A list you subscribe to is fetched from the address you give, and its owner sees your public IP too.';
 const TERMS =
   'The terms of a list are your responsibility: check that you may use it and how often it may be fetched. Dyno sends only the request for the file, with its name and version as the User-Agent, to the address you gave.';
-const ATTRIBUTION = 'IP Geolocation by DB-IP (https://db-ip.com), licensed CC-BY-4.0. Dyno downloads the files once a month and uses them on this computer only; no address ever leaves it.';
+const ATTRIBUTION = 'IP Geolocation by DB-IP (https://db-ip.com), licensed CC-BY-4.0.';
 
 interface Stored {
   id: string;
@@ -80,14 +81,23 @@ export function dedupe(text: string): { kept: string[]; preview: DedupePreview }
   const removed: [string, string][] = [];
   let duplicates = 0;
   let covered = 0;
-  const kept: { entry: string; note: string | null }[] = [];
-  const seen = new Set<string>();
   const rangeOf = (e: string) => ipv4(e);
+  // Exact repeats first, so each removal is counted once and a repeat is a duplicate even when a wider entry also covers it.
+  const firstSeen = new Set<string>();
+  const unique: { entry: string; note: string | null }[] = [];
   for (const l of all) {
-    const dupOf = seen.has(l.entry);
-    seen.add(l.entry);
+    if (firstSeen.has(l.entry)) {
+      duplicates++;
+      removed.push([l.entry, l.entry]);
+    } else {
+      firstSeen.add(l.entry);
+      unique.push(l);
+    }
+  }
+  const kept: { entry: string; note: string | null }[] = [];
+  for (const l of unique) {
     const r = rangeOf(l.entry);
-    const cover = all.find((o) => {
+    const cover = unique.find((o) => {
       if (o.entry === l.entry) return false;
       const or = rangeOf(o.entry);
       if (r && or) return or.start <= r.start && or.end >= r.end;
@@ -96,9 +106,6 @@ export function dedupe(text: string): { kept: string[]; preview: DedupePreview }
     if (cover) {
       covered++;
       removed.push([l.entry, cover.entry]);
-    } else if (dupOf) {
-      duplicates++;
-      removed.push([l.entry, l.entry]);
     } else kept.push(l);
   }
   return {
@@ -122,6 +129,9 @@ export class MockIntel {
   private allow = '';
   private switches: NetSwitches = { locationDatabases: true, ownLocation: true, firstRunNoteSeen: false };
   private nextId = 2;
+
+  /** `?geo=many`: a destination in every country (to see 250 arcs). */
+  many = false;
 
   constructor(private readonly now: () => number = () => NOW_FALLBACK) {}
 
@@ -246,12 +256,17 @@ export class MockIntel {
   }
 
   geo(): GeoSummary {
-    const c = (code: string, name: string, connections: number, programs: number, hosts: number, flagged = 0, cdn = false): CountryCount => ({ code, name, connections, programs, hosts, flagged, includesContentNetworks: cdn });
+    const c = (code: string, name: string, connections: number, programs: number, hosts: number, flagged = 0, cdn = false, top: string[] = []): CountryCount => ({ code, name, connections, programs, hosts, flagged, includesContentNetworks: cdn, topPrograms: top });
+    if (this.many) {
+      const names = new Intl.DisplayNames(['en'], { type: 'region' });
+      const countries = ISO_CODES.filter((code) => code !== 'SG').map((code, i) => c(code, names.of(code) ?? code, (i * 7) % 230 + 1, 1 + (i % 5), 1 + (i % 9), i % 40 === 0 ? 1 : 0, false, ['Google Chrome']));
+      return { countries, local: [], unknown: 0, dbDate: '2026-11-01', truncated: 0, databaseOn: true, homeCountry: 'SG', homeSource: 'Your location: from your public IP (via Cloudflare)' };
+    }
     return {
       countries: [
-        c('US', 'United States', 54, 6, 21, 1, true),
-        c('IE', 'Ireland', 18, 3, 6),
-        c('DE', 'Germany', 12, 4, 5),
+        c('US', 'United States', 54, 6, 21, 1, true, ['Google Chrome', 'Slack', 'Spotify']),
+        c('IE', 'Ireland', 18, 3, 6, 0, false, ['Code Helper', 'Google Chrome']),
+        c('DE', 'Germany', 12, 4, 5, 0, false, ['Mail', 'cargo', 'node']),
         c('JP', 'Japan', 4, 1, 2),
         c('SG', 'Singapore', 3, 2, 2),
         c('BR', 'Brazil', 1, 1, 1),

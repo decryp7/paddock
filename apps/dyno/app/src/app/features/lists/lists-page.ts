@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatCheckbox } from '@angular/material/checkbox';
+import { MatRadioButton, MatRadioGroup } from '@angular/material/radio';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import type { ListStatus, NewSource } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
@@ -19,7 +21,7 @@ const MAX_IMPORT = 16 * 1024 * 1024;
  */
 @Component({
   selector: 'dy-lists-page',
-  imports: [AsyncState, Icon, MatButton, MatCheckbox, OnlineData],
+  imports: [AsyncState, Icon, MatButton, MatCheckbox, MatRadioButton, MatRadioGroup, OnlineData, PdSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -53,7 +55,7 @@ const MAX_IMPORT = 16 * 1024 * 1024;
                       <button type="button" matButton="text" (click)="renaming.set(null)">Cancel</button>
                     } @else {
                       <strong class="name-text">{{ l.name }}</strong>
-                      <span class="state" [attr.data-on]="l.enabled">{{ l.enabled ? 'On' : 'Off' }}</span>
+                      @if (!l.enabled) { <span class="off">Off</span> }
                       <span class="faint">{{ source(l) }}</span>
                     }
                   </div>
@@ -63,39 +65,45 @@ const MAX_IMPORT = 16 * 1024 * 1024;
                     <p class="update" [class.bad]="!!l.counts.error" [attr.role]="l.counts.error ? 'alert' : null" data-testid="update-line">{{ update(l) }}</p>
                   }
                   <div class="actions">
-                    <mat-checkbox [checked]="l.enabled" (change)="store.edit({ setEnabled: { id: l.id, enabled: !l.enabled } })">On</mat-checkbox>
-                    <button type="button" matButton="text" (click)="renaming.set(l.id)">Rename</button>
-                    @if (url(l)) {
-                      <button type="button" matButton="outlined" [disabled]="updating(l) || !!blocked(l)" (click)="store.updateNow(l.id)" data-testid="update-now">Update now</button>
-                      @if (blocked(l); as why) { <span class="faint" data-testid="blocked">{{ why }}</span> }
-                    } @else {
-                      <button type="button" matButton="text" (click)="editing.set(editing() === l.id ? null : l.id)">{{ editing() === l.id ? 'Close the text' : 'Edit the text' }}</button>
-                      <button type="button" matButton="text" (click)="store.previewDedupe(l.id)" data-testid="dedupe">Remove duplicates</button>
-                    }
-                    @if (confirming() === l.id) {
-                      <button type="button" matButton="filled" (click)="remove(l)" data-testid="confirm-remove">Remove “{{ l.name }}”</button>
-                      <button type="button" matButton="text" (click)="confirming.set(null)">Keep it</button>
-                    } @else {
-                      <button type="button" matButton="text" (click)="confirming.set(l.id)">Remove</button>
-                    }
+                    <div class="main">
+                      <mat-checkbox [checked]="l.enabled" (change)="store.edit({ setEnabled: { id: l.id, enabled: !l.enabled } })">On</mat-checkbox>
+                      <button type="button" matButton="outlined" (click)="renaming.set(l.id)">Rename</button>
+                      @if (url(l)) {
+                        <button type="button" matButton="outlined" [disabled]="updating(l) || !!blocked(l)" (click)="store.updateNow(l.id)" data-testid="update-now">Update now</button>
+                      } @else {
+                        <button type="button" matButton="outlined" (click)="editing.set(editing() === l.id ? null : l.id)">{{ editing() === l.id ? 'Close the text' : 'Edit the text' }}</button>
+                        <button type="button" matButton="outlined" (click)="store.previewDedupe(l.id)" data-testid="dedupe">Remove duplicates</button>
+                      }
+                    </div>
+                    <div class="danger">
+                      @if (confirming() === l.id) {
+                        <button type="button" matButton="text" (click)="confirming.set(null)">Keep it</button>
+                        <button type="button" matButton="outlined" class="remove" (click)="remove(l)" data-testid="confirm-remove">Remove “{{ l.name }}”</button>
+                      } @else {
+                        <button type="button" matButton="outlined" class="remove" (click)="confirming.set(l.id)">Remove</button>
+                      }
+                    </div>
                   </div>
+                  @if (url(l) && blocked(l); as why) { <p class="faint" data-testid="blocked">{{ why }}</p> }
                   @if (store.preview(); as p) {
                     @if (p.id === l.id) {
                       <div class="preview" role="group" aria-label="Remove duplicates preview" data-testid="preview">
                         @if (p.preview.duplicates + p.preview.covered === 0) {
                           <p>Nothing to remove: no duplicates and nothing covered by a wider entry.</p>
-                          <button type="button" matButton="text" (click)="store.cancelPreview()">Close</button>
+                          <div class="row-end"><button type="button" matButton="outlined" (click)="store.cancelPreview()">Close</button></div>
                         } @else {
-                          <p>
-                            <b>{{ p.preview.before }}</b> entries become <b>{{ p.preview.after }}</b>: {{ p.preview.duplicates }} exact
-                            {{ p.preview.duplicates === 1 ? 'duplicate' : 'duplicates' }} and {{ p.preview.covered }}
-                            {{ p.preview.covered === 1 ? 'entry' : 'entries' }} covered by a wider one go. Notes of removed entries go with them.
+                          <p data-testid="preview-numbers">
+                            <b>{{ p.preview.before }}</b> {{ p.preview.before === 1 ? 'entry becomes' : 'entries become' }} <b>{{ p.preview.after }}</b>:
+                            {{ p.preview.duplicates }} exact {{ p.preview.duplicates === 1 ? 'duplicate' : 'duplicates' }} and
+                            {{ p.preview.covered }} covered by a wider entry go. Notes of removed entries go with them.
                           </p>
                           <ul class="faint">
                             @for (e of p.preview.examples; track $index) { <li><code>{{ e[0] }}</code> is covered by <code>{{ e[1] }}</code></li> }
                           </ul>
-                          <button type="button" matButton="filled" (click)="store.applyDedupe(l.id)" data-testid="apply-dedupe">Remove them</button>
-                          <button type="button" matButton="text" (click)="store.cancelPreview()">Keep everything</button>
+                          <div class="row-end">
+                            <button type="button" matButton="text" (click)="store.cancelPreview()">Keep everything</button>
+                            <button type="button" matButton="filled" (click)="store.applyDedupe(l.id)" data-testid="apply-dedupe">Remove {{ p.preview.duplicates + p.preview.covered }} {{ p.preview.duplicates + p.preview.covered === 1 ? 'entry' : 'entries' }}</button>
+                          </div>
                         }
                       </div>
                     }
@@ -120,14 +128,17 @@ const MAX_IMPORT = 16 * 1024 * 1024;
             <div class="form" role="group" aria-label="Add a list">
               <label class="field">
                 <span>Name</span>
-                <input class="input" [value]="addName()" (input)="addName.set($any($event.target).value)" aria-label="New list name" data-testid="add-name" />
+                <input class="input" [value]="addName()" (input)="addName.set($any($event.target).value)" aria-label="New list name" data-testid="add-name" [attr.aria-invalid]="!!errorFor('name')" [attr.aria-describedby]="errorFor('name') ? 'add-name-error' : null" />
+                @if (errorFor('name'); as why) { <span class="bad" id="add-name-error" role="alert" data-testid="edit-error"><dy-icon name="alert" /> {{ why }}</span> }
               </label>
-              <fieldset class="kinds">
-                <legend>Where the entries come from</legend>
-                <label><input type="radio" name="kind" [checked]="addKind() === 'typed'" (change)="addKind.set('typed')" /> Type them</label>
-                <label><input type="radio" name="kind" [checked]="addKind() === 'file'" (change)="addKind.set('file')" /> Import a text file</label>
-                <label><input type="radio" name="kind" [checked]="addKind() === 'url'" (change)="addKind.set('url')" data-testid="kind-url" /> Subscribe by address</label>
-              </fieldset>
+              <div class="field">
+                <span id="kind-label">Where the entries come from</span>
+                <mat-radio-group class="kinds" aria-labelledby="kind-label" [value]="addKind()" (change)="addKind.set($event.value)">
+                  <mat-radio-button value="typed">Type them</mat-radio-button>
+                  <mat-radio-button value="file">Import a text file</mat-radio-button>
+                  <mat-radio-button value="url" data-testid="kind-url">Subscribe by address</mat-radio-button>
+                </mat-radio-group>
+              </div>
               @switch (addKind()) {
                 @case ('typed') {
                   <label class="field">
@@ -145,21 +156,17 @@ const MAX_IMPORT = 16 * 1024 * 1024;
                 @case ('url') {
                   <label class="field">
                     <span>Address of the list (https)</span>
-                    <input class="input" type="url" [value]="addUrl()" (input)="addUrl.set($any($event.target).value)" aria-label="List address" placeholder="https://example.com/list.txt" data-testid="add-url" />
+                    <input class="input" type="url" [value]="addUrl()" (input)="addUrl.set($any($event.target).value)" aria-label="List address" placeholder="https://example.com/list.txt" data-testid="add-url" [attr.aria-invalid]="!!errorFor('url')" [attr.aria-describedby]="errorFor('url') ? 'add-url-error' : null" />
+                    @if (errorFor('url'); as why) { <span class="bad" id="add-url-error" role="alert" data-testid="edit-error"><dy-icon name="alert" /> {{ why }}</span> }
                   </label>
-                  <label class="field">
-                    <span>Update</span>
-                    <select class="input" aria-label="Update every" (change)="addHours.set($any($event.target).value)">
-                      <option value="24" [selected]="addHours() === '24'">every day</option>
-                      <option value="6" [selected]="addHours() === '6'">every 6 hours</option>
-                      <option value="1" [selected]="addHours() === '1'">every hour (the shortest)</option>
-                      <option value="168" [selected]="addHours() === '168'">every week</option>
-                    </select>
-                  </label>
+                  <div class="field">
+                    <span id="every-label">Update</span>
+                    <pd-select [options]="everyChoices" [value]="addHours()" ariaLabel="Update every" (valueChange)="addHours.set($event)" />
+                  </div>
                   <p class="note"><dy-icon name="info" /> <span data-testid="terms">{{ s.termsNotice }}</span></p>
                 }
               }
-              @if (store.editError(); as e) { <p class="bad" role="alert" data-testid="edit-error"><dy-icon name="alert" /> {{ e.message }}</p> }
+              @if (errorFor('other'); as why) { <p class="bad" role="alert" data-testid="edit-error"><dy-icon name="alert" /> {{ why }}</p> }
               <div><button type="button" matButton="filled" [disabled]="!canAdd()" (click)="add()" data-testid="add-list">Add the list</button></div>
             </div>
           </section>
@@ -186,11 +193,14 @@ const MAX_IMPORT = 16 * 1024 * 1024;
     .list { display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
     .row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
     .name-text { font-size: var(--fs-md); }
-    .state { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: var(--fs-xs); }
-    .state[data-on='true']::before { content: '✓ '; }
+    .off { color: var(--text-2); font-size: var(--fs-xs); border: 1px solid var(--border-strong); border-radius: 999px; padding: 1px 8px; }
     .counts, .url, .update { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
     .url { overflow-wrap: anywhere; }
-    .actions { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+    .actions { display: flex; gap: var(--sp-3); align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .actions .main, .actions .danger, .row-end { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+    .actions .danger { padding-inline-start: var(--sp-3); border-inline-start: 1px solid var(--border); }
+    .row-end { justify-content: flex-end; }
+    .remove { --mat-button-outlined-label-text-color: var(--bad); --mat-button-outlined-outline-color: var(--bad); }
     .preview { padding: var(--sp-2); border: 1px dashed var(--border-strong); border-radius: var(--r-sm); display: grid; gap: var(--sp-1); }
     .preview ul { margin: 0; padding-left: var(--sp-4); font-size: var(--fs-xs); }
     .form { display: grid; gap: var(--sp-2); max-width: 720px; }
@@ -198,8 +208,7 @@ const MAX_IMPORT = 16 * 1024 * 1024;
     .input { font: inherit; color: var(--text-1); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 6px 8px; }
     .input.text { font-family: var(--font-mono); font-size: var(--fs-xs); width: 100%; box-sizing: border-box; }
     .input.name { min-width: 220px; }
-    .kinds { display: flex; gap: var(--sp-4); flex-wrap: wrap; border: 0; padding: 0; margin: 0; font-size: var(--fs-sm); }
-    .kinds legend { color: var(--text-2); margin-bottom: 4px; }
+    .kinds { display: flex; gap: var(--sp-4); flex-wrap: wrap; font-size: var(--fs-sm); }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
     .bad { color: var(--bad); }
     .empty { margin: 0; padding: var(--sp-3); border: 1px dashed var(--border-strong); border-radius: var(--r-md); color: var(--text-2); }
@@ -217,9 +226,23 @@ export class ListsPage implements OnInit {
   protected readonly addUrl = signal('');
   protected readonly addHours = signal('24');
   protected readonly fileName = signal<string | null>(null);
+  protected readonly everyChoices: PdSelectOption[] = [
+    { value: '24', label: 'every day' },
+    { value: '6', label: 'every 6 hours' },
+    { value: '1', label: 'every hour (the shortest)' },
+    { value: '168', label: 'every week' },
+  ];
 
   ngOnInit(): void {
     void this.store.load();
+  }
+
+  /** The refusal of the last edit, only when it belongs to this field (the name, the address, or neither). */
+  protected errorFor(field: 'name' | 'url' | 'other'): string | null {
+    const m = this.store.editError()?.message;
+    if (!m) return null;
+    const kind = /name/i.test(m) ? 'name' : /address|https|public/i.test(m) ? 'url' : 'other';
+    return kind === field ? m : null;
   }
 
   protected counts = (l: ListStatus): string => countsLine(l.counts);

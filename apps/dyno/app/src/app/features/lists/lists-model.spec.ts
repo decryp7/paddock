@@ -12,7 +12,7 @@ describe('lists model', () => {
   });
 
   it('says what a list is and where a subscription points', () => {
-    expect(sourceText('manual')).toBe('Typed');
+    expect(sourceText('manual')).toBe('Typed by you');
     expect(sourceText({ file: { name: 'bad.txt' } })).toBe('Imported from bad.txt');
     expect(sourceText(list().source)).toBe('Subscription');
     expect(urlOf(list().source)).toBe('https://x.example/l');

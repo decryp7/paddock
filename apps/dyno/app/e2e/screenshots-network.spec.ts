@@ -35,6 +35,27 @@ test.describe('Dyno network screenshots', () => {
         await shot(page, 'map-focus');
       });
 
+      test('map, 250 arcs', async ({ page }) => {
+        await page.goto('/?latency=0&geo=many#/map');
+        await page.getByTestId('world-map').waitFor();
+        await shot(page, 'map-250-arcs');
+      });
+
+      test('map, loading', async ({ page }) => {
+        await page.goto('/?latency=4000#/map');
+        await page.getByRole('heading', { level: 1, name: 'Connections map' }).waitFor();
+        await page.waitForTimeout(300);
+        mkdirSync(OUT, { recursive: true });
+        await page.screenshot({ path: `${OUT}/map-loading-${scheme}.png`, fullPage: true });
+      });
+
+      test('map, a marker with the tooltip', async ({ page }) => {
+        await page.goto('/?latency=0#/map');
+        await page.getByRole('button', { name: /^United States: 54 connections/ }).focus();
+        await page.getByTestId('country-tip').waitFor();
+        await shot(page, 'map-tooltip');
+      });
+
       test('map, error with Retry', async ({ page }) => {
         await page.goto('/?latency=0&fail=geoSummary#/map');
         await page.getByRole('alert').first().waitFor();
@@ -57,7 +78,7 @@ test.describe('Dyno network screenshots', () => {
 
       test('lists, subscription form with the terms', async ({ page }) => {
         await page.goto('/?latency=0#/lists');
-        await page.getByTestId('kind-url').check();
+        await page.getByRole('radio', { name: 'Subscribe by address' }).check();
         await page.getByTestId('terms').waitFor();
         await shot(page, 'lists-subscribe');
       });
@@ -74,7 +95,7 @@ test.describe('Dyno network screenshots', () => {
 
       test('lists, a refused subscription address', async ({ page }) => {
         await page.goto('/?latency=0#/lists');
-        await page.getByTestId('kind-url').check();
+        await page.getByRole('radio', { name: 'Subscribe by address' }).check();
         await page.getByLabel('New list name').fill('Feed');
         await page.getByLabel('List address').fill('http://lists.example/feed.txt');
         await page.getByTestId('add-list').click();

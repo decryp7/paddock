@@ -1,5 +1,8 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { MatButton } from '@angular/material/button';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { SETTINGS_DIALOG_ID } from '@decryp7/paddock-ui/shell/settings';
+import { SETTINGS_PAGE_ID } from '../../shell/navigate';
 import type { FirewallProfile, FirewallSource, RuleAction, RuleSourceKind } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
@@ -38,7 +41,9 @@ export function rulesLine(s: FirewallSource): string {
           <h1>Firewall</h1>
           <p>What the system firewall is set to. Dyno only looks: it never changes a rule or switches the firewall.</p>
         </div>
-        <button type="button" matButton="outlined" (click)="store.load()" data-testid="refresh"><dy-icon name="refresh" /> Refresh</button>
+        @if (store.view()) {
+          <button type="button" matButton="outlined" (click)="store.load()" data-testid="refresh"><dy-icon name="refresh" /> Refresh</button>
+        }
       </header>
       <dy-async [loaded]="!!store.view()" [error]="store.error()" what="the firewall" [rows]="4" (retry)="store.load()">
         @if (store.view(); as v) {
@@ -47,7 +52,7 @@ export function rulesLine(s: FirewallSource): string {
               <h2>{{ name(s.source) }}</h2>
               @if (s.states.length > 0) {
                 <p class="states">
-                  @for (st of s.states; track st.profile) { <span class="chip" [attr.data-on]="st.enabled">{{ profile(st.profile) }}: {{ st.enabled ? 'On' : 'Off' }}</span> }
+                  @for (st of s.states; track st.profile) { <span class="chip" [attr.data-on]="st.enabled">{{ profileWord(st.profile) }}: {{ st.enabled ? 'On' : 'Off' }}</span> }
                 </p>
               }
               @if (s.switches.length > 0) {
@@ -58,7 +63,11 @@ export function rulesLine(s: FirewallSource): string {
               @if (s.defaultIn || s.defaultOut) {
                 <p class="faint">Default for incoming: {{ action(s.defaultIn) }} · outgoing: {{ action(s.defaultOut) }}</p>
               }
-              @if (s.note; as n) { <p class="note" data-testid="source-note"><dy-icon name="info" /> {{ n }}</p> }
+              @if (s.note; as n) {
+                <p class="note" data-testid="source-note"><dy-icon name="info" /> <span>{{ n }}</span>
+                  @if (s.rulesHidden && n.includes('helper')) { <button type="button" matButton="outlined" (click)="openSettings()" data-testid="open-settings">Open settings</button> }
+                </p>
+              }
               @if (!s.rulesHidden) {
                 <p class="faint num">{{ line(s) }}</p>
                 @if (s.rules.length > 0) {
@@ -93,11 +102,11 @@ export function rulesLine(s: FirewallSource): string {
     dy-async { display: grid; gap: var(--sp-3); }
     .source { display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
     h2 { margin: 0; font-size: var(--fs-md); }
-    .states { margin: 0; display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+    .states { margin: 0; display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
     .chip { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: var(--fs-xs); }
     .chip[data-on='true']::before { content: '✓ '; }
     .chip[data-on='false']::before { content: '✕ '; }
-    .note { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
+    .note { margin: 0; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .faint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
     table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-xs); }
     .grid th, .grid td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
@@ -108,11 +117,19 @@ export function rulesLine(s: FirewallSource): string {
 })
 export class FirewallPage implements OnInit {
   protected readonly store = inject(FirewallStore);
+  private readonly dialogs = inject(DialogService);
   ngOnInit(): void {
     void this.store.load();
   }
   protected name = sourceName;
   protected line = rulesLine;
   protected profile = (p: FirewallProfile): string => PROFILE[p];
+  /** "Firewall" for a system with one switch for everything, the network's name for Windows' three profiles. */
+  protected profileWord = (p: FirewallProfile): string => (p === 'all' ? 'Firewall' : PROFILE[p]);
+
+  /** Opens Settings at the Administrator readings card, where the helper is turned on. */
+  protected openSettings(): void {
+    void this.dialogs.open(SETTINGS_DIALOG_ID, { inputs: { page: SETTINGS_PAGE_ID, anchor: { id: 'helper', at: Date.now() } } });
+  }
   protected action = (a: RuleAction | null): string => (a === null ? 'not stated' : a === 'allow' ? 'allow' : 'block');
 }

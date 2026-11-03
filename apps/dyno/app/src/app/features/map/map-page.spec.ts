@@ -42,7 +42,7 @@ describe('MapPage', () => {
     expect(all('path.land').length).toBeGreaterThan(150);
     expect(all('path.arc').map((a) => a.dataset['arc'])).toEqual(['US', 'IE', 'DE', 'JP', 'BR']);
     expect(q('.home text')!.textContent).toBe('You');
-    expect(q('[data-testid="home-source"]')!.textContent).toContain('from your public IP (via Cloudflare)');
+    expect(q('[data-testid="home-source"]')!.textContent).toContain('Your location: Singapore, from your public IP (via Cloudflare)');
   });
 
   it('names every country with connections, focusable, with the numbers in its label (never colour alone)', async () => {
@@ -53,16 +53,20 @@ describe('MapPage', () => {
       expect(s.getAttribute('role')).toBe('button');
       expect(s.tabIndex).toBe(0);
     }
-    expect(spots[0]!.getAttribute('aria-label')).toBe('United States: 54 connections from 6 programs, 1 flagged, includes content-network addresses');
+    expect(spots[0]!.getAttribute('aria-label')).toBe('United States: 54 connections from 6 programs, 1 flagged by your lists, includes content-network addresses');
+    // The flag is drawn (a hatched ring, a flag and the word), not only a colour.
     expect(all('circle.flag')).toHaveLength(1);
+    expect(all('g.flagmark')).toHaveLength(1);
+    expect(all('g.flagmark text')[0]!.textContent).toBe('flagged');
   });
 
   it('shows the legend with the numbers, the credit and the map source', async () => {
     const { q } = await open();
     expect(q('[data-testid="legend"]')!.textContent).toContain('1–2');
     expect(q('[data-testid="legend"]')!.textContent).toContain('200+');
-    expect(q('[data-testid="legend"]')!.textContent).toContain('flagged by a list');
+    expect(q('[data-testid="legend"]')!.textContent).toContain('flagged by one of your lists');
     expect(q('[data-testid="credit"]')!.textContent).toContain('IP Geolocation by DB-IP');
+    expect(q('figure [data-testid="credit"]'), 'the credit sits under the map itself').toBeTruthy();
     expect(q('[data-testid="credit"]')!.textContent).toContain('Natural Earth');
   });
 
@@ -78,7 +82,8 @@ describe('MapPage', () => {
     expect(rows()[0]).toBe('BR');
     expect(q('thead th[aria-sort="descending"], thead th[aria-sort="ascending"]')).toBeTruthy();
     expect(f.nativeElement.textContent).toContain('flagged');
-    expect(q('tr[data-country="DE"] button')!.getAttribute('aria-label')).toBe('Show connections to Germany');
+    expect(q('tr[data-country="DE"] td.act button')!.getAttribute('aria-label')).toBe('Show connections to Germany');
+    expect(q('[data-testid="credit-table"]')!.textContent).toContain('DB-IP');
   });
 
   it('Enter or a click on a country opens the Connections table filtered to that country', async () => {
@@ -120,7 +125,21 @@ describe('MapPage', () => {
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('geoSummary');
   });
 
+  it('shows the country, its count and its busiest programs when a marker has focus', async () => {
+    const { all, q, settle } = await open();
+    all('g.spot')[0]!.dispatchEvent(new Event('focus'));
+    await settle();
+    const tip = q('[data-testid="country-tip"]')!;
+    expect(tip.textContent).toContain('United States');
+    expect(tip.textContent).toContain('54 connections');
+    expect(tip.textContent).toContain('1 flagged');
+    expect(tip.textContent).toContain('Google Chrome, Slack, Spotify');
+    all('g.spot')[0]!.dispatchEvent(new Event('blur'));
+    await settle();
+    expect(q('[data-testid="country-tip"]')).toBeNull();
+  });
+
   it('words a country label with singular and plural', () => {
-    expect(countryLabel({ code: 'BR', name: 'Brazil', connections: 1, programs: 1, hosts: 1, flagged: 0, includesContentNetworks: false })).toBe('Brazil: 1 connection from 1 program');
+    expect(countryLabel({ code: 'BR', name: 'Brazil', connections: 1, programs: 1, hosts: 1, flagged: 0, includesContentNetworks: false, topPrograms: [] })).toBe('Brazil: 1 connection from 1 program');
   });
 });

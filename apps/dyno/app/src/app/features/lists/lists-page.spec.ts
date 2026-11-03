@@ -67,8 +67,10 @@ describe('ListsPage', () => {
     await type('[data-testid="add-name"]', 'home');
     await click('[data-testid="add-list"]');
     expect(q('[data-testid="edit-error"]')!.textContent).toContain('Another list already has that name');
+    expect(q('[data-testid="add-name"]')!.getAttribute('aria-invalid')).toBe('true');
+    expect(q('[data-testid="add-name"]')!.getAttribute('aria-describedby')).toBe('add-name-error');
     expect(store.status()!.lists).toHaveLength(2);
-    await click('[data-testid="list-list-2"] .actions button:last-of-type');
+    await click('[data-testid="list-list-2"] .danger button');
     expect(q('[data-testid="confirm-remove"]')!.textContent).toContain('Home');
     await click('[data-testid="confirm-remove"]');
     expect(store.status()!.lists.map((l) => l.id)).toEqual(['list-1']);
@@ -76,12 +78,14 @@ describe('ListsPage', () => {
 
   it('subscribes by address: shows the terms, refuses plain http, and lists the subscription with its schedule', async () => {
     const { q, type, click, store } = await open();
-    await click('[data-testid="kind-url"]');
+    await click('[data-testid="kind-url"] input');
     expect(q('[data-testid="terms"]')!.textContent).toContain('responsibility');
     await type('[data-testid="add-name"]', 'Feed');
     await type('[data-testid="add-url"]', 'http://lists.example/feed.txt');
     await click('[data-testid="add-list"]');
-    expect(q('[data-testid="edit-error"]')!.textContent).toContain('https://');
+    expect(q('[data-testid="edit-error"]')!.textContent).toContain('The address must start with https://');
+    expect(q('[data-testid="add-url"]')!.getAttribute('aria-invalid')).toBe('true');
+    expect(q('[data-testid="add-url"]')!.getAttribute('aria-describedby')).toBe('add-url-error');
     await type('[data-testid="add-url"]', 'https://127.0.0.1:8099/list.txt');
     await click('[data-testid="add-list"]');
     expect(q('[data-testid="edit-error"]')!.textContent).toContain('only from public addresses');
@@ -99,7 +103,8 @@ describe('ListsPage', () => {
     await click('[data-testid="add-list"]');
     await click('[data-testid="list-list-2"] [data-testid="dedupe"]');
     const preview = q('[data-testid="preview"]')!;
-    expect(preview.textContent).toContain('5');
+    expect(q('[data-testid="preview-numbers"]')!.textContent!.replace(/\s+/g, ' ')).toContain('5 entries become 2: 1 exact duplicate and 2 covered by a wider entry go');
+    expect(q('[data-testid="apply-dedupe"]')!.textContent).toContain('Remove 3 entries');
     expect(preview.textContent).toContain('is covered by');
     expect(mock.intel.status().lists[1]!.text).toContain('y.x.example');
     await click('[data-testid="apply-dedupe"]');
@@ -126,7 +131,7 @@ describe('ListsPage', () => {
 describe('ListsPage empty state', () => {
   it('says there are no lists and how to add one', async () => {
     const { q, click, store } = await open();
-    await click('[data-testid="list-list-1"] .actions button:last-of-type');
+    await click('[data-testid="list-list-1"] .danger button');
     await click('[data-testid="confirm-remove"]');
     expect(store.status()!.lists).toHaveLength(0);
     expect(q('[data-testid="no-lists"]')!.textContent).toContain('no lists yet');
