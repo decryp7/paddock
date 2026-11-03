@@ -504,8 +504,13 @@ fn root_causes_starts_from_the_overview() {
     assert!(n.text.contains("gateway"));
 }
 
+/// The tool loop's limits, cancellation and argument checks do not depend on the data: an empty workspace, not the
+/// sample incident (which a busy CI host stretched past the 90 s budget: each round ran the overview on it, run 7348).
 #[test]
 fn tool_loop_limits_cancellation_and_bad_arguments() {
+    let empty =
+        debrief_core::workspace::WorkspaceStore::new(debrief_core::Workspace::new(debrief_core::Profile::default_profile()).unwrap());
+    let store = || -> &dyn debrief_core::ports::Store { &empty };
     let call = || Reply::Tools(String::new(), vec![("overview".into(), json!({}))]);
     // wrap-up answer after the limit
     let a = Assistant::new(
@@ -542,8 +547,6 @@ fn tool_loop_limits_cancellation_and_bad_arguments() {
         ScriptedProvider::new(vec![call(), Reply::Text("never".into())]),
         AssistantConfig::default(),
     );
-    let flag = a.config().cancel.clone();
-    let _ = flag;
     a.cancel();
     assert!(matches!(a.root_causes(store()), Err(AiError::Cancelled)));
     // malformed tool arguments become an error result the model can react to

@@ -1539,8 +1539,9 @@ mod tests {
 
     #[test]
     fn concurrent_identical_analyses_compute_once() {
-        let root = std::env::temp_dir().join(format!("debrief-flight-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        // Declared before the store, so it is removed after the store and its background services are dropped (rule 49).
+        let tmp = tempfile::Builder::new().prefix("debrief-flight-").tempdir().unwrap();
+        let root = tmp.path();
         std::fs::create_dir_all(root.join("logs")).unwrap();
         let paths = interleaved(&root.join("logs"), 50);
         let store = DuckStore::create(
@@ -1581,7 +1582,6 @@ mod tests {
             "the four identical requests share one computation"
         );
         assert!(lock(&store.inner.flights).is_empty(), "finished flights are forgotten");
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1609,8 +1609,13 @@ mod tests {
     fn the_promoted_key_does_not_depend_on_the_import_schedule() {
         let mut bad = vec![];
         for seed in [4u64, 8, 16, 22, 24] {
-            let root = std::env::temp_dir().join(format!("debrief-promote-seed-{}-{seed}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&root);
+            // Declared before the store, so it is removed after the store and its background services are dropped (rule 49);
+            // removing the folder while the store still ran left one behind on CI (run 7348).
+            let tmp = tempfile::Builder::new()
+                .prefix(&format!("debrief-promote-seed-{seed}-"))
+                .tempdir()
+                .unwrap();
+            let root = tmp.path();
             std::fs::create_dir_all(root.join("logs")).unwrap();
             let paths = interleaved(&root.join("logs"), 3_000);
             let store = DuckStore::create(
@@ -1626,15 +1631,15 @@ mod tests {
             if !ctx.fields.promoted_text.contains("Host") {
                 bad.push(seed);
             }
-            let _ = std::fs::remove_dir_all(&root);
         }
         assert!(bad.is_empty(), "seeds without Host promoted: {bad:?}");
     }
 
     #[test]
     fn ordered_streams_read_windows_in_time_order_and_count_the_rest() {
-        let root = std::env::temp_dir().join(format!("debrief-ordered-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        // Declared before the store, so it is removed after the store and its background services are dropped (rule 49).
+        let tmp = tempfile::Builder::new().prefix("debrief-ordered-").tempdir().unwrap();
+        let root = tmp.path();
         std::fs::create_dir_all(root.join("logs")).unwrap();
         let n = 3_000;
         let paths = interleaved(&root.join("logs"), n);
@@ -1695,7 +1700,6 @@ mod tests {
         assert_eq!(empty.finish().unwrap().matched, 0);
         drop(conn);
         drop(store);
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

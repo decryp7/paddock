@@ -37,3 +37,5 @@ memory-stats.workspace = true
 getrandom.workspace = true
 chrono.workspace = true
 zip.workspace = true
+# Test folders removed after the store that uses them, also after a panic (rule 49).
+tempfile.workspace = true

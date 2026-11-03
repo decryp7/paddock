@@ -39,7 +39,7 @@ import { MonitorChartsStore } from './monitor-charts.store';
           @if (store.loading() && store.charts().length) { <span class="spinner" role="status" aria-label="Updating" i18n-aria-label="@@tools.monitor.live.updating"></span> }
         </div>
 
-        @if (store.legend().length) {
+        @if (store.ready() && store.legend().length) {
           <div class="legend" role="group" aria-label="Processes" i18n-aria-label="@@tools.monitor.live.processes">
             @for (l of store.legend(); track l.key) {
               <button type="button" class="chip key" [attr.aria-pressed]="!store.hiddenSet().has(l.key)" [title]="toggleTitle(l.key)" (click)="store.toggle(l.key)">
@@ -52,7 +52,11 @@ import { MonitorChartsStore } from './monitor-charts.store';
           </div>
         }
 
-        @if (store.error(); as e) {
+        @if (store.opening()) {
+          <div class="state faint" role="status" data-testid="monitor-live-loading" i18n="@@tools.monitor.live.opening"><span class="spinner" aria-hidden="true"></span>Opening the run's output…</div>
+        } @else if (!store.ready()) {
+          <div class="state faint" role="status" data-testid="monitor-live-unopened" i18n="@@tools.monitor.live.unopened">The run's output is not open in the workspace, so it is not charted. Open its folder to chart it.</div>
+        } @else if (store.error(); as e) {
           <div class="state err" role="alert" data-testid="monitor-live-error">
             <span i18n="@@tools.monitor.live.error">Could not load the live charts: {{ e }}</span>
             <button type="button" class="btn" (click)="store.retry()" i18n="@@tools.monitor.live.retry">Retry</button>
@@ -165,11 +169,12 @@ export class MonitorLiveCharts {
 
   constructor() {
     // Load when the panel appears, the scope or window changes, on Retry, and on every data change while following.
-    // After a failure live changes do not reload (no hammering a failing engine): the user retries.
+    // After a failure live changes do not reload (no hammering a failing engine): the user retries. While a new run
+    // opens its output nothing is asked: the first load is scoped to that run.
     let last = '';
     let version = -1;
     effect(() => {
-      if (!this.store.visible()) return;
+      if (!this.store.visible() || !this.store.ready()) return;
       const failed = this.store.error() !== null;
       if (this.store.following() && !failed) version = this.workspace.dataVersion();
       const key = JSON.stringify([this.store.sources(), this.store.windowMin(), this.store.following() ? version : null, this.store.attempt()]);
