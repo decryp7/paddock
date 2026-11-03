@@ -13,6 +13,8 @@ interface HealthState {
   /** Every entry before the filter, and how many are the OS's and how many signed (the toggles show them). */
   startupCounts: { total: number; os: number; signed: number };
   startupLoaded: boolean;
+  /** What the startup list could not read; the list is partial while this is not empty. */
+  startupUnavailable: string[];
   startupError: CommandError | null;
 }
 
@@ -23,6 +25,7 @@ const initial: HealthState = {
   startup: [],
   startupCounts: { total: 0, os: 0, signed: 0 },
   startupLoaded: false,
+  startupUnavailable: [],
   startupError: null,
 };
 
@@ -46,7 +49,7 @@ export const HealthStore = signalStore(
         patchState(store, { startupError: null });
         try {
           const o = await backend.startupOverview(filter);
-          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true });
+          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true, startupUnavailable: o.unavailable });
         } catch (e) {
           patchState(store, { startupError: toCommandError(e) });
         }
