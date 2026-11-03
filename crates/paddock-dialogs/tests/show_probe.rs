@@ -517,18 +517,17 @@ fn check(
     };
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole
     // footer is inside it.
-    // A frame shorter than the dialog floor (`DIALOG_MIN`) is shown at the floor: the content never needs more.
-    // ADR 0043: every kind has the 200 px floor; a viewer opens at min(content, preferred) (preferred 560).
-    let floor = paddock_dialogs::contract::DIALOG_MIN.height;
-    let expected = match spec().expect {
-        Expect::Viewer => measured
-            .min(paddock_dialogs::contract::VIEWER_MIN.height)
-            .max(floor),
-        _ => measured.max(floor),
+    // ADR 0043: decision and form max(200, content), a viewer max(560, content); where the work area cannot hold that,
+    // the window is clamped to it (the most a screen allows, nothing cut off).
+    let floor = match spec().expect {
+        Expect::Viewer => paddock_dialogs::contract::VIEWER_MIN.height,
+        _ => paddock_dialogs::contract::DIALOG_MIN.height,
     };
+    let expected = measured.max(floor);
+    let clamped = fits_work_area_exactly(app, &label);
     let wrong = match spec().expect {
         Expect::Tool => r.inner < floor,
-        _ => (r.inner - expected).abs() >= 1.0,
+        _ => (r.inner - expected).abs() >= 1.0 && !(r.inner < expected && clamped),
     };
     if wrong {
         failures.push(format!(
@@ -556,6 +555,22 @@ fn check(
         eprintln!("show_probe: window {}", geometry(app, &label));
     }
     failures
+}
+
+/// Whether the window fills the work area's height to within the frame's invisible borders: the sign that a size too tall for
+/// the screen was clamped to it and not given up short of it.
+fn fits_work_area_exactly(app: &tauri::AppHandle<Wry>, label: &str) -> bool {
+    let Some(w) = app.get_webview_window(label) else {
+        return false;
+    };
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let outer = f64::from(w.outer_size().unwrap_or_default().height) / scale;
+    let work = w
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map_or(0.0, |m| f64::from(m.work_area().size.height) / scale);
+    outer <= work + 16.0 && work - outer <= 16.0
 }
 
 /// The window as the OS has it (physical px, and the logical size from its scale), for the run record.

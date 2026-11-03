@@ -34,5 +34,35 @@ what was run, where, and what it showed; a section is added per run, never rewri
 - **Message-only window tests** (`edge::windows::tests`) in `paddock-win11-test` (x64 exe from `cargo xwin`, from
   snapshot `gui-session-tools`, reverted afterwards): 15 `edge::` tests pass. The first run hung because
   `DefWindowProc` enters a modal loop on `SC_SIZE` and `SC_MOVE`; the test no longer sends `WM_SYSCOMMAND`.
-- **Real dialogs at 100, 125 and 150 %:** not run yet (waiting for the VM); to be added here with screenshots in
-  `scratch/dialog-edge-shots/`.
+## Windows 11 (VM): real dialogs at 100, 125 and 150 %
+
+- **What:** `show_probe` (x64 exe from `cargo xwin`, tag `feat/dialog-size-to-content-edges` at the commit that adds
+  this section) in `paddock-win11-test` from snapshot `gui-session-tools`, in the auto-logon console session (a scheduled
+  task with `/it`), once per kind, with the user's scale set through `LogPixels` 96, 120 and 144 plus a restart each.
+  The shell-demo `dist` and the capability files are copied beside the exe (`PADDOCK_PROBE_CRATE_DIR`). The probe holds
+  each window up (`PADDOCK_PROBE_HOLD`) while the script takes a full-screen, DPI-aware screenshot. The VM was reverted
+  to `gui-session-tools` afterwards. Screen 1024x768; the work area is 720, 708 and 696 physical px high at the three scales
+  (taskbar), so 563/464 logical at 125/150 %. Screenshots: `scratch/dialog-edge-shots/<scale>-<kind>.png` (for
+  independent review, ER-23); the shot is taken when the page reports, so a window may still be fading in.
+- **Judged:** shown by its ready; the page's viewport equals max(floor, content) (decision, form: 200; viewer: 560), or
+  the work area when that cannot hold it; no scroll; the footer is fully inside the viewport. The window's logical size
+  is its physical inner size over its scale.
+
+| Kind | Scale | Window, logical (physical) | Viewport | Result |
+|---|---|---|---|---|
+| decision `sd.confirm-reset` | 100 / 125 / 150 % | 400x200 (400x200, 500x250, 600x300) | 200 px, content 148 | pass |
+| form `sd.rename` | 100 / 125 / 150 % | 400x200 (400x200, 500x250, 600x300) | 200 px, content 145 | pass |
+| viewer `sd.about` | 100 % | 720x560 (720x560) | 560 px, content 174 | pass |
+| viewer `sd.about` | 125 % | 680x535 (850x669) | 536 px: clamped to the work area | pass |
+| viewer `sd.about` | 150 % | 680x433 (1020x649), at 0,0 | 433 px: clamped to the work area | pass |
+| tool `pd.settings` | 100 % | 768x540 | 540 px | pass |
+| tool `pd.settings` | 125 % | 614x425 | 426 px | pass |
+| tool `pd.settings` | 150 % | 512x348 | 349 px | pass |
+
+- **Reading the table:** decisions and forms are the exact logical size at every scale (the rounding is one `ceil` in
+  physical px) and sit inside the work area. A viewer cannot be 560 px tall where the work area is 464 to 566 logical px:
+  it is clamped to the work area less its visible frame (the floor is lowered to what the screen allows, ADR 0043 §4).
+  A tool is declared 880x620; on this small screen the 75 % cap (`CAP_FRACTION`) of the work area gives 768x540 at 100 %,
+  which is correct, not a defect; at 150 % the work area is 683x464 logical, so 512x348.
+- **Not covered:** a scale change with a dialog open (WM_DPICHANGED with the suggested rectangle; ADR 0040's DPI-change
+  step), a second monitor, user resize and snap. These need the VM-smoke harness (WP-5).
