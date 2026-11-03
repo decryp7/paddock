@@ -71,6 +71,7 @@ fn tag_error_code(v: &ErrorCode) -> &'static str {
         ErrorCode::Timeout => "Timeout",
         ErrorCode::Busy => "Busy",
         ErrorCode::Internal => "Internal",
+        ErrorCode::NeedsConsent => "NeedsConsent",
     }
 }
 
@@ -78,6 +79,7 @@ fn tag_live_detail(v: &LiveDetail) -> &'static str {
     match v {
         LiveDetail::Summary => "Summary",
         LiveDetail::Processes => "Processes",
+        LiveDetail::Tray => "Tray",
     }
 }
 
@@ -218,6 +220,8 @@ fn tag_request(v: &Request) -> &'static str {
         Request::JobResult { .. } => "JobResult",
         Request::DiskVolumes => "DiskVolumes",
         Request::StartDiskScan { .. } => "StartDiskScan",
+        Request::ForgetSavedDiskMap { .. } => "ForgetSavedDiskMap",
+        Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
         Request::CancelDiskScan { .. } => "CancelDiskScan",
         Request::DiskScans => "DiskScans",
         Request::DiskChildren { .. } => "DiskChildren",
@@ -314,11 +318,12 @@ fn error_code_samples() -> Vec<ErrorCode> {
         Timeout,
         Busy,
         Internal,
+        NeedsConsent,
     ]
 }
 
 fn live_detail_samples() -> Vec<LiveDetail> {
-    vec![LiveDetail::Summary, LiveDetail::Processes]
+    vec![LiveDetail::Summary, LiveDetail::Processes, LiveDetail::Tray]
 }
 
 fn process_ref() -> ProcessRef {
@@ -457,6 +462,7 @@ fn request_samples() -> Vec<Request> {
             group: Some(s("g")),
             phase: Some(bench::BenchPhase::Before),
             disk_mib: Some(64),
+            allow_battery: true,
         },
         Request::CancelBenchmark,
         Request::DeleteBenchmark { id: s("b1") },
@@ -518,7 +524,10 @@ fn request_samples() -> Vec<Request> {
         Request::DiskVolumes,
         Request::StartDiskScan {
             target: DiskTarget::Folder { path: s("/x") },
+            replaces: Some(1),
         },
+        Request::ForgetSavedDiskMap { scan: 1 },
+        Request::ForgetSavedDiskMaps,
         Request::CancelDiskScan { scan: 1 },
         Request::DiskScans,
         Request::DiskChildren {
@@ -571,6 +580,10 @@ fn disk_status() -> dyno_core::disk::scan::DiskScanStatus {
         eta_seconds: None,
         hidden_bytes: None,
         scanned_at: None,
+        origin: ScanOrigin::Saved { saved_at: Timestamp(3) },
+        changed_bytes: Some(-5),
+        replaces: Some(1),
+        not_saved: Some(NotSaved::Failed),
     }
 }
 
@@ -822,6 +835,7 @@ fn the_source_scan_names_a_missing_variant() {
 const JSON_ONLY: &[(&str, usize)] = &[
     ("network.rs", 2),                    // OwnerJson (mirrored by OwnerBinary) and NetEvent
     ("bench.rs", 1),                      // StatusJson (mirrored by a binary form)
+    ("bench/wire.rs", 1),                 // the JSON lines a dyno-bench child writes on stdout; never crosses the app-agent wire
     ("widgets/popover_values/mod.rs", 1), // PopoverSurfaceValues, carried by `JsonOnLink`
 ];
 
