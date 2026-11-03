@@ -1,6 +1,7 @@
 # 0030. The benchmark tool: per-drive disk, CPU with a sustained run, memory bandwidth and latency, GPU through wgpu
 
-- Status: Proposed (2026-11-03). Numbered 0030: 0029 is left for the parallel cached-views ADR (README: numbers are
+- Status: Accepted (2026-11-03; user decisions D1 to D10 as recommended; independent review approved after one round of
+  changes). Numbered 0030: 0029 is left for the parallel cached-views ADR (README: numbers are
   allocated at merge time; renumber on a clash). Revised 2026-11-03 after an independent review (verdict: changes; the
   six findings confirmed; two P1 and eight P2 taken into the text, marked "review").
 - Date: 2026-11-03
@@ -395,7 +396,11 @@ Total about **25 agent-days** (re-estimated after review: the third-OS signing a
 I/O and GPU on the Windows and Linux runners, the Linux unit handling). Order: B2's Linux spike and B1 first; B3 to B6
 in parallel; B0 and B6a with the kinds they ship; B7 after B1/B2; B8 last.
 
-## Decisions for the user (with recommendations)
+## Decisions (accepted by the user 2026-11-03)
+
+The user accepted D1 to D10 as recommended below on 2026-11-03; each recommendation is now the decision. Where the
+review offered an alternative (D3: 5 repetitions; D8: hand-written `#[target_feature]` dispatch; D9: drop the 1.0
+history), the recommended option was chosen.
 
 Each recommendation below is the author's after the independent review; where the review changed or qualified it, the
 line says "review".

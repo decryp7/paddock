@@ -30,7 +30,7 @@ so the numbering is fixed.
 | [0024](0024-local-days-through-a-zone-port.md) | Local days, hours and minutes come from a time-zone port read from the OS (daylight saving included), never a stored offset |
 | [0025](0025-supervisor-state-machine.md) | The agent supervisor is a pure state machine with one owner thread: explicit phases, numbered answers, quit decided once, a bounded model check with the five historical bugs as mutants |
 | [0026](0026-macos-sockets-from-the-kernel-list.md) | macOS sockets come from the kernel's `pcblist_n` lists, never from a sweep over other programs' descriptors (Accepted) |
-| [0030](0030-benchmark-tool.md) | Proposed: the benchmark tool: per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
+| [0030](0030-benchmark-tool.md) | The benchmark tool (Accepted): per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.
