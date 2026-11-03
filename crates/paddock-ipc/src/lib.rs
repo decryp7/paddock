@@ -4,6 +4,7 @@
 //! - [`frame`]: the frame codec (4-byte length, postcard [`Frame`]); [`wire`]: message bodies and [`Json`].
 //! - [`endpoint`]: a private address (a Unix socket in a 0700 folder, an owner-only named pipe; never TCP).
 //! - [`token`]: the per-launch secret; [`handshake`]: `Hello`/`Welcome` with token, protocol version and peer pid.
+//! - [`body`]: a [`peer`] whose calls, answers and pushes are one body type (a protocol enum), for apps with one wire enum.
 //! - [`peer`]: a connection after the handshake: calls both ways, streams with credits, cancel, pushes, typed errors;
 //!   one frame over the limit fails one call, not the connection.
 //! - [`identity`], [`trust`], [`limits`]: a system endpoint's side of ADR 0027 §2: the caller's account from OS facts (never a
@@ -18,6 +19,7 @@
 //! The reference for the wire (framing, encoding, handshake, versioning, streams, limits) is `docs/ipc-wire.md` in the
 //! repository.
 
+pub mod body;
 pub mod child;
 pub mod endpoint;
 pub mod error;
@@ -32,6 +34,7 @@ pub mod token;
 pub mod trust;
 pub mod wire;
 
+pub use body::{BodyHandler, BodyOptions, BodyPeer};
 pub use endpoint::Access;
 pub use error::{IpcError, RemoteError, codes, panic_message};
 pub use frame::{Frame, FrameLimit, ProtocolVersion, Skew};
