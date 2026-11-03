@@ -241,6 +241,32 @@ pub enum HelperState {
     Ready,
 }
 
+/// What the user asked of the helper in Settings; each runs as a job with phases (ADR 0027 section 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HelperAction {
+    /// Turn on administrator readings (the install through the OS's one prompt).
+    TurnOn,
+    /// Install again over a helper that is missing something (one prompt).
+    Repair,
+    /// Install the bundled newer helper (one prompt).
+    Update,
+    /// Turn the helper off (it removes itself; the prompt only when it cannot answer).
+    TurnOff,
+}
+
+impl HelperAction {
+    /// The sentence for the job card.
+    pub fn title(self) -> &'static str {
+        match self {
+            HelperAction::TurnOn => "Turning on administrator readings",
+            HelperAction::Repair => "Repairing the helper",
+            HelperAction::Update => "Updating the helper",
+            HelperAction::TurnOff => "Turning off administrator readings",
+        }
+    }
+}
+
 /// The helper for the Settings page and the "turn on" dialog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -466,7 +492,13 @@ mod tests {
                 bytes_in: 1,
                 bytes_out: 2,
             }])),
-            HelperMessage::Reply(HelperReply::About(info("1", 1), CallerView { scope: Visibility::Full, tools: vec![] })),
+            HelperMessage::Reply(HelperReply::About(
+                info("1", 1),
+                CallerView {
+                    scope: Visibility::Full,
+                    tools: vec![],
+                },
+            )),
             HelperMessage::Reply(HelperReply::Log(vec!["a".into()])),
             HelperMessage::Reply(HelperReply::LoginItems(LoginItemsReply {
                 items: vec![],

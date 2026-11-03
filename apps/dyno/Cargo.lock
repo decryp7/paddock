@@ -1145,6 +1145,7 @@ name = "dyno-agent"
 version = "1.0.0"
 dependencies = [
  "dyno-core",
+ "dyno-helper-service",
  "dyno-platform",
  "dyno-plugin-host",
  "libc",
@@ -1154,6 +1155,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-proc",
+ "paddock-service",
  "paddock-widgets",
  "plist",
  "rusqlite",

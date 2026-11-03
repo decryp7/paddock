@@ -92,6 +92,25 @@
         "spec": "softwareInventory"
       }
     },
+    {
+      "startJob": {
+        "spec": {
+          "helper": {
+            "action": "turnOn"
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "helper": {
+            "action": "turnOff"
+          }
+        }
+      }
+    },
+    "helperStatus",
     "jobs",
     {
       "cancelJob": {

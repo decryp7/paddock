@@ -74,6 +74,11 @@ pub enum JobSpec {
     AppUsage,
     /// The installed software (runs the package tools).
     SoftwareInventory,
+    /// Turns the privileged helper on, repairs, updates or turns it off (ADR 0027).
+    Helper {
+        /// What to do.
+        action: crate::helper_wire::HelperAction,
+    },
 }
 
 impl JobSpec {
@@ -88,6 +93,7 @@ impl JobSpec {
             JobSpec::BootAnalysis => JobKind::BootAnalysis,
             JobSpec::AppUsage => JobKind::AppUsage,
             JobSpec::SoftwareInventory => JobKind::SoftwareInventory,
+            JobSpec::Helper { .. } => JobKind::Helper,
         }
     }
 }
@@ -112,6 +118,8 @@ pub enum JobKind {
     AppUsage,
     /// Listing the installed software.
     SoftwareInventory,
+    /// Setting up the privileged helper.
+    Helper,
 }
 
 impl JobKind {
@@ -126,6 +134,7 @@ impl JobKind {
             JobKind::BootAnalysis => "Analysing boots",
             JobKind::AppUsage => "Reading app usage",
             JobKind::SoftwareInventory => "Listing installed software",
+            JobKind::Helper => "Setting up administrator readings",
         }
     }
 
@@ -140,6 +149,7 @@ impl JobKind {
             JobKind::BootAnalysis => "boot-analysis",
             JobKind::AppUsage => "app-usage",
             JobKind::SoftwareInventory => "software-inventory",
+            JobKind::Helper => "helper",
         }
     }
 
@@ -154,6 +164,7 @@ impl JobKind {
             JobKind::BootAnalysis,
             JobKind::AppUsage,
             JobKind::SoftwareInventory,
+            JobKind::Helper,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -180,6 +191,8 @@ pub enum JobOutput {
     AppUsage(Box<UsageReport>),
     /// From [`JobSpec::SoftwareInventory`].
     Software(Box<SoftwareInventory>),
+    /// From [`JobSpec::Helper`]: the helper as it is now.
+    Helper(Box<crate::helper_wire::HelperStatus>),
 }
 
 #[cfg(test)]

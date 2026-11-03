@@ -271,6 +271,8 @@ pub struct Shared {
     pub baselines: crate::baselines::BaselineCentre,
     /// The disk map: volumes and scans (read-only).
     pub disk: Arc<crate::disk::centre::DiskCentre>,
+    /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
+    pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -397,6 +399,7 @@ impl Shared {
                 cores,
                 settings_limits,
             )),
+            helper: crate::helper_os::centre(),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

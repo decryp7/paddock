@@ -472,6 +472,9 @@ pub enum Request {
         /// Which placements.
         placements: Vec<paddock_widgets::PlacementId>,
     },
+    /// Whether the privileged helper is off, running, outdated and so on, with the audit entries this account may read
+    /// (ADR 0027). A query; answers [`Reply::HelperStatus`]. Appended (needs the protocol bump the steward makes).
+    HelperStatus,
 }
 
 /// Dyno's own cost.
@@ -762,6 +765,8 @@ pub enum Reply {
     WidgetLayout(Box<crate::widgets::SurfaceView>),
     /// The popup's values for the asked placements.
     PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
+    /// The helper's state. Appended.
+    HelperStatus(Box<crate::helper_wire::HelperStatus>),
 }
 
 /// The inventory report that was written.
@@ -842,6 +847,7 @@ impl Reply {
             Reply::JobOutput(x) => v(x),
             Reply::WidgetLayout(x) => v(x),
             Reply::PopoverValues(x) => v(x),
+            Reply::HelperStatus(x) => v(x),
         }
     }
 }

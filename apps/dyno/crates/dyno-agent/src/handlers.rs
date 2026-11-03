@@ -217,6 +217,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             ))))
         }
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
+        Request::HelperStatus => Ok(Reply::HelperStatus(Box::new(shared.helper.status()))),
         Request::Issues { query } => crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o))),
         Request::StartJob { spec } => shared.jobs.start(shared, spec).map(|s| Reply::Job(Box::new(s))),
         Request::Jobs => Ok(Reply::Jobs(shared.jobs.statuses())),

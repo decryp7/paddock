@@ -90,7 +90,7 @@ impl<T: HelperTransport> HelperLink<T> {
     /// cannot exist (an AppImage, no polkit).
     pub fn status(&self, host: HelperHost, supported: Result<(), String>, our_version: &str) -> HelperStatus {
         let probe = match self.call("info", HelperRequest::Info) {
-            Ok(HelperReply::About(info)) => {
+            Ok(HelperReply::About(info, _)) => {
                 // The audit log is for the owner and administrators; a refusal just means an empty list.
                 let recent = match self.call("audit", HelperRequest::Audit(STATUS_AUDIT)) {
                     Ok(HelperReply::Entries(e)) => e,
@@ -180,7 +180,8 @@ impl<T: HelperTransport> FirewallReader for HelperLink<T> {
 mod tests {
     use super::*;
     use dyno_core::firewall::RuleSource;
-    use dyno_core::helper_wire::{codes, HelperInfo, HELPER_API, MIN_HELPER_VERSION};
+    use dyno_core::helper_policy::Visibility;
+    use dyno_core::helper_wire::{codes, CallerView, HelperInfo, HELPER_API, MIN_HELPER_VERSION};
     use paddock_jobs::time::FakeClock;
     use std::sync::Mutex;
 
@@ -207,12 +208,18 @@ mod tests {
     }
 
     fn about(version: &str, api: u32) -> HelperReply {
-        HelperReply::About(HelperInfo {
-            version: version.into(),
-            api,
-            host: HelperHost::Linux,
-            agent_exe: "/x".into(),
-        })
+        HelperReply::About(
+            HelperInfo {
+                version: version.into(),
+                api,
+                host: HelperHost::Linux,
+                agent_exe: "/x".into(),
+            },
+            CallerView {
+                scope: Visibility::Full,
+                tools: vec![],
+            },
+        )
     }
 
     #[test]
