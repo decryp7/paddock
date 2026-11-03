@@ -1,17 +1,20 @@
 # 43. Dialogs size to their content: a declared size mode, a continuous measure loop, logical units converted once at the OS edge
 
 - Status: Proposed (2026-11-03). Asked for by the user on 2026-11-03 ("should Paddock dialogs use the same design as
-  WPF's `Window.SizeToContent`?"). Not reviewed yet; needs an independent review (rule 22 / ER-23 for its figures, rule
-  40 / ER-21 for the redesign) and the user's answers to the open decisions below.
+  WPF's `Window.SizeToContent`?"). Independent review round 1 (2026-11-03) asked for changes; this revision answers its
+  three P1 and nine P2 points. The user decided D1-D6 the same day (Decisions of the user, below). Stays Proposed until
+  the delta review and the Windows VM findings (placeholder section).
 - Date: 2026-11-03
 - Related: rule 17 (every dialog is a real OS window), rule 40 / ER-21 (recurring bugs mean a missing design rule),
   rule 55 / ADR 0034 (one implementation per mechanism), rule 56 / ER-27 (logs explain every failure), rule 57 / ER-28
   (a cause is confirmed only by a run without it), rule 60 (ADR 0041: tests control time); ADR 0009 (dialog kinds and
   contracts), ADR 0016 (dialog window sizing contract; this ADR **amends its decisions 1, 5 and 6**), ADR 0026 (the
   shared dialog API; this ADR **amends §1's height column and §4.2, §4.3 and §4.5**), ADR 0040 (Windows GUI test
-  session; this ADR **refines its "Dialogs at two scales" step**), ADR 0022 G.7 (no larger `crates/` change inside an
-  app's release window).
-- Evidence read at `origin/main` `a18e18801` and on `origin/fix/dialog-sizing` `08ad47b22`, 2026-11-03.
+  session; this ADR **refines its "Dialogs at two scales" step and adds a DPI-change step**), rule 1 (one release at a
+  time: shared `crates/` and `ui/` changes ship inside one app's release), rule 43 (a shared change and its adoption
+  land together); Dyno 1.1.0 (where this ships).
+- Evidence read at `origin/main` `a18e18801`, on `origin/fix/dialog-sizing` `08ad47b22`, and in tao 0.37.2's
+  `src/platform_impl/windows/event_loop.rs` (the version in the local Cargo registry), 2026-11-03.
 
 ## Context
 
@@ -138,7 +141,7 @@ dialog: fixed width, content height, re-layout on content change. AutoScaleMode 
 
 ## Decision
 
-### 1. A declared size mode per dialog, in the Rust contract
+### 1. A declared size mode per dialog kind, in the Rust contract
 
 `paddock-dialogs` gets `SizeMode`, generated into TypeScript like the kind table:
 
@@ -148,151 +151,243 @@ pub enum SizeMode {
     Manual,
     /// Width fixed (declared, then remembered or dragged); height follows the content.
     Height { shrink: Shrink },
-    /// Width follows the content's max-content width within [min_width, max_width]; height follows the content.
-    WidthAndHeight { shrink: Shrink },
 }
 pub enum Shrink { Always, Never }   // Never: a viewer's result does not shrink under the reader (today's grows_only)
 ```
 
-`KindPolicy` loses `fits_content` and `grows_only` and gains `size_mode`; a contract may override it only within what
-its kind allows (validated where the table is parsed, a `ContractError` otherwise):
+`KindPolicy` loses `fits_content` and `grows_only` and gains `size_mode`. **The mode is the kind's; a contract cannot
+override it** (review round 1, YAGNI). A dialog that needs another behaviour is another kind, which is a decision for an
+ADR, not a field.
 
-| Kind | Default mode | Allowed | Notes |
-|---|---|---|---|
-| `decision` | `Height { shrink: Always }` | `Height`, `WidthAndHeight` (D1) | width `narrow` 400 or `medium` 560 |
-| `form` | `Height { shrink: Always }` | `Height` | no declared height (unchanged from ADR 0026) |
-| `viewer` | `Height { shrink: Never }` | `Height`, `Manual` | starts at its preferred height when content is shorter (D2) |
-| `tool` | `Manual` | `Manual` | preferred 960x680, OS minimum = measured minimum content |
+| Kind | Mode | Notes |
+|---|---|---|
+| `decision` | `Height { shrink: Always }` | width `narrow` 400 or `medium` 560 |
+| `form` | `Height { shrink: Always }` | no declared height (unchanged from ADR 0026) |
+| `viewer` | `Height { shrink: Never }` | opens at `min(content, preferred)`, grows to the cap (D2); remembers width and offset (D3) |
+| `tool` | `Manual` | preferred 960x680, OS minimum = measured minimum content |
 
-Constraints are WPF's Min/Max: `min = max(kind floor, measured min content)`, `max = work area − frame` on the
+WPF's `Width` and `WidthAndHeight` are not adopted now (see Alternatives); the enum is closed and a variant is added by
+a later ADR if a dialog needs it.
+
+Constraints are WPF's Min/Max: `min = max(kind floor, measured min content)`, `max = work area − visible frame` on the
 window's current monitor; the 75 % cap (`CAP_FRACTION`) stays as the limit of the *preferred* (content) size and never
 pushes below `min` (ADR 0016 decision 4, unchanged).
 
-**User resize switches to `Manual` for the rest of this opening** (WPF). The remembered state stays as ADR 0026 §1
-says (a decision remembers its offset, a form its width, a viewer and a tool their size); a dialog opens in its
-declared mode every time (D3).
+**A user resize switches the window to `Manual` for the rest of this opening** (WPF; D4, D6). Each opening starts in
+its kind's mode, and a `Height` window restores no remembered height (D3): a decision remembers its offset, a form and a
+viewer their width and offset, a tool its size.
 
 ### 2. One measure loop in the page; the handshake no longer sizes
 
 The DOM is the measurer. `DialogFrame` owns a single `SizeLoop`:
 
 - **What is measured.** `.pd-frame-content` is a natural-height block inside the scrolling body; the measure is header
-  + alert + body padding + content + footer (`DialogFrame.measure`, unchanged in substance), in CSS px. In `Height`
-  mode the frame is laid out at the window's current width; before the window is shown, at the pinned contract width
-  (method d). In `WidthAndHeight` mode a second synchronous read lays the content out at `width: max-content` clamped to
-  `[min_width, max_width]` and then measures the height at that width.
+  + alert + body padding + content + footer (`DialogFrame.measure`, unchanged in substance), in CSS px, at the window's
+  current width; before the window is shown, at the pinned contract width (method d).
+- **No scrollbar feedback.** `.pd-frame-body` gets `scrollbar-gutter: stable`, so the content's width, and with it its
+  wrapping, is the same whether or not the body scrolls. Without that, a window clamped at the cap shows a scrollbar,
+  the content re-wraps narrower and taller, the next measure differs, and the loop can oscillate. Where a platform
+  ignores `scrollbar-gutter` (WebKitGTK and WKWebView overlay scrollbars take no width, so there is nothing to re-wrap;
+  to be confirmed per engine in WP-3), the content is measured at the body's `clientWidth` minus nothing, which is the
+  same width either way.
 - **When.** Every layout invalidation the frame can see: the ResizeObserver on the content root and the footer, the
   MutationObserver on `<html>` settings attributes, `document.fonts` `loadingdone`, the content's `requestFit()`, and
   a `dialog://remeasure` event from Rust (§4). Coalesced to one send per animation frame once shown. Before the window
-  is shown there are no frames, so the loop also runs once synchronously when the content is mounted and the fonts are
+  is shown there are no frames, so the loop also runs synchronously when the content is mounted and the fonts are
   ready, and once more after every awaited step of the start (a font that started loading, the `dialog_ready` round
   trip). These are calls of the **same** function, not a second measuring path.
-- **Baseline.** The loop's baseline is the last measure *sent*, never one read later (the `08ad47b22` lesson). Every
-  send carries a sequence number.
-- **Wire.** One command, `dialog_measure { seq, measure }`, replaces both `dialog_ready { measure }` and
-  `dialog_fit { measure }`. `dialog_ready { seq }` stays only as "the page has sent measure `seq`; show me": it carries
-  no size. Rust applies the measure with the highest `seq` it has received, whatever order the invokes arrive in, and
-  logs a lower one as stale and drops it.
-- `Measure` gains `overflow: bool` (the body scrolls: `scrollHeight > clientHeight + 1`), so Rust's log and the
-  Windows GUI judge can see a scrollbar without reaching into the page (ER-27).
+- **Baseline.** The loop's baseline is the last measure *sent*, never one read later (the `08ad47b22` lesson).
+- **Convergence invariant.** One content change produces **at most two sends**: the measure of the change, and at most
+  one more after Rust's resize re-lays the page out (a rounding of the new size can move one line). A third send without
+  a new trigger (content, settings, fonts, `requestFit`, `remeasure`, a user resize) is a loop: the frame stops sending,
+  logs `dialog size loop did not settle` with the last three measures (`console.warn`, forwarded to the app log), and
+  waits for the next trigger. The browser e2e and the Rust property test both check the invariant (check 2, 4).
+- **Ratchets are forbidden in `Height` content.** A content root or a direct child whose height follows the window
+  (`vh`, a `%` height, `flex-grow` along the block axis, `height: 100%`) grows with the window and so grows the measure;
+  with `shrink: Never` that ratchets the window to the cap. Check 3c rejects them in `decision`, `form` and `viewer`
+  content; a `tool` (`Manual`) may use them.
+- **Identity of a page.** `dialog_take_input` returns an `epoch` (a counter per window, raised on every page load,
+  including a reload by `paddock-startup`'s watchdog). Every measure carries `(epoch, seq)`; a new epoch resets the
+  order, so a reloaded page's `seq = 1` is not dropped as stale.
+- **Wire** (generated, §3): `dialog_measure { epoch, seq, measure }` replaces both `dialog_ready { measure }` and
+  `dialog_fit { measure }`; `dialog_ready { epoch, seq }` says "measure `seq` is the one to show at" and carries no
+  size. `Measure` gains `overflow: bool` (the body scrolls: `scrollHeight > clientHeight + 1`), so Rust's log and the
+  Windows GUI judge see a scrollbar without reaching into the page (ER-27).
 
-### 3. Rust converts once, at the OS edge, and owns the mode
+### 3. Rust converts once, at the OS edge, on the main thread, and owns the mode
 
 All sizing of dialog windows happens in `paddock-dialogs`:
 
-- **A pure size state machine** in `window.rs` (or a new `size.rs`): `SizeState { mode, last: Option<(seq, Measure)>,
-  applied: Option<PhysicalSize>, scale, frame }` with pure transitions `on_measure`, `on_resized`, `on_scale_changed`,
-  `on_monitor_changed`, each returning a `Plan { inner: LogicalSize, min: LogicalSize, move_to, mode_change }`. Today's
-  `plan_fit`, `fit_target`, `zoom_after` and `viewport_delta` fold into it; property tests cover it as ADR 0016's check
-  3 required.
-- **An edge module per OS** (`edge/windows.rs`, `edge/macos.rs`, `edge/linux.rs`, behind the `tauri` feature) answers
-  three questions in physical px for the window's current monitor: the frame for a given client size and DPI, the work
-  area, and the scale. Windows: `GetDpiForWindow` and `AdjustWindowRectExForDpi` with the window's own style and
-  extended style (computed for the target DPI, not read off a hidden window), the monitor's work area from
-  `GetMonitorInfoW` (not re-checked today). macOS: `frameRectForContentRect:styleMask:` in points (scale-independent), `visibleFrame` of the
-  screen (not re-checked today). Linux: outer minus inner after the window is mapped (GTK's client-side decorations give no API for it), and the
-  monitor workarea from GDK; the frame is re-read on each fit. CSS px become logical px by the page's zoom
-  (`devicePixelRatio / scale`), read fresh with every measure because the page now re-measures after a scale change
-  (§4), so `zoom_after`'s "keep the old zoom" rule goes.
+- **One pure size state machine** (`size.rs`): `SizeState { mode, epoch, last: Option<(seq, Measure)>, pending:
+  VecDeque<Request>, scale, frame, show: ShowState }`, where a `Request` is the physical inner size Rust asked the OS
+  for and why. Pure transitions `on_measure`, `on_ready`, `on_resized`, `on_user_resize_started`, `on_scale_changed`,
+  `on_moved` each return a `Plan { inner, min, move_to, mode_change, show }`. Today's `plan_fit`, `fit_target`,
+  `zoom_after` and `viewport_delta` fold into it; property tests cover it (check 2).
+- **The main thread is the only place that sizes.** Tauri runs `async` commands off the main thread and queues their
+  window calls; a `set_size` from a command can therefore land after a `Resized` the state machine has not seen yet.
+  Commands (`dialog_measure`, `dialog_ready`) only post the transition to the main thread (`run_on_main_thread`), where
+  the state machine, the OS calls and the window events are ordered. Each `set_size` pushes a `Request`; a `Resized`
+  equal (within 1 physical px per edge) to a pending request pops it and every older one; one that matches none is
+  **unexplained**, and is logged with the pending queue.
+- **What counts as a user resize** is decided by the OS's own signal, not by the comparison:
+  - **Windows:** a `WM_SIZING` (sent only "to a window that the user is resizing",
+    <https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-sizing>, read 2026-11-03) or a `WM_SYSCOMMAND` with
+    `SC_SIZE` (keyboard size). **Not** `WM_ENTERSIZEMOVE`: it is also sent for a move, which tao already tracks as
+    `MARKER_IN_SIZE_MOVE` (tao 0.37.2 `event_loop.rs:969-983`). The hook is a `SetWindowSubclass` procedure on dialog
+    windows only, chained after tao's own subclass.
+  - **macOS:** `NSWindowWillStartLiveResizeNotification` ("the user is about to resize the window"); a move is not a
+    live resize.
+  - **Linux X11:** no such signal; an unexplained `Resized` after the configure for every pending request has arrived
+    is taken as a user resize.
+  - **Linux Wayland:** the compositor may configure the window at any time (tiling, maximise); an unexplained configure
+    is a user resize (D6).
+  - A user resize sets `Manual`, sends `dialog://size-mode { mode }` (the page sets `data-size-mode`), and logs it. A
+    move never changes the mode (check 2 and 5).
+- **An edge module per OS** (`edge/windows.rs`, `edge/macos.rs`, `edge/linux.rs`, behind the `tauri` feature), in
+  physical px for the window's current monitor:
+  - **Windows:** the scale from `GetDpiForWindow`; the frame for a client size from `AdjustWindowRectExForDpi` with the
+    window's own style and extended style at that DPI (what `SetWindowPos` needs). That frame **includes the invisible
+    resize borders** of Windows 10/11, so the clamp to the work area and `keep_on_monitor` use the **visible** frame:
+    `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`, "the extended frame bounds rectangle in screen space"
+    (<https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute>, updated 2026-03-09),
+    minus the client rectangle. The work area comes from `GetMonitorInfoW` (not re-checked today).
+  - **macOS:** `frameRectForContentRect:styleMask:` in points (scale-independent), the screen's `visibleFrame` (not
+    re-checked today).
+  - **Linux X11:** outer minus inner after the window is mapped (GTK client-side decorations give no API), re-read on
+    each fit; the monitor's work area from GDK.
+  - **Linux Wayland:** a client cannot place a top-level window, so `set_position` does nothing and `keep_on_monitor`
+    has no effect; there is no work-area protocol, so the work area is the full monitor. The clamp therefore uses the
+    monitor minus a margin (proposed 48 logical px top and bottom, for panels), and the dialog relies on the
+    compositor to place it.
+  - CSS px become logical px by the page's zoom (`devicePixelRatio / scale`), read fresh with every measure, because
+    the page measures again after every scale change (§4); `zoom_after`'s "keep the old zoom" goes.
 - **Rounding once.** Logical to physical with `physical_ceil` on the client size only; the frame is added in physical
   px from the edge module, never converted back and forth.
-- **Telling a user resize from our own.** After every `set_size`, Rust reads the inner size back and records it as
-  `applied`. A `Resized` whose size differs from `applied` by more than 1 physical px on either edge, outside a pending
-  scale change, is an external resize: the mode becomes `Manual`, the page gets `dialog://size-mode { mode }` (it sets
-  `data-size-mode` on `<html>` for tests), and the log says so. On Windows the edge module also subclasses the window
-  for `WM_ENTERSIZEMOVE`/`WM_EXITSIZEMOVE` and on macOS observes `NSWindowWillStartLiveResizeNotification`, so a drag is
-  known for certain even when it ends at the applied size; on Linux the read-back comparison is the only signal. A
-  window-manager resize (Windows Snap, a tiling WM) counts as a user resize, which is what the user asked for.
-- **Logging (ER-27).** One line per transition: dialog id, window label, `Phase` (`measure`, `ready`, `scale`,
-  `monitor`, `resized`), `Seq`, `Mode` and any `ModeChange`, content and min (CSS and logical), `Zoom`, `Scale`/DPI,
-  frame, work area, requested inner logical and physical size, read-back size, `Overflow`, and whether a stale measure
-  was dropped. This extends the `Phase` line of `08ad47b22`.
+- **Show.** `dialog_ready { epoch, seq }` shows the window only once measure `(epoch, seq)` has been applied and its
+  `Resized` has arrived (or matched); if the ready arrives first, the show is held. The existing show deadline (ADR
+  0026 §4.3) is the watchdog: at the deadline the window is shown at whatever size it has, with a warning that names
+  what was missing (no measure, measure not applied, no `Resized`).
+- **Logging (ER-27).** One line per transition: dialog id, window label, `Phase` (`measure`, `ready`, `show`,
+  `scale`, `moved`, `resized`, `user-resize`), `Epoch`, `Seq`, `Mode` and any `ModeChange`, content and min (CSS and
+  logical), `Zoom`, `Scale`/DPI, frame (full and visible), work area, requested inner logical and physical size,
+  pending queue length, read-back size, `Overflow`, and stale or unexplained events. This extends the `Phase` line of
+  `08ad47b22`.
 
 ### 4. Monitor, DPI and work-area changes
 
-- **Scale change** (`ScaleFactorChanged`; on Windows `WM_DPICHANGED`): Rust first refits at once from the last logical
-  measure for the new scale and frame (so the window is never a frame at the old size), then emits
-  `dialog://remeasure`; the page's next measure (text may re-wrap at the new DPI) refits again through the normal path.
-  On Windows the edge module answers `WM_GETDPISCALEDSIZE` with the size the state machine wants for the new DPI, so
-  Windows' linear suggestion is never applied first and then corrected (D5).
-- **Monitor change without a scale change** (dragged to a monitor with a smaller work area): the next `Moved` re-checks
-  the work-area clamp; a window taller than the new work area minus its frame is clamped and the body scrolls (the
-  footer stays, because `min` is the minimum content).
-- **Work-area clamp** on every plan: inner ≤ work area − frame; `keep_on_monitor` keeps the window on its monitor
-  (unchanged); the clamp never goes below `min` unless the work area itself is smaller, which is logged.
-- **In `Manual` mode** only `min` and the clamp still apply; the content height is not applied.
+- **Scale change, and why a refit inside the event is lost.** tao 0.37.2's `WM_DPICHANGED` handler
+  (`src/platform_impl/windows/event_loop.rs:1837-2068`, read 2026-11-03) sends `ScaleFactorChanged` synchronously and
+  then calls `SetWindowPos` itself: on Windows 11 (build ≥ 22000) with the OS's `suggested_rect`, on Windows 10 with a
+  rectangle it computes. Any `set_size` made inside the event handler is overwritten by that call. Today's
+  `scale_changed` (`tauri.rs:969-983`) refits inside the event, so its result can be lost (a candidate cause in the
+  table below). The new design:
+  - the edge module answers `WM_GETDPISCALEDSIZE` with the frame size the state machine wants at the new DPI, which
+    Microsoft documents as becoming "the candidate rectangle sent to `WM_DPICHANGED`"; on Windows 11 tao then applies
+    exactly that (D5);
+  - the refit for the new scale is **posted** with `run_on_main_thread` from the `ScaleFactorChanged` handler, so it
+    runs after tao's `SetWindowPos`, and is pushed as a `Request` like any other;
+  - then Rust emits `dialog://remeasure`; the page's next measure (text may re-wrap at the new DPI) refits through the
+    normal path.
+  macOS and Linux have no such overwrite in their scale-change paths as far as read (to be confirmed in WP-2); they use
+  the same posted refit.
+- **Monitor change without a scale change** (dragged to a monitor with a smaller work area): `Moved` re-checks the
+  clamp after the move ends (on Windows at `WM_EXITSIZEMOVE`, elsewhere on the next `Moved`); a window taller than the
+  work area minus its visible frame is clamped and the body scrolls (the footer stays, `min` being the minimum content).
+- **Work-area clamp** on every plan: inner ≤ work area − visible frame; `keep_on_monitor` keeps the window on its
+  monitor (not on Wayland, above); the clamp never goes below `min` unless the work area is smaller, which is logged.
+- **In `Manual` mode** only `min` and the clamp apply; the content height is not.
 
-### 5. What is removed
+### 5. One wire definition
+
+`DialogMeasureWire` (with `epoch`, `seq`, `overflow`), `DialogReadyWire { epoch, seq }`, `DialogStart.epoch` and the
+event payloads `DialogSizeModeEvent { mode }` and `DialogRemeasureEvent { scale }` are Rust types exported with `ts-rs`
+into `ui/projects/paddock-ui/shell/generated/` (ADR 0026 §3). `io.ts` aliases the generated types and declares none of
+its own; the generator's check (`PADDOCK_WRITE_TS`) fails on drift.
+
+### 6. What is removed or frozen
 
 - The handshake measure as a source of truth: `dialog_ready` stops carrying a measure; `DialogShell.ready`'s own
   measure-and-compare (`08ad47b22`) is replaced by the loop.
 - `fits_content`, `grows_only`, `is_fitted` and the TypeScript `fitsContent`: replaced by `SizeMode`.
 - The viewport delta "taken once" (`viewport_delta_or`): the delta is part of each measure's conversion.
 - `UNMEASURED_HEIGHT` as anything but the hidden window's initial size.
-- Debrief's copy (`dialog_windows.rs`, `dialog_placement.rs`, `dialog-windows/kit/`) when Debrief 1.2 adopts the shared
-  dialogs (ADR 0026 §7; registered as copy `dialog-windows` in `docs/known-copies.toml`, rule 55).
+- **Debrief's copy is frozen now.** It is registered as copy `dialog-windows` in `docs/known-copies.toml` (line 451,
+  canonical `paddock-dialogs`, rule 55 / ADR 0034): from this ADR's acceptance it receives no sizing changes except a
+  fix that the rule 55 trailer covers. Moving Debrief's 50 dialogs onto the shared dialogs, and deleting the copy, is
+  in Debrief 1.2's plan (ADR 0026 §7), not here.
 
 ## The check (makes the class checked, rule 40)
 
-1. **Contract validation (Rust test).** Every table entry's mode is allowed for its kind; the generated TypeScript
-   equals the Rust table (the existing `PADDOCK_WRITE_TS` test extended).
-2. **Property tests (Rust, `paddock-dialogs`).** For any scale 1-3 (including 1.25, 1.5, 1.75), work area 800x600 to
-   7680x4320, frame 0-60 px, any measure and any mode: the planned inner size is ≥ `min`, ≤ work area − frame, its
-   physical size converted back is ≥ the logical request and < request + 1 physical px; `Height { shrink: Always }`
-   equals the content when it is between min and cap; a `Resized` to anything but `applied` yields `Manual`, and no
-   later `on_measure` changes the size of a `Manual` window except to raise it to a new `min`; a stale `seq` never
-   changes anything.
+Each check below says which code it exercises; one that only exercises a fake is not counted as checking Rust.
+
+1. **Contract and wire (Rust test).** Every kind has a mode; the generated TypeScript (kind table, wire types, event
+   payloads) equals the Rust types (`PADDOCK_WRITE_TS` test extended).
+2. **Property tests (Rust, `paddock-dialogs` `size.rs`).** For any scale 1-3 (including 1.25, 1.5, 1.75), work area
+   800x600 to 7680x4320, full and visible frames 0-60 px, any measure sequence and any interleaving of `on_measure`,
+   `on_resized` (matching or not), `on_user_resize_started`, `on_moved`, `on_scale_changed` and `on_ready`:
+   - the planned inner size is ≥ `min`, ≤ work area − visible frame, and its physical size converted back is ≥ the
+     logical request and < request + 1 physical px;
+   - `Height { shrink: Always }` equals the content when it is between `min` and the cap;
+   - only `on_user_resize_started` (or, on X11 and Wayland, an unexplained `Resized` with no pending request) yields
+     `Manual`; **a move never does**; a `Resized` that matches a pending request never does;
+   - no later `on_measure` changes a `Manual` window's size except to raise it to a new `min`;
+   - a lower `seq` in the same epoch changes nothing; a new epoch is accepted;
+   - the window is shown only after the ready's measure was applied, or at the deadline;
+   - a scale change yields exactly one posted refit and one `remeasure`.
 3. **Conformance check** (number assigned when it lands; C61 is the highest on `main`, C67-C73 are taken by ADRs
-   0037-0042): (a) no `set_size`/`set_min_size`/`set_position` on a dialog window outside `crates/paddock-dialogs`
-   (scanned in files that use `paddock_dialogs` or dialog labels; Debrief's registered copy is waived to its rule 55
-   tag); (b) no TypeScript calls `dialog_measure`/`dialog_ready` except `shell/dialogs/src/io.ts`; (c) a component
-   registered as a dialog sets no fixed `height`/`min-height`/`max-height` in px on its host or root element (the
-   body's declared minimum goes through `dialogMinBodyHeight`); (d) every app with dialogs runs the shared e2e below
-   over its whole contract (the visited-ids count of ADR 0016 check 5).
-4. **Shared e2e, every dialog kind** (`@decryp7/paddock-e2e` `expectSizeToContent`, run by the shell demo and every app
-   over its contract; Chromium in branches, WebKit nightly): the shell demo gets one fixture dialog per kind and mode
-   whose input can add content after the first measure (a late list, a long error, a streamed answer). For each: (i)
-   the last sent measure after the late content equals a fresh measure, the body does not scroll below the cap, and
-   the footer buttons are inside the viewport (`elementFromPoint`); (ii) after a simulated user resize (the io fake
-   reports an external `Resized`) the mode is `Manual` and further late content sends measures but the fake window
-   keeps its size; (iii) at `deviceScaleFactor` 1, 1.25 and 1.5. Waits are on state (`data-fit-seq` equal to the last
-   sent seq, `data-size-mode`), never on time (rule 60).
-5. **Real-window checks.** (a) The Tauri e2e (WebDriver, Windows and Linux CI) opens each fixture dialog, triggers late
-   content, compares the window's inner size with the last logged requested size, resizes the window with WebDriver
-   `Set Window Rect` (an external resize), triggers more content, and asserts the size did not change and the log shows
-   `ModeChange=Manual`. (b) **ADR 0040's "Dialogs at two scales" step is refined:** for a `Height` or `WidthAndHeight`
-   dialog the expected logical size is the size the dialog last asked for (the app log's last fit line for that window,
-   ER-27), not the contract's; the window's client rectangle divided by `GetDpiForWindow`/96 equals it within 2
-   physical px per edge at 100 % and 150 %; `Overflow` is false unless the request equals the cap; the last focusable
-   element is inside the client rectangle. A second sub-step drags the bottom border by 80 px with `SendInput`, invokes
-   the fixture's "add content" button through UI Automation, and asserts the client size stayed where the drag left it.
+   0037-0042):
+   - (a) no `set_size`/`set_min_size`/`set_position` on a dialog window outside `crates/paddock-dialogs` (scanned in
+     files that use `paddock_dialogs` or dialog labels; Debrief's frozen copy waived to its rule 55 tag);
+   - (b) no TypeScript calls `dialog_measure`/`dialog_ready` except `shell/dialogs/src/io.ts`, and `io.ts` declares no
+     wire type of its own;
+   - (c) a component registered as a `decision`, `form` or `viewer` sets no height that follows the window on its host,
+     its root or their direct children: no `vh`/`dvh`/`svh` units, no `%` or `100%` `height`/`min-height`, no
+     `flex-grow` or `flex: 1` along the block axis, no fixed `px` `height`/`min-height`/`max-height` (the body's minimum
+     goes through `dialogMinBodyHeight`);
+   - (d) every app with dialogs runs the shared e2e (check 4) over its whole contract (the visited-ids count of ADR 0016
+     check 5).
+4. **Page-side e2e, every dialog kind** (`@decryp7/paddock-e2e` `expectSizeToContent`; Chromium in branches, WebKit
+   nightly). **This exercises the page only** (the loop, the baseline, the epoch, the wrap at a CSS zoom), never Rust's
+   conversion: a browser's `deviceScaleFactor` does not reach Rust. The shell demo gets one fixture dialog per kind whose
+   input can add content after the first measure (a late list, a long error, a streamed answer). For each: the last
+   sent measure after the late content equals a fresh measure; the body does not scroll below the cap; the footer
+   buttons are inside the viewport (`elementFromPoint`); one content change caused at most two sends; a reload sends
+   with a new epoch. Run at `deviceScaleFactor` 1, 1.25 and 1.5 to catch CSS rounding and re-wrap. Waits are on state
+   (`data-fit-seq` equal to the last sent seq), never on time (rule 60).
+5. **Rust integration test with the mock runtime** (`paddock-dialogs` `mock-runtime` feature, already used by
+   `paddock-shell`): the real `tauri.rs` glue, driven by invoking `dialog_measure`/`dialog_ready` and feeding
+   `on_window_event` synthetic `Resized`, `Moved` and `ScaleFactorChanged` events, checks that a user resize stops
+   refits, that a move does not, that a reload's new epoch is accepted, and that the scale-change refit is posted, not
+   applied inside the event. Whether the mock runtime delivers `run_on_main_thread` closures in order is verified first
+   in WP-4; if it does not, the glue takes an injected executor (rule 60 seam).
+6. **Real-window checks.**
+   - (a) **Tauri WebDriver** (Windows and Linux CI): a shared `tauri-driver` harness, extracted from Debrief's
+     `apps/debrief/app/e2e-tauri/` (`wdio.conf.ts`, `fetch-msedgedriver.mjs`) into `@decryp7/paddock-e2e`, run by the
+     shell demo: open each fixture dialog, add late content, compare the inner size with the last logged requested
+     size, resize with WebDriver *Set Window Rect*, add content, and assert the size stayed and the log shows
+     `ModeChange=Manual`. **Unverified:** whether msedgedriver for WebView2 and WebKitWebDriver implement *Set Window
+     Rect* for a Tauri window; WP-4b verifies it first. If one does not, that OS's no-snap-back case moves to 6(b) (the
+     Windows GUI session) or, on Linux, to an `xdotool` resize in the Linux CI container, and the gap is listed. macOS has
+     no WebDriver for WKWebView: macOS is covered by `vm-smoke --gui` (`axdrive`) only, as a release gate, not per
+     branch.
+   - (b) **ADR 0040's Windows GUI step, refined and extended** (a Dyno 1.1.0 gate, below). For a `Height` dialog the
+     expected logical size is the size it last asked for (the app log's last fit line for that window, ER-27), not the
+     contract's: at 100 % and 150 % the client rectangle divided by `GetDpiForWindow`/96 equals it within 2 physical px
+     per edge, `Overflow` is false unless the request equals the cap, the last focusable element is inside the client
+     rectangle. Then: a `SendInput` drag of the bottom border by 80 px, an invoke of the fixture's "add content" button
+     through UI Automation, and the client size stays where the drag left it; a `SendInput` drag of the title bar by
+     200 px leaves the mode `Height` (a move is not a resize). **New DPI-change step:** with a dialog open, change the
+     display scale from 100 % to 150 % (the VM's settings, no sign-out for a per-monitor-aware app), wait for the
+     `Phase=scale` and the following `Phase=measure` lines (a state wait under a hang guard), and check the same size
+     condition at 150 %.
 
 ## Phase log and the Windows 150 % run (placeholder, to be filled from `fix/dialog-sizing`)
 
 > **PLACEHOLDER: findings of the Windows VM run in progress on `fix/dialog-sizing` (`08ad47b22`). Do not accept this
 > ADR before this section is filled.** For Dyno's `pd.updates` (and at least one decision and one form), at 100 % and
-> 150 %, record the `Phase=ready` and `Phase=fit` lines (`Content`, `Height`, `Current`, `Decor`, `Delta`, `Scale`,
-> `Zoom`, `Resized`) and the client rectangle and `GetDpiForWindow` read through UI Automation.
+> 150 %, record the `Phase=ready`, `Phase=fit` and `Phase=scale` lines (`Content`, `Height`, `Current`, `Decor`,
+> `Delta`, `Scale`, `Zoom`, `Resized`) and the client rectangle, `GetWindowRect`, `DWMWA_EXTENDED_FRAME_BOUNDS` and
+> `GetDpiForWindow` read through UI Automation and Win32.
 
 | Candidate cause | Rules it in | Rules it out | Result |
 |---|---|---|---|
@@ -300,46 +395,48 @@ All sizing of dialog windows happens in `paddock-dialogs`:
 | DPI or frame rounding | `Current`+`Decor` ≠ outer size, or client height ≠ requested × DPI/96 by > 1 px | both match at 150 % | _pending_ |
 | Viewport delta from the hidden window | `Delta` ≠ 0 at `Phase=ready` | `Delta` = 0 | _pending_ |
 | Fonts not settled at the first measure | `Content` at ready < `Content` at a later fit with no content change | equal | _pending_ |
-| Frame read includes Windows 11 invisible resize borders (unverified hypothesis, this ADR) | `Decor` width ≈ 14-16 logical px at 100 % while the visible border is 1-2 px | `Decor` matches `AdjustWindowRectExForDpi` | _pending_ |
-| Window created at one DPI, placed on a monitor with another, then linearly rescaled by `WM_DPICHANGED` after the fit (unverified hypothesis, this ADR) | a `Phase=scale` line after `Phase=ready` with a changed `Height` | no scale line | _pending_ |
-| Stale zoom after a scale change (`zoom_after` keeps the old zoom) (unverified hypothesis, this ADR) | `Zoom` ≠ `devicePixelRatio/Scale` at the last fit | equal | _pending_ |
+| Scale-change refit overwritten by tao's own `SetWindowPos` after `ScaleFactorChanged` (tao 0.37.2 `event_loop.rs:1837-2068`; review round 1) | a `Phase=scale` line whose `Height` differs from the client height read afterwards | the client height equals the scale line's request, or no `Phase=scale` line (the window never changed DPI) | _pending_ |
+| Window created hidden at one DPI and placed on a monitor with another, then rescaled by `WM_DPICHANGED` after the first fit (unverified hypothesis) | a `Phase=scale` line after `Phase=ready` | no scale line | _pending_ |
+| Frame read includes Windows 11 invisible resize borders (`GetWindowRect` vs `DWMWA_EXTENDED_FRAME_BOUNDS`; unverified hypothesis) | `Decor` width ≈ 14-16 logical px at 100 % while the visible border is 1-2 px | `Decor` equals the visible frame | _pending_ |
+| Stale zoom after a scale change (`zoom_after` keeps the old zoom; unverified hypothesis) | `Zoom` ≠ `devicePixelRatio/Scale` at the last fit | equal | _pending_ |
 
-Whatever the run shows, the confirmed cause is fixed as an instance on `fix/dialog-sizing` for the next Dyno patch
-(with its failing test first, rule 5 / ER-11, and confirmed by a run without it, ER-28); this ADR's design then has to
-make that cause impossible or checked, and the row above names where (§3 edge, §4, or check 5b). If a cause is found
-that this design does not cover, the ADR is revised before acceptance.
+The confirmed cause is fixed as an instance in Dyno 1.1.0 (WP-0), with its failing test first (rule 5 / ER-11) and
+confirmed by a run without it (ER-28). The row then names where this design makes the cause impossible or checked (§3
+edge, §4, check 2, 5 or 6b). A cause this design does not cover sends the ADR back for revision before acceptance.
 
 ## Consequences
 
-- One mechanism with one baseline decides a dialog's size at every moment; late content, fonts, density, theme and
-  DPI are all "the measure changed", not special cases.
-- A user who resizes a dialog keeps that size for the opening; a dialog that has not been touched follows its content.
-- Windows gets its frame and DPI from the OS APIs meant for it, at the window's own monitor; macOS and Linux get the
-  closest equivalents. The edge module is the only platform-specific sizing code and is checked on each OS's runner.
-- The wire changes (`dialog_measure`, `dialog_ready { seq }`, two events): every app with shared dialogs changes in the
-  same change (rule 43; no compatibility shim before v1).
+- One mechanism with one baseline, on one thread, decides a dialog's size at every moment; late content, fonts,
+  density, theme and DPI are all "the measure changed", not special cases.
+- A user who resizes a dialog keeps that size for the opening; moving it changes nothing; a dialog that has not been
+  touched follows its content.
+- Windows gets its frame and DPI from the OS APIs meant for it, with the visible frame for placement; macOS and Linux
+  get the closest equivalents, and Wayland's limits are stated instead of assumed away. The edge module is the only
+  platform-specific sizing code and is checked on each OS's runner.
+- The wire changes (`dialog_measure`, `dialog_ready { epoch, seq }`, two events, all generated): every app with shared
+  dialogs changes in the same change (rule 43; no compatibility shim before v1).
 - More fit lines in the log at info level; they are short and per transition, not per frame.
-- Risk: `WidthAndHeight` measuring max-content can make a dialog wide for long unbreakable text; mitigated by
-  `max_width` and kept off by default (D1).
-- Risk: the read-back comparison on Linux can mistake a WM adjustment of our own request for a user resize. Mitigation:
-  read back after the configure is acknowledged and compare with 1 physical px tolerance; the property test covers the
-  rule; a false `Manual` only stops automatic sizing for that opening (the minimum still holds).
-- Risk: subclassing the Windows window procedure beside tao's. Mitigation: `SetWindowSubclass` (comctl32), which chains
-  safely, only for dialog windows; covered by the Windows GUI check.
+- Risk: the X11 and Wayland user-resize rule depends on matching configures to requests; a false `Manual` only stops
+  automatic sizing for that opening (the minimum still holds), and every unexplained `Resized` is logged with the
+  pending queue so a false one can be diagnosed from a user's bundle.
+- Risk: a second subclass on dialog windows beside tao's. Mitigation: `SetWindowSubclass` chains; it handles three
+  messages and passes everything on; covered by check 6b.
+- Risk: `scrollbar-gutter: stable` reserves a gutter in dialogs that never scroll (a few px on Windows' classic
+  scrollbars). Accepted; the alternative is the oscillation above.
 
 ## Migration (every app with dialogs, read at `a18e18801`)
 
 | App | Dialogs today | What changes |
 |---|---|---|
-| Dyno | shared dialogs (`paddock-dialogs`, `@decryp7/paddock-ui/shell/dialogs`): 37 registered across Dyno and shared `paddock-ui` contributions (8 decision, 13 form, 6 viewer, 10 tool by `kind:` count) | modes come from kinds; Updates (`pd.updates`) and the late-status e2e move to `expectSizeToContent`; Windows GUI check at 100/150 % |
-| shell-demo, workbench-demo | shared dialogs (ADR 0016: 16 and 2 contract entries) | gain the per-kind fixture dialogs; run the shared e2e |
-| Debrief | its own copy (`dialog_windows.rs`, `dialog_placement.rs`, `dialog-windows/`; 50 dialogs per ADR 0016) | adopts the shared dialogs in 1.2 (ADR 0026 §7) directly on this model; its five fixed-height forms become `Height` forms or tools, decided per dialog there; the copy is deleted |
-| Pitwall | no dialog windows on `main` (in-page confirms; its own windows in `shell.rs`) | adopts on the shared shell in 1.1, directly on this model |
+| Dyno | shared dialogs (`paddock-dialogs`, `@decryp7/paddock-ui/shell/dialogs`): 37 registered across Dyno and shared `paddock-ui` contributions (8 decision, 13 form, 6 viewer, 10 tool by `kind:` count) | in 1.1.0: modes from kinds; Updates (`pd.updates`) and the late-status e2e move to `expectSizeToContent`; check 6b at 100 %, 150 % and a DPI change is a 1.1.0 gate |
+| shell-demo, workbench-demo | shared dialogs (ADR 0016: 16 and 2 contract entries) | the per-kind fixture dialogs and the shared harnesses (checks 4 and 6a) live in the shell demo |
+| Debrief | its own copy (`dialog_windows.rs`, `dialog_placement.rs`, `dialog-windows/`; 50 dialogs per ADR 0016), copy `dialog-windows` in `known-copies.toml` | frozen now (§6); adopts the shared dialogs on this model in 1.2's plan; its five fixed-height forms become `Height` forms or tools there |
+| Pitwall | no dialog windows on `main` (in-page confirms; its own windows in `shell.rs`) | adopts on the shared shell in 1.1, once, on this model |
 | Spotter, Pitcrew | no dialog windows on `main` (tray windows only) | adopt when they move onto the shared shell; nothing to migrate now |
 | Pacenotes, Sighter | no code | start on this model |
 
 The shared `paddock-ui` dialogs (`pd.about`, `pd.updates`, `pd.settings`, `pd.setup`, `pd.confirm`, the channel, MCP,
-storage and workbench layout dialogs) take their kinds' modes; none declares an override.
+storage and workbench layout dialogs) take their kinds' modes.
 
 ## Work packages
 
@@ -347,53 +444,53 @@ Agent-days are for one agent, excluding review and CI waiting.
 
 | WP | Scope | Owner paths | Agent-days | Depends on |
 |---|---|---|---|---|
-| WP-0 | Fill the placeholder from the VM run; land the confirmed instance fix for the Dyno patch on `fix/dialog-sizing` (not part of this redesign) | this ADR; `fix/dialog-sizing` | 0.5 | the VM run |
-| WP-1 | `SizeMode` in the contract and kind table, generated TypeScript, contract validation; the pure `SizeState` machine replacing `plan_fit`/`fit_target`/`zoom_after`; property tests (check 2) | `crates/paddock-dialogs/src/{contract,window,size,ts,generated}.rs`, `ui/projects/paddock-ui/shell/generated/dialogs.ts` | 2.5 | – |
-| WP-2 | Edge modules: Windows (`GetDpiForWindow`, `AdjustWindowRectExForDpi`, `GetMonitorInfoW`, subclass for `WM_ENTERSIZEMOVE`/`WM_GETDPISCALEDSIZE`), macOS (`frameRectForContentRect`, live-resize notification), Linux (read-back); read-back and `applied`; events `dialog://size-mode`, `dialog://remeasure`; `dialog_measure`/`dialog_ready { seq }`; fit log (§3) | `crates/paddock-dialogs/src/tauri.rs`, `src/edge/*` | 3 | WP-1 |
-| WP-3 | `SizeLoop` in `DialogFrame` (one function, last-sent baseline, `seq`, `overflow`, `WidthAndHeight` read), `DialogShell` start without its own measure, io (`dialog_measure`, events), browser io fake reporting external resizes, `data-fit-seq`/`data-size-mode` | `ui/projects/paddock-ui/shell/dialogs/src/*` | 2 | WP-1 (wire types) |
-| WP-4 | Checks: conformance check (3a-d), `expectSizeToContent` in `paddock-e2e`, per-kind fixture dialogs in the shell demo, Tauri e2e real-window case (5a) | `conformance/`, `ui/projects/paddock-e2e/src/`, `apps/shell-demo/`, `ui/e2e/` | 2.5 | WP-2, WP-3 |
-| WP-5 | ADR 0040 dialog step refinement (5b): judge reads the fit log, `SendInput` border drag, UIA invoke of the fixture button, at 100 % and 150 % | `scripts/vm-smoke/` (per ADR 0042's owner of that harness) | 1.5 | WP-4, ADR 0040's Windows GUI WPs |
-| WP-6 | Migration: Dyno and the shared dialogs (e2e switched, late-status spec kept as a case), workbench-demo; Pitwall 1.1 and Debrief 1.2 adopt in their own plans (no extra package here, a checklist line each) | `apps/dyno/app/`, `apps/workbench-demo/`, `ui/projects/paddock-ui/**/*.contributions.ts` | 1.5 | WP-3, WP-4 |
-| WP-7 | Docs: rule 17 gains "sized by its declared size mode (ADR 0043)"; ADR 0016 and 0026 get "amended by 0043" notes; lesson; design guide dialog section; CHANGELOG | `docs/`, `CHANGELOG.md` | 0.5 | acceptance |
+| WP-0 | Fill the placeholder from the VM run; the confirmed instance fix, with its failing test, lands in Dyno 1.1.0 | this ADR; `fix/dialog-sizing` | 0.5 | the VM run |
+| WP-1 | `SizeMode` in the kind table; the pure `SizeState` (pending queue, epoch, show state, both modes); generated wire and event types; property tests (check 2); contract and wire test (check 1) | `crates/paddock-dialogs/src/{contract,window,size,ts,generated}.rs`, `ui/projects/paddock-ui/shell/generated/` | 3 | – |
+| WP-2 | Main-thread glue (`run_on_main_thread` for commands and the posted scale refit), edge modules: Windows subclass (`WM_SIZING`, `SC_SIZE`, `WM_GETDPISCALEDSIZE`, `WM_EXITSIZEMOVE`), `AdjustWindowRectExForDpi`, `DWMWA_EXTENDED_FRAME_BOUNDS`, `GetMonitorInfoW`; macOS live-resize observer and `frameRectForContentRect`; Linux X11 and Wayland rules; events; fit log (§3) | `crates/paddock-dialogs/src/tauri.rs`, `src/edge/*` | 4 | WP-1 |
+| WP-3 | `SizeLoop` in `DialogFrame` (one function, last-sent baseline, epoch and seq, `overflow`, the two-send invariant and its stop), `scrollbar-gutter` per engine, `DialogShell` start without its own measure, `io.ts` on generated types and events, `data-fit-seq`/`data-size-mode` | `ui/projects/paddock-ui/shell/dialogs/src/*` | 2 | WP-1 |
+| WP-4 | Conformance check 3a-d; mock-runtime integration test (check 5, incl. the ordering check of `run_on_main_thread`); `expectSizeToContent` and the per-kind fixture dialogs in the shell demo (check 4) | `conformance/`, `crates/paddock-dialogs/tests/`, `ui/projects/paddock-e2e/src/`, `apps/shell-demo/`, `ui/e2e/` | 3 | WP-2, WP-3 |
+| WP-4b | Shared `tauri-driver` harness extracted from Debrief's `e2e-tauri` into `paddock-e2e`, run by the shell demo on Windows and Linux CI; first verify *Set Window Rect* on msedgedriver (WebView2) and WebKitWebDriver; check 6a, or its listed fallback | `ui/projects/paddock-e2e/src/tauri/`, `apps/shell-demo/e2e-tauri/`, the shell demo's CI leg | 3 | WP-4 |
+| WP-5 | ADR 0040 dialog step refinement and the DPI-change step (check 6b): judge reads the fit log; `SendInput` border and title-bar drags; UIA invoke; scale change with a dialog open | `scripts/vm-smoke/` (through ADR 0042's owner of that harness) | 2 | WP-4, ADR 0040's Windows GUI packages |
+| WP-6 | Migration: Dyno and the shared dialogs (e2e switched, late-status spec kept as a case), workbench-demo; Debrief copy frozen (a `known-copies.toml` note); checklist lines in Pitwall 1.1's and Debrief 1.2's plans | `apps/dyno/app/`, `apps/workbench-demo/`, `ui/projects/paddock-ui/**/*.contributions.ts`, `docs/known-copies.toml`, `docs/plans/` | 1.5 | WP-3, WP-4 |
+| WP-7 | Docs: rule 17 gains "sized by its kind's size mode (ADR 0043)"; ADR 0016 and 0026 get "amended by 0043" notes; lesson; design guide dialog section; CHANGELOG | `docs/`, `CHANGELOG.md` | 0.5 | acceptance |
 
-**Total: about 14 agent-days** (13.5 without WP-0), about 6-7 calendar days with two agents in parallel after WP-1
-(WP-2 and WP-3 in parallel, then WP-4, then WP-5 and WP-6 in parallel).
+**Total: about 19.5 agent-days** (19 without WP-0; the review estimated 18-21). With two agents after WP-1 (WP-2 with
+WP-3; then WP-4; then WP-4b with WP-6; WP-5 when ADR 0040's packages are in) about 10-11 working days.
 
-**Release-window placement (ADR 0022 G.7, rule 1).** WP-1 to WP-4 and WP-6 change `crates/` and `ui/`, which every
-app's release builds from, so they land **outside any app's release window**: after the Dyno patch release that ships
-WP-0's instance fix, and **before Pitwall 1.1's window opens**, so that Pitwall 1.1 and Debrief 1.2 adopt the shared
-dialogs once, on this model, instead of migrating twice. WP-0 is an instance fix on Dyno's release path and follows
-Dyno's own release rules. WP-5 lives in `vm-smoke` (not on an app's build path) and can land whenever ADR 0040's
-packages allow. If Pitwall 1.1's window opens first, WP-1 to WP-4 wait until its tag, and Pitwall adopts afterwards in
-a patch.
+**Placement: inside Dyno 1.1.0 (rule 1, one release at a time).** There is no separate Dyno patch for report 7: WP-0's
+instance fix goes into 1.1.0 with the rest. WP-1 to WP-6 land **early in Dyno 1.1.0's development**, as one shared
+change with Dyno's adoption (rule 43), so that the shared `crates/` and `ui/` change is not in flight while another app
+is in its release window. ADR 0040's 150 % dialog step and the new DPI-change step (check 6b, WP-5) become **Dyno 1.1.0
+release gates**. Pitwall 1.1 and Debrief 1.2 come after and adopt the shared dialogs once, on this model.
 
-## Open decisions (with recommendations)
+## Decisions of the user (2026-11-03, relayed by the coordinator)
 
-- **D1. Use `WidthAndHeight` at all?** Recommendation: define it, allow it for `decision` only, and use it for none in
-  this change (all decisions stay `narrow`/`medium` with `Height`). TaskDialog's ideal-width behaviour is attractive for
-  short confirms, but our three width steps (user, 2026-10-28) already give consistent dialogs. Revisit if a decision
-  is reported too wide or too narrow.
-- **D2. Viewers: keep "never shrink"?** Recommendation: yes, `Height { shrink: Never }`, opening at
-  `min(content, preferred)` so short content leaves no band (ADR 0026 §1), and growing to the cap. A streamed answer
-  must not jump under the reader.
-- **D3. Does a user resize persist into the next opening as `Manual`?** Recommendation: no. The opening starts in the
-  declared mode (WPF does not persist it either); what is remembered stays as ADR 0026 §1 (forms: width; viewers and
-  tools: size, clamped to the minimum content).
-- **D4. Does a width-only drag of a `Height` dialog switch to `Manual`?** Recommendation: yes, as WPF does: any user
-  resize means "I want this size". The alternative (stay in `Height` and refit the height to the new width) is cleverer
-  but surprises users who also dragged a corner by a few pixels.
-- **D5. Answer `WM_GETDPISCALEDSIZE` on Windows, or accept Windows' linear rescale and refit after?** Recommendation:
-  answer it (one subclass that WP-2 needs anyway for `WM_ENTERSIZEMOVE`), so a dialog moving between 100 % and 150 %
-  monitors resizes once to the right size. Fallback if the subclass conflicts with tao: refit after `ScaleFactorChanged`
-  (two resizes, logged), which is today's behaviour.
-- **D6. Is a Windows Snap or tiling-WM resize a "user resize"?** Recommendation: yes (it is the user's action through
-  the shell), and it is the only rule the Linux read-back can implement reliably.
+The user accepted the reviewer's answers to the open decisions. The numbers stay as first published.
+
+- **D1. No `WidthAndHeight` mode** until a dialog needs it; a later ADR adds it then.
+- **D2. Viewers never shrink** (`Height { shrink: Never }`), opening at `min(content, preferred)` and growing to the
+  cap, with the viewport-content guard: check 3c rejects content whose height follows the window, so the window cannot
+  ratchet itself to the cap.
+- **D3. Each opening starts in its kind's declared mode; no remembered size** is restored into a `Height` window. A
+  user resize to `Manual` lasts for that opening only. Read as: decisions remember their offset, forms and viewers
+  their width and offset (this **amends ADR 0026 §1** for viewers, which remembered their size); tools (`Manual`) keep
+  their remembered size, clamped to the minimum content, as before. The delta review should confirm this reading.
+- **D4. Only a real resize switches to `Manual`:** `WM_SIZING` or `SC_SIZE` on Windows, live resize on macOS, an
+  unexplained configure on X11 and Wayland (§3); a move never does.
+- **D5. Answer `WM_GETDPISCALEDSIZE`, and also defer the refit:** the posted refit after `ScaleFactorChanged` runs on
+  every OS and corrects Windows 10, where tao computes its own rectangle.
+- **D6. Windows Snap, a tiling window manager and a Wayland compositor's configure count as a user resize.**
 
 ## Alternatives considered
 
 - **Keep the handshake and harden it further** (`08ad47b22` and successors). Each hardening closes one gap between
-  two baselines; nothing stops the next asynchronous step from opening another. Rejected as the design; kept as the
-  instance fix for the Dyno patch.
+  two baselines; nothing stops the next asynchronous step from opening another. Rejected as the design; its instance
+  fix ships in Dyno 1.1.0 (WP-0).
+- **WPF's `Width` and `WidthAndHeight`** (TaskDialog's ideal width). Attractive for short confirms, but the family's
+  three width steps (user, 2026-10-28) already give consistent dialogs, and measuring max-content width adds a second
+  layout read and a new failure mode (long unbreakable text). Not adopted now (review round 1).
+- **Per-contract mode overrides.** No dialog needs one today; an override is a second way to say what the kind says.
+  Not adopted (review round 1).
 - **AutoScaleMode-style scaling of declared sizes by DPI.** This is what fixed heights did, and ADR 0016 cause 1 showed
   it breaking at 125-150 % and on small screens. Rejected.
 - **Let the webview report a preferred size to the OS.** Neither WebView2, WKWebView nor WebKitGTK reports one to Tauri
@@ -403,3 +500,6 @@ a patch.
   is the right mode for tools.
 - **Size in TypeScript (`getCurrentWindow().setSize`).** Moves the DPI and frame conversion into the page, which cannot
   see the frame or the target monitor's DPI before a move, and breaks "Rust owns the window" (ADR 0026 §3). Rejected.
+- **Tell a user resize from our own by size comparison alone** (the first draft). Async commands, late Linux
+  configures and moves (`WM_ENTERSIZEMOVE` fires for both) make it misfire; the OS's own resize signals are used where
+  they exist and the comparison only where none does (review round 1).
