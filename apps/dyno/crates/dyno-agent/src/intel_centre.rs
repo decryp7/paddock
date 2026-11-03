@@ -64,6 +64,21 @@ fn save_lists(dirs: &Dirs, lists: &UserLists) -> std::io::Result<()> {
     crate::intel_fetch::replace(&tmp, &path)
 }
 
+/// The user's location from the OS region setting: the country of the locale. Nothing is sent anywhere.
+fn region_home() -> HomeInfo {
+    let env = |k: &str| std::env::var(k).ok();
+    match crate::region::region_country(&mut dyno_platform::runner::SystemRunner, &env) {
+        Some(c) => HomeInfo {
+            country: Some(c),
+            source: "Your location: from your region setting".into(),
+        },
+        None => HomeInfo {
+            country: None,
+            source: "Your location: unknown (no region setting found)".into(),
+        },
+    }
+}
+
 /// What the network objects are made of (tests pass fakes; the agent builds the real ones when first needed).
 pub struct Net {
     /// List subscriptions.
@@ -348,10 +363,12 @@ impl IntelCentre {
         let on = lock(&self.lists).switches.own_location;
         let geo = self.geo();
         let info = if !on {
-            HomeInfo {
-                country: None,
-                source: "Your location: not asked for (switched off in Settings)".into(),
+            // Switched off: the region setting is read locally and sent nowhere.
+            let mut h = region_home();
+            if h.country.is_none() {
+                h.source = "Your location: not asked for (switched off in Settings), and no region setting found".into();
             }
+            h
         } else {
             let home = {
                 let mut n = lock(&self.net);
@@ -371,10 +388,7 @@ impl IntelCentre {
                         source: "Your location: your public IP is not in the location database yet".into(),
                     },
                 },
-                None => HomeInfo {
-                    country: None,
-                    source: "Your location: from your region setting".into(),
-                },
+                None => region_home(),
             }
         };
         *lock(&self.home) = info;
@@ -777,7 +791,13 @@ mod tests {
             })
             .unwrap();
         r.centre.find_home(&ctx());
-        assert!(r.centre.home().source.contains("switched off"));
+        let h = r.centre.home();
+        assert!(
+            h.source.contains("region setting") || h.source.contains("switched off"),
+            "either the region setting named a country or it says why not: {}",
+            h.source
+        );
+        assert!(!h.source.contains("public IP"), "the address lookup was not made");
         assert_eq!(r.wire.sends(), 0);
     }
 }

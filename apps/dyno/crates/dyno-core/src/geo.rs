@@ -97,6 +97,11 @@ pub struct GeoSummary {
     pub truncated: u32,
     /// Whether any database is in use.
     pub database_on: bool,
+    /// The country of the user's own location (where the arcs start), when known.
+    pub home_country: Option<String>,
+    /// Where that comes from, in words: "Your location: from your public IP (via Cloudflare)", "... from your region setting"
+    /// or why it is not known.
+    pub home_source: String,
 }
 
 #[derive(Default)]
@@ -181,6 +186,8 @@ pub fn summarise(
         db_date,
         truncated: left_out,
         database_on: geo.is_some(),
+        home_country: None,
+        home_source: String::new(),
     }
 }
 

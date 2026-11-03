@@ -485,6 +485,8 @@ pub enum Request {
     },
     /// The map's data for the connections now, aggregated before any page cap (answers [`Reply::Geo`]). Appended.
     GeoSummary,
+    /// The firewall of this computer, read-only (answers [`Reply::Firewall`]); sources only the helper can read say so. Appended.
+    Firewall,
 }
 
 /// Dyno's own cost.
@@ -783,6 +785,8 @@ pub enum Reply {
     IntelEdited(Box<crate::intel_lists::EditOutcome>),
     /// The map's data.
     Geo(Box<crate::geo::GeoSummary>),
+    /// The firewall view.
+    Firewall(Box<crate::firewall::FirewallView>),
 }
 
 /// The inventory report that was written.
@@ -866,6 +870,7 @@ impl Reply {
             Reply::Intel(x) => v(x),
             Reply::IntelEdited(x) => v(x),
             Reply::Geo(x) => v(x),
+            Reply::Firewall(x) => v(x),
         }
     }
 }
@@ -1180,6 +1185,7 @@ mod tests {
                 },
             },
             Request::GeoSummary,
+            Request::Firewall,
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));
@@ -1200,6 +1206,10 @@ mod tests {
             Reply::Intel(Box::default()),
             Reply::IntelEdited(Box::new(crate::intel_lists::EditOutcome::Done)),
             Reply::Geo(Box::default()),
+            Reply::Firewall(Box::new(crate::firewall::FirewallView {
+                os: crate::helper::HelperHost::Macos,
+                sources: vec![crate::firewall::FirewallSource::new(crate::firewall::RuleSource::Pf)],
+            })),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);

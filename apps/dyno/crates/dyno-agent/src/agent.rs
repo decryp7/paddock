@@ -251,6 +251,8 @@ pub struct Shared {
     pub network: crate::network::NetCentre,
     /// The user's bad-IP lists, the match index, the location databases and the user's own location.
     pub intel: crate::intel_centre::IntelCentre,
+    /// The firewall of this computer (read-only).
+    pub firewall: crate::firewall::FirewallCentre,
     /// The performance counters browser (observe-only).
     pub counters: crate::counters::CounterCentre,
     /// The OS problem logs (observe-only).
@@ -366,6 +368,7 @@ impl Shared {
             hardware,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
+            firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
             intel: crate::intel_centre::IntelCentre::new(dirs.clone(), Arc::new(paddock_jobs::time::SystemClock)),
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,

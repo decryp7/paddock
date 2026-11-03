@@ -1168,3 +1168,16 @@ height". **Why the later resize did not restore the height is not explained** (n
 Chromium). The fix avoids the cause instead of explaining it: `fit()` ignores a container with no size and resizes only
 when the size differs from the chart's own. **Lesson:** do not resize a third-party renderer to a size of 0; if it happens
 again with the fix in place, find the ECharts/zrender step that skips the restore before adding more guards.
+
+## `maxminddb` `Reader::verify` never returns on a search tree with a cycle (2026-11-03, Dyno)
+
+Dyno's location databases are downloaded, so their bytes are untrusted. A byte-damage scan over a tiny valid file (every
+position, four values) hung on one case: the first record of the root node set to 0, which makes the root its own child.
+`Reader::verify` (`maxminddb` 0.27.3) then loops and grows memory until the process is killed (SIGKILL after 5 minutes); a
+property test showed the same as a test that "ran for over 60 seconds" with nothing printed. In debug builds the same crate also
+panics on arithmetic overflow in `resolve_data_pointer` for a damaged pointer (release wraps and its next bounds check rejects
+it). **Fix** (`dyno-agent/src/geo_db.rs`): before `verify`, a bounded walk of our own proves the tree is acyclic and no deeper
+than 128 bits (one byte of state per node, `O(nodes)`); opening and lookups run under `catch_unwind`; tests pin both; a fuzz
+target (`apps/dyno/fuzz`) runs the open-and-verify path. **Lesson:** a library's "verify" is not a safe parser for untrusted
+bytes; scan single-byte damage of a valid file with a time limit per case, and do not trust a green proptest that never
+finishes.

@@ -172,6 +172,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
         Request::ResolveHosts { addresses } => shared.network.resolve(&addresses).map(Reply::HostNames),
+        Request::Firewall => shared.firewall.view().map(|v| Reply::Firewall(Box::new(v))),
         Request::IntelStatus => Ok(Reply::Intel(Box::new(shared.intel.status()))),
         Request::IntelEdit { edit } => {
             let outcome = shared.intel.edit(edit.clone()).map_err(bad_edit)?;
@@ -196,7 +197,11 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
                 let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateGeo);
             }
             let rows = shared.network.remote_rows(shared)?;
-            Ok(Reply::Geo(Box::new(shared.intel.geo_summary(&rows, 0))))
+            let mut summary = shared.intel.geo_summary(&rows, 0);
+            let home = shared.intel.home();
+            summary.home_country = home.country;
+            summary.home_source = home.source;
+            Ok(Reply::Geo(Box::new(summary)))
         }
         Request::LookupIp { ip, template } => {
             let settings = match template {
