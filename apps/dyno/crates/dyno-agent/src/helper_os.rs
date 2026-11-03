@@ -80,6 +80,20 @@ pub fn unsupported(host: HelperHost, bundled: &Path, bundled_exists: bool, appim
     Ok(())
 }
 
+/// Whether the helper has been turned on: its protected program is there (macOS, Windows), or, on Linux, where the package puts the
+/// program in place whether or not anyone enabled it, the service is enabled (`systemctl is-enabled`, which needs no rights).
+pub fn is_installed(host: HelperHost, program: &Path, runner: &dyn ToolRunner) -> bool {
+    if host != HelperHost::Linux {
+        return program.exists();
+    }
+    runner
+        .run_tool(
+            &tool("/usr/bin/systemctl", &["is-enabled", "dyno-helper.service"]),
+            Duration::from_secs(5),
+        )
+        .is_ok_and(|o| o.ok)
+}
+
 /// The program the elevated `uninstall` runs. Windows cannot delete a program that is running, so the installed copy cannot remove
 /// itself (measured in the Windows 11 VM: `RemoveProgram ... Access is denied`); the bundled copy removes it. Elsewhere the
 /// installed copy does (the running file can be unlinked).
@@ -160,7 +174,7 @@ pub fn centre() -> HelperCentre<PeerTransport> {
     let installed_path = paths.binary.clone();
     let transport = PeerTransport::new(paths.endpoint.clone(), {
         let p = installed_path.clone();
-        move || p.exists()
+        move || is_installed(host, &p, &SystemRunner)
     });
     let owner = current_owner(host, &SystemRunner);
     let installer = OsInstaller {
@@ -199,7 +213,7 @@ mod tests {
     impl ToolRunner for Says {
         fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, dyno_core::ports::PlatformError> {
             assert!(
-                t.program == "whoami" || t.program == "/usr/bin/id",
+                ["whoami", "/usr/bin/id", "/usr/bin/systemctl"].contains(&t.program.as_str()),
                 "only fixed programs: {}",
                 t.program
             );
@@ -218,6 +232,31 @@ mod tests {
         assert!(current_owner(HelperHost::Linux, &Says("nope".into()))
             .unwrap_err()
             .contains("which account"));
+    }
+
+    #[test]
+    fn on_linux_the_helper_is_installed_when_its_service_is_enabled_not_when_the_package_put_the_program_there() {
+        // Measured on Ubuntu (Orb): with the program in /usr/bin and the service not enabled the card said "Not running" instead of "Off".
+        let enabled = Says("enabled\n".into());
+        let program = Path::new("/usr/bin/dyno-helper");
+        assert!(is_installed(HelperHost::Linux, program, &enabled));
+        struct Disabled;
+        impl ToolRunner for Disabled {
+            fn run_tool(&self, _: &Tool, _: Duration) -> Result<ToolOutput, dyno_core::ports::PlatformError> {
+                Ok(ToolOutput {
+                    ok: false,
+                    stdout: "disabled\n".into(),
+                    error: String::new(),
+                })
+            }
+        }
+        assert!(!is_installed(HelperHost::Linux, program, &Disabled));
+        // Elsewhere the protected program's presence decides (a path that is not there: not installed, no tool run).
+        assert!(!is_installed(
+            HelperHost::Macos,
+            Path::new("/definitely/not/here/dyno-helper"),
+            &enabled
+        ));
     }
 
     #[test]

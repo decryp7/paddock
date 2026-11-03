@@ -35,6 +35,7 @@ fn the_helper_state_and_one_action_on_this_machine() {
     let centre = helper_os::centre();
     let before = centre.status();
     println!("state before: {:?}: {}", before.state, before.message);
+    println!("detail before: {:?}", before.detail);
     if let Some(action) = action() {
         let registry = JobRegistry::with_clock(Arc::new(Print), Arc::new(SystemClock), 0);
         let ctx = registry.register("helper", "Helper", None);

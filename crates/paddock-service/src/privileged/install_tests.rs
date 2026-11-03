@@ -997,7 +997,8 @@ fn a_service_removing_itself_deletes_its_files_first_and_stops_last() {
             .log()
             .iter()
             .find(|l| *l == "evict" || *l == "unregister"),
-        Some(&"evict".to_string())
+        Some(&"unregister".to_string()),
+        "the registration goes before the stop that ends this process"
     );
 }
 
@@ -1094,5 +1095,35 @@ fn a_process_that_does_not_end_is_an_error_that_names_it_and_removes_nothing() {
     assert!(
         files.facts_of(Path::new(MAC_PROGRAM)).is_some(),
         "the program stays"
+    );
+}
+
+#[test]
+fn a_service_removing_itself_unregisters_before_it_stops_because_the_stop_ends_the_process_running_the_steps()
+ {
+    // Measured in a macOS VM: `launchctl bootout` of its own job ended the helper before the plist was removed, so the
+    // definition stayed behind. Taking the registration away first leaves nothing to restart and nothing behind.
+    let files = mac_disk();
+    files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+        s.process = Some(helper_process());
+        s.alive_polls = 5;
+    });
+    let (mut f, mut b, mut sys) = (files.clone(), backend.clone(), FakeSystem::new());
+    Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut sys)
+        .uninstall_self()
+        .unwrap();
+    let log = backend.log();
+    let at = |what: &str| {
+        log.iter()
+            .position(|l| l == what)
+            .unwrap_or_else(|| panic!("{what} not in {log:?}"))
+    };
+    assert!(at("unregister") < at("evict"), "{log:?}");
+    assert!(
+        log.iter().all(|l| !l.starts_with("alive")),
+        "it does not wait for its own process: {log:?}"
     );
 }

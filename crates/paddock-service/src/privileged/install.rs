@@ -324,12 +324,22 @@ impl<'a> Installer<'a> {
         let mut notes = Vec::new();
         // Read before the stop: afterwards the OS may not name the process any more.
         let running = self.backend.job_process();
-        if let Err(e) = self.backend.evict() {
-            notes.push(format!("stop: {e}"));
+        if self.running_here {
+            // The stop ends the process that is running these steps: take the registration away first.
+            self.backend
+                .unregister()
+                .map_err(|e| failed(Step::StopExisting, e))?;
+            if let Err(e) = self.backend.evict() {
+                notes.push(format!("stop: {e}"));
+            }
+        } else {
+            if let Err(e) = self.backend.evict() {
+                notes.push(format!("stop: {e}"));
+            }
+            self.backend
+                .unregister()
+                .map_err(|e| failed(Step::StopExisting, e))?;
         }
-        self.backend
-            .unregister()
-            .map_err(|e| failed(Step::StopExisting, e))?;
         let mut waited = Duration::ZERO;
         while !self.backend.job_gone() {
             if waited >= self.waits.gone {

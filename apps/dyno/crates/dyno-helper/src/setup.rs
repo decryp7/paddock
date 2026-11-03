@@ -135,6 +135,11 @@ pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
 /// # Errors
 /// What went wrong.
 pub fn uninstall_self(os: Os) -> Result<Report, String> {
+    // The last step ends this process, so what the helper wrote goes first (a file this process holds open may stay: said in the log).
+    match remove_data_folder(&helper_paths()) {
+        Ok(note) => log::info!(note = note.as_str(); "self-uninstall: the data folder"),
+        Err(why) => log::warn!(why = why.as_str(); "self-uninstall: the data folder was kept"),
+    }
     uninstall_self_in_place(os, &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())
 }
 

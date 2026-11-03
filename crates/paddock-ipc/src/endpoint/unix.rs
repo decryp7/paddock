@@ -193,6 +193,16 @@ impl Stream {
         expected_uid: u32,
     ) -> Result<Stream, super::SystemConnectError> {
         use super::SystemConnectError::{Connect, Untrusted};
+        // No folder at all means nothing is listening (the service was never installed): that is not an untrusted server.
+        let parent = Path::new(name)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        if let Err(e) = std::fs::symlink_metadata(parent)
+            && e.kind() == io::ErrorKind::NotFound
+        {
+            return Err(Connect(e));
+        }
         super::unix_peer::check_folder_of(name, expected_uid).map_err(Untrusted)?;
         let stream = Stream::connect(name, timeout).map_err(Connect)?;
         let uid = peer_uid(&stream.s).ok_or_else(|| {

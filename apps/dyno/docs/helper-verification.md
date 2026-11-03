@@ -39,31 +39,74 @@ it builds the agent's `HelperCentre` for the machine, prints the state, runs the
    `dyno-helper.exe` in Program Files, and the prompted `uninstall` run from the installed copy failed with `RemoveProgram ... Access is denied`.
    Fixed in the agent: on Windows the elevated `uninstall` runs the bundled copy, which removes the installed one completely, and Turn off on
    Windows goes straight to the prompt. (`uninstall_self_in_place` leaves the program behind on Windows; that is the service crate's to decide.)
-3. **One removal failed once** with `RemoveProgram ... left in place while it runs` right after a turn on, and did not repeat in three
-   later runs: `StopExisting` returned before the helper process had ended. It deserves a wait on the process's end in `paddock-service`
-   (not changed here).
-4. **The data folder stays** after removal (`config.json`, `helper.log`, `audit.jsonl`). A deliberate keep of the log, or a leftover: to be decided
-   with the owner of `paddock-service`.
-5. **One connection per call** writes one `a connection was accepted` line per request; a status poll during a one-minute wait writes
-   hundreds. The agent should hold one connection per job (WP-11 follow-up) or the helper should summarise (ADR 0027 section 9 asks for a
-   per-minute summary).
+3. **One removal failed once** with `RemoveProgram ... left in place while it runs` right after a turn on: `StopExisting` returned before the
+   helper process had ended. Fixed: the stop now waits for the process by identity (pid and start time) before anything is removed, with a clear
+   bounded error (test).
+4. **The data folder stayed** after removal. Fixed (see finding 9).
+5. **One connection per call** wrote one `a connection was accepted` line per request, hundreds during a status poll. Fixed: the agent keeps one
+   connection between calls (a stale one is replaced once), and the state is logged at info only when it changes.
 
 Update runs the same code as Repair (install again over the running helper) and was not run separately.
 
-## macOS (Tart `vmgui-base-tahoe-4aaa751f`): not run
+## macOS 26.6.2 (build 25G83, 2026-11-03): done
 
-The password dialog is `osascript`'s and is answered through the VM's GUI session; the helper must be cross-built for macOS (arm64) and the
-VM cloned to a private copy first. Not done in this session. To run: clone, copy `dyno-helper` and the `helper_vm` test binary into the clone,
-run `PADDOCK_VM=1 HELPER_ACTION=turnOn helper_vm --ignored --nocapture` from the GUI session, answer the dialog with the VM's VNC, then
-`launchctl print system/net.decryptology.dyno.helper`, check the daemon in System Settings > Login Items, the socket's folder
-(`/var/run/dyno-helper`, root-owned) and a second standard account; delete the clone.
+- **Machine.** A private clone of the Tart image `vmgui-base-tahoe-4aaa751f` (Apple silicon, the console user `admin` signed in), started with
+  `--vnc-experimental`; the clone is deleted. Binaries built natively on the host (`aarch64-apple-darwin`) and shared read-only. The agent side
+  ran in the user's session (`launchctl asuser`); the password was typed into the real dialog through the VM's VNC.
+- **Prompt seen.** Yes, the real `osascript` password window ("Dyno wants to install its helper, which shows the readings that need
+  administrator rights."): [turn on](screenshots/helper/macos-password-dialog-turn-on.png), [repair](screenshots/helper/macos-password-dialog-repair.png).
 
-## Linux (Orb `paddock-gate-arm`, systemd): not run
+| Step | Result |
+| --- | --- |
+| Nothing installed | `Off` (see finding 6: it said "Not trusted" before the fix) |
+| Turn on (password) | phases `check`, `prompt`, `start`, `verify`; `Ready`, readings listed for macOS |
+| The daemon | `launchctl print system/net.decryptology.dyno.helper`: running, run by `root`, program `/Library/PrivilegedHelperTools/net.decryptology.dyno.helper` (root:wheel 0755), plist `/Library/LaunchDaemons/...plist` (root:wheel 0644, `RunAtLoad`, `KeepAlive` on failure) |
+| The endpoint | `/var/run/dyno-helper` is `root:daemon 0755` (no group or world write), `helper.sock` is `srw-rw-rw-` (any local account may connect; what it sees is decided by its identity); the data folder is not readable by the standard user; `config.json` names uid 501 as owner |
+| Squatting | the standard user cannot create a folder under `/var/run` (`Permission denied`); with the folder made the standard user's own (as root, in the VM only), the state is `Foreign` ("Not trusted") and nothing is sent; given back to root it is `Ready` |
+| Repair (password) | `check`, `prompt` x3, `start`, `verify`; `Ready` |
+| Turn off | no prompt on macOS (a program can remove itself while it runs): phases `check`, `remove`, `verify`; `Off`; the daemon, the program and (after finding 7) the plist are gone |
+| Log lines | `Helper: protected-location check ... protected=true`, `Helper: serving endpoint=/var/run/dyno-helper/helper.sock owner=uid:501 version=...`, one `a connection was accepted account=uid 501 admin=true` for a whole poll (one kept connection) |
 
-The machine has no polkit (`pkexec` is missing) and no authentication agent; `pkexec` from the agent's pipe-connected process needs one.
-To run: install `polkitd` and `pkexec`, start a text agent on a terminal (`pkttyagent`) or a rule that allows the one command for the test
-account, build `dyno-helper` and the `helper_vm` test natively in the machine, run the harness, then `systemctl status dyno-helper`,
-`systemd-analyze security dyno-helper`, the socket's mode and its root-owned folder, and a second account.
+## Ubuntu 24.04 arm64 (Orb `paddock-gate-arm`, systemd, 2026-11-03): done except the polkit prompt
+
+- **Machine.** The Orb machine, restored afterwards: `polkitd`, `pkexec`, `libpolkit-agent-1-0`, `libpolkit-gobject-1-0` installed for the test and
+  removed again, the test account `dynotest` (member of `sudo`) removed, `/usr/bin/dyno-helper` and the unit removed, the build folder removed.
+  Binaries built natively in the machine. The `.deb` is not built yet (WP-13), so the program was copied to `/usr/bin` and the packaged unit
+  (`paddock-service`'s golden) to `/usr/lib/systemd/system`, as the package will.
+- **The polkit prompt: not exercised.** The agent's `pkexec` runs with no terminal and there is no graphical authentication agent in the
+  machine; a text agent (`pkttyagent`) could not be attached to the agent's `pkexec` (it tried its own and failed on `/dev/tty`: "You are not
+  allowed to do this (Error creating textual authentication agent ...)", shown as the job's failure). The install itself was run as root
+  (`dyno-helper install --for uid:1000`), which is what `pkexec` runs. A desktop test is still open.
+
+| Step | Result |
+| --- | --- |
+| Package installed, service not enabled | `Off` after finding 8 (it said "Not running" before: the program's presence is not "turned on") |
+| Install as root | `install: StopExisting, VerifyProgram, Register, Confirm (running)` |
+| State as the standard user | `Ready`, the Linux readings listed |
+| Service | `dyno-helper.service` active, `ps`: `root`; `/run/dyno-helper` `root:root 0755`, `helper.sock` `srw-rw-rw-`; `/var/lib/dyno-helper` `root 0700`, `config.json` owner uid 1000 |
+| Unit hardening | the unit is the golden file (`ProtectSystem=strict`, `NoNewPrivileges=yes`, `PrivateTmp`, `CapabilityBoundingSet` of five, `SystemCallFilter=@system-service`, `IPAddressDeny=any`, `RestrictAddressFamilies=AF_UNIX AF_NETLINK`, `MemoryDenyWriteExecute`, `UMask=0077`, ...). `systemd-analyze security`: exposure 4.8 OK; the applied seccomp filter, the capability set, `IPAddressDeny` and `MemoryDenyWriteExecute` are in force. **`ProtectSystem`, `NoNewPrivileges`, `PrivateTmp` and `ProtectHome` read `no` in this machine** because it carries a global drop-in `/run/systemd/system/service.d/zzz-lxc-service.conf` that switches them off (an LXC-style container): they need a real VM to verify |
+| Squatting | the standard user cannot create under `/run`; with `/run/dyno-helper` made the standard user's own (as root) the state is `Foreign`; given back it is `Ready` |
+| Turn off | the helper removes itself on the authenticated request: the unit is stopped and `/run/dyno-helper` and `/var/lib/dyno-helper` are gone; the package's program stays (dpkg's) |
+
+## Findings of the macOS and Linux runs, and what was done
+
+6. **A missing socket folder was "Not trusted".** Before anything is installed, `/var/run/dyno-helper` does not exist and `paddock-ipc`'s
+   client check called that an untrusted endpoint (macOS and Linux both showed `Foreign`; after Turn off the job then waited for an `Off` that
+   could not come). Fixed in `paddock-ipc` (a missing folder is "nothing listening"), with a test.
+7. **Self-removal left the registration behind.** On macOS `launchctl bootout` of its own job ended the helper before it removed its plist.
+   Fixed: a service removing itself unregisters first and stops last (test). The stale `helper.sock` and an empty `/Library/Application
+   Support/Dyno` folder remain on macOS; both are harmless and are noted for the service crate.
+8. **"Installed" on Linux was "the package's program exists".** Without the service enabled the card said "Not running" instead of "Off".
+   Fixed: on Linux, installed means `systemctl is-enabled` succeeds.
+9. The helper's data folder is now removed by the elevated `uninstall` and by the self-removal (only its own files and folders, a link is never
+   followed); the data folder of the earlier Windows run was kept before this fix.
+
+## Windows: what the card says, and what was not re-run
+
+The Windows build of Dyno's helper is unsigned, and stays so (user decision, 2026-11-03), so the card says before Turn on that Windows will ask
+whether to let an app from an unknown publisher (`dyno-helper.exe`) make changes to the device, that this is expected, and to choose Yes
+(`prompt_text`, shown on every Windows card state that can turn the helper on; no password line on Windows). The fixes above (the stop race,
+the data folder, the kept connection) were not run again in the Windows VM in this session; the macOS and Linux runs exercise the same code.
 
 ## Settings card, every state (mock backend, independent review)
 

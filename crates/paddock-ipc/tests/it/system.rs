@@ -168,6 +168,34 @@ fn a_system_endpoint_in_a_missing_or_linked_folder_is_refused_with_the_cause() {
     assert!(Stream::connect_system("helper.sock", T).is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_client_finding_no_folder_or_no_socket_sees_nothing_listening_not_an_untrusted_server() {
+    // Measured in a clean macOS VM: before the helper is installed its socket folder does not exist, and the agent called that
+    // an endpoint it did not trust ("Not trusted") instead of "Off". Nothing there is nothing listening.
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir
+        .path()
+        .join("no/such/helper.sock")
+        .to_string_lossy()
+        .into_owned();
+    let e = Stream::connect_system(&missing, T).err().unwrap();
+    assert!(
+        matches!(&e, SystemConnectError::Connect(io) if io.kind() == std::io::ErrorKind::NotFound),
+        "{e}"
+    );
+    // A folder that exists and is the client's own is still refused (not root's), whether or not a socket is in it.
+    let own = dir.path().join("own.sock").to_string_lossy().into_owned();
+    let e = Stream::connect_system(&own, T).err().unwrap();
+    assert!(
+        matches!(
+            e,
+            SystemConnectError::Untrusted(Untrusted::FolderOwner { .. })
+        ),
+        "{e}"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn a_pipe_not_owned_by_system_is_refused_before_anything_is_sent() {

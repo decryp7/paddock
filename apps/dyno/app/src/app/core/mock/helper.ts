@@ -10,7 +10,7 @@ export const MOCK_HELPER_VERSION = '1.1.0';
 const PROMPTS: Record<MockOs, string> = {
   macos: 'macOS asks for your account password, in a window titled by osascript, to let Dyno install its helper.',
   windows:
-    "Windows will ask you to allow dyno-helper.exe to make changes to your device. It lists an unknown publisher because Dyno's helper is not signed; choose Yes.",
+    "Windows will ask whether to let an app from an unknown publisher (dyno-helper.exe) make changes to your device. That is expected: Dyno's helper is not signed. Choose Yes.",
   linux: 'Your desktop asks you to authenticate (polkit) so Dyno can install its helper.',
 };
 
