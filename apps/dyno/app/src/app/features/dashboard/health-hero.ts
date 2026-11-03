@@ -20,7 +20,6 @@ import { MatTooltip } from '@angular/material/tooltip';
           <small>of 100</small>
         </dy-ring>
         <div class="who">
-          <span class="eyebrow">Health</span>
           <strong class="grade" [attr.data-tone]="tone()">{{ grade() }}</strong>
           @if (trend(); as t) {
             <span class="trend num">{{ t }}</span>

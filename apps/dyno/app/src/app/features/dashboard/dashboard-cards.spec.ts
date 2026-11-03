@@ -54,6 +54,17 @@ const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
   ],
 });
 
+describe('DiagnosisCard stats', () => {
+  it('never cuts a number: only the busiest app name is ellipsized, with its full text in the tooltip', async () => {
+    env();
+    const f = TestBed.createComponent(DiagnosisCard);
+    await settle(f);
+    const dds = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.stats dd')];
+    expect(dds.length).toBe(4);
+    expect(dds.map((d) => d.classList.contains('name'))).toEqual([false, false, false, true]);
+  });
+});
+
 describe('DiagnosisCard', () => {
   it('invites a check first, then shows the headline, cause, evidence and a "Check again" button', async () => {
     const { mock } = env();

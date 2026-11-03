@@ -7,6 +7,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { Icon } from '../../shared/icon';
 import { formatBytes, formatPercent } from '../../shared/format';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
+import { coreHeat } from '../../shared/heat';
 import { Ring } from '../../shared/ring';
 import { Sparkline } from '../../shared/sparkline';
 import { DiagnosisStore } from '../../state/diagnosis.store';
@@ -30,6 +31,20 @@ import type { DyValue } from './dashboard-states';
 export const HERO_MIN_WIDTH = 4;
 /** From this many rows the health hero lists three reasons, below it two (the third would be cut). */
 export const HERO_ROWS_FOR_THREE = 11;
+
+/** From this many rows the issues widget lists three issues, below it two (a third would be cut). */
+export const ISSUES_ROWS_FOR_THREE = 8;
+
+/** The height of one recent-events entry (two lines and its padding), the head and the padding and grip clearance of a card, in px. */
+export const EVENT_ROW_PX = 48;
+const CARD_CHROME_PX = 62;
+const FEED_MAX = 7;
+
+/** How many recent-events entries fit `rows` grid rows (at the standard 24 px row and 16 px gap), at least one. */
+export function eventsFitting(rows: number): number {
+  const inner = rows * 24 + (rows - 1) * 16 - CARD_CHROME_PX;
+  return Math.min(FEED_MAX, Math.max(1, Math.floor(inner / EVENT_ROW_PX)));
+}
 
 /** The placement the body reads while there is no value (never drawn: the twin is). */
 const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1, widget: { kind: 'bigNumber', metric: 'cpuTotal', options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } } };
@@ -80,7 +95,11 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
           <dy-ring [value]="reading().percent ?? 0" [tone]="ringTone()" [label]="title() + ' ' + reading().text + reading().unit" style="--ring-size: 84px">
             <span class="rn"><dy-animated-number [value]="reading().text" /></span>
           </dy-ring>
-          <p class="note">@if (reading().reason; as why) {<span>Not available. {{ why }}</span>} @else {<span>{{ title() }}</span>}</p>
+          @if (reading().reason; as why) {
+            <p class="note"><span>Not available. {{ why }}</span></p>
+          } @else if (batteryState(); as state) {
+            <p class="note state">{{ state }}</p>
+          }
         </div>
       }
       @case ('heatmap') {
@@ -108,14 +127,14 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
           @for (a of anomalies(); track a.id) {
             <li>
               <span class="ic" aria-hidden="true"><dy-icon [name]="anomalyIcon(a.kind)" /></span>
-              <span class="tx"><strong class="truncate" [dyFullText]="a.title">{{ a.title }}</strong><small class="truncate" [dyFullText]="label(a.kind) + ' · ' + a.app">{{ label(a.kind) }} · {{ a.app }}</small></span>
+              <span class="tx"><strong class="two-lines" [dyFullText]="a.title">{{ a.title }}</strong><small class="truncate" [dyFullText]="label(a.kind) + ' · ' + a.app">{{ label(a.kind) }} · {{ a.app }}</small></span>
             </li>
           }
         </ul>
       }
       @case ('cpu') { <dy-cpu-tile /> }
       @case ('diagnosis') { <dy-diagnosis-card /> }
-      @case ('events') { <dy-events-feed /> }
+      @case ('events') { <dy-events-feed [limit]="eventLimit()" /> }
       @case ('history') { <dy-history-panel /> }
       @case ('consumers') { <dy-consumers-panel /> }
       @case ('diskTrend') { <dy-disk-trend-panel /> }
@@ -126,7 +145,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
         @if (health.report(); as r) {
           <div class="ringrow">
             <dy-ring [value]="r.score" [tone]="gradeTone()" [label]="'Health score ' + r.score" style="--ring-size: 84px"><span class="rn num">{{ round(r.score) }}</span></dy-ring>
-            <div><strong class="grade" [attr.data-tone]="gradeTone()">{{ grade() }}</strong><p class="note">Health score</p></div>
+            <strong class="grade" [attr.data-tone]="gradeTone()">{{ grade() }}</strong>
           </div>
         } @else {
           <p class="note">{{ health.reportError()?.message ?? 'Reading the health score…' }}</p>
@@ -137,7 +156,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
     }
   `,
   styles: `
-    :host { display: block; min-width: 0; /* The body's height inside its frame: the placement's rows, less the head and the padding. */ --wv-avail: calc(var(--wv-rows, 4) * var(--pd-widget-row) + (var(--wv-rows, 4) - 1) * var(--pd-card-gap) - 22px - 2 * var(--pd-space-3)); }
+    :host { display: block; min-width: 0; /* The body's height inside its frame: the placement's rows, less the head and the padding. */ --wv-avail: calc(var(--wv-rows, 4) * var(--pd-widget-row) + (var(--wv-rows, 4) - 1) * var(--pd-card-gap) - 22px - 2 * var(--pd-space-3) - var(--pd-widget-grip-clear, 16px)); }
     .twin { display: grid; gap: var(--sp-2); justify-items: start; }
     .sk-big { display: block; font: var(--fw-semibold) var(--fs-2xl) / 1.1 var(--font-display); }
     .sk-line { display: block; font-size: var(--fs-sm); }
@@ -162,6 +181,8 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
     .issues .ic { display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn); flex: none; }
     .issues .tx { display: grid; min-width: 0; line-height: 1.3; }
     .issues strong { font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+    /* A name wraps to a second line before it is cut (the tooltip has the rest). */
+    .two-lines { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
     .issues small { color: var(--text-3); font-size: var(--fs-xs); }
   `,
 })
@@ -200,6 +221,14 @@ export class WidgetView {
   protected readonly barTone = computed(() => (this.reading().tone === 'ok' ? null : this.reading().tone));
   protected readonly ringTone = computed<'ok' | 'warn' | 'bad' | 'accent'>(() => (this.reading().tone === 'ok' ? 'accent' : this.reading().tone));
   protected readonly percent = computed(() => this.reading().percent !== null);
+  /** The battery ring's state word (the frame's title already says "Battery", so the ring row does not repeat it); null for any other metric. */
+  protected readonly batteryState = computed<string | null>(() => {
+    if (this.widget().metric !== 'battery') return null;
+    const b = this.live.system()?.battery;
+    if (!b || !('available' in b)) return null;
+    if (b.available.source === 'battery') return 'On battery';
+    return b.available.charge >= 99.5 ? 'Full' : 'Charging';
+  });
   protected readonly accent = computed(() => this.widget().options.accent ?? 'var(--accent)');
   protected readonly series = computed(() => {
     const path = this.counterPath();
@@ -213,7 +242,10 @@ export class WidgetView {
     const u = this.live.update();
     return ((this.widget().metric === 'memory' ? u?.topMemory : u?.topCpu) ?? []).slice(0, 5);
   });
-  protected readonly anomalies = computed(() => this.diagnosis.anomalies().slice(0, 3));
+  /** Three issues fit from `ISSUES_ROWS_FOR_THREE` rows (each takes up to three lines), below it two. */
+  /** As many feed entries as the widget's rows hold (two-line entries of `EVENT_ROW_PX` below the head, inside the padding and clear of the resize grip). */
+  protected readonly eventLimit = computed(() => eventsFitting(this.rows()));
+  protected readonly anomalies = computed(() => this.diagnosis.anomalies().slice(0, this.rows() >= ISSUES_ROWS_FOR_THREE ? 3 : 2));
   protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
   protected readonly gradeTone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));
   protected readonly pct = formatPercent;
@@ -223,5 +255,5 @@ export class WidgetView {
   /** Slow-moving levels are drawn zoomed so a steady 50% still shows its line. */
   protected readonly zoomed = computed(() => ['memory', 'swap', 'gpuLoad', 'diskFree', 'battery'].includes(String(this.widget().metric)));
   protected readonly topValue = (g: { cpu: Measured<number>; memory: Measured<number> }) => (this.widget().metric === 'memory' ? showMeasured(g.memory, formatBytes) : showMeasured(g.cpu, formatPercent));
-  protected readonly cellColor = (v: number) => `color-mix(in srgb, var(--accent) ${Math.round(Math.min(100, Math.max(0, v)) * 0.85)}%, var(--surface-active))`;
+  protected readonly cellColor = coreHeat;
 }

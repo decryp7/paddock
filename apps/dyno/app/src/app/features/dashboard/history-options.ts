@@ -194,7 +194,10 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
   const projection =
     last && typeof trend.forecast === 'object' ? [[last.at, last.free], [last.at + trend.forecast.fullInDays * day, 0]] : [];
   const color = t.chart[2]!;
-  const axis = byteAxis(Math.max(0, ...trend.points.map((p) => p.free)));
+  const nice = byteAxis(Math.max(0, ...trend.points.map((p) => p.free)));
+  // Three ticks (zero, the middle, the top): the card is short, and five labels in 90 px crowd each other.
+  const half = nice.interval * Math.ceil(nice.max / nice.interval / 2);
+  const axis = { max: half * 2, interval: half };
   // Evenly spaced date ticks (whole days, about five across the line and its forecast) instead of the month and day boundaries the
   // automatic ticks mix.
   const first = trend.points[0]?.at ?? 0;

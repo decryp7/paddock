@@ -1,5 +1,5 @@
 import { FullTextTip } from '../../shared/full-text-tip';
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import type { ActivityEntry, Alert } from '../../core/api.types';
 import { formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -71,10 +71,12 @@ export const FEED_LIMIT = 7;
   `,
 })
 export class EventsFeed {
+  /** How many entries to list (the dashboard widget gives as many as its height holds, so the last one is never cut). */
+  readonly limit = input(FEED_LIMIT);
   protected readonly activity = inject(ActivityStore);
   protected readonly alerts = inject(AlertsStore);
   private readonly live = inject(LiveStore);
-  protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), FEED_LIMIT));
+  protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), this.limit()));
   /** Relative to the engine's clock, so the feed reads right whatever the computer's clock does. */
   protected readonly ago = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
 

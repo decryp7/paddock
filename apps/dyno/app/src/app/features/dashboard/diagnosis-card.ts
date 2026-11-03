@@ -67,7 +67,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
     @if (stats(); as st) {
       <dl class="stats num" aria-label="Right now">
         @for (x of st; track x.k) {
-          <div><dt>{{ x.k }}</dt><dd [dyFullText]="x.v">{{ x.v }}</dd></div>
+          <div><dt>{{ x.k }}</dt>@if (x.name) {<dd class="name" [dyFullText]="x.v">{{ x.v }}</dd>} @else {<dd>{{ x.v }}</dd>}</div>
         }
       </dl>
     }
@@ -93,9 +93,12 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .others dy-icon { --icon-size: 14px; color: var(--text-3); }
     .others .t { flex: 1; }
     .faint { color: var(--text-3); }
-    .stats { margin: 0; padding-top: var(--sp-3); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
+    .stats { margin: 0; padding-top: var(--sp-3); display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
     .stats dt { color: var(--text-3); font-size: var(--fs-sm); }
-    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stats > div { min-width: 0; }
+    /* A number is never cut: the grid gives it another row instead. Only the busiest app's name may ellipsize (its tooltip has the whole name). */
+    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-display); white-space: nowrap; }
+    .stats dd.name { overflow: hidden; text-overflow: ellipsis; }
   `,
 })
 export class DiagnosisCard {
@@ -109,10 +112,10 @@ export class DiagnosisCard {
     const memPct = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
     const top = u.topCpu[0];
     return [
-      { k: 'CPU', v: formatPercent(sys.cpu.total, 0) },
-      { k: 'Memory', v: formatPercent(memPct, 0) },
-      { k: 'Disk', v: formatRate(sys.diskIo.readBps + sys.diskIo.writeBps) },
-      { k: 'Busiest', v: top ? top.name : '—' },
+      { k: 'CPU', v: formatPercent(sys.cpu.total, 0), name: false },
+      { k: 'Memory', v: formatPercent(memPct, 0), name: false },
+      { k: 'Disk', v: formatRate(sys.diskIo.readBps + sys.diskIo.writeBps), name: false },
+      { k: 'Busiest', v: top ? top.name : '—', name: true },
     ];
   });
   protected readonly cause = computed(() => this.store.diagnosis()?.causes[0] ?? null);

@@ -6,11 +6,12 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import type { Cells, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
 import { WidgetLayouts } from '../../state/widget-layouts';
+import { DiagnosisStore } from '../../state/diagnosis.store';
 import { CountersStore } from '../../state/counters.store';
 import { LiveStore } from '../../state/live.store';
 import { AnimatedNumber } from './animated-number';
 import { DASHBOARD_KINDS, WidgetBoard } from './widget-board';
-import { WidgetView } from './widget-view';
+import { eventsFitting, ISSUES_ROWS_FOR_THREE, WidgetView } from './widget-view';
 import type { DyValue } from './dashboard-states';
 
 /** A dashboard placement of `kind` showing `metric`, `w` columns wide. */
@@ -57,6 +58,50 @@ describe('dy-widget', () => {
     const el = body('ring', given('ring', 'battery', rd(86))).nativeElement as HTMLElement;
     expect(el.querySelector('dy-ring')).not.toBeNull();
     expect(el.querySelector('.bar-track')).toBeNull();
+  });
+
+  it('says the battery state beside the ring instead of repeating the title, and nothing for another ring', () => {
+    const { mock } = (() => { const m = env(); return { mock: m }; })();
+    const el = body('ring', given('ring', 'battery', rd(86))).nativeElement as HTMLElement;
+    expect(el.querySelector('.state')?.textContent).toMatch(/^(Charging|On battery|Full)$/);
+    expect(el.textContent).not.toContain('Battery');
+    const live = TestBed.inject(LiveStore);
+    const base = mock.liveUpdate('summary');
+    const battery = (source: 'ac' | 'battery', charge: number) => ({ ...base, system: { ...base.system, battery: { available: { charge, source, health: 90, cycles: null, secondsToEmpty: null } } } });
+    for (const [source, charge, word] of [['ac', 100, 'Full'], ['ac', 80, 'Charging'], ['battery', 80, 'On battery']] as const) {
+      live.receive(battery(source, charge));
+      const f = body('ring', given('ring', 'battery', rd(charge)));
+      expect((f.nativeElement as HTMLElement).querySelector('.state')?.textContent).toBe(word);
+    }
+    live.receive({ ...base, system: { ...base.system, battery: { unavailable: 'No battery' } } });
+    expect((body('ring', given('ring', 'battery', rd(86))).nativeElement as HTMLElement).querySelector('.state')).toBeNull();
+    expect((body('ring', given('ring', 'memory', rd(51))).nativeElement as HTMLElement).querySelector('.note')).toBeNull();
+  });
+
+  it('does not repeat the title in the compact health ring, only the grade', () => {
+    env();
+    const el = body('health', given('health', 'cpuTotal', null, 3)).nativeElement as HTMLElement;
+    expect(el.textContent).not.toContain('Health score');
+  });
+
+  it('lists two issues when short and three from ISSUES_ROWS_FOR_THREE rows, each name allowed a second line with its full text in the tooltip', async () => {
+    env();
+    await TestBed.inject(DiagnosisStore).loadAnomalies();
+    const at = (h: number): DyValue => ({ placement: { ...place('issues', 'cpuTotal', 3), h }, reading: null });
+    const el = body('issues', at(ISSUES_ROWS_FOR_THREE - 1)).nativeElement as HTMLElement;
+    expect(el.querySelectorAll('.issues li').length).toBe(2);
+    const tall = body('issues', at(ISSUES_ROWS_FOR_THREE)).nativeElement as HTMLElement;
+    expect(tall.querySelectorAll('.issues li').length).toBe(3);
+    expect(tall.querySelector('.issues strong')!.classList.contains('two-lines')).toBe(true);
+  });
+
+  it('lists as many recent events as the rows hold, so the last entry never reaches the resize grip', () => {
+    expect([4, 7, 9, 14, 99].map(eventsFitting)).toEqual([1, 4, 5, 7, 7]);
+    expect(eventsFitting(1)).toBe(1);
+    env();
+    const at = (h: number): DyValue => ({ placement: { ...place('events', 'cpuTotal', 6), h }, reading: null });
+    const f = body('events', at(7));
+    expect((f.nativeElement as HTMLElement).querySelectorAll('dy-events-feed li').length).toBeLessThanOrEqual(4);
   });
 
   it('says why a graph has no reading instead of drawing a history for it', () => {

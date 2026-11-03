@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { formatGhz, formatPercent, formatCount, splitValue } from '../../shared/format';
+import { coreHeat } from '../../shared/heat';
 import { Sparkline } from '../../shared/sparkline';
 import { LiveStore } from '../../state/live.store';
 import { Icon } from '../../shared/icon';
@@ -86,8 +87,8 @@ export class CpuTile {
   protected readonly ghz = formatGhz;
   protected readonly total = (v: number) => parts(formatPercent(v));
   protected readonly count = (i: number) => formatCount(i + 1);
-  /** A single-hue ramp from neutral to the accent (percent load; the number is in the tooltip). */
-  protected readonly coreColor = (v: number) => `color-mix(in srgb, var(--accent) ${Math.round(Math.min(100, Math.max(0, v)) * 0.85)}%, var(--surface-active))`;
+  /** A ramp from a neutral to the accent, every step at least 3:1 on a card (percent load; the number is in the tooltip). */
+  protected readonly coreColor = coreHeat;
   protected readonly coresText = computed(() => {
     const c = this.cpu();
     if (!c) return '';

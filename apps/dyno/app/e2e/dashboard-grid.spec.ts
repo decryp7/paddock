@@ -19,6 +19,13 @@ async function open(page: Page, width = 1280, height = 900): Promise<void> {
   await expect(page.locator('pd-widget-frame [aria-busy="true"], pd-widget-frame[aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 });
 }
 
+/** The live graphs have a line to draw (a reviewer's shot of one sample shows empty cards): wait on the samples, not on time. */
+async function graphsHaveALine(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.locator('dy-widget dy-sparkline path').first().getAttribute('d').then((d) => (d?.match(/L/g) ?? []).length), { timeout: 60_000 })
+    .toBeGreaterThan(8);
+}
+
 const box = async (cell: Locator): Promise<{ x: number; y: number; width: number; height: number }> => {
   const b = await cell.boundingBox();
   if (!b) throw new Error('the widget has no box');
@@ -130,6 +137,122 @@ test.describe('dashboard grid', () => {
     await expect(page.getByText(/needs a wider dashboard/)).toBeVisible();
   });
 
+  test('edit mode: the page keeps one primary button (Done); a body button reads as inactive', async ({ page }) => {
+    await open(page);
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    await expect(page.getByText('Editing layout')).toBeVisible();
+    const filled = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('main .mat-mdc-unelevated-button')]
+        .filter((b) => getComputedStyle(b).backgroundColor !== 'rgba(0, 0, 0, 0)')
+        .map((b) => (b.textContent ?? '').trim()),
+    );
+    expect(filled).toEqual(['Done']);
+    // Outside edit mode the Why slow widget's own button is the filled one again.
+    await page.getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByText('Editing layout')).toHaveCount(0);
+    await expect(page.locator('dy-diagnosis-card .mat-mdc-unelevated-button')).toHaveCSS('background-color', /rgb\((?!0, 0, 0)/);
+  });
+
+  for (const width of [1280, 900, 500]) {
+    test(`never cuts a value at ${width} px: a clipped text is a name with its full text in a tooltip`, async ({ page }) => {
+      await open(page, width, 4000);
+      for (const mode of ['normal', 'edit']) {
+        if (mode === 'edit') {
+          if (!(await page.getByRole('button', { name: 'Edit layout' }).isEnabled())) continue;
+          await page.getByRole('button', { name: 'Edit layout' }).click();
+          await expect(page.getByText('Editing layout')).toBeVisible();
+        }
+        const cut = await page.evaluate(() => {
+          const valueLike = /^[\s\-+\u2212~<>]*\d[\d.,\s]*[^\s]{0,8}(\s+[^\s]{1,8})?$/;
+          const out: string[] = [];
+          for (const el of document.querySelectorAll<HTMLElement>('main *')) {
+            if ((el.children.length > 0 && !el.matches('strong, span, dd, b, small, p, li')) || el.closest('.visually-hidden, .cdk-visually-hidden')) continue;
+            const cs = getComputedStyle(el);
+            const clipsX = cs.overflow === 'hidden' || cs.overflowX === 'hidden';
+            const text = (el.textContent ?? '').trim();
+            if (!text || !clipsX || el.clientWidth <= 1 || el.scrollWidth <= el.clientWidth + 1) continue;
+            const named = el.hasAttribute('data-full-text') || el.closest('[data-full-text]') !== null || el.hasAttribute('title');
+            if (valueLike.test(text) || !named) out.push(text.slice(0, 40));
+          }
+          return out;
+        });
+        expect(cut, `${mode} at ${width}`).toEqual([]);
+      }
+    });
+  }
+
+  test('Is this normal? at one column wraps each value under its sentence instead of cutting it', async ({ page }) => {
+    await open(page, 500, 1200);
+    const rows = page.locator('dy-normal-card li');
+    await expect(rows.first()).toBeVisible();
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      const li = rows.nth(i);
+      const [row, vals] = await Promise.all([box(li), box(li.locator('.vals'))]);
+      expect(vals.x + vals.width, `row ${i} value inside the card`).toBeLessThanOrEqual(row.x + row.width + 0.5);
+      expect(await li.locator('.vals').evaluate((v) => v.scrollWidth <= v.clientWidth + 1)).toBe(true);
+    }
+  });
+
+  test('the corner grip never covers the last line of a widget', async ({ page }) => {
+    await open(page);
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    await expect(page.getByText('Editing layout')).toBeVisible();
+    const overlaps = await page.evaluate(() => {
+      const bad: string[] = [];
+      for (const cell of document.querySelectorAll<HTMLElement>('[data-pd-cell]')) {
+        const grip = cell.querySelector('.pd-wg-h--se')?.getBoundingClientRect();
+        if (!grip) continue;
+        for (const el of cell.querySelectorAll<HTMLElement>('pd-widget-frame *')) {
+          if (el.children.length > 0 || !(el.textContent ?? '').trim() || el.closest('.visually-hidden')) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          if (r.left < grip.right && r.right > grip.left && r.top < grip.bottom && r.bottom > grip.top) bad.push(`${cell.getAttribute('data-pd-cell')}: ${(el.textContent ?? '').trim().slice(0, 30)}`);
+        }
+      }
+      return bad;
+    });
+    expect(overlaps).toEqual([]);
+  });
+
+  test('the six-column arrangement leaves no empty half beside a widget', async ({ page }) => {
+    await open(page, 900, 3000);
+    const board = await box(page.locator('dy-widget-board'));
+    const consumers = page.locator('[data-pd-cell]', { has: page.locator('dy-consumers-panel') });
+    const c = await box(consumers);
+    expect(c.width).toBeGreaterThan(board.width * 0.9);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`every per-core cell, the lowest step too, is 3:1 on the card in ${theme}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await open(page);
+      const ratio = await page.evaluate(() => {
+        const rgb = (css: string): number[] => {
+          const c = document.createElement('canvas').getContext('2d')!;
+          c.fillStyle = '#000';
+          c.fillStyle = css;
+          c.fillRect(0, 0, 1, 1);
+          return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3);
+        };
+        const lum = (v: number[]): number => {
+          const [r, g, b] = v.map((x) => { const s = x / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+          return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+        };
+        // Every per-core cell on the dashboard, the idle ones included, against the card behind it.
+        const cells = [...document.querySelectorAll<HTMLElement>('dy-cpu-tile .core, dy-widget .cell')];
+        if (cells.length === 0) throw new Error('no per-core cells drawn');
+        let lowest = Infinity;
+        for (const cell of cells) {
+          const [a, b] = [lum(rgb(getComputedStyle(cell).backgroundColor)), lum(rgb(getComputedStyle(cell.closest('.pd-w')!).backgroundColor))];
+          lowest = Math.min(lowest, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05));
+        }
+        return lowest;
+      });
+      expect(ratio).toBeGreaterThanOrEqual(3);
+    });
+  }
+
   test('has no accessibility violations in either theme, in normal and in edit mode', async ({ page }) => {
     await open(page);
     expect(await axeInThemes(page, { include: ['dy-widget-board'] })).toEqual([]);
@@ -150,14 +273,17 @@ test.describe('dashboard grid screenshots', () => {
       // Tall, so the whole dashboard is in the picture (the page scrolls inside the shell, not as a document).
       await page.setViewportSize({ width: 1280, height: 2400 });
       await open(page, 1280, 2400);
+      await graphsHaveALine(page);
       await page.screenshot({ path: join(dir, `dashboard-normal-${theme}.png`), fullPage: true });
       await page.getByRole('button', { name: 'Edit layout' }).click();
       await expect(page.getByText('Editing layout')).toBeVisible();
       await page.screenshot({ path: join(dir, `dashboard-edit-${theme}.png`), fullPage: true });
       const suffix = theme === 'light' ? '' : '-dark';
       await open(page, 900, 2800);
+      await graphsHaveALine(page);
       await page.screenshot({ path: join(dir, `dashboard-900-six-columns${suffix}.png`), fullPage: true });
       await open(page, 500, 5200);
+      await graphsHaveALine(page);
       await page.screenshot({ path: join(dir, `dashboard-500-one-column${suffix}.png`), fullPage: true });
     });
   }
