@@ -51,7 +51,7 @@ const kind = (k: string, title: string, summary: string, icon: string, spans: nu
   title,
   summary,
   icon,
-  size: { arrangement: 'spans', spans },
+  size: { spans: { spans } },
   maxInstances,
   refresh,
 });
@@ -67,7 +67,7 @@ const CATALOGUE: CatalogueInfo<string, string> = {
   ],
 };
 /** The spans a flow kind allows. */
-const spansOf = (info: KindInfo<string>): readonly number[] => (info.size.arrangement === 'spans' ? info.size.spans : []);
+const spansOf = (info: KindInfo<string>): readonly number[] => ('spans' in info.size ? info.size.spans.spans : []);
 const place = (id: string, k: string, span = 2, volume?: string): Placement<Sample> => ({ id, span, widget: volume ? { kind: k, volume } : { kind: k } });
 const DEFAULTS: Placement<Sample>[] = [place('alarms', 'alarms'), place('disk', 'disk', 2, 'all'), place('cpu', 'cpu'), place('net', 'net', 1), place('backup', 'backup', 1)];
 
@@ -110,6 +110,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
   arrangements: [],
   moves: [],
   canRedo: false,
+  outcome: null,
   catalogue: CATALOGUE,
   builtinPresets: [MINIMAL],
   notes: [],

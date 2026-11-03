@@ -40,7 +40,7 @@ let nextId = 0;
 
 /** The spans a flow kind allows (a grid kind has none: the chooser is for flow surfaces). */
 function spansOf(info: KindInfo<unknown>): readonly number[] {
-  return info.size.arrangement === 'spans' ? info.size.spans : [];
+  return 'spans' in info.size ? info.size.spans.spans : [];
 }
 
 /** A move target: where a row goes. */

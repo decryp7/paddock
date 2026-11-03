@@ -21,7 +21,7 @@ const kind = (k: string, title: string): KindInfo<string> => ({
   title,
   summary: `${title} summary`,
   icon: 'pd:activity',
-  size: { arrangement: 'cells', widths: { steps: 'range', min: 2, max: 12 }, heights: { steps: 'range', min: 2, max: 14 }, defaultW: 6, defaultH: 4 },
+  size: { cells: { widths: { range: { min: 2, max: 12 } }, heights: { range: { min: 2, max: 14 } }, defaultW: 6, defaultH: 4 } },
   maxInstances: 1,
   refresh: 'live',
 });
@@ -46,6 +46,7 @@ function mkView(over: Partial<View> = {}, revision = 7): View {
       { id: 'c', moves: ALL },
     ],
     canRedo: false,
+    outcome: null,
     catalogue: { surface: { id: 'dashboard', noun: 'dashboard', columns: 12, maxPlacements: 32, minPlacements: 0, maxUserPresets: 3 }, kinds: [kind('cpu', 'CPU'), kind('net', 'Network'), kind('disk', 'Disk')] },
     builtinPresets: [],
     notes: [],
@@ -347,7 +348,7 @@ describe('PdWidgetGrid', () => {
       cell('a').focus();
       const e = key(cell('a'), 'ArrowRight');
       expect(e).toBe(false);
-      expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { gesture: 'nudge', id: 'a', dir: 'right' } } }, 7);
+      expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { nudge: { id: 'a', dir: 'right' } } } }, 7);
       await settle(f);
       expect(ids()).toEqual(['b', 'a', 'c']);
       expect(f.componentInstance.changes).toHaveLength(1);
@@ -371,12 +372,12 @@ describe('PdWidgetGrid', () => {
       key(cell('b'), 'End');
       await settle(f);
       expect(backend.edit.mock.calls.map((c) => (c[0] as { arrange: { gesture: unknown } }).arrange.gesture)).toEqual([
-        { gesture: 'grow', id: 'a', dir: 'right' },
-        { gesture: 'grow', id: 'a', dir: 'left' },
-        { gesture: 'grow', id: 'a', dir: 'down' },
-        { gesture: 'grow', id: 'a', dir: 'up' },
-        { gesture: 'toFirst', id: 'b' },
-        { gesture: 'toLast', id: 'b' },
+        { grow: { id: 'a', dir: 'right' } },
+        { grow: { id: 'a', dir: 'left' } },
+        { grow: { id: 'a', dir: 'down' } },
+        { grow: { id: 'a', dir: 'up' } },
+        { toFirst: { id: 'b' } },
+        { toLast: { id: 'b' } },
       ]);
       backend.edit.mockClear();
       key(cell('c'), 'Delete');
@@ -520,7 +521,7 @@ describe('PdWidgetGrid', () => {
       expect(items().map((i) => i.hasAttribute('disabled') || i.getAttribute('aria-disabled') === 'true')).toEqual([true, false, false, false, false, false, false, false, false, false, false]);
       items()[1]!.click();
       await settle(f);
-      expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { gesture: 'nudge', id: 'a', dir: 'right' } } }, 7);
+      expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { nudge: { id: 'a', dir: 'right' } } } }, 7);
       (cell('c').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
       items().at(-1)!.click();
@@ -556,7 +557,7 @@ describe('PdWidgetGrid', () => {
       move('a', 50 + 405, 50);
       sched.flush();
       await settle(f);
-      expect(backend.preview).toHaveBeenCalledWith({ surface: 'dashboard', revision: 7, gesture: { gesture: 'place', id: 'a', rect: R(4, 0, 6, 4) }, seq: 1 });
+      expect(backend.preview).toHaveBeenCalledWith({ surface: 'dashboard', revision: 7, gesture: { place: { id: 'a', rect: R(4, 0, 6, 4) } }, seq: 1 });
       expect(cell('a').style.transform).toContain('translate(405px');
       expect(q('.pd-wg-ph')!.style.gridColumn).toBe('7 / span 6');
       expect(q('.pd-wg-guide--left')!.style.gridColumn).toBe('7 / span 1');
@@ -569,7 +570,7 @@ describe('PdWidgetGrid', () => {
       expect(q('.pd-wg-grid')!.style.gridTemplateRows).toBe('repeat(16, var(--pd-widget-row))');
       up('a');
       await settle(f);
-      expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { gesture: 'place', id: 'a', rect: R(4, 0, 6, 4) } } }, 7);
+      expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { place: { id: 'a', rect: R(4, 0, 6, 4) } } } }, 7);
       expect(say).toHaveBeenCalledWith('CPU moved here, after Network. Position 2 of 3.', 'polite');
       expect(q('.pd-wg-ph')).toBeNull();
       expect(ids()).toEqual(['b', 'a', 'c']);
@@ -708,7 +709,7 @@ describe('PdWidgetGrid', () => {
       sched.flush();
       await settle(f);
       // column pitch (1200 - 11 * 12) / 12 + 12 = 100, row pitch 36
-      expect(backend.preview).toHaveBeenCalledWith(expect.objectContaining({ gesture: { gesture: 'place', id: 'a', rect: R(3, 3, 6, 4) } }));
+      expect(backend.preview).toHaveBeenCalledWith(expect.objectContaining({ gesture: { place: { id: 'a', rect: R(3, 3, 6, 4) } } }));
     });
   });
 

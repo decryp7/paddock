@@ -1,4 +1,4 @@
-import type { Arrangement, Cells, Edit, GridGesture, KindInfo, Moves, PreviewRequest, Rect } from '@decryp7/paddock-ui/widgets';
+import type { Arrangement, Cells, Dir, Edit, GridGesture, KindInfo, Moves, PreviewRequest, Rect } from '@decryp7/paddock-ui/widgets';
 import { type GridView, type PreviewReply, type WidgetGridBackend } from '@decryp7/paddock-ui/widgets';
 import cases from '../../../paddock-ui/widgets/generated/grid-cases.json';
 
@@ -21,7 +21,7 @@ export const GOLDEN_CASES = cases as unknown as readonly GoldenCase[];
 
 /** Six sample kinds; the golden cases use a to f. */
 export const SAMPLE_KINDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot'] as const;
-const size = { arrangement: 'cells', widths: { steps: 'range', min: 2, max: 12 }, heights: { steps: 'range', min: 2, max: 14 }, defaultW: 6, defaultH: 4 } as const;
+const size = { cells: { widths: { range: { min: 2, max: 12 } }, heights: { range: { min: 2, max: 14 } }, defaultW: 6, defaultH: 4 } } as const;
 const kindInfo = (k: string): KindInfo<string> => ({ kind: k, title: k[0]!.toUpperCase() + k.slice(1), summary: `${k} summary`, icon: 'pd:activity', size, maxInstances: 12, refresh: 'onChange' });
 
 /** The sample kind of a placement id: a, b, c ... in turn. */
@@ -58,6 +58,7 @@ export function viewOf(items: readonly Item[], opts: { revision?: number; canUnd
     arrangements,
     moves,
     canRedo: opts.canRedo ?? false,
+    outcome: null,
     catalogue: { surface: { id: 'dashboard', noun: 'dashboard', columns: 12, maxPlacements: 32, minPlacements: 0, maxUserPresets: 3 }, kinds: (kinds.length ? kinds : [...SAMPLE_KINDS]).map(kindInfo) },
     builtinPresets: [],
     notes: [],
@@ -123,25 +124,29 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
   private compute(g: GridGesture): Promise<readonly Item[]> {
     const golden = GOLDEN_CASES.find((c) => sameItems(c.items, this.items) && JSON.stringify(sortKeys(c.gesture)) === JSON.stringify(sortKeys(g)));
     if (golden) return 'ok' in golden.result ? Promise.resolve(golden.result.ok) : Promise.reject({ blocked: 'unchanged' });
-    const me = this.items.find((i) => i.id === g.id);
+    const id = Object.values(g)[0]!.id;
+    const me = this.items.find((i) => i.id === id);
     if (!me) return Promise.reject({ invalid: 'Unknown widget.' });
     const r = me.rect;
     const put = (rect: Rect): Promise<readonly Item[]> => {
       const clamped = { ...rect, x: Math.max(0, Math.min(12 - rect.w, rect.x)), y: Math.max(0, rect.y) };
-      return same(clamped, r) ? Promise.reject({ blocked: 'unchanged' }) : Promise.resolve(roughSettle(this.items.map((i) => (i.id === g.id ? { id: i.id, rect: clamped } : i)), g.id));
+      return same(clamped, r) ? Promise.reject({ blocked: 'unchanged' }) : Promise.resolve(roughSettle(this.items.map((i) => (i.id === id ? { id: i.id, rect: clamped } : i)), id));
     };
-    switch (g.gesture) {
-      case 'place':
-        return put({ ...g.rect, w: Math.min(12, Math.max(2, g.rect.w)), h: Math.min(14, Math.max(2, g.rect.h)) });
-      case 'nudge':
-        return put({ ...r, x: r.x + (g.dir === 'right' ? 1 : g.dir === 'left' ? -1 : 0), y: r.y + (g.dir === 'down' ? 1 : g.dir === 'up' ? -1 : 0) });
-      case 'grow':
-        return put({ ...r, w: Math.min(12, Math.max(2, r.w + (g.dir === 'right' ? 1 : g.dir === 'left' ? -1 : 0))), h: Math.min(14, Math.max(2, r.h + (g.dir === 'down' ? 1 : g.dir === 'up' ? -1 : 0))) });
-      case 'toFirst':
-        return put({ ...r, x: 0, y: 0 });
-      case 'toLast':
-        return put({ ...r, x: 0, y: Math.max(...this.items.map((i) => i.rect.y + i.rect.h)) });
+    const step = (dir: Dir, by: number) => ({ dx: dir === 'right' ? by : dir === 'left' ? -by : 0, dy: dir === 'down' ? by : dir === 'up' ? -by : 0 });
+    if ('place' in g) {
+      const t = g.place.rect;
+      return put({ ...t, w: Math.min(12, Math.max(2, t.w)), h: Math.min(14, Math.max(2, t.h)) });
     }
+    if ('nudge' in g) {
+      const { dx, dy } = step(g.nudge.dir, 1);
+      return put({ ...r, x: r.x + dx, y: r.y + dy });
+    }
+    if ('grow' in g) {
+      const { dx, dy } = step(g.grow.dir, 1);
+      return put({ ...r, w: Math.min(12, Math.max(2, r.w + dx)), h: Math.min(14, Math.max(2, r.h + dy)) });
+    }
+    if ('toFirst' in g) return put({ ...r, x: 0, y: 0 });
+    return put({ ...r, x: 0, y: Math.max(...this.items.map((i) => i.rect.y + i.rect.h)) });
   }
 }
 

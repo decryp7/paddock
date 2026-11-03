@@ -522,7 +522,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     const seq = ++this.seq;
     this.captureFlip();
     this.backend
-      .preview({ surface: String(view.catalogue.surface.id), revision: view.revision, gesture: { gesture: 'place', id: t.id, rect: t.rect }, seq })
+      .preview({ surface: String(view.catalogue.surface.id), revision: view.revision, gesture: { place: { id: t.id, rect: t.rect } }, seq })
       .then((reply) => {
         if (reply.seq !== this.seq || !this.gesture()) return;
         this.limit.set(null);
@@ -546,7 +546,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
       this.endGesture();
       return;
     }
-    const gesture: GridGesture = { gesture: 'place', id: t.id, rect: t.rect };
+    const gesture: GridGesture = { place: { id: t.id, rect: t.rect } };
     const next = await this.apply({ arrange: { gesture } }, this.titleOf(t.id));
     this.endGesture();
     if (next) {
