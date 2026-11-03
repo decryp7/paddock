@@ -178,7 +178,7 @@ test.describe('dashboard and menu-bar editors', () => {
     await expect(shown(chooser)).toHaveCount(7);
   });
 
-  test('the menu-bar editor adds an item up to four', async ({ page }) => {
+  test('the menu-bar editor starts with the four default items and adds one', async ({ page }) => {
     await page.goto('/?latency=0#/');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     await pressMod(page, 'Mod+Comma');
@@ -187,9 +187,9 @@ test.describe('dashboard and menu-bar editors', () => {
     await dialog.getByText('Dyno', { exact: true }).click();
     const editor = dialog.locator('dy-menu-bar-items');
     await editor.scrollIntoViewIfNeeded();
-    await expect(shown(editor)).toHaveCount(2);
+    await expect(shown(editor)).toHaveCount(4);
     await editor.getByRole('button', { name: 'Add Number' }).click();
-    await expect(shown(editor)).toHaveCount(3);
+    await expect(shown(editor)).toHaveCount(5);
   });
 });
 

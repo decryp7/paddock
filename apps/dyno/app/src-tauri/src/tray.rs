@@ -6,6 +6,7 @@
 //! Before the first update, and while the agent is away, the static template icons from `icons/tray` stand in.
 
 use crate::logging;
+#[cfg(any(target_os = "macos", windows))]
 use crate::tray_identity;
 use crate::tray_look::Look;
 use crate::tray_model::{plan_sync, Frame, ItemSpec};

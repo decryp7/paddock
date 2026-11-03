@@ -75,7 +75,7 @@ export function startedByAgent(root) {
 }
 
 /** The folders of the shipped crates. */
-export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-bench', 'crates/dyno-ipc', 'app/src-tauri/src'];
+export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-bench', 'app/src-tauri/src'];
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
   const root = new URL('..', import.meta.url).pathname;

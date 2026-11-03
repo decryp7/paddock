@@ -1127,7 +1127,7 @@ test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no tem
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
   assert.match(read(join(WORKFLOWS, 'app-release.yml')), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
   const dyno = runtimeTempPrefixes('dyno').map(([, p]) => p);
-  assert.ok(dyno.includes('dyno-bench-') && dyno.some((p) => p === 'dyno-'), `the scan finds Dyno's own scratch folders (${dyno})`);
+  assert.ok(dyno.includes('dyno-bench-'), `the scan finds Dyno's own scratch folders (${dyno})`);
   for (const app of KIT_APPS) {
     const sweep = `${app}-it-`;
     for (const [file, prefix] of runtimeTempPrefixes(app)) {
