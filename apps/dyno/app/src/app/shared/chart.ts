@@ -49,6 +49,15 @@ export class Chart {
   protected readonly failed = signal(false);
   private readonly ready = signal(false);
 
+  /**
+   * Gives the chart the size its container has now. A container with no size (the panel's skeleton is showing, so the
+   * projected chart is detached) is ignored: resizing to 0 would leave a 0 px canvas that a later resize did not restore.
+   */
+  private fit(): void {
+    const el = this.host().nativeElement;
+    if (this.chart && el.clientWidth > 0 && el.clientHeight > 0) this.chart.resize({ width: el.clientWidth, height: el.clientHeight });
+  }
+
   constructor() {
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => {
@@ -77,7 +86,7 @@ export class Chart {
           this.chart.on('datazoom', () => this.zoomed.emit());
           this.chart.on('click', (p) => this.itemClick.emit(p as { name?: string; data?: unknown; seriesName?: string }));
           if (typeof ResizeObserver !== 'undefined') {
-            observer = new ResizeObserver(() => this.chart?.resize());
+            observer = new ResizeObserver(() => this.fit());
             observer.observe(this.host().nativeElement);
           }
           this.ready.set(true);
@@ -91,6 +100,8 @@ export class Chart {
       try {
         this.chart.setOption({ animation: !prefersReducedMotion(), animationDuration: 300, ...options }, { notMerge: true, lazyUpdate: true });
         this.failed.set(false);
+        // The container may have been detached and back since the last resize (a panel's skeleton between two answers).
+        requestAnimationFrame(() => this.fit());
       } catch (e) {
         console.error('Chart failed', e);
         this.failed.set(true);

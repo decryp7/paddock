@@ -144,6 +144,25 @@ test.describe('dashboard', () => {
     await expect(page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '7d' })).toBeChecked();
   });
 
+  test('switching the history range keeps a drawn chart (it went empty until the view was reopened)', async ({ page }) => {
+    // The engine answers after a moment (as the agent does), so the panel shows its skeleton between ranges.
+    await page.goto('/?latency=300#/');
+    const history = page.getByRole('region', { name: 'History' });
+    const range = history.getByRole('radiogroup', { name: 'Range' });
+    const drawn = history.locator('dy-chart canvas').first();
+    await expect(drawn).toBeVisible();
+    for (const label of ['7d', '30d', '24h']) {
+      await range.getByRole('radio', { name: label }).click();
+      await expect(range.getByRole('radio', { name: label })).toBeChecked();
+      await expect(history.getByText('No history yet')).toHaveCount(0);
+      await expect(drawn).toBeVisible();
+      // A chart that lost its size shows a canvas of 0 x 0 pixels.
+      await expect
+        .poll(async () => (await drawn.boundingBox())?.height ?? 0)
+        .toBeGreaterThan(100);
+    }
+  });
+
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
     await page.goto(url('/', '&mock=desktop'));
     const battery = page.getByRole('group', { name: 'Battery', exact: true });

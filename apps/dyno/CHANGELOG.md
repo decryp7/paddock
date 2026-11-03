@@ -5,6 +5,7 @@
 ### Fixed
 
 - About: "See all releases" opens the releases page in the browser (it failed with "state not managed ... `files_open_url`" because the shell served the command without its service; fixed in `paddock-shell`).
+- History: switching the range no longer leaves the chart empty until the view is reopened. The chart resized itself to 0 px while the panel's skeleton detached it between two answers and never recovered; it now ignores a container without a size and fits itself again after each draw.
 
 ## [1.0.0] - 2026-10-29
 
