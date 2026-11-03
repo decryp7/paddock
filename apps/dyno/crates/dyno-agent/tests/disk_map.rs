@@ -13,8 +13,8 @@ use dyno_core::disk::scan::{DiskScanStatus, DiskTarget, ScanState};
 use dyno_core::disk::volume::{Volume, VolumeLocation};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{ErrorCode, Message, Reply, Request};
-use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::Fake;
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
@@ -117,13 +117,13 @@ fn final_status(running: &Running, statuses: &Receiver<DiskScanStatus>, scan: u6
 }
 
 /// A connection that forwards the pushed disk scan statuses.
-fn listener(dirs: &Dirs) -> (Peer<Message>, Receiver<DiskScanStatus>) {
+fn listener(dirs: &Dirs) -> (BodyPeer<Message>, Receiver<DiskScanStatus>) {
     let d = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
-    let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+    let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
     let (tx, rx) = channel();
-    let peer = Peer::start(
+    let peer = BodyPeer::start(
         conn,
-        PeerOptions::new().on_push(move |m| {
+        BodyOptions::new("the agent").on_push(move |m| {
             if let Message::DiskScan(s) = m {
                 let _ = tx.send(*s);
             }

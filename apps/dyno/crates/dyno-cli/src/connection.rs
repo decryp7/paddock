@@ -1,7 +1,7 @@
 //! Finding and talking to the running agent: the same `agent.json`, token and protocol as the app (ADR 0014).
 
-use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request, PROTOCOL_VERSION};
-use dyno_ipc::{Client, Peer, PeerOptions, Token};
+use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request, MAX_FRAME, PROTOCOL_VERSION, WIRE_MAJOR};
+use paddock_ipc::{BodyOptions, BodyPeer, Client, FrameLimit, IpcError, ProtocolVersion, Token};
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -148,7 +148,7 @@ pub struct AgentInfo {
 
 /// The agent over its private local IPC.
 pub struct IpcAgent {
-    peer: Peer<Message>,
+    peer: BodyPeer<Message>,
     updates: Mutex<mpsc::Receiver<LiveUpdate>>,
     info: AgentInfo,
 }
@@ -159,9 +159,9 @@ impl IpcAgent {
         let d = Discovery::read(env).ok_or(Problem::NotRunning)?;
         check_version(&d, PROTOCOL_VERSION)?;
         let token = Token::from_hex(&d.token).ok_or_else(|| Problem::Failed("The discovery file is damaged; restart Dyno.".into()))?;
-        let conn = Client::connect(&d.endpoint, &token).map_err(|e| {
+        let conn = Client::connect(&d.endpoint, &token, FrameLimit::new(MAX_FRAME), ProtocolVersion::new(WIRE_MAJOR, 0)).map_err(|e| {
             let text = e.to_string();
-            if text.to_lowercase().contains("version") {
+            if matches!(e, IpcError::Version(_)) {
                 Problem::VersionMismatch {
                     agent: d.protocol,
                     ours: PROTOCOL_VERSION,
@@ -176,9 +176,9 @@ impl IpcAgent {
         })?;
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     if let Ok(tx) = tx.lock() {
                         let _ = tx.send(*l);

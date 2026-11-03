@@ -1,14 +1,20 @@
-//! The accept loop: authenticate every connection (token and version in `dyno-ipc`, then the user and the program
+//! The accept loop: authenticate every connection (token and version in `paddock-ipc`, then the user and the program
 //! in [`crate::auth`]), then serve its calls through the [`Dispatcher`]. A connection that fails any check is dropped
 //! without an answer and recorded in the audit log.
 
 use crate::auth::{ImageOf, Policy};
 use crate::dispatch::Dispatcher;
-use dyno_core::helper_wire::{codes, HelperMessage};
-use dyno_ipc::{Handler, Host, IpcError, Peer, PeerOptions, RemoteError};
+use dyno_core::helper_wire::{codes, HelperMessage, MAX_FRAME, WIRE_MAJOR};
+use paddock_ipc::ProtocolVersion;
+use paddock_ipc::{BodyHandler, BodyOptions, BodyPeer, Host, IpcError, RemoteError};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// The protocol the handshake carries between the agent and the helper.
+pub fn wire() -> ProtocolVersion {
+    ProtocolVersion::new(WIRE_MAJOR, 0)
+}
 
 /// How long one connection may stay open.
 pub const SESSION_MAX: Duration = Duration::from_secs(120);
@@ -36,7 +42,7 @@ struct Session {
     peer: Option<u32>,
 }
 
-impl Handler<HelperMessage> for Session {
+impl BodyHandler<HelperMessage> for Session {
     fn handle(&self, body: HelperMessage) -> Result<HelperMessage, RemoteError> {
         match body {
             HelperMessage::Request(r) => self.dispatcher.handle(self.peer, r).map(HelperMessage::Reply),
@@ -55,7 +61,9 @@ impl Daemon {
                 Ok(conn) => {
                     failures = 0;
                     let (uid, pid) = (conn.peer_uid(), conn.peer_pid());
+                    log::info!(PeerPid = pid.unwrap_or(0); "Helper: a connection passed the handshake");
                     if let Err(refusal) = self.policy.check(uid, pid, &*self.images) {
+                        log::warn!(PeerPid = pid.unwrap_or(0), Reason = refusal.to_string().as_str(); "Helper: a caller was refused");
                         self.dispatcher.record_refused_caller(pid, &refusal.to_string());
                         continue;
                     }
@@ -65,7 +73,10 @@ impl Daemon {
                     }
                     let (dispatcher, session_count) = (self.dispatcher.clone(), active.clone());
                     let spawned = std::thread::Builder::new().name("helper-session".into()).spawn(move || {
-                        if let Ok(peer) = Peer::start(conn, PeerOptions::new().serve(Session { dispatcher, peer: pid }).workers(1)) {
+                        if let Ok(peer) = BodyPeer::start(
+                            conn,
+                            BodyOptions::new("the agent").serve(Session { dispatcher, peer: pid }).calls(1, 64),
+                        ) {
                             peer.wait_closed(Some(SESSION_MAX));
                             peer.close();
                         }
@@ -75,9 +86,12 @@ impl Daemon {
                         active.fetch_sub(1, Ordering::SeqCst);
                     }
                 }
-                Err(IpcError::Timeout(_)) => failures = 0,
+                Err(IpcError::Timeout) => failures = 0,
                 // A client that failed the token, the version or the protocol is simply dropped.
-                Err(IpcError::Auth(_) | IpcError::Version { .. } | IpcError::Protocol(_) | IpcError::Closed) => failures = 0,
+                Err(e @ (IpcError::Auth(_) | IpcError::Version(_) | IpcError::Protocol(_) | IpcError::Closed(_))) => {
+                    log::warn!(Error = e.to_string().as_str(); "Helper: a connection failed the handshake and was dropped");
+                    failures = 0;
+                }
                 Err(e) => {
                     failures += 1;
                     if failures >= MAX_ACCEPT_FAILURES {
@@ -99,7 +113,7 @@ mod tests {
     use dyno_core::helper::HelperHost;
     use dyno_core::helper_wire::{HelperInfo, HelperReply, HelperRequest, HelperUser};
     use dyno_core::ports::{PlatformError, ProcessTraffic};
-    use dyno_ipc::{Client, Token};
+    use paddock_ipc::{Client, FrameLimit, Token};
     use std::path::PathBuf;
 
     struct NoTraffic;
@@ -128,8 +142,8 @@ mod tests {
     impl Rig {
         fn start(user: HelperUser, program: &str) -> Rig {
             let dir = tempfile::tempdir().unwrap();
-            let host = Host::listen().unwrap();
-            let (name, token) = (host.name().to_string(), host.token().clone());
+            let host = Host::listen(FrameLimit::new(MAX_FRAME), wire()).unwrap();
+            let (name, token) = (host.endpoint().to_string(), host.token().clone());
             let dispatcher = Arc::new(Dispatcher::new(Parts {
                 info: HelperInfo {
                     version: "1.0.0".into(),
@@ -164,8 +178,8 @@ mod tests {
         }
 
         fn call(&self, request: HelperRequest) -> Result<HelperReply, IpcError> {
-            let conn = Client::connect(&self.name, &self.token)?;
-            let peer = Peer::<HelperMessage>::start(conn, PeerOptions::new())?;
+            let conn = Client::connect(&self.name, &self.token, FrameLimit::new(MAX_FRAME), wire())?;
+            let peer = BodyPeer::<HelperMessage>::start(conn, BodyOptions::new("the helper"))?;
             let answer = peer.call(HelperMessage::Request(request), Duration::from_secs(5));
             peer.close();
             match answer? {
@@ -212,7 +226,7 @@ mod tests {
         let rig = Rig::start(this_user(), "/tmp/evil/dyno-agent");
         let err = rig.call(HelperRequest::Info).unwrap_err();
         assert!(
-            matches!(err, IpcError::Closed | IpcError::Io { .. } | IpcError::Timeout(_)),
+            matches!(err, IpcError::Closed(_) | IpcError::Io { .. } | IpcError::Timeout),
             "{err:?}"
         );
         let log = match rig.dispatcher.handle(None, HelperRequest::Audit(5)).unwrap() {
@@ -239,7 +253,7 @@ mod tests {
     #[test]
     fn a_wrong_token_never_reaches_the_dispatcher() {
         let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
-        let got = Client::connect(&rig.name, &Token::from_bytes([9; 32]));
+        let got = Client::connect(&rig.name, &Token::from_bytes([9; 32]), FrameLimit::new(MAX_FRAME), wire());
         assert!(matches!(got, Err(IpcError::Auth(_))), "{:?}", got.as_ref().err());
         // The daemon is still serving.
         assert!(rig.call(HelperRequest::Info).is_ok());
@@ -249,8 +263,8 @@ mod tests {
     #[test]
     fn a_reply_sent_as_a_request_is_refused() {
         let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
-        let conn = Client::connect(&rig.name, &rig.token).unwrap();
-        let peer = Peer::<HelperMessage>::start(conn, PeerOptions::new()).unwrap();
+        let conn = Client::connect(&rig.name, &rig.token, FrameLimit::new(MAX_FRAME), wire()).unwrap();
+        let peer = BodyPeer::<HelperMessage>::start(conn, BodyOptions::new("the helper")).unwrap();
         let e = peer
             .call(HelperMessage::Reply(HelperReply::Bye), Duration::from_secs(5))
             .unwrap_err();

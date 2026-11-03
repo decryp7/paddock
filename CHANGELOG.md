@@ -4,6 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Dyno moves from `dyno-ipc` to `paddock-ipc`; `paddock-ipc` gains `BodyPeer` (Dyno ADR 0027, WP-1b)
+- New `body` module: `BodyPeer<B>`, `BodyOptions<B>`, `BodyHandler<B>` and `body_handler`, a typed view over `Peer` for apps whose wire is one postcard enum
+  (calls, answers and pushes are all `B`). The frames on the wire are the same as any peer's; a body that does not decode is `invalid` (a call) or counted in
+  `undecodable_pushes` (a push), never a closed connection. `BodyPeer::wrap` views a peer that was started elsewhere (a `Child`'s).
+- `Child::exit_status(wait)` (how a launched child ended, read once from the OS and kept) and `Connection::stream_mut` (the raw stream, for tests that must break the protocol).
+- Dyno's agent, command line, plugin API and host, helper and app now use `paddock-ipc`; `apps/dyno/crates/dyno-ipc` and its three `known-copies.toml` entries are deleted.
+  The one change users of Dyno's wire can see: the IPC handshake carries the app protocol (or the plugin / helper protocol) as its major version, so a peer of
+  another protocol is refused with which side to update. Everything else is kept: calls over the concurrency limit wait in order, a plugin's memory cap is still
+  a hard Windows job-object commit limit.
+- `PeerOptions::call_queue` (and `BodyOptions::calls`): opt-in bounded FIFO for calls over `max_concurrent_calls` (default 0: refused with `busy`, as before).
+- `MemoryCap::hard_commit` / `ChildSpec::memory_hard` (`paddock-proc`, `paddock-ipc`): also set `JOB_OBJECT_LIMIT_PROCESS_MEMORY` on the child's job object (Windows).
+
 ### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
 - New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
   `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through

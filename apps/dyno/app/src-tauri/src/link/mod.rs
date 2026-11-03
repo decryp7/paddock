@@ -1,4 +1,4 @@
-//! The link to the agent (ADR 0002, ADR 0025): finds the running agent, starts one when there is none, keeps one dyno-ipc
+//! The link to the agent (ADR 0002, ADR 0025): finds the running agent, starts one when there is none, keeps one `paddock-ipc`
 //! connection, forwards the webview's requests and fans the agent's pushes out to a [`Sink`].
 //!
 //! The supervision is a pure state machine ([`machine::Supervisor`]) with one owner thread ([`driver`], the generic
@@ -34,8 +34,8 @@ use dyno_agent::discovery::Discovery;
 use dyno_agent::paths::Dirs;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::{activity::ActivityEntry, alerts::Alert};
-use dyno_ipc::{IpcError, Peer};
 use machine::{Event, Snapshot, Supervisor};
+use paddock_ipc::{BodyPeer, IpcError};
 use paddock_proc::StallCause;
 pub use ports::{agent_exe, Child, Launcher, ProcessLauncher};
 use std::collections::HashMap;
@@ -219,7 +219,7 @@ pub struct AgentLink {
     pub(crate) sink: Arc<dyn Sink>,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// What requests go to (set by the supervisor's `UsePeer`).
-    pub(crate) peer: Mutex<Option<Arc<Peer<Message>>>>,
+    pub(crate) peer: Mutex<Option<Arc<BodyPeer<Message>>>>,
     votes: Mutex<DetailVotes>,
     /// The detail last sent over the current connection.
     sent: Mutex<Option<LiveDetail>>,
@@ -381,8 +381,8 @@ impl AgentLink {
         let result = match peer.call(Message::Request(Box::new(request)), timeout) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),
             Ok(_) => Err(CommandError::internal("The agent sent something unexpected.")),
-            Err(IpcError::Timeout(_)) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
-            Err(IpcError::Closed) => Err(CommandError::unavailable()),
+            Err(IpcError::Timeout) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
+            Err(IpcError::Closed(_)) => Err(CommandError::unavailable()),
             Err(e) => {
                 chain = Some(e.to_string());
                 Err(CommandError::new(ErrorCode::Internal, format!("The agent link failed: {e}")))
@@ -414,7 +414,7 @@ impl AgentLink {
     /// The connection. Before the very first one has been made, a request waits for it, or for a shown stall or a failure
     /// (the window asks for data the moment it opens, usually before the agent has answered; the wait is on the state, not
     /// on a clock). After a first connection, requests fail fast instead.
-    fn peer_or_wait(&self) -> Option<Arc<Peer<Message>>> {
+    fn peer_or_wait(&self) -> Option<Arc<BodyPeer<Message>>> {
         // A connection the supervisor has published (`UsePeer`) is used at once. Its snapshot follows the step that made it,
         // so a request that starts in between (the worker that subscribes right after a connect) must not read the older
         // snapshot, which may say "settled, not connected" (a stall had been shown) and fail it as unavailable.

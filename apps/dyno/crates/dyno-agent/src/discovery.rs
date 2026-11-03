@@ -2,7 +2,7 @@
 //! per-launch token, so it is written readable by the owner only and removed when the agent exits. A file whose
 //! process is gone is stale and ignored.
 
-use dyno_ipc::Token;
+use paddock_ipc::Token;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
