@@ -1,6 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, signal, untracked } from '@angular/core';
+import { MatCheckbox } from '@angular/material/checkbox';
 import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { NoticeActions } from './notice-actions';
 import { LOCAL_SOURCE, NotificationsStore, type ReadFilter } from './notifications.store';
 import type { Notice, NoticeAction } from './wire.types';
@@ -18,16 +21,26 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
 /**
  * The notification centre of the window: what happened and may need attention (the engine's messages, health outages,
  * the UI's own notices), newest first and grouped by source, with each message's actions, Mark read, Dismiss and Mark
- * all read. The engine keeps the list (dedupe with counts, caps, read state).
+ * all read; messages can be selected (checkboxes, Shift-click for a range) and deleted together, or all at once after a
+ * confirmation. The engine keeps the list (dedupe with counts, caps, read state).
  */
 @Component({
   selector: 'pd-notifications-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, SuSegmentedControl],
+  imports: [SuEmptyState, SuSegmentedControl, MatCheckbox],
   template: `
     <div class="pd-bar" data-testid="notices-filter-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
       <span class="pd-spacer"></span>
+      @if (store.notices().length) {
+        <mat-checkbox [checked]="allSelected()" [indeterminate]="someSelected()" [aria-label]="t.selectAll" data-testid="notices-select-all" (change)="toggleAll()" />
+      }
+      @if (selectedIds().length) {
+        <button type="button" class="pd-btn" data-testid="notices-delete-selected" (click)="deleteSelected()">{{ deleteSelectedLabel() }}</button>
+      }
+      @if (store.all().length) {
+        <button type="button" class="pd-btn" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
+      }
       <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
     </div>
     @if (store.requestError(); as e) {
@@ -48,6 +61,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
         @for (n of g.notices; track n.id) {
           <li class="pd-notice" [class.pd-unread]="!n.read" [class.pd-focus]="store.focus() === n.id" [attr.data-severity]="n.severity" [attr.data-testid]="'notice-' + n.id" [attr.data-cause]="n.cause">
             <div class="pd-row">
+              <mat-checkbox class="pd-pick" [checked]="isSelected(n.id)" [aria-label]="selectLabel(n.title)" [attr.data-testid]="'notice-select-' + n.id" (change)="pick(n.id)" />
               <span class="pd-dot" aria-hidden="true"></span>
               <strong class="pd-title" [attr.title]="titleWithCount(n)">{{ titleWithCount(n) }}</strong>
               @if (!n.read) {
@@ -93,6 +107,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     .pd-notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
     .pd-notice.pd-focus { outline: 2px solid var(--pd-focus-ring); }
     .pd-row { display: flex; align-items: flex-start; gap: var(--pd-space-1); min-width: 0; }
+    .pd-pick { flex: none; margin-block: -10px; margin-inline-start: -10px; }
     .pd-dot { width: 7px; height: 7px; margin-top: 0.5lh; translate: 0 -50%; border-radius: 50%; flex: none; }
     .pd-unread .pd-dot { background: var(--pd-accent); }
     /* Wraps (two lines, then an ellipsis with the full text in the tooltip): a one-line ellipsis cut titles with room to spare. */
@@ -124,12 +139,24 @@ export class PdNotificationsPanel {
     emptyDescription: $localize`:@@pd.notifications.empty.description:Finished work, alerts and problems show up here.`,
     markAllRead: $localize`:@@pd.notifications.mark-all-read:Mark all read`,
     retry: $localize`:@@pd.notifications.retry:Retry`,
+    selectAll: $localize`:@@pd.notifications.select-all:Select all notifications`,
+    deleteAll: $localize`:@@pd.notifications.delete-all:Delete all`,
     unreadMark: $localize`:@@pd.notifications.unread-mark:, unread`,
   };
   protected readonly store = inject(NotificationsStore);
   protected readonly actions = inject(NoticeActions);
   private readonly registry = inject(ContributionRegistry, { optional: true });
+  protected readonly dialogs = inject(DialogService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly chosen = signal<ReadonlySet<number>>(new Set());
+  private anchor: number | null = null;
+  private shift = false;
+  /** The listed messages' ids in the order shown (group by group). */
+  private readonly shownIds = computed(() => this.store.groups().flatMap((g) => g.notices.map((n) => n.id)));
+  /** The selection that is still listed (a message that went away is no longer selected). */
+  protected readonly selectedIds = computed(() => this.shownIds().filter((id) => this.chosen().has(id)));
+  protected readonly allSelected = computed(() => this.shownIds().length > 0 && this.selectedIds().length === this.shownIds().length);
+  protected readonly someSelected = computed(() => this.selectedIds().length > 0 && !this.allSelected());
   protected readonly note = signal<string | null>(null);
   protected readonly titleWithCount = titleWithCount;
   protected readonly filters = computed<SuSegment[]>(() => [
@@ -138,6 +165,13 @@ export class PdNotificationsPanel {
   ]);
 
   constructor() {
+    // Whether Shift was held for the click that changes a checkbox (the checkbox reports its change before the click bubbles).
+    const el = this.host.nativeElement;
+    const remember = (e: Event): void => {
+      this.shift = (e as MouseEvent).shiftKey === true;
+    };
+    el.addEventListener('click', remember, true);
+    inject(DestroyRef).onDestroy(() => el.removeEventListener('click', remember, true));
     // A clicked OS notification or "Show in Notifications": scroll the message into view and focus its first button.
     effect(() => {
       const id = this.store.focus();
@@ -172,6 +206,64 @@ export class PdNotificationsPanel {
 
   protected dismissLabel(title: string): string {
     return $localize`:@@pd.notifications.dismiss:Dismiss ${title}:title:`;
+  }
+
+  protected isSelected(id: number): boolean {
+    return this.chosen().has(id);
+  }
+
+  protected selectLabel(title: string): string {
+    return $localize`:@@pd.notifications.select:Select ${title}:title:`;
+  }
+
+  protected deleteSelectedLabel(): string {
+    return $localize`:@@pd.notifications.delete-selected:Delete selected (${this.selectedIds().length}:count:)`;
+  }
+
+  /** Toggles one message; with Shift held, the range from the last one picked. */
+  protected pick(id: number): void {
+    const next = new Set(this.chosen());
+    const on = !next.has(id);
+    const order = this.shownIds();
+    const from = this.shift && this.anchor !== null ? order.indexOf(this.anchor) : -1;
+    const to = order.indexOf(id);
+    const ids = from >= 0 && to >= 0 ? order.slice(Math.min(from, to), Math.max(from, to) + 1) : [id];
+    for (const i of ids) {
+      if (on) next.add(i);
+      else next.delete(i);
+    }
+    this.anchor = id;
+    this.shift = false;
+    this.chosen.set(next);
+  }
+
+  protected toggleAll(): void {
+    this.chosen.set(this.allSelected() ? new Set() : new Set(this.shownIds()));
+    this.anchor = null;
+  }
+
+  protected async deleteSelected(): Promise<void> {
+    const ids = this.selectedIds();
+    this.chosen.set(new Set());
+    this.anchor = null;
+    await this.store.dismissMany(ids);
+  }
+
+  /** Asks first (it cannot be undone), then removes every message of the window. */
+  protected async deleteAll(): Promise<void> {
+    const count = this.store.all().length;
+    const yes = await confirm(this.dialogs, {
+      heading: $localize`:@@pd.notifications.delete-all.heading:Delete all notifications?`,
+      message:
+        count === 1
+          ? $localize`:@@pd.notifications.delete-all.message-one:The notification is removed from the centre. This cannot be undone.`
+          : $localize`:@@pd.notifications.delete-all.message:${count}:count: notifications are removed from the centre. This cannot be undone.`,
+      confirm: { label: $localize`:@@pd.notifications.delete-all.confirm:Delete all`, destructive: true },
+    });
+    if (!yes) return;
+    this.chosen.set(new Set());
+    this.anchor = null;
+    await this.store.dismissAll();
   }
 
   protected time(at: number): string {

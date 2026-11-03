@@ -10,6 +10,8 @@ describe('the paddock-health wire types', () => {
       notifications_mark_read: true,
       notifications_mark_all_read: true,
       notifications_dismiss: true,
+      notifications_dismiss_many: true,
+      notifications_dismiss_all: true,
       notifications_post: true,
     };
     const inTable = (c: string): c is HealthCommand => c in HEALTH_COMMANDS;

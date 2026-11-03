@@ -315,6 +315,37 @@ impl NotificationCentre {
             .is_some()
     }
 
+    /// Removes the messages `ids` names from the window's project list and the app list; ids the window cannot see are
+    /// ignored. Returns how many were removed (one revision step for the whole call).
+    pub fn dismiss_many(&self, window: &str, ids: &[NoticeId]) -> usize {
+        let project = lock(&self.projects)
+            .get_mut(window)
+            .map_or(0, |c| c.dismiss_many(ids));
+        let mut app = lock(&self.app);
+        let from_app = app.dismiss_many(ids);
+        if from_app > 0 {
+            self.save_app(&app);
+        }
+        let removed = project + from_app;
+        self.changed_if(removed > 0);
+        removed
+    }
+
+    /// Removes every message the window sees (its project's and the app's). Returns how many were removed.
+    pub fn dismiss_all(&self, window: &str) -> usize {
+        let project = lock(&self.projects)
+            .get_mut(window)
+            .map_or(0, Centre::clear);
+        let mut app = lock(&self.app);
+        let from_app = app.clear();
+        if from_app > 0 {
+            self.save_app(&app);
+        }
+        let removed = project + from_app;
+        self.changed_if(removed > 0);
+        removed
+    }
+
     /// Marks the window's messages (its project's and the app's) read; returns how many were unread.
     pub fn mark_all_read(&self, window: &str) -> usize {
         let project = {

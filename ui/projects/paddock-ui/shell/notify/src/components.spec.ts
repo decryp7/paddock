@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ContributionRegistry, defineNotificationKind, msg, provideContributions } from '@decryp7/paddock-ui/shell';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { NotificationsStore } from './notifications.store';
 import { noticeTime, notificationsStatusText, titleWithCount } from './notice-text';
 import { PdNotificationsPanel } from './notifications-panel';
@@ -435,6 +436,72 @@ describe('the notification centre', () => {
     TestBed.inject(NotificationsStore).setFocus(9999);
     await f.whenStable();
     await Promise.resolve();
+  });
+});
+
+describe('selecting and deleting notifications', () => {
+  async function panel(answer: 'answered' | 'dismissed' = 'answered') {
+    const asked: unknown[] = [];
+    const dialogs = { open: (_id: string, o: unknown) => (asked.push(o), { closed: Promise.resolve({ kind: answer }) }) };
+    const { centre } = notifyBed({ extra: [{ provide: DialogService, useValue: dialogs }] });
+    const f = TestBed.createComponent(PdNotificationsPanel);
+    const posted = ['A', 'B', 'C', 'D'].map((t) => centre.post({ cause: t.toLowerCase(), source: 's', severity: 'info', title: t }));
+    await settle();
+    await f.whenStable();
+    const el: HTMLElement = f.nativeElement;
+    const pick = async (id: number, shiftKey = false) => {
+      const input = one(el, `[data-testid=notice-select-${id}] input`);
+      input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey }));
+      await settle();
+      await f.whenStable();
+    };
+    const titles = () => all(el, '.pd-notice .pd-title').map((t) => t.textContent?.trim());
+    return { f, el, centre, posted, pick, titles, asked };
+  }
+
+  it('deletes the selected messages with a shift-click range, from the keyboard-reachable checkboxes', async () => {
+    const { f, el, posted, pick, titles } = await panel();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+    // Newest first: D C B A. Pick D, then Shift-pick B: D, C and B.
+    await pick(posted[3]!.id);
+    await pick(posted[1]!.id, true);
+    const del = one(el, '[data-testid=notices-delete-selected]');
+    expect(del.textContent).toContain('(3)');
+    del.click();
+    await settle();
+    await f.whenStable();
+    expect(titles()).toEqual(['A']);
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+  });
+
+  it('selects all and clears it again', async () => {
+    const { f, el } = await panel();
+    const all1 = one(el, '[data-testid=notices-select-all] input') as HTMLInputElement;
+    all1.click();
+    await settle();
+    await f.whenStable();
+    expect(one(el, '[data-testid=notices-delete-selected]').textContent).toContain('(4)');
+    all1.click();
+    await settle();
+    await f.whenStable();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+  });
+
+  it('deletes everything only after the decision dialog is answered', async () => {
+    const no = await panel('dismissed');
+    one(no.el, '[data-testid=notices-delete-all]').click();
+    await settle();
+    await no.f.whenStable();
+    expect(no.asked).toHaveLength(1);
+    expect(no.titles()).toHaveLength(4);
+    TestBed.resetTestingModule();
+    const yes = await panel('answered');
+    one(yes.el, '[data-testid=notices-delete-all]').click();
+    await settle();
+    await yes.f.whenStable();
+    expect(yes.titles()).toEqual([]);
+    expect(yes.el.querySelector('[data-testid=notices-delete-all]')).toBeNull();
+    expect(JSON.stringify(yes.asked[0])).toContain('Delete all');
   });
 });
 

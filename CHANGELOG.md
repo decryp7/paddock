@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-health` and `@decryp7/paddock-ui/shell/notify`: delete selected or all notifications
+- New commands `notifications_dismiss_many` (`ids`, at most 1000; returns how many were removed) and `notifications_dismiss_all` (returns the count) remove the
+  calling window's messages (its project's and the app's list; an app list is saved again, so a deleted message does not return after a restart). Ids the
+  window cannot see are ignored. The log line carries counts only. `NotificationCentre::dismiss_many` / `dismiss_all`, `Centre::dismiss_many` / `clear`.
+- `NotificationsBackend` gains the abstract `dismissMany(ids)` and `dismissAll()` (Tauri and in-memory backends), `NotificationsStore.dismissMany` / `dismissAll`.
+  `pd-notifications-panel` has a checkbox per message (Shift-click selects a range), Select all, "Delete selected (n)" and "Delete all", which asks first in the
+  shared `pd.confirm` decision dialog. `shell-commands.ts`, `health-commands.ts`, the permission files and the window-class sets are regenerated.
+
+### `@decryp7/paddock-ui/table`: `PdTable.expandAllGroups()` and `collapseAllGroups()`
+- Public methods for an app's toolbar on a `groupBy` table (the table kept the fold state to itself); `groupKeys(rows, column)` is exported next to `groupItems`.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

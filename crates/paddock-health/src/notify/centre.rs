@@ -453,6 +453,20 @@ impl Centre {
         self.notices.len() != before
     }
 
+    /// Removes the messages `ids` names; ids that are not here are ignored. Returns how many were removed.
+    pub fn dismiss_many(&mut self, ids: &[NoticeId]) -> usize {
+        let before = self.notices.len();
+        self.notices.retain(|n| !ids.contains(&n.id));
+        before - self.notices.len()
+    }
+
+    /// Removes every message; returns how many there were.
+    pub fn clear(&mut self) -> usize {
+        let n = self.notices.len();
+        self.notices.clear();
+        n
+    }
+
     /// How many are unread.
     pub fn unread(&self) -> usize {
         self.notices.iter().filter(|n| !n.read).count()
@@ -489,6 +503,24 @@ mod tests {
         )
         .body("12 errors in a minute")
         .primary(NoticeAction::new("showAlert").arg("alertId", "a1"))
+    }
+
+    #[test]
+    fn dismiss_many_and_clear_count_what_they_removed() {
+        let mut c = Centre::new(10);
+        for (i, host) in ["A", "B", "C"].iter().enumerate() {
+            c.post(spike(host), NoticeId(i as u64 + 1), 100);
+        }
+        assert_eq!(c.dismiss_many(&[]), 0, "an empty selection removes nothing");
+        assert_eq!(
+            c.dismiss_many(&[NoticeId(1), NoticeId(1), NoticeId(99)]),
+            1,
+            "unknown and repeated ids are ignored"
+        );
+        assert_eq!(c.notices().len(), 2);
+        assert_eq!(c.clear(), 2);
+        assert_eq!(c.clear(), 0);
+        assert!(c.notices().is_empty());
     }
 
     #[test]
