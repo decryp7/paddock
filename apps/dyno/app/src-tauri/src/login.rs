@@ -121,15 +121,23 @@ impl CliService {
     }
 }
 
+/// On Windows the app's own `Run` value is the logon entry and the app starts the agent hidden: the agent is not registered
+/// separately (an entry that started only the agent opened a console and left no tray icon, Dyno 1.0.0), so `install` only
+/// removes the stale agent entry 1.0.0 wrote, and `repair` does the same and says whether it was there.
 #[cfg(not(target_os = "macos"))]
 impl AgentService for CliService {
     fn installed(&mut self) -> bool {
-        self.service()
-            .is_ok_and(|mut s| !matches!(s.status(), dyno_agent::service::Status::NotInstalled))
+        self.service().is_ok_and(|mut s| {
+            !s.app_is_logon_entry() && !matches!(s.status(), dyno_agent::service::Status::NotInstalled)
+        })
     }
 
     fn install(&mut self) -> Result<(), String> {
-        self.service()?.install()
+        let mut s = self.service()?;
+        if s.app_is_logon_entry() {
+            return s.clear_stale_run_entry().map(|_| ());
+        }
+        s.install()
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
@@ -141,8 +149,28 @@ impl AgentService for CliService {
     }
 
     fn repair(&mut self, _agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
-        self.service()?.ensure()
+        let mut s = self.service()?;
+        if s.app_is_logon_entry() {
+            return s.clear_stale_run_entry();
+        }
+        s.ensure()
     }
+}
+
+/// Dyno 1.0.0 on Windows replaced the app's logon entry (`Dyno` = `dyno-app.exe --hidden`) with the agent's (`Dyno` =
+/// `dyno-agent.exe run`), five seconds after every start, so the next logon started only the agent. At the first sight of the
+/// switch after an update: the stale entry is removed, and the app's own entry is registered again when start at login is on
+/// (when it is off, removing it is all). Returns whether a stale entry was there.
+pub fn repair_stale_agent_entry(
+    start_at_login: bool,
+    service: &mut dyn AgentService,
+    autostart: &mut dyn Autostart,
+) -> Result<bool, String> {
+    let cleaned = service.repair(&|| true)?;
+    if cleaned && start_at_login {
+        autostart.set(true)?;
+    }
+    Ok(cleaned)
 }
 
 // ---------------------------------------------------------------------------------------------------------- macOS
@@ -686,5 +714,52 @@ mod tests {
             Ok(crate::login_item::LegacyPlist::Removed)
         );
         assert_eq!(calls.0.lock().unwrap().len(), 1);
+    }
+
+    struct StaleService {
+        stale: bool,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl AgentService for StaleService {
+        fn installed(&mut self) -> bool {
+            false
+        }
+        fn install(&mut self) -> Result<(), String> {
+            self.calls.lock().unwrap().push("service install".into());
+            Ok(())
+        }
+        fn uninstall(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn repair(&mut self, _: &dyn Fn() -> bool) -> Result<bool, String> {
+            self.calls.lock().unwrap().push("repair".into());
+            Ok(std::mem::take(&mut self.stale))
+        }
+    }
+
+    fn upgrade(stale: bool, start_at_login: bool) -> (Result<bool, String>, Vec<String>) {
+        let calls = Calls::default();
+        let mut s = StaleService { stale, calls: calls.0.clone() };
+        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let r = repair_stale_agent_entry(start_at_login, &mut s, &mut a);
+        let log = calls.0.lock().unwrap().clone();
+        (r, log)
+    }
+
+    #[test]
+    fn upgrading_from_1_0_0_with_start_at_login_on_puts_the_apps_entry_back() {
+        assert_eq!(upgrade(true, true), (Ok(true), vec!["repair".to_string(), "autostart true".to_string()]));
+    }
+
+    #[test]
+    fn upgrading_from_1_0_0_with_start_at_login_off_only_removes_the_stale_entry() {
+        assert_eq!(upgrade(true, false), (Ok(true), vec!["repair".to_string()]));
+    }
+
+    #[test]
+    fn without_a_stale_entry_the_apps_entry_is_left_alone() {
+        assert_eq!(upgrade(false, true), (Ok(false), vec!["repair".to_string()]));
+        assert_eq!(upgrade(false, false), (Ok(false), vec!["repair".to_string()]));
     }
 }

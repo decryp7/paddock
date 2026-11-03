@@ -223,6 +223,20 @@ impl<R: Runtime> ShellOf<R> {
         match previous {
             None => {
                 *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
+                // Windows, once per start: the entry Dyno 1.0.0 left in place of the app's own is repaired with the switch.
+                #[cfg(windows)]
+                {
+                    let mut service = login::platform_service();
+                    let mut autostart = login::platform_autostart(&self.app);
+                    match login::repair_stale_agent_entry(wanted, service.as_mut(), autostart.as_mut()) {
+                        Ok(true) => logging::info(&format!(
+                            "removed the stale agent logon entry that Dyno 1.0.0 wrote; the app's own entry is {}",
+                            if wanted { "registered again" } else { "not needed (start at login is off)" }
+                        )),
+                        Ok(false) => {}
+                        Err(e) => logging::info(&format!("the stale agent logon entry could not be repaired: {e}")),
+                    }
+                }
                 Ok(())
             }
             Some(p) if p == wanted => Ok(()),
