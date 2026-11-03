@@ -56,7 +56,11 @@ pub struct EdgeMetrics {
 impl EdgeMetrics {
     /// The logical [`Env`] of the state machine. A zero or non-finite scale is taken as 1.0 (an OS that failed to say).
     pub fn env(&self) -> Env {
-        let s = if self.scale.is_finite() && self.scale > 0.0 { self.scale } else { 1.0 };
+        let s = if self.scale.is_finite() && self.scale > 0.0 {
+            self.scale
+        } else {
+            1.0
+        };
         let logical = |(w, h): (u32, u32)| Size {
             width: f64::from(w) / s,
             height: f64::from(h) / s,
@@ -91,7 +95,11 @@ pub fn visible_frame(extended_bounds: PhysRect, client: (u32, u32)) -> (u32, u32
 /// The answer to `WM_GETDPISCALEDSIZE`: the outer size the window should have at the new DPI for the logical inner
 /// size the state machine wants. `frame_at_new_dpi` is the **full** frame (invisible borders included) that
 /// `AdjustWindowRectExForDpi` gives at that DPI, since `SetWindowPos` takes the outer rectangle.
-pub fn dpi_scaled_outer(inner_logical: Size, new_dpi: u32, frame_at_new_dpi: (u32, u32)) -> (u32, u32) {
+pub fn dpi_scaled_outer(
+    inner_logical: Size,
+    new_dpi: u32,
+    frame_at_new_dpi: (u32, u32),
+) -> (u32, u32) {
     let s = scale_of_dpi(new_dpi);
     (
         physical(inner_logical.width, s) + frame_at_new_dpi.0,
@@ -110,22 +118,38 @@ pub enum DisplayServer {
 impl DisplayServer {
     /// From the environment the process runs in: `GDK_BACKEND` wins, then `XDG_SESSION_TYPE`, then
     /// `WAYLAND_DISPLAY`; anything else is X11.
-    pub fn detect(gdk_backend: Option<&str>, session_type: Option<&str>, wayland_display: Option<&str>) -> Self {
+    pub fn detect(
+        gdk_backend: Option<&str>,
+        session_type: Option<&str>,
+        wayland_display: Option<&str>,
+    ) -> Self {
         fn set(v: Option<&str>) -> Option<&str> {
             v.map(str::trim).filter(|v| !v.is_empty())
         }
         if let Some(b) = set(gdk_backend) {
             // `GDK_BACKEND=wayland,x11` is a preference list: the first is the one tried.
-            return if b.split(',').next().is_some_and(|f| f.trim().eq_ignore_ascii_case("wayland")) {
+            return if b
+                .split(',')
+                .next()
+                .is_some_and(|f| f.trim().eq_ignore_ascii_case("wayland"))
+            {
                 DisplayServer::Wayland
             } else {
                 DisplayServer::X11
             };
         }
         if let Some(t) = set(session_type) {
-            return if t.eq_ignore_ascii_case("wayland") { DisplayServer::Wayland } else { DisplayServer::X11 };
+            return if t.eq_ignore_ascii_case("wayland") {
+                DisplayServer::Wayland
+            } else {
+                DisplayServer::X11
+            };
         }
-        if set(wayland_display).is_some() { DisplayServer::Wayland } else { DisplayServer::X11 }
+        if set(wayland_display).is_some() {
+            DisplayServer::Wayland
+        } else {
+            DisplayServer::X11
+        }
     }
 
     /// Whether `set_position` and `keep_on_monitor` do anything.
@@ -156,12 +180,22 @@ pub fn metrics_for(
     outer: (u32, u32),
     inner: (u32, u32),
 ) -> EdgeMetrics {
-    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    let guessed = server.work_area(Size { width: f64::from(work.0) / s, height: f64::from(work.1) / s });
+    let s = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let guessed = server.work_area(Size {
+        width: f64::from(work.0) / s,
+        height: f64::from(work.1) / s,
+    });
     EdgeMetrics {
         scale: s,
         work: (physical(guessed.width, s), physical(guessed.height, s)),
-        frame: (outer.0.saturating_sub(inner.0), outer.1.saturating_sub(inner.1)),
+        frame: (
+            outer.0.saturating_sub(inner.0),
+            outer.1.saturating_sub(inner.1),
+        ),
     }
 }
 
@@ -220,7 +254,12 @@ mod tests {
     #[test]
     fn visible_frame_leaves_out_the_invisible_borders() {
         // A 1000x700 client at 150 %: DWM reports the visible outer rectangle; the invisible 8 px borders are not in it.
-        let bounds = PhysRect { left: 100, top: 100, right: 1100 + 2, bottom: 800 + 31 + 2 };
+        let bounds = PhysRect {
+            left: 100,
+            top: 100,
+            right: 1100 + 2,
+            bottom: 800 + 31 + 2,
+        };
         assert_eq!(visible_frame(bounds, (1000, 700)), (2, 33));
         // A client larger than the bounds (a stale read) is no frame, not an underflow.
         assert_eq!(visible_frame(bounds, (5000, 5000)), (0, 0));
@@ -229,14 +268,24 @@ mod tests {
     #[test]
     fn the_scaled_size_is_the_ceiled_client_plus_the_full_frame_at_the_new_dpi() {
         // Inner 410.2 x 300.1 logical at 125 %: 513 x 376 physical, plus a 16 x 39 frame.
-        assert_eq!(dpi_scaled_outer(size(410.2, 300.1), 120, (16, 39)), (513 + 16, 376 + 39));
+        assert_eq!(
+            dpi_scaled_outer(size(410.2, 300.1), 120, (16, 39)),
+            (513 + 16, 376 + 39)
+        );
         // At 100 % the same inner needs 411 x 301.
-        assert_eq!(dpi_scaled_outer(size(410.2, 300.1), 96, (16, 39)), (411 + 16, 301 + 39));
+        assert_eq!(
+            dpi_scaled_outer(size(410.2, 300.1), 96, (16, 39)),
+            (411 + 16, 301 + 39)
+        );
     }
 
     #[test]
     fn metrics_become_a_logical_env_and_a_bad_scale_is_one() {
-        let m = EdgeMetrics { scale: 1.5, work: (2880, 1560), frame: (24, 60) };
+        let m = EdgeMetrics {
+            scale: 1.5,
+            work: (2880, 1560),
+            frame: (24, 60),
+        };
         let e = m.env();
         assert_eq!(e.scale, 1.5);
         assert_eq!(e.work, size(1920.0, 1040.0));
@@ -248,7 +297,16 @@ mod tests {
 
     #[test]
     fn rect_size_never_goes_negative() {
-        assert_eq!(PhysRect { left: 10, top: 10, right: 5, bottom: 30 }.size(), (0, 20));
+        assert_eq!(
+            PhysRect {
+                left: 10,
+                top: 10,
+                right: 5,
+                bottom: 30
+            }
+            .size(),
+            (0, 20)
+        );
     }
 
     #[test]
@@ -256,12 +314,30 @@ mod tests {
         use DisplayServer::*;
         assert_eq!(DisplayServer::detect(None, None, None), X11);
         assert_eq!(DisplayServer::detect(None, Some("wayland"), None), Wayland);
-        assert_eq!(DisplayServer::detect(None, Some("x11"), Some("wayland-0")), X11, "the session type is the stronger word");
-        assert_eq!(DisplayServer::detect(None, None, Some("wayland-0")), Wayland);
+        assert_eq!(
+            DisplayServer::detect(None, Some("x11"), Some("wayland-0")),
+            X11,
+            "the session type is the stronger word"
+        );
+        assert_eq!(
+            DisplayServer::detect(None, None, Some("wayland-0")),
+            Wayland
+        );
         assert_eq!(DisplayServer::detect(None, Some(""), Some("")), X11);
-        assert_eq!(DisplayServer::detect(Some("x11"), Some("wayland"), Some("wayland-0")), X11, "GDK_BACKEND wins");
-        assert_eq!(DisplayServer::detect(Some("wayland,x11"), None, None), Wayland, "the first of a list");
-        assert_eq!(DisplayServer::detect(Some("x11,wayland"), Some("wayland"), None), X11);
+        assert_eq!(
+            DisplayServer::detect(Some("x11"), Some("wayland"), Some("wayland-0")),
+            X11,
+            "GDK_BACKEND wins"
+        );
+        assert_eq!(
+            DisplayServer::detect(Some("wayland,x11"), None, None),
+            Wayland,
+            "the first of a list"
+        );
+        assert_eq!(
+            DisplayServer::detect(Some("x11,wayland"), Some("wayland"), None),
+            X11
+        );
     }
 
     #[test]
@@ -270,21 +346,51 @@ mod tests {
         assert!(!DisplayServer::Wayland.can_place());
         let monitor = size(1920.0, 1080.0);
         assert_eq!(DisplayServer::X11.work_area(monitor), monitor);
-        assert_eq!(DisplayServer::Wayland.work_area(monitor), size(1920.0, 984.0));
-        assert_eq!(DisplayServer::Wayland.work_area(size(100.0, 50.0)).height, 1.0, "never zero");
+        assert_eq!(
+            DisplayServer::Wayland.work_area(monitor),
+            size(1920.0, 984.0)
+        );
+        assert_eq!(
+            DisplayServer::Wayland.work_area(size(100.0, 50.0)).height,
+            1.0,
+            "never zero"
+        );
     }
 
     #[test]
     fn linux_metrics_take_the_frame_from_outer_minus_inner_and_guess_wayland_panels() {
-        let x11 = metrics_for(DisplayServer::X11, 2.0, (3840, 2160), (1030, 760), (1000, 700));
+        let x11 = metrics_for(
+            DisplayServer::X11,
+            2.0,
+            (3840, 2160),
+            (1030, 760),
+            (1000, 700),
+        );
         assert_eq!(x11.frame, (30, 60));
         assert_eq!(x11.work, (3840, 2160));
         assert_eq!(x11.scale, 2.0);
-        let wl = metrics_for(DisplayServer::Wayland, 2.0, (3840, 2160), (1000, 700), (1000, 700));
-        assert_eq!(wl.frame, (0, 0), "an unframed window has none until it is mapped");
-        assert_eq!(wl.work, (3840, 2160 - 192), "48 logical px top and bottom at scale 2");
+        let wl = metrics_for(
+            DisplayServer::Wayland,
+            2.0,
+            (3840, 2160),
+            (1000, 700),
+            (1000, 700),
+        );
+        assert_eq!(
+            wl.frame,
+            (0, 0),
+            "an unframed window has none until it is mapped"
+        );
+        assert_eq!(
+            wl.work,
+            (3840, 2160 - 192),
+            "48 logical px top and bottom at scale 2"
+        );
         // An inner larger than the outer (a toolkit reporting before it is framed) is no frame, not an underflow.
-        assert_eq!(metrics_for(DisplayServer::X11, 1.0, (800, 600), (500, 400), (510, 410)).frame, (0, 0));
+        assert_eq!(
+            metrics_for(DisplayServer::X11, 1.0, (800, 600), (500, 400), (510, 410)).frame,
+            (0, 0)
+        );
     }
 
     #[test]

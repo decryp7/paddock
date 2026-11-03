@@ -15,17 +15,21 @@
 //! The subclass is chained after tao's own (installed later, so it is called first and passes everything on). It must be
 //! installed on the thread that owns the window, the main thread.
 
-use super::{EdgeMetrics, PhysRect, dpi_scaled_outer, is_size_command, scale_of_dpi, visible_frame};
+use super::{
+    EdgeMetrics, PhysRect, dpi_scaled_outer, is_size_command, scale_of_dpi, visible_frame,
+};
 use crate::contract::Size;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+};
+use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectExForDpi, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE,
+    GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE,
     WM_EXITSIZEMOVE, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_SIZING, WM_SYSCOMMAND,
 };
 
@@ -97,15 +101,28 @@ pub fn full_frame_at(hwnd: HWND, dpi: u32) -> Result<(u32, u32), EdgeError> {
         let mut r = RECT::default();
         AdjustWindowRectExForDpi(&mut r, style, false, ex, dpi.max(1))
             .map_err(|e| EdgeError::Win32("AdjustWindowRectExForDpi", e.to_string()))?;
-        Ok(PhysRect { left: r.left, top: r.top, right: r.right, bottom: r.bottom }.size())
+        Ok(PhysRect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        }
+        .size())
     }
 }
 
 fn client_size(hwnd: HWND) -> Result<(u32, u32), EdgeError> {
     let mut r = RECT::default();
     // SAFETY: `r` is a valid out parameter.
-    unsafe { GetClientRect(hwnd, &mut r) }.map_err(|e| EdgeError::Win32("GetClientRect", e.to_string()))?;
-    Ok(PhysRect { left: r.left, top: r.top, right: r.right, bottom: r.bottom }.size())
+    unsafe { GetClientRect(hwnd, &mut r) }
+        .map_err(|e| EdgeError::Win32("GetClientRect", e.to_string()))?;
+    Ok(PhysRect {
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom,
+    }
+    .size())
 }
 
 /// The work area of the monitor the window is on (nearest, if it is on none), physical px.
@@ -113,12 +130,24 @@ pub fn work_area_of(hwnd: HWND) -> Result<(u32, u32), EdgeError> {
     // SAFETY: `info` has its size set and outlives the call.
     unsafe {
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
         if !GetMonitorInfoW(monitor, &mut info).as_bool() {
-            return Err(EdgeError::Win32("GetMonitorInfoW", "no monitor information".into()));
+            return Err(EdgeError::Win32(
+                "GetMonitorInfoW",
+                "no monitor information".into(),
+            ));
         }
         let r = info.rcWork;
-        Ok(PhysRect { left: r.left, top: r.top, right: r.right, bottom: r.bottom }.size())
+        Ok(PhysRect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        }
+        .size())
     }
 }
 
@@ -126,10 +155,20 @@ fn extended_frame_bounds(hwnd: HWND) -> Option<PhysRect> {
     let mut r = RECT::default();
     // SAFETY: `r` is a RECT and the size passed is its size.
     unsafe {
-        DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, (&raw mut r).cast::<c_void>(), size_of::<RECT>() as u32)
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            (&raw mut r).cast::<c_void>(),
+            size_of::<RECT>() as u32,
+        )
     }
     .ok()?;
-    let bounds = PhysRect { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    let bounds = PhysRect {
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom,
+    };
     (bounds.size() != (0, 0)).then_some(bounds)
 }
 
@@ -144,7 +183,11 @@ pub fn read(hwnd: HWND) -> Result<Reading, EdgeError> {
     };
     Ok(Reading {
         dpi,
-        metrics: EdgeMetrics { scale: scale_of_dpi(dpi), work: work_area_of(hwnd)?, frame },
+        metrics: EdgeMetrics {
+            scale: scale_of_dpi(dpi),
+            work: work_area_of(hwnd)?,
+            frame,
+        },
         full_frame: full,
         frame_source: source,
     })
@@ -152,8 +195,7 @@ pub fn read(hwnd: HWND) -> Result<Reading, EdgeError> {
 
 /// The native handle of a Tauri window.
 pub fn hwnd_of<R: tauri::Runtime>(window: &tauri::Window<R>) -> Result<HWND, EdgeError> {
-    // The handle's type is the `windows` crate's of the Tauri version in the tree; its value is the same pointer.
-    window.hwnd().map(|h| HWND(h.0 as *mut c_void)).map_err(|_| EdgeError::NoWindow)
+    window.hwnd().map_err(|_| EdgeError::NoWindow)
 }
 
 /// Installs the dialog subclass on `hwnd`; `events` lives until the window is destroyed. Call on the window's thread.
@@ -166,7 +208,10 @@ pub fn install(hwnd: HWND, events: Box<dyn WindowEvents>) -> Result<(), EdgeErro
     } else {
         // SAFETY: the subclass was not installed, so nothing else owns `data`.
         drop(unsafe { Box::from_raw(data as *mut Box<dyn WindowEvents>) });
-        Err(EdgeError::Win32("SetWindowSubclass", "the call failed".into()))
+        Err(EdgeError::Win32(
+            "SetWindowSubclass",
+            "the call failed".into(),
+        ))
     }
 }
 
@@ -200,7 +245,12 @@ unsafe extern "system" fn subclass_proc(
             let frame = full_frame_at(hwnd, dpi).ok()?;
             let (w, h) = dpi_scaled_outer(inner, dpi, frame);
             // SAFETY: for this message `lparam` points to the SIZE the OS wants filled.
-            unsafe { *(lparam.0 as *mut SIZE) = SIZE { cx: w as i32, cy: h as i32 } };
+            unsafe {
+                *(lparam.0 as *mut SIZE) = SIZE {
+                    cx: w as i32,
+                    cy: h as i32,
+                }
+            };
             Some(LRESULT(1))
         }
         _ => None,
@@ -228,7 +278,8 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, HWND_MESSAGE, SC_MOVE, SC_SIZE, SendMessageW, WS_OVERLAPPEDWINDOW,
+        CreateWindowExW, DestroyWindow, HWND_MESSAGE, SC_MOVE, SC_SIZE, SendMessageW,
+        WS_OVERLAPPEDWINDOW,
     };
     use windows::core::w;
 
@@ -278,7 +329,13 @@ mod tests {
 
     fn sink(inner: Option<Size>) -> (Box<dyn WindowEvents>, Rc<RefCell<Log>>) {
         let log = Rc::new(RefCell::new(Log::default()));
-        (Box::new(Sink { log: log.clone(), inner }), log)
+        (
+            Box::new(Sink {
+                log: log.clone(),
+                inner,
+            }),
+            log,
+        )
     }
 
     #[test]
@@ -286,8 +343,14 @@ mod tests {
         let h = window();
         let at = |dpi| full_frame_at(h, dpi).unwrap();
         let (f96, f120, f144) = (at(96), at(120), at(144));
-        assert!(f96.0 > 0 && f96.1 > f96.0, "a title bar makes it taller than wide: {f96:?}");
-        assert!(f120.1 > f96.1 && f144.1 > f120.1, "{f96:?} {f120:?} {f144:?}");
+        assert!(
+            f96.0 > 0 && f96.1 > f96.0,
+            "a title bar makes it taller than wide: {f96:?}"
+        );
+        assert!(
+            f120.1 > f96.1 && f144.1 > f120.1,
+            "{f96:?} {f120:?} {f144:?}"
+        );
         unsafe { DestroyWindow(h).unwrap() };
     }
 
@@ -297,7 +360,10 @@ mod tests {
         let r = read(h).unwrap();
         assert!(r.metrics.scale >= 1.0);
         assert!(r.metrics.work.0 > 0 && r.metrics.work.1 > 0);
-        assert!(r.metrics.frame.0 <= r.full_frame.0 && r.metrics.frame.1 <= r.full_frame.1, "{r:?}");
+        assert!(
+            r.metrics.frame.0 <= r.full_frame.0 && r.metrics.frame.1 <= r.full_frame.1,
+            "{r:?}"
+        );
         unsafe { DestroyWindow(h).unwrap() };
     }
 
@@ -313,7 +379,12 @@ mod tests {
         unsafe {
             SendMessageW(h, WM_SYSCOMMAND, Some(WPARAM(SC_SIZE as usize | 0x8)), None);
             let mut r = RECT::default();
-            SendMessageW(h, WM_SIZING, Some(WPARAM(1)), Some(LPARAM((&raw mut r) as isize)));
+            SendMessageW(
+                h,
+                WM_SIZING,
+                Some(WPARAM(1)),
+                Some(LPARAM((&raw mut r) as isize)),
+            );
         }
         assert_eq!(log.borrow().resize, 2);
         unsafe {
@@ -326,13 +397,26 @@ mod tests {
     #[test]
     fn the_dpi_scaled_size_is_the_wanted_inner_at_the_new_dpi_plus_the_frame_there() {
         let h = window();
-        let (events, _) = sink(Some(Size { width: 410.2, height: 300.1 }));
+        let (events, _) = sink(Some(Size {
+            width: 410.2,
+            height: 300.1,
+        }));
         install(h, events).unwrap();
         let mut size = SIZE::default();
-        let answer = unsafe { SendMessageW(h, WM_GETDPISCALEDSIZE, Some(WPARAM(144)), Some(LPARAM((&raw mut size) as isize))) };
+        let answer = unsafe {
+            SendMessageW(
+                h,
+                WM_GETDPISCALEDSIZE,
+                Some(WPARAM(144)),
+                Some(LPARAM((&raw mut size) as isize)),
+            )
+        };
         assert_eq!(answer.0, 1, "answered");
         let frame = full_frame_at(h, 144).unwrap();
-        assert_eq!((size.cx, size.cy), (616 + frame.0 as i32, 451 + frame.1 as i32));
+        assert_eq!(
+            (size.cx, size.cy),
+            (616 + frame.0 as i32, 451 + frame.1 as i32)
+        );
         unsafe { DestroyWindow(h).unwrap() };
     }
 
@@ -342,7 +426,14 @@ mod tests {
         let (events, _) = sink(None);
         install(h, events).unwrap();
         let mut size = SIZE { cx: 7, cy: 9 };
-        unsafe { SendMessageW(h, WM_GETDPISCALEDSIZE, Some(WPARAM(144)), Some(LPARAM((&raw mut size) as isize))) };
+        unsafe {
+            SendMessageW(
+                h,
+                WM_GETDPISCALEDSIZE,
+                Some(WPARAM(144)),
+                Some(LPARAM((&raw mut size) as isize)),
+            )
+        };
         assert_eq!((size.cx, size.cy), (7, 9), "untouched");
         unsafe { DestroyWindow(h).unwrap() };
     }

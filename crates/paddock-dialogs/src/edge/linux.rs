@@ -44,7 +44,10 @@ pub fn read<R: Runtime>(window: &Window<R>) -> Option<EdgeMetrics> {
     let inner = window.inner_size().ok()?;
     Some(metrics_for(
         display_server(),
-        window.scale_factor().ok().unwrap_or_else(|| monitor.scale_factor()),
+        window
+            .scale_factor()
+            .ok()
+            .unwrap_or_else(|| monitor.scale_factor()),
         (work.width, work.height),
         (outer.width, outer.height),
         (inner.width, inner.height),
