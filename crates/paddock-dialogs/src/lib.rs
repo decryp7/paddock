@@ -44,13 +44,14 @@
 pub mod contract;
 pub mod placement;
 pub mod registry;
+pub mod size;
 pub mod table;
 pub mod ts;
 pub mod window;
 
 pub use contract::{
     BASE_COMMANDS, Contract, ContractError, Contracts, Grant, Kind, KindPolicy, Modality,
-    Remembers, Size,
+    Remembers, Shrink, Size, SizeMode,
 };
 pub use paddock_commands::DialogCallable;
 pub use placement::{Bounds, Monitor, Placement, Rect, Remembered, ScreenPosition};

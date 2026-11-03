@@ -754,8 +754,12 @@ mod tests {
             memory_for(Kind::Decision, r, d),
             rem(10.0, 20.0, 400.0, 300.0)
         );
-        assert_eq!(memory_for(Kind::Form, r, d), rem(10.0, 20.0, 900.0, 300.0));
-        assert_eq!(memory_for(Kind::Viewer, r, d), r);
+        // ADR 0043 D3: only a tool remembers its size; the others remember their offset.
+        assert_eq!(memory_for(Kind::Form, r, d), rem(10.0, 20.0, 400.0, 300.0));
+        assert_eq!(
+            memory_for(Kind::Viewer, r, d),
+            rem(10.0, 20.0, 400.0, 300.0)
+        );
         assert_eq!(memory_for(Kind::Tool, r, d), r);
         assert_eq!(memory_for(Kind::Tool, None, d), None);
     }

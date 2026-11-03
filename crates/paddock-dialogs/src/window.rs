@@ -303,7 +303,7 @@ pub fn geometry(contract: &Contract) -> (f64, f64, f64, f64) {
 /// Whether the window of a dialog of `kind` is fitted to its content (ADR 0026 §1: decisions, forms and viewers are;
 /// a tool is user-sized).
 pub fn is_fitted(kind: Kind) -> bool {
-    kind.policy().fits_content
+    kind.policy().size_mode.follows_content()
 }
 
 /// The builder configuration of a dialog window, separate from the build so a test can check it without a window.
@@ -571,7 +571,7 @@ pub fn fit_target(
         return None;
     }
     let fitted = content.ceil().max(floor).min(cap).max(min);
-    Some(if kind.policy().grows_only {
+    Some(if kind.policy().size_mode.grows_only() {
         fitted.max(current)
     } else {
         fitted
@@ -649,7 +649,7 @@ pub fn plan_fit(
         height: (measure.min_content.height + delta).min(avail_h),
     };
     let width = current.width.max(min.width);
-    let height = if kind.policy().fits_content && !user_sized {
+    let height = if kind.policy().size_mode.follows_content() && !user_sized {
         let cap = work.map_or(MAX_SIDE, |(_, h)| h * CAP_FRACTION - decor.height);
         fit_target(
             kind,
