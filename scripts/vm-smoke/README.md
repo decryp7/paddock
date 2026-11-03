@@ -74,21 +74,35 @@ are not counted). `stateFiles[]`: a discovery file (`path`, `helper`, `jsonPidFi
 `loginService`, `quit.appleScriptName`, `updateHost`, `readyTimeoutSec`, `settleSec`, `logs`. Adding a helper to an app means
 adding it here; `scripts/vm-smoke/judge.test.mjs` checks the shape.
 
-## Power checks (`--suite power`, Dyno 1.1.0)
+## Power checks (`--suite power`, Dyno 1.1.0, macOS guest)
 
-`scripts/vm-smoke/vm-smoke.sh --app dyno --suite power --run <id>` installs the same installer, cold-starts Dyno and runs the
-hardware-free power checks of [ADR 0032](../../apps/dyno/docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md), step 3b of
-`apps/dyno/docs/releasing.md`. Dyno's CLI is the actuator; the verdict is always the OS's own table (`power-probes.mjs`):
+`scripts/vm-smoke/vm-smoke.sh --app dyno --suite power --run <id>` installs the same installer, cold-starts Dyno and runs the release
+checks of [ADR 0032](../../apps/dyno/docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) (`apps/dyno/docs/releasing.md` step
+3b) in the real window. The window is driven through the Accessibility API with `axdrive` (`guest/axdrive.swift`, compiled on the host once,
+installed into the clone from the read-only share; the web content of Dyno's window is in the AX tree), the system's password sheet the same
+way, and the dashboard drag as real pointer events through the HID event tap. The verdict is always the OS's own state (`power-probes.mjs`)
+or the app's own text, never a screenshot.
 
-| Step | Actuator | Judged by |
+| Step | Driven by | Judged by |
 |---|---|---|
-| Keep awake | `dyno awake on --for 1h`, `off` | macOS `pmset -g assertions`, Windows `powercfg /requests`, Linux `systemd-inhibit --list`: a Dyno hold appears, then is gone |
-| Scheduled wake | `dyno wake-schedule add --at <now+5 min> --repeat once`, `cancel` | `pmset -g sched` (owner `net.decryptology.dyno.*`, 3 to 7 min ahead), `powercfg /waketimers`, `systemctl list-timers`/wakealarm. SKIP when the helper is needed and off, or the guest has no sleep state (Windows VM) |
-| Wake-on-LAN | `dyno wake 02:aa:bb:cc:dd:ee` | `tcpdump -xx` in the guest: UDP port 9 or 7, payload 6 x FF then the address 16 times |
+| Admin helper on | Dyno menu > Settings > Dyno > Turn on administrator readings; the SecurityAgent password sheet is filled (`PADDOCK_VM_PASSWORD`, default the image's `admin`; never printed) | `launchctl print system/net.decryptology.dyno.helper`, `/Library/PrivilegedHelperTools/...`, the card reads "On" |
+| Keep awake | Power > Keep awake for 1 hour, Stop keeping awake | `pmset -g assertions`: a Dyno hold appears, then is gone (Windows `powercfg /requests`, Linux `systemd-inhibit --list` adapters exist) |
+| Scheduled wake | Power > Schedule > Turn on scheduled wake, Add schedule (5 min ahead, Once); cancelled with `dyno wake-schedule cancel` (the row's Change form has no delete button) | `pmset -g sched`: owner `net.decryptology.dyno.*`, 3 to 7 min ahead; gone after cancel |
+| Wake-on-LAN | Wake devices > Add by hand (`vm-peer`, `02:aa:bb:cc:dd:ee`), Wake vm-peer | `tcpdump -xx` in the guest: UDP port 9 or 7, payload 6 x FF then the address 16 times |
+| GUI tour | menu-bar items (windows `net.decryptology.dyno.menubar.*`), dashboard Edit layout, drag, Done, Quit, relaunch (the order is kept), a CPU + Disk (256 MB) benchmark, Connections map, IP lists, Settings and About | the shared raw-text rules of `paddock-e2e`'s screenshot check (`ui/projects/paddock-e2e/src/screenshot-check.ts`, loaded with node's type stripping; needs the repo's `node_modules`) over the texts the window really shows. Clipped-text and status-chip rules need a DOM and are not claimed |
+| Admin helper off | Turn off administrator readings | launchd job and file gone, card "Off" |
+| Idle action | a one-minute rule seeded in `settings.json`; the Power page's "Cancel sleep" and "Snooze 30 minutes"; a long `say` file played for the audio wait; a HID event re-arms the rule | `dyno idle`: "Counting down", "Snoozed", "Waiting because audio is playing" (coreaudiod's assertion); the VM is never slept, the OS call is recorded (`/usr/bin/pmset sleepnow`) with the agent's log lines |
 
-Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/power-checks.test.mjs`). The macOS guest path was run
-end to end; the Windows and Linux adapters (`ADAPTERS` in `power-checks.mjs`) are written and parser-tested but not yet run in a VM.
-Not automated yet (printed as MANUAL): the admin helper OS prompts, the idle action UI and "Audio is playing", and all screenshot rows.
+The start check also accepts launchd as the agent's parent when launchd itself reports the job `net.decryptology.dyno.agent.ondemand` with that
+pid (`parentJob` in `apps/dyno/vm-smoke.json`, Dyno ADR 0026), and requires the job to be gone after Quit.
+
+The macOS "Allow dyno-agent to find devices on local networks?" prompt (UserNotificationCenter) appears after the first Wake-on-LAN; the suite
+answers Allow and screenshots it. Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/*.test.mjs`).
+
+**Not built yet:** the Windows and Linux guests. The Windows adapter (`ADAPTERS.windows`) and parsers are written and tested but never run in a
+VM. Windows needs a WebView2 driver (the web content is not in UI Automation; `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`
+and Playwright over an SSH tunnel would also run `expectScreenshotClean` on the real DOM), a click on the UAC consent (secure desktop: VNC), the
+tray menu and 100 / 150 % dialogs. Linux needs an amd64 `.deb` run in a GNOME VM (Rosetta on this host) and the polkit agent prompt.
 
 ## Not covered here
 
