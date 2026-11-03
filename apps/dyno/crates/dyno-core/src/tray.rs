@@ -3,6 +3,13 @@
 //! Bars: one rounded column per metric (up to three), filled from the bottom, on a faint track. Graph: the first
 //! metric's recent values as a filled area. Colours follow the suite icon family: Dyno's hue, the first metric at full
 //! ink and the others at 60 %, the high-load orange when pegged; the track adapts to a light or dark taskbar. The tooltip carries the numbers, so the icon never stands alone.
+//!
+//! The redesigned items (2026-11-03, `docs/design/dyno-tray/README.md`) are [`menu_bar`] (macOS templates, text through the
+//! [`text`] port) and [`pixel`] (Windows and Linux icons); the app does not use them yet.
+
+pub mod menu_bar;
+pub mod pixel;
+pub mod text;
 
 /// A metric an icon can draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

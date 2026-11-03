@@ -124,11 +124,11 @@ mod tests {
         edit_layout(
             &mut s,
             SurfaceEdit::MenuBar(Edit::Remove {
-                id: PlacementId::new("vertical-bars-2").unwrap(),
+                id: PlacementId::new("number-2").unwrap(),
             }),
         )
         .unwrap();
-        assert_eq!(s.menu_bar.layout().placements.len(), 1);
+        assert_eq!(s.menu_bar.layout().placements.len(), 3);
         let before = s.clone();
         let id = PlacementId::new("nope").unwrap();
         let e = edit_layout(&mut s, SurfaceEdit::MenuBar(Edit::Remove { id })).unwrap_err();

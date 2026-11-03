@@ -6,9 +6,12 @@
 //! them for development and measurements. A small always-visible Windows mini-bar window is a documented stub (off by
 //! default; not built yet).
 
+use crate::tray_look::{mac_kind, px_kind, render_mac, render_px, AlertGate, AlertPolicy, Look, Sample};
 use dyno_core::protocol::LiveUpdate;
-use dyno_core::tray::{self, Icon, IconMetric, IconStyle};
-use dyno_core::widgets::{read_metric, MenuBarItem, Metric, Thresholds};
+use dyno_core::tray::text::TextRaster;
+use dyno_core::tray::{menu_bar, pixel};
+use dyno_core::widgets::menu_bar::MAX_ITEMS;
+use dyno_core::widgets::{read_metric, MenuBarItem, Metric, NumberFormat, Thresholds};
 use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -73,6 +76,8 @@ pub struct ItemSpec {
     pub label: String,
     /// The unit a number shows in the tooltip (empty: the metric's own).
     pub unit: String,
+    /// Whether a number draws on one line (otherwise stacked).
+    pub line: bool,
 }
 
 impl ItemSpec {
@@ -84,6 +89,7 @@ impl ItemSpec {
             glyph,
             label: String::new(),
             unit: String::new(),
+            line: false,
         }
     }
 }
@@ -94,6 +100,13 @@ pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpe
         .iter()
         .map(|p| {
             let metric = p.widget.metric().clone();
+            let line = matches!(
+                &p.widget,
+                MenuBarItem::Number {
+                    format: NumberFormat::Line,
+                    ..
+                }
+            );
             let (glyph, label, unit) = match &p.widget {
                 MenuBarItem::LineGraph { .. } => (Glyph::Graph, String::new(), String::new()),
                 MenuBarItem::VerticalBars { .. } if metric == Metric::CpuPerCore => (Glyph::CoreBars, String::new(), String::new()),
@@ -109,6 +122,7 @@ pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpe
                 glyph,
                 label,
                 unit,
+                line,
             }
         })
         .collect()
@@ -116,10 +130,10 @@ pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpe
 
 /// Items from `metric:glyph` entries separated by commas, e.g. `cpu:ring,memory:number,cpu:cores` (metrics
 /// `cpu memory swap disk network gpu temp battery`; glyphs `bars graph meter ring number graphnumber cores`). Anything
-/// unrecognised is skipped; at most 8 items.
+/// unrecognised is skipped; at most [`MAX_ITEMS`] items.
 pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     let mut out: Vec<ItemSpec> = Vec::new();
-    for entry in text.split(',').take(8) {
+    for entry in text.split(',').take(usize::from(MAX_ITEMS)) {
         let parts: Vec<&str> = entry.trim().split(':').collect();
         let metric = match parts.first().copied() {
             Some("cpu") => Metric::CpuTotal,
@@ -147,18 +161,125 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     out
 }
 
-/// An icon with its tooltip.
+/// What changing the icons from `current` to `wanted` takes: only items that are gone or differ are removed, only items that are new
+/// or differ are made, so an unchanged item keeps its native icon (and with it its place in the bar).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SyncPlan {
+    /// Ids to remove, sorted.
+    pub remove: Vec<String>,
+    /// Specs to make, in `wanted` order.
+    pub create: Vec<ItemSpec>,
+}
+
+/// The [`SyncPlan`] from the icons now there to the wanted specs.
+pub fn plan_sync(current: &std::collections::HashMap<String, ItemSpec>, wanted: &[ItemSpec]) -> SyncPlan {
+    let mut remove: Vec<String> = current
+        .iter()
+        .filter(|(id, old)| wanted.iter().find(|w| &w.id == *id).is_none_or(|w| w != *old))
+        .map(|(id, _)| id.clone())
+        .collect();
+    remove.sort();
+    let create = wanted.iter().filter(|w| current.get(&w.id) != Some(*w)).cloned().collect();
+    SyncPlan { remove, create }
+}
+
+/// What one drawn frame costs the native icon. The picture is set in ONE call whatever else changed (a second call renders the
+/// status item twice and flickers on macOS, where `set_icon` and then `set_icon_as_template` did exactly that), the tooltip is
+/// sent only when its text changed, and the saved position is refreshed on the first draw and every 30th.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaintOps {
+    /// Calls that set the picture (always 1).
+    pub image_sets: u8,
+    /// Whether the tooltip is sent.
+    pub tooltip: bool,
+    /// Whether the macOS position copy is refreshed.
+    pub save_position: bool,
+}
+
+/// The [`PaintOps`] of the `count`th draw (1-based) of an item whose tooltip was `previous`.
+pub fn paint_ops(previous: &str, tooltip: &str, count: u64) -> PaintOps {
+    PaintOps {
+        image_sets: 1,
+        tooltip: previous != tooltip,
+        save_position: crate::tray_identity::should_save_position(count),
+    }
+}
+
+/// A picture in device pixels: straight RGBA bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picture {
+    /// Row-major RGBA bytes (`width * height * 4`).
+    pub rgba: Vec<u8>,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
+/// An item's pictures with its tooltip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
-    /// The pixels.
-    pub icon: Icon,
+    /// The pictures and the item's fixed size (see [`Look`]).
+    pub look: Look,
     /// The tooltip.
     pub tooltip: String,
+}
+
+/// Which family of renderers draws the items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    /// macOS: template images at 1x and @2x, text through the text port.
+    Mac,
+    /// Windows and Linux: whole-pixel icons.
+    Pixels,
+}
+
+/// What the items are drawn with: the renderer family, the icon size where it matters, and the text port.
+#[derive(Clone)]
+pub struct Env {
+    /// The renderer family.
+    pub platform: Platform,
+    /// The icon size in pixels for [`Platform::Pixels`] (16, 20, 24, 32; Linux 22).
+    pub px: u32,
+    /// The text port ([`Platform::Mac`]).
+    pub text: std::sync::Arc<dyn TextRaster + Send + Sync>,
+}
+
+impl std::fmt::Debug for Env {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Env")
+            .field("platform", &self.platform)
+            .field("px", &self.px)
+            .finish()
+    }
+}
+
+impl Env {
+    /// This machine's: CoreText on macOS, the taskbar's size on Windows, 22 px on Linux.
+    pub fn native() -> Env {
+        #[cfg(target_os = "macos")]
+        {
+            Env {
+                platform: Platform::Mac,
+                px: 18,
+                text: std::sync::Arc::new(crate::tray_text::CoreText),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Env {
+                platform: Platform::Pixels,
+                px: crate::tray::native_icon_px(),
+                text: std::sync::Arc::new(dyno_core::tray::text::BoxText),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 struct ItemState {
     history: VecDeque<f32>,
+    alert: AlertGate,
     last: Option<Frame>,
 }
 
@@ -168,12 +289,16 @@ pub struct TrayItems {
     specs: Vec<ItemSpec>,
     state: Vec<ItemState>,
     net_peak: f64,
-    size: u32,
+    env: Env,
+    policy: AlertPolicy,
+    /// The metrics the agent has an open alarm for now.
+    alarmed: Vec<Metric>,
 }
 
 /// A measurement: where it sits on the 0-100 drawing scale, and how to say it.
 struct Measured {
     scale: f32,
+    raw: f64,
     text: String,
 }
 
@@ -198,15 +323,63 @@ pub fn metric_name(m: &Metric) -> String {
 }
 
 impl TrayItems {
-    /// Items drawn at `size` pixels.
-    pub fn new(specs: Vec<ItemSpec>, size: u32) -> TrayItems {
+    /// Items drawn with `env`.
+    pub fn new(specs: Vec<ItemSpec>, env: Env) -> TrayItems {
         let state = specs.iter().map(|_| ItemState::default()).collect();
         TrayItems {
             specs,
             state,
             net_peak: NET_FLOOR,
-            size,
+            env,
+            policy: AlertPolicy::default(),
+            alarmed: Vec::new(),
         }
+    }
+
+    /// Which alarm rules cover which metrics, and the fallback level (the settings changed).
+    pub fn set_policy(&mut self, policy: AlertPolicy) {
+        self.policy = policy;
+    }
+
+    /// The metrics with an open alarm (an alarm changed).
+    pub fn set_alarmed(&mut self, alarmed: Vec<Metric>) {
+        self.alarmed = alarmed;
+    }
+
+    /// The icon size changed (the taskbar's DPI): every item is drawn again at the next update. Returns whether it changed.
+    pub fn set_px(&mut self, px: u32) -> bool {
+        if self.env.px == px {
+            return false;
+        }
+        self.env.px = px;
+        for st in &mut self.state {
+            st.last = None;
+        }
+        true
+    }
+
+    /// The frame of every item as unavailable (the agent is away), and forgets what was drawn so the live pictures return.
+    pub fn unavailable_frames(&mut self, dark: bool) -> Vec<(String, Frame)> {
+        let out = (0..self.specs.len())
+            .map(|i| {
+                let spec = self.specs[i].clone();
+                let name = self.name(&spec);
+                (
+                    spec.id.clone(),
+                    self.frame(
+                        &spec,
+                        &Sample::default(),
+                        Visual::Unavailable,
+                        dark,
+                        format!("Dyno — {name}: the agent is not running"),
+                    ),
+                )
+            })
+            .collect();
+        for st in &mut self.state {
+            st.last = None;
+        }
+        out
     }
 
     /// The items.
@@ -249,7 +422,7 @@ impl TrayItems {
             "%" => format!("{}%", r.text),
             unit => format!("{} {unit}", r.text),
         };
-        Some(Measured { scale, text })
+        Some(Measured { scale, raw: value, text })
     }
 
     /// The pictures that changed since the last call, as `(item id, frame)`.
@@ -267,54 +440,100 @@ impl TrayItems {
         changed
     }
 
-    fn draw(&mut self, i: usize, u: &LiveUpdate, dark: bool) -> Frame {
-        let spec = self.specs[i].clone();
-        let size = self.size;
-        let name = if spec.label.is_empty() {
+    fn name(&self, spec: &ItemSpec) -> String {
+        if spec.label.is_empty() {
             metric_name(&spec.metric)
         } else {
             spec.label.clone()
+        }
+    }
+
+    /// The pictures of one item in one visual state.
+    fn frame(&self, spec: &ItemSpec, s: &Sample, visual: Visual, dark: bool, tooltip: String) -> Frame {
+        let look = match self.env.platform {
+            Platform::Mac => {
+                let st = match visual {
+                    Visual::Normal => menu_bar::State::Normal,
+                    Visual::Alert => menu_bar::State::Alert,
+                    Visual::Unavailable => menu_bar::State::Unavailable,
+                };
+                render_mac(&mac_kind(spec, s.cores.len().max(1)), s, st, &*self.env.text)
+            }
+            Platform::Pixels => {
+                let st = match visual {
+                    Visual::Normal => pixel::State::Normal,
+                    Visual::Alert => pixel::State::Alert,
+                    Visual::Unavailable => pixel::State::Unavailable,
+                };
+                render_px(&px_kind(spec), s, st, self.env.px, dark)
+            }
         };
+        Frame { look, tooltip }
+    }
+
+    fn draw(&mut self, i: usize, u: &LiveUpdate, dark: bool) -> Frame {
+        let spec = self.specs[i].clone();
+        let name = self.name(&spec);
+        let (down, up) = u.system.network_totals();
+        let cores = u.system.cpu.per_core.clone();
+        let now = u.system.at.0;
         if spec.glyph == Glyph::CoreBars {
-            let cores = &u.system.cpu.per_core;
             let busiest = cores.iter().copied().fold(0.0f32, f32::max);
-            return Frame {
-                icon: tray::render_core_bars(cores, size, dark),
-                tooltip: format!("Dyno — {name} {:.0}% · busiest core {busiest:.0}%", u.system.cpu.total),
+            let s = Sample {
+                value: Some(u.system.cpu.total),
+                cores,
+                ..Sample::default()
             };
+            let tooltip = format!("Dyno — {name} {:.0}% · busiest core {busiest:.0}%", u.system.cpu.total);
+            return self.frame(&spec, &s, Visual::Normal, dark, tooltip);
         }
         let Some(m) = self.measure(u, &spec.metric) else {
-            return Frame {
-                icon: tray::render_meter(0.0, size, dark),
-                tooltip: format!("Dyno — {name} is not available on this computer"),
-            };
+            self.state[i].alert = AlertGate::default();
+            let tooltip = format!("Dyno — {name} is not available on this computer");
+            return self.frame(&spec, &Sample::default(), Visual::Unavailable, dark, tooltip);
         };
         let history = &mut self.state[i].history;
         history.push_back(m.scale);
         while history.len() > HISTORY {
             history.pop_front();
         }
-        let graph: Vec<f32> = history.iter().copied().collect();
-        let v = m.scale;
-        let icon = match spec.glyph {
-            Glyph::Bars => tray::render(&[(IconMetric::Cpu, v)], &[], IconStyle::Bars, size, dark),
-            Glyph::Graph => tray::render(&[(IconMetric::Cpu, v)], &graph, IconStyle::Graph, size, dark),
-            Glyph::Meter => tray::render_meter(v, size, dark),
-            Glyph::Ring => tray::render_ring(v, size, dark),
-            Glyph::Number => tray::render_number(v, size, dark),
-            Glyph::GraphNumber => tray::render_graph_number(v, &graph, size, dark),
-            Glyph::CoreBars => tray::render_meter(0.0, size, dark), // handled above
+        // Degrees are drawn as degrees; everything else on the 0 to 100 scale.
+        let shown = if spec.metric == Metric::Temperature {
+            m.raw as f32
+        } else {
+            m.scale
+        };
+        let s = Sample {
+            value: Some(shown),
+            history: history.iter().copied().collect(),
+            cores,
+            up,
+            down,
+        };
+        let alert = if self.policy.covers(&spec.metric) {
+            // An alarm rule covers it: the alert is the alarm, with the alarm's own hold and hysteresis.
+            self.state[i].alert = AlertGate::default();
+            self.alarmed.contains(&spec.metric)
+        } else {
+            let level = self.policy.fallback_level(&spec.metric);
+            self.state[i].alert.update(Some(shown), level, now)
         };
         let text = if spec.unit.is_empty() {
             m.text
         } else {
             format!("{:.0}{}", m.scale, spec.unit)
         };
-        Frame {
-            icon,
-            tooltip: format!("Dyno — {name} {text}"),
-        }
+        let tooltip = format!("Dyno — {name} {text}");
+        self.frame(&spec, &s, if alert { Visual::Alert } else { Visual::Normal }, dark, tooltip)
     }
+}
+
+/// How an item is drawn now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Visual {
+    Normal,
+    Alert,
+    Unavailable,
 }
 
 #[cfg(test)]
@@ -327,6 +546,22 @@ mod tests {
     use dyno_core::widgets::MenuBarCatalogue;
     use dyno_platform::fake::quiet_sample;
     use paddock_widgets::{assign_ids, Catalogue};
+
+    fn mac_env() -> Env {
+        Env {
+            platform: Platform::Mac,
+            px: 18,
+            text: std::sync::Arc::new(dyno_core::tray::text::BoxText),
+        }
+    }
+
+    fn win_env(px: u32) -> Env {
+        Env {
+            platform: Platform::Pixels,
+            px,
+            text: std::sync::Arc::new(dyno_core::tray::text::BoxText),
+        }
+    }
 
     fn update(cpu: f32) -> LiveUpdate {
         let mut system = quiet_sample(Timestamp(0));
@@ -364,10 +599,10 @@ mod tests {
     #[test]
     fn the_settings_model_maps_to_items() {
         let default = items_from_settings(&MenuBarCatalogue::defaults());
-        assert_eq!(default.len(), 2);
-        assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Bars, &Metric::CpuTotal));
-        assert_eq!(default[0].id, "vertical-bars");
-        assert_eq!(default[1].id, "vertical-bars-2");
+        assert_eq!(default.len(), 4, "the design's default set");
+        assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Number, &Metric::CpuTotal));
+        assert_eq!(default[0].id, "number");
+        assert_eq!(default[1].id, "number-2");
         let s = assign_ids([
             (
                 1,
@@ -381,6 +616,7 @@ mod tests {
                     metric: Metric::Temperature,
                     unit: "C".into(),
                     label: "Hot".into(),
+                    format: NumberFormat::Line,
                 },
             ),
             (1, MenuBarItem::GraphAndNumber { metric: Metric::Memory }),
@@ -402,6 +638,162 @@ mod tests {
             ]
         );
         assert_eq!((items[1].label.as_str(), items[1].unit.as_str()), ("Hot", "C"));
+        assert!(items[1].line && !items[0].line, "only the item set to one line draws on one line");
+    }
+
+    #[test]
+    fn more_than_four_items_each_get_their_own_spec_and_frame() {
+        let metrics = [
+            Metric::CpuTotal,
+            Metric::Memory,
+            Metric::Swap,
+            Metric::DiskActivity,
+            Metric::NetworkDown,
+            Metric::GpuLoad,
+            Metric::Temperature,
+            Metric::Battery,
+        ];
+        let s = assign_ids(metrics.iter().cloned().map(|metric| (1, MenuBarItem::Ring { metric })));
+        let specs = items_from_settings(&s);
+        assert_eq!(specs.len(), 8);
+        let ids: std::collections::HashSet<&str> = specs.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids.len(), 8, "every item has its own id");
+        let mut items = TrayItems::new(specs, mac_env());
+        assert_eq!(items.frames(&update(10.0), true).len(), 8, "every item draws");
+        let text = (0..usize::from(MAX_ITEMS) + 5).map(|_| "cpu:ring").collect::<Vec<_>>().join(",");
+        assert_eq!(parse_items(&text).len(), usize::from(MAX_ITEMS));
+    }
+
+    /// ER-20 measurement, not a check: `cargo test -p dyno-app --lib measure_32 -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement that prints the drawing time of 32 graph items; it asserts nothing about time"]
+    fn measure_32_graph_items() {
+        let specs: Vec<ItemSpec> = (0..32)
+            .map(|n| ItemSpec::new(&format!("cpu-{n}"), Metric::CpuTotal, Glyph::Graph))
+            .collect();
+        let mut items = TrayItems::new(specs, mac_env());
+        let start = Instant::now();
+        let mut drawn = 0;
+        for tick in 0..200 {
+            drawn += items.frames(&update((tick % 100) as f32), true).len();
+        }
+        let per_tick = start.elapsed() / 200;
+        println!("32 graph items: {drawn} frames in 200 ticks, {per_tick:?} per tick (all items changing every tick)");
+    }
+
+    #[test]
+    fn a_frame_sets_the_picture_once_and_the_tooltip_only_when_it_changed() {
+        let first = paint_ops("", "Dyno CPU 5%", 1);
+        assert_eq!((first.image_sets, first.tooltip, first.save_position), (1, true, true));
+        let same = paint_ops("Dyno CPU 5%", "Dyno CPU 5%", 2);
+        assert_eq!((same.image_sets, same.tooltip, same.save_position), (1, false, false));
+        assert!(paint_ops("Dyno CPU 5%", "Dyno CPU 6%", 3).tooltip);
+    }
+
+    #[test]
+    fn an_items_picture_keeps_its_size_whatever_the_value() {
+        // A picture that changes size changes the status item's width and moves its neighbours: the flicker's third suspect.
+        for glyph in [
+            Glyph::Bars,
+            Glyph::Graph,
+            Glyph::Meter,
+            Glyph::Ring,
+            Glyph::Number,
+            Glyph::GraphNumber,
+            Glyph::CoreBars,
+        ] {
+            let mut items = TrayItems::new(vec![ItemSpec::new("cpu-1", Metric::CpuTotal, glyph)], mac_env());
+            let mut shapes = std::collections::HashSet::new();
+            for v in [0.0, 1.0, 9.0, 10.0, 55.0, 99.0, 100.0] {
+                for (_, f) in items.frames(&update(v), true) {
+                    shapes.insert((
+                        f.look.width,
+                        f.look.height,
+                        f.look.pictures.iter().map(|p| p.rgba.len()).sum::<usize>(),
+                    ));
+                }
+            }
+            assert_eq!(shapes.len(), 1, "{glyph:?} changed size: {shapes:?}");
+        }
+    }
+
+    #[test]
+    fn an_unchanged_value_draws_nothing() {
+        let mut items = TrayItems::new(vec![ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring)], mac_env());
+        assert_eq!(items.frames(&update(40.0), true).len(), 1);
+        assert!(
+            items.frames(&update(40.0), true).is_empty(),
+            "no redraw when the picture did not change"
+        );
+    }
+
+    fn at(mut u: LiveUpdate, ms: i64) -> LiveUpdate {
+        u.system.at = Timestamp(ms);
+        u
+    }
+
+    fn frame_of(m: &mut TrayItems, u: &LiveUpdate) -> Option<Frame> {
+        m.frames(u, true).pop().map(|(_, f)| f)
+    }
+
+    #[test]
+    fn a_metric_an_alarm_rule_covers_alerts_only_with_an_open_alarm() {
+        let mut m = TrayItems::new(vec![item("c", Metric::CpuTotal, Glyph::Number)], win_env(32));
+        m.set_policy(AlertPolicy {
+            covered: vec![Metric::CpuTotal],
+            fallback_percent: 90.0,
+        });
+        let calm = frame_of(&mut m, &at(update(95.0), 0)).unwrap();
+        // 95 % for 10 s, but the rule has not raised an alarm: no alert, whatever the fallback level says.
+        assert_eq!(frame_of(&mut m, &at(update(95.0), 10_000)), None, "unchanged picture");
+        m.set_alarmed(vec![Metric::CpuTotal]);
+        let alarmed = frame_of(&mut m, &at(update(95.0), 11_000)).unwrap();
+        assert_ne!(alarmed.look.pictures, calm.look.pictures, "the open alarm shows as an alert");
+        m.set_alarmed(vec![]);
+        let cleared = frame_of(&mut m, &at(update(95.0), 12_000)).unwrap();
+        assert_eq!(cleared.look.pictures, calm.look.pictures);
+    }
+
+    #[test]
+    fn a_load_no_rule_covers_uses_the_settings_level_after_three_seconds() {
+        let mut m = TrayItems::new(vec![item("c", Metric::CpuTotal, Glyph::Number)], win_env(32));
+        m.set_policy(AlertPolicy {
+            covered: vec![],
+            fallback_percent: 80.0,
+        });
+        let first = frame_of(&mut m, &at(update(85.0), 0)).unwrap();
+        assert_eq!(frame_of(&mut m, &at(update(85.0), 2_999)), None, "held for less than three seconds");
+        let later = frame_of(&mut m, &at(update(85.0), 3_000)).unwrap();
+        assert_ne!(
+            later.look.pictures, first.look.pictures,
+            "alert after three seconds at the Settings level"
+        );
+        // 76 is inside the five-point band below 80: still alerting; 74 clears it.
+        assert_eq!(
+            frame_of(&mut m, &at(update(76.0), 4_000)).map(|f| f.look.pictures == later.look.pictures),
+            Some(false),
+            "the number changed"
+        );
+    }
+
+    #[test]
+    fn only_changed_items_are_removed_and_made() {
+        use std::collections::HashMap;
+        let a = ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring);
+        let b = ItemSpec::new("memory-2", Metric::Memory, Glyph::Number);
+        let c = ItemSpec::new("swap-3", Metric::Swap, Glyph::Bars);
+        let current: HashMap<String, ItemSpec> = [&a, &b, &c].iter().map(|s| (s.id.clone(), (*s).clone())).collect();
+        assert_eq!(
+            plan_sync(&current, &[a.clone(), b.clone(), c.clone()]),
+            SyncPlan::default(),
+            "nothing changed"
+        );
+        let b2 = ItemSpec::new("memory-2", Metric::Memory, Glyph::Graph);
+        let d = ItemSpec::new("gpu-4", Metric::GpuLoad, Glyph::Ring);
+        let plan = plan_sync(&current, &[a.clone(), b2.clone(), d.clone()]);
+        assert_eq!(plan.remove, ["memory-2", "swap-3"]);
+        assert_eq!(plan.create, [b2, d]);
+        assert_eq!(plan_sync(&HashMap::new(), std::slice::from_ref(&a)).create, [a]);
     }
 
     #[test]
@@ -413,7 +805,6 @@ mod tests {
             [("cpu-1", Glyph::Ring), ("memory-2", Glyph::Number), ("cpu-3", Glyph::CoreBars)]
         );
         assert!(items.iter().all(|i| i.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')));
-        assert_eq!(parse_items(&"cpu:ring,".repeat(20)).len(), 8, "at most eight items");
         assert!(parse_items("").is_empty());
     }
 
@@ -433,10 +824,12 @@ mod tests {
             .enumerate()
             .map(|(i, g)| item(&format!("i{i}"), Metric::CpuTotal, *g))
             .collect();
-        let mut m = TrayItems::new(specs, 32);
+        let mut m = TrayItems::new(specs, win_env(32));
         let first = m.frames(&update(40.0), true);
         assert_eq!(first.len(), all.len());
-        assert!(first.iter().all(|(_, f)| f.icon.size == 32 && f.tooltip.starts_with("Dyno")));
+        assert!(first
+            .iter()
+            .all(|(_, f)| f.look.width == 32 && f.look.height == 32 && f.look.pictures.len() == 1 && f.tooltip.starts_with("Dyno")));
         // Only the graph glyphs move with their history when the number stays the same.
         let again = m.frames(&update(40.0), true);
         assert!(
@@ -451,7 +844,7 @@ mod tests {
     fn per_core_bars_follow_the_cores_and_name_the_busiest() {
         let mut u = update(10.0);
         u.system.cpu.per_core = vec![5.0, 95.0, 10.0, 0.0];
-        let mut m = TrayItems::new(vec![item("c", Metric::CpuPerCore, Glyph::CoreBars)], 32);
+        let mut m = TrayItems::new(vec![item("c", Metric::CpuPerCore, Glyph::CoreBars)], win_env(32));
         let f = m.frames(&u, true).remove(0).1;
         assert!(f.tooltip.contains("busiest core 95%"), "{}", f.tooltip);
     }
@@ -467,7 +860,7 @@ mod tests {
                 item("p", Metric::PerfCounter("x".into()), Glyph::Number),
                 item("t", Metric::Temperature, Glyph::Number),
             ],
-            32,
+            win_env(32),
         );
         let f = m.frames(&u, true);
         assert!(f.iter().all(|(_, fr)| fr.tooltip.contains("not available")), "{f:?}");
@@ -486,7 +879,7 @@ mod tests {
                 item("m", Metric::MemoryPressure, Glyph::Meter),
                 item("s", Metric::Swap, Glyph::Meter),
             ],
-            32,
+            win_env(32),
         );
         let f = m.frames(&u, true);
         assert_eq!(f[0].1.tooltip, "Dyno — CPU 100%");
@@ -501,7 +894,7 @@ mod tests {
         let mut spec = item("t", Metric::CpuTotal, Glyph::Number);
         spec.label = "Proc".into();
         spec.unit = "pct".into();
-        let mut m = TrayItems::new(vec![spec], 32);
+        let mut m = TrayItems::new(vec![spec], win_env(32));
         assert_eq!(m.frames(&update(42.0), true)[0].1.tooltip, "Dyno — Proc 42pct");
     }
 
@@ -518,13 +911,13 @@ mod tests {
             disk_bps: dyno_core::process::Measured::Value(0.0),
             partial: false,
         }];
-        let mut m = TrayItems::new(vec![item("p", Metric::Process("chrome".into()), Glyph::Number)], 32);
+        let mut m = TrayItems::new(vec![item("p", Metric::Process("chrome".into()), Glyph::Number)], win_env(32));
         assert!(m.frames(&u, true)[0].1.tooltip.contains("chrome 33%"));
     }
 
     #[test]
     fn changing_the_items_resets_them() {
-        let mut m = TrayItems::new(vec![item("a", Metric::CpuTotal, Glyph::Ring)], 32);
+        let mut m = TrayItems::new(vec![item("a", Metric::CpuTotal, Glyph::Ring)], win_env(32));
         m.frames(&update(10.0), true);
         assert!(!m.set_specs(m.specs().to_vec()), "same items: no change");
         assert!(m.set_specs(vec![item("b", Metric::CpuTotal, Glyph::Ring)]));

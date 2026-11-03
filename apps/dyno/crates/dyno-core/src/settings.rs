@@ -272,7 +272,7 @@ mod tests {
         assert!(s.dashboard.notes().is_empty() && s.menu_bar.notes().is_empty() && s.popover.notes().is_empty());
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert!(j["dashboard"]["presets"].is_array());
-        assert_eq!(j["menuBar"]["placements"][0]["widget"]["verticalBars"]["metric"], "cpuTotal");
+        assert_eq!(j["menuBar"]["placements"][0]["widget"]["number"]["metric"], "cpuTotal");
         assert_eq!(j["popover"]["placements"][0]["widget"], "activeAlarms");
     }
 

@@ -40,7 +40,8 @@ pub enum CustomMetric {
 }
 
 impl CustomMetric {
-    fn widget(self) -> Metric {
+    /// The widget metric this rule's alarm charts.
+    pub fn widget(self) -> Metric {
         match self {
             CustomMetric::CpuTotal => Metric::CpuTotal,
             CustomMetric::MemoryUsed => Metric::Memory,

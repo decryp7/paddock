@@ -86,7 +86,7 @@ describe('SettingsPage', () => {
       expect(card.querySelectorAll('pd-widget-chooser')).toHaveLength(2);
     });
     expect(card.querySelector('#popup-widgets')).not.toBeNull();
-    expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(2);
+    expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(4);
     expect(Object.keys(await mock.settings())).not.toContain('trayItems');
   });
   it('scrolls to the section the Settings window was asked for, and again when it is asked again', async () => {

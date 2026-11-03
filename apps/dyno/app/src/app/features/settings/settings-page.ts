@@ -174,6 +174,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <mat-form-field class="num-in"><input matInput type="number" min="60" max="120" [disabled]="!d.alerts.enabled" aria-label="Overheating temperature" [ngModel]="d.alerts.overheatCelsius" (ngModelChange)="setAlerts({ overheatCelsius: +$event })" /><span matTextSuffix>°C</span></mat-form-field>
               </div>
               <div class="row" [class.off]="!d.alerts.enabled">
+                <div class="lbl"><strong>Menu-bar alert level</strong><small>A menu-bar item shows an alert at this load when none of your alert rules covers it. Items with a rule follow the rule.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="50" max="100" [disabled]="!d.alerts.enabled" aria-label="Menu-bar alert level" [ngModel]="d.alerts.trayAlertPercent" (ngModelChange)="setAlerts({ trayAlertPercent: +$event })" /><span matTextSuffix>%</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Long high CPU</strong><small>Alert when one app keeps the CPU busy this long.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="1" max="240" [disabled]="!d.alerts.enabled" aria-label="Minutes of high CPU" [ngModel]="d.alerts.longHighCpuMinutes" (ngModelChange)="setAlerts({ longHighCpuMinutes: +$event })" /><span matTextSuffix>minutes</span></mat-form-field>
               </div>

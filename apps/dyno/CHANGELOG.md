@@ -5,6 +5,15 @@
 ### Added
 
 - Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
+- Every metric can be its own menu-bar / tray item: the limit of four items is now 32 (one icon each, so each can be dragged to its own place; ADR 0028).
+- Each item is given a stable identity so the OS can remember where you put it: macOS names every status item (`NSStatusItem.autosaveName`) and keeps a copy of its saved position across the item being removed; Windows gives every icon a GUID (`guidItem`), recovering a GUID the shell refuses and falling back to no GUID rather than losing the icon; Linux's status-notifier id is the item id. Not yet verified on a Mac or a Windows PC. Windows builds are not signed, so a remembered place holds only while the program stays in the same folder. A new item of the same kind as a removed one takes its place.
+- Changing the items only replaces the icons that changed. The log tells each icon's identity (and, on Windows, whether its GUID was accepted) or why it could not be created.
+
+### Changed
+
+- The menu-bar and tray items have a new look (design `docs/design/dyno-tray/README.md`): stacked label-over-value numbers with tabular figures in the system font, fixed widths per format, a dimmed dash when a value is missing, an alert that needs the level held for 3 s, and whole-pixel icons at the taskbar's own size on Windows (drawn again when the DPI or theme changes). The default set is CPU, memory, network and temperature.
+- A tray item shows its alert while Dyno has an open alarm for its metric (your alarm rules and the overheating alert); a load no rule covers uses the new Settings level "Menu-bar alert level" (default 90 %). A number item can be set to one line, and Settings explains what macOS and Windows 11 do with items that do not fit once more than four are on.
+- When the agent stays away for 3 s the items show a dimmed dash at their usual width instead of the static icon.
 
 ### Fixed
 
@@ -17,6 +26,7 @@
 - Windows: the log tells each tray icon: its static image and size, created or why not, and the first drawn image (size, or the refusal). A new icon of an app that was never pinned sits in the taskbar's overflow (the `^` at the right) on Windows 11 until the user turns it on in Settings > Personalization > Taskbar > Other system tray icons; the registry showed Dyno's icon registered there (`NotifyIconSettings`, tooltip `Dyno`).
 - Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
 - macOS: the Network page lists every program's sockets also when Start at login is off. The agent the app starts itself was its child process, and macOS 27 shows a child of an ad-hoc signed app only its own sockets; the app now starts it as a launchd job of the user's session (`launchctl bootstrap`, label `net.decryptology.dyno.agent.ondemand`, its definition in Dyno's data folder, not in `~/Library/LaunchAgents`, so nothing starts it at login), and ends it through launchd on Quit. Linux and Windows are unchanged. The log says which way the agent was started (`Via`) and the agent logs what macOS shows it (Dyno ADR 0026).
+- macOS: the menu-bar icons no longer risk flickering: each picture is set with its template flag in one call (it was set, then set again as a template), the tooltip is sent only when it changed, and changing the items replaces only the icons that changed. The log shows every picture set at debug level. Not yet confirmed on the Mac that reported it.
 
 ## [1.0.0] - 2026-10-29
 
