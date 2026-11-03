@@ -3,13 +3,23 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { MatButton } from '@angular/material/button';
-import { PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
+import { blockText, PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
 import { GOLDEN_CASES, kindOfId, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
 
 type View = GridView<GridSample, string, string>;
 type Val = { readonly size: string };
 
 const kindName = (id: string): string => { const k = kindOfId(id); return k.charAt(0).toUpperCase() + k.slice(1); };
+/** The engine's refusal in words: the recorded Debug text names a Block ("Nothing to change: Edge(Left)."), never shown as it is. */
+function refusalText(c: { gesture: { id: string }; result: unknown }): string {
+  const raw = String((c.result as { error: string }).error);
+  const who = kindName(c.gesture.id);
+  const edge = /Edge\((\w+)\)/.exec(raw)?.[1]?.toLowerCase() as 'left' | 'right' | 'up' | 'down' | undefined;
+  if (edge) return blockText(who, { edge });
+  if (/Largest/.test(raw)) return blockText(who, 'largest');
+  if (/Smallest/.test(raw)) return blockText(who, 'smallest');
+  return blockText(who, 'unchanged');
+}
 const R = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
 /** The interactive board: eight widgets of mixed sizes, with a hole beside the tall one (gravity is vertical only). */
 const BOARD = [
@@ -97,9 +107,9 @@ export class GalBigBoard {
               <figure><figcaption>Before</figcaption><pd-widget-grid [view]="c.before" [bar]="false" [values]="c.values" [templates]="templates()" [width]="1000" /></figure>
               <figure><figcaption>After</figcaption>
                 @if (c.after) {
-                  <pd-widget-grid [view]="c.after" [bar]="false" [values]="c.values" [templates]="templates()" [width]="1000" />
+                  <pd-widget-grid [view]="c.after" [bar]="false" [values]="c.afterValues" [templates]="templates()" [width]="1000" />
                 } @else {
-                  <p class="wgg-refused" role="status">Refused: {{ c.error }}</p>
+                  <p class="wgg-refused" role="status">Refused: {{ c.refusal }}</p>
                 }
               </figure>
             </div>
@@ -152,9 +162,10 @@ export class GalWidgetGrid {
     title: c.name.charAt(0).toUpperCase() + c.name.slice(1),
     gesture: c.gesture,
     values: valuesOf(c.items.map((i) => i.id), (id) => c.items.find((i) => i.id === id)?.rect),
+    afterValues: valuesOf(c.items.map((i) => i.id), (id) => ('ok' in c.result ? c.result.ok : c.items).find((i) => i.id === id)?.rect),
     before: viewOf(c.items),
     after: 'ok' in c.result ? viewOf(c.result.ok) : null,
-    error: 'error' in c.result ? c.result.error : '',
+    refusal: 'error' in c.result ? refusalText(c) : '',
   }));
 
   constructor() {

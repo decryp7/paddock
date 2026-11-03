@@ -21,3 +21,4 @@ export {
   type PdWidgetContext,
   type PdWidgetOptionContext,
 } from './src/widget';
+export { blockText } from './src/grid-text';

@@ -162,7 +162,9 @@ export class PdGridGesture {
       this.renderer.setStyle(this.host, 'transform', `translate(${dx - ox}px, ${dy - oy}px)${lift}`);
       rect = moveTarget(g, s.start.left + dx - g.left, s.start.top + dy - g.top, s.from.w, s.from.h);
     } else {
-      const width = s.handle === 's' ? s.start.width : s.start.width + dx - ox;
+      // Never wider than the grid's right edge, whatever the pointer does.
+      const room = g.left + g.columns * (g.colWidth + g.gap) - g.gap - s.start.left - ox;
+      const width = s.handle === 's' ? s.start.width : Math.min(room, s.start.width + dx - ox);
       const height = s.handle === 'e' ? s.start.height : s.start.height + dy - oy;
       this.renderer.setStyle(this.host, 'width', `${width}px`);
       this.renderer.setStyle(this.host, 'height', `${height}px`);

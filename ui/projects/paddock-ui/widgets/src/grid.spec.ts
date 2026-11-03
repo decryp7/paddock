@@ -546,7 +546,7 @@ describe('PdWidgetGrid', () => {
       backend.edit.mockResolvedValue(moved());
       (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).toEqual(['Move left', 'Move right', 'Move up', 'Move down', 'Move to first', 'Move to last', 'Wider', 'Narrower', 'Taller', 'Shorter', 'Options…', 'Remove']);
+      expect(items().map((i) => i.textContent?.trim())).toEqual(['Move left', 'Move right', 'Move up', 'Move down', 'Move CPU to first place', 'Move CPU to the end', 'Wider', 'Narrower', 'Taller', 'Shorter', 'Options…', 'Remove']);
       expect(items().map((i) => i.hasAttribute('disabled') || i.getAttribute('aria-disabled') === 'true')).toEqual([true, false, false, false, false, false, false, false, false, false, false, false]);
       items()[1]!.click();
       await settle(f);

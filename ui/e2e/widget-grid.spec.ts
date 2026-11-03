@@ -24,12 +24,21 @@ const startEditing = async (page: Page) => {
   await board(page).getByRole('button', { name: 'Edit layout' }).click();
   await expect(board(page).getByText('Editing layout')).toBeVisible();
 };
-/** The width of one column plus the gap, read from two widgets side by side (a spans 4 columns). */
+/** One column plus the gap and one row plus the gap, from the grid's own box (12 columns, 16 px gap, 24 px rows). */
 async function pitch(page: Page): Promise<{ col: number; row: number }> {
-  const a = (await cell(page, 'a').boundingBox())!;
-  const b = (await cell(page, 'b').boundingBox())!;
-  const d = (await cell(page, 'd').boundingBox())!;
-  return { col: (b.x - a.x) / 4, row: (d.y - a.y) / 4 };
+  const g = (await board(page).locator('.pd-wg-grid').first().boundingBox())!;
+  return { col: (g.width + 16) / 12, row: 40 };
+}
+/** Waits until the placeholder is where the dragged frame is (within a cell): the last preview has been drawn. */
+async function previewCaughtUp(page: Page, id: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const ph = await board(page).locator('.pd-wg-ph').boundingBox();
+      const fr = await cell(page, id).boundingBox();
+      const p = await pitch(page);
+      return !!ph && !!fr && Math.abs(ph.x - fr.x) <= p.col * 0.75 && Math.abs(ph.y - fr.y) <= p.row * 4;
+    })
+    .toBe(true);
 }
 
 for (const theme of THEMES) {
@@ -49,7 +58,10 @@ for (const theme of THEMES) {
         test(`Widget grid: review screenshots (${theme}, ${scale}x)`, async ({ page }) => {
           test.skip(!SHOTS, 'set WIDGET_GRID_SHOTS to a folder');
           mkdirSync(SHOTS as string, { recursive: true });
-          const shot = (loc: Locator, name: string) => loc.screenshot({ path: join(SHOTS as string, `${name}-${theme}-${scale}x.png`) });
+          const shot = async (loc: Locator, name: string) => {
+            await animationsDone(page);
+            await loc.screenshot({ path: join(SHOTS as string, `${name}-${theme}-${scale}x.png`) });
+          };
           await open(page, theme);
           await shot(board(page), 'board');
           await startEditing(page);
@@ -67,8 +79,9 @@ for (const theme of THEMES) {
             const a = (await cell(page, 'e').boundingBox())!;
             await page.mouse.move(a.x + 20, a.y + 20);
             await page.mouse.down();
-            await page.mouse.move(a.x + 20 + p.col * 3, a.y + 20 - p.row * 2, { steps: 6 });
+            await page.mouse.move(a.x + 20 + p.col * 3, a.y + 20 + p.row, { steps: 6 });
             await expect(board(page).locator('.pd-wg-ph')).toBeVisible();
+            await previewCaughtUp(page, 'e');
             await animationsDone(page);
             await shot(board(page), name);
             await page.mouse.up();
@@ -88,6 +101,25 @@ for (const theme of THEMES) {
           await expect(board(page).getByRole('button', { name: 'Edit layout' })).toBeVisible();
           await expect(board(page).locator('.pd-wg-feedback')).toHaveCount(0);
           await shot(page.locator('.wgg-states'), 'states');
+          // The menu, the undo toast and the add sheet, as the person sees them (the viewport).
+          await startEditing(page);
+          await cell(page, 'a').getByRole('button', { name: 'Actions for Alpha' }).click();
+          await expect(page.getByRole('menuitem', { name: 'Options…' })).toBeVisible();
+          await animationsDone(page);
+          await page.screenshot({ path: join(SHOTS as string, `options-menu-${theme}-${scale}x.png`) });
+          await page.keyboard.press('Escape');
+          await cell(page, 'c').focus();
+          await page.keyboard.press('Delete');
+          await expect(page.locator('.pd-undo-snack')).toBeVisible();
+          await animationsDone(page);
+          await page.screenshot({ path: join(SHOTS as string, `undo-snack-${theme}-${scale}x.png`) });
+          await page.locator('.pd-undo-snack button').click();
+          await board(page).getByRole('button', { name: 'Add widget' }).click();
+          await expect(page.getByTestId('wgg-sheet')).toBeVisible();
+          await animationsDone(page);
+          await page.screenshot({ path: join(SHOTS as string, `add-sheet-${theme}-${scale}x.png`) });
+          await page.getByTestId('wgg-sheet').getByRole('button', { name: 'Close' }).click();
+          await board(page).getByRole('button', { name: 'Done' }).click();
           for (let i = 0; i < 12; i++) await shot(page.getByTestId(`wgg-case-${i}`), `golden-case-${String(i + 1).padStart(2, '0')}`);
           await page.emulateMedia({ reducedMotion: 'reduce' });
           await page.evaluate(() => document.documentElement.setAttribute('data-motion', 'reduce'));
@@ -245,4 +277,33 @@ test('Widget grid: the add sheet lists the kinds and adds one; Options is in the
   await expect(board(page).locator('[data-pd-cell]')).toHaveCount(7);
   await cell(page, 'a').getByRole('button', { name: 'Actions for Alpha' }).click();
   await expect(page.getByRole('menuitem', { name: 'Options…' })).toBeVisible();
+});
+
+test('Widget grid: ARIA snapshots in normal and edit mode, every widget is named, moves reach the live region', async ({ page }) => {
+  await open(page, 'dark');
+  const normal = board(page).locator('[data-pd-cell="a"]');
+  await expect(normal).toMatchAriaSnapshot(`
+    - region "Alpha"
+  `);
+  await expect(board(page).getByRole('button', { name: 'Edit layout' })).toBeVisible();
+  await startEditing(page);
+  await expect(cell(page, 'a')).toMatchAriaSnapshot(`
+    - group "Alpha":
+      - button "Actions for Alpha"
+  `);
+  const names = await board(page).locator('[data-pd-cell]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+  expect(names.length).toBe(6);
+  for (const n of names) expect(n && n.length).toBeTruthy();
+  expect(await cell(page, 'a').getAttribute('aria-roledescription')).toBe('widget');
+  // The CDK live region says what a key did.
+  await cell(page, 'a').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.cdk-live-announcer-element')).toContainText('Alpha moved right');
+});
+
+test('Widget grid: no raw engine text reaches the page, and a refused golden case is in words', async ({ page }) => {
+  await open(page, 'dark');
+  const text = await page.getByTestId('widget-grid').innerText();
+  expect(text).not.toMatch(/Edge\(|Largest\b\(|Smallest\b\(|Block|Debug|\[object/);
+  await expect(page.getByTestId('wgg-case-7').getByRole('status')).toHaveText('Refused: Alpha is already at the left edge.');
 });

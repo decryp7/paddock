@@ -206,7 +206,7 @@ interface Active {
     <mat-menu #menu="matMenu" class="pd-wg-menu">
       <ng-template matMenuContent let-id="id">
         @for (name of names; track name) {
-          <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)">{{ actions[name].label }}</button>
+          <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)">{{ labelOf(id, name) }}</button>
         }
         @if (hasOptions()(kindOfId(id))) {
           <button mat-menu-item type="button" class="pd-wg-options" (click)="options.emit(id)">Options…</button>
@@ -247,9 +247,9 @@ interface Active {
     .pd-wg-ph { z-index: 0; border-radius: var(--pd-radius-card); background: var(--pd-accent-tint); outline: 1.5px dashed var(--pd-accent); outline-offset: -1.5px; position: relative; }
     .pd-wg-chipbox { z-index: 5; pointer-events: none; display: flex; justify-content: flex-end; align-items: flex-end; }
     .pd-wg-chip { margin: 0 0 calc(-1 * (var(--pd-space-2) + 24px)) 0; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); box-shadow: var(--pd-shadow-1); }
-    .pd-wg-guide { z-index: 0; pointer-events: none; }
-    .pd-wg-guide--left { border-left: 1px dashed var(--pd-snap-guide); }
-    .pd-wg-guide--right { border-right: 1px dashed var(--pd-snap-guide); }
+    .pd-wg-guide { z-index: 0; pointer-events: none; width: 1px; box-sizing: border-box; border-left: 1px dashed var(--pd-snap-guide); }
+    .pd-wg-guide--left { justify-self: start; }
+    .pd-wg-guide--right { justify-self: end; }
     .pd-wg-empty, .pd-wg-state { min-width: 0; overflow-wrap: anywhere; box-sizing: border-box; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--pd-space-0) var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
     .pd-wg-empty > pd-glyph, .pd-wg-state > pd-status-glyph, .pd-wg-state > pd-glyph { margin-top: var(--pd-space-0); color: var(--pd-text-muted); }
     .pd-wg-state .pd-wg-bad { color: var(--pd-danger); }
@@ -264,9 +264,11 @@ interface Active {
     @media (prefers-contrast: more) {
       :root:not([data-contrast='off']) .pd-wg-ph { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
       :root:not([data-contrast='off']) .pd-wg-grid--editing .pd-wg-cell { outline: 1px solid var(--pd-border-strong); outline-offset: -1px; }
+      :root:not([data-contrast='off']) .pd-wg-grid--editing .pd-wg-cell:focus { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     }
     :root[data-contrast='more'] .pd-wg-ph { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
     :root[data-contrast='more'] .pd-wg-grid--editing .pd-wg-cell { outline: 1px solid var(--pd-border-strong); outline-offset: -1px; }
+    :root[data-contrast='more'] .pd-wg-grid--editing .pd-wg-cell:focus { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
   `,
 })
 export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends string = string, S = unknown> {
@@ -455,6 +457,14 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   /** "6 by 6, position 5 of 15" for a screen reader. */
   protected describe(row: Row<W, V, A>): string {
     return sizeText(row.rect, row.position, row.of);
+  }
+
+  /** The menu item: the plain label, but first and last name the widget ("Move Delta to first place", "Move Alpha to the end"). */
+  protected labelOf(id: string, name: MoveName): string {
+    const title = this.titleOf(id);
+    if (name === 'first') return `Move ${title} to first place`;
+    if (name === 'last') return `Move ${title} to the end`;
+    return MOVE_ACTIONS[name].label;
   }
 
   protected kindOfId(id: string): string {

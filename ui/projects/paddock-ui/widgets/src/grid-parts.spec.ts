@@ -266,6 +266,15 @@ describe('pdGridGesture', () => {
     expect(cell.classList.contains('pd-wg-lifted')).toBe(true);
   });
 
+  it('never lets a resize reach past the grid edge', () => {
+    down(284, 114, cell.querySelector('.hse')!);
+    move(5000, 114);
+    sched.flush();
+    // The grid ends at 100 + 12 * 100 - 16 = 1284; the cell starts at 100.
+    expect(cell.style.width).toBe('1184px');
+    up();
+  });
+
   it('cancels with Escape, a cancelled pointer or a lost capture, and says so only when a gesture was active', () => {
     down();
     move(300, 100);
