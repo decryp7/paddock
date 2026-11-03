@@ -30,7 +30,7 @@ interface Meta {
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [NgTemplateOutlet, MatIcon, MatProgressBar, MatButton, PdGlyph, PdStatusGlyph],
-  host: { class: 'pd-widget-frame', '[style.grid-column]': '"span " + span()' },
+  host: { class: 'pd-widget-frame', '[class.pd-widget-frame--card]': "variant() === 'card'", '[style.grid-column]': '"span " + span()' },
   template: `
     <section class="pd-w" [class.pd-w--loading]="loading()" [attr.aria-labelledby]="titleId" [attr.aria-busy]="loading() ? 'true' : null">
       <header class="pd-w-head">
@@ -99,6 +99,8 @@ interface Meta {
   styles: `
     .pd-widget-frame { display: block; min-width: 0; }
     .pd-w { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); color: var(--pd-text); }
+    .pd-widget-frame--card { height: 100%; }
+    .pd-widget-frame--card .pd-w { box-sizing: border-box; height: 100%; padding: var(--pd-space-3); overflow: hidden; align-content: start; }
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-w-icon.mat-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -140,6 +142,8 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly state = input<WidgetState<V, A> | null | undefined>(null);
   /** The app's template for the kind (`PdWidget.template`). */
   readonly template = input<TemplateRef<PdWidgetContext<V>> | null>(null);
+  /** `tile`: a popup tile that sizes to its content. `card`: fills its grid cell (the widget grid, ADR 0044), head and body clipped to the cell. */
+  readonly variant = input<'tile' | 'card'>('tile');
   /** Columns spanned in the area's grid. */
   readonly span = input(2);
   /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */

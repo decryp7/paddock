@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/widgets`: the movable, resizable widget grid (family ADR 0044, WP-B)
+- New `PdWidgetGrid` (`pd-widget-grid`): draws the `LayoutView`'s arrangement for the container's width (design arrangement at its widest, derived ones
+  below), edit mode with Done, Undo and Redo, a "⋯" actions menu, keyboard gestures (arrows, Shift, Home, End, Delete, Ctrl/Cmd Z) enabled from the
+  engine's `moves`, `LiveAnnouncer` results, a stale reload-and-retry once, and the loading, error, empty and blocked states. It sends `GridGesture`
+  intents and draws what the engine returns.
+- New `PdGridGesture` (`pdGridGesture`): the pointer move and resize directive (not CDK drag-drop), with a placeholder, snapping guides, auto-scroll and
+  cancel. New `WidgetGridBackend` / `PD_WIDGET_GRID_BACKEND` (preview, edit, reload) and `FrameScheduler` / `PD_FRAME_SCHEDULER` (with `ManualFrameScheduler` for specs).
+- `PdWidgetFrame` gains `variant="card"` (fills its grid cell). New tokens `--pd-widget-row` (24 px) and `--pd-snap-guide`.
+- The chooser and area take the generic wire types: `LayoutView<S, W, Span, K>`; a kind's spans are `KindInfo.size` (`{ arrangement: 'spans', spans }`).
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`
