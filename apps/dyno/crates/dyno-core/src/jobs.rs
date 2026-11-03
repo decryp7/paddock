@@ -74,6 +74,15 @@ pub enum JobSpec {
     AppUsage,
     /// The installed software (runs the package tools).
     SoftwareInventory,
+    /// Fetches one list subscription now (a download job with phases and Cancel), then rebuilds the index.
+    UpdateList {
+        /// The list's id.
+        id: String,
+    },
+    /// Fetches the DB-IP location databases now (monthly files; at most one attempt a day).
+    UpdateGeo,
+    /// Rebuilds the match index from the user's lists (after an edit).
+    RebuildIntel,
 }
 
 impl JobSpec {
@@ -88,6 +97,9 @@ impl JobSpec {
             JobSpec::BootAnalysis => JobKind::BootAnalysis,
             JobSpec::AppUsage => JobKind::AppUsage,
             JobSpec::SoftwareInventory => JobKind::SoftwareInventory,
+            JobSpec::UpdateList { .. } => JobKind::UpdateList,
+            JobSpec::UpdateGeo => JobKind::UpdateGeo,
+            JobSpec::RebuildIntel => JobKind::RebuildIntel,
         }
     }
 }
@@ -112,6 +124,12 @@ pub enum JobKind {
     AppUsage,
     /// Listing the installed software.
     SoftwareInventory,
+    /// Updating one list subscription.
+    UpdateList,
+    /// Updating the location databases.
+    UpdateGeo,
+    /// Rebuilding the match index of the user's lists.
+    RebuildIntel,
 }
 
 impl JobKind {
@@ -126,6 +144,9 @@ impl JobKind {
             JobKind::BootAnalysis => "Analysing boots",
             JobKind::AppUsage => "Reading app usage",
             JobKind::SoftwareInventory => "Listing installed software",
+            JobKind::UpdateList => "Updating a list",
+            JobKind::UpdateGeo => "Updating the location databases",
+            JobKind::RebuildIntel => "Building the match index",
         }
     }
 
@@ -140,6 +161,9 @@ impl JobKind {
             JobKind::BootAnalysis => "boot-analysis",
             JobKind::AppUsage => "app-usage",
             JobKind::SoftwareInventory => "software-inventory",
+            JobKind::UpdateList => "update-list",
+            JobKind::UpdateGeo => "update-geo",
+            JobKind::RebuildIntel => "rebuild-intel",
         }
     }
 
@@ -154,6 +178,9 @@ impl JobKind {
             JobKind::BootAnalysis,
             JobKind::AppUsage,
             JobKind::SoftwareInventory,
+            JobKind::UpdateList,
+            JobKind::UpdateGeo,
+            JobKind::RebuildIntel,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -180,6 +207,8 @@ pub enum JobOutput {
     AppUsage(Box<UsageReport>),
     /// From [`JobSpec::SoftwareInventory`].
     Software(Box<SoftwareInventory>),
+    /// From [`JobSpec::UpdateList`], [`JobSpec::UpdateGeo`] and [`JobSpec::RebuildIntel`]: the lists page after the job.
+    Intel(Box<crate::intel_lists::IntelStatus>),
 }
 
 #[cfg(test)]

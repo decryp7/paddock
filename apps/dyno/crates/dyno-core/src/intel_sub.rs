@@ -92,7 +92,7 @@ impl Hours {
 
 /// How a subscription is refreshed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase")]
 pub enum Schedule {
     /// Only when the user presses "Update now".
     Manual,
@@ -101,28 +101,6 @@ pub enum Schedule {
         /// The interval.
         every: Hours,
     },
-}
-
-/// When a subscription may be fetched again (milliseconds since the Unix epoch), or `None` when it may be fetched now. The floor
-/// is [`MIN_INTERVAL`] for "Update now" and for automatic runs; an automatic run waits for the chosen interval. `last_attempt_ms`
-/// is kept outside the cache folder, so clearing the cache cannot cause an early fetch.
-pub fn next_allowed(last_attempt_ms: Option<i64>, now_ms: i64, floor: Duration) -> Option<i64> {
-    let last = last_attempt_ms?;
-    let at = last.saturating_add(i64::try_from(floor.as_millis()).unwrap_or(i64::MAX));
-    // A clock that moved back (last in the future) must not lock the list for longer than the floor.
-    if last > now_ms {
-        return Some(now_ms.saturating_add(i64::try_from(floor.as_millis()).unwrap_or(i64::MAX)));
-    }
-    (at > now_ms).then_some(at)
-}
-
-/// When the next automatic run is due (ms since the epoch); a subscription never fetched is due now. A run missed while the
-/// computer slept is due once, at wake.
-pub fn automatic_due(schedule: Schedule, last_attempt_ms: Option<i64>, now_ms: i64) -> bool {
-    match schedule {
-        Schedule::Manual => false,
-        Schedule::Automatic { every } => next_allowed(last_attempt_ms, now_ms, every.duration().max(MIN_INTERVAL)).is_none(),
-    }
 }
 
 /// What the page shows for one subscription.
@@ -145,11 +123,6 @@ pub struct SubscriptionStatus {
     pub error: Option<String>,
     /// A note that is not an error ("The new list has 3 entries instead of 1,200; kept the previous one").
     pub note: Option<String>,
-}
-
-/// Whether a freshly fetched list with `new_entries` is a large drop against the last good copy of `old_entries`.
-pub fn is_large_drop(old_entries: u32, new_entries: u32) -> bool {
-    (new_entries == 0 && old_entries > 0) || (u64::from(new_entries) * 100 < u64::from(old_entries) * MIN_KEEP_PERCENT && old_entries >= 10)
 }
 
 #[cfg(test)]
@@ -179,39 +152,5 @@ mod tests {
         assert_eq!(Hours::new(0).get(), 1);
         assert_eq!(Hours::new(5000).get(), 720);
         assert_eq!(Hours::daily().duration(), DEFAULT_INTERVAL);
-    }
-
-    #[test]
-    fn the_floor_counts_from_the_last_attempt_and_survives_a_cleared_cache() {
-        let h = 3_600_000;
-        assert_eq!(next_allowed(None, 1_000, MIN_INTERVAL), None, "never fetched: now");
-        assert_eq!(
-            next_allowed(Some(0), 30 * 60_000, MIN_INTERVAL),
-            Some(h),
-            "30 minutes in: allowed at the hour"
-        );
-        assert_eq!(next_allowed(Some(0), h, MIN_INTERVAL), None, "exactly at the floor is allowed");
-        // The clock moved back: wait at most one floor from now, never longer.
-        assert_eq!(next_allowed(Some(10 * h), h, MIN_INTERVAL), Some(2 * h));
-    }
-
-    #[test]
-    fn automatic_runs_follow_the_interval_and_manual_ones_never_start_alone() {
-        let day = Schedule::Automatic { every: Hours::daily() };
-        let h = 3_600_000;
-        assert!(automatic_due(day, None, 0));
-        assert!(!automatic_due(day, Some(0), 23 * h));
-        assert!(automatic_due(day, Some(0), 24 * h));
-        assert!(automatic_due(day, Some(0), 10 * 24 * h), "slept through ten days: due once");
-        assert!(!automatic_due(Schedule::Manual, None, 0));
-    }
-
-    #[test]
-    fn a_large_drop_is_not_taken() {
-        assert!(is_large_drop(1200, 3));
-        assert!(is_large_drop(1200, 0));
-        assert!(!is_large_drop(1200, 200));
-        assert!(!is_large_drop(5, 1), "tiny lists may change freely");
-        assert!(!is_large_drop(0, 0));
     }
 }

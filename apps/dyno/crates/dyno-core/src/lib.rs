@@ -27,6 +27,7 @@ pub mod helper_wire;
 pub mod history;
 pub mod inventory;
 pub mod intel;
+pub mod intel_lists;
 pub mod intel_sub;
 pub mod intel_text;
 pub mod ip_lookup;

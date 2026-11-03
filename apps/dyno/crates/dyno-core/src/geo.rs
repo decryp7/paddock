@@ -8,7 +8,7 @@
 //! - Locations are where an address is *registered*, not where a server is; the page says so (see [`LOCATION_NOTE`]).
 
 use crate::ip_lookup::{classify, unwrapped, AddressClass};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 
@@ -19,7 +19,7 @@ pub const LOCATION_NOTE: &str = "Locations are where an address is registered. C
 pub const MAX_COUNTRIES: usize = 300;
 
 /// What the database knows about one public address.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeoTag {
     /// ISO 3166-1 alpha-2 code, upper case.
@@ -50,7 +50,7 @@ pub struct GeoRow {
 }
 
 /// One country on the map.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CountryCount {
     /// ISO code.
@@ -70,7 +70,7 @@ pub struct CountryCount {
 }
 
 /// A group of non-public remote addresses.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalGroup {
     /// The class.
@@ -82,7 +82,7 @@ pub struct LocalGroup {
 }
 
 /// The map's data.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeoSummary {
     /// Countries, most connections first (ties by code).

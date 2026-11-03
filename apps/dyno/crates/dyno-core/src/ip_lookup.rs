@@ -137,7 +137,7 @@ pub fn parse_ip(text: &str) -> Result<IpAddr, LookupError> {
 }
 
 /// What kind of address this is. Only [`AddressClass::Public`] is looked up, located on the map or matched against a list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AddressClass {
     /// Known to the public internet.

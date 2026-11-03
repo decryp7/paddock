@@ -21,6 +21,10 @@ use std::sync::Arc;
 
 type Answer = Result<Reply, AgentError>;
 
+fn bad_edit(e: dyno_core::intel_lists::EditError) -> AgentError {
+    bad(e.to_string())
+}
+
 fn bad(msg: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::BadRequest, msg)
 }
@@ -168,6 +172,32 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
         Request::ResolveHosts { addresses } => shared.network.resolve(&addresses).map(Reply::HostNames),
+        Request::IntelStatus => Ok(Reply::Intel(Box::new(shared.intel.status()))),
+        Request::IntelEdit { edit } => {
+            let outcome = shared.intel.edit(edit.clone()).map_err(bad_edit)?;
+            if crate::intel_centre::needs_rebuild(&edit, &outcome) {
+                // A rebuild already running covers a second edit shortly after (the job reads the lists when it starts).
+                let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::RebuildIntel);
+            }
+            if let dyno_core::intel_lists::IntelEdit::AddList {
+                source: dyno_core::intel_lists::NewSource::Url { .. },
+                ..
+            } = &edit
+            {
+                if let dyno_core::intel_lists::EditOutcome::Added { id } = &outcome {
+                    // A new subscription fetches at once (the user just asked for it).
+                    let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateList { id: id.clone() });
+                }
+            }
+            Ok(Reply::IntelEdited(Box::new(outcome)))
+        }
+        Request::GeoSummary => {
+            if shared.intel.wants_geo() {
+                let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateGeo);
+            }
+            let rows = shared.network.remote_rows(shared)?;
+            Ok(Reply::Geo(Box::new(shared.intel.geo_summary(&rows, 0))))
+        }
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {

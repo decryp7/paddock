@@ -1,5 +1,6 @@
 //! Fetching the lists the user subscribed to (ADR 0031 amendment 1). Dyno has no list of its own: every address here is one the
-//! user typed. Each fetch goes through `paddock-net`'s [`Egress`] (https only, public addresses only, a size cap), at most hourly per subscription, and the text lands in the cache folder with the last good copy kept.
+//! user typed. Each fetch is a `paddock-download` job over `paddock-net`'s [`Egress`] (https only, public addresses only, a size bound,
+//! cancel in every phase), at most hourly per subscription; the text lands in the cache folder with the last good copy kept.
 //!
 //! - **The floor** counts from the last *attempt*, kept in `intel-fetch.json` in the data folder, not in the cache, so clearing
 //!   the cache cannot cause an early fetch. "Update now" respects it too and answers the time it is next allowed.
@@ -8,14 +9,15 @@
 //!   failure. Never the address of the list, an entry, or the text (ER-27).
 
 use crate::paths::Dirs;
-use dyno_core::intel_sub::{is_large_drop, next_allowed, SubscriptionStatus, MAX_BYTES, MIN_INTERVAL};
+use dyno_core::intel_sub::{SubscriptionStatus, MAX_BYTES, MIN_INTERVAL, MIN_KEEP_PERCENT};
 use dyno_core::intel_text::{parse_list, Entry};
+use paddock_download::schedule::{is_large_drop, next_allowed, staging_path, swap_in};
+use paddock_download::{Config, DownloadError, Downloader, Integrity, Request};
 use paddock_jobs::time::Clock;
-use paddock_jobs::CancelToken;
-use paddock_net::{Egress, NetError, Policy, Reach, Request, SystemLookup};
+use paddock_jobs::{JobContext, Phase};
+use paddock_net::{Egress, Policy, Reach, SystemLookup};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,32 +26,14 @@ use std::time::Duration;
 const CURRENT: &str = "list.txt";
 /// The copy before the current one.
 const PREVIOUS: &str = "previous.txt";
-/// Where a download is written before it replaces the current copy.
-const STAGING: &str = "list.staging";
 /// Largest `intel-fetch.json` read.
 const MAX_STATE_FILE: u64 = 4 << 20;
 
-/// The phases of one update, for the job that runs it (progress is labelled by phase, ER-18).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Phase {
-    /// Asking for the file and reading it.
-    Download,
-    /// Reading the lines and comparing with the last good copy.
-    Check,
-    /// Replacing the current copy.
-    Swap,
-}
-
-impl Phase {
-    /// The phase name used in logs and job labels.
-    pub fn name(self) -> &'static str {
-        match self {
-            Phase::Download => "download",
-            Phase::Check => "check",
-            Phase::Swap => "swap",
-        }
-    }
-}
+/// The job phase for reading the lines and comparing with the last good copy (the download's own phases are
+/// `paddock-download`'s `connect`, `download` and `verify`).
+pub const CHECK: &str = "check";
+/// The job phase for replacing the current copy.
+pub const SWAP: &str = "swap";
 
 /// What an update did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,8 +45,6 @@ pub enum Outcome {
         /// Bytes received.
         bytes: u64,
     },
-    /// The publisher said nothing changed (`304`).
-    NotModified,
     /// The new list looked broken (a large drop in entries): the previous copy stays in use.
     KeptPrevious {
         /// Entries in the rejected list.
@@ -120,8 +102,6 @@ impl FetchError {
 pub struct FetchState {
     /// What the page shows.
     pub status: SubscriptionStatus,
-    /// The validator for the next conditional request.
-    pub etag: Option<String>,
 }
 
 /// The states of every subscription, in `intel-fetch.json`.
@@ -181,16 +161,49 @@ pub fn policy() -> Policy {
     p
 }
 
+/// Maps a failed download to the error the page shows.
+pub(crate) fn map_download(e: DownloadError) -> FetchError {
+    match e {
+        DownloadError::Cancelled(_) => FetchError::Cancelled,
+        DownloadError::Http { status, .. } => FetchError::Http(status),
+        DownloadError::TooLarge { .. } => FetchError::TooBig,
+        DownloadError::DiskFull | DownloadError::NotEnoughSpace { .. } => FetchError::Save("disk full".into()),
+        DownloadError::Io(e) => FetchError::Save(e.kind().to_string()),
+        other => FetchError::Net(other.to_string()),
+    }
+}
+
+/// Downloads `url` to `dest` (a staging file in the cache folder) with `paddock-download`: job phases `connect`, `download` and
+/// `verify` on `ctx`, cancel in every phase, the size bound, and the digest computed while writing. No checksum is known in
+/// advance. Returns the bytes written.
+pub(crate) fn download_to(downloader: &Downloader, ctx: &JobContext, url: &str, dest: &Path, max_bytes: u64) -> Result<u64, FetchError> {
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| FetchError::Save(e.kind().to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let request = Request::new(url, dest, Integrity::Unpinned)
+        .map_err(|e| FetchError::Net(e.to_string()))?
+        .max_bytes(max_bytes);
+    downloader.download(ctx, &request).map(|d| d.bytes).map_err(map_download)
+}
+
 /// Fetches subscriptions through one egress.
 pub struct Fetcher {
-    egress: Arc<Egress>,
+    downloader: Downloader,
     clock: Arc<dyn Clock>,
 }
 
 impl Fetcher {
-    /// A fetcher over a given door (tests pass a fake wire).
-    pub fn new(egress: Arc<Egress>, clock: Arc<dyn Clock>) -> Fetcher {
-        Fetcher { egress, clock }
+    /// A fetcher over a given door (tests pass a fake wire) and download settings.
+    pub fn new(egress: Arc<Egress>, clock: Arc<dyn Clock>, config: Config) -> Fetcher {
+        Fetcher {
+            downloader: Downloader::new(Arc::new(egress.download_transport())).with_config(config),
+            clock,
+        }
     }
 
     /// The real door: the system resolver and the real wire with the system's proxy settings. Built only when the user has a
@@ -199,22 +212,14 @@ impl Fetcher {
         let policy = policy();
         let wire = paddock_net::UreqWire::new(&policy, paddock_download::ProxyMode::System).map_err(|e| FetchError::Net(e.to_string()))?;
         let egress = Egress::new(policy, Arc::new(wire), Arc::new(SystemLookup), clock.clone());
-        Ok(Fetcher::new(Arc::new(egress), clock))
+        Ok(Fetcher::new(Arc::new(egress), clock, Config::default()))
     }
 
-    /// Updates one subscription: `url` is the user's address, `cache` the folder of this list ([`Dirs::intel_cache`]), `state` what
-    /// was kept last time (changed in place: the caller saves it). `phase` is told when each phase starts.
-    pub fn update(
-        &self,
-        id: &str,
-        url: &str,
-        state: &mut FetchState,
-        cache: &Path,
-        cancel: &CancelToken,
-        phase: &mut dyn FnMut(Phase),
-    ) -> Result<Outcome, FetchError> {
+    /// Updates one subscription as the job `ctx`: `url` is the user's address, `cache` the folder of this list
+    /// ([`Dirs::intel_cache`]), `state` what was kept last time (changed in place: the caller saves it).
+    pub fn update(&self, id: &str, url: &str, state: &mut FetchState, cache: &Path, ctx: &JobContext) -> Result<Outcome, FetchError> {
         let started = self.clock.monotonic();
-        let result = self.run(url, state, cache, cancel, phase);
+        let result = self.run(url, state, cache, ctx);
         let ms = (self.clock.monotonic().saturating_sub(started)).as_millis();
         match &result {
             Ok(o) => {
@@ -227,28 +232,20 @@ impl Fetcher {
         result
     }
 
-    fn run(
-        &self,
-        url: &str,
-        state: &mut FetchState,
-        cache: &Path,
-        cancel: &CancelToken,
-        phase: &mut dyn FnMut(Phase),
-    ) -> Result<Outcome, FetchError> {
+    fn run(&self, url: &str, state: &mut FetchState, cache: &Path, ctx: &JobContext) -> Result<Outcome, FetchError> {
         let now_ms = self.clock.wall_ms();
         if let Some(at) = next_allowed(state.status.last_attempt_ms, now_ms, MIN_INTERVAL) {
             return Err(FetchError::TooSoon { next_allowed_ms: at });
         }
         // From here on this counts as an attempt, whatever happens.
         state.status.last_attempt_ms = Some(now_ms);
-        let outcome = self.fetch(url, state, cache, cancel, phase);
+        let staging = staging_path(&cache.join(CURRENT));
+        let outcome = self.fetch(url, state, cache, &staging, ctx);
+        let _ = std::fs::remove_file(&staging);
         match &outcome {
-            Ok(Outcome::Updated { .. } | Outcome::NotModified) => {
+            Ok(Outcome::Updated { .. }) => {
                 state.status.error = None;
                 state.status.last_fetched_ms = Some(now_ms);
-                if matches!(outcome, Ok(Outcome::NotModified)) {
-                    state.status.note = None;
-                }
             }
             Ok(Outcome::KeptPrevious { .. }) => {}
             Err(e) => state.status.error = Some(e.to_string()),
@@ -256,32 +253,11 @@ impl Fetcher {
         outcome
     }
 
-    fn fetch(
-        &self,
-        url: &str,
-        state: &mut FetchState,
-        cache: &Path,
-        cancel: &CancelToken,
-        phase: &mut dyn FnMut(Phase),
-    ) -> Result<Outcome, FetchError> {
-        phase(Phase::Download);
-        let mut request = Request::get(url).without_lan();
-        if let (Some(etag), true) = (state.etag.as_deref(), cache.join(CURRENT).is_file()) {
-            request = request.if_none_match(etag).map_err(|e| FetchError::Net(e.to_string()))?;
-        }
-        let reply = self.egress.send(&request, cancel).map_err(map_net)?;
-        if reply.not_modified() {
-            return Ok(Outcome::NotModified);
-        }
-        if !reply.ok() {
-            return Err(FetchError::Http(reply.status));
-        }
-        if cancel.is_cancelled() {
-            return Err(FetchError::Cancelled);
-        }
-        phase(Phase::Check);
-        let bytes = reply.body.len() as u64;
-        let text = std::str::from_utf8(&reply.body).map_err(|_| FetchError::NotAList)?;
+    fn fetch(&self, url: &str, state: &mut FetchState, cache: &Path, staging: &Path, ctx: &JobContext) -> Result<Outcome, FetchError> {
+        let bytes = download_to(&self.downloader, ctx, url, staging, MAX_BYTES)?;
+        ctx.phase(Phase::items(CHECK, "Checking the list", 1));
+        let body = std::fs::read(staging).map_err(|e| FetchError::Save(e.kind().to_string()))?;
+        let text = std::str::from_utf8(&body).map_err(|_| FetchError::NotAList)?;
         if text.contains('\0') {
             return Err(FetchError::NotAList);
         }
@@ -290,19 +266,18 @@ impl Fetcher {
         if entries == 0 && (parsed.skipped_count > 0 || !text.trim().is_empty()) && state.status.entries == 0 {
             return Err(FetchError::NotAList);
         }
-        if is_large_drop(state.status.entries, entries) {
+        if is_large_drop(u64::from(state.status.entries), u64::from(entries), MIN_KEEP_PERCENT, 10) {
             state.status.note = Some(format!(
                 "The new list has {entries} entries instead of {}; kept the previous one.",
                 state.status.entries
             ));
             return Ok(Outcome::KeptPrevious { rejected_entries: entries });
         }
-        if cancel.is_cancelled() {
+        if ctx.cancel_token().is_cancelled() {
             return Err(FetchError::Cancelled);
         }
-        phase(Phase::Swap);
-        write_list(cache, &reply.body).map_err(|e| FetchError::Save(e.kind().to_string()))?;
-        state.etag = reply.etag().map(str::to_string);
+        ctx.phase(Phase::items(SWAP, "Replacing the list", 1));
+        swap_in(staging, &cache.join(CURRENT), &cache.join(PREVIOUS)).map_err(|e| FetchError::Save(e.kind().to_string()))?;
         state.status.entries = entries;
         state.status.duplicates = parsed.duplicates;
         state.status.covered = parsed.covered;
@@ -315,52 +290,12 @@ impl Fetcher {
 fn outcome_kind(o: &Outcome) -> String {
     match o {
         Outcome::Updated { entries, bytes } => format!("updated entries={entries} bytes={bytes}"),
-        Outcome::NotModified => "not-modified".into(),
         Outcome::KeptPrevious { rejected_entries } => format!("kept-previous rejected_entries={rejected_entries}"),
     }
 }
 
-fn map_net(e: NetError) -> FetchError {
-    match e {
-        NetError::Cancelled => FetchError::Cancelled,
-        NetError::TooLarge(_) => FetchError::TooBig,
-        other => FetchError::Net(other.to_string()),
-    }
-}
-
 /// Moves `from` over `to` (Windows cannot rename onto an existing file).
-pub(crate) fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
-    if cfg!(windows) && to.exists() {
-        std::fs::remove_file(to)?;
-    }
-    std::fs::rename(from, to)
-}
-
-/// Writes the staging file, keeps the current copy as the previous one, and moves the new one into place.
-fn write_list(cache: &Path, body: &[u8]) -> std::io::Result<()> {
-    std::fs::create_dir_all(cache)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(cache, std::fs::Permissions::from_mode(0o700))?;
-    }
-    let staging = cache.join(STAGING);
-    {
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&staging)?;
-        f.write_all(body)?;
-        f.sync_all()?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))?;
-    }
-    let current = cache.join(CURRENT);
-    if current.is_file() {
-        replace(&current, &cache.join(PREVIOUS))?;
-    }
-    replace(&staging, &current)
-}
+pub(crate) use paddock_download::schedule::replace;
 
 /// The entries of the list in use for subscription `cache` (empty when nothing was fetched yet or the cache was cleared). The
 /// text is read again from the cache folder; it is bounded by [`MAX_BYTES`].
@@ -379,13 +314,35 @@ pub fn load_entries(cache: &Path) -> Vec<Entry> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use paddock_jobs::time::FakeClock;
+    use paddock_jobs::{EventSink, JobRegistry, JobSnapshot};
     use paddock_net::{FakeWire, Reply, StaticLookup};
+    use std::time::Duration;
 
     const URL: &str = "https://lists.example/mine.txt";
     const HOUR_MS: i64 = 3_600_000;
+
+    struct Null;
+    impl EventSink for Null {
+        fn emit(&self, _: &JobSnapshot) {}
+    }
+
+    pub(crate) fn ctx() -> JobContext {
+        JobRegistry::new(Arc::new(Null)).register("test", "test", None)
+    }
+
+    /// One attempt, no retry sleeps.
+    pub(crate) fn config() -> Config {
+        Config {
+            attempts: 1,
+            max_throttles: 1,
+            backoff: Duration::from_millis(1),
+            max_wait: Duration::from_millis(5),
+            ..Config::default()
+        }
+    }
 
     struct Rig {
         fetcher: Fetcher,
@@ -404,7 +361,7 @@ mod tests {
         let lookup = Arc::new(StaticLookup::new().with("lists.example", &["93.184.216.34"]));
         let egress = Egress::new(policy(), wire.clone(), lookup, Arc::new(clock.clone()));
         Rig {
-            fetcher: Fetcher::new(Arc::new(egress), Arc::new(clock.clone())),
+            fetcher: Fetcher::new(Arc::new(egress), Arc::new(clock.clone()), config()),
             wire,
             clock,
             dir: tempfile::tempdir().unwrap(),
@@ -412,8 +369,7 @@ mod tests {
     }
 
     fn run(r: &Rig, state: &mut FetchState) -> Result<Outcome, FetchError> {
-        r.fetcher
-            .update("list-1", URL, state, &r.dir.path().join("c"), &CancelToken::new(), &mut |_| {})
+        r.fetcher.update("list-1", URL, state, &r.dir.path().join("c"), &ctx())
     }
 
     fn list_of(n: usize) -> Vec<u8> {
@@ -424,26 +380,22 @@ mod tests {
     }
 
     #[test]
-    fn a_good_list_is_taken_counted_and_kept_in_the_cache_with_its_validator() {
-        let r = rig(vec![
-            Reply::ok(b"# mine\n8.8.8.8 # dns\n8.8.0.0/16\nevil.example\n").header("etag", "\"v1\"")
-        ]);
+    fn a_good_list_is_taken_counted_and_kept_in_the_cache() {
+        let r = rig(vec![Reply::ok(b"# mine\n8.8.8.8 # dns\n8.8.0.0/16\nevil.example\n")]);
         let mut st = FetchState::default();
-        let mut phases = Vec::new();
-        let o = r
-            .fetcher
-            .update("list-1", URL, &mut st, &r.dir.path().join("c"), &CancelToken::new(), &mut |p| {
-                phases.push(p)
-            });
+        let o = run(&r, &mut st);
         assert_eq!(o, Ok(Outcome::Updated { entries: 2, bytes: 45 }));
-        assert_eq!(phases, [Phase::Download, Phase::Check, Phase::Swap]);
         assert_eq!((st.status.entries, st.status.covered, st.status.duplicates), (2, 1, 0));
         assert_eq!(st.status.last_fetched_ms, Some(1_800_000_000_000));
-        assert_eq!(st.etag.as_deref(), Some("\"v1\""));
         assert_eq!(st.status.error, None);
         assert_eq!(load_entries(&r.dir.path().join("c")).len(), 2);
         assert_eq!(r.wire.sends(), 1);
         assert!(policy().user_agent.starts_with("Dyno/"), "an honest User-Agent");
+        let c = r.dir.path().join("c");
+        assert!(
+            !staging_path(&c.join(CURRENT)).exists() && !c.join("list.txt.staging.part").exists(),
+            "no staging file is left"
+        );
     }
 
     #[test]
@@ -477,26 +429,11 @@ mod tests {
 
     #[test]
     fn a_failed_attempt_counts_for_the_floor_and_the_error_is_kept() {
-        let r = rig(vec![Reply::status(503)]);
+        let r = rig(vec![Reply::status(404)]);
         let mut st = FetchState::default();
-        assert_eq!(run(&r, &mut st), Err(FetchError::Http(503)));
-        assert!(st.status.error.as_deref().unwrap().contains("503"));
+        assert_eq!(run(&r, &mut st), Err(FetchError::Http(404)));
+        assert!(st.status.error.as_deref().unwrap().contains("404"));
         assert!(matches!(run(&r, &mut st), Err(FetchError::TooSoon { .. })));
-    }
-
-    #[test]
-    fn not_modified_keeps_the_list_and_sends_the_validator() {
-        let r = rig(vec![Reply::ok(b"8.8.8.8\n").header("etag", "\"v1\""), Reply::status(304)]);
-        let mut st = FetchState::default();
-        run(&r, &mut st).unwrap();
-        r.clock.advance(Duration::from_secs(3600));
-        assert_eq!(run(&r, &mut st), Ok(Outcome::NotModified));
-        let sent = r.wire.seen();
-        assert!(sent[1]
-            .headers
-            .iter()
-            .any(|(n, v)| n.eq_ignore_ascii_case("if-none-match") && v == "\"v1\""));
-        assert_eq!(load_entries(&r.dir.path().join("c")).len(), 1);
     }
 
     #[test]
@@ -522,11 +459,10 @@ mod tests {
         let c = r.dir.path().join("c");
         assert_eq!(std::fs::read_to_string(c.join(PREVIOUS)).unwrap(), "8.8.8.8\n");
         assert_eq!(std::fs::read_to_string(c.join(CURRENT)).unwrap(), "9.9.9.9\n");
-        assert!(!c.join(STAGING).exists());
     }
 
     #[test]
-    fn binary_and_non_list_answers_are_refused_and_nothing_is_written() {
+    fn binary_and_non_list_answers_are_refused_and_nothing_is_kept() {
         for body in [
             &b"\x00\x01\x02"[..],
             &[0xFF, 0xFE, 0x41][..],
@@ -535,7 +471,8 @@ mod tests {
             let r = rig(vec![Reply::ok(body)]);
             let mut st = FetchState::default();
             assert_eq!(run(&r, &mut st), Err(FetchError::NotAList));
-            assert!(!r.dir.path().join("c").exists());
+            assert!(!r.dir.path().join("c").join(CURRENT).exists());
+            assert!(!staging_path(&r.dir.path().join("c").join(CURRENT)).exists());
         }
     }
 
@@ -546,14 +483,9 @@ mod tests {
         assert!(matches!(run(&r, &mut st), Err(FetchError::Net(_))));
         let r = rig(vec![]);
         let mut st = FetchState::default();
-        let e = r.fetcher.update(
-            "l",
-            "https://intranet.example/x",
-            &mut st,
-            &r.dir.path().join("c"),
-            &CancelToken::new(),
-            &mut |_| {},
-        );
+        let e = r
+            .fetcher
+            .update("l", "https://intranet.example/x", &mut st, &r.dir.path().join("c"), &ctx());
         assert!(
             matches!(e, Err(FetchError::Net(_))),
             "a name the resolver does not know is not reachable"
@@ -561,18 +493,14 @@ mod tests {
     }
 
     #[test]
-    fn cancel_before_the_swap_leaves_the_old_list() {
+    fn a_stop_before_the_swap_leaves_the_old_list() {
         let r = rig(vec![Reply::ok(b"8.8.8.8\n"), Reply::ok(b"9.9.9.9\n")]);
         let mut st = FetchState::default();
         run(&r, &mut st).unwrap();
         r.clock.advance(Duration::from_secs(3600));
-        let cancel = CancelToken::new();
-        let c2 = cancel.clone();
-        let e = r.fetcher.update("l", URL, &mut st, &r.dir.path().join("c"), &cancel, &mut |p| {
-            if p == Phase::Check {
-                c2.cancel();
-            }
-        });
+        let job = ctx();
+        job.cancel_token().cancel();
+        let e = r.fetcher.update("l", URL, &mut st, &r.dir.path().join("c"), &job);
         assert_eq!(e, Err(FetchError::Cancelled));
         assert_eq!(std::fs::read_to_string(r.dir.path().join("c").join(CURRENT)).unwrap(), "8.8.8.8\n");
     }
@@ -582,19 +510,31 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(dir.path());
         let mut s = FetchStore::default();
-        s.lists.insert(
-            "a".into(),
-            FetchState {
-                etag: Some("x".into()),
-                ..FetchState::default()
-            },
-        );
+        let mut st = FetchState::default();
+        st.status.entries = 7;
+        s.lists.insert("a".into(), st);
         s.save(&dirs).unwrap();
-        assert_eq!(FetchStore::load(&dirs).lists["a"].etag.as_deref(), Some("x"));
+        assert_eq!(FetchStore::load(&dirs).lists["a"].status.entries, 7);
         std::fs::write(dirs.intel_fetch_state(), b"{ not json").unwrap();
         assert_eq!(FetchStore::load(&dirs), FetchStore::default());
         std::fs::write(dirs.intel_fetch_state(), br#"{"version": 9}"#).unwrap();
         assert_eq!(FetchStore::load(&dirs), FetchStore::default(), "a newer version is not guessed at");
+    }
+
+    #[test]
+    fn download_errors_map_to_messages_that_say_what_to_do() {
+        use paddock_jobs::CancelReason;
+        assert_eq!(map_download(DownloadError::Cancelled(CancelReason::User)), FetchError::Cancelled);
+        assert_eq!(map_download(DownloadError::TooLarge { size: 2, limit: 1 }), FetchError::TooBig);
+        assert!(matches!(map_download(DownloadError::DiskFull), FetchError::Save(_)));
+        assert!(matches!(
+            map_download(DownloadError::Io(std::io::ErrorKind::NotFound.into())),
+            FetchError::Save(_)
+        ));
+        assert!(matches!(
+            map_download(DownloadError::Throttled { host: "h".into() }),
+            FetchError::Net(_)
+        ));
     }
 
     #[test]

@@ -460,6 +460,19 @@ pub enum Request {
         /// Which placements.
         placements: Vec<paddock_widgets::PlacementId>,
     },
+
+    // ---- bad-IP lists and the connections map (ADR 0031 and its amendments) ----
+    /// The user's lists with their counts and state, the allow list, the network switches and the location databases'
+    /// state (answers [`Reply::Intel`]). Appended.
+    IntelStatus,
+    /// Changes the lists, the allow list or the switches (answers [`Reply::IntelEdited`]); the agent validates, saves and
+    /// starts the index rebuild job when matching changed. A "Remove duplicates" preview changes nothing. Appended.
+    IntelEdit {
+        /// The change.
+        edit: crate::intel_lists::IntelEdit,
+    },
+    /// The map's data for the connections now, aggregated before any page cap (answers [`Reply::Geo`]). Appended.
+    GeoSummary,
 }
 
 /// Dyno's own cost.
@@ -750,6 +763,14 @@ pub enum Reply {
     WidgetLayout(Box<crate::widgets::SurfaceView>),
     /// The popup's values for the asked placements.
     PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
+
+    // ---- bad-IP lists and the connections map ----
+    /// The lists page.
+    Intel(Box<crate::intel_lists::IntelStatus>),
+    /// What an edit produced.
+    IntelEdited(Box<crate::intel_lists::EditOutcome>),
+    /// The map's data.
+    Geo(Box<crate::geo::GeoSummary>),
 }
 
 /// The inventory report that was written.
@@ -830,6 +851,9 @@ impl Reply {
             Reply::JobOutput(x) => v(x),
             Reply::WidgetLayout(x) => v(x),
             Reply::PopoverValues(x) => v(x),
+            Reply::Intel(x) => v(x),
+            Reply::IntelEdited(x) => v(x),
+            Reply::Geo(x) => v(x),
         }
     }
 }
@@ -1136,6 +1160,14 @@ mod tests {
                 min_share: 0.01,
                 max_nodes: 500,
             },
+            Request::IntelStatus,
+            Request::IntelEdit {
+                edit: crate::intel_lists::IntelEdit::SetEnabled {
+                    id: "list-1".into(),
+                    enabled: false,
+                },
+            },
+            Request::GeoSummary,
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));
@@ -1153,6 +1185,9 @@ mod tests {
                 crate::widgets::DynoSurface::Popover,
             ))),
             Reply::PopoverValues(crate::widgets::JsonOnLink(vec![])),
+            Reply::Intel(Box::default()),
+            Reply::IntelEdited(Box::new(crate::intel_lists::EditOutcome::Done)),
+            Reply::Geo(Box::default()),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);

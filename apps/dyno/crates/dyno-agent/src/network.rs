@@ -164,6 +164,21 @@ impl NetCentre {
         Ok(snapshot)
     }
 
+    /// The remote address and program name of every connected socket now, for the map: every row, before any page cap.
+    pub fn remote_rows(&self, shared: &Shared) -> Result<Vec<(IpAddr, String)>, AgentError> {
+        let processes = lock(&shared.core).latest.processes.clone();
+        let (rows, _) = self.look(&processes)?;
+        let names: HashMap<u32, &str> = processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let (ip, _) = r.remote?;
+                let name = r.pid.and_then(|p| names.get(&p).copied()).unwrap_or("Unknown program");
+                Some((ip, name.to_string()))
+            })
+            .collect())
+    }
+
     /// One background look (for the slow loop).
     pub fn tick(&self, shared: &Shared) {
         let processes = lock(&shared.core).latest.processes.clone();

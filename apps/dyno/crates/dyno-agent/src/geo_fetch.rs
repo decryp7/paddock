@@ -13,12 +13,13 @@
 //! - **Logs** carry the source id, phases, durations, bytes, node counts and the kind of failure; never an address.
 
 use crate::geo_db::{inflate_capped, open_checked, DbError, DbKind, GeoReader};
-use crate::intel_fetch::{policy as base_policy, replace, FetchError, FetchState, Phase};
+use crate::intel_fetch::{download_to, policy as base_policy, replace, FetchError, FetchState, CHECK, SWAP};
 use crate::paths::Dirs;
-use dyno_core::intel_sub::next_allowed;
+use paddock_download::schedule::next_allowed;
+use paddock_download::{Config, Downloader};
 use paddock_jobs::time::Clock;
-use paddock_jobs::CancelToken;
-use paddock_net::{Egress, NetError, Policy, Reach, Request, SystemLookup};
+use paddock_jobs::{JobContext, Phase};
+use paddock_net::{Egress, Policy, Reach, SystemLookup};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -181,14 +182,17 @@ pub fn policy() -> Policy {
 
 /// Downloads and checks the databases.
 pub struct GeoFetcher {
-    egress: Arc<Egress>,
+    downloader: Downloader,
     clock: Arc<dyn Clock>,
 }
 
 impl GeoFetcher {
     /// Over a given door (tests pass a fake wire).
-    pub fn new(egress: Arc<Egress>, clock: Arc<dyn Clock>) -> GeoFetcher {
-        GeoFetcher { egress, clock }
+    pub fn new(egress: Arc<Egress>, clock: Arc<dyn Clock>, config: Config) -> GeoFetcher {
+        GeoFetcher {
+            downloader: Downloader::new(Arc::new(egress.download_transport())).with_config(config),
+            clock,
+        }
     }
 
     /// The real door; built only while the map's data switch is on.
@@ -196,20 +200,13 @@ impl GeoFetcher {
         let p = policy();
         let wire = paddock_net::UreqWire::new(&p, paddock_download::ProxyMode::System).map_err(|e| FetchError::Net(e.to_string()))?;
         let egress = Egress::new(p, Arc::new(wire), Arc::new(SystemLookup), clock.clone());
-        Ok(GeoFetcher::new(Arc::new(egress), clock))
+        Ok(GeoFetcher::new(Arc::new(egress), clock, Config::default()))
     }
 
     /// Updates one database. `state` is changed in place (the caller saves it); `cache` is [`Dirs::intel_cache`] of the source.
-    pub fn update(
-        &self,
-        source: Source,
-        state: &mut FetchState,
-        cache: &Path,
-        cancel: &CancelToken,
-        phase: &mut dyn FnMut(Phase),
-    ) -> Result<GeoOutcome, GeoError> {
+    pub fn update(&self, source: Source, state: &mut FetchState, cache: &Path, ctx: &JobContext) -> Result<GeoOutcome, GeoError> {
         let started = self.clock.monotonic();
-        let result = self.run(source, state, cache, cancel, phase);
+        let result = self.run(source, state, cache, ctx);
         let ms = self.clock.monotonic().saturating_sub(started).as_millis();
         match &result {
             Ok(GeoOutcome::UpToDate) => log::info!(target: "dyno::geo", "database check: id={} outcome=up-to-date", source.id),
@@ -224,14 +221,7 @@ impl GeoFetcher {
         result
     }
 
-    fn run(
-        &self,
-        source: Source,
-        state: &mut FetchState,
-        cache: &Path,
-        cancel: &CancelToken,
-        phase: &mut dyn FnMut(Phase),
-    ) -> Result<GeoOutcome, GeoError> {
+    fn run(&self, source: Source, state: &mut FetchState, cache: &Path, ctx: &JobContext) -> Result<GeoOutcome, GeoError> {
         let now_ms = self.clock.wall_ms();
         let now_secs = u64::try_from(now_ms / 1000).unwrap_or(0);
         let (y, m, _) = civil(now_secs);
@@ -243,47 +233,44 @@ impl GeoFetcher {
         }
         state.status.last_attempt_ms = Some(now_ms);
 
-        phase(Phase::Download);
+        let staging = cache.join("download.gz");
         let mut found = None;
         for (cy, cm) in [(y, m), previous_month(y, m)] {
             if cache.join(file_name(cy, cm)).is_file() {
                 // Last month's file is in use and this month's is not published yet.
                 return Err(GeoError::NotPublished);
             }
-            let reply = self
-                .egress
-                .send(&Request::get(&source.url(cy, cm)).without_lan(), cancel)
-                .map_err(|e| match e {
-                    NetError::Cancelled => FetchError::Cancelled,
-                    NetError::TooLarge(_) => FetchError::TooBig,
-                    other => FetchError::Net(other.to_string()),
-                })?;
-            if reply.status == 404 {
-                continue;
+            match download_to(&self.downloader, ctx, &source.url(cy, cm), &staging, MAX_GZ) {
+                Ok(bytes) => {
+                    found = Some((cy, cm, bytes));
+                    break;
+                }
+                Err(FetchError::Http(404)) => continue,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&staging);
+                    return Err(e.into());
+                }
             }
-            if !reply.ok() {
-                return Err(FetchError::Http(reply.status).into());
-            }
-            found = Some((cy, cm, reply.body));
-            break;
         }
-        let Some((fy, fm, gz)) = found else {
+        let Some((fy, fm, bytes)) = found else {
             return Err(GeoError::NotPublished);
         };
-        if cancel.is_cancelled() {
+
+        ctx.phase(Phase::items(CHECK, "Checking the database", 1));
+        let checked = (|| {
+            let gz = std::fs::read(&staging).map_err(|e| FetchError::Save(e.kind().to_string()))?;
+            let digest = hex(&Sha256::digest(&gz));
+            let raw = inflate_capped(&gz, MAX_INFLATED)?;
+            let (_reader, info) = open_checked(raw.clone(), source.kind, now_secs, true)?;
+            Ok::<_, GeoError>((digest, raw, info))
+        })();
+        let _ = std::fs::remove_file(&staging);
+        let (digest, raw, info) = checked?;
+        if ctx.cancel_token().is_cancelled() {
             return Err(FetchError::Cancelled.into());
         }
 
-        phase(Phase::Check);
-        let bytes = gz.len() as u64;
-        let digest = hex(&Sha256::digest(&gz));
-        let raw = inflate_capped(&gz, MAX_INFLATED)?;
-        let (_reader, info) = open_checked(raw.clone(), source.kind, now_secs, true)?;
-        if cancel.is_cancelled() {
-            return Err(FetchError::Cancelled.into());
-        }
-
-        phase(Phase::Swap);
+        ctx.phase(Phase::items(SWAP, "Replacing the database", 1));
         swap_in(cache, fy, fm, &raw).map_err(|e| FetchError::Save(e.kind().to_string()))?;
         let meta = format!(
             "{{\"source\":\"{}\",\"fetchedMs\":{now_ms},\"month\":\"{fy:04}-{fm:02}\",\"sha256\":\"{digest}\",\"buildEpoch\":{},\"nodeCount\":{},\"format\":1}}\n",
@@ -396,7 +383,7 @@ mod tests {
         let lookup = Arc::new(StaticLookup::new().with(HOST, &["93.184.216.34"]));
         let egress = Egress::new(policy(), wire.clone(), lookup, Arc::new(clock.clone()));
         Rig {
-            fetcher: GeoFetcher::new(Arc::new(egress), Arc::new(clock.clone())),
+            fetcher: GeoFetcher::new(Arc::new(egress), Arc::new(clock.clone()), crate::intel_fetch::tests::config()),
             wire,
             clock,
             dir: tempfile::tempdir().unwrap(),
@@ -404,7 +391,8 @@ mod tests {
     }
 
     fn go(r: &Rig, src: Source, st: &mut FetchState) -> Result<GeoOutcome, GeoError> {
-        r.fetcher.update(src, st, &r.dir.path().join("c"), &CancelToken::new(), &mut |_| {})
+        r.fetcher
+            .update(src, st, &r.dir.path().join("c"), &crate::intel_fetch::tests::ctx())
     }
 
     #[test]
@@ -424,14 +412,9 @@ mod tests {
     fn a_good_download_is_checked_swapped_in_and_answers_lookups() {
         let r = rig(vec![Reply::ok(&gz(&sample_country(NOW - 3600)))]);
         let mut st = FetchState::default();
-        let mut phases = Vec::new();
-        let o = r
-            .fetcher
-            .update(COUNTRY, &mut st, &r.dir.path().join("c"), &CancelToken::new(), &mut |p| {
-                phases.push(p)
-            });
+        let o = go(&r, COUNTRY, &mut st);
         assert!(matches!(o, Ok(GeoOutcome::Updated { year: 2026, month: 11, .. })), "{o:?}");
-        assert_eq!(phases, [Phase::Download, Phase::Check, Phase::Swap]);
+        assert!(!r.dir.path().join("c/download.gz").exists(), "no staging file is left");
         assert_eq!(r.wire.seen()[0].url, COUNTRY.url(2026, 11));
         assert!(r.dir.path().join("c/current-2026-11.mmdb").is_file());
         assert!(std::fs::read_to_string(r.dir.path().join("c/meta.json"))
