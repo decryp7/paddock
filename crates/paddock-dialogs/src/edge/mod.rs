@@ -30,6 +30,13 @@ pub const fn has_resize_signal(os: &str) -> bool {
     matches!(os.as_bytes(), b"windows" | b"macos")
 }
 
+/// Whether the size state infers a user resize from an unexplained `Resized` on `os` (ADR 0043 D4, D6): where the OS gives
+/// no signal at all (Linux), and on Windows, whose `WM_SIZING` and `SC_SIZE` signals miss an Aero snap, which sends
+/// neither. macOS has the live-resize notification and a snap-like tile is a live resize there.
+pub const fn infers_user_resize(os: &str) -> bool {
+    matches!(os.as_bytes(), b"windows" | b"linux")
+}
+
 /// Windows' base DPI: a scale of 1.0.
 pub const BASE_DPI: u32 = 96;
 
@@ -243,6 +250,13 @@ mod tests {
 
     fn size(width: f64, height: f64) -> Size {
         Size { width, height }
+    }
+
+    #[test]
+    fn windows_and_linux_infer_a_user_resize_and_macos_does_not() {
+        assert!(infers_user_resize("windows"), "a snap sends no WM_SIZING");
+        assert!(infers_user_resize("linux"));
+        assert!(!infers_user_resize("macos"));
     }
 
     #[test]
