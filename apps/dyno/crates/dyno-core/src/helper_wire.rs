@@ -359,7 +359,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
         ),
         Probe::Foreign(owner) => status(
             HelperState::Missing,
-            format!("Something other than Dyno's helper answered on its endpoint (owner {owner}), so Dyno did not trust it. Repair the helper from Settings."),
+            format!("Something other than Dyno's helper answered on its endpoint, so Dyno did not trust it ({owner}). Repair the helper from Settings."),
             None,
             vec![],
         ),

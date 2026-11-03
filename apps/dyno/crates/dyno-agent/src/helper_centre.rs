@@ -118,6 +118,13 @@ impl<T: HelperTransport> HelperCentre<T> {
                 log::info!(Action = format!("{action:?}").as_str(); "The helper job finished");
                 return Ok(now);
             }
+            if now.state == HelperState::Outdated {
+                // It answers, but it is not a build this Dyno accepts: waiting longer changes nothing.
+                return Err(JobError::Failed(format!(
+                    "The helper started but this Dyno cannot use it. {}",
+                    now.message
+                )));
+            }
             (self.pause)(PAUSE);
         }
         let last = self.status();
@@ -132,12 +139,11 @@ impl<T: HelperTransport> HelperCentre<T> {
             return Ok(before.clone());
         }
         ctx.phase(Phase::discovering("remove", "Asking the helper to remove itself"));
-        // A running helper removes itself on an authenticated request (no prompt); otherwise the prompt does it.
-        let asked = if before.state == HelperState::Ready || before.state == HelperState::Outdated {
-            self.link.uninstall().is_ok()
-        } else {
-            false
-        };
+        // A running helper removes itself on an authenticated request (no prompt), except on Windows: a running program cannot be
+        // deleted there, so the request leaves `dyno-helper.exe` behind (measured in the Windows 11 VM). Windows goes through the
+        // prompt, where the bundled copy removes the installed one completely.
+        let can_ask = matches!(before.state, HelperState::Ready | HelperState::Outdated) && self.host != HelperHost::Windows;
+        let asked = can_ask && self.link.uninstall().is_ok();
         if !asked {
             self.prompt(ctx, "Waiting for the system's permission prompt", |i| i.uninstall())?;
         }
@@ -168,6 +174,7 @@ mod tests {
 
     /// A helper that answers `Info` only after `after` asks, and goes away on `Uninstall`.
     struct Machine {
+        version: Mutex<String>,
         up: Mutex<bool>,
         asks_until_up: Mutex<u32>,
         installed: Mutex<bool>,
@@ -189,7 +196,7 @@ mod tests {
                     *m.up.lock().unwrap() = true;
                     Ok(HelperReply::About(
                         HelperInfo {
-                            version: MIN_HELPER_VERSION.into(),
+                            version: m.version.lock().unwrap().clone(),
                             api: HELPER_API,
                             host: HelperHost::Linux,
                             agent_exe: "/x".into(),
@@ -230,8 +237,14 @@ mod tests {
         }
     }
 
-    fn centre(installed: bool, asks_until_up: u32, answer: Result<(), String>) -> (HelperCentre<Fake>, Arc<Mutex<u32>>, FakeClock) {
+    fn centre_v(
+        installed: bool,
+        asks_until_up: u32,
+        answer: Result<(), String>,
+        version: &str,
+    ) -> (HelperCentre<Fake>, Arc<Mutex<u32>>, FakeClock) {
         let machine = Arc::new(Machine {
+            version: Mutex::new(version.into()),
             up: Mutex::new(false),
             asks_until_up: Mutex::new(asks_until_up),
             installed: Mutex::new(installed),
@@ -251,6 +264,10 @@ mod tests {
         );
         let tick = clock.clone();
         (c.with_pause(Box::new(move |d| tick.advance(d))), asked, clock)
+    }
+
+    fn centre(installed: bool, asks_until_up: u32, answer: Result<(), String>) -> (HelperCentre<Fake>, Arc<Mutex<u32>>, FakeClock) {
+        centre_v(installed, asks_until_up, answer, MIN_HELPER_VERSION)
     }
 
     fn ids(run: &Run) -> Vec<String> {
@@ -282,6 +299,20 @@ mod tests {
         let (c, _, _) = centre(false, 0, Err("The permission prompt was declined, so nothing was changed.".into()));
         let err = Run::new().job(|ctx| c.run(ctx, HelperAction::TurnOn)).unwrap_err();
         assert!(matches!(err, JobError::Failed(m) if m.contains("declined")));
+    }
+
+    #[test]
+    fn a_helper_that_answers_but_is_too_old_fails_at_once_and_says_so() {
+        let (c, _, clock) = centre_v(false, 0, Ok(()), "1.0.0");
+        let err = Run::new().job(|ctx| c.run(ctx, HelperAction::TurnOn)).unwrap_err();
+        assert!(
+            matches!(&err, JobError::Failed(m) if m.contains("cannot use it") && m.contains("1.0.0")),
+            "{err:?}"
+        );
+        assert!(
+            clock.monotonic() < Duration::from_secs(1),
+            "no minute of waiting for a helper that is already answering"
+        );
     }
 
     #[test]
@@ -317,8 +348,24 @@ mod tests {
     }
 
     #[test]
+    fn windows_turns_off_through_the_prompt_even_when_the_helper_answers() {
+        let (c, asked, _) = centre(true, 0, Ok(()));
+        let c = HelperCentre {
+            host: HelperHost::Windows,
+            ..c
+        };
+        let out = Run::new().job(|ctx| c.run(ctx, HelperAction::TurnOff)).unwrap();
+        assert_eq!(
+            (out.state, *asked.lock().unwrap()),
+            (HelperState::Off, 1),
+            "the bundled copy removes the installed one"
+        );
+    }
+
+    #[test]
     fn where_the_helper_cannot_exist_the_job_says_why() {
         let machine = Arc::new(Machine {
+            version: Mutex::new(MIN_HELPER_VERSION.into()),
             up: Mutex::new(false),
             asks_until_up: Mutex::new(0),
             installed: Mutex::new(false),

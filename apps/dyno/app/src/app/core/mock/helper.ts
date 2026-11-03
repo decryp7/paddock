@@ -35,7 +35,7 @@ export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): Helper
         ...base,
         state: 'missing',
         message:
-          'Something other than Dyno\'s helper answered on its endpoint (owner S-1-5-21-1-2-3-1001), so Dyno did not trust it. Repair the helper from Settings.',
+          'Something other than Dyno\'s helper answered on its endpoint, so Dyno did not trust it (owner S-1-5-21-1-2-3-1001, expected S-1-5-18). Repair the helper from Settings.',
       };
     case 'outdated':
       return {

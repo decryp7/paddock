@@ -80,6 +80,17 @@ pub fn unsupported(host: HelperHost, bundled: &Path, bundled_exists: bool, appim
     Ok(())
 }
 
+/// The program the elevated `uninstall` runs. Windows cannot delete a program that is running, so the installed copy cannot remove
+/// itself (measured in the Windows 11 VM: `RemoveProgram ... Access is denied`); the bundled copy removes it. Elsewhere the
+/// installed copy does (the running file can be unlinked).
+pub fn uninstall_program<'a>(host: HelperHost, bundled: &'a Path, installed: &'a Path) -> &'a Path {
+    if host == HelperHost::Windows {
+        bundled
+    } else {
+        installed
+    }
+}
+
 /// The helper program that ships with the agent.
 pub fn bundled_helper(host: HelperHost, agent_exe: &Path) -> PathBuf {
     match host {
@@ -125,8 +136,8 @@ impl HelperInstaller for OsInstaller {
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
-        dyno_helper_service::turn_off(os_of(self.host), &self.installed, &mut RealSystem::new(), elevator().as_mut())
-            .map_err(|e| e.to_string())
+        let program = uninstall_program(self.host, &self.bundled, &self.installed);
+        dyno_helper_service::turn_off(os_of(self.host), program, &mut RealSystem::new(), elevator().as_mut()).map_err(|e| e.to_string())
     }
 }
 
@@ -207,6 +218,14 @@ mod tests {
         assert!(current_owner(HelperHost::Linux, &Says("nope".into()))
             .unwrap_err()
             .contains("which account"));
+    }
+
+    #[test]
+    fn windows_removes_the_installed_helper_with_the_bundled_one() {
+        let (b, i) = (Path::new("/app/dyno-helper"), Path::new("/lib/dyno-helper"));
+        assert_eq!(uninstall_program(HelperHost::Windows, b, i), b);
+        assert_eq!(uninstall_program(HelperHost::Macos, b, i), i);
+        assert_eq!(uninstall_program(HelperHost::Linux, b, i), i);
     }
 
     #[test]
