@@ -60,7 +60,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               @if (r.phase; as ph) {
                 <p class="phase" aria-live="polite">
                   <span>{{ r.current ? title(r.current) + ' · ' : '' }}{{ ph.label }} · {{ phaseWhere(ph) }}</span>
-                  <progress class="bar-live" [attr.value]="ph.rep > 0 ? ph.rep : null" [max]="ph.of" [attr.aria-label]="ph.label + ', ' + phaseWhere(ph)"></progress>
+                  <progress class="bar-live" [value]="ph.rep" [max]="ph.of" [attr.aria-label]="ph.label + ', ' + phaseWhere(ph)"></progress>
                 </p>
               }
               @if (liveNote(r.liveness); as ln) { <p class="note" [attr.data-tone]="r.liveness === 'notResponding' ? 'bad' : 'warn'" role="status"><dy-icon name="info" /> {{ ln }}</p> }

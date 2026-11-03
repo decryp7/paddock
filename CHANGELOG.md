@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
+
+- `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
+
 ### `paddock-shell`: `files_*` commands always have their service
 
 An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).

@@ -46,8 +46,8 @@ impl<W: Write + Send> Progress for Emitter<W> {
     }
 }
 
-/// A phase of a repetition: `rep` 0 is the warm-up. `total` is unknown (a growing count would need a total the kernels do not
-/// have), so the repetition is the scale: `count` is the repetition done so far.
+/// A phase report: `rep` is the repetitions finished (0 while warming up and during the first pass), `count` the same number on
+/// the scale `total = of`. The label says what is happening now.
 pub fn phase(phase: &str, label: &str, rep: u32, of: u32) -> PhaseProgress {
     PhaseProgress {
         phase: phase.into(),
@@ -57,6 +57,30 @@ pub fn phase(phase: &str, label: &str, rep: u32, of: u32) -> PhaseProgress {
         count: u64::from(rep),
         total: Some(u64::from(of)),
     }
+}
+
+/// The phase of a kind, steady for the whole kind (its id never changes), on the scale of repetitions finished: `done` counts a
+/// repetition when it has ended, not when it starts. The label says what happens now, including the pause between passes.
+pub fn kind_phase(kind: &str, label: &str, done: u32, of: u32) -> PhaseProgress {
+    phase(kind, label, done, of)
+}
+
+/// The words for the warm-up.
+pub const WARMING_UP: &str = "Warming up";
+
+/// The words for a section of pass `n` of `of`.
+pub fn pass_label(n: u32, of: u32, section: &str) -> String {
+    format!("Pass {n} of {of} · {section}")
+}
+
+/// The words for the end of pass `n`.
+pub fn pass_done_label(n: u32, of: u32) -> String {
+    format!("Pass {n} of {of} done")
+}
+
+/// The words for the pause after pass `done`, before the next.
+pub fn gap_label(done: u32, of: u32) -> String {
+    format!("Cooling down before pass {} of {of}", done + 1)
 }
 
 /// Calls `beat` now and then every `every` on a thread of its own, until it is dropped or `beat` returns false.

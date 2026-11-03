@@ -1,7 +1,7 @@
 //! Integer work: a xorshift-and-multiply mix whose result is consumed, so it can't be optimised away. Reported as
 //! million rounds per second on one core and on every core at once.
 
-use crate::emit::{phase, Progress};
+use crate::emit::{gap_label, kind_phase, pass_done_label, pass_label, Progress, WARMING_UP};
 use crate::repeat::{repeated, Pace, Repeats, Step};
 use dyno_core::bench::BenchMetric;
 use paddock_bench::Clock;
@@ -39,20 +39,31 @@ pub fn rounds_per_second(budget: Duration) -> f64 {
 /// half its time each and is not counted.
 pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace, progress: &dyn Progress) -> Vec<BenchMetric> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(256);
-    let both = |b: Duration, rep: u32, of: u32| {
-        progress.report(phase("cpu-single", "Single core", rep, of));
+    let both = |b: Duration, label: &dyn Fn(&str) -> String, done: u32, of: u32| {
+        progress.report(kind_phase("cpu", &label("Single core"), done, of));
         let single = rounds_per_second(b);
-        progress.report(phase("cpu-multi", &format!("All {threads} cores"), rep, of));
+        progress.report(kind_phase("cpu", &label(&format!("All {threads} cores")), done, of));
         let multi: f64 = std::thread::scope(|s| {
             let handles: Vec<_> = (0..threads).map(|_| s.spawn(|| rounds_per_second(b))).collect();
             handles.into_iter().filter_map(|h| h.join().ok()).sum()
         });
         (single, multi)
     };
-    let reps = repeated(clock, pace, repeats, |step| match step {
-        Step::Warmup(d) => both(d / 2, 0, repeats.reps),
-        Step::Rep { n, of } => both(budget, n, of),
-    });
+    let reps = repeated(
+        clock,
+        pace,
+        repeats,
+        |step| match step {
+            Step::Warmup(d) => both(d / 2, &|s| format!("{WARMING_UP} · {s}"), 0, repeats.reps),
+            Step::Rep { n, of } => {
+                let r = both(budget, &|s| pass_label(n, of, s), n - 1, of);
+                // A repetition counts when it ends.
+                progress.report(kind_phase("cpu", &pass_done_label(n, of), n, of));
+                r
+            }
+        },
+        |done, of| progress.report(kind_phase("cpu", &gap_label(done, of), done, of)),
+    );
     let single: Vec<f64> = reps.iter().map(|(s, _)| s / 1e6).collect();
     let multi: Vec<f64> = reps.iter().map(|(_, m)| m / 1e6).collect();
     let scaling: Vec<f64> = reps.iter().map(|(s, m)| m / s.max(1.0)).collect();

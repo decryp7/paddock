@@ -73,9 +73,9 @@ export function methodNote(run: BenchRun): string {
   return run.oldWay ? 'Measured the old way (Dyno 1.0); not compared with newer runs' : '';
 }
 
-/** Where a phase is in words: the warm-up (repetition 0) has no count, the rest are "pass 2 of 5". */
+/** How far a kind is in words: the passes finished (a pass counts when it ends), so it starts at "0 of 5 passes done". */
 export function phaseText(p: BenchPhaseProgress): string {
-  return p.rep === 0 ? 'warming up' : `pass ${p.rep} of ${p.of}`;
+  return `${p.rep} of ${p.of} passes done`;
 }
 
 /** What to tell the person when a run is slow or quiet; '' while it is on plan. Nothing ends the run but their Cancel. */

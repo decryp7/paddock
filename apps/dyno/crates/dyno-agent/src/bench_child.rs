@@ -76,6 +76,16 @@ pub trait ChildProcess {
     fn exit_note(&mut self) -> String;
 }
 
+/// The status of a kind that was stopped on purpose (the person's Cancel, or a named safety stop).
+pub fn stopped(stop: &Stop, kind: BenchKind) -> BenchStatus {
+    let why = match stop {
+        Stop::Cancelled => "Cancelled.".to_string(),
+        Stop::Safety(text) => text.clone(),
+    };
+    log::info!("dyno-agent: benchmark {}: stopped ({why})", kind.name());
+    BenchStatus::Stopped { reason: why }
+}
+
 /// Reads the child until it answers, ends or has to be stopped.
 pub fn drive(child: &mut dyn ChildProcess, events: &dyn ChildEvents, clock: &dyn Clock, bound: Duration, kind: BenchKind) -> BenchStatus {
     let started = clock.now();
@@ -86,16 +96,14 @@ pub fn drive(child: &mut dyn ChildProcess, events: &dyn ChildEvents, clock: &dyn
     loop {
         if let Some(stop) = events.stop() {
             child.end();
-            let why = match stop {
-                Stop::Cancelled => "Cancelled.".to_string(),
-                Stop::Safety(text) => text,
-            };
-            log::info!("dyno-agent: benchmark {}: stopped ({why})", kind.name());
-            return BenchStatus::Stopped { reason: why };
+            return stopped(&stop, kind);
         }
         match child.next(TICK) {
             Msg::Line(Ok(line)) => {
-                lines += 1;
+                // Heartbeats are one a second for as long as the child lives: only progress lines count, so time never fails a run (ER-19).
+                if !matches!(line, Line::Heartbeat) {
+                    lines += 1;
+                }
                 if lines > MAX_LINES {
                     child.end();
                     return BenchStatus::Failed {
@@ -565,10 +573,21 @@ mod tests {
     #[test]
     fn too_many_lines_end_the_kind() {
         let ev = Events::default();
-        let script: Vec<_> = (0..=MAX_LINES).map(|_| (Duration::ZERO, beat())).collect();
+        let script: Vec<_> = (0..=MAX_LINES).map(|_| (Duration::ZERO, progress(1))).collect();
         let (s, ended) = run(script, &ev, secs(60));
         assert!(matches!(s, BenchStatus::Failed { reason } if reason.contains("more than")));
         assert!(ended);
+    }
+
+    #[test]
+    fn heartbeats_are_not_counted_so_a_long_quiet_run_never_fails_on_its_line_count() {
+        let ev = Events::default();
+        let script: Vec<_> = (0..=MAX_LINES + 10)
+            .map(|_| (Duration::ZERO, beat()))
+            .chain([(Duration::ZERO, done())])
+            .collect();
+        let (s, _) = run(script, &ev, secs(60));
+        assert!(matches!(s, BenchStatus::Done { .. }), "{s:?}");
     }
 
     #[test]

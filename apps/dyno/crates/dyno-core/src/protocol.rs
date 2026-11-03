@@ -24,7 +24,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// 4 (benchmarks, ADR 0030; the protocol is positional postcard): `StartBenchmark` gained `allow_battery`; `BenchMetric` gained
+/// `samples`, `min`, `max`, `cv`, `unsteady`; `KindResult` gained `method`; `BenchRun` gained `old_way` and `limited`;
+/// `BenchProgress` gained `phase`, `liveness`, `limited`; `BenchOverview` gained `disk_test_enabled`; `MetricDelta` gained the
+/// spreads and `unsteady`; `ErrorCode::NeedsConsent` is new.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

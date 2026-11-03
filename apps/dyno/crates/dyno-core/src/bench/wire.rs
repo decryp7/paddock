@@ -26,7 +26,8 @@ pub struct PhaseProgress {
     pub phase: String,
     /// Plain words for it, e.g. `Single core`.
     pub label: String,
-    /// The repetition (from 1; 0 is the warm-up).
+    /// The repetitions finished (0 while warming up and during the first pass); a repetition counts when it ends, so this never
+    /// goes backwards.
     pub rep: u32,
     /// How many repetitions there are.
     pub of: u32,

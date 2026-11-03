@@ -49,28 +49,29 @@ fn cpu_writes_progress_and_one_done_result_with_every_repetition() {
         .unwrap();
     assert!(out.status.success());
     let all = lines(&out);
-    // Warm-up (repetition 0) then two repetitions, each with its single-core and all-cores phase.
+    // One steady phase for the kind; the count is repetitions finished and never goes back; the label says what happens now.
     let progress: Vec<_> = all
         .iter()
         .filter_map(|l| {
             if let Line::Progress(p) = l {
-                Some((p.phase.as_str(), p.rep, p.of))
+                Some((p.phase.clone(), p.rep, p.label.clone()))
             } else {
                 None
             }
         })
         .collect();
-    assert_eq!(
-        progress,
-        vec![
-            ("cpu-single", 0, 2),
-            ("cpu-multi", 0, 2),
-            ("cpu-single", 1, 2),
-            ("cpu-multi", 1, 2),
-            ("cpu-single", 2, 2),
-            ("cpu-multi", 2, 2)
-        ]
-    );
+    assert!(progress.iter().all(|(phase, _, _)| phase == "cpu"));
+    assert!(progress.windows(2).all(|w| w[0].1 <= w[1].1), "{progress:?}");
+    let labels: Vec<&str> = progress.iter().map(|(_, _, l)| l.as_str()).collect();
+    for wanted in [
+        "Warming up",
+        "Pass 1 of 2 done",
+        "Cooling down before pass 2 of 2",
+        "Pass 2 of 2 done",
+    ] {
+        assert!(labels.iter().any(|l| l.contains(wanted)), "{wanted} in {labels:?}");
+    }
+    assert_eq!(progress.last().map(|p| p.1), Some(2));
     assert!(all.iter().any(|l| matches!(l, Line::Heartbeat)), "the heartbeat starts at once");
     assert!(matches!(status(&out), BenchStatus::Done { metrics } if metrics.len() == 3 && metrics.iter().all(|m| m.samples.len() == 2)));
 }
@@ -82,16 +83,15 @@ fn gpu_is_reported_unavailable_with_a_reason() {
 }
 
 #[test]
-fn disk_needs_a_folder_and_cleans_up() {
-    let out = bin().args(["disk"]).output().unwrap();
-    assert!(matches!(status(&out), BenchStatus::Failed { .. }));
+fn disk_is_unavailable_while_the_1_0_disk_test_is_off() {
+    // Even asked for directly with a folder: the 1.0 disk test (page-cache reads) never runs from a shipped build (ADR 0030 D10).
     let dir = tempfile::tempdir().unwrap();
     let out = bin()
         .args(["disk", "--disk-mib", "2", "--millis", "20", "--dir"])
         .arg(dir.path())
         .output()
         .unwrap();
-    assert!(matches!(status(&out), BenchStatus::Done { .. }));
+    assert!(matches!(status(&out), BenchStatus::Unavailable { reason } if reason == dyno_core::bench::DISK_TEST_OFF));
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 

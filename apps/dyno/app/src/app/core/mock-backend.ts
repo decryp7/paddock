@@ -968,7 +968,7 @@ export class MockBackend implements DynoBackend {
       if (this.benchRunning) throw err('busy', 'A benchmark is already running; wait for it or cancel it.');
       if (!r.kinds.length) throw err('badRequest', 'Choose at least one benchmark to run.');
       const kinds = [...new Set(r.kinds)];
-      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [], phase: { phase: 'cpu-single', label: 'Single core', rep: 2, of: 5, count: 2, total: 5 }, liveness: 'running', limited: null };
+      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [], phase: { phase: 'cpu', label: 'Pass 3 of 5 · Single core', rep: 2, of: 5, count: 2, total: 5 }, liveness: 'running', limited: null };
       this.benchRunning = progress;
       const step = (i: number) => {
         const p = this.benchRunning;

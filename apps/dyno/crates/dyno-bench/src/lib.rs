@@ -43,11 +43,12 @@ pub fn run(kind: BenchKind, s: &Settings<'_>, progress: &dyn Progress) -> Result
     match kind {
         BenchKind::Cpu => Ok(cpu::run(s.budget, s.repeats, &SystemClock::new(), &SleepPace, progress)),
         BenchKind::Memory => Ok(memory::run(s.budget, s.repeats, &SystemClock::new(), &SleepPace, progress)),
+        BenchKind::Disk if !dyno_core::bench::DISK_TEST_ENABLED => Err(Outcome::Unavailable(dyno_core::bench::DISK_TEST_OFF.into())),
         BenchKind::Disk => {
             let dir = s
                 .dir
                 .ok_or_else(|| Outcome::Failed("The disk test needs a scratch folder.".into()))?;
-            progress.report(emit::phase("disk", "Disk test", 1, 1));
+            progress.report(emit::phase("disk", "Disk test", 0, 1));
             disk::run(dir, s.disk_mib, s.budget).map_err(|e| Outcome::Failed(format!("The disk test failed: {e}")))
         }
         BenchKind::Gpu => Err(Outcome::Unavailable(

@@ -63,8 +63,14 @@ impl Pace for SleepPace {
 }
 
 /// Runs `step` for the warm-up (its result is dropped) and then for each repetition, keeping `gap` between repetitions by the
-/// clock. Returns the results of the repetitions in order.
-pub fn repeated<T>(clock: &dyn Clock, pace: &dyn Pace, r: Repeats, mut step: impl FnMut(Step) -> T) -> Vec<T> {
+/// clock; `gap(done, of)` is called as each gap begins. Returns the results of the repetitions in order.
+pub fn repeated<T>(
+    clock: &dyn Clock,
+    pace: &dyn Pace,
+    r: Repeats,
+    mut step: impl FnMut(Step) -> T,
+    mut gap: impl FnMut(u32, u32),
+) -> Vec<T> {
     if !r.warmup.is_zero() {
         drop(step(Step::Warmup(r.warmup)));
     }
@@ -73,6 +79,8 @@ pub fn repeated<T>(clock: &dyn Clock, pace: &dyn Pace, r: Repeats, mut step: imp
     for n in 1..=of {
         out.push(step(Step::Rep { n, of }));
         if n < of {
+            // Told first, so the gap is a phase of its own that the person sees (ER-18).
+            gap(n, of);
             keep_gap(clock, pace, r.gap);
         }
     }
@@ -128,10 +136,16 @@ mod tests {
         let clock = ManualClock::new();
         let p = pace(&clock, 1);
         let mut steps = Vec::new();
-        let out = repeated(&clock, &p, Repeats::STANDARD, |s| {
-            steps.push(s);
-            steps.len()
-        });
+        let out = repeated(
+            &clock,
+            &p,
+            Repeats::STANDARD,
+            |s| {
+                steps.push(s);
+                steps.len()
+            },
+            |_, _| {},
+        );
         assert_eq!(steps[0], Step::Warmup(Duration::from_secs(1)));
         assert_eq!(steps.len(), 6);
         assert_eq!(steps[1], Step::Rep { n: 1, of: 5 });
@@ -143,7 +157,9 @@ mod tests {
     fn the_gap_is_kept_between_repetitions_and_not_after_the_last() {
         let clock = ManualClock::new();
         let p = pace(&clock, 1);
-        repeated(&clock, &p, Repeats::STANDARD, |_| ());
+        let mut gaps = Vec::new();
+        repeated(&clock, &p, Repeats::STANDARD, |_| (), |done, of| gaps.push((done, of)));
+        assert_eq!(gaps, vec![(1, 5), (2, 5), (3, 5), (4, 5)], "each gap is announced as it begins");
         assert_eq!(*p.asked.borrow(), vec![Duration::from_secs(2); 4]);
         assert_eq!(clock.now(), Duration::from_secs(8));
     }
@@ -161,6 +177,7 @@ mod tests {
                 gap: Duration::from_secs(2),
             },
             |_| (),
+            |_, _| {},
         );
         // Asked for 2 s, got 1 s; asked for the 1 s left, got 0.5 s; and so on until the gap is (all but) covered.
         assert!(clock.now() > Duration::from_millis(1999));
@@ -176,7 +193,7 @@ mod tests {
             fn pause(&self, _: Duration) {}
         }
         let clock = ManualClock::new();
-        let out = repeated(&clock, &Stuck, Repeats::STANDARD, |s| matches!(s, Step::Rep { .. }));
+        let out = repeated(&clock, &Stuck, Repeats::STANDARD, |s| matches!(s, Step::Rep { .. }), |_, _| {});
         assert_eq!(out.len(), 5);
     }
 
@@ -185,16 +202,22 @@ mod tests {
         let clock = ManualClock::new();
         let p = pace(&clock, 1);
         let mut n = 0;
-        let out = repeated(&clock, &p, Repeats::SINGLE, |_| {
-            n += 1;
-            n
-        });
+        let out = repeated(
+            &clock,
+            &p,
+            Repeats::SINGLE,
+            |_| {
+                n += 1;
+                n
+            },
+            |_, _| {},
+        );
         assert_eq!(out, vec![1]);
         assert!(p.asked.borrow().is_empty());
         let zero = Repeats {
             reps: 0,
             ..Repeats::SINGLE
         };
-        assert_eq!(repeated(&clock, &p, zero, |_| ()).len(), 1, "at least one repetition");
+        assert_eq!(repeated(&clock, &p, zero, |_| (), |_, _| {}).len(), 1, "at least one repetition");
     }
 }

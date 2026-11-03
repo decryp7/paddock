@@ -96,11 +96,22 @@ systemd-run --user --unit=dyno-bench-<run id>-<kind> --collect --wait --pipe --s
 - Without a user manager the runner is an ordinary supervised child of the agent, and the run records "limited: nice 10, memory
   limit 256 MiB" and is shown as low confidence.
 
-What is tested: the command lines, the output parsers and the cleanup decisions are pure functions with unit tests
-(`dyno_core::bench::unit`), the restart cleanup runs against a fake manager, and Cancel, silence and safety stops run against a
-scripted child. What is **not** yet proven on a real systemd (the spike's open points, to be checked in a container created for
-the purpose, never on the developer's session): that the unit gets nice 0 and no memory limit, that Cancel stops an all-core
-burner within 2 s, and that killing the agent mid-run and restarting it stops the leftover unit.
+Verified on a real systemd (Ubuntu 24.04 arm64, systemd user manager, OrbStack test machine `paddock-gate-arm`, 2026-11-03; the
+agent side was run at nice 10 to show the unit does not inherit it):
+
+| Check | Result |
+|---|---|
+| Nice value and memory limit of the unit | `Nice=0`, `MemoryHigh=infinity`, `MemoryMax=infinity` (shown by `systemctl show`); the runner sees `nice 0` and `memory.high = max` from inside |
+| `--pipe`, stdin `go` and the InvocationID | The runner printed nothing before `go`; `go` written to the client's stdin reached it; `systemctl --user show -p InvocationID --value` returned a 32-digit id while the unit ran |
+| Cancel on an all-core burner (8 busy loops) | `systemctl --user stop` took 7 ms by hand; `ProcessLauncher::run` returned in under 2 s after the decision; no process left, unit inactive |
+| Restart cleanup | A recorded leftover unit was stopped; a unit with the same prefix and a foreign InvocationID stayed running; the records were forgotten |
+
+These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They need a user manager and
+return at once, saying so, where there is none (most CI containers). To run them on a Linux machine with systemd:
+`cargo test -p dyno-agent --test bench_units -- --test-threads=1`. On a headless machine start the manager first
+(`sudo loginctl enable-linger $USER`, then `XDG_RUNTIME_DIR=/run/user/$(id -u)`). Unit tests of the pure parts (command
+lines, parsers, cleanup decisions) are in `dyno_core::bench::unit`, and the agent's logic runs against a scripted child.
+`LINUX_UNITS_VERIFIED` in `bench.rs` switches the unit mode off in one place if it ever has to be.
 
 ## Removing Dyno
 

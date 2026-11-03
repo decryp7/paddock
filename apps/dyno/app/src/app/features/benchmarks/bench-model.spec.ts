@@ -6,8 +6,8 @@ const metric = (id: string, value: number, higherIsBetter = true): BenchMetric =
 
 describe('bench model', () => {
   it('says where a phase is, and how a slow or quiet run is shown', () => {
-    expect(phaseText({ phase: 'p', label: 'Single core', rep: 0, of: 5, count: 0, total: null })).toBe('warming up');
-    expect(phaseText({ phase: 'p', label: 'Single core', rep: 2, of: 5, count: 2, total: 5 })).toBe('pass 2 of 5');
+    expect(phaseText({ phase: 'cpu', label: 'Warming up', rep: 0, of: 5, count: 0, total: 5 })).toBe('0 of 5 passes done');
+    expect(phaseText({ phase: 'cpu', label: 'Cooling down before pass 3 of 5', rep: 2, of: 5, count: 2, total: 5 })).toBe('2 of 5 passes done');
     expect(livenessNote('running')).toBe('');
     expect(livenessNote('stillWorking')).toContain('Still working');
     expect(livenessNote('notResponding')).toContain('Not responding');

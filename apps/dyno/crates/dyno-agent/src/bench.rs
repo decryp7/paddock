@@ -12,7 +12,7 @@
 //! stays at its normal role.
 
 use crate::agent::{lock, now};
-use crate::bench_child::{self, ChildEvents, ChildRequest, ProcessChild, Stop, UnitControl, UnitHandle};
+use crate::bench_child::{self, ChildEvents, ChildProcess, ChildRequest, ProcessChild, Stop, UnitControl, UnitHandle};
 use crate::files;
 use dyno_core::bench::unit::{self, UnitCommand, UnitRecord};
 use dyno_core::bench::wire::{battery_preflight, plan_bound, stop_for_battery, Liveness, PhaseProgress, Preflight, BATTERY_STOP_REASON};
@@ -21,7 +21,7 @@ use dyno_core::bench::{
     HISTORY_VERSION,
 };
 use dyno_core::protocol::{AgentError, ErrorCode};
-use paddock_bench::SystemClock;
+use paddock_bench::{Clock, SystemClock};
 use paddock_jobs::{CancelReason, JobContext, JobError, Phase};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -169,6 +169,46 @@ fn forget_record(file: &Path, unit_name: &str) {
     let _ = bench_child::write_records(file, &all);
 }
 
+/// Whether the agent runs the benchmark child as a systemd user unit where a user manager exists. On since the B2 spike passed on a
+/// real systemd (ADR 0030 D5; results in `docs/linux.md`); `tests/bench_units.rs` is the check and must stay green.
+pub const LINUX_UNITS_VERIFIED: bool = true;
+
+/// How long the agent waits for a started unit to show an InvocationID.
+const INVOCATION_WAIT: Duration = Duration::from_secs(3);
+const INVOCATION_STEP: Duration = Duration::from_millis(100);
+
+/// What waiting for the InvocationID ended with.
+#[derive(Debug, PartialEq, Eq)]
+enum InvocationWait {
+    Found(String),
+    TimedOut,
+    Stopped(Stop),
+}
+
+/// Looks for the unit's InvocationID until `budget` has passed on `clock`, asking `events` for a stop before each look, so Cancel
+/// works while it waits. `pause` waits one step (the real one sleeps, the tests move a manual clock).
+fn wait_for_invocation(
+    find: &mut dyn FnMut() -> Option<String>,
+    events: &dyn ChildEvents,
+    clock: &dyn Clock,
+    pause: &dyn Fn(Duration),
+    budget: Duration,
+) -> InvocationWait {
+    let start = clock.now();
+    loop {
+        if let Some(stop) = events.stop() {
+            return InvocationWait::Stopped(stop);
+        }
+        if let Some(id) = find() {
+            return InvocationWait::Found(id);
+        }
+        if clock.now().saturating_sub(start) >= budget {
+            return InvocationWait::TimedOut;
+        }
+        pause(INVOCATION_STEP);
+    }
+}
+
 /// Starts the `dyno-bench` executable that sits next to the agent.
 pub struct ProcessLauncher {
     exe: PathBuf,
@@ -191,7 +231,7 @@ impl ProcessLauncher {
             .ok()
             .and_then(|p| p.parent().map(Path::to_path_buf))
             .unwrap_or_default();
-        let units = SystemctlControl::available();
+        let units = LINUX_UNITS_VERIFIED && SystemctlControl::available();
         if cfg!(target_os = "linux") {
             log::info!(
                 "dyno-agent: benchmarks on Linux {}",
@@ -206,6 +246,15 @@ impl ProcessLauncher {
             exe: dir.join(name),
             units,
             records: bench_child::units_file(history),
+        }
+    }
+
+    /// A launcher that runs the child as a unit (needs a systemd user manager; the Linux check uses it).
+    pub fn with_units(exe: impl Into<PathBuf>, records: impl Into<PathBuf>) -> ProcessLauncher {
+        ProcessLauncher {
+            exe: exe.into(),
+            units: true,
+            records: records.into(),
         }
     }
 
@@ -280,27 +329,32 @@ impl BenchLauncher for ProcessLauncher {
         };
         log::info!("dyno-agent: run {} {}: pid {:?}", req.run_id, req.kind.name(), child.pid());
         if let Some(name) = &unit_name {
-            // The unit's InvocationID is written down before the child measures: it waits for `go`.
-            let mut id = None;
-            for _ in 0..30 {
-                id = SystemctlControl.invocation_id(name);
-                if id.is_some() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            match id {
-                Some(invocation_id) => remember_record(
+            // The unit's InvocationID is written down before the child measures: it waits for `go`. Cancel works meanwhile.
+            let clock = SystemClock::new();
+            let waited = wait_for_invocation(
+                &mut || SystemctlControl.invocation_id(name),
+                events,
+                &clock,
+                &std::thread::sleep,
+                INVOCATION_WAIT,
+            );
+            match waited {
+                InvocationWait::Found(invocation_id) => remember_record(
                     &self.records,
                     UnitRecord {
                         unit: name.clone(),
                         invocation_id,
                     },
                 ),
-                None => log::warn!(
+                InvocationWait::TimedOut => log::warn!(
                     "dyno-agent: run {}: the unit {name} has no readable InvocationID; a crash would not be cleaned up",
                     req.run_id
                 ),
+                InvocationWait::Stopped(stop) => {
+                    child.end();
+                    forget_record(&self.records, name);
+                    return bench_child::stopped(&stop, req.kind);
+                }
             }
             if let Err(e) = child.send_go() {
                 log::warn!("dyno-agent: run {}: could not tell the runner to go: {e}", req.run_id);
@@ -343,6 +397,8 @@ struct State {
 
 struct Inner {
     state: Mutex<State>,
+    /// Signalled after every change of the state, so waiters (tests, shutdown) wait on the condition and not on time.
+    changed: std::sync::Condvar,
     cancel: AtomicBool,
     launcher: Box<dyn BenchLauncher>,
     env: Mutex<Arc<dyn BenchEnv>>,
@@ -356,6 +412,16 @@ pub struct BenchCentre {
     inner: Arc<Inner>,
 }
 
+/// How a run's kinds ended.
+#[derive(Default)]
+struct RunOutcome {
+    results: Vec<KindResult>,
+    /// Stopped before the end (Cancel or a safety stop).
+    cancelled: bool,
+    /// The words of the safety stop that ended it, if one did.
+    safety: Option<String>,
+}
+
 /// What the child loop asks of the run, for one kind: progress to record, liveness to show, and when to stop.
 struct RunEvents {
     centre: BenchCentre,
@@ -367,32 +433,34 @@ struct RunEvents {
     ticks: AtomicU32,
     /// The last power reading, kept between the looks.
     on_battery: Mutex<Option<bool>>,
+    /// Why a safety stop ended the run, once one did.
+    safety: Mutex<Option<String>>,
 }
 
 impl ChildEvents for RunEvents {
     fn progress(&self, p: &PhaseProgress) {
-        if let Some(r) = lock(&self.centre.inner.state).running.as_mut() {
-            r.phase = Some(p.clone());
-        }
         if let Some(job) = &self.job {
             let mut id = lock(&self.phase_id);
             if *id != p.phase {
                 id.clone_from(&p.phase);
-                // Each phase on its own scale: its repetitions.
-                job.phase(Phase::items(
-                    &p.phase,
-                    &format!("{} · {}", self.kind.title(), p.label),
-                    u64::from(p.of),
-                ));
+                // One steady phase per kind, on its own scale: the repetitions finished. The child's live wording is in the
+                // overview; the job's label does not flicker with it (ER-18).
+                job.phase(Phase::items(&p.phase, self.kind.title(), u64::from(p.of)));
             }
             job.set(u64::from(p.rep));
         }
+        // The job is updated before the overview says so: whoever sees the overview sees the job at least as far.
+        if let Some(r) = lock(&self.centre.inner.state).running.as_mut() {
+            r.phase = Some(p.clone());
+        }
+        self.centre.touch();
     }
 
     fn liveness(&self, l: Liveness) {
         if let Some(r) = lock(&self.centre.inner.state).running.as_mut() {
             r.liveness = l;
         }
+        self.centre.touch();
     }
 
     fn stop(&self) -> Option<Stop> {
@@ -404,7 +472,11 @@ impl ChildEvents for RunEvents {
             let now = lock(&self.centre.inner.env).clone().on_battery();
             *lock(&self.on_battery) = now;
         }
-        stop_for_battery(*lock(&self.on_battery), self.consent).then(|| Stop::Safety(BATTERY_STOP_REASON.to_string()))
+        if stop_for_battery(*lock(&self.on_battery), self.consent) {
+            *lock(&self.safety) = Some(BATTERY_STOP_REASON.to_string());
+            return Some(Stop::Safety(BATTERY_STOP_REASON.to_string()));
+        }
+        None
     }
 }
 
@@ -416,6 +488,7 @@ impl BenchCentre {
         launcher.cleanup_leftovers();
         let centre = BenchCentre {
             inner: Arc::new(Inner {
+                changed: std::sync::Condvar::new(),
                 state: Mutex::new(State {
                     history: history.unwrap_or_default(),
                     running: None,
@@ -470,10 +543,29 @@ impl BenchCentre {
     /// The agent is stopping: cancels the run and waits up to `wait` for its child (and unit) to be gone.
     pub fn shutdown(&self, wait: Duration) {
         self.cancel();
-        let end = Instant::now() + wait;
-        while lock(&self.inner.state).running.is_some() && Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        self.wait_for(wait, |o| o.running.is_none());
+    }
+
+    fn touch(&self) {
+        self.inner.changed.notify_all();
+    }
+
+    /// Waits up to `timeout` for `done` to hold of the overview, on the condition (the state's changes signal it), not on time.
+    /// Returns the overview that satisfied it, or `None` at the timeout.
+    pub fn wait_for(&self, timeout: Duration, done: impl Fn(&BenchOverview) -> bool) -> Option<BenchOverview> {
+        let overview = |s: &State| BenchOverview {
+            running: s.running.clone(),
+            runs: s.history.runs.clone(),
+            disk_test_enabled: dyno_core::bench::DISK_TEST_ENABLED,
+        };
+        let guard = lock(&self.inner.state);
+        let (guard, _) = self
+            .inner
+            .changed
+            .wait_timeout_while(guard, timeout, |s| !done(&overview(s)))
+            .unwrap_or_else(|p| p.into_inner());
+        let o = overview(&guard);
+        done(&o).then_some(o)
     }
 
     fn save(&self, h: &BenchHistory) {
@@ -519,6 +611,7 @@ impl BenchCentre {
             });
             id
         };
+        self.touch();
         self.inner.cancel.store(false, Ordering::SeqCst);
         let me = self.clone();
         // The orchestration thread stays at its normal role; the measuring child is the narrow rule 52 exception (bench_child).
@@ -528,6 +621,7 @@ impl BenchCentre {
         });
         if let Err(e) = spawned {
             lock(&self.inner.state).running = None;
+            self.touch();
             return Err(AgentError::new(ErrorCode::Internal, format!("Could not start the benchmark: {e}")));
         }
         Ok(self.overview())
@@ -550,23 +644,27 @@ impl BenchCentre {
         );
         let env = lock(&self.inner.env).clone();
         let job = env.register_job("Running benchmarks", Some(&plan.label));
-        let (results, cancelled) = match &job {
+        let outcome = match &job {
             Some(ctx) => {
                 let mut out = None;
                 let _ = ctx.run(|c| {
                     let r = self.run_kinds(run_id, &plan, Some(c), consent);
-                    let cancelled = r.1;
-                    out = Some(r);
-                    if cancelled {
+                    let end = if let Some(why) = &r.safety {
+                        // A named safety stop, not the person's cancel: the job ends failed with the words that say why.
+                        Err(JobError::Failed(why.clone()))
+                    } else if r.cancelled {
                         Err(JobError::Cancelled(CancelReason::User))
                     } else {
                         Ok(())
-                    }
+                    };
+                    out = Some(r);
+                    end
                 });
                 out.unwrap_or_default()
             }
             None => self.run_kinds(run_id, &plan, None, consent),
         };
+        let (results, cancelled) = (outcome.results, outcome.cancelled);
         let failed = results.iter().filter(|r| matches!(r.status, BenchStatus::Failed { .. })).count();
         let run = BenchRun {
             id: run_id.to_string(),
@@ -584,6 +682,7 @@ impl BenchCentre {
         s.history.push(run);
         s.running = None;
         self.save(&s.history);
+        self.touch();
         log::info!(
             "dyno-agent: run {run_id} ended after {} ms: {} (failed kinds {failed}); history saved, scratch cleaned up",
             t.elapsed().as_millis(),
@@ -591,12 +690,15 @@ impl BenchCentre {
         );
     }
 
-    /// Every kind in order; returns the results and whether the run was stopped.
-    fn run_kinds(&self, run_id: &str, plan: &RunPlan, job: Option<&JobContext>, consent: bool) -> (Vec<KindResult>, bool) {
+    /// Every kind in order; returns the results and how the run ended.
+    fn run_kinds(&self, run_id: &str, plan: &RunPlan, job: Option<&JobContext>, consent: bool) -> RunOutcome {
         let mut results: Vec<KindResult> = Vec::new();
         let mut stopped = false;
+        let mut safety = None;
         for kind in &plan.kinds {
-            if stopped || self.inner.cancel.load(Ordering::SeqCst) {
+            // Cancel from the page or from the Jobs view (the job's token).
+            let cancelled = self.inner.cancel.load(Ordering::SeqCst) || job.is_some_and(|j| j.cancel_token().is_cancelled());
+            if stopped || cancelled {
                 stopped = true;
                 results.push(KindResult {
                     kind: *kind,
@@ -613,6 +715,7 @@ impl BenchCentre {
                 r.phase = None;
                 r.liveness = Liveness::Running;
             }
+            self.touch();
             let t = Instant::now();
             let events = RunEvents {
                 centre: self.clone(),
@@ -622,8 +725,12 @@ impl BenchCentre {
                 phase_id: Mutex::new(String::new()),
                 ticks: AtomicU32::new(0),
                 on_battery: Mutex::new(None),
+                safety: Mutex::new(None),
             };
             let status = self.measure(run_id, *kind, plan.disk_mib, &events);
+            if let Some(why) = lock(&events.safety).take() {
+                safety = Some(why);
+            }
             let millis = u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX);
             let outcome = match &status {
                 BenchStatus::Done { metrics } => format!("done, {} metrics", metrics.len()),
@@ -647,8 +754,13 @@ impl BenchCentre {
                 r.phase = None;
                 r.done.push(*kind);
             }
+            self.touch();
         }
-        (results, stopped)
+        RunOutcome {
+            results,
+            cancelled: stopped,
+            safety,
+        }
     }
 
     /// One kind, with its scratch folder made and removed here.
@@ -728,8 +840,8 @@ mod tests {
             }
             if self.talk {
                 events.progress(&PhaseProgress {
-                    phase: "cpu-single".into(),
-                    label: "Single core".into(),
+                    phase: "cpu".into(),
+                    label: "Pass 3 of 5 · Single core".into(),
                     rep: 2,
                     of: 5,
                     count: 2,
@@ -746,7 +858,7 @@ mod tests {
                             }
                         }
                         Some(Stop::Safety(r)) => return BenchStatus::Stopped { reason: r },
-                        None => std::thread::sleep(Duration::from_millis(2)),
+                        None => std::thread::yield_now(),
                     }
                 }
             }
@@ -776,14 +888,14 @@ mod tests {
     }
 
     fn wait_idle(c: &BenchCentre) -> BenchOverview {
-        for _ in 0..1000 {
-            let o = c.overview();
-            if o.running.is_none() {
-                return o;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("the run did not finish");
+        c.wait_for(Duration::from_secs(60), |o| o.running.is_none())
+            .expect("the run did not finish")
+    }
+
+    /// Waits until the run is measuring a kind.
+    fn wait_current(c: &BenchCentre) {
+        c.wait_for(Duration::from_secs(60), |o| o.running.as_ref().is_some_and(|r| r.current.is_some()))
+            .expect("no kind started");
     }
 
     fn start(c: &BenchCentre, kinds: &[BenchKind]) -> Result<BenchOverview, AgentError> {
@@ -800,10 +912,13 @@ mod tests {
         )
     }
 
-    struct NullSink;
+    /// Hands every job snapshot to the test, which waits on the channel and not on time.
+    struct ChannelSink(Mutex<std::sync::mpsc::Sender<JobSnapshot>>);
 
-    impl EventSink for NullSink {
-        fn emit(&self, _: &JobSnapshot) {}
+    impl EventSink for ChannelSink {
+        fn emit(&self, s: &JobSnapshot) {
+            let _ = lock(&self.0).send(s.clone());
+        }
     }
 
     /// An environment with a real job registry and a power source the test flips.
@@ -811,15 +926,41 @@ mod tests {
         registry: JobRegistry,
         battery: Arc<Mutex<Option<bool>>>,
         jobs: Mutex<Vec<JobContext>>,
+        registered: std::sync::Condvar,
+        snapshots: Mutex<std::sync::mpsc::Receiver<JobSnapshot>>,
     }
 
     impl Env {
         fn new() -> Arc<Env> {
+            let (tx, rx) = std::sync::mpsc::channel();
             Arc::new(Env {
-                registry: JobRegistry::new(Arc::new(NullSink)),
+                registry: JobRegistry::new(Arc::new(ChannelSink(Mutex::new(tx)))),
                 battery: Arc::new(Mutex::new(Some(false))),
                 jobs: Mutex::new(Vec::new()),
+                registered: std::sync::Condvar::new(),
+                snapshots: Mutex::new(rx),
             })
+        }
+
+        /// The first registered job's id, waiting for the run to register it.
+        fn job_id(&self) -> paddock_jobs::JobId {
+            let jobs = lock(&self.jobs);
+            let (jobs, _) = self
+                .registered
+                .wait_timeout_while(jobs, Duration::from_secs(60), |j| j.is_empty())
+                .unwrap_or_else(|p| p.into_inner());
+            jobs.first().expect("no job registered").id()
+        }
+
+        /// The first snapshot of job `id` for which `pred` holds.
+        fn snapshot_where(&self, id: paddock_jobs::JobId, pred: impl Fn(&JobSnapshot) -> bool) -> JobSnapshot {
+            let rx = lock(&self.snapshots);
+            loop {
+                let s = rx.recv_timeout(Duration::from_secs(60)).expect("the job sent no such snapshot");
+                if s.id == id && pred(&s) {
+                    return s;
+                }
+            }
         }
     }
 
@@ -827,6 +968,7 @@ mod tests {
         fn register_job(&self, title: &str, subject: Option<&str>) -> Option<JobContext> {
             let ctx = self.registry.register("benchmark", title, subject);
             lock(&self.jobs).push(ctx.clone());
+            self.registered.notify_all();
             Some(ctx)
         }
 
@@ -870,9 +1012,7 @@ mod tests {
         let c = centre(tmp.path(), Some(gate.clone()), None);
         start(&c, &[BenchKind::Cpu, BenchKind::Memory]).unwrap();
         assert_eq!(start(&c, &[BenchKind::Cpu]).unwrap_err().code, ErrorCode::Busy);
-        while c.overview().running.and_then(|r| r.current).is_none() {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        wait_current(&c);
         c.cancel();
         *lock(&gate.0) = true;
         gate.1.notify_all();
@@ -892,9 +1032,7 @@ mod tests {
             },
         );
         start(&c, &[BenchKind::Cpu, BenchKind::Memory]).unwrap();
-        while c.overview().running.and_then(|r| r.current).is_none() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        wait_current(&c);
         c.cancel();
         let o = wait_idle(&c);
         let reasons: Vec<_> = o.runs[0]
@@ -926,14 +1064,17 @@ mod tests {
         start(&c, &[BenchKind::Cpu]).unwrap();
         *lock(&gate.0) = true;
         gate.1.notify_all();
-        let seen = loop {
-            let r = c.overview().running.unwrap();
-            if let Some(p) = r.phase.clone() {
-                break (p, r.liveness);
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        };
-        assert_eq!((seen.0.phase.as_str(), seen.0.rep, seen.0.of), ("cpu-single", 2, 5));
+        let seen = c
+            .wait_for(Duration::from_secs(60), |o| o.running.as_ref().is_some_and(|r| r.phase.is_some()))
+            .and_then(|o| o.running)
+            .and_then(|r| r.phase)
+            .expect("no phase reported");
+        assert_eq!((seen.phase.as_str(), seen.rep, seen.of), ("cpu", 2, 5));
+        assert!(
+            seen.label.contains("Pass 3 of 5"),
+            "the child's live wording reaches the overview: {}",
+            seen.label
+        );
         c.cancel();
         wait_idle(&c);
     }
@@ -952,27 +1093,21 @@ mod tests {
         let env = Env::new();
         c.attach(env.clone());
         start(&c, &[BenchKind::Cpu]).unwrap();
-        let id = loop {
-            if let Some(j) = lock(&env.jobs).first() {
-                break j.id();
-            }
-            std::thread::sleep(Duration::from_millis(2));
+        let id = env.job_id();
+        // The job's phase is steady per kind (the kind's name) on its own scale: the repetitions finished.
+        c.wait_for(Duration::from_secs(60), |o| o.running.as_ref().is_some_and(|r| r.phase.is_some()))
+            .expect("no phase reported");
+        let snap = env.registry.snapshots().into_iter().find(|s| s.id == id).unwrap();
+        let paddock_jobs::JobState::Running { phase: Some(phase) } = snap.state else {
+            panic!("{:?}", snap.state)
         };
-        // The job's phase carries the kind and the child's label on its own scale (the repetitions).
-        let phase = loop {
-            let snap = env.registry.snapshots().into_iter().find(|s| s.id == id).unwrap();
-            if let paddock_jobs::JobState::Running { phase: Some(p) } = snap.state {
-                break p;
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        };
-        assert_eq!(phase.phase.label, "Processor · Single core");
+        assert_eq!(phase.phase.label, "Processor");
         assert_eq!((phase.done, phase.phase.total), (2, Some(5)));
         // Cancel from the Jobs view, not the page.
         assert!(env.registry.cancel(id));
         let o = wait_idle(&c);
         assert!(matches!(o.runs[0].results[0].status, BenchStatus::Stopped { .. }));
-        let end = env.registry.snapshots().into_iter().find(|s| s.id == id).unwrap();
+        let end = env.snapshot_where(id, |s| s.state.is_terminal());
         assert!(matches!(end.state, paddock_jobs::JobState::Cancelled { .. }), "{:?}", end.state);
     }
 
@@ -1010,13 +1145,69 @@ mod tests {
         let env = Env::new();
         c.attach(env.clone());
         start(&c, &[BenchKind::Cpu, BenchKind::Memory]).unwrap();
-        while c.overview().running.and_then(|r| r.current).is_none() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        wait_current(&c);
         *lock(&env.battery) = Some(true);
         let o = wait_idle(&c);
         assert!(matches!(&o.runs[0].results[0].status, BenchStatus::Stopped { reason } if reason.starts_with("Stopped for safety")));
         assert!(matches!(&o.runs[0].results[1].status, BenchStatus::Stopped { reason } if reason.contains("before it started")));
+        // The job names the safety stop; it is not shown as the person's cancel.
+        let end = env.snapshot_where(env.job_id(), |s| s.state.is_terminal());
+        assert!(
+            matches!(&end.state, paddock_jobs::JobState::Failed { message } if message.starts_with("Stopped for safety")),
+            "{:?}",
+            end.state
+        );
+    }
+
+    #[test]
+    fn a_cancel_from_the_jobs_view_between_kinds_stops_the_kinds_that_have_not_started() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let c = centre(tmp.path(), Some(gate.clone()), None);
+        let env = Env::new();
+        c.attach(env.clone());
+        start(&c, &[BenchKind::Cpu, BenchKind::Memory]).unwrap();
+        // Only the job's token is cancelled (not the page's flag) while the first kind is held at the gate.
+        assert!(env.registry.cancel(env.job_id()));
+        *lock(&gate.0) = true;
+        gate.1.notify_all();
+        let o = wait_idle(&c);
+        assert!(matches!(&o.runs[0].results[1].status, BenchStatus::Stopped { reason } if reason.contains("before it started")));
+    }
+
+    struct Quiet(Option<Stop>);
+
+    impl ChildEvents for Quiet {
+        fn progress(&self, _: &PhaseProgress) {}
+        fn liveness(&self, _: Liveness) {}
+        fn stop(&self) -> Option<Stop> {
+            self.0.clone()
+        }
+    }
+
+    /// A clock the pause moves, so the wait for the InvocationID needs no real time.
+    fn waiting(find_after: usize, events: &dyn ChildEvents, budget: Duration) -> (InvocationWait, usize, Duration) {
+        let clock = paddock_bench::ManualClock::new();
+        let looks = std::cell::Cell::new(0);
+        let mut find = || {
+            looks.set(looks.get() + 1);
+            (looks.get() > find_after).then(|| "0123456789abcdef0123456789abcdef".to_string())
+        };
+        let r = wait_for_invocation(&mut find, events, &clock, &|d| clock.advance(d), budget);
+        (r, looks.get(), clock.now())
+    }
+
+    #[test]
+    fn the_invocation_wait_finds_the_id_times_out_and_honours_cancel_on_the_injected_clock() {
+        let (r, looks, at) = waiting(3, &Quiet(None), Duration::from_secs(3));
+        assert!(matches!(r, InvocationWait::Found(_)));
+        assert_eq!((looks, at), (4, Duration::from_millis(300)));
+        let (r, _, at) = waiting(usize::MAX, &Quiet(None), Duration::from_secs(3));
+        assert_eq!(r, InvocationWait::TimedOut);
+        assert_eq!(at, Duration::from_secs(3));
+        // Cancel is seen before the first look: nothing waits for a unit that is not wanted.
+        let (r, looks, at) = waiting(usize::MAX, &Quiet(Some(Stop::Cancelled)), Duration::from_secs(3));
+        assert_eq!((r, looks, at), (InvocationWait::Stopped(Stop::Cancelled), 0, Duration::ZERO));
     }
 
     #[test]

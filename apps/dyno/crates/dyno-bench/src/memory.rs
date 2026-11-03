@@ -1,7 +1,7 @@
 //! Memory: copy bandwidth over a buffer much larger than the caches, and random-access latency by chasing a
 //! shuffled cycle through a buffer of the same size.
 
-use crate::emit::{phase, Progress};
+use crate::emit::{gap_label, kind_phase, pass_done_label, Progress, WARMING_UP};
 use crate::repeat::{repeated, Pace, Repeats, Step};
 use dyno_core::bench::BenchMetric;
 use paddock_bench::Clock;
@@ -57,16 +57,27 @@ pub fn latency_ns(slots: usize, budget: Duration) -> f64 {
 
 /// The memory metrics, each from every repetition. The warm-up runs both for half its time each and is not counted.
 pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace, progress: &dyn Progress) -> Vec<BenchMetric> {
-    let reps = repeated(clock, pace, repeats, |step| {
-        let (b, rep, of) = match step {
-            Step::Warmup(d) => (d / 2, 0, repeats.reps),
-            Step::Rep { n, of } => (budget, n, of),
-        };
-        progress.report(phase("mem-copy", "Copy bandwidth", rep, of));
-        let copy = copy_bandwidth(COPY_BYTES, b);
-        progress.report(phase("mem-latency", "Random access latency", rep, of));
-        (copy, latency_ns(CHAIN_SLOTS, b))
-    });
+    let reps = repeated(
+        clock,
+        pace,
+        repeats,
+        |step| {
+            let (b, prefix, done, of) = match step {
+                Step::Warmup(d) => (d / 2, WARMING_UP.to_string(), 0, repeats.reps),
+                Step::Rep { n, of } => (budget, format!("Pass {n} of {of}"), n - 1, of),
+            };
+            let label = |section: &str| format!("{prefix} · {section}");
+            progress.report(kind_phase("memory", &label("Copy bandwidth"), done, of));
+            let copy = copy_bandwidth(COPY_BYTES, b);
+            progress.report(kind_phase("memory", &label("Random access latency"), done, of));
+            let latency = latency_ns(CHAIN_SLOTS, b);
+            if let Step::Rep { n, of } = step {
+                progress.report(kind_phase("memory", &pass_done_label(n, of), n, of));
+            }
+            (copy, latency)
+        },
+        |done, of| progress.report(kind_phase("memory", &gap_label(done, of), done, of)),
+    );
     let copy: Vec<f64> = reps.iter().map(|(c, _)| *c).collect();
     let latency: Vec<f64> = reps.iter().map(|(_, l)| *l).collect();
     vec![

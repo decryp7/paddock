@@ -557,7 +557,7 @@ pub fn compare(before: &BenchRun, after: &BenchRun) -> Comparison {
         };
         warnings.push(format!(
             "The {} results were measured with different methods{old}, so they are not compared.",
-            kind.name()
+            kind.title()
         ));
     }
     if before.machine != after.machine {
@@ -880,7 +880,7 @@ mod tests {
         let c = compare(&old, &measured_run("b", 2, &[150.0, 150.0, 150.0]));
         assert!(c.deltas.is_empty());
         assert!(
-            c.warnings.iter().any(|w| w.contains("cpu") && w.contains("old way")),
+            c.warnings.iter().any(|w| w.contains("Processor") && w.contains("old way")),
             "{:?}",
             c.warnings
         );
