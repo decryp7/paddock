@@ -179,6 +179,12 @@ export function groupItems<T>(
   return out;
 }
 
+/** The heading keys {@link groupItems} would make for `rows` grouped by `column` (none without a column). */
+export function groupKeys<T>(rows: readonly T[], column: PdColumn<T> | undefined): readonly string[] {
+  if (!column) return [];
+  return [...new Set(rows.map((row) => cellText(column, row)))];
+}
+
 /** The line to move to for a navigation key, or null for any other key. `page` is how many lines fit. */
 export function nextIndex(count: number, current: number, key: string, page = 10): number | null {
   if (count <= 0) return null;

@@ -13,7 +13,7 @@ module.exports = defineConfig(...preset({ prefix: 'pc' }));
 ```
 
 Options: `prefix` (required), `ignores`, `rules` (extra for `*.ts`), `templateRules` (extra for `*.html`; a reasoned override such
-as Debrief's two accessibility rules), `storeFlagsAllowedIn` (regex of the file that defines `withRequestStatus`), `signalForms`
+as Debrief's two accessibility rules), `dialogStores` (globs of the stores a dialog shows: their `onInit` loads must be tracked, `paddock/dialog-load-tracked`), `storeFlagsAllowedIn` (regex of the file that defines `withRequestStatus`), `signalForms`
 (rule 37: forbid new reactive forms; off while existing forms stay).
 
 | Rule | Rule no. | What |

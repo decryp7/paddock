@@ -72,10 +72,7 @@ fn term_stops_a_running_agent_cleanly_and_removes_its_discovery_file() {
     let status = exits(child);
     assert_eq!(status.code(), Some(0), "a clean stop is exit code 0, got {status:?}");
     assert!(!dirs.discovery().exists(), "the discovery file was left behind");
-    assert!(
-        !paddock_proc::is_held_settled(&dirs.instance_lock()),
-        "the agent lock was not released"
-    );
+    assert!(!dyno_agent::instance::is_held(&dirs), "the agent lock was not released");
 }
 
 #[test]
@@ -88,10 +85,7 @@ fn term_sent_while_the_agent_is_starting_still_ends_it() {
         let child = start(dirs.root());
         term(&child);
         let _ = exits(child);
-        assert!(
-            !paddock_proc::is_held_settled(&dirs.instance_lock()),
-            "the agent lock was left held"
-        );
+        assert!(!dyno_agent::instance::is_held(&dirs), "the agent lock was left held");
     }
 }
 

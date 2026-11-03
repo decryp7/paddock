@@ -112,7 +112,7 @@ impl Harness {
 /// hang guard only a lost lock reaches.
 fn wait_until_free(dirs: &Dirs) {
     let began = std::time::Instant::now();
-    while dyno_agent::instance::is_held_now(dirs) {
+    while dyno_agent::instance::is_held(dirs) {
         assert!(
             began.elapsed() < Duration::from_secs(60),
             "the data folder's lock was never released"
@@ -887,6 +887,25 @@ fn lifespan_forecasts_come_from_stored_readings_and_a_worn_battery_raises_an_ala
     // 78 % of the original charge is past the replacement line, which needs no history to say.
     assert_eq!(bat.outcome, dyno_core::lifespan::LifeOutcome::AlreadyPastLimit, "{bat:?}");
     assert!(alarm_rules(&peer).contains(&"lifespan:battery".to_string()));
+}
+
+#[test]
+fn the_agent_records_and_logs_the_first_sighting_at_start_without_a_baselines_request() {
+    let _ = captured();
+    let h = Harness::start();
+    let s = shared(&h);
+    let first = dyno_agent::agent::lock(&s.core).store.meta("firstSeen").unwrap();
+    assert!(first.is_some_and(|v| v.parse::<i64>().is_ok()), "the start records firstSeen");
+    let records = captured();
+    assert!(
+        records.iter().any(|r| r.contains("Baselines learning at start")
+            && r.contains("DataFolder=caller's folder")
+            && r.contains("Store=file")
+            && r.contains("FirstSeenMs=")
+            && r.contains("ReadyAtMs=")
+            && r.contains("Rule=")),
+        "{records:?}"
+    );
 }
 
 #[test]

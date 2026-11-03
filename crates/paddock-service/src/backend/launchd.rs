@@ -46,7 +46,7 @@ fn start_facts(sys: &mut dyn System, target: &str) -> StartFacts {
         job: job_of(Some(report)),
         pid: report.pid,
         runs: report.runs,
-        last_exit: report.last_exit,
+        last_exit: report.last_exit_code,
         cpu: running_pid.and_then(|pid| sys.cpu_time(pid)),
         run_state: running_pid.map_or(RunState::Unknown, |pid| sys.run_state(pid)),
     }

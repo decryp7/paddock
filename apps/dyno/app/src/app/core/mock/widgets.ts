@@ -131,7 +131,7 @@ interface Stored {
   presets: Preset<W>[];
 }
 
-/** HH:MM in the viewer's zone, the way the widget frame says "As of 14:28" (one time across the notice and every widget). */
+/** HH:MM in the viewer's zone, the way the widget frame says "Paused at 14:28" (one time across the notice and every widget). */
 function clockOf(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;

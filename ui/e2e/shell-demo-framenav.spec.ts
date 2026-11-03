@@ -16,16 +16,15 @@ for (const colorScheme of THEMES) {
       await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
       await expect(app.sidebar.link('Lab')).toHaveCount(0);
       const links = app.sidebar.links;
-      const count = await links.count();
       await links.first().focus();
       await page.keyboard.press('ArrowDown');
       await expect(links.nth(1)).toBeFocused();
       await page.keyboard.press('End');
-      await expect(links.nth(count - 1)).toBeFocused();
+      await expect(links.last()).toBeFocused();
       await page.keyboard.press('ArrowDown');
       await expect(links.first()).toBeFocused();
       await page.keyboard.press('ArrowUp');
-      await expect(links.nth(count - 1)).toBeFocused();
+      await expect(links.last()).toBeFocused();
       await page.keyboard.press('Home');
       await expect(links.first()).toBeFocused();
       // The focus ring is drawn (keyboard focus: :focus-visible).

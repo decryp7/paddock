@@ -187,6 +187,8 @@ describe('ProcessesPage actions', () => {
       first.focus();
       first.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, cancelable: true, bubbles: true }));
       await settle(f);
+      // The overlay opens on a later turn than the key: wait for the menu, not for a number of turns (rule 49).
+      await vi.waitFor(() => expect(document.querySelectorAll('.pd-popmenu__item').length).toBeGreaterThan(0));
       const items = [...document.querySelectorAll('.pd-popmenu__item')].map((i) => i.textContent!.trim());
       expect(items).toEqual(['Details', 'Open file location', 'Search the web…', 'Search file hash on VirusTotal…']);
       document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));

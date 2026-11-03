@@ -616,6 +616,7 @@ impl DiskCentre {
             stat_limit: STAT_LIMIT,
             listing_progress_every: super::engine::LISTING_PROGRESS_EVERY,
             reasons: dyno_core::disk::reason::ReasonContext::current(meta.fda_missing),
+            unreachable_run_limit: matches!(r.location, VolumeLocation::Network { .. }).then_some(super::engine::MAX_UNREACHABLE_IN_A_ROW),
         };
         meta.announce(r.total_bytes);
         let walk = Walk::start(self.source.clone(), r.root.clone(), &r.name, cfg, meta.clone()).map_err(|e| {
@@ -1102,6 +1103,7 @@ mod tests {
         let root = fs.root();
         let a = fs.dir(&root, "a");
         fs.fail_open(&a, ReadError::Unreachable("ETIMEDOUT".into()));
+        fs.drop_volume_at(&a);
         let r = rig(fs.clone(), vec![vol("nas", &root, net("nas.local"))]);
         let s = r.centre.start(DiskTarget::Volume { id: "nas".into() }).unwrap();
         let st = wait_final(&r, s.scan);

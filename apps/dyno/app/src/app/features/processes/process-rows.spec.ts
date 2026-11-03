@@ -1,5 +1,5 @@
 import type { AppGroup, Measured, ProcessSample } from '../../core/api.types';
-import { type Row, type RowInput, type Sort, buildRows, compareRows, matches } from './process-rows';
+import { type Row, type RowInput, type Sort, buildRows, collapseAllKeys, compareRows, expandAllKeys, matches } from './process-rows';
 
 type SampleOver = Partial<Omit<ProcessSample, 'user' | 'cpu' | 'memory' | 'diskReadBps' | 'diskWriteBps' | 'started'>> & {
   user?: string | null;
@@ -226,5 +226,33 @@ describe('buildRows: tree', () => {
   it('is empty without processes', () => {
     expect(buildRows(input({ mode: 'tree' }))).toEqual([]);
     expect(buildRows(input({ mode: 'groups' }))).toEqual([]);
+  });
+});
+
+describe('expand all and collapse all', () => {
+  const procs = [sample(1, 'init'), sample(2, 'shell', { parent: 1 }), sample(3, 'tool', { parent: 2 }), sample(4, 'solo', { parent: 99 })];
+  const groups = [group('a', 'Shell', [2, 3]), group('b', 'Solo', [4])];
+
+  it('opens the groups with more than one process in the Apps view, and every parent in the Tree view', () => {
+    expect(expandAllKeys('groups', procs, groups)).toEqual(['ga']);
+    expect(expandAllKeys('tree', procs, groups).sort()).toEqual(['p1', 'p2']);
+    expect(expandAllKeys('flat', procs, groups)).toEqual([]);
+    const open = buildRows(input({ mode: 'tree', processes: procs, groups, expanded: new Set(expandAllKeys('tree', procs, groups)) }));
+    expect(names(open)).toContain('tool');
+  });
+
+  it('folds back to the top level: nothing open in the Apps view, the roots marked folded in the Tree view', () => {
+    expect(collapseAllKeys('groups', procs)).toEqual([]);
+    expect(collapseAllKeys('flat', procs)).toEqual([]);
+    const keys = collapseAllKeys('tree', procs);
+    expect(keys).toEqual(['-p1']);
+    expect(names(buildRows(input({ mode: 'tree', processes: procs, groups, expanded: new Set(keys) })))).toEqual(['init', 'solo']);
+  });
+
+  it('copes with a large tree', () => {
+    const many = Array.from({ length: 5000 }, (_, i) => sample(i + 1, `p${i}`, { parent: i === 0 ? null : Math.floor(i / 3) + 1 }));
+    const keys = expandAllKeys('tree', many, []);
+    const rows = buildRows(input({ mode: 'tree', processes: many, expanded: new Set(keys) }));
+    expect(rows).toHaveLength(5000);
   });
 });

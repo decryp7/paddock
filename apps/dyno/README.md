@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/dyno-icon.svg?v=0a2d5050" alt="Dyno icon" width="96" height="96">
+<img src="docs/images/dyno-icon.svg?v=b33176be" alt="Dyno icon" width="96" height="96">
 
 # Dyno
 
@@ -13,7 +13,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=202f935a)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=a7ee67cb)
 
 
 > **Status: 1.0.0 in preparation, unreleased.** Dyno 1.0.0 is a monitor: live and history, processes and why it is slow,
@@ -53,9 +53,9 @@ does the second:
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=471f40ce)
+![Dyno features](docs/images/dyno-features.svg?v=fd98299a)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg?v=a478bd02)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=d9cb3fb8)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 

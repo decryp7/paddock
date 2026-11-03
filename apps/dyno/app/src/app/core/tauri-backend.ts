@@ -602,6 +602,11 @@ export class TauriBackend implements DynoBackend {
     return this.command<SavedInventory | null>('save_inventory_report', { format });
   }
 
+  /** The shell opens the OS taskbar settings. */
+  openTaskbarSettings(): Promise<void> {
+    return this.command<void>('open_taskbar_settings', undefined);
+  }
+
   /** The shell shows the OS folder dialog and answers the chosen path (or null). */
   pickFolder(): Promise<string | null> {
     return this.command<string | null>('pick_folder', undefined);

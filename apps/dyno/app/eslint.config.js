@@ -5,6 +5,8 @@ const eslint = require('@eslint/js');
 const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
+// The shared Paddock rule that a dialog's start-up load is a pending task (ADR 0026 §6).
+const { plugin: paddock } = require('../../../eslint/src/index.cjs');
 
 module.exports = defineConfig(
   {
@@ -19,6 +21,11 @@ module.exports = defineConfig(
       '@angular-eslint/component-selector': ['error', { type: 'element', prefix: 'dy', style: 'kebab-case' }],
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
     },
+  },
+  {
+    files: ['**/*.ts'],
+    plugins: { paddock },
+    rules: { 'paddock/dialog-load-tracked': 'error' },
   },
   {
     files: ['**/*.html'],

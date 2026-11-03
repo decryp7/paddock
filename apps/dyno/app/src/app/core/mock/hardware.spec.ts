@@ -45,7 +45,7 @@ describe('hardware scenarios', () => {
   });
 
   it('baselines: learning has no items, ready lists the unusual first', () => {
-    expect(mockBaselines(NOW, 'learning')).toMatchObject({ learning: { learning: { daysDone: 3, daysNeeded: 7 } }, items: [] });
+    expect(mockBaselines(NOW, 'learning')).toMatchObject({ learning: { learning: { day: 3, daysNeeded: 7, since: NOW - 2 * 86_400_000, readyAt: NOW + 5 * 86_400_000 } }, items: [] });
     expect(mockBaselines(NOW, 'hot').items.length).toBeGreaterThan(3);
   });
 });

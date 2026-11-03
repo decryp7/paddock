@@ -22,6 +22,7 @@ use ::tauri::{
 };
 use paddock_commands::tauri::Guard;
 use paddock_dialogs::placement::{Monitor, Rect};
+use paddock_jobs::FakeClock;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -680,7 +681,7 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
     let quits = calls();
     let steps = calls();
     let s = steps.clone();
-    let clock = paddock_jobs::time::FakeClock::new();
+    let clock = FakeClock::new();
     let config = WindowConfig::new("Pitwall")
         .exit_stall_limit(Duration::from_secs(8))
         .step_limit(Duration::from_secs(3))
@@ -732,7 +733,7 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
 #[test]
 fn the_normal_exit_tears_down_and_the_watchdog_then_does_nothing() {
     let quits = calls();
-    let clock = paddock_jobs::time::FakeClock::new();
+    let clock = FakeClock::new();
     let config = WindowConfig::new("Debrief")
         .exit_stall_limit(Duration::from_secs(8))
         .clock(Arc::new(clock.clone()));
@@ -1077,22 +1078,130 @@ fn icon() -> IconRect {
 }
 
 fn popover_app() -> App {
-    let app = app_with(windows(WindowConfig::new("Dyno"), &calls()).build());
-    app.manage(
+    popover_app_with(Popovers::new().style(Style {
+        os: "macos",
+        material: Material::None,
+    }))
+}
+
+const GUARD: Duration = Duration::from_secs(10);
+
+/// A popover app on Windows rules (a blur grace) with a fake clock and a fixed foreground window class.
+fn windows_popover_app(clock: &FakeClock, foreground: &'static str) -> App {
+    popover_app_with(
         Popovers::new()
-            // No material: the platform's effects need a real window handle (the mock's would crash).
             .style(Style {
-                os: "macos",
+                os: "windows",
+                // No material: the platform's effects need a real window handle (the mock's would crash).
                 material: Material::None,
             })
-            .popover(
-                None,
-                PopoverSpec::new("index.html#/tray", "Dyno").width(400.0),
-            )
-            .popover(Some("cpu"), PopoverSpec::new("index.html#/tray/cpu", "CPU"))
-            .popover(Some("BAD"), PopoverSpec::new("x", "x")),
+            .clock(Arc::new(clock.clone()))
+            .foreground_class(move || Some(foreground.to_string())),
+    )
+}
+
+fn popover_app_with(pops: Popovers) -> App {
+    let app = app_with(windows(WindowConfig::new("Dyno"), &calls()).build());
+    app.manage(
+        pops.popover(
+            None,
+            PopoverSpec::new("index.html#/tray", "Dyno").width(400.0),
+        )
+        .popover(Some("cpu"), PopoverSpec::new("index.html#/tray/cpu", "CPU"))
+        .popover(Some("BAD"), PopoverSpec::new("x", "x")),
     );
     app
+}
+
+fn blur(app: &App, label: &str) {
+    let os = app.get_webview_window(label).unwrap().as_ref().window();
+    on_window_event(&os, &WindowEvent::Focused(false));
+}
+
+#[test]
+fn only_windows_gives_a_blur_grace_unless_one_is_set() {
+    let style = |os| Style {
+        os,
+        material: Material::None,
+    };
+    let windows = Popovers::new().style(style("windows"));
+    assert_eq!(windows.grace(), crate::popover::BLUR_GRACE);
+    let mac = Popovers::new().style(style("macos"));
+    assert_eq!(mac.grace(), Duration::ZERO);
+    assert_eq!(
+        mac.blur_grace(Duration::from_secs(1)).grace(),
+        Duration::from_secs(1)
+    );
+}
+
+#[test]
+fn a_blur_right_after_showing_keeps_the_popover_while_the_shell_has_the_foreground() {
+    // Windows: the shell takes the foreground back right after the tray click, so the popover is blurred at once.
+    let clock = FakeClock::new();
+    let app = windows_popover_app(&clock, "Shell_TrayWnd");
+    let h = app.handle();
+    assert_eq!(toggle_popover(h, None, icon()), Ok(true));
+    blur(&app, "tray");
+    assert!(
+        app.state::<Popovers>().is_open("tray"),
+        "an immediate blur must not close it"
+    );
+    // The grace is over: the shell still has the foreground, the popover asks for the focus again and stays.
+    assert!(clock.wait_for_started(1, GUARD));
+    clock.advance(crate::popover::BLUR_GRACE);
+    app.state::<Popovers>().join_threads();
+    assert!(app.state::<Popovers>().is_open("tray"));
+    // The icon still toggles it.
+    assert_eq!(toggle_popover(h, None, icon()), Ok(false));
+    assert!(clock.wait_for_started(2, GUARD));
+    clock.advance(crate::popover::FADE);
+    app.state::<Popovers>().join_threads();
+    assert!(!app.state::<Popovers>().is_open("tray"));
+}
+
+#[test]
+fn a_blur_within_the_grace_to_another_window_closes_the_popover_when_the_grace_is_over() {
+    let clock = FakeClock::new();
+    let app = windows_popover_app(&clock, "Chrome_WidgetWin_1");
+    assert_eq!(toggle_popover(app.handle(), None, icon()), Ok(true));
+    blur(&app, "tray");
+    assert!(app.state::<Popovers>().is_open("tray"));
+    assert!(clock.wait_for_started(1, GUARD));
+    clock.advance(crate::popover::BLUR_GRACE);
+    // The grace thread closed it, and then waits for the fade.
+    assert!(clock.wait_for_started(2, GUARD));
+    clock.advance(crate::popover::FADE);
+    app.state::<Popovers>().join_threads();
+    assert!(!app.state::<Popovers>().is_open("tray"));
+}
+
+#[test]
+fn a_blur_after_the_grace_closes_the_popover_at_once() {
+    let clock = FakeClock::new();
+    let app = windows_popover_app(&clock, "Shell_TrayWnd");
+    assert_eq!(toggle_popover(app.handle(), None, icon()), Ok(true));
+    clock.advance(crate::popover::BLUR_GRACE);
+    blur(&app, "tray");
+    assert!(!app.state::<Popovers>().is_open("tray"));
+    assert!(clock.wait_for_started(1, GUARD));
+    clock.advance(crate::popover::FADE);
+    app.state::<Popovers>().join_threads();
+}
+
+#[test]
+fn closing_during_the_grace_ends_its_wait() {
+    let clock = FakeClock::new();
+    let app = windows_popover_app(&clock, "Shell_TrayWnd");
+    let h = app.handle();
+    assert_eq!(toggle_popover(h, None, icon()), Ok(true));
+    blur(&app, "tray");
+    assert!(clock.wait_for_started(1, GUARD));
+    // Escape or the icon closes it: the grace wait is cancelled, no thread is left waiting for time to pass.
+    close_popover(h, "tray");
+    assert!(clock.wait_for_started(2, GUARD));
+    clock.advance(crate::popover::FADE);
+    app.state::<Popovers>().join_threads();
+    assert_eq!(clock.waiters(), 0);
 }
 
 #[test]

@@ -1217,3 +1217,62 @@ the state and nothing but a reviewer's memory prevented it. **Rule (ER-21, no ne
 choice explicit and refuses the unchosen one at the app's start, independent of the CI's secrets (`tauri::install` returns
 `InstallerUndeclared` unless `.installer(..)` or `.no_install()` was called), the status says what the build can do
 (`canInstall`) so the UI offers only that, and a conformance check (C59) covers every app.
+## A detached chart host resized to 0 stayed at height 0 (2026-11-03, Dyno; open question)
+
+Dyno 1.0.0: switching the history range left the chart empty until the view was reopened. The panel's skeleton detaches the
+projected `dy-chart` between two answers; the `ResizeObserver` then resized ECharts to 0 px. After the host came back the
+canvas kept `height="0"` (width 982) although the observer saw the 0 to N change, and ECharts warned "Can't get DOM width or
+height". **Why the later resize did not restore the height is not explained** (not reproduced outside the gated e2e, only in
+Chromium). The fix avoids the cause instead of explaining it: `fit()` ignores a container with no size and resizes only
+when the size differs from the chart's own. **Lesson:** do not resize a third-party renderer to a size of 0; if it happens
+again with the fix in place, find the ECharts/zrender step that skips the restore before adding more guards.
+
+## "Day 1 of 7" on the second day: elapsed 24-hour periods shown as a calendar day (2026-11-03, Dyno)
+
+A user installed Dyno 1.0.0 on a Monday and, after Tuesday's boot, the "Is this normal?" card still said "day 1 of 7", which
+read as a reset. Suspected first: a different data folder for the Windows `Run` entry's agent than for the app's child, so each
+start saw a fresh database. The code refuted it: both run `dyno-agent run` as the same user with no extra environment or
+working folder, and `Dirs::current` reads only `DYNO_DATA_DIR` and `%LOCALAPPDATA%`; `firstSeen` is never deleted or rewritten.
+The cause was the rule: the engine counted complete 24-hour periods since the first sighting (0 for the first 24 hours, 1 for
+the next 24) and the card showed `max(1, daysDone)`, so both of the first two days said "day 1", and with an evening install
+a morning boot two calendar days later did too. A restart test over one database file on a fake clock reproduced it (Tuesday
+shown as 1, expected 2). Contributing: `firstSeen` was stored lazily on the first Baselines request, so an agent started at
+logon without a window did not start the count, and nothing in the log said what the learning counted from. **Lesson:** a
+progress count shown to people is defined once in the engine in the unit people read (local calendar days, 1-based) and sent
+as such; the UI never clamps or offsets it, and the start of the count is recorded and logged when the process starts.
+The decided rule (user, 2026-11-03): the card counts local calendar days, and Ready also needs 7 times 24 hours since the
+first sighting; on the last day the card says when it will be ready, and the engine sends that time (`ready_at`), so a clock
+change moves it by exactly the hour the clock moved.
+
+## A sidebar spec counted the links once and indexed past the end (2026-11-03, shell-demo; CI run 7452)
+
+`shell-demo-framenav.spec.ts` read `links.count()` right after the frame opened and later asked for `links.nth(count - 1)`; one run
+found the list shorter by then ("element(s) not found" at index 9, light theme only, passed in the runs before). The spec now uses
+`links.last()`, which is resolved against the page when it is asserted. **Lesson:** never freeze a locator's count in a number and
+index with it later; use the locator that names the position. (Same day, run 7453: the Angular dev server of the Dyno chromium
+shard 2 died with `lmdb` "Cannot read properties of null (reading 'refCount')" in its build cache before the first test; the cause
+is not found, the job passed on the other shard and in earlier runs; if it repeats, set `NG_BUILD_CACHE=false` for e2e.)
+
+## A stall test read the runner's log right after the exit event (2026-11-03, Pitcrew; CI run 7459)
+
+`a_stalled_runner_is_stopped_gracefully_and_restarted` failed once ("the runner shut down by itself after the stop request", 434 of
+435 passed, nothing in Pitcrew changed). Candidates and what refuted them: the supervisor treats a self-exit after a graceful stop
+differently (no: the `Exited { expected: true }` event the test had already seen is that path); the fake never logs the line (no:
+it logs before it exits; 100 stress runs under four busy loops at nice 19 all passed); the log file is flushed late (no:
+`write_line` runs in `line()`). The cause: the runner's output reaches the supervisor through a reader thread and a channel, the
+exit through a probe of the process, so the exit can be handled before the last line; the test waited for the exit and then read
+the log once. Confirmed by putting the cause back: a temporary 300 ms delay per line in `read_lines` failed the old test with the
+reported message every time, and the waiting test passes 10 of 10 with it. The test now waits on the line with the real clock.
+**Lesson (class: two event sources, one assumed order):** a test that waits for event A on one path never reads state fed by
+event B on another path without waiting for B; to measure a rare order race, inject the delay on the path that is assumed fast.
+## A baseline read after an async step hides what changed during it (2026-11-03, Dyno dialogs)
+
+Dyno 1.0.0's Updates window showed a scrollbar beside one line. `DialogFrame.watch()` took its "last measure" from a fresh
+measure read after the `dialog_ready` round trip, so content that arrived during the round trip was taken as already sent and
+never refitted. **Confirmed on Windows 11 (VM, 2026-11-03, 100 % and 150 %):** the 1.0.0 code ended at inner 105 px (the first,
+loading state) with the scrollbar of the user's screenshot, and the change at 195 px. Ruled out by the new fit log:
+frame rounding (the frame matched `AdjustWindowRectExForDpi`, the inner size is rounded up), the viewport delta (0) and
+fonts (same content height in the later fit). Found on the way: tao resizes the window itself after `ScaleFactorChanged`,
+so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
+is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
+Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.

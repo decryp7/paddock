@@ -120,6 +120,27 @@ export function buildRows(input: RowInput): Row[] {
   return other ? [...rows, other] : rows;
 }
 
+/**
+ * The `expanded` keys that open every group (Apps view) or every process with children (Tree view); the flat view has none.
+ * Pure: the store keeps what this returns.
+ */
+export function expandAllKeys(mode: ViewMode, processes: readonly ProcessSample[], groups: readonly AppGroup[]): string[] {
+  if (mode === 'groups') return groups.filter((g) => g.pids.length > 1).map((g) => `g${g.id}`);
+  if (mode === 'tree') {
+    const present = new Set(processes.map((p) => p.pid));
+    return [...new Set(processes.map((p) => p.parent).filter((parent): parent is number => parent !== null && present.has(parent)))].map((pid) => `p${pid}`);
+  }
+  return [];
+}
+
+/**
+ * The `expanded` keys that fold everything: none in the Apps view; in the Tree view the roots, which open by themselves,
+ * carry a fold marker (`-p<pid>`).
+ */
+export function collapseAllKeys(mode: ViewMode, processes: readonly ProcessSample[]): string[] {
+  return mode === 'tree' ? processes.filter((p) => p.parent === null).map((p) => `-p${p.pid}`) : [];
+}
+
 const OTHER_USERS_NAME = 'Other users';
 
 /** The "Other users" row: like a process row, never expandable, always last. Hidden when a search does not match its name. */
@@ -203,6 +224,7 @@ function buildListRows(input: RowInput): Row[] {
     } else roots.push(p);
   }
   const rows: Row[] = [];
+  const byPid = new Map(kept.map((p) => [p.pid, p]));
   const walk = (p: ProcessSample, depth: number, seen: Set<number>): void => {
     if (seen.has(p.pid)) return;
     seen.add(p.pid);
@@ -211,10 +233,10 @@ function buildListRows(input: RowInput): Row[] {
     rows.push(processRow(p, depth, kids.length > 0, open && kids.length > 0));
     if (open) {
       const sorted = kids.map((k) => processRow(k, depth + 1)).sort((a, b) => compareRows(a, b, sort));
-      for (const k of sorted) walk(kept.find((x) => x.pid === k.pid)!, depth + 1, seen);
+      for (const k of sorted) walk(byPid.get(k.pid!)!, depth + 1, seen);
     }
   };
   const rootRows = roots.map((r) => processRow(r, 0)).sort((a, b) => compareRows(a, b, sort));
-  for (const r of rootRows) walk(kept.find((x) => x.pid === r.pid)!, 0, new Set());
+  for (const r of rootRows) walk(byPid.get(r.pid!)!, 0, new Set());
   return rows;
 }

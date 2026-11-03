@@ -5,6 +5,8 @@ export const HEALTH_COMMANDS = {
   health_repair: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   health_snapshot: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_dismiss: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  notifications_dismiss_all: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  notifications_dismiss_many: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_list: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_mark_all_read: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_mark_read: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },

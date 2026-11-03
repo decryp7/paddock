@@ -758,6 +758,32 @@ fn the_knowledge_packs_bring_their_commands_event_and_health_entry() {
     assert!(invoke(&main, "packs_reload", json!({})).is_ok());
 }
 
+/// An app that never calls `Builder::files` still serves `files_open_url` (About's releases link): the shell manages a minimal
+/// service for the commands it registers, so no app can register the command without its state (the Dyno 1.0.0 report:
+/// "state not managed for field `state` on command `files_open_url`").
+#[test]
+fn files_open_url_has_its_state_without_builder_files() {
+    let app = app(Builder::new(identity()).in_memory().native_menu(false));
+    let main = window(&app, "main");
+    // The service answers (its own refusal of a scheme it does not open), not "state not managed".
+    let refused = format!(
+        "{:?}",
+        invoke(
+            &main,
+            "files_open_url",
+            json!({ "url": "ftp://example.org" })
+        )
+    );
+    assert!(
+        !refused.contains("not managed") && refused.contains("only http, https and mailto"),
+        "{refused}"
+    );
+    // And it grants nothing else: no recent lists, no drops granted, no service for the storage commands.
+    let lists = invoke(&main, "files_recent_list", json!({})).unwrap();
+    assert_eq!(lists["lists"].as_array().map(Vec::len), Some(0), "{lists}");
+    assert!(paddock_files::tauri::files(app.handle()).is_none());
+}
+
 #[test]
 fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
     use paddock_files::open::{Invocation, Launcher};

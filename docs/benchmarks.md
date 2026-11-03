@@ -220,6 +220,23 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-03, starving a test process by OS priority on macOS
+
+Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).
+- **Commit:** 9da2ccf59 (origin/main); no code, a synthetic loop.
+- **Machine:** Mac mini M4 Pro, 14 cores (10 performance, 4 efficiency), 64 GB, macOS 27.2.
+- **Load:** 1-minute load 16.4 before and 26.3 after; other agents and CI were working on the machine. An indication only.
+- **Build:** none; Python 3.12.5 (`python3 -I`).
+- **Corpus:** none. The work is a fixed loop: `x += i*i` for `i` in `range(6_000_000)`, timed with `time.perf_counter()`
+  inside the script.
+- **Command:** `python3 -I work.py` (normal), `taskpolicy -b python3 -I work.py` (`PRIO_DARWIN_BG`), `taskpolicy -c
+  utility python3 -I work.py` (a utility QoS clamp); three rounds, interleaved.
+- **Runs:** 3 per set-up.
+- **Numbers:** normal 0.33-0.36 s; utility clamp 0.33-0.36 s; `PRIO_DARWIN_BG` 3.03-24.73 s (24.73, 6.93, 3.03), so 9× to
+  73× the normal time. No budget; verdict: `taskpolicy -b` starves a process without adding load, with a large and
+  load-dependent spread, while a utility clamp does not starve it at this load.
+- **Memory:** not measured (not relevant to this measurement).
+
 ### 2026-10-30, linker for Dyno's incremental debug rebuilds: ld-prime against rust-lld (ci/build-parallelism)
 
 - **Commit:** ddf0becda (origin/main); no code change, the linker is chosen per run.

@@ -214,8 +214,7 @@ impl Supervisor {
   public methods stay, as thin facades: `retry()`, `refresh_service()` and `quit()` send `Event::Retry`,
   `Event::ServiceChanged` and `Event::Quit`; `call()` reads the peer published by `UsePeer`.
 - **Ports** (traits, fakes in tests): `Launcher` (launch with a generation, end the held child of that generation, child
-  exits reported as events by the adapter), `LockProbe` (`paddock_proc::is_held_now`: one check, no wait; the machine judges the lock over its looks, and
-  a re-checking probe here slowed every look about 400 ms, CI run 7257), `ServiceProbe`,
+  exits reported as events by the adapter), `LockProbe` (`paddock_proc::instance::is_held`), `ServiceProbe`,
   `HintReader` (`paddock_proc::hint`, bounded read), `Connector`, `Pace` (the ADR 0031 tick). A slow port (the service
   probe, a connect) runs on a short-lived worker and answers with an event, so the owner never blocks and Quit is
   always taken at once.
@@ -291,7 +290,7 @@ written"), and a test of a fix is checked with a mutant (the shared mutation ste
 
 - **Now, in Dyno:** `apps/dyno/app/src-tauri/src/link/` split into `machine.rs` (pure, no Tauri), `driver.rs` (owner
   thread, ports, transitions), `ports.rs` (real adapters, mostly today's `ProcessLauncher` and probes) and `mod.rs`
-  (`AgentLink` facade). It uses the shared `StartJudge`, `StallReport`, `InstanceLock`/`is_held_now` and `hint` from
+  (`AgentLink` facade). It uses the shared `StartJudge`, `StallReport`, `InstanceLock`/`is_held` and `hint` from
   `paddock-proc` (`feat/paddock-proc-start-judge`).
 - **The generic mechanism goes to the shared crate after the Dyno tag**, not the Dyno transitions: a `Machine` trait
   (`step(Event) -> Vec<Command>`), the owner-thread `Driver`, `Transitions<S>` with `wait_until`, and the bounded

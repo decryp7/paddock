@@ -1,11 +1,9 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! A forked child that has not exec'd yet holds a copy of the agent's lock. This test forks on purpose, so it lives in a binary
 //! of its own: in `agent.rs` its child copied the descriptors of every agent the other tests had open at that moment (refusing
 //! their restarts as "already running") and, on macOS, a fork while other threads sit in socket calls is the trigger of the
 //! spurious EBADF on healthy sockets (docs/lessons.md). One test per binary means no neighbour to harm.
-//!
-//! Unix only (it forks): the doc comes before the `cfg` so the empty crate on Windows still has its crate doc.
-#![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // The test forks and execs, so it exists on Unix only; its helper and imports are matched to it (dead code on Windows otherwise).
 #[cfg(unix)]
@@ -27,6 +25,7 @@ fn start_on(dirs: &Dirs) -> Result<Running, String> {
 /// folder locked for a while after the agent that held it is gone; a loaded macOS runner showed it (the third start of
 /// `a_second_agent…` was refused). This holds a child in that state on purpose, without a clock: it blocks on a pipe the test
 /// closes.
+#[cfg(unix)]
 #[test]
 #[expect(
     unsafe_code,
@@ -70,7 +69,7 @@ fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_
 
     first.stop();
     assert!(
-        paddock_proc::is_held_settled(&dirs.instance_lock()),
+        dyno_agent::instance::is_held(&dirs),
         "the stopped agent's lock should still be held by the forked child's copy of the descriptor"
     );
     match start_on(&dirs) {

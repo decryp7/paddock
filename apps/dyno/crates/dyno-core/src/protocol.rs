@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// 4: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`).
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1231,12 +1233,18 @@ mod tests {
         let base = Reply::Baselines(Box::new(crate::baseline::BaselineOverview {
             at: Timestamp(5),
             learning: crate::baseline::Learning::Learning {
-                days_done: 2,
+                day: 3,
                 days_needed: 7,
+                since: Some(Timestamp(1)),
+                ready_at: Some(Timestamp(2)),
             },
             items: vec![],
         }));
-        assert_eq!(base.into_json().unwrap()["learning"]["learning"]["daysNeeded"], 7);
+        let j = base.into_json().unwrap();
+        assert_eq!(j["learning"]["learning"]["daysNeeded"], 7);
+        assert_eq!(j["learning"]["learning"]["day"], 3);
+        assert_eq!(j["learning"]["learning"]["since"], 1);
+        assert_eq!(j["learning"]["learning"]["readyAt"], 2);
     }
 }
 

@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <title>Debrief 32px</title>
   <defs>
-    <linearGradient id="debrief-32-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5590FF"/><stop offset="1" stop-color="#1D4FD3"/></linearGradient>
+    <linearGradient id="debrief-fl32-32-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5590FF"/><stop offset="1" stop-color="#1D4FD3"/></linearGradient>
     
   </defs>
-  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#debrief-32-bg)"/>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#debrief-fl32-32-bg)"/>
   <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#10308A" stroke-opacity="0.35" stroke-width="0.5"/>
-  <path d="M4 21L18 28L18 27L4 20Z" fill="#9BA7BB" shape-rendering="crispEdges"/><path d="M18 28L28 23L28 22L18 27Z" fill="#717D94" shape-rendering="crispEdges"/><path d="M4 20L18 27L28 22L14 15Z" fill="#FFFFFF" shape-rendering="crispEdges"/><path d="M10.5 18.75L20.5 23.75L24.5 21.75L14.5 16.75Z" fill="#2A3140" shape-rendering="crispEdges"/><path d="M10 22L14 24L16.5 22.75L12.5 20.75Z" fill="#AEB8CA" shape-rendering="crispEdges"/><path d="M14 15L28 22L28 12L14 5Z" fill="#141922" shape-rendering="crispEdges"/><path d="M15 14.5L27 20.5L27 12.5L15 6.5Z" fill="#1C2E58" shape-rendering="crispEdges"/><path d="M28 22L29 21.5L29 11.5L28 12Z" fill="#58657A" shape-rendering="crispEdges"/><path d="M14 5L28 12L29 11.5L15 4.5Z" fill="#FFFFFF" shape-rendering="crispEdges"/><path d="M15 11h1v1h-1ZM16 12h1v1h-1ZM17 12h1v1h-1ZM18 13h1v1h-1ZM19 13h1v1h-1ZM19 12h1v1h-1ZM20 11h1v1h-1ZM20 10h1v1h-1ZM21 12h1v1h-1ZM21 13h1v1h-1ZM21 14h1v1h-1ZM21 15h1v1h-1ZM22 16h1v1h-1ZM22 17h1v1h-1ZM23 16h1v1h-1ZM23 15h1v1h-1ZM24 15h1v1h-1ZM25 16h1v1h-1ZM26 16h1v1h-1Z" fill="#9CC0FF" shape-rendering="crispEdges"/>
+  
+<g transform="scale(1)"><defs><mask id="debrief-fl32-32-am" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32"><rect width="32" height="32" fill="#000"/><rect x="4" y="6" width="24" height="16" rx="2" fill="#fff"/><rect x="6" y="8" width="20" height="12" rx="0.8" fill="#000"/><path d="M8.5 14.5L11.5 14.5L13.5 9.5L17.5 18.5L19.5 12.5L20.5 14.5L23.5 14.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="square" stroke-linejoin="round"/><rect x="2" y="24" width="28" height="2" rx="1" fill="#fff"/></mask></defs><g transform="translate(1 -1)"><rect width="32" height="32" fill="#10308A" opacity="0.4" mask="url(#debrief-fl32-32-am)" transform="translate(0 1)"/><rect width="32" height="32" fill="#FFFFFF" mask="url(#debrief-fl32-32-am)"/></g></g>
 </svg>

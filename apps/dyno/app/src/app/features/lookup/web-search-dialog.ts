@@ -6,6 +6,7 @@ import { Icon } from '../../shared/icon';
 import { LookupStore } from '../../state/lookup.store';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
+import { injectTrackLoad } from '@decryp7/paddock-ui/shell/store';
 
 /** The longest search text the engine accepts. */
 export const MAX_QUERY = 200;
@@ -56,6 +57,7 @@ export class WebSearchDialog implements DialogContent<true>, OnInit {
   /** Names the thing the search is about. */
   readonly subject = input('');
   protected readonly store = inject(LookupStore);
+  private readonly trackLoad = injectTrackLoad();
   protected readonly max = MAX_QUERY;
   protected readonly query = signal('');
   protected readonly hint = computed(() => {
@@ -74,10 +76,13 @@ export class WebSearchDialog implements DialogContent<true>, OnInit {
     { kind: 'answer', id: 'search', label: 'Search', role: 'primary', enabled: this.canSearch(), answer: () => this.search() },
   ]);
 
-  async ngOnInit(): Promise<void> {
+  ngOnInit(): void {
     this.store.reset();
-    await this.store.loadSeed(this.text());
-    this.query.set(this.store.seed()?.text ?? '');
+    // A pending task: the window is settled (sized to the text) only after the seed is read.
+    void this.trackLoad(async () => {
+      await this.store.loadSeed(this.text());
+      this.query.set(this.store.seed()?.text ?? '');
+    });
   }
 
   private async search(): Promise<true> {

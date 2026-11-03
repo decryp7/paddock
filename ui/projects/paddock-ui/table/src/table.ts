@@ -39,6 +39,7 @@ import {
   fitColumns,
   fromControl,
   groupItems,
+  groupKeys,
   inlineActions,
   menuActions,
   nextIndex,
@@ -738,6 +739,17 @@ export class PdTable<T> {
   protected onSort(e: Sort): void {
     this.sort.set(e.direction ? { key: e.active, direction: e.direction } : null);
   }
+  /** Opens every group of a `groupBy` table (the app's toolbar calls this; it does nothing without `groupBy`). */
+  expandAllGroups(): void {
+    this.collapsed.set(new Set());
+  }
+
+  /** Folds every group of a `groupBy` table down to its heading. */
+  collapseAllGroups(): void {
+    const key = this.groupBy();
+    if (key) this.collapsed.set(new Set(groupKeys(this.ordered(), this.columns().find((c) => c.key === key))));
+  }
+
   protected toggleGroup(key: string): void {
     this.collapsed.update((set) => {
       const next = new Set(set);

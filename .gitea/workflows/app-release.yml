@@ -96,6 +96,10 @@ on:
         description: "An app's own check of the built bundle: a script from the repository root, run on Linux and macOS after the installers are built with the bundle folder ($PADDOCK_BUILD_FOLDER/dist/bundle) as its argument (Dyno's run paths of the packaged binaries). Empty: none."
         type: string
         default: ""
+      windows-bundle-check:
+        description: "An app's own check of the built Windows binaries: a command run by bash on the Windows runner from the repository root after the installer is built, with the cargo profile folder ($PADDOCK_BUILD_FOLDER/dist, where the sidecars are built) appended as its last argument (Dyno: the PE subsystem of dyno-agent.exe and dyno.exe). Empty: none."
+        type: string
+        default: ""
       image:
         type: string
         default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -243,6 +247,19 @@ jobs:
         env:
           CHECK: ${{ inputs.bundle-check }}
         run: bash "$CHECK" "$PADDOCK_BUILD_FOLDER/dist/bundle"
+
+      # The built Windows binaries read as artifacts (ADR 0039), e.g. no console window for a program the login entry starts.
+      - name: The app's own Windows binary check
+        if: inputs.windows-bundle-check != '' && runner.os == 'Windows'
+        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          CHECK: ${{ inputs.windows-bundle-check }}
+        run: |
+          set -euo pipefail
+          echo "::group::windows binary check"
+          eval "$CHECK" "\"$PADDOCK_BUILD_FOLDER/dist\"" || { echo "::error::the Windows binary check failed (command: $CHECK); see the lines above"; exit 1; }
+          echo "::endgroup::"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and the app inside the
       # DMG, every sidecar started from the built app; the app is never started here.

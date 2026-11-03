@@ -76,6 +76,22 @@ describe('NetworkPage', () => {
     expect(f.nativeElement.querySelector('aside')).toBeNull();
   });
 
+  it('Collapse all folds every program and Expand all opens them again, and the fold is kept', async () => {
+    const { el, groups, rows, settle } = await open();
+    const total = rows().length;
+    const count = groups().length;
+    expect(count).toBeGreaterThan(1);
+    el.querySelector<HTMLButtonElement>('[data-testid=tree-collapse-all]')!.click();
+    await settle();
+    expect(groups().every((g) => g.getAttribute('aria-expanded') === 'false')).toBe(true);
+    expect(rows()).toHaveLength(count);
+    expect(JSON.parse(localStorage.getItem('dyno.networkCollapsed')!)).toHaveLength(count);
+    el.querySelector<HTMLButtonElement>('[data-testid=tree-expand-all]')!.click();
+    await settle();
+    expect(rows()).toHaveLength(total);
+    expect(JSON.parse(localStorage.getItem('dyno.networkCollapsed')!)).toEqual([]);
+  });
+
   it('Enter on a socket opens the details panel and Escape closes it', async () => {
     const { el, rows, press, settle } = await open();
     const item = rows().find((r) => !r.hasAttribute('aria-expanded'))!;

@@ -273,6 +273,88 @@ fn a_degraded_service_updates_its_one_message_in_place() {
 }
 
 #[test]
+fn dismiss_many_and_all_remove_what_the_window_sees_and_count_it() {
+    let (app, _) = app_with(Setup::new(vec![]).clock(Arc::new(FakeClock::at_wall_ms(1_000))));
+    let main = window(&app, "main");
+    let other = window(&app, "w-2");
+    let mk = |cause: &str, scope| {
+        NewNotice::new(cause, "liveAlert", NoticeSeverity::Error, cause, scope)
+    };
+    let a = post(
+        app.handle(),
+        Some("main"),
+        mk("live:a", NoticeScope::Project),
+        false,
+    )
+    .unwrap();
+    let b = post(
+        app.handle(),
+        Some("main"),
+        mk("live:b", NoticeScope::Project),
+        false,
+    )
+    .unwrap();
+    let c = post(
+        app.handle(),
+        Some("w-2"),
+        mk("live:c", NoticeScope::Project),
+        false,
+    )
+    .unwrap();
+    let count = |w: &_| {
+        invoke(w, "notifications_list", json!({})).unwrap()["notices"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    assert_eq!(count(&main), 2);
+    // An empty selection, an unknown id and another window's id remove nothing.
+    for ids in [json!([]), json!([987_654]), json!([c.id.0])] {
+        assert_eq!(
+            invoke(&main, "notifications_dismiss_many", json!({"ids": ids})).unwrap(),
+            0
+        );
+    }
+    assert_eq!(count(&main), 2);
+    assert_eq!(count(&other), 1);
+    assert_eq!(
+        invoke(
+            &main,
+            "notifications_dismiss_many",
+            json!({"ids": [a.id.0, a.id.0, 987_654]})
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(count(&main), 1);
+    let too_many: Vec<u64> = (0..1001).collect();
+    let e = invoke(
+        &main,
+        "notifications_dismiss_many",
+        json!({"ids": too_many}),
+    )
+    .unwrap_err();
+    assert_eq!(e["code"], "invalid");
+    let seen = b.id.0;
+    let late = post(
+        app.handle(),
+        Some("main"),
+        mk("live:late", NoticeScope::Project),
+        false,
+    )
+    .unwrap();
+    let all =
+        |up_to: u64| invoke(&main, "notifications_dismiss_all", json!({"upTo": up_to})).unwrap();
+    assert_eq!(all(seen), 1, "only what was seen");
+    assert_eq!(count(&main), 1, "the message that arrived meanwhile stays");
+    assert_eq!(all(late.id.0), 1);
+    assert_eq!(all(late.id.0), 0);
+    assert_eq!(count(&main), 0);
+    assert_eq!(count(&other), 1, "another window's messages stay");
+    let _ = b;
+}
+
+#[test]
 fn commands_list_mark_dismiss_and_restore_through_ipc_and_dialogs_see_their_host() {
     let (app, _) = app_with(Setup::new(vec![]).clock(Arc::new(FakeClock::at_wall_ms(1_000))));
     let main = window(&app, "main");

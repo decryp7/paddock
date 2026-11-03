@@ -13,6 +13,8 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
+- **Research profile:** clearing the kept research profile right after the AI browser closed no longer fails with "in use"
+- **Process monitor:** a new run's live charts wait until its output is open instead of briefly charting the earlier runs; when the output cannot be opened the panel and the monitor say so, and a failed first load stays shown until you retry
 
 ## 1.1.1 (2026-10-24)
 

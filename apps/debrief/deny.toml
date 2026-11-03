@@ -16,6 +16,10 @@ ignore = [
   { id = "RUSTSEC-2026-0391", reason = "zstd 0.13 via parquet 58; removed by the DuckDB 2 migration" },
   { id = "RUSTSEC-2026-0398", reason = "zstd-safe 7 via parquet 58; removed by the DuckDB 2 migration" },
   { id = "RUSTSEC-2026-0403", reason = "zstd-safe 7 via parquet 58; removed by the DuckDB 2 migration" },
+  # Time-boxed (2026-11-03, expires with Debrief 1.2.0): thrift 0.17 is parquet 58's (fixed in thrift >= 0.23, but parquet
+  # 58 requires ^0.17; parquet 60 drops thrift yet needs arrow 60, which cannot meet duckdb 1.x's arrow 58). Debrief reads
+  # only Parquet files it wrote itself. The DuckDB 2 migration (arrow 60 + parquet 60) removes thrift and this entry.
+  { id = "RUSTSEC-2026-0435", reason = "thrift 0.17 via parquet 58 (own files only); removed by the DuckDB 2 migration, before Debrief 1.2.0" },
 ]
 
 [licenses]

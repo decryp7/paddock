@@ -1,4 +1,5 @@
 import type { BaselineItem, BaselineOverview, BaselineStrength } from '../../core/api.types';
+import { formatClock, formatDate, formatDayTime } from '../../shared/format';
 
 /** Most unusual items the dashboard card lists. */
 export const MAX_UNUSUAL = 4;
@@ -28,6 +29,21 @@ export const itemName = (i: BaselineItem): string => (i.subject === 'System' ? i
 export function normalLine(o: BaselineOverview, unusualCount: number): string | null {
   const l = o.learning;
   if (l === 'off') return null;
-  if ('learning' in l) return `Learning what is normal for this computer: day ${Math.max(1, l.learning.daysDone)} of ${l.learning.daysNeeded}`;
+  if ('learning' in l) {
+    // The engine counts local calendar days from the first sighting (day 1 is the day Dyno first ran); learning also waits
+    // for the full hours, so on the last day the line says when it ends, and on the day after the period (the engine's
+    // day past daysNeeded, under a day) it says "almost done" instead of repeating the last day.
+    const { day, daysNeeded, since, readyAt } = l.learning;
+    const lead = 'Learning what is normal for this computer:';
+    if (readyAt !== null && day > daysNeeded) return `${lead} almost done · ready ${when(readyAt, o.at)}`;
+    const head = `${lead} day ${day} of ${daysNeeded}`;
+    if (readyAt !== null && day === daysNeeded) return `${head} · ready ${when(readyAt, o.at)}`;
+    return since === null ? head : `${head}, since ${formatDate(since, o.at)}`;
+  }
   return unusualCount === 0 ? 'Everything looks usual for this time of the week' : null;
+}
+
+/** "at 20:00" when `at` is on `now`'s local date, else "Mon 20:00". */
+function when(at: number, now: number): string {
+  return new Date(at).toDateString() === new Date(now).toDateString() ? `at ${formatClock(at)}` : formatDayTime(at);
 }

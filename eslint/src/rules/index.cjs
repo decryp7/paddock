@@ -7,6 +7,7 @@ module.exports = {
   'no-zone': require('./no-zone.cjs'),
   'effect-state': require('./effect-state.cjs'),
   'signal-read-before-await': require('./signal-read-before-await.cjs'),
+  'dialog-load-tracked': require('./dialog-load-tracked.cjs'),
   'store-rules': require('./store-rules.cjs'),
   'no-raw-style-values': require('./no-raw-style-values.cjs'),
   ...templateRules,

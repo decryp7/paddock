@@ -42,6 +42,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "mcp_save",
     "menu_set",
     "notifications_dismiss",
+    "notifications_dismiss_all",
+    "notifications_dismiss_many",
     "notifications_list",
     "notifications_mark_all_read",
     "notifications_mark_read",

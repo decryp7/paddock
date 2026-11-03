@@ -2,7 +2,7 @@
 // app-release.yml. The steps are read out of the workflow with parseSteps and run for real in a scratch repository.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -164,4 +164,72 @@ test('an origin that cannot be reached fails loudly and blames the tag listing, 
 
 test('the workflow does not fetch tags (the full history behind every tag)', () => {
   assert.doesNotMatch(failFastStep.run, /git fetch/);
+});
+
+// The awk program must read the same under mawk (Ubuntu's default awk), gawk and BSD awk. Every awk found on this machine
+// runs the script on a fixture with link references; a bracket expression that holds ']' (`[^]]`, mawk and old BSD awks
+// differ on it) is rejected by a lint of the script itself.
+const awks = [];
+for (const name of ['awk', 'mawk', 'gawk', 'original-awk', 'nawk', 'busybox']) {
+  const found = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
+  if (found && !awks.some((a) => a.real === found)) awks.push({ name, real: found });
+}
+
+for (const awk of awks) {
+  test(`first-release-notes.sh gives the same section under ${awk.name} (${awk.real})`, () => {
+    const shim = join(scratch, `awk-${awk.name}`);
+    mkdirSync(shim, { recursive: true });
+    const target = awk.name === 'busybox' ? `#!/bin/sh\nexec ${awk.real} awk "$@"\n` : `#!/bin/sh\nexec ${awk.real} "$@"\n`;
+    writeFileSync(join(shim, 'awk'), target);
+    chmodSync(join(shim, 'awk'), 0o755);
+    const dir = repo(GOOD + '\n[unreleased]: https://example.invalid/u\n');
+    const r = spawnSync('bash', ['-c', notesStep.run], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${shim}:${bin}:${process.env.PATH}`, FIRST_CHANGELOG: 'CHANGELOG.md', TAG: 'dyno-v1.0.0', PREFIX: 'dyno-', CONFIG: '', PATHS: '' },
+    });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.equal(notes(dir), '\n### Added\n\n- Dyno measures.\n- It explains.\n');
+  });
+}
+
+test('the CI shell scripts have no awk bracket expression that holds a closing bracket', () => {
+  const dirs = ['conformance/ci', 'scripts'];
+  const bad = [];
+  const walk = (rel) => {
+    for (const e of readdirSync(join(PADDOCK, rel), { withFileTypes: true })) {
+      const p = join(rel, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.sh')) {
+        readFileSync(join(PADDOCK, p), 'utf8').split('\n').forEach((line, i) => {
+          if (/\[\^\]/.test(line)) bad.push(`${p}:${i + 1}`);
+        });
+      }
+    }
+  };
+  dirs.forEach(walk);
+  assert.deepEqual(bad, []);
+});
+
+test('the script logs its awk, file, heading line and section size on stderr, and the first lines of an empty section', () => {
+  const ok = run(notesStep, repo(GOOD));
+  assert.match(ok.stderr, /first-release-notes: awk='.*' changelog=CHANGELOG\.md bytes=\d+ sha256=[0-9a-f]{64} heading_line=3/);
+  assert.match(ok.stderr, /section lines=\d+ bytes=\d+/);
+  const bad = run(notesStep, repo('## [1.0.0] - 2026-11-01\n\n[1.0.0]: https://example.invalid/a\n## [0.9.0] - x\n'));
+  assert.match(bad.stderr + bad.stdout, /is empty/);
+  assert.match(bad.stderr, /first 3 lines after the heading:\n  \| \n  \| \[1\.0\.0\]: https/);
+});
+
+// ER-11: a section larger than a pipe buffer (64 KB). `printf "$section" | grep -q` under pipefail lost a SIGPIPE race on it
+// and reported a non-empty section as empty (the first Dyno release); the script now matches without a pipe.
+test('a section larger than 64 KB is not reported empty (no pipe-fed grep -q under pipefail)', () => {
+  const bullets = Array.from({ length: 1500 }, (_, i) => `- Item ${i}: ${'x'.repeat(60)}`).join('\n');
+  const big = `## [1.0.0] - 2026-11-01\n\n${bullets}\n\n## [0.9.0] - x\n- older\n`;
+  assert.ok(big.length > 100 * 1024);
+  for (let i = 0; i < 5; i++) {
+    const dir = repo(big);
+    const r = run(notesStep, dir);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.ok(notes(dir).length > 64 * 1024);
+  }
 });

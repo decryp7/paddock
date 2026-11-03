@@ -178,6 +178,28 @@ export const NotificationsStore = signalStore(
         else await call(() => backend.dismiss(id));
       },
 
+      /** Removes the listed messages from the centre (and their toasts); ids the engine does not know are ignored. */
+      async dismissMany(ids: readonly number[]): Promise<void> {
+        if (!ids.length) return;
+        const drop = new Set(ids);
+        const gone = new Set(store.all().filter((n) => drop.has(n.id)).map((n) => n.cause));
+        patchState(store, (s) => ({ toasts: s.toasts.filter((t) => !gone.has(t.cause)), local: s.local.filter((l) => !drop.has(l.id)) }));
+        const engine = ids.filter((id) => !isLocal(id));
+        if (engine.length) await call(() => backend.dismissMany(engine));
+      },
+
+      /**
+       * Removes the messages `seen` names (the whole list as the user saw it when asking): one that arrived since stays. The
+       * engine takes the highest id it knows of and removes everything up to it.
+       */
+      async dismissAll(seen: readonly number[]): Promise<void> {
+        const drop = new Set(seen);
+        const gone = new Set(store.all().filter((n) => drop.has(n.id)).map((n) => n.cause));
+        patchState(store, (s) => ({ local: s.local.filter((l) => !drop.has(l.id)), toasts: s.toasts.filter((t) => !gone.has(t.cause)) }));
+        const engine = seen.filter((id) => !isLocal(id));
+        if (engine.length) await call(() => backend.dismissAll(Math.max(...engine)));
+      },
+
       /** The toast of `cause` goes (dismissed, or its time ran out); the message stays in the centre. */
       dismissToast,
 

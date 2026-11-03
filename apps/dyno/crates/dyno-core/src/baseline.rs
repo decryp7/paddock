@@ -8,7 +8,7 @@
 
 use crate::hardware::Confidence;
 use crate::stats::{median, quantile};
-use crate::time::{to_local, LocalZone, Timestamp, DAY, HOUR};
+use crate::time::{from_local, local_epoch_day, to_local, LocalZone, Timestamp, DAY, HOUR};
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -150,33 +150,61 @@ pub enum Learning {
     Off,
     /// Still collecting; nothing is highlighted yet.
     Learning {
-        /// Whole days seen so far.
-        days_done: u32,
+        /// Today's number in the learning, by local calendar day: 1 on the day Dyno first saw this machine, 2 the next
+        /// day, whether or not the computer was on in between. It is `days_needed + 1` on the calendar day after the
+        /// period when the full hours are not reached yet (until `ready_at`, under a day later), so no day number lasts
+        /// longer than a local day.
+        day: u32,
         /// Days needed.
         days_needed: u32,
+        /// When Dyno first saw this machine (none when the store could not say).
+        since: Option<Timestamp>,
+        /// When learning ends: the later of the end of the last learning day and the full hours since `since` (none
+        /// without `since`).
+        ready_at: Option<Timestamp>,
     },
     /// Ready to judge.
     Ready {
-        /// Days of history behind the baselines.
+        /// Complete local days behind the baselines.
         days: u32,
     },
 }
 
-/// The learning state from when Dyno first saw this machine.
-pub fn learning_status(settings: &BaselineSettings, first_seen: Option<Timestamp>, now: Timestamp) -> Learning {
+/// The learning state from when Dyno first saw this machine, by the rule [`learning_days`] describes.
+pub fn learning_status(settings: &BaselineSettings, first_seen: Option<Timestamp>, now: Timestamp, zone: &dyn LocalZone) -> Learning {
     if !settings.enabled {
         return Learning::Off;
     }
     let needed = settings.clamped().learning_days;
-    let days = first_seen.map_or(0, |f| (now.since(f).max(0) / DAY) as u32);
-    if days >= needed {
-        Learning::Ready { days }
-    } else {
-        Learning::Learning {
-            days_done: days,
+    let done = first_seen.map_or(0, |f| learning_days(f, now, zone));
+    let ready_at = first_seen.map(|f| ready_time(f, needed, zone));
+    match ready_at {
+        Some(r) if now >= r => Learning::Ready { days: done },
+        _ => Learning::Learning {
+            day: done.saturating_add(1),
             days_needed: needed,
-        }
+            since: first_seen,
+            ready_at,
+        },
     }
+}
+
+/// The rule, for the logs.
+pub const LEARNING_RULE: &str = "local calendar days since first seen, and at least that many times 24 hours";
+
+/// When learning `needed` days from `first_seen` ends: both `needed` complete local days and `needed` times 24 hours have
+/// passed. The hours decide unless a clock change moved the local day boundary past them.
+pub fn ready_time(first_seen: Timestamp, needed: u32, zone: &dyn LocalZone) -> Timestamp {
+    let hours = first_seen.plus(i64::from(needed) * DAY);
+    let days = from_local((local_epoch_day(first_seen, zone) + i64::from(needed)) * DAY, zone);
+    hours.max(days)
+}
+
+/// Complete local calendar days since `first_seen`: 0 on the first day, 1 from the next local midnight on, whatever the
+/// computer did in between (asleep, off, restarted). A clock set back before the first sighting counts 0.
+pub fn learning_days(first_seen: Timestamp, now: Timestamp, zone: &dyn LocalZone) -> u32 {
+    let days = local_epoch_day(now, zone) - local_epoch_day(first_seen, zone);
+    u32::try_from(days.max(0)).unwrap_or(u32::MAX)
 }
 
 /// Robust centre and spread of a slot.
@@ -615,33 +643,52 @@ mod tests {
         let s = BaselineSettings::default();
         let first = at(0, 0);
         assert_eq!(
-            learning_status(&s, Some(first), at(3, 0)),
+            learning_status(&s, Some(first), at(3, 0), UTC),
             Learning::Learning {
-                days_done: 3,
-                days_needed: 7
+                day: 4,
+                days_needed: 7,
+                since: Some(first),
+                ready_at: Some(at(7, 0))
             }
         );
-        assert_eq!(learning_status(&s, Some(first), at(7, 1)), Learning::Ready { days: 7 });
+        assert_eq!(learning_status(&s, Some(first), at(7, 1), UTC), Learning::Ready { days: 7 });
         assert_eq!(
-            learning_status(&s, None, at(7, 1)),
+            learning_status(&s, None, at(7, 1), UTC),
             Learning::Learning {
-                days_done: 0,
-                days_needed: 7
+                day: 1,
+                days_needed: 7,
+                since: None,
+                ready_at: None
             }
         );
+        // Late on the first day, then just after the next local midnight: a new day, though under an hour has passed.
+        let late = first.plus(23 * HOUR + 30 * crate::time::MINUTE);
+        assert_eq!(learning_days(late, late.plus(HOUR), UTC), 1);
+        assert_eq!(learning_days(late, late, UTC), 0);
+        // Both conditions: a start late in the day waits for the hours, a start just after midnight in a week that ends
+        // with the clocks set back waits for the local midnight.
+        assert_eq!(ready_time(late, 7, UTC), late.plus(7 * DAY));
+        assert_eq!(ready_time(first, 7, UTC), at(7, 0));
+        // The day follows the zone, not UTC: 20:00 UTC is already the next day at UTC+8.
+        let zone = crate::time::FixedZone(480);
+        assert_eq!(learning_days(first.plus(10 * HOUR), first.plus(20 * HOUR), &zone), 1);
+        assert_eq!(learning_days(first.plus(10 * HOUR), first.plus(20 * HOUR), UTC), 0);
         let long = BaselineSettings { learning_days: 99, ..s };
         assert_eq!(long.clamped().learning_days, 30);
         assert_eq!(BaselineSettings { learning_days: 0, ..s }.clamped().learning_days, 1);
         assert_eq!(
-            learning_status(&BaselineSettings { enabled: false, ..s }, Some(first), at(30, 0)),
+            learning_status(&BaselineSettings { enabled: false, ..s }, Some(first), at(30, 0), UTC),
             Learning::Off
         );
-        // A clock that moved backwards after the first run learns for the full period again, never negative.
+        // Now before the first sighting (a clock set back since): day 1, never negative, and ready a full period after the
+        // sighting. The agent moves a sighting more than a day in the future back to now at start (`baselines::on_start`).
         assert_eq!(
-            learning_status(&s, Some(at(10, 0)), at(0, 0)),
+            learning_status(&s, Some(at(10, 0)), at(0, 0), UTC),
             Learning::Learning {
-                days_done: 0,
-                days_needed: 7
+                day: 1,
+                days_needed: 7,
+                since: Some(at(10, 0)),
+                ready_at: Some(at(17, 0))
             }
         );
     }

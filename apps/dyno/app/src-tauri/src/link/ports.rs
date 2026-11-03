@@ -53,6 +53,10 @@ pub trait Launcher: Send + Sync {
     fn close(&self) {}
     /// Waits briefly for the process this launcher started to exit (after `Shutdown`), ending it when it does not.
     fn finish(&self, wait: Duration);
+    /// How it starts the agent, for the log (rule 56): `child` (the app's own child process) or `launchd` (a launchd job).
+    fn via(&self) -> &'static str {
+        "child"
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -101,7 +105,7 @@ impl Slot {
 
 /// A held child that has not exited: stopped when the OS says so ([`liveness_of`]), else running. The launcher holds the process
 /// unreaped, so the pid names it reliably (rule 53) and its identity is taken from the live process.
-fn running_or_stopped(pid: u32) -> Child {
+pub(crate) fn running_or_stopped(pid: u32) -> Child {
     match ProcessId::of(pid).map(|id| liveness_of(id, None)) {
         Some(Liveness::Paused) => Child::Stopped { pid },
         _ => Child::Running { pid },
@@ -188,6 +192,24 @@ impl Launcher for ProcessLauncher {
     }
 }
 
+/// How the app starts its own agent (when no login service runs one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchRoute {
+    /// As a launchd job (macOS): macOS 27 shows the app's own child only its own sockets (Dyno ADR 0026).
+    Launchd,
+    /// As the app's own child process (Linux, Windows).
+    Child,
+}
+
+/// The route for an OS name (`std::env::consts::OS`).
+pub fn launch_route(os: &str) -> LaunchRoute {
+    if os == "macos" {
+        LaunchRoute::Launchd
+    } else {
+        LaunchRoute::Child
+    }
+}
+
 /// The agent program to start: `DYNO_AGENT_BIN` when set and valid (development), else `dyno-agent` next to the app
 /// (where Tauri puts the sidecar). An empty file is the build's placeholder and counts as missing.
 pub fn agent_exe(app_exe: &std::path::Path, env_override: Option<&std::ffi::OsStr>) -> Result<std::path::PathBuf, String> {
@@ -268,8 +290,7 @@ pub fn look(
         let found = Discovery::read(&dirs.discovery());
         let hint = found.as_ref().map(|d| hint_of(d, app_version));
         let lock = lock.then(|| {
-            // One check: the machine judges the lock over its looks, so a look never waits on a re-check (CI run 7257).
-            if dyno_agent::instance::is_held_now(dirs) {
+            if dyno_agent::instance::is_held(dirs) {
                 LockSeen::Held
             } else {
                 LockSeen::Free

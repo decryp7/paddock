@@ -86,6 +86,11 @@ pub trait System: Send {
     fn read(&mut self, path: &Path) -> std::io::Result<String>;
     /// Writes a file atomically, creating its folder.
     fn write(&mut self, path: &Path, text: &str) -> std::io::Result<()>;
+    /// [`write`](Self::write) for a file only its owner may read or change (0600 on Unix): a job definition launchd loads.
+    /// The default writes like `write` (a fake keeps its files in memory).
+    fn write_private(&mut self, path: &Path, text: &str) -> std::io::Result<()> {
+        self.write(path, text)
+    }
     /// Removes a file; a missing file is `NotFound`.
     fn remove(&mut self, path: &Path) -> std::io::Result<()>;
     /// Whether `path` is a non-empty file (a build placeholder is empty).

@@ -1110,6 +1110,58 @@ Denies the notifications_dismiss command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-notifications-dismiss-all`
+
+</td>
+<td>
+
+Enables the notifications_dismiss_all command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-notifications-dismiss-all`
+
+</td>
+<td>
+
+Denies the notifications_dismiss_all command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-notifications-dismiss-many`
+
+</td>
+<td>
+
+Enables the notifications_dismiss_many command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-notifications-dismiss-many`
+
+</td>
+<td>
+
+Denies the notifications_dismiss_many command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-notifications-list`
 
 </td>

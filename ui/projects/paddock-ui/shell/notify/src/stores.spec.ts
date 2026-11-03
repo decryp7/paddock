@@ -129,6 +129,12 @@ class FailingCentre extends NotificationsBackend {
   dismiss(): Promise<boolean> {
     return Promise.reject(new Error('no'));
   }
+  dismissMany(): Promise<number> {
+    return Promise.reject(new Error('no'));
+  }
+  dismissAll(_upTo: number): Promise<number> {
+    return Promise.reject(new Error('no'));
+  }
   postNotice(): Promise<Notice> {
     return Promise.reject(new Error('the centre is gone'));
   }
@@ -285,6 +291,33 @@ describe('NotificationsStore', () => {
     await store.markAllRead();
     await store.dismiss(b.id);
     expect(store.all().map((n) => n.title)).toEqual(['A']);
+  });
+
+  it('deletes a selection and then everything, local messages included, with their toasts', async () => {
+    const { centre } = notifyBed();
+    const store = TestBed.inject(NotificationsStore);
+    await settle();
+    const a = centre.post({ cause: 'a', source: 's', severity: 'info', title: 'A' });
+    const b = centre.post({ cause: 'b', source: 's', severity: 'info', title: 'B' });
+    centre.post({ cause: 'c', source: 's', severity: 'info', title: 'C' });
+    await store.post({ level: 'info', message: 'Mine' });
+    await settle();
+    const local = store.all().find((n) => n.title === 'Mine')!;
+    await store.dismissMany([]);
+    expect(store.all()).toHaveLength(4);
+    await store.dismissMany([a.id, b.id, local.id, 12345]);
+    expect(store.all().map((n) => n.title)).toEqual(['C']);
+    expect(store.toasts().map((t) => t.title)).toEqual(['C']);
+    const seen = store.all().map((n) => n.id);
+    const late = centre.post({ cause: 'late', source: 's', severity: 'info', title: 'Late' });
+    await store.dismissAll(seen);
+    await settle();
+    expect(store.all().map((n) => n.title)).toEqual(['Late']);
+    expect(store.toasts().map((t) => t.title)).toEqual(['Late']);
+    await store.dismissAll([late.id]);
+    await store.dismissAll([]);
+    await settle();
+    expect(store.all()).toEqual([]);
   });
 
   it('an OS notification click focuses its message', async () => {
