@@ -1,0 +1,3276 @@
+{
+ "_comment": "Known timing sites of ADR 0041 / C71, by file and hash of the normalised line (line is for reading only). May only shrink; migrate a site by waiting on the condition and delete its entry.",
+ "expires": "2027-04-30",
+ "sites": [
+  {
+   "file": "apps/debrief/app/e2e/activity-errors.e2e.ts",
+   "line": 49,
+   "hash": "3dc7b574344af5e8"
+  },
+  {
+   "file": "apps/debrief/app/e2e/activity-report.e2e.ts",
+   "line": 19,
+   "hash": "1133341f068e0f3a"
+  },
+  {
+   "file": "apps/debrief/app/e2e/app.ts",
+   "line": 44,
+   "hash": "1ca8abafcfaa7000"
+  },
+  {
+   "file": "apps/debrief/app/e2e/axe.ts",
+   "line": 13,
+   "hash": "f5b8ce0b51942fe9"
+  },
+  {
+   "file": "apps/debrief/app/e2e/browser-scripts.e2e.ts",
+   "line": 154,
+   "hash": "bb92dac1c07fac8b"
+  },
+  {
+   "file": "apps/debrief/app/e2e/dock-default-split.e2e.ts",
+   "line": 11,
+   "hash": "2b77a4cedf954d66"
+  },
+  {
+   "file": "apps/debrief/app/e2e/dock-float.e2e.ts",
+   "line": 159,
+   "hash": "df1ed6aaf4310034"
+  },
+  {
+   "file": "apps/debrief/app/e2e/dock-panels.e2e.ts",
+   "line": 45,
+   "hash": "4edc13f2277d3a67"
+  },
+  {
+   "file": "apps/debrief/app/e2e/error-snapshots.e2e.ts",
+   "line": 13,
+   "hash": "17cb6cf49dfdd8f8"
+  },
+  {
+   "file": "apps/debrief/app/e2e/home-narrow.e2e.ts",
+   "line": 25,
+   "hash": "27f38a8ce590d2bf"
+  },
+  {
+   "file": "apps/debrief/app/e2e/i18n-pseudo.e2e.ts",
+   "line": 75,
+   "hash": "f98d49048bc13eb5"
+  },
+  {
+   "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
+   "line": 31,
+   "hash": "76f566c13a340666"
+  },
+  {
+   "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
+   "line": 157,
+   "hash": "124cb5498dd4d240"
+  },
+  {
+   "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
+   "line": 169,
+   "hash": "e1fd20482c6b752c"
+  },
+  {
+   "file": "apps/debrief/app/e2e/metrics.e2e.ts",
+   "line": 13,
+   "hash": "d91c7dc795233dbd"
+  },
+  {
+   "file": "apps/debrief/app/e2e/metrics.e2e.ts",
+   "line": 14,
+   "hash": "fa3ecdbdc7756fba"
+  },
+  {
+   "file": "apps/debrief/app/e2e/native-feel.e2e.ts",
+   "line": 116,
+   "hash": "27323be34a0005e1"
+  },
+  {
+   "file": "apps/debrief/app/e2e/navigation-history.e2e.ts",
+   "line": 23,
+   "hash": "23168f3397fdadfa"
+  },
+  {
+   "file": "apps/debrief/app/e2e/store-pane.e2e.ts",
+   "line": 47,
+   "hash": "76f566c13a340666"
+  },
+  {
+   "file": "apps/debrief/app/e2e/tools-monitor-charts.e2e.ts",
+   "line": 58,
+   "hash": "008ef4ffa34e854e"
+  },
+  {
+   "file": "apps/debrief/app/e2e/ux-home.e2e.ts",
+   "line": 66,
+   "hash": "bb92dac1c07fac8b"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/activity/report.rs",
+   "line": 916,
+   "hash": "5b49960b70255439"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
+   "line": 110,
+   "hash": "5b36266b30c02e39"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
+   "line": 239,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
+   "line": 1026,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
+   "line": 1031,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
+   "line": 1140,
+   "hash": "5b36266b30c02e39"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests/pitwall.rs",
+   "line": 150,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests/update_checks.rs",
+   "line": 285,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/approvals.rs",
+   "line": 141,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/approvals.rs",
+   "line": 174,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 118,
+   "hash": "ae778574bba627a4"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 138,
+   "hash": "7526eefaa7da97c2"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 141,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 356,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 363,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 1015,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 1042,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/sessions.rs",
+   "line": 704,
+   "hash": "806c30c165057c76"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/config_store.rs",
+   "line": 389,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/dialog_windows.rs",
+   "line": 1114,
+   "hash": "9bd1c9f701701e50"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/dialog_windows.rs",
+   "line": 1126,
+   "hash": "9bd1c9f701701e50"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/dumps.rs",
+   "line": 714,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/dumps.rs",
+   "line": 843,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/health/commands/tests.rs",
+   "line": 288,
+   "hash": "3d5815373692ceed"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/health/hub/tests.rs",
+   "line": 110,
+   "hash": "4cad119e99fa6b8c"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 594,
+   "hash": "f004d13b567f94d3"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 963,
+   "hash": "421b7cec5c980f1f"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 1076,
+   "hash": "b7e19e0c8723bfb3"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 1121,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 1350,
+   "hash": "b7e19e0c8723bfb3"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/tests.rs",
+   "line": 273,
+   "hash": "d9c419ca60ddbc31"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/tests.rs",
+   "line": 297,
+   "hash": "cbc4d73b333a2312"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lib.rs",
+   "line": 1503,
+   "hash": "3d5815373692ceed"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 601,
+   "hash": "3355ccab621e0777"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 809,
+   "hash": "9f38707b0db4ca99"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 887,
+   "hash": "71828e6915248dfa"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 894,
+   "hash": "343b993c41d17c4d"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 901,
+   "hash": "8f2dc70f955d8e23"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 444,
+   "hash": "dc9182704fcc2674"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 613,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 648,
+   "hash": "1fa9f6f51d67343b"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 656,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 663,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 737,
+   "hash": "45ddea1acd767c2a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 828,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 912,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 917,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/logging.rs",
+   "line": 544,
+   "hash": "3d5815373692ceed"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/names.rs",
+   "line": 183,
+   "hash": "cdea33951a01099d"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/names.rs",
+   "line": 291,
+   "hash": "17bbcf6da9077e33"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/names.rs",
+   "line": 581,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/opener.rs",
+   "line": 415,
+   "hash": "4a1046787de4599e"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/profiling.rs",
+   "line": 690,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/query_cancel.rs",
+   "line": 327,
+   "hash": "1884950a19cc8266"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/search_everything.rs",
+   "line": 307,
+   "hash": "4cad119e99fa6b8c"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/snapshots.rs",
+   "line": 952,
+   "hash": "df443114a9da3e79"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/snapshots.rs",
+   "line": 973,
+   "hash": "df443114a9da3e79"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/startup_watchdog.rs",
+   "line": 247,
+   "hash": "50e8c3d16541ae4d"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/updater.rs",
+   "line": 454,
+   "hash": "d5081e91baec4666"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/updater.rs",
+   "line": 516,
+   "hash": "56d38352e67ebb58"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
+   "line": 619,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
+   "line": 791,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/watched.rs",
+   "line": 212,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/watched.rs",
+   "line": 478,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/watched.rs",
+   "line": 522,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/app/src/app/ai/chat/chat.store.spec.ts",
+   "line": 110,
+   "hash": "f1c0c2c8d8033d79"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/ql-suggestions.spec.ts",
+   "line": 15,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 20,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 261,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 289,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 293,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 297,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 301,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 313,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 321,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 329,
+   "hash": "7745d51511b46f92"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 368,
+   "hash": "70f143c28effce27"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 422,
+   "hash": "7a49582c912ad22f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 449,
+   "hash": "70f143c28effce27"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 504,
+   "hash": "7a49582c912ad22f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 520,
+   "hash": "a63fb919d3e46296"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 529,
+   "hash": "5e62b1c53b07c373"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 533,
+   "hash": "5e62b1c53b07c373"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 547,
+   "hash": "5e62b1c53b07c373"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 614,
+   "hash": "ea72249090b71aa1"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-field.spec.ts",
+   "line": 621,
+   "hash": "7a49582c912ad22f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/query-session.spec.ts",
+   "line": 10,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/search-field.spec.ts",
+   "line": 10,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/analysis/search-field.spec.ts",
+   "line": 198,
+   "hash": "70f143c28effce27"
+  },
+  {
+   "file": "apps/debrief/app/src/app/browser/browser-runtime.spec.ts",
+   "line": 11,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/browser/browser-runtime.spec.ts",
+   "line": 93,
+   "hash": "410135ff4cf53d15"
+  },
+  {
+   "file": "apps/debrief/app/src/app/browser/browser-runtime.spec.ts",
+   "line": 111,
+   "hash": "410135ff4cf53d15"
+  },
+  {
+   "file": "apps/debrief/app/src/app/browser/browser-runtime.spec.ts",
+   "line": 121,
+   "hash": "410135ff4cf53d15"
+  },
+  {
+   "file": "apps/debrief/app/src/app/context/context.spec.ts",
+   "line": 99,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/activity/coverage-guard.spec.ts",
+   "line": 26,
+   "hash": "71c8ba03aec8805d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/mock/mock-backend.spec.ts",
+   "line": 187,
+   "hash": "88cb7f34bcfcddf6"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/mock/mock-backend.spec.ts",
+   "line": 191,
+   "hash": "88cb7f34bcfcddf6"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/mock/mock-clock.spec.ts",
+   "line": 20,
+   "hash": "064af9f8fe17ec13"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/mock/mock-import.spec.ts",
+   "line": 117,
+   "hash": "c3c64a54418af077"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/mock/mock-import.spec.ts",
+   "line": 133,
+   "hash": "c3c64a54418af077"
+  },
+  {
+   "file": "apps/debrief/app/src/app/core/mock/mock-options.spec.ts",
+   "line": 57,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/debrief/app/src/app/diagnostics/diagnostics-report.spec.ts",
+   "line": 68,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/diagnostics/diagnostics.spec.ts",
+   "line": 191,
+   "hash": "64bbf516d7b23e4c"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dialog-windows/dialog-shell.spec.ts",
+   "line": 76,
+   "hash": "60d32527432c823a"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dialog-windows/dialog-shell.spec.ts",
+   "line": 153,
+   "hash": "38e036ad075a5d0e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dialog-windows/dialog-shell.spec.ts",
+   "line": 269,
+   "hash": "bd0f1f08913a6c7f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dialog-windows/dialog-shell.spec.ts",
+   "line": 299,
+   "hash": "38e036ad075a5d0e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dialog-windows/tauri-dialog-backend.spec.ts",
+   "line": 33,
+   "hash": "ba5233e83fdf412d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-features.spec.ts",
+   "line": 71,
+   "hash": "2454ad1645c30414"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-features.spec.ts",
+   "line": 245,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-features.spec.ts",
+   "line": 287,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-features.spec.ts",
+   "line": 297,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-features.spec.ts",
+   "line": 485,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-features.spec.ts",
+   "line": 488,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock-ui.spec.ts",
+   "line": 256,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 148,
+   "hash": "628214a9d96e0c24"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 167,
+   "hash": "628214a9d96e0c24"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 180,
+   "hash": "628214a9d96e0c24"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 322,
+   "hash": "4f3e06eaedfd6c11"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 338,
+   "hash": "628214a9d96e0c24"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 515,
+   "hash": "ca0e3af9da5eb923"
+  },
+  {
+   "file": "apps/debrief/app/src/app/dock/dock.spec.ts",
+   "line": 586,
+   "hash": "2454ad1645c30414"
+  },
+  {
+   "file": "apps/debrief/app/src/app/export/export.spec.ts",
+   "line": 66,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/export/export.spec.ts",
+   "line": 134,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/format/format-wizard.spec.ts",
+   "line": 50,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 419,
+   "hash": "2c9c3e44992adf7f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 432,
+   "hash": "ac61110a874b0754"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 493,
+   "hash": "2c9c3e44992adf7f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/inspector/context-section.spec.ts",
+   "line": 21,
+   "hash": "6e9fe115ccd1f72a"
+  },
+  {
+   "file": "apps/debrief/app/src/app/inspector/context-section.spec.ts",
+   "line": 174,
+   "hash": "6e9fe115ccd1f72a"
+  },
+  {
+   "file": "apps/debrief/app/src/app/inspector/context-section.spec.ts",
+   "line": 184,
+   "hash": "6e9fe115ccd1f72a"
+  },
+  {
+   "file": "apps/debrief/app/src/app/inspector/inspector.spec.ts",
+   "line": 154,
+   "hash": "c06b5cfb0d6320f6"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
+   "line": 55,
+   "hash": "00c57e832606ed62"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
+   "line": 58,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
+   "line": 102,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
+   "line": 114,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
+   "line": 135,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-report.spec.ts",
+   "line": 79,
+   "hash": "e7e53aa9f2717b3c"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/rules.spec.ts",
+   "line": 221,
+   "hash": "5ed9deef8e1afb51"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/marker-editor.spec.ts",
+   "line": 29,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/regex/regex.spec.ts",
+   "line": 109,
+   "hash": "cc501dc96ff7a6de"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/regex/regex.spec.ts",
+   "line": 128,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/regex/regex.spec.ts",
+   "line": 132,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/metrics/metrics.spec.ts",
+   "line": 315,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/metrics/metrics.spec.ts",
+   "line": 347,
+   "hash": "7a49582c912ad22f"
+  },
+  {
+   "file": "apps/debrief/app/src/app/plugins/registry/registry.spec.ts",
+   "line": 214,
+   "hash": "c06b5cfb0d6320f6"
+  },
+  {
+   "file": "apps/debrief/app/src/app/popout/drag-ghost-session.spec.ts",
+   "line": 27,
+   "hash": "ba5233e83fdf412d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/popout/popout-shell.spec.ts",
+   "line": 162,
+   "hash": "04921d8fdbaf8b3b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/popout/sync-port.spec.ts",
+   "line": 105,
+   "hash": "aeba29067229eadc"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/pipeline-editor.spec.ts",
+   "line": 19,
+   "hash": "9aec2f9f031a11de"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/profile.spec.ts",
+   "line": 45,
+   "hash": "9aec2f9f031a11de"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/profile.spec.ts",
+   "line": 331,
+   "hash": "aecc6c0327bf078d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/profile.spec.ts",
+   "line": 381,
+   "hash": "aecc6c0327bf078d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/profile.spec.ts",
+   "line": 388,
+   "hash": "aecc6c0327bf078d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/compare/compare-view.spec.ts",
+   "line": 29,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/compare/compare-view.spec.ts",
+   "line": 119,
+   "hash": "5785ba4b38226573"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/compare/compare-view.spec.ts",
+   "line": 124,
+   "hash": "5785ba4b38226573"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/flame/flame-view.spec.ts",
+   "line": 26,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/flame/flame-view.spec.ts",
+   "line": 105,
+   "hash": "5785ba4b38226573"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/heap/heap-views.spec.ts",
+   "line": 54,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/heap/heap-views.spec.ts",
+   "line": 246,
+   "hash": "5785ba4b38226573"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/heap/heap-views.spec.ts",
+   "line": 251,
+   "hash": "5785ba4b38226573"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/hotspots/hotspots-view.spec.ts",
+   "line": 105,
+   "hash": "1dffae7158ab6eda"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/hotspots/hotspots-view.spec.ts",
+   "line": 115,
+   "hash": "1dffae7158ab6eda"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/hotspots/hotspots-view.spec.ts",
+   "line": 202,
+   "hash": "04921d8fdbaf8b3b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/hotspots/hotspots-view.spec.ts",
+   "line": 208,
+   "hash": "1dffae7158ab6eda"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/hotspots/hotspots-view.spec.ts",
+   "line": 245,
+   "hash": "04921d8fdbaf8b3b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/profiling-shared.spec.ts",
+   "line": 92,
+   "hash": "6b5ebe634d627450"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/profiling-shared.spec.ts",
+   "line": 95,
+   "hash": "6d81f5d148782976"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/tree/call-tree-view.spec.ts",
+   "line": 207,
+   "hash": "ac61110a874b0754"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profiling/tree/call-tree-view.spec.ts",
+   "line": 213,
+   "hash": "ac61110a874b0754"
+  },
+  {
+   "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
+   "line": 352,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
+   "line": 586,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
+   "line": 591,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
+   "line": 596,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/debrief/app/src/app/settings/parsers/parser-editor.spec.ts",
+   "line": 35,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redacted-copy/redacted-copy.spec.ts",
+   "line": 153,
+   "hash": "901465101d00d956"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 32,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 109,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 123,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 128,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 148,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 176,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 181,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 205,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/redaction/redaction.spec.ts",
+   "line": 224,
+   "hash": "c859e41bfd3d6721"
+  },
+  {
+   "file": "apps/debrief/app/src/app/timeline/timeline-panel-instances.spec.ts",
+   "line": 158,
+   "hash": "77549dca0ca1fc21"
+  },
+  {
+   "file": "apps/debrief/app/src/app/timeline/timeline-panel.spec.ts",
+   "line": 254,
+   "hash": "3107a0efa167e54b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/timeline/timeline-panel.spec.ts",
+   "line": 261,
+   "hash": "3107a0efa167e54b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/timeline/timeline-parts.spec.ts",
+   "line": 109,
+   "hash": "6bd92055ce7d9ab0"
+  },
+  {
+   "file": "apps/debrief/app/src/app/tools/eventlog/eventlog.spec.ts",
+   "line": 24,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/debrief/app/src/app/tools/eventlog/eventlog.spec.ts",
+   "line": 185,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/debrief/app/src/app/ui/ui.spec.ts",
+   "line": 149,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/debrief/app/src/app/ui/ui.spec.ts",
+   "line": 154,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/debrief/app/src/app/undo/integration.spec.ts",
+   "line": 169,
+   "hash": "dda583ba323cf35b"
+  },
+  {
+   "file": "apps/debrief/app/src/app/updates/updates.spec.ts",
+   "line": 29,
+   "hash": "b9167ac49efc8d89"
+  },
+  {
+   "file": "apps/debrief/app/src/app/watched/watched-folders.spec.ts",
+   "line": 40,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/debrief/app/src/app/workspace/filter-bar.spec.ts",
+   "line": 50,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/workspace/filter-bar.spec.ts",
+   "line": 54,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/workspace/filter-bar.spec.ts",
+   "line": 75,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/workspace/filter-bar.spec.ts",
+   "line": 85,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "apps/debrief/app/src/app/workspace/filter-bar.spec.ts",
+   "line": 222,
+   "hash": "04921d8fdbaf8b3b"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
+   "line": 331,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
+   "line": 365,
+   "hash": "090f4447a438ed17"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
+   "line": 404,
+   "hash": "729f1be381f6f5cc"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
+   "line": 416,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
+   "line": 491,
+   "hash": "89e6fd80a40cc1bc"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
+   "line": 74,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
+   "line": 99,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
+   "line": 115,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-agent/src/agent/tests.rs",
+   "line": 79,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-agent/src/agent/tests.rs",
+   "line": 199,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai-worker/src/http.rs",
+   "line": 387,
+   "hash": "42e24ddec41c190f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai-worker/tests/it/server_backend.rs",
+   "line": 239,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai-worker/tests/it/server_backend.rs",
+   "line": 290,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
+   "line": 405,
+   "hash": "42e24ddec41c190f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
+   "line": 500,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
+   "line": 50,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
+   "line": 186,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
+   "line": 335,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
+   "line": 380,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/models/source.rs",
+   "line": 189,
+   "hash": "b0ff37dd5053b132"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/common/mod.rs",
+   "line": 142,
+   "hash": "f9061bf2ad5b89ad"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/common/mod.rs",
+   "line": 165,
+   "hash": "41921ee56b376b67"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/frames.rs",
+   "line": 66,
+   "hash": "18676250581b12f8"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/runtimes.rs",
+   "line": 304,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/runtimes.rs",
+   "line": 447,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs",
+   "line": 119,
+   "hash": "8070a10dcfb8445c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs",
+   "line": 335,
+   "hash": "421b7cec5c980f1f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs",
+   "line": 433,
+   "hash": "cc51975ec6567f4e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/setup.rs",
+   "line": 115,
+   "hash": "19958d09b24bb026"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/setup.rs",
+   "line": 441,
+   "hash": "bd46a1fc92f4950a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/setup.rs",
+   "line": 489,
+   "hash": "5b36266b30c02e39"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/setup.rs",
+   "line": 595,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/worker.rs",
+   "line": 111,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/worker.rs",
+   "line": 254,
+   "hash": "6937297f4b3b6d28"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/worker_memory.rs",
+   "line": 37,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/worker_memory.rs",
+   "line": 50,
+   "hash": "4a1046787de4599e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-cli/src/progress.rs",
+   "line": 119,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-cli/tests/it/cli.rs",
+   "line": 406,
+   "hash": "1c2b87d7b83a0097"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/events/tests.rs",
+   "line": 8,
+   "hash": "421b7cec5c980f1f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/guard/tests.rs",
+   "line": 352,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/guard/tests.rs",
+   "line": 361,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/ingest/pipeline.rs",
+   "line": 294,
+   "hash": "627efe9a80fb60f9"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/ingest/pipeline.rs",
+   "line": 431,
+   "hash": "b7e19e0c8723bfb3"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/plugin/services.rs",
+   "line": 404,
+   "hash": "1804bdd4fa8bc92a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/plugin/services.rs",
+   "line": 445,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/plugin/tools/tests.rs",
+   "line": 50,
+   "hash": "a31eb41757c45e18"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/plugin/tools/tests.rs",
+   "line": 371,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/plugin/watchdog.rs",
+   "line": 143,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/plugin/watchdog.rs",
+   "line": 148,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/search_all/tests.rs",
+   "line": 272,
+   "hash": "63c4eff27bf72a9f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/stages.rs",
+   "line": 110,
+   "hash": "052a3c865d85cbfc"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/workspace/mod.rs",
+   "line": 1395,
+   "hash": "42aaa4ddeb20a99d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/archives_projects.rs",
+   "line": 362,
+   "hash": "5b49960b70255439"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/import_discovery.rs",
+   "line": 88,
+   "hash": "b7e19e0c8723bfb3"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/package_export_cancel.rs",
+   "line": 48,
+   "hash": "ce15a12c50c572f0"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+   "line": 127,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+   "line": 634,
+   "hash": "1804bdd4fa8bc92a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+   "line": 690,
+   "hash": "a31eb41757c45e18"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+   "line": 709,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/store.rs",
+   "line": 101,
+   "hash": "42aaa4ddeb20a99d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/tail.rs",
+   "line": 1075,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/tail.rs",
+   "line": 1112,
+   "hash": "a31eb41757c45e18"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 79,
+   "hash": "b7e19e0c8723bfb3"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 114,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 138,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 155,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 162,
+   "hash": "fba74e5504c3f62f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 205,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 216,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 226,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+   "line": 233,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/supervisor.rs",
+   "line": 400,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/tests/it/child_log.rs",
+   "line": 23,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/tests/it/launch.rs",
+   "line": 67,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/tests/it/launch.rs",
+   "line": 476,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-monitor/src/dotnet_win_tests.rs",
+   "line": 114,
+   "hash": "c69aa0a4d55d7a61"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-monitor/src/dotnet_win_tests.rs",
+   "line": 204,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-monitor/src/source.rs",
+   "line": 183,
+   "hash": "4cad119e99fa6b8c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-monitor/src/tests.rs",
+   "line": 607,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-api/src/output.rs",
+   "line": 454,
+   "hash": "4a1046787de4599e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 96,
+   "hash": "421b7cec5c980f1f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 169,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 225,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 236,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 297,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 325,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 331,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/captures.rs",
+   "line": 327,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/captures.rs",
+   "line": 417,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/elevated.rs",
+   "line": 450,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/elevated.rs",
+   "line": 499,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/tool.rs",
+   "line": 235,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/tool.rs",
+   "line": 262,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/recording.rs",
+   "line": 245,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/recording.rs",
+   "line": 253,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/recording.rs",
+   "line": 280,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
+   "line": 111,
+   "hash": "c69aa0a4d55d7a61"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
+   "line": 116,
+   "hash": "af4d226ec4967c29"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
+   "line": 145,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
+   "line": 243,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dumps/src/capture.rs",
+   "line": 305,
+   "hash": "343b993c41d17c4d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dumps/src/capture.rs",
+   "line": 320,
+   "hash": "c67ca85d04e6c3ec"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-host/tests/it/elevated_output.rs",
+   "line": 92,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/captures.rs",
+   "line": 364,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/captures.rs",
+   "line": 389,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/captures.rs",
+   "line": 426,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/tests/it/real_process.rs",
+   "line": 53,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/tests/it/real_process.rs",
+   "line": 105,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-tools/src/eventlog_tool/tests.rs",
+   "line": 52,
+   "hash": "7a93c3ab22f38936"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-tools/src/eventlog_tool/tests.rs",
+   "line": 137,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-tools/src/monitor_tool.rs",
+   "line": 178,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-tools/src/monitor_tool.rs",
+   "line": 225,
+   "hash": "1f59029f9370b7f7"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-tools/src/tests.rs",
+   "line": 24,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower.rs",
+   "line": 366,
+   "hash": "cd8c8e3a57b99d11"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower.rs",
+   "line": 576,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 90,
+   "hash": "d965fc272f82bee0"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 119,
+   "hash": "7a93c3ab22f38936"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 201,
+   "hash": "60fba82d30cf8aef"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 239,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 490,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 492,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 669,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
+   "line": 76,
+   "hash": "cf7f54f465941ddb"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
+   "line": 89,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
+   "line": 167,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/evtx_memory.rs",
+   "line": 159,
+   "hash": "4a1046787de4599e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/evtx_memory.rs",
+   "line": 214,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/evtx_memory.rs",
+   "line": 216,
+   "hash": "7098e4c7d92ca660"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/native_profiling.rs",
+   "line": 89,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/native_profiling.rs",
+   "line": 106,
+   "hash": "af4d226ec4967c29"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/perf_plugins.rs",
+   "line": 26,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugins/tests/it/perf_plugins.rs",
+   "line": 30,
+   "hash": "076bce839ff9ee28"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/src/analysis.rs",
+   "line": 1564,
+   "hash": "8f2dc70f955d8e23"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/bench_reads.rs",
+   "line": 119,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/common/rss.rs",
+   "line": 26,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/import_phases.rs",
+   "line": 26,
+   "hash": "1dbbf8cda6371d77"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/large_folder.rs",
+   "line": 83,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/layout_bakeoff.rs",
+   "line": 58,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/layout_bakeoff.rs",
+   "line": 192,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/long_ops.rs",
+   "line": 78,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/qlang.rs",
+   "line": 122,
+   "hash": "42aaa4ddeb20a99d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/redacted_copy.rs",
+   "line": 228,
+   "hash": "052a3c865d85cbfc"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+   "line": 387,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+   "line": 449,
+   "hash": "a31eb41757c45e18"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+   "line": 600,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/perf_idle.rs",
+   "line": 99,
+   "hash": "076bce839ff9ee28"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/tests/perf_idle.rs",
+   "line": 126,
+   "hash": "af4d226ec4967c29"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/src/server.rs",
+   "line": 518,
+   "hash": "e84168b19821460d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/src/server.rs",
+   "line": 547,
+   "hash": "e84168b19821460d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/parity.rs",
+   "line": 198,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 118,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 241,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 248,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 251,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 351,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 468,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 479,
+   "hash": "a101d0b50615fe0b"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 494,
+   "hash": "1f59029f9370b7f7"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 507,
+   "hash": "a101d0b50615fe0b"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 611,
+   "hash": "8a7b239b74fa9163"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-symbols/src/servers.rs",
+   "line": 355,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-symbols/tests/it/dbghelp.rs",
+   "line": 80,
+   "hash": "3d5815373692ceed"
+  },
+  {
+   "file": "apps/debrief/examples/plugins/collector-example/tests/plugin.rs",
+   "line": 14,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/app/e2e/flows.spec.ts",
+   "line": 274,
+   "hash": "7bba35e4f6072e4b"
+  },
+  {
+   "file": "apps/dyno/app/e2e/flows.spec.ts",
+   "line": 328,
+   "hash": "7bba35e4f6072e4b"
+  },
+  {
+   "file": "apps/dyno/app/e2e/row-actions.spec.ts",
+   "line": 33,
+   "hash": "812c3fa30b7f8bf0"
+  },
+  {
+   "file": "apps/dyno/app/e2e/row-actions.spec.ts",
+   "line": 45,
+   "hash": "33046128e6ab59e9"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 19,
+   "hash": "58bc5f6c17c7dc29"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 28,
+   "hash": "767f0cb771c9e849"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 41,
+   "hash": "7ea17622a91efd03"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 48,
+   "hash": "58bc5f6c17c7dc29"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 50,
+   "hash": "124cb5498dd4d240"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 54,
+   "hash": "124cb5498dd4d240"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 114,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 268,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 684,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 696,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/logging.rs",
+   "line": 61,
+   "hash": "42aaa4ddeb20a99d"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/supervise/mod.rs",
+   "line": 217,
+   "hash": "411f1e629f09bdcf"
+  },
+  {
+   "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
+   "line": 17,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
+   "line": 574,
+   "hash": "cc501dc96ff7a6de"
+  },
+  {
+   "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
+   "line": 589,
+   "hash": "daa99d1f749e551a"
+  },
+  {
+   "file": "apps/dyno/app/src/app/core/tauri-backend.spec.ts",
+   "line": 227,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/app/src/app/core/tauri-backend.spec.ts",
+   "line": 241,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/alarms/alarms-page.spec.ts",
+   "line": 21,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/alarms/alarms-page.spec.ts",
+   "line": 22,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/alarms/rule-dialog.spec.ts",
+   "line": 16,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
+   "line": 22,
+   "hash": "2120f4a78d7eaac1"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
+   "line": 23,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
+   "line": 157,
+   "hash": "cc501dc96ff7a6de"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
+   "line": 165,
+   "hash": "cf9e622456b95bd5"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/counters/counters-page.spec.ts",
+   "line": 31,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/diagnostics/diagnostics-page.spec.ts",
+   "line": 17,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
+   "line": 44,
+   "hash": "2120f4a78d7eaac1"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
+   "line": 45,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
+   "line": 350,
+   "hash": "cc501dc96ff7a6de"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
+   "line": 361,
+   "hash": "cf9e622456b95bd5"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
+   "line": 371,
+   "hash": "cc501dc96ff7a6de"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/health/health-page.spec.ts",
+   "line": 19,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/inventory/inventory-page.spec.ts",
+   "line": 29,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/issues/issues-page.spec.ts",
+   "line": 36,
+   "hash": "2120f4a78d7eaac1"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/issues/issues-page.spec.ts",
+   "line": 37,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/issues/issues-page.spec.ts",
+   "line": 138,
+   "hash": "cc501dc96ff7a6de"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/issues/issues-page.spec.ts",
+   "line": 146,
+   "hash": "cf9e622456b95bd5"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/lookup/lookup-dialogs.spec.ts",
+   "line": 24,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/lookup/lookup-dialogs.spec.ts",
+   "line": 115,
+   "hash": "12110a956d013a5e"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/lookup/lookup-dialogs.spec.ts",
+   "line": 121,
+   "hash": "30577aeef0bf033a"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/recorder/recorder-page.spec.ts",
+   "line": 35,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/reports/reports-page.spec.ts",
+   "line": 20,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/throttling/throttling-page.spec.ts",
+   "line": 23,
+   "hash": "e226e1510bfa8756"
+  },
+  {
+   "file": "apps/dyno/app/src/app/shared/chart.spec.ts",
+   "line": 43,
+   "hash": "88cb7f34bcfcddf6"
+  },
+  {
+   "file": "apps/dyno/app/src/app/state/counters.store.spec.ts",
+   "line": 166,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/bench.rs",
+   "line": 322,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/bench.rs",
+   "line": 365,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
+   "line": 547,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
+   "line": 585,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
+   "line": 618,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
+   "line": 698,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/extras/finder.rs",
+   "line": 728,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/network.rs",
+   "line": 408,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 293,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 551,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 964,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 999,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 1021,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/common/mod.rs",
+   "line": 38,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/extras.rs",
+   "line": 250,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/issues.rs",
+   "line": 225,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/issues.rs",
+   "line": 341,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/issues.rs",
+   "line": 480,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 146,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 494,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 568,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/local_day.rs",
+   "line": 265,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
+   "line": 69,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
+   "line": 103,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
+   "line": 173,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-ipc/src/endpoint/mod.rs",
+   "line": 168,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-ipc/src/endpoint/mod.rs",
+   "line": 213,
+   "hash": "d6b395f9d534be1a"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-ipc/src/queue.rs",
+   "line": 114,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-ipc/src/queue.rs",
+   "line": 126,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/linux/sensors.rs",
+   "line": 401,
+   "hash": "fcc932619d343380"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/macos/probe.rs",
+   "line": 159,
+   "hash": "a31eb41757c45e18"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/network.rs",
+   "line": 287,
+   "hash": "5b49960b70255439"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/network.rs",
+   "line": 303,
+   "hash": "5b49960b70255439"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/process.rs",
+   "line": 247,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/process.rs",
+   "line": 392,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/process.rs",
+   "line": 439,
+   "hash": "090f4447a438ed17"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/sensors.rs",
+   "line": 300,
+   "hash": "f73b6d836ad7b1d8"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/windows/counters.rs",
+   "line": 280,
+   "hash": "8f2dc70f955d8e23"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/windows/pdh.rs",
+   "line": 270,
+   "hash": "8f2dc70f955d8e23"
+  },
+  {
+   "file": "apps/pitcrew/app/e2e/flows.spec.ts",
+   "line": 143,
+   "hash": "bb92dac1c07fac8b"
+  },
+  {
+   "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
+   "line": 90,
+   "hash": "124cb5498dd4d240"
+  },
+  {
+   "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
+   "line": 205,
+   "hash": "767f0cb771c9e849"
+  },
+  {
+   "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
+   "line": 207,
+   "hash": "4551282862261b15"
+  },
+  {
+   "file": "apps/pitcrew/app/src-tauri/src/service_client.rs",
+   "line": 185,
+   "hash": "7098e4c7d92ca660"
+  },
+  {
+   "file": "apps/pitcrew/app/src/app/core/tauri-backend.spec.ts",
+   "line": 158,
+   "hash": "aeba29067229eadc"
+  },
+  {
+   "file": "apps/pitcrew/app/src/app/core/tauri-backend.spec.ts",
+   "line": 217,
+   "hash": "aeba29067229eadc"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 395,
+   "hash": "c69aa0a4d55d7a61"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/launch.rs",
+   "line": 344,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/launch.rs",
+   "line": 389,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 285,
+   "hash": "4aac62194072eaf4"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
+   "line": 407,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/tests/transport.rs",
+   "line": 28,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/native-feel.e2e.ts",
+   "line": 84,
+   "hash": "76f566c13a340666"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/capture.shot.ts",
+   "line": 218,
+   "hash": "27f38a8ce590d2bf"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/capture.shot.ts",
+   "line": 235,
+   "hash": "124cb5498dd4d240"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/capture.shot.ts",
+   "line": 240,
+   "hash": "bb92dac1c07fac8b"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/capture.shot.ts",
+   "line": 253,
+   "hash": "27f38a8ce590d2bf"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/capture.shot.ts",
+   "line": 267,
+   "hash": "76f566c13a340666"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/commands.rs",
+   "line": 692,
+   "hash": "6dd9cc9ffe53f850"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/commands.rs",
+   "line": 729,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/server_client.rs",
+   "line": 343,
+   "hash": "ba479f1ae32ed38d"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/server_client.rs",
+   "line": 510,
+   "hash": "6dd9cc9ffe53f850"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/core/timeout-backend.spec.ts",
+   "line": 25,
+   "hash": "e846104653cf208f"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/apps/apps-page.spec.ts",
+   "line": 16,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/benchmarks/benchmarks-page.spec.ts",
+   "line": 7,
+   "hash": "9b56a1f0e596d2cb"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/benchmarks/benchmarks-page.spec.ts",
+   "line": 30,
+   "hash": "7745d51511b46f92"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/benchmarks/benchmarks-page.spec.ts",
+   "line": 67,
+   "hash": "56bd9d02234d660a"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/benchmarks/benchmarks-page.spec.ts",
+   "line": 77,
+   "hash": "ea72249090b71aa1"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/benchmarks/benchmarks-page.spec.ts",
+   "line": 87,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/benchmarks/benchmarks-page.spec.ts",
+   "line": 96,
+   "hash": "56bd9d02234d660a"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/dashboard/dashboard.spec.ts",
+   "line": 240,
+   "hash": "f1c0c2c8d8033d79"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/dashboard/dashboard.spec.ts",
+   "line": 244,
+   "hash": "f1c0c2c8d8033d79"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/dashboard/dashboard.spec.ts",
+   "line": 266,
+   "hash": "f1c0c2c8d8033d79"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/engines/engine-pins.spec.ts",
+   "line": 14,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/engines/engines.spec.ts",
+   "line": 16,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/models-packs.spec.ts",
+   "line": 15,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/models-page.spec.ts",
+   "line": 19,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/models-pins.spec.ts",
+   "line": 16,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/presets-tab.spec.ts",
+   "line": 14,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/presets-tab.spec.ts",
+   "line": 45,
+   "hash": "4cd148b7e2b31d74"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/presets-tab.spec.ts",
+   "line": 246,
+   "hash": "4cd148b7e2b31d74"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/models/slots-panel.spec.ts",
+   "line": 14,
+   "hash": "4e187930ab65a393"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground-page.spec.ts",
+   "line": 5,
+   "hash": "9b56a1f0e596d2cb"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground-page.spec.ts",
+   "line": 24,
+   "hash": "8eb4e0ba7b916cab"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground-page.spec.ts",
+   "line": 108,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 10,
+   "hash": "9b56a1f0e596d2cb"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 54,
+   "hash": "84ffbdd43f920458"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 215,
+   "hash": "d3e0b3070929da85"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 220,
+   "hash": "729373e103d77978"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 254,
+   "hash": "70f143c28effce27"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 263,
+   "hash": "7a49582c912ad22f"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/quit/quit-prompt.spec.ts",
+   "line": 9,
+   "hash": "6605f62174197be5"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/requests/requests-page.spec.ts",
+   "line": 16,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/updates/updates.store.spec.ts",
+   "line": 208,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/updates/updates.store.spec.ts",
+   "line": 213,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/usage/app-usage.spec.ts",
+   "line": 58,
+   "hash": "f1c0c2c8d8033d79"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/usage/usage-card.spec.ts",
+   "line": 12,
+   "hash": "3fa3c029c8640e4a"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/shared/charts/echart.spec.ts",
+   "line": 26,
+   "hash": "aa00819679a900a9"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/shared/ui/detail-kit.spec.ts",
+   "line": 152,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-cli/tests/cli.rs",
+   "line": 526,
+   "hash": "c2f7898924c03a00"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-loopback/src/lib.rs",
+   "line": 328,
+   "hash": "6dd9cc9ffe53f850"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/engine_setup.rs",
+   "line": 231,
+   "hash": "8b3f51b8e1556482"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/engines.rs",
+   "line": 1005,
+   "hash": "229271371e69f6cc"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/library.rs",
+   "line": 604,
+   "hash": "949c0b5ead5323a5"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/library.rs",
+   "line": 630,
+   "hash": "c5a4568c03c73cb6"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/library.rs",
+   "line": 634,
+   "hash": "949c0b5ead5323a5"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/service/watch.rs",
+   "line": 209,
+   "hash": "8ebcd9e3141afc36"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/service/watch.rs",
+   "line": 213,
+   "hash": "8ebcd9e3141afc36"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/caching.rs",
+   "line": 332,
+   "hash": "5686da84ada4ba41"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/common/mod.rs",
+   "line": 141,
+   "hash": "29db9ebe13a17c72"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/common/mod.rs",
+   "line": 486,
+   "hash": "229271371e69f6cc"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/e2e.rs",
+   "line": 604,
+   "hash": "c5a4568c03c73cb6"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/e2e.rs",
+   "line": 690,
+   "hash": "6c0d8353bde32b4b"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/e2e.rs",
+   "line": 696,
+   "hash": "c5a4568c03c73cb6"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/e2e.rs",
+   "line": 702,
+   "hash": "04b34b0c486f45ee"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/e2e.rs",
+   "line": 707,
+   "hash": "bf1d924ced76a30b"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/e2e.rs",
+   "line": 812,
+   "hash": "5686da84ada4ba41"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/jobs.rs",
+   "line": 54,
+   "hash": "d7fdfed90fa61e70"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/llama_e2e.rs",
+   "line": 31,
+   "hash": "ce45c10bb6cbffdc"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/slots.rs",
+   "line": 133,
+   "hash": "8c4779c9871c5d5d"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/tests/updates.rs",
+   "line": 216,
+   "hash": "949c0b5ead5323a5"
+  },
+  {
+   "file": "apps/spotter/app/e2e/screenshots.spec.ts",
+   "line": 14,
+   "hash": "cd9a9c3c550c9a1a"
+  },
+  {
+   "file": "apps/spotter/app/src-tauri/src/notifier.rs",
+   "line": 414,
+   "hash": "d5ce0e933c64b2e6"
+  },
+  {
+   "file": "apps/spotter/app/src/app/features/editor/editor-page.spec.ts",
+   "line": 135,
+   "hash": "8a73f1d04ac07a3b"
+  },
+  {
+   "file": "apps/spotter/app/src/app/features/editor/editor.store.spec.ts",
+   "line": 275,
+   "hash": "14ae7f8dce54d588"
+  },
+  {
+   "file": "apps/spotter/app/src/app/layout/operations.spec.ts",
+   "line": 15,
+   "hash": "2aced7bcbd1ee581"
+  },
+  {
+   "file": "apps/spotter/app/src/app/layout/operations.spec.ts",
+   "line": 29,
+   "hash": "7499bc1db0edf38d"
+  },
+  {
+   "file": "apps/spotter/app/src/app/layout/operations.spec.ts",
+   "line": 49,
+   "hash": "70f143c28effce27"
+  },
+  {
+   "file": "apps/spotter/app/src/app/layout/operations.spec.ts",
+   "line": 65,
+   "hash": "410135ff4cf53d15"
+  },
+  {
+   "file": "apps/spotter/app/src/app/layout/operations.spec.ts",
+   "line": 111,
+   "hash": "7745d51511b46f92"
+  },
+  {
+   "file": "apps/spotter/app/src/app/layout/operations.spec.ts",
+   "line": 114,
+   "hash": "ed63eb4426b7d4dd"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/jobs.store.spec.ts",
+   "line": 56,
+   "hash": "c186ca0278f8fff9"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/jobs.store.spec.ts",
+   "line": 70,
+   "hash": "daa99d1f749e551a"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/jobs.store.spec.ts",
+   "line": 74,
+   "hash": "c186ca0278f8fff9"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/watches.store.spec.ts",
+   "line": 151,
+   "hash": "88cb7f34bcfcddf6"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/watches.store.spec.ts",
+   "line": 166,
+   "hash": "6bd92055ce7d9ab0"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/watches.store.spec.ts",
+   "line": 182,
+   "hash": "88cb7f34bcfcddf6"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/watches.store.spec.ts",
+   "line": 185,
+   "hash": "c186ca0278f8fff9"
+  },
+  {
+   "file": "apps/spotter/app/src/app/state/watches.store.spec.ts",
+   "line": 195,
+   "hash": "6bd92055ce7d9ab0"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/coverage_gaps.rs",
+   "line": 42,
+   "hash": "d6a1e3e0450ec3bf"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/coverage_gaps.rs",
+   "line": 216,
+   "hash": "9ac8272489a7eaab"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/coverage_gaps.rs",
+   "line": 218,
+   "hash": "9ac8272489a7eaab"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/engine_api.rs",
+   "line": 612,
+   "hash": "4595db30e4600cd1"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/engine_api.rs",
+   "line": 622,
+   "hash": "1b2002614288eb7f"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/engine_robustness.rs",
+   "line": 67,
+   "hash": "d6a1e3e0450ec3bf"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/folder_products.rs",
+   "line": 254,
+   "hash": "b34403ebb75aabaf"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/long_operations.rs",
+   "line": 111,
+   "hash": "d6f562ff073b3dc4"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/long_operations.rs",
+   "line": 135,
+   "hash": "a4732ad4421f28d7"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-engine/tests/mail_delivery.rs",
+   "line": 55,
+   "hash": "36666930cd7b6fa5"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/src/page.rs",
+   "line": 675,
+   "hash": "50e8c3d16541ae4d"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/tests/install_progress.rs",
+   "line": 181,
+   "hash": "609ce87efaba0822"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
+   "line": 78,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
+   "line": 298,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
+   "line": 321,
+   "hash": "a837550434f7c685"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/tests/support/mod.rs",
+   "line": 54,
+   "hash": "430283ac5857e1ab"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 896,
+   "hash": "c0f7df0977a37afe"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 904,
+   "hash": "f1caea821ae2529f"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 937,
+   "hash": "06a8850893bc5267"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 967,
+   "hash": "f1caea821ae2529f"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 976,
+   "hash": "f1caea821ae2529f"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 1328,
+   "hash": "f3feea9628154c2c"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 1364,
+   "hash": "4d33633b44b31603"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
+   "line": 1366,
+   "hash": "4d33633b44b31603"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/tests/adapters.rs",
+   "line": 289,
+   "hash": "2be5ee5dd308584d"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-sources/tests/progress.rs",
+   "line": 110,
+   "hash": "e74623b3244dd34b"
+  },
+  {
+   "file": "crates/paddock-download/tests/it/http.rs",
+   "line": 1041,
+   "hash": "af4d226ec4967c29"
+  },
+  {
+   "file": "crates/paddock-download/tests/it/support/mod.rs",
+   "line": 251,
+   "hash": "9b6913ea8eecb202"
+  },
+  {
+   "file": "crates/paddock-download/tests/it/support/mod.rs",
+   "line": 263,
+   "hash": "cb140ea841063684"
+  },
+  {
+   "file": "crates/paddock-download/tests/it/support/mod.rs",
+   "line": 275,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "crates/paddock-panels/src/tauri/native.rs",
+   "line": 112,
+   "hash": "449a5ccb93c97f61"
+  },
+  {
+   "file": "crates/paddock-proc/tests/it/run_state.rs",
+   "line": 44,
+   "hash": "ad246e7f5236447e"
+  },
+  {
+   "file": "ui/e2e/contact-sheet-x21.spec.ts",
+   "line": 24,
+   "hash": "4551282862261b15"
+  },
+  {
+   "file": "ui/e2e/contact-sheet-x21.spec.ts",
+   "line": 95,
+   "hash": "e1fd20482c6b752c"
+  },
+  {
+   "file": "ui/e2e/data.spec.ts",
+   "line": 263,
+   "hash": "4551282862261b15"
+  },
+  {
+   "file": "ui/e2e/gallery.spec.ts",
+   "line": 13,
+   "hash": "124cb5498dd4d240"
+  },
+  {
+   "file": "ui/e2e/material.spec.ts",
+   "line": 166,
+   "hash": "9e2d480bbadca745"
+  },
+  {
+   "file": "ui/e2e/shell-demo-channels.spec.ts",
+   "line": 113,
+   "hash": "58bc5f6c17c7dc29"
+  },
+  {
+   "file": "ui/e2e/shell-demo-locale.spec.ts",
+   "line": 92,
+   "hash": "f98d49048bc13eb5"
+  },
+  {
+   "file": "ui/e2e/shell-demo-locale.spec.ts",
+   "line": 100,
+   "hash": "17383b7125192a2b"
+  },
+  {
+   "file": "ui/e2e/shell-demo-locale.spec.ts",
+   "line": 101,
+   "hash": "b43a663ea302b6b3"
+  },
+  {
+   "file": "ui/e2e/shell-demo-locale.spec.ts",
+   "line": 107,
+   "hash": "f98d49048bc13eb5"
+  },
+  {
+   "file": "ui/e2e/shell-demo-pages.spec.ts",
+   "line": 120,
+   "hash": "db3498fbec4cf17e"
+  },
+  {
+   "file": "ui/e2e/shell-demo-pages.spec.ts",
+   "line": 122,
+   "hash": "d88056c1497b8c1e"
+  },
+  {
+   "file": "ui/e2e/shell-demo-service.spec.ts",
+   "line": 40,
+   "hash": "58bc5f6c17c7dc29"
+  },
+  {
+   "file": "ui/e2e/shell-demo-setup.spec.ts",
+   "line": 32,
+   "hash": "58bc5f6c17c7dc29"
+  },
+  {
+   "file": "ui/e2e/shell-demo-theme.spec.ts",
+   "line": 81,
+   "hash": "7bba35e4f6072e4b"
+  },
+  {
+   "file": "ui/e2e/sunburst.spec.ts",
+   "line": 23,
+   "hash": "81c9bdcb95680af4"
+  },
+  {
+   "file": "ui/e2e/workbench-demo.spec.ts",
+   "line": 327,
+   "hash": "b9493258497f2913"
+  },
+  {
+   "file": "ui/projects/paddock-ui/chart/src/chart.spec.ts",
+   "line": 149,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/chart/src/sunburst.spec.ts",
+   "line": 257,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "ui/projects/paddock-ui/chart/src/sunburst.spec.ts",
+   "line": 412,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "ui/projects/paddock-ui/chart/src/sunburst.spec.ts",
+   "line": 469,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "ui/projects/paddock-ui/chart/src/sunburst.spec.ts",
+   "line": 502,
+   "hash": "fab39cd8206d4975"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
+   "line": 130,
+   "hash": "7a832cae47a10021"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
+   "line": 859,
+   "hash": "7a832cae47a10021"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
+   "line": 1088,
+   "hash": "7a832cae47a10021"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
+   "line": 1093,
+   "hash": "7a832cae47a10021"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
+   "line": 1149,
+   "hash": "aa8592874558596f"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/dialogs/src/window-active.spec.ts",
+   "line": 16,
+   "hash": "1da606306af7f919"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/jobs/src/ui-timeouts.spec.ts",
+   "line": 5,
+   "hash": "a6b4d3253f4e49d3"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/jobs/src/ui-timeouts.spec.ts",
+   "line": 16,
+   "hash": "b77d30dfc5122ace"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/jobs/src/ui-timeouts.spec.ts",
+   "line": 29,
+   "hash": "f61e2de55fe93b64"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/menu/src/app-menu.spec.ts",
+   "line": 53,
+   "hash": "ea58e9483a60936f"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/menu/src/keymap.spec.ts",
+   "line": 72,
+   "hash": "ea58e9483a60936f"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/menu/src/native-menu.spec.ts",
+   "line": 89,
+   "hash": "ea58e9483a60936f"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/notify/src/backends.spec.ts",
+   "line": 206,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/notify/src/reference-app.spec.ts",
+   "line": 43,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/notify/src/reference-app.spec.ts",
+   "line": 54,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/pages/src/pages.spec.ts",
+   "line": 31,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/store/src/track-load.spec.ts",
+   "line": 15,
+   "hash": "7a832cae47a10021"
+  },
+  {
+   "file": "ui/projects/paddock-ui/shell/testing/src/dialog-harness.spec.ts",
+   "line": 152,
+   "hash": "ab9d8431b9a1bb49"
+  },
+  {
+   "file": "ui/projects/paddock-ui/src/lib/tray-popover.spec.ts",
+   "line": 78,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/table/src/table.spec.ts",
+   "line": 138,
+   "hash": "b68d3b040880d3a3"
+  },
+  {
+   "file": "ui/projects/paddock-ui/table/src/table.spec.ts",
+   "line": 474,
+   "hash": "6460a11b205cdcd7"
+  },
+  {
+   "file": "ui/projects/paddock-ui/testing/src/testing.spec.ts",
+   "line": 131,
+   "hash": "bc1b44706bd70b3e"
+  },
+  {
+   "file": "ui/projects/paddock-ui/testing/src/testing.spec.ts",
+   "line": 132,
+   "hash": "dbd173958e58ebea"
+  },
+  {
+   "file": "ui/projects/paddock-ui/widgets/src/widgets.spec.ts",
+   "line": 697,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "ui/projects/paddock-ui/widgets/src/widgets.spec.ts",
+   "line": 824,
+   "hash": "a6216afc9af9efed"
+  },
+  {
+   "file": "ui/projects/paddock-ui/workbench/panels/src/ghost-session.spec.ts",
+   "line": 27,
+   "hash": "ba5233e83fdf412d"
+  }
+ ]
+}
