@@ -22,6 +22,7 @@
 //! compiles. A Tauri app owns the main thread, hence `harness = false`; the result is the exit code (0 pass, 1 failed,
 //! 2 timed out).
 
+use paddock_dialogs::contract::Kind;
 use paddock_dialogs::tauri::WindowHooks;
 use paddock_dialogs::{Contracts, DialogRequest, Dialogs, Entry, Shape, Width};
 use std::borrow::Cow;
@@ -394,7 +395,7 @@ fn main() {
     let contracts = Contracts::from_entries(&[spec().entry], &[])
         .unwrap_or_else(|e| die("the dialog contract is invalid", e));
     app.manage(Dialogs::new(std::sync::Arc::new(contracts)).with_show_deadline(DEADLINE));
-    app.manage(WindowHooks::<Wry>::new());
+    app.manage(WindowHooks::<Wry>::new().built(no_transitions));
     // A visible host window: the modal's parent, as in an app.
     WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("host.html".into()))
         .visible(true)
@@ -413,6 +414,11 @@ fn main() {
         }
     });
 
+    // The size-mode events the glue tells the page of (a user resize turns `Height` into `Manual`, ADR 0043 D4).
+    let (mode_tx, mode_rx) = mpsc::channel::<String>();
+    app.listen_any(paddock_dialogs::SIZE_MODE_EVENT, move |e| {
+        let _ = mode_tx.send(e.payload().to_string());
+    });
     let (done_tx, done_rx) = mpsc::channel::<()>();
     // Only a failure path: the probe is event-driven, this just stops a hung webview from holding the run.
     let watchdog_handle = handle.clone();
@@ -450,6 +456,9 @@ fn main() {
                             &measured_content,
                         );
                     }
+                    if failures.is_empty() {
+                        failures.extend(scenario(&handle, &mode_rx));
+                    }
                     finish(&failures)
                 }
                 Err(_) => 1,
@@ -474,7 +483,13 @@ fn main() {
                 instance: None,
                 title: "Probe".into(),
                 input: Some(serde_json::json!({ "current": "Shell demo" })),
-                remembered: None,
+                remembered: (std::env::var("PADDOCK_PROBE_SCENARIO").as_deref() == Ok("remember"))
+                    .then_some(paddock_dialogs::placement::Remembered {
+                        dx: 20.0,
+                        dy: 20.0,
+                        width: REMEMBERED.0,
+                        height: REMEMBERED.1,
+                    }),
                 theme: Some(paddock_dialogs::Theme::Dark),
             };
             if let Err(e) = paddock_dialogs::tauri::open(app, "main", request) {
@@ -517,17 +532,29 @@ fn check(
     };
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole
     // footer is inside it.
-    // ADR 0043: decision and form max(200, content), a viewer max(560, content); where the work area cannot hold that,
-    // the window is clamped to it (the most a screen allows, nothing cut off).
-    let floor = match spec().expect {
-        Expect::Viewer => paddock_dialogs::contract::VIEWER_MIN.height,
-        _ => paddock_dialogs::contract::DIALOG_MIN.height,
+    // ADR 0043 through `paddock_dialogs::expect` (the spec, independent of the size state): max(floor, min(content, cap)),
+    // lowered to what the work area holds. The frame is outer minus inner, which on Windows counts the invisible resize
+    // borders (about 8 px a side), so the expected height is a range between the two readings of the frame.
+    let (floor, mode) = match spec().expect {
+        Expect::Viewer => (paddock_dialogs::contract::VIEWER_MIN.height, Kind::Viewer),
+        Expect::Tool => (paddock_dialogs::contract::DIALOG_MIN.height, Kind::Tool),
+        Expect::Fitted => (paddock_dialogs::contract::DIALOG_MIN.height, Kind::Form),
     };
-    let expected = measured.max(floor);
-    let clamped = fits_work_area_exactly(app, &label);
+    let (work, frame) = screen_facts(app, &label);
+    let (lo, hi) = paddock_dialogs::expect::opening_range(
+        mode.policy().size_mode,
+        floor,
+        measured,
+        spec().entry.height.map(f64::from),
+        work,
+        frame,
+        16.0,
+    );
     let wrong = match spec().expect {
-        Expect::Tool => r.inner < floor,
-        _ => (r.inner - expected).abs() >= 1.0 && !(r.inner < expected && clamped),
+        // A tool is opened at its declared size capped by the screen. Finding (VM, 2026-11-04): the cap is computed before
+        // the window has a frame, so it opens up to one frame taller than the cap; only that it fits the screen is judged.
+        Expect::Tool => r.inner < floor || r.inner > hi.max(work - frame + 16.0),
+        _ => r.inner < lo - 1.0 || r.inner > hi + 1.0,
     };
     if wrong {
         failures.push(format!(
@@ -557,20 +584,133 @@ fn check(
     failures
 }
 
-/// Whether the window fills the work area's height to within the frame's invisible borders: the sign that a size too tall for
-/// the screen was clamped to it and not given up short of it.
-fn fits_work_area_exactly(app: &tauri::AppHandle<Wry>, label: &str) -> bool {
+/// Windows fades a window in over a quarter of a second; a screenshot taken the moment the window is shown would catch it
+/// half transparent. DWM's own switch turns the transition off for the window, so the shown state is the final picture
+/// (nothing waits a fixed time).
+#[cfg(windows)]
+fn no_transitions(w: &tauri::WebviewWindow<Wry>) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
+    use windows::core::BOOL;
+    if let Ok(h) = w.hwnd() {
+        let off = BOOL(1);
+        // SAFETY: a BOOL attribute of a live window, set once at its creation.
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                HWND(h.0),
+                DWMWA_TRANSITIONS_FORCEDISABLED,
+                (&raw const off).cast(),
+                size_of::<BOOL>() as u32,
+            )
+        };
+    }
+}
+
+#[cfg(not(windows))]
+fn no_transitions(_: &tauri::WebviewWindow<Wry>) {}
+
+/// The size a dialog is asked to open at in the `remember` scenario (logical px): a tool keeps it, nothing else does (D3).
+const REMEMBERED: (f64, f64) = (520.0, 420.0);
+
+/// The window's inner size, logical px.
+fn inner_logical(app: &tauri::AppHandle<Wry>) -> Option<(f64, f64)> {
+    let label = app.state::<Dialogs>().of_host("main").into_iter().next()?;
+    let w = app.get_webview_window(&label)?;
+    let scale = w.scale_factor().ok()?;
+    let s = w.inner_size().ok()?;
+    Some((f64::from(s.width) / scale, f64::from(s.height) / scale))
+}
+
+/// The scenario after the opening checks passed (`PADDOCK_PROBE_SCENARIO`): `remember` (the dialog was asked to open at a
+/// remembered size: only a tool keeps it) or `resize` (the user resizes it: a `Height` kind turns `Manual` and says so,
+/// a tool, already `Manual`, stays quiet; the size stays what the user made it).
+fn scenario(app: &tauri::AppHandle<Wry>, modes: &mpsc::Receiver<String>) -> Vec<String> {
+    let Ok(which) = std::env::var("PADDOCK_PROBE_SCENARIO") else {
+        return Vec::new();
+    };
+    let tool = matches!(spec().expect, Expect::Tool);
+    let Some((w, h)) = inner_logical(app) else {
+        return vec!["the dialog is gone".into()];
+    };
+    let mut failures = Vec::new();
+    match which.as_str() {
+        "remember" => {
+            let (work, frame) =
+                screen_facts(app, &app.state::<Dialogs>().of_host("main").remove(0));
+            let fits = work - frame >= REMEMBERED.1;
+            let kept = (w - REMEMBERED.0).abs() <= 1.0 && (h - REMEMBERED.1).abs() <= 1.0;
+            if tool && fits && !kept {
+                failures.push(format!("a tool did not keep its remembered size: {w}x{h}"));
+            }
+            if !tool && (w - REMEMBERED.0).abs() <= 1.0 {
+                failures.push(format!("a non-tool took the remembered width: {w}x{h}"));
+            }
+            eprintln!("show_probe: scenario remember: {w}x{h} logical (tool {tool})");
+        }
+        "resize" => {
+            let label = app.state::<Dialogs>().of_host("main").remove(0);
+            let Some(win) = app.get_webview_window(&label) else {
+                return vec!["the dialog is gone".into()];
+            };
+            // The window system resizes it, not the dialogs layer: what a user dragging an edge looks like to the glue.
+            let _ = win.set_size(tauri::LogicalSize::new(w + 60.0, h + 60.0));
+            let end = std::time::Instant::now() + Duration::from_secs(20);
+            let mut got = None;
+            while got.is_none() && std::time::Instant::now() < end {
+                got = inner_logical(app).filter(|(nw, nh)| {
+                    (nw - (w + 60.0)).abs() <= 1.0 && (nh - (h + 60.0)).abs() <= 1.0
+                });
+                if got.is_none() {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            if got.is_none() {
+                failures.push("the window did not take the new size".into());
+            }
+            if tool {
+                if let Ok(m) = modes.try_recv() {
+                    failures.push(format!(
+                        "a tool (already Manual) announced a mode change: {m}"
+                    ));
+                }
+            } else {
+                match modes.recv_timeout(Duration::from_secs(20)) {
+                    Ok(m) if m.contains("manual") => {}
+                    Ok(m) => failures.push(format!("a user resize announced {m}, not Manual")),
+                    Err(_) => {
+                        failures.push("a user resize did not switch the dialog to Manual".into())
+                    }
+                }
+            }
+            eprintln!(
+                "show_probe: scenario resize: {w}x{h} -> {:?} logical (tool {tool})",
+                got
+            );
+        }
+        other => failures.push(format!("unknown PADDOCK_PROBE_SCENARIO {other}")),
+    }
+    failures
+}
+
+/// The work area's height and the frame's (outer minus inner), logical px, of the dialog window as it is now.
+fn screen_facts(app: &tauri::AppHandle<Wry>, label: &str) -> (f64, f64) {
     let Some(w) = app.get_webview_window(label) else {
-        return false;
+        return (0.0, 0.0);
     };
     let scale = w.scale_factor().unwrap_or(1.0);
-    let outer = f64::from(w.outer_size().unwrap_or_default().height) / scale;
+    let (outer, inner) = (
+        w.outer_size().unwrap_or_default(),
+        w.inner_size().unwrap_or_default(),
+    );
     let work = w
         .current_monitor()
         .ok()
         .flatten()
         .map_or(0.0, |m| f64::from(m.work_area().size.height) / scale);
-    outer <= work + 16.0 && work - outer <= 16.0
+    (
+        work,
+        f64::from(outer.height.saturating_sub(inner.height)) / scale,
+    )
 }
 
 /// The window as the OS has it (physical px, and the logical size from its scale), for the run record.

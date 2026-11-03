@@ -29,6 +29,21 @@ what was run, where, and what it showed; a section is added per run, never rewri
 - **Not covered:** Wayland (no compositor available); the frame read with a window manager is not printed by the
   probe's log, only that nothing was cut off; work-area clamp on a small monitor; scale factors above 1 (Xvfb is 1).
 
+### Linux scenarios (X11, openbox): remembered size and user resize
+
+`PADDOCK_PROBE_SCENARIO=remember|resize`, all four kinds, passing:
+
+- **remember:** the dialog is asked to open at a remembered 520x420. A tool keeps it (520x420); the form, the decision
+  and the viewer ignore the size and open at their natural one (400x200, 400x200, 720x560) (D3).
+- **resize:** the window is resized by the window system, outside the dialogs layer (the inference of an unexplained
+  `Resized` on X11, D4). The decision, form and viewer announce `Manual` (`paddock://dialog-size-mode`) and keep the new
+  size; the tool, already `Manual`, announces nothing and keeps it.
+- **Oracle:** the open checks now judge with `paddock_dialogs::expect` (the spec, independent of `SizeState`), including
+  the work-area clamp on a small screen as pure tests (`expect::tests::on_a_small_screen_...`).
+- **Finding:** on Windows the tool opened at exactly 75 % of the work area (540 of 720, 424.8 of 566.4), that is with the
+  cap computed with a frame of 0: the window has no frame before it is shown. Up to one frame (31 px) over the cap; the
+  probe judges only that a tool fits the screen until the cap is recomputed with the frame (SizeState, WP-1).
+
 ## Windows
 
 - **Message-only window tests** (`edge::windows::tests`) in `paddock-win11-test` (x64 exe from `cargo xwin`, from

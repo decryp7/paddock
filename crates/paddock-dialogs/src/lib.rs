@@ -43,6 +43,7 @@
 
 pub mod contract;
 pub mod edge;
+pub mod expect;
 pub mod placement;
 pub mod registry;
 pub mod size;
