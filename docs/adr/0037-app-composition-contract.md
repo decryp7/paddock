@@ -11,8 +11,12 @@
 - Evidence (read at `origin/main` `9da2ccf59`, which is also the `dyno-v1.0.0` tag, and on the release branches named
   below, 2026-11-03):
   - `crates/paddock-shell/src/builder.rs`: `Builder::build` routes all 17 command tables of the shell crates without
-    conditions. `Builder::install` manages the state of 11 parts only `if let Some(..)`: diagnostics, files, storage,
-    service, packs, channels, mcp, windows, updater, first run and downloader.
+    conditions. `Builder::install` manages the state of 12 parts only `if let Some(..)`: health set-up, diagnostics,
+    files, storage, service, packs, channels, mcp, windows, updater, first run and downloader.
+  - The release-window fix for instance 4: `d371d5e4a` on the local branch `fix/dyno-history-releases` (2026-11-03,
+    `crates/paddock-shell/src/builder.rs`, +4 lines). When the app sets up no files part, the shell now manages a minimal
+    `Files` service (no folders, no recent lists, web addresses only). It has tests in `paddock-shell` and in Dyno's
+    `tests/shell.rs`.
   - `crates/paddock-files/src/tauri.rs:319`: `files_open_url(state: State<'_, Arc<Files>>, url)`.
     `crates/paddock-updater/src/lib.rs:86`: the shell's own `pd.about` contract declares `files_open_url`.
     `SHELL_DIALOGS` (`crates/paddock-shell/src/lib.rs`) registers `pd.about` in every app on the shell.
@@ -35,7 +39,7 @@ Each of the following shipped, or nearly shipped, while every browser e2e test a
 | 1 | 2026-11-01 | Dyno's tray icon did nothing on click: the shell's `toggle_popover` looks up a `Popovers` spec that Dyno never managed | Dyno 1.0 VM test | fixed `2746040e8`, by an app-side `manage` inside the tray closure plus a Dyno start test |
 | 2 | 2026-11-01 | Settings' "Popup widgets" and menu-bar editors loaded for ever: the `pd.settings` contract did not declare `widget_layout`, `widget_choices` and `popover_preview`, so the guard refused them to the dialog window | Dyno 1.0 VM test | fixed for those pages by `settings-dialog-commands.spec.ts` (a recording `invoke` over the real `TauriBackend`) |
 | 3 | 2026-11-01 | "Customize widgets…" did not re-target an open Settings window: the inputs travelled on a `BroadcastChannel`, which the browser e2e shares between pages and the other webview did not hear | Dyno 1.0 VM test | fixed `c7baebd24` with a native `paddock://dialog-inputs` event |
-| 4 | 2026-11-03 | "See all releases" in About failed in the released Dyno 1.0.0: "state not managed for field `state` on command `files_open_url`" | user feedback on 1.0.0 (bug 8) | open; the same gap exists in Spotter, Pitwall and the workbench demo (table below) |
+| 4 | 2026-11-03 | "See all releases" in About failed in the released Dyno 1.0.0: "state not managed for field `state` on command `files_open_url`" | user feedback on 1.0.0 (bug 8) | fixed for every shell app by `d371d5e4a` (a minimal `Files` service, not yet on `main`). The gap was the same in Spotter, Pitwall and the workbench demo (table below). WP-1 replaces this fix after the release window |
 
 The browser builds replace exactly the part of the app that is the real contract: Tauri state, the command guard and its
 dialog contracts, native events and the tray. ADR 0029's start test closed one class (a window built inside a plugin hook).
@@ -56,14 +60,14 @@ puts the two together.
 
 | Where | Instance | Status |
 |---|---|---|
-| Dyno (main, 1.0.0) | `pd.about` → `files_open_url`, no `Builder::files` | **broken** (shipped) |
-| Spotter (`steward/s29-spotter-1.0`) | same: `.add_to .app_commands .dialogs .downloader .launch .tray .updater`, no `.files` | **broken** before its 1.0 tag |
-| Pitwall (`steward/s30-pitwall-1.1`) | same: no `.files` | **broken** before 1.1 |
-| Workbench demo (main) | same: no `.files` | broken if About is reachable |
+| Dyno (main, 1.0.0) | `pd.about` → `files_open_url`, no `Builder::files` | **broken** (shipped); fixed by `d371d5e4a` |
+| Spotter (`steward/s29-spotter-1.0`) | same: `.add_to .app_commands .dialogs .downloader .launch .tray .updater`, no `.files` | broken before its 1.0 tag; fixed by `d371d5e4a` once it lands |
+| Pitwall (`steward/s30-pitwall-1.1`) | same: no `.files` | broken before 1.1; fixed by `d371d5e4a` once it lands |
+| Workbench demo (main) | same: no `.files` | fixed by `d371d5e4a` once it lands |
 | Shell demo (main) | configures `.files` | fine |
 | Every shell app | `paddock-storage`'s "Show in folder" needs `Builder::files` (its doc comment says so) but nothing checks it | at risk |
-| Every shell app | the commands of the 11 optional parts are routed whether or not the part is set up | at risk (the class) |
-| Dyno | the test composition differs from `run`'s (diagnostics installed only, the app handler added outside `app()`) | at risk |
+| Every shell app | the commands of the 12 optional parts are routed whether or not the part is set up (`d371d5e4a` covers files only) | at risk (the class) |
+| Dyno | the test composition differs from `run`'s (diagnostics installed only, `.native_menu(false)` and `.in_memory()` in the test place, the app handler added outside `app()`) | at risk |
 | Dyno, fixed | tray popover managed by hand inside the tray closure | fixed by hand; the class stays open for the next tray |
 | `ui/…/shell/dialogs/src/io.ts`, `retarget.ts`; `shell/src/theme/appearance-backend.ts`, `provide-appearance.ts`; Debrief `popout/sync-port.ts`, `popout-backend.ts`; shell demo `demo-settings.ts` | `BroadcastChannel` in production code | at risk: each must be shown to have a native-event path (the dialogs one has had one since `c7baebd24`) |
 | Pitcrew, Debrief | not on the shell plugin at `origin/main` (Debrief has its own start; Pitcrew moves in 1.1) | adopt when they move |
@@ -73,8 +77,14 @@ puts the two together.
 ### 1. One composition, used by `run` and by the test
 
 Each app exposes one `compose(place, ..) -> tauri::Builder<R>`. Both `run` and the composition test call it. `Place`
-(`Installed` or `Test { dir }`) may change folders, storage (in memory or on disk) and the OS plugins that rule 7 keeps
-out of tests (single instance, autostart, the updater plugin, notifications). It must never change which shell parts,
+(`Installed` or `Test { dir }`) may change only what this closed list names:
+- folders;
+- storage (`.in_memory()` or on disk);
+- the native menu bar (`.native_menu(false)`: the mock runtime has no menu bar, and the menu model and its commands are
+  still built and checked);
+- the OS plugins that rule 7 keeps out of tests (single instance, autostart, the updater plugin, notifications).
+
+`composition()` (§7) knows the list and reports any other difference. The place must never change which shell parts,
 dialog tables, command tables, tray or popovers are present. Diagnostics becomes a part that a test gives a temporary
 folder, not a part that only the installed app has.
 
@@ -93,7 +103,13 @@ class that names a command of an unconfigured part (for example "`pd.about` call
 
 Opening a web address needs no path grants. `files_open_url` therefore moves to an always-on part of the shell (its own
 `open_url`, kept in `paddock-files` but routed with the always-on parts), so `pd.about` works in every app without
-`Builder::files`. This fixes instance 4 through the mechanism, not by adding `.files` to four apps.
+`Builder::files`.
+
+**Order against the releases.** Inside the release window, instance 4 is fixed by the small change `d371d5e4a`: a minimal
+`Files` service whenever the app sets up none. That lands for the Spotter 1.0 and Pitwall 1.1 tags (and Dyno 1.1.0).
+ADR 0022 G.7 keeps larger `crates/` changes out of a release window, so WP-1 (conditional routes, `partNotConfigured`,
+`open_url`) is **not** scheduled before those tags. It replaces the minimal service afterwards, and deletes it in the same
+change.
 
 ### 3. Every command declares the state it reads, and the composition test checks it
 
@@ -108,6 +124,15 @@ built), it runs in `./dev check`, or in the JavaScript conformance engine until 
 compares the function's `State<'_, T>` parameters with the table's `uses` list, resolving type aliases in the same file
 (`type Managed<'a> = State<'a, Arc<Files>>`). A command that reads state it does not declare fails, and so does a
 declaration with no parameter behind it.
+
+A command body can also read state without a parameter (`app.state::<T>()`, `window.state::<T>()`), and C67 would not see
+that from the signature. Two rules close the gap:
+- Clippy's `disallowed-methods` lists `tauri::Manager::state` in the family preset (`lint/clippy.toml`), with the reason
+  "read state through a declared `State<T>` parameter or `try_state`". Set-up code that manages and reads its own state
+  allows it locally, with `#[allow(clippy::disallowed_methods)]` and a comment.
+- C67 also flags `.state::<…>()` calls inside a function that a command table lists, so an `allow` there fails too.
+
+`try_state` stays allowed, because its `None` is a handled state.
 
 ### 4. The tray and its popovers are one value
 
@@ -134,7 +159,9 @@ dialog-commands` (ADR 0026, ADR 0022 R19) stays the nightly "declared but never 
 A `BroadcastChannel` is allowed only inside one adapter in `paddock-ui` that also listens to the native window-system
 event, and it is never the only path. An ESLint `no-restricted-globals` rule enforces this in the shared preset for every
 app and for `ui/`, with the adapter file as its one exception. Each site in the table above either moves onto the adapter
-or is shown (with a test of both ends) to be same-webview only.
+or is shown (with a test of both ends) to be same-webview only. Because `no-restricted-globals` does not see a member
+access, the preset also sets `no-restricted-properties` for `window.BroadcastChannel`, `globalThis.BroadcastChannel` and
+`self.BroadcastChannel`, with the same exception.
 
 ### 7. One shared check: `paddock_shell::testing::composition`
 
@@ -177,9 +204,9 @@ The Windows GUI session needed for a tray and popup click test (instance 4 of th
 
 | Check | Kind | Fails on today's instance |
 |---|---|---|
-| Parts route with their state; `partNotConfigured` | impossible by construction (shell parts) | #4 cannot occur; `problems()` names `pd.about` in Dyno, Spotter, Pitwall and the workbench demo until `open_url` moves |
+| Parts route with their state; `partNotConfigured` | impossible by construction (shell parts) | #4 cannot occur (`d371d5e4a` closes it for files only, until WP-1) |
 | `composition()`: declared state managed (`try_state`) | enumerating test, every routed command | #4 (`Arc<Files>` for `files_open_url`) |
-| C67: `uses` matches the `State` parameters | source check over every table | any undeclared state read |
+| C67: `uses` matches the `State` parameters, and no `.state::<T>()` in a listed command; Clippy `disallowed-methods` for `Manager::state` | source check over every table, lint over every crate | any undeclared state read |
 | Place parity in `composition()` | enumerating test | Dyno's diagnostics and handler divergence |
 | `Tray` carries its popovers; click opens a `tray*` window | type plus test | #1 |
 | Recorder, harness spec per dialog, C68 | run-time plus enumerating check | #2 |
@@ -191,9 +218,10 @@ The Windows GUI session needed for a tray and popup click test (instance 4 of th
 
 Rule 1 sets the order: the release-critical parts come first, and shared changes land with their adoption (rule 39).
 
-1. **WP-1 (shared, before Dyno 1.1.0 and the Spotter 1.0 tag):** move `open_url` to an always-on part; make the routes
-   conditional with `partNotConfigured`; add the `problems()` entry. This fixes instance 4 in Dyno, Spotter, Pitwall and
-   the workbench demo in one change.
+0. **In the release window:** `d371d5e4a` (the minimal `Files` service) lands for Dyno 1.1.0, Spotter 1.0 and Pitwall 1.1.
+   It is the only `crates/` change this ADR makes before those tags (ADR 0022 G.7).
+1. **WP-1 (shared, after the Spotter 1.0 and Pitwall 1.1 tags):** move `open_url` to an always-on part; make the routes
+   conditional with `partNotConfigured`; add the `problems()` entry; delete the minimal `Files` service of `d371d5e4a`.
 2. **WP-2:** `composition()` with place parity and the tray click; extend C50; adopt it in Dyno, Spotter and the demos.
 3. **WP-3:** `uses` in `command_table!` for about 187 shared and about 170 app commands (Dyno 26, Spotter 47, Pitwall 85,
    demos 11); the `try_state` sweep; C67. The annotation is mechanical and goes to an implementer with the table as the
@@ -216,16 +244,16 @@ unconditional and `problems()` keeps reporting. The other packages add checks an
 |---|---|
 | WP-1 parts with state, `open_url`, `problems()` | 1.5 |
 | WP-2 `composition()`, place parity, tray click, C50 | 2 |
-| WP-3 `uses`, `try_state` sweep, C67 (mostly implementer) | 2.5 |
+| WP-3 `uses`, `try_state` sweep, C67 with the in-body `state` rule, the Clippy entry (mostly implementer) | 2.75 |
 | WP-4 `Tray` with popovers | 1 |
 | WP-5 recorder, harness kit, C68 | 2.5 |
 | WP-6 `BroadcastChannel` lint and adapter | 0.5 |
 | WP-7 shared real-app smoke kit, Linux and Windows legs | 3 |
 | WP-8 macOS `--smoke` mode in `vm-smoke` | 1.5 |
 | Adoption: Dyno, Spotter, Pitwall, Pitcrew, two demos (composition and smoke, about 0.75 each) | 4.5 |
-| **Total** | **19** |
+| **Total** | **19.25** |
 
-WP-1 alone (1.5 days) closes the shipped instance in every app.
+The shipped instance is already closed in the release window by `d371d5e4a` (outside these estimates). WP-1 makes the class impossible after the tags.
 
 ## Consequences
 
@@ -240,8 +268,9 @@ WP-1 alone (1.5 days) closes the shipped instance in every app.
   not the user.
 - The mock runtime still cannot show OS or webview behaviour. The real-app smoke covers that per release, and on macOS
   only locally in a VM.
-- The macOS smoke mode is test code shipped in debug builds only (behind `cfg(debug_assertions)` or a `smoke` feature
-  never enabled in release builds). A release build check (ADR 0039) confirms that the smoke command is absent.
+- The macOS smoke mode, and the debug-only tray-click test command of §8, are test code in debug builds only (behind
+  `cfg(debug_assertions)` or a `smoke` feature never enabled in release builds). ADR 0039's verifier checks that the
+  released app refuses `--smoke` (its "no test entry points" check), so a release build cannot carry them.
 
 ## Alternatives considered
 
@@ -254,5 +283,12 @@ WP-1 alone (1.5 days) closes the shipped instance in every app.
   in seven workspaces would change. The `uses` clause plus C67 gets the same guarantee with a declarative macro. This can
   be revisited if C67's alias resolution proves brittle.
 - **Add `.files(..)` to every app.** It fixes four instances and leaves the class open. Rejected.
+- **CrabNebula's WebDriver for macOS.** CrabNebula offers a cross-platform fork of tauri-driver that also drives macOS,
+  but it needs a paid API key on macOS. This was checked on 2026-11-03 against Tauri's WebDriver page
+  (<https://v2.tauri.app/develop/tests/webdriver/>, read that day). It was rejected because it is a commercial service
+  for a personal family of apps, a network dependency inside the gate (the family is local-first and online only by
+  opt-in), and a second driver beside tauri-driver. The in-app `--smoke` mode needs neither. The same page also describes
+  an embedded WebDriver server inside the app, which is the same idea as `--smoke`; WP-8 evaluates it before building its
+  own.
 - **More browser e2e.** The mock backend has no Tauri state, guard or native events, so it cannot see this class (the
   lesson of 2026-11-01).
