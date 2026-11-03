@@ -1252,3 +1252,7 @@ and load alone. **Fix:** the page exposes `data-fit-pending` (the follow-up fram
 pending and a sequence number that moved past its value before the change and then held (0 of 200). **Lesson:** a test
 that waits on a rendering callback depends on whether the browser renders that window; wait on a condition the page states
 itself (ER-12), and measure the failure rate before and after (ER-28).
+
+## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
+
+I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.

@@ -882,11 +882,11 @@ mod tests {
     #[test]
     fn the_plock_log_follows_plocks_environment() {
         let env = |k: &str| (k == "PLOCK_ROOT").then(|| "/r".to_string());
-        assert_eq!(plock_log_path(&env), PathBuf::from("/r/pitcrew-lock-activity.log"));
+        assert_eq!(plock_log_path(&env), Path::new("/r").join("pitcrew-lock-activity.log"));
         let none = |_: &str| None;
         assert_eq!(
             plock_log_path(&none),
-            PathBuf::from("/private/tmp/claude-501/pitcrew-lock-activity.log")
+            Path::new("/private/tmp/claude-501").join("pitcrew-lock-activity.log")
         );
     }
 
@@ -1048,7 +1048,7 @@ mod tests {
     #[test]
     fn plock_through_the_command_uses_the_log_of_the_environment() {
         let files = FakeFiles::default();
-        files.put("/p/pitcrew-lock-activity.log", "");
+        files.put(&Path::new("/p").join("pitcrew-lock-activity.log").to_string_lossy(), "");
         let mut http = FakeHttp {
             answers: vec![],
             urls: vec![],
@@ -1056,6 +1056,8 @@ mod tests {
         let a = args(&["--plock", "job1", "--max", "5s", "--interval", "1s"]);
         let (r, log) = run(&a, &files, &mut http, &[("PLOCK_DIR", "/p")]);
         assert!(r.is_err());
-        assert!(log.contains("/p/pitcrew-lock-activity.log"), "{log}");
+        // The log names the path as the OS spells it: `/p\pitcrew-lock-activity.log` on Windows.
+        let expected = Path::new("/p").join("pitcrew-lock-activity.log");
+        assert!(log.contains(&expected.display().to_string()), "{log}");
     }
 }
