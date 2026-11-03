@@ -18,7 +18,8 @@ concept) is kept for reference in `archive/2026-10-flat/`; the sections below on
 | `tools/art-direct.mjs` | the masters, 32/24 frames and flat symbols of Spotter, Pacenotes and Dyno (on iso.mjs) |
 | `tools/paddock-iso.mjs` | Paddock's pit building and its 32/24 frames |
 | `tools/iso-family.mjs` | the registry of every frame and tray state of the eight icons, used by build, preview and tests |
-| `tools/small-flat.mjs`, `tools/small-sheet.mjs` | the small sizes approved 2026-11-03 (STYLE.md section 6a): the flat glyph drawn per size for the 16 and 24 pt slots, the container map (`MIX`), the trays; and the review sheets in `docs/design/icons-small/` (family, before and after, zoom, clarity, trays). The apps switch over after the independent review |
+| `tools/small-flat.mjs`, `tools/small-sheet.mjs` | the small sizes approved 2026-11-03 (STYLE.md section 6a): the flat glyph drawn per size for the 16 and 24 pt slots, the container map (`MIX`), the trays; and the review sheets in `docs/design/icons-small/` (family, before and after, zoom, clarity, trays); in the apps since 2026-11-03 |
+| `tools/installed-sheet.mjs` | review sheets of the icons as installed in the apps (.icns slots via iconutil, .ico frames, Linux PNGs, trays) in `docs/design/icons-small/installed/` |
 | `tools/install.mjs` | copies the sets into the apps (`src-tauri/icons`, tray PNGs, in-app copies) and `docs/images/src/icons` |
 
 | App | Status |
@@ -210,10 +211,11 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 <app>/<app>-macos.svg, <app>-windows.svg       1024 masters (pure vector)
 <app>/<app>-macos-1024.png, -windows-1024.png  rendered masters
 <app>/<app>-128.svg|png, <app>-60.svg|png       the simple frame (128 and 112) and the 60 frame (diagrams)
-<app>/small/<app>-{16,24,32,48}.svg|png         hand-tuned small frames
+<app>/small/<app>-{16,20,24,32,40}.svg|png      flat frames (the 16 and 24 pt slots)
+<app>/small/<app>-{32-iso,48,64}.svg|png       isometric frames (the 32 pt slot and up)
 <app>/tray/svg/                                 tray sources (template, template-18pt, light, dark)
-<app>/tray/macos/<name>-{16,18}ptTemplate[@2x].png   menu-bar template images
-<app>/tray/windows/<name>-{light,dark}-{16,32}.png and .ico
+<app>/tray/macos/<name>-18ptTemplate@2x.png     the menu-bar template the app loads (36 px; the family ships no 1x tray PNGs)
+<app>/tray/windows/<name>-{light,dark}-32.png   the notification-area images the app loads
 <app>/tauri/                                    drop-in replacement for src-tauri/icons
 paddock/web/                                    favicon (svg, ico), apple-touch-icon, 512 and avatar PNGs (umbrella only)
 archive/2026-10-flat/                           the flat set and its Carbon concept, for reference

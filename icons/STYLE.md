@@ -205,7 +205,7 @@ does not build. Tray edges are anti-aliased, as every Retina menu-bar symbol's a
 **Contrast:** flat ink 3.3 to 13.3:1 on the tile base; isometric fronts 3.1 to 8.5:1, except Pitcrew's 2.7:1, the approved exception
 in section 9.
 
-The switch-over of the apps (bundles, trays, in-app copies) follows the independent review of this set.
+The apps' bundles, trays and in-app copies carry this set since 2026-11-03 (`tools/build.mjs`, `tools/install.mjs`).
 
 ### 6b. Benchmarks (read 2026-11-03)
 
@@ -253,7 +253,7 @@ The switch-over of the apps (bundles, trays, in-app copies) follows the independ
 | Visual weight | fitted with `weight: 0.68`; measured weight 0.68 to 0.78 and ink area within 0.08 of the pit building's | `visibleBox()` in `tools/iso.mjs` |
 | Coverage at 16 | 18 to 26 % (line glyphs), up to 30 % (filled silhouettes); the class of each glyph is `GLYPH_KIND` in `tools/iso-family.mjs` | `npm test` (`tools/iso-family.test.mjs`) |
 | Tray coverage | the same limits, measured on the tray glyph **without its state badge** (`smoothTrayGlyph()`, at 32 px). A badge adds ink by design, so the rule judges the symbol | `npm test` |
-| Tray alpha | templates are black with alpha only; edges anti-aliased (from the switch-over; until then the shipped trays stay whole-pixel) (the apps ship one image per platform, which the OS scales) | `npm test` |
+| Tray alpha | templates are black with alpha only; edges anti-aliased (the apps ship one image per platform, which the OS scales) | `npm test` |
 | Whole pixels | the flat glyph's rects and polygons on whole pixels at 16 to 40, no part under one pixel, weights whole and never lighter at a larger size | `npm test`; `zoom.png` |
 | Seams | the tile background has no step over 3 levels | `npm test` |
 
@@ -266,7 +266,7 @@ the pit wall (12 deep, 30 high, chequered top). Fit box 690 x 560, shift (-4, +1
 
 - The simple frame: three bays with pillars 22, dark openings, doors 40 % down, a coarser chequer on a 40-high wall, stripe 10.
 - The 60 frame: the simple frame without the chequer, 8 % larger.
-- The 32 and 24 frames: `PIT_SMALL`.
-- 16 and the tray: the flat slatted door.
+- 16 to 40 px: the flat door glyph under the band of hues (`FLAT.paddock`); 32 pt and up: the simple frame on the small tile.
+- The tray: the door glyph in one tone, the band as its lintel.
 
 `node tools/paddock-pit-sheet.mjs` renders the set and the sheet.

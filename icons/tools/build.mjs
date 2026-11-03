@@ -8,7 +8,7 @@ import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { ALL, UMBRELLA, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
-import { FAMILY, TRAY_STATES, master, small as isoSmall, tray as isoTray } from './iso-family.mjs';
+import { FAMILY, FLAT_SIZES, ISO_SIZES, MIX, TRAY_STATES, iso, master, small as isoSmall, tray as isoTray } from './iso-family.mjs';
 import { writeIco } from './ico.mjs';
 import { withSmallFrames } from './icns.mjs';
 import { render, scanSeams } from './scan.mjs';
@@ -33,10 +33,14 @@ function renderers(app) {
       // The simple frame (128 and 112: the README) and the 60 frame (the ecosystem diagram and the app posters).
       frames: { 128: master(app, { frame: 'simple' }), 60: master(app, { frame: 'tiny' }) },
       small: s => isoSmall(app, s),
+      // The small frames (STYLE.md section 6a): flat 16 to 40 px, isometric 48 and 64; plus the isometric 32 for the 32 pt slot.
+      smallSizes: [...FLAT_SIZES, ...ISO_SIZES.filter(s => s !== 32)],
+      iso32: () => iso(app, 32),
+      family: true,
       states: TRAY_STATES[app],
       tray: (st, theme, opts) => isoTray(app, st, theme, opts),
-      // icon.ico: the hand-tuned 16/24/32/48 and the Windows master at 256 (Windows scales from the nearest larger frame).
-      ico: (smallPng, win) => [16, 24, 32, 48].map(s => ({ size: s, png: smallPng[s] })).concat({ size: 256, png: png(win, 256) }),
+      // icon.ico: every MIX entry below 256 (flat 16 to 40, isometric 48 and 64) and the Windows master at 256.
+      ico: (smallPng, win) => MIX.ico.filter(e => e[2] < 256).map(e => ({ size: e[2], png: smallPng[e[2]] })).concat({ size: 256, png: png(win, 256) }),
     };
   }
   return {
@@ -85,12 +89,13 @@ for (const app of ONLY) {
   // 2. Hand-tuned small variants
   const small = dir(app, 'small');
   const smallPng = {};
-  for (const s of [16, 24, 32, 48]) {
+  for (const s of R.smallSizes ?? [16, 24, 32, 48]) {
     const svg = R.small(s);
     save(join(small, `${app}-${s}.svg`), svg);
     smallPng[s] = png(svg, s);
     save(join(small, `${app}-${s}.png`), smallPng[s]);
   }
+  if (R.iso32) { const svg = R.iso32(); save(join(small, `${app}-32-iso.svg`), svg); smallPng.iso32 = png(svg, 32); save(join(small, `${app}-32-iso.png`), smallPng.iso32); }
 
   // 3. Tray / menu bar
   const traySrc = dir(app, 'tray', 'svg'), macTray = dir(app, 'tray', 'macos'), winTray = dir(app, 'tray', 'windows');
@@ -98,9 +103,20 @@ for (const app of ONLY) {
     const name = st === 'default' ? `${app}-tray` : `${app}-tray-${st}`;
     const tpl = R.tray(st, 'template');
     save(join(traySrc, `${name}-template.svg`), tpl);
-    // 16 pt from the 16 grid; 18 pt (what the apps load, at @2x) from the same grid padded by one unit, so both are exact.
     const tpl18 = R.tray(st, 'template', { pt18: true });
     save(join(traySrc, `${name}-template-18pt.svg`), tpl18);
+    if (R.family) {
+      // The family ships the one image per platform each app loads (tray-icon sets one image; the OS scales it): the 18 pt template at
+      // 36 px and the 32 px light and dark PNGs. No 1x PNGs or .ico: nothing loads them (STYLE.md section 6a).
+      save(join(macTray, `${name}-18ptTemplate@2x.png`), png(tpl18, 36));
+      for (const theme of ['light', 'dark']) {
+        const svg = R.tray(st, theme);
+        save(join(traySrc, `${name}-${theme}.svg`), svg);
+        save(join(winTray, `${name}-${theme}-32.png`), png(svg, 32));
+      }
+      continue;
+    }
+    // 16 pt from the 16 grid; 18 pt (what the apps load, at @2x) from the same grid padded by one unit, so both are exact.
     for (const [pt, svg] of [[16, tpl], [18, tpl18]]) {
       save(join(macTray, `${name}-${pt}ptTemplate.png`), png(svg, pt));
       save(join(macTray, `${name}-${pt}ptTemplate@2x.png`), png(svg, pt * 2));
@@ -126,9 +142,16 @@ for (const app of ONLY) {
   for (const f of readdirSync(tmp)) if (/^(Square\d+x\d+Logo|StoreLogo)\.png$/.test(f)) copyFileSync(join(tmp, f), join(tauri, f));
   for (const extra of ['android', 'ios']) rmSync(join(tauri, extra), { recursive: true, force: true });
   save(join(tauri, 'icon.ico'), writeIco(R.ico(smallPng, win)));
-  // The small frames are the hand-tuned ones, not downscales of the master: 16 and 32 as drawn, 64 the 32 frame at an exact 2x.
-  const small64 = png(R.small(32), 64);
-  save(join(tauri, 'icon.icns'), withSmallFrames(readFileSync(join(tauri, 'icon.icns')), { 16: smallPng[16], 32: smallPng[32], 64: small64 }));
+  // The small frames are the hand-tuned ones, not downscales of the master. The family (STYLE.md section 6a): 16 pt is the flat glyph
+  // at 1x and 2x, 32 pt the isometric frame at 32 and 64; Linux takes the flat 32 and the isometric 64. The demo apps: 16 and 32 as
+  // drawn, 64 the 32 frame at an exact 2x.
+  if (R.family) {
+    save(join(tauri, 'icon.icns'), withSmallFrames(readFileSync(join(tauri, 'icon.icns')), { 16: smallPng[16], '16@2x': smallPng[32], 32: smallPng.iso32, 64: smallPng[64] }));
+    save(join(tauri, '64x64.png'), smallPng[64]);
+  } else {
+    const small64 = png(R.small(32), 64);
+    save(join(tauri, 'icon.icns'), withSmallFrames(readFileSync(join(tauri, 'icon.icns')), { 16: smallPng[16], 32: smallPng[32], 64: small64 }));
+  }
   save(join(tauri, '32x32.png'), smallPng[32]);
   // The favicon of a page that shows the app (the splash, the browser tab): the 16, 32 and 48 frames.
   save(join(dir(app, 'web'), 'favicon.ico'), writeIco([16, 32, 48].map(s => ({ size: s, png: smallPng[s] }))));
