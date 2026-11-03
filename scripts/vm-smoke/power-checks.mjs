@@ -208,22 +208,31 @@ export async function runPower(power) {
 
 /** Rows this suite does not automate, printed in the result as MANUAL with the reason (never silently dropped). */
 export const POWER_MANUAL = [
-  { title: 'Admin helper on/off: the OS prompt (manual)', summary: 'The macOS password sheet, Windows UAC prompt and Linux polkit prompt need a GUI driver (axdrive on macOS, UI Automation on Windows, a GNOME VM on Linux) that is not in this suite yet; no Dyno build with the helper existed when the suite was written.' },
-  { title: 'Idle action: countdown, Cancel, Snooze, "Audio is playing" (manual)', summary: 'Needs the Power page driven in the UI and, for audio, a sound device in the guest. The VM cannot sleep, so a real sleep is never exercised either.' },
-  { title: 'Screenshots: tray, dashboard customize, dialogs at 100/150 %, Windows tray menu, network map, benchmark (manual)', summary: 'Needs the GUI drivers above and the paddock-e2e screenshot check against the installed app.' },
+  { title: 'Screenshots: tray, dashboard customize, dialogs at 100/150 %, Windows tray menu, network map, benchmark (manual)', summary: 'Not automated yet on this guest; see the README for what the GUI tour covers.' },
 ];
 
 /**
  * Install the installer, start Dyno (judged like a cold start), run the power steps, quit. `check` is the vm-smoke Check of the guest,
- * `makePower` builds the PowerChecks for it. Returns { steps, version } like runAll.
+ * `makePower` builds the PowerChecks for it, `gui` (macOS) the MacGui that clicks the helper's password sheet, `idle` the idle checks.
+ * The helper goes on first (a scheduled wake needs it on macOS) and off after the wake checks. Returns { steps, version }.
  */
-export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWER_MANUAL }) {
+export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWER_MANUAL, gui = null, idle = null, tour = null }) {
   const steps = [];
   const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
   const install = push(await check.install(stagedDmg));
   if (install.status === 'fail') return { steps, version: check.version };
   const start = push(await check.startAndJudge({ title: 'Cold start for the power checks', pre: async () => { await check.g.exec('sudo purge'); } }));
-  if (start.status !== 'fail') for (const s of await runPower(makePower())) steps.push(s);
+  // A failed start judgement (for example a parent rule) does not stop the checks: each step fails by itself if the app is not there.
+  {
+    const power = makePower();
+    if (gui) push(await gui.helperOn());
+    push(await power.keepAwake());
+    push(await power.scheduledWake());
+    push(await power.wakeOnLan());
+    if (tour) for (const s of await tour.run()) push(s);
+    if (gui) push(await gui.helperOff());
+    if (idle) push(await idle.run());
+  }
   push(await check.quit('Quit after the power checks'));
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };

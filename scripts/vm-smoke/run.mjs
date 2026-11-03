@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
 import { renderResult } from './judge.mjs';
 import { PowerChecks, runPowerSuite } from './power-checks.mjs';
+import { MacGui } from './mac-gui.mjs';
+import { MacIdleChecks } from './mac-idle.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -185,7 +187,11 @@ async function main(argv) {
     if (c.code !== 0) throw new Error(`tart clone failed: ${c.stderr.trim().slice(0, 300)}`);
 
     log('booting headless');
-    runChild = spawn(tartBin, ['run', '--no-graphics', `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: 'ignore' });
+    // The power suite also needs the VM's own VNC server (real pointer drags); it listens on 127.0.0.1 only and the URL stays in memory.
+    const vnc = o.suite === 'power';
+    runChild = spawn(tartBin, ['run', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+    let vncUrl = null;
+    runChild.stdout.on('data', (d) => { vncUrl ??= /vnc:\/\/\S+/.exec(String(d))?.[0] ?? null; });
     const exec = async (cmd, opts = {}) => {
       const r = await tart(['exec', vm, 'env', 'PADDOCK_DISPOSABLE_VM=1', 'bash', '-c', cmd], { timeoutMs: opts.timeoutMs ?? 120_000 });
       return r;
@@ -204,7 +210,23 @@ async function main(argv) {
     const started = new Date().toISOString();
     const staged = `${SHARE}/installer.dmg`;
     const { steps, version } = o.suite === 'power'
-      ? await runPowerSuite(check, () => new PowerChecks(guest, 'macos', { bundle: `/Applications/${config.bundle}`, log }), { stagedDmg: staged })
+      ? await (async () => {
+        const evDir = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}-power-evidence`);
+        mkdirSync(evDir, { recursive: true });
+        // A guest file to the host as a file next to the result (PNG through base64: tart exec output is text).
+        const fetch = async (path) => {
+          const r = await tart(['exec', vm, 'base64', '-i', path], { timeoutMs: 60_000 });
+          if (r.code !== 0) return null;
+          const dest = join(evDir, basename(path));
+          writeFileSync(dest, Buffer.from(r.stdout.replace(/\s+/g, ''), 'base64'));
+          return dest;
+        };
+        const power = new PowerChecks(guest, 'macos', { bundle: `/Applications/${config.bundle}`, log });
+        const pw = process.env.PADDOCK_VM_PASSWORD ?? 'admin'; // the pinned image's admin account; never printed
+        const gui = new MacGui(guest, { password: pw, fetch, log });
+        const idle = new MacIdleChecks(guest, power, check, { log });
+        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle });
+      })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
     const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });

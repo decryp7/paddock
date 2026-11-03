@@ -1,0 +1,132 @@
+// The GUI and idle release checks of Dyno 1.1.0 on a macOS guest (docs: README.md "Power checks"). The app's own window is driven through
+// the Accessibility API with `axdrive` (installed in the test image; source in guest/axdrive.swift), the system's password sheet the
+// same way, and real pointer drags through the VM's own VNC server (vncdotool). Every step waits on a state with a guard; every verdict
+// comes from the OS (launchd, the filesystem, pmset) or from the app's own text, never from a screenshot.
+import { parseTree, rawTextOf } from './ax-tree.mjs';
+
+const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+export const HELPER_LABEL = 'net.decryptology.dyno.helper';
+export const HELPER_FILE = `/Library/PrivilegedHelperTools/${HELPER_LABEL}`;
+/** Words the Dyno UI uses (apps/dyno/app/src/app/features/settings/helper-model.ts). */
+export const UI = { turnOn: '^Turn on administrator readings$', turnOff: '^Turn off administrator readings$', on: '^On$' };
+
+export class MacGui {
+  /** @param guest {exec, now, sleep}  @param o {app, ax, password, evidence(name, guestPath), log} */
+  constructor(guest, { app = 'Dyno', ax = '/usr/local/bin/axdrive', password = 'admin', fetch = null, log = () => {}, intervalMs = 1000 } = {}) {
+    Object.assign(this, { g: guest, app, ax, password, fetch, log, interval: intervalMs, shots: 0 });
+  }
+
+  axCmd(args) { return `${this.ax} ${args}`; }
+  async has(app, re, role = 'AXButton') { return (await this.g.exec(this.axCmd(`has ${sq(app)} ${sq(re)} ${role}`))).code === 0; }
+  async press(app, re, role = 'AXButton') { return (await this.g.exec(this.axCmd(`press ${sq(app)} ${sq(re)} ${role}`))).code === 0; }
+
+  async waitFor(fn, guardMs) {
+    const t0 = this.g.now();
+    for (;;) {
+      const v = await fn();
+      if (v) return { ok: true, value: v };
+      if (this.g.now() - t0 >= guardMs) return { ok: false, value: v };
+      await this.g.sleep(this.interval);
+    }
+  }
+
+  /** Texts of the app window (static texts, buttons, links), from the AX tree. */
+  async texts(app = this.app, depth = 40) {
+    const r = await this.g.exec(this.axCmd(`tree ${sq(app)} ${depth}`), { timeoutMs: 60_000 });
+    return parseTree(r.stdout);
+  }
+
+  async shot(name) {
+    const file = `/tmp/ev/${String(++this.shots).padStart(2, '0')}-${name}.png`;
+    await this.g.exec(`mkdir -p /tmp/ev && screencapture -x ${file}`);
+    const saved = this.fetch ? await this.fetch(file) : null;
+    return saved ?? file;
+  }
+
+  /** Fills the system's password sheet (coreautha on macOS 26, SecurityAgent before) and presses OK. The password is never logged. */
+  async answerPasswordSheet(guardMs = 60_000) {
+    let who = null;
+    const seen = await this.waitFor(async () => { for (const p of ['coreautha', 'SecurityAgent']) if (await this.has(p, '^(OK|Modify Settings|Install Helper)$')) { who = p; return p; } return null; }, guardMs);
+    if (!seen.ok) return { ok: false, detail: 'no password sheet appeared' };
+    const pre = await this.shot('password-sheet');
+    const set = await this.g.exec(`printf '%s\\n' ${sq(this.password)} | ${this.axCmd(`setfield ${who} 1`)}`);
+    if (set.code !== 0) return { ok: false, detail: `could not fill the password field of ${who}`, shot: pre };
+    const ok = await this.press(who, '^(OK|Modify Settings|Install Helper)$');
+    if (!ok) return { ok: false, detail: `no OK button in ${who}`, shot: pre };
+    const gone = await this.waitFor(async () => !(await this.has(who, '^(OK|Modify Settings|Install Helper)$')), 60_000);
+    return { ok: gone.ok, detail: gone.ok ? `the ${who} password sheet was answered` : 'the sheet stayed (wrong password?)', shot: pre };
+  }
+
+  async helperInstalled() {
+    const r = await this.g.exec(`launchctl print system/${HELPER_LABEL} >/dev/null 2>&1; echo $?; ls ${HELPER_FILE} >/dev/null 2>&1; echo $?`);
+    const [job, file] = r.stdout.trim().split('\n').map(Number);
+    return { job: job === 0, file: file === 0 };
+  }
+
+  /** Dyno > Settings… (the app menu item opens the Settings window), then the section button of that window. */
+  async openSettingsSection(sectionRe) {
+    if (!(await this.has(this.app, '^Settings$', 'AXWindow'))) {
+      const m = await this.press(this.app, '^Settings…', 'AXMenuItem');
+      if (!m) return { ok: false, detail: 'no "Settings…" item in the Dyno menu' };
+      const w = await this.waitFor(() => this.has(this.app, '^Settings$', 'AXWindow'), 20_000);
+      if (!w.ok) return { ok: false, detail: 'the Settings window did not open within 20 s' };
+    }
+    const s = await this.waitFor(() => this.press(this.app, sectionRe, 'AXButton'), 15_000);
+    return { ok: s.ok, detail: s.ok ? `opened Settings > ${sectionRe.replace(/[\^$]/g, '')}` : `no "${sectionRe}" section in Settings` };
+  }
+
+  /** Settings > Administrator readings > Turn on: password sheet, card ends "On", launchd job and file exist. */
+  async helperOn() {
+    const title = 'Admin helper: Turn on (password sheet), card "On"';
+    const checks = [];
+    const evidence = [];
+    const before = await this.helperInstalled();
+    checks.push({ ok: !before.job && !before.file, detail: `before: launchd job ${before.job ? 'present' : 'absent'}, file ${before.file ? 'present' : 'absent'} (both must be absent)` });
+    const nav = await this.openSettingsSection('^Dyno$');
+    checks.push({ ok: nav.ok, detail: nav.detail });
+    const found = await this.waitFor(() => this.has(this.app, UI.turnOn), 20_000);
+    checks.push({ ok: found.ok, detail: found.ok ? 'the card offers "Turn on administrator readings"' : 'no "Turn on administrator readings" button within 20 s' });
+    if (!found.ok) { evidence.push(`screenshot: ${await this.shot('helper-no-button')}`); return this.finish(title, checks, evidence); }
+    await this.press(this.app, UI.turnOn);
+    const sheet = await this.answerPasswordSheet();
+    checks.push({ ok: sheet.ok, detail: sheet.detail });
+    if (sheet.shot) evidence.push(`screenshot: ${sheet.shot}`);
+    const on = await this.waitFor(async () => { const h = await this.helperInstalled(); return h.job && h.file ? h : null; }, 90_000);
+    checks.push({ ok: on.ok, detail: on.ok ? `macOS has the helper: launchd job system/${HELPER_LABEL} and ${HELPER_FILE}` : 'launchd job or file still missing 90 s after the password' });
+    const badge = await this.waitFor(async () => (await this.texts()).some((t) => new RegExp(UI.on).test(t.text)), 60_000);
+    const words = badge.ok ? 'On' : (await this.texts()).filter((t) => /^(Off|Update available|Not running|Needs repair|Not trusted|Turning on)$|helper version|cannot use/.test(t.text)).map((t) => t.text).join(' / ');
+    checks.push({ ok: badge.ok, detail: badge.ok ? 'the card reads "On"' : `the card never read "On": it says ${words || 'nothing recognisable'}` });
+    evidence.push(`screenshot: ${await this.shot('helper-on')}`);
+    return this.finish(title, checks, evidence, 'password sheet answered, card "On", launchd job and file present');
+  }
+
+  /** Turn off administrator readings removes the helper: launchd job and file gone, card "Off". */
+  async helperOff() {
+    const title = 'Admin helper: Turn off removes it';
+    const checks = [];
+    const evidence = [];
+    const off = await this.press(this.app, UI.turnOff);
+    checks.push({ ok: off, detail: off ? 'pressed "Turn off administrator readings"' : 'no "Turn off administrator readings" button' });
+    if (off) {
+      const extra = await this.waitFor(async () => (await this.has('coreautha', '^OK$')) || (await this.has('SecurityAgent', '^OK$')), 8_000);
+      if (extra.ok) { const s = await this.answerPasswordSheet(5_000); evidence.push(`turn off asked for the password: ${s.detail}`); }
+      const gone = await this.waitFor(async () => { const h = await this.helperInstalled(); return !h.job && !h.file; }, 90_000);
+      checks.push({ ok: gone.ok, detail: gone.ok ? 'the launchd job and the file are gone after Turn off' : 'the helper was still installed 90 s after Turn off' });
+      const word = await this.waitFor(async () => (await this.texts()).some((t) => /^Off$/.test(t.text)), 30_000);
+      checks.push({ ok: word.ok, detail: word.ok ? 'the card reads "Off" again' : 'the card did not read "Off" after Turn off' });
+    }
+    evidence.push(`screenshot: ${await this.shot('helper-off')}`);
+    return this.finish(title, checks, evidence, 'Turn off removed the launchd job and the file');
+  }
+
+  finish(title, checks, evidence, passSummary = '') {
+    const failed = checks.filter((c) => !c.ok);
+    return { title, status: failed.length ? 'fail' : 'pass', summary: failed.length ? failed.map((c) => c.detail).join('; ').slice(0, 240) : passSummary, checks, evidence };
+  }
+
+  /** Raw-text rules of the shared screenshot check, run on the texts the app really shows. `problems` is rawTextProblems. */
+  async screenCheck(label, problems) {
+    const texts = (await this.texts()).map((t) => ({ text: t.text, where: `${label} (${t.role})` })).filter((t) => t.text.length > 0);
+    return { texts: texts.length, problems: problems(texts) };
+  }
+}
