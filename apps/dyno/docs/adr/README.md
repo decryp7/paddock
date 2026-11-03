@@ -36,7 +36,6 @@ so the numbering is fixed.
 | [0029](0029-saved-views-disk-map-cache.md) | Saved views: disk-map scans (and the counter catalog and software list) kept in a rebuildable `cache.db` with one writer thread, shown at once with their age, refreshed on demand and swapped when done (Accepted) |
 | [0030](0030-benchmark-tool.md) | The benchmark tool (Accepted): per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
 | [0031](0031-network-threat-lists-world-map-and-firewall-view.md) | Network threat lists, the connections world map and a read-only firewall view: core features over opt-in downloaded data (Accepted) |
-| [0032](0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) | Power: keep awake, Wake-on-LAN, idle and timed sleep or shut down, scheduled wake and an energy report; amends 0021 and 0027 (Proposed) |
 | [0032](0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) | Power: keep awake, Wake-on-LAN, idle and timed sleep or shut down, scheduled wake and an energy report; amends 0021 and 0027 (Accepted 2026-11-03) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are

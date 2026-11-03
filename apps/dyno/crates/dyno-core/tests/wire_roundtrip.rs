@@ -1020,6 +1020,7 @@ const JSON_ONLY: &[(&str, usize)] = &[
     ("bench.rs", 1),                      // StatusJson (mirrored by a binary form)
     ("bench/wire.rs", 1),                 // the JSON lines a dyno-bench child writes on stdout; never crosses the app-agent wire
     ("widgets/popover_values/mod.rs", 1), // PopoverSurfaceValues, carried by `JsonOnLink`
+    ("intel/mod.rs", 2),                  // MatchedBy and Verdict: Serialize-only, never decoded; the verdict reaches the UI as JSON
 ];
 
 fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

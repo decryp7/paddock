@@ -70,7 +70,7 @@ const HOME_NOT_LOOKED_UP: &str = "not looked up yet";
 /// The user's location from the OS region setting: the country of the locale. Nothing is sent anywhere.
 fn region_home() -> HomeInfo {
     let env = |k: &str| std::env::var(k).ok();
-    match crate::region::region_country(&mut dyno_platform::runner::SystemRunner, &env) {
+    match crate::region::region_country(&dyno_platform::runner::SystemRunner, &env) {
         Some(c) => HomeInfo {
             country: Some(c),
             source: "Your location: from your region setting".into(),
