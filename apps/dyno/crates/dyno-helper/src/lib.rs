@@ -26,6 +26,7 @@ pub mod server;
 pub mod setup;
 pub mod startup;
 pub mod sys;
+pub mod tools;
 #[cfg(windows)]
 pub mod winsvc;
 

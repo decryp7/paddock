@@ -8,6 +8,7 @@ use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest};
 use dyno_core::network_traffic::MAX_COUNTERS;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
+use dyno_core::smart::{SmartReader, ToolInstaller};
 use paddock_ipc::RemoteError;
 
 /// Everything a [`Dispatcher`] needs from outside.
@@ -22,6 +23,10 @@ pub struct Parts {
     pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
     /// The macOS login-items reader (`sfltool dumpbtm` as the helper's account, parsed here).
     pub login_items: Box<dyn LoginItemsReader>,
+    /// The SMART reader of this system.
+    pub smart: Box<dyn SmartReader>,
+    /// The pinned tool installer of this system.
+    pub tools: Box<dyn ToolInstaller>,
     /// The last `n` lines of the helper's log, oldest first.
     pub log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
     /// Called after an `Uninstall` request was audited and answered (it removes the helper in the background).
@@ -36,6 +41,8 @@ pub struct Dispatcher {
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
     on_uninstall: Box<dyn Fn() + Send + Sync>,
     login_items: Box<dyn LoginItemsReader>,
+    smart: Box<dyn SmartReader>,
+    tools: Box<dyn ToolInstaller>,
     log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
 }
 
@@ -81,6 +88,8 @@ impl Dispatcher {
             clock: parts.clock,
             on_uninstall: parts.on_uninstall,
             login_items: parts.login_items,
+            smart: parts.smart,
+            tools: parts.tools,
             log_tail: parts.log_tail,
         }
     }
@@ -93,6 +102,30 @@ impl Dispatcher {
             what: "A connection was refused".into(),
             verdict: AuditVerdict::Refused,
             detail: why.chars().take(300).collect(),
+        });
+    }
+
+    /// Every tool install is audited, success or not (it changes the machine).
+    fn audit_tool(
+        &self,
+        peer: Option<u32>,
+        tool: dyno_core::helper_requests::ToolKind,
+        outcome: &Result<dyno_core::helper_wire::ToolStatus, PlatformError>,
+    ) {
+        let _ = self.audit.record(&AuditEntry {
+            at: (self.clock)(),
+            peer,
+            what: format!("Install the tool {tool:?}"),
+            verdict: if outcome.is_ok() {
+                AuditVerdict::Done
+            } else {
+                AuditVerdict::Failed
+            },
+            detail: outcome
+                .as_ref()
+                .err()
+                .map(|e| e.to_string().chars().take(300).collect())
+                .unwrap_or_default(),
         });
     }
 
@@ -113,6 +146,12 @@ impl Dispatcher {
                 })?;
                 self.login_items.read(uid).map(HelperReply::LoginItems).map_err(|e| remote(&e))
             }
+            HelperRequest::Smart(q) => self.smart.read(q).map(HelperReply::Smart).map_err(|e| remote(&e)),
+            HelperRequest::InstallTool { tool, bytes } => {
+                let outcome = self.tools.install(tool, &bytes);
+                self.audit_tool(peer, tool, &outcome);
+                outcome.map(HelperReply::Installed).map_err(|e| remote(&e))
+            }
             HelperRequest::LogTail(n) => Ok(HelperReply::Log((self.log_tail)(HelperRequest::log_len(n)))),
             HelperRequest::Audit(n) => Ok(HelperReply::Entries(self.audit.tail(HelperRequest::audit_len(n)))),
             HelperRequest::Traffic => {
@@ -127,8 +166,6 @@ impl Dispatcher {
             | HelperRequest::FileHolders { .. }
             | HelperRequest::Counters(_)
             | HelperRequest::MemoryModules
-            | HelperRequest::Smart(_)
-            | HelperRequest::InstallTool { .. }
             | HelperRequest::Firewall
             | HelperRequest::Extras(_) => Err(RemoteError::new(
                 codes::UNSUPPORTED,
@@ -156,7 +193,7 @@ mod tests {
     use super::*;
     use dyno_core::btm::LoginItemsReply;
     use dyno_core::helper::HelperHost;
-    use dyno_core::helper_requests::{ProcessQuery, SmartQuery};
+    use dyno_core::helper_requests::{ProcessQuery, SmartQuery, ToolKind};
     use dyno_core::helper_wire::MAX_AUDIT_REPLY;
     use dyno_core::network_traffic::TrafficCounter;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -166,6 +203,25 @@ mod tests {
     impl ProcessTraffic for Traffic {
         fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
             self.0.clone()
+        }
+    }
+
+    struct NoSmart;
+    impl SmartReader for NoSmart {
+        fn read(&self, _: SmartQuery) -> Result<dyno_core::smart::SmartReply, PlatformError> {
+            Ok(dyno_core::smart::SmartReply {
+                disks: vec![],
+                skipped: vec![],
+                not_visited: 3,
+            })
+        }
+    }
+    impl ToolInstaller for NoSmart {
+        fn install(&self, tool: ToolKind, _: &[u8]) -> Result<dyno_core::helper_wire::ToolStatus, PlatformError> {
+            Ok(dyno_core::helper_wire::ToolStatus {
+                tool,
+                installed: Some("7.5".into()),
+            })
         }
     }
 
@@ -209,6 +265,8 @@ mod tests {
             clock: Box::new(|| 1_000),
             on_uninstall: Box::new(move || flag.store(true, Ordering::SeqCst)),
             login_items: Box::new(Items(Ok(items_reply()))),
+            smart: Box::new(NoSmart),
+            tools: Box::new(NoSmart),
             log_tail: Box::new(|n| (0..n.min(3)).map(|i| format!("line {i}")).collect()),
         });
         Rig { d, gone, _dir: dir }
@@ -277,7 +335,7 @@ mod tests {
         assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
         let bad = HelperRequest::Smart(SmartQuery { max_disks: 99 });
         assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
-        let ok = HelperRequest::Smart(SmartQuery::default());
+        let ok = HelperRequest::Firewall;
         assert_eq!(r.d.handle(None, ok).unwrap_err().code, codes::UNSUPPORTED);
     }
 
@@ -304,6 +362,8 @@ mod tests {
             clock: Box::new(|| 5),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Ok(items_reply()))),
+            smart: Box::new(NoSmart),
+            tools: Box::new(NoSmart),
             log_tail: Box::new(|_| vec![]),
         });
         assert!(d
@@ -349,6 +409,8 @@ mod tests {
             clock: Box::new(|| 1),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Err(PlatformError::AccessDenied("no".into())))),
+            smart: Box::new(NoSmart),
+            tools: Box::new(NoSmart),
             log_tail: Box::new(|_| vec![]),
         });
         assert!(failing.handle_for(&ctx, HelperRequest::LoginItems).is_err());
@@ -361,5 +423,24 @@ mod tests {
             HelperReply::Log(l) => assert_eq!(l, ["line 0", "line 1", "line 2"]),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn smart_is_read_and_a_tool_install_is_handed_over_and_audited() {
+        let r = rig(HelperHost::Windows, Ok(vec![]));
+        match r.d.handle(None, HelperRequest::Smart(SmartQuery::default())).unwrap() {
+            HelperReply::Smart(s) => assert_eq!(s.not_visited, 3),
+            other => panic!("{other:?}"),
+        }
+        let install = HelperRequest::InstallTool {
+            tool: ToolKind::Smartmontools,
+            bytes: vec![1, 2, 3],
+        };
+        match r.d.handle(Some(8), install).unwrap() {
+            HelperReply::Installed(t) => assert_eq!(t.installed.as_deref(), Some("7.5")),
+            other => panic!("{other:?}"),
+        }
+        let entry = &audit(&r)[0];
+        assert!(entry.what.contains("Smartmontools") && entry.verdict == AuditVerdict::Done);
     }
 }
