@@ -83,6 +83,12 @@ pub struct FirewallRule {
     pub profile: FirewallProfile,
     /// Where it came from.
     pub source: RuleSource,
+    /// The rule group (Windows `Grouping`, for example "Core Networking"), when it has one.
+    pub group: Option<String>,
+    /// The Windows service the rule applies to, when it names one.
+    pub service: Option<String>,
+    /// The protocol as the firewall prints it (`tcp`, `udp`, `icmp`, a number), when the rule names one.
+    pub protocol: Option<String>,
 }
 
 /// Whether the firewall is on for one profile.
@@ -211,6 +217,9 @@ mod tests {
             addresses: None,
             profile: FirewallProfile::All,
             source: RuleSource::Nftables,
+            group: None,
+            service: None,
+            protocol: None,
         }
     }
 
