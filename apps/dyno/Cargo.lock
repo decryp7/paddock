@@ -1148,6 +1148,7 @@ dependencies = [
  "dyno-ipc",
  "dyno-platform",
  "dyno-plugin-host",
+ "flate2",
  "libc",
  "log",
  "paddock-env",

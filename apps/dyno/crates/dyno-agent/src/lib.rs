@@ -6,6 +6,7 @@ pub mod agent;
 pub mod alarms;
 pub mod baselines;
 pub mod bench;
+pub mod cache;
 pub mod cli;
 pub mod counters;
 pub mod diagnostics;

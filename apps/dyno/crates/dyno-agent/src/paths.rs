@@ -9,6 +9,8 @@ pub struct Dirs {
     root: PathBuf,
     /// Where the dated logs are when that is not `<root>/logs` (the app's log folder in an install).
     log_folder: Option<PathBuf>,
+    /// The OS cache folder for rebuildable files, when it is not `<root>/cache` (only the current user's real folders).
+    cache_folder: Option<PathBuf>,
 }
 
 impl Dirs {
@@ -16,7 +18,19 @@ impl Dirs {
     /// `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`); `DYNO_DATA_DIR` wins; the temp folder when nothing is known.
     pub fn current() -> Dirs {
         let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-        let root = env("DYNO_DATA_DIR").unwrap_or_else(|| {
+        let override_root = env("DYNO_DATA_DIR");
+        let cache_folder = if override_root.is_some() {
+            None
+        } else if cfg!(windows) {
+            env("LOCALAPPDATA").map(|d| d.join("Dyno").join("Cache"))
+        } else if cfg!(target_os = "macos") {
+            env("HOME").map(|h| h.join("Library").join("Caches").join("Dyno"))
+        } else {
+            env("XDG_CACHE_HOME")
+                .map(|d| d.join("dyno"))
+                .or_else(|| env("HOME").map(|h| h.join(".cache").join("dyno")))
+        };
+        let root = override_root.unwrap_or_else(|| {
             let found = if cfg!(windows) {
                 env("LOCALAPPDATA").map(|d| d.join("Dyno"))
             } else if cfg!(target_os = "macos") {
@@ -28,7 +42,11 @@ impl Dirs {
             };
             found.unwrap_or_else(|| std::env::temp_dir().join("Dyno"))
         });
-        Dirs { root, log_folder: None }
+        Dirs {
+            root,
+            log_folder: None,
+            cache_folder,
+        }
     }
 
     /// A folder chosen by the caller.
@@ -36,6 +54,7 @@ impl Dirs {
         Dirs {
             root: root.into(),
             log_folder: None,
+            cache_folder: None,
         }
     }
 
@@ -47,6 +66,18 @@ impl Dirs {
     /// The history database.
     pub fn database(&self) -> PathBuf {
         self.root.join("dyno.db")
+    }
+
+    /// The folder for rebuildable files: the OS cache folder (`~/Library/Caches/Dyno`, `$XDG_CACHE_HOME/dyno` or
+    /// `~/.cache/dyno`, `%LOCALAPPDATA%\Dyno\Cache`), kept out of backups; `<data folder>/cache` when `DYNO_DATA_DIR` or
+    /// [`Dirs::at`] names the data folder (tests, ER-14).
+    pub fn cache_folder(&self) -> PathBuf {
+        self.cache_folder.clone().unwrap_or_else(|| self.root.join("cache"))
+    }
+
+    /// The saved-views cache database (ADR 0029): rebuildable, so never in the data folder.
+    pub fn cache_db(&self) -> PathBuf {
+        self.cache_folder().join("cache.db")
     }
 
     /// The user's settings.
@@ -105,6 +136,15 @@ mod tests {
         for p in [d.settings(), d.logs(), d.plugins(), d.instance_lock()] {
             assert!(p.starts_with("/x/dyno"));
         }
+    }
+
+    #[test]
+    fn the_cache_database_is_beside_the_data_when_the_data_folder_is_named_and_in_the_cache_folder_otherwise() {
+        assert_eq!(Dirs::at("/x/dyno").cache_db(), Path::new("/x/dyno/cache/cache.db"));
+        let mut d = Dirs::at("/x/dyno");
+        d.cache_folder = Some(PathBuf::from("/c/Dyno"));
+        assert_eq!(d.cache_db(), Path::new("/c/Dyno/cache.db"));
+        assert!(!d.cache_db().starts_with(d.root()), "never inside the data folder");
     }
 
     #[test]
