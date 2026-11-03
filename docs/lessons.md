@@ -1218,3 +1218,15 @@ fonts (same content height in the later fit). Found on the way: tao resizes the 
 so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
+
+## A window's size is a state with one owner, not a sequence of events (2026-11-04, ADR 0043)
+
+Sixteen dialog-size fixes in two weeks each closed one gap between two baselines (a handshake measure, a watch started later, a
+scale-change hook). The class is "nothing states what the size should be at any moment". ADR 0043 makes the size a pure state
+machine (`paddock_dialogs::size`) fed by numbered measures `(epoch, seq)` and the OS's own events, carried out on the main
+thread; the page has one measure loop with a last-sent baseline and a guard of two sends per change. **Lessons:** (1) an
+echo of our own `set_size` is told from the user's resize by a queue of what was asked, and by the OS's signal where it has one
+(`WM_SIZING`, live resize), never by comparing sizes alone; (2) anything that touches a native window (`ns_window`) must be
+left out under the mock runtime, which hands out a dangling pointer (SIGSEGV, not an error); (3) an e2e that fixes the
+viewport to a width other than the contract's asserts the wrong thing: at another width the content wraps differently and
+the loop rightly measures again.

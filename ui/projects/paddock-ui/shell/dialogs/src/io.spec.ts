@@ -38,10 +38,12 @@ describe('tauriDialogIo', () => {
 describe('browserDialogIo', () => {
   afterEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     delete document.documentElement.dataset['fittedHeight'];
     delete document.documentElement.dataset['fitHistory'];
     delete document.documentElement.dataset['dialogReady'];
     delete document.documentElement.dataset['fitSeq'];
+    delete document.documentElement.dataset['fitEpoch'];
     delete document.documentElement.dataset['minContent'];
     delete document.documentElement.dataset['contentWidth'];
   });
@@ -63,7 +65,16 @@ describe('browserDialogIo', () => {
     await io.ready(1, 1);
     await io.measure(1, 2, { content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 } });
     const data = document.documentElement.dataset;
-    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent'], data['contentWidth'], data['fitSeq']]).toEqual(['true', '260', '200,260', '330x120', '400', '2']);
+    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent'], data['contentWidth'], data['fitSeq'], data['fitEpoch']]).toEqual(['true', '260', '200,260', '330x120', '400', '2', '1']);
+    // A reload of the same window is a new page load: its epoch is the next one.
+    expect((await io.take()).epoch).toBe(2);
+    expect((await browserDialogIo({ hash: '#/dialog?id=other' }).take()).epoch).toBe(1);
+    // Storage that throws leaves the epoch at 1.
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect((await io.take()).epoch).toBe(1);
+    get.mockRestore();
   });
 
   it('tolerates a route without input, a bad input and a full storage', async () => {

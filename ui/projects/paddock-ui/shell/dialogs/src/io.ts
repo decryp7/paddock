@@ -131,7 +131,7 @@ export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogI
         modality: p.get('modality') === 'modal' ? 'modal' : 'modeless',
         requiredChoice: false,
         input,
-        epoch: 1,
+        epoch: nextBrowserEpoch(id),
       };
     },
     close: async (result) => {
@@ -148,14 +148,27 @@ export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogI
     setTitle: async (title) => {
       document.title = title;
     },
-    measure: async (_epoch, seq, m) => {
+    measure: async (epoch, seq, m) => {
       document.documentElement.dataset['fitSeq'] = String(seq);
+      document.documentElement.dataset['fitEpoch'] = String(epoch);
       publishMeasure(m);
     },
     ready: async () => {
       document.documentElement.dataset['dialogReady'] = 'true';
     },
   };
+}
+
+/** The page load count of dialog `id`'s window in this tab (the browser build's `epoch`: a reload sends a new one). */
+function nextBrowserEpoch(id: string): number {
+  try {
+    const key = `paddock.dialog.epoch.${id}`;
+    const n = (Number(sessionStorage.getItem(key)) || 0) + 1;
+    sessionStorage.setItem(key, String(n));
+    return n;
+  } catch {
+    return 1;
+  }
 }
 
 function publishMeasure(m: DialogMeasure): void {

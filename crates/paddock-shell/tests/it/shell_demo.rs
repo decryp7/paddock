@@ -44,6 +44,10 @@ paddock_dialogs::dialogs! {
     "sd.inspector" => Form(Modeless) { commands: &[dialog_callable::demo_status] },
     "sd.choose-style" => Decision { required_choice: true },
     "sd.unsaved" => Decision,
+    "sd.fixture-decision" => Decision,
+    "sd.fixture-form" => Form(Modeless),
+    "sd.fixture-viewer" => Viewer,
+    "sd.fixture-tool" => Tool,
     "pd.settings" => Tool {
         width: Some(Px(880)),
         height: Some(620),
