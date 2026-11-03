@@ -31,6 +31,7 @@ mod issues;
 mod recorder;
 
 pub use hardware::kind as hardware_kind;
+pub use hardware::FIRST_SEEN_KEY;
 
 /// The schema version.
 pub const SCHEMA: i64 = 1;

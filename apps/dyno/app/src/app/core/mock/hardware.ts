@@ -188,7 +188,7 @@ const item = (subject: string, metric: BaselineItem['metric'], label: string, cu
 /** The "Is this normal?" data. */
 export function mockBaselines(now: number, scenario?: HardwareScenario): BaselineOverview {
   const sc = scenarioNow(scenario);
-  if (sc === 'learning') return { at: now, learning: { learning: { daysDone: 3, daysNeeded: 7 } }, items: [] };
+  if (sc === 'learning') return { at: now, learning: { learning: { day: 3, daysNeeded: 7, since: now - 2 * 86_400_000, readyAt: now + 5 * 86_400_000 } }, items: [] };
   return {
     at: now,
     learning: { ready: { days: 34 } },

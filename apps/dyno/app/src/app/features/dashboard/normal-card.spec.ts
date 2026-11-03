@@ -5,6 +5,7 @@ import type { BaselineOverview } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { mockBaselines } from '../../core/mock/hardware';
+import { formatDate } from '../../shared/format';
 import { provideIcons } from '../../shared/icons';
 import { BASELINES_REFRESH_MS } from '../../state/baselines.store';
 import { NormalCard } from './normal-card';
@@ -32,7 +33,9 @@ describe('dy-normal-card', () => {
   it('while learning: one quiet line and no highlights', async () => {
     const { f, el } = render(mockBaselines(NOW, 'learning'));
     await settle(f);
-    expect(el.querySelector('.line')?.textContent).toBe('Learning what is normal for this computer: day 3 of 7');
+    expect(el.querySelector('.line')?.textContent).toBe(
+      `Learning what is normal for this computer: day 3 of 7, since ${formatDate(NOW - 2 * 86_400_000, NOW)}`,
+    );
     expect(el.querySelector('li')).toBeNull();
   });
 
