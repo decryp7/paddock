@@ -434,6 +434,46 @@ pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
+/// "Export" on the Benchmarks page: the OS save dialog (so the path is one the person chose, never one the webview supplied), then
+/// the agent writes the chosen runs there as JSON or CSV. `null` when they cancel.
+#[tauri::command]
+pub async fn save_benchmarks(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    format: dyno_core::bench::export::ExportFormat,
+    ids: Vec<String>,
+) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use dyno_core::bench::export::ExportFormat;
+        use tauri_plugin_dialog::DialogExt;
+        let (name, filter) = match format {
+            ExportFormat::Json => ("dyno-benchmarks.json", ("JSON", "json")),
+            ExportFormat::Csv => ("dyno-benchmarks.csv", ("Spreadsheet (CSV)", "csv")),
+        };
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Save the benchmark results")
+            .set_file_name(name)
+            .add_filter(filter.0, &[filter.1])
+            .blocking_save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+        let path = utf8_path(&path)?;
+        let reply = link.call(Request::SaveBenchmarks { path, format, ids })?;
+        reply
+            .into_json()
+            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
 /// "Export" on the Reports page: the OS save dialog (so the path is one the person chose, never one the webview supplied),
 /// then the agent writes the week's report there as Markdown or HTML. `null` when they cancel.
 #[tauri::command]

@@ -34,6 +34,16 @@ pub struct ChildRequest {
     pub scratch: PathBuf,
     /// The scratch file size (disk only), MiB.
     pub disk_mib: u32,
+    /// The drive spins (disk only): random patterns measure for a shorter time.
+    pub rotational: bool,
+    /// The CPU kind runs as a sustained run of this many seconds.
+    pub sustained_secs: Option<u32>,
+    /// The sustained write after the disk patterns, MiB (disk only; zero: none).
+    pub sustained_write_mib: u32,
+    /// Memory available at the start, MiB (memory only; the runner sizes its arrays from it).
+    pub available_mib: Option<u64>,
+    /// The graphics adapter to measure (graphics only; `None`: the runner's default).
+    pub gpu_adapter: Option<u32>,
 }
 
 /// Why the loop should end the child now.
@@ -53,6 +63,10 @@ pub trait ChildEvents {
     fn liveness(&self, l: Liveness);
     /// Whether to end the child now. Asked every tick.
     fn stop(&self) -> Option<Stop>;
+    /// One second of a sustained run arrived.
+    fn sample(&self, _secs: u32, _throughput: f64) {}
+    /// A note about how the measurement was made arrived.
+    fn note(&self, _text: &str) {}
 }
 
 /// One thing that arrived from the child.
@@ -114,6 +128,8 @@ pub fn drive(child: &mut dyn ChildProcess, events: &dyn ChildEvents, clock: &dyn
                 match line {
                     Line::Progress(p) => events.progress(&p),
                     Line::Heartbeat => {}
+                    Line::Sample { secs, throughput } => events.sample(secs, throughput),
+                    Line::Note { text } => events.note(&text),
                     Line::Result { status } => {
                         result = Some(status);
                         break;

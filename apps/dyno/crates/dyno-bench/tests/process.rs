@@ -73,7 +73,7 @@ fn cpu_writes_progress_and_one_done_result_with_every_repetition() {
     }
     assert_eq!(progress.last().map(|p| p.1), Some(2));
     assert!(all.iter().any(|l| matches!(l, Line::Heartbeat)), "the heartbeat starts at once");
-    assert!(matches!(status(&out), BenchStatus::Done { metrics } if metrics.len() == 3 && metrics.iter().all(|m| m.samples.len() == 2)));
+    assert!(matches!(status(&out), BenchStatus::Done { metrics } if metrics.len() == 9 && metrics.iter().all(|m| m.samples.len() == 2)));
 }
 
 #[test]
@@ -82,16 +82,57 @@ fn gpu_is_reported_unavailable_with_a_reason() {
     assert!(matches!(status(&out), BenchStatus::Unavailable { reason } if !reason.is_empty()));
 }
 
+/// A folder for the disk tests inside the target directory: the tests never write to the user's own folders (ER-14).
+fn target_dir() -> tempfile::TempDir {
+    tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
+}
+
 #[test]
-fn disk_is_unavailable_while_the_1_0_disk_test_is_off() {
-    // Even asked for directly with a folder: the 1.0 disk test (page-cache reads) never runs from a shipped build (ADR 0030 D10).
-    let dir = tempfile::tempdir().unwrap();
+fn disk_measures_the_mechanics_and_leaves_nothing_behind() {
+    // Mechanics, not speed: the smallest file, one repetition; no assertion about how fast the drive is.
+    let dir = target_dir();
     let out = bin()
-        .args(["disk", "--disk-mib", "2", "--millis", "20", "--dir"])
+        .args(["disk", "--disk-mib", "16", "--reps", "1", "--dir"])
         .arg(dir.path())
         .output()
         .unwrap();
-    assert!(matches!(status(&out), BenchStatus::Unavailable { reason } if reason == dyno_core::bench::DISK_TEST_OFF));
+    match status(&out) {
+        BenchStatus::Done { metrics } => {
+            assert_eq!(metrics.len(), 12);
+            assert!(
+                metrics.iter().all(|m| m.value.is_finite() && m.value > 0.0 && m.samples.len() == 1),
+                "{metrics:?}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "no scratch file is left");
+}
+
+#[test]
+fn disk_never_touches_a_file_that_was_already_there() {
+    let dir = target_dir();
+    let theirs = dir.path().join(dyno_bench::disk::scratch::SCRATCH_NAME);
+    std::fs::write(&theirs, b"mine").unwrap();
+    let out = bin()
+        .args(["disk", "--disk-mib", "16", "--reps", "1", "--dir"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(matches!(status(&out), BenchStatus::Failed { .. }));
+    assert_eq!(std::fs::read(&theirs).unwrap(), b"mine");
+}
+
+#[test]
+fn disk_refuses_a_file_outside_its_bounds_before_writing() {
+    let dir = target_dir();
+    for mib in ["1", "99999"] {
+        let out = bin().args(["disk", "--disk-mib", mib, "--dir"]).arg(dir.path()).output().unwrap();
+        assert!(
+            matches!(status(&out), BenchStatus::Failed { reason } if reason.contains("between")),
+            "{mib}"
+        );
+    }
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 

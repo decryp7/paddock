@@ -58,6 +58,10 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  GpuAdapter,
+  BenchExportFormat,
+  BenchEstimateRequest,
+  BenchRunEstimate,
   BackupReport,
   ChangeTimeline,
   ChangesQuery,
@@ -493,11 +497,23 @@ export class TauriBackend implements DynoBackend {
   }
 
   startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
-    return this.request({ startBenchmark: { kinds: r.kinds, label: r.label, group: r.group ?? null, phase: r.phase ?? null, diskMib: r.diskMib ?? null, allowBattery: r.allowBattery ?? false } });
+    return this.request({ startBenchmark: { kinds: r.kinds, label: r.label, group: r.group ?? null, phase: r.phase ?? null, diskMib: r.diskMib ?? null, allowBattery: r.allowBattery ?? false, diskVolumes: r.diskVolumes ?? [], allowNetworkDrives: r.allowNetworkDrives ?? false, diskFolders: r.diskFolders ?? [], gpuAdapter: r.gpuAdapter ?? null, sustainedMinutes: r.sustainedMinutes ?? null, sustainedWriteGib: r.sustainedWriteGib ?? null } });
   }
 
   cancelBenchmark(): Promise<void> {
     return this.request('cancelBenchmark');
+  }
+
+  benchEstimate(request: BenchEstimateRequest): Promise<BenchRunEstimate | null> {
+    return this.request({ benchEstimate: { request } });
+  }
+
+  benchGpuAdapters(): Promise<GpuAdapter[]> {
+    return this.request('benchGpuAdapters');
+  }
+
+  saveBenchmarks(ids: string[], format: BenchExportFormat): Promise<SavedReport | null> {
+    return this.command<SavedReport | null>('save_benchmarks', { ids, format });
   }
 
   deleteBenchmark(id: string): Promise<void> {

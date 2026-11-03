@@ -34,13 +34,17 @@ use serde::{Deserialize, Serialize};
 /// - benchmarks (ADR 0030): `StartBenchmark` gained `allow_battery`; `BenchMetric` gained `samples`, `min`, `max`, `cv`,
 ///   `unsteady`; `KindResult` gained `method`; `BenchRun` gained `old_way` and `limited`; `BenchProgress` gained `phase`,
 ///   `liveness`, `limited`; `BenchOverview` gained `disk_test_enabled`; `MetricDelta` gained the spreads and `unsteady`;
-///   `ErrorCode::NeedsConsent` is new;
+///   `ErrorCode::NeedsConsent` is new; the disk test (WP-B3): `StartBenchmark` gained `disk_volumes`, `allow_network_drives`,
+///   `sustained_minutes` and `sustained_write_gib`, `KindResult` gained `device` and `trace`, `BenchProgress` gained `trace`, and the
+///   runner's `Line` gained `Sample`;
 /// - helper (ADR 0027): `Request::HelperStatus`, `Reply::HelperStatus`, `JobSpec::Helper` and `JobOutput::Helper` are new;
 /// - network features (ADR 0031): `Request::{IntelStatus, IntelEdit, GeoSummary, Firewall, ToolOffer, RemoveTool}`,
 ///   `Reply::{Intel, IntelEdited, Geo, Firewall, ToolOffer}`, `JobSpec::{UpdateList, UpdateGeo, RebuildIntel, InstallTool}` and
 ///   `JobOutput::{Intel, Tool}` are new;
 /// - widget grid (ADR 0044): `EditWidgetLayout` gained `base_revision`; `ErrorCode::Stale` is new (the layout views travel as JSON
 ///   on the link);
+/// - benchmarks B3-B8: `Request::{SaveBenchmarks, BenchGpuAdapters, BenchEstimate}` and `Reply::{GpuAdapters, BenchEstimate}` are new,
+///   `StartBenchmark` also gained `disk_folders` and `gpu_adapter`;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -256,6 +260,24 @@ pub enum Request {
         /// The person agreed to run on battery, for this run only (ADR 0030 D6). Without it a run on battery answers `NeedsConsent`.
         #[serde(default)]
         allow_battery: bool,
+        /// The volumes the disk test measures, by id (their mount points, from the disk map's list); empty means the system drive.
+        #[serde(default)]
+        disk_volumes: Vec<String>,
+        /// Network drives may be tested in this run (the person ticked it); their results are marked network.
+        #[serde(default)]
+        allow_network_drives: bool,
+        /// Folders chosen for drives whose top is not writable (the shell's folder dialog gave them).
+        #[serde(default)]
+        disk_folders: Vec<crate::bench::DiskFolder>,
+        /// The graphics adapter to measure, by its index in [`Reply::GpuAdapters`]; the default is the discrete one.
+        #[serde(default)]
+        gpu_adapter: Option<u32>,
+        /// Run the CPU kind as a sustained run of this many minutes (2, 5, 10 or 20) instead of the short test.
+        #[serde(default)]
+        sustained_minutes: Option<u32>,
+        /// Also run the sustained disk write (past the drive's cache), up to this many GiB per drive; the person confirmed the amount.
+        #[serde(default)]
+        sustained_write_gib: Option<u32>,
     },
     /// Stops the run in progress after the current kind (that kind is stopped at once). Appended.
     CancelBenchmark,
@@ -545,6 +567,23 @@ pub enum Request {
     ToolOffer,
     /// Removes Dyno's own copy of the disk-health tool (macOS); answers [`Reply::Ok`]. Appended.
     RemoveTool,
+    /// Writes saved benchmark runs as JSON or CSV to a path the user picked in the OS save dialog (answers `ReportSaved`). Appended.
+    SaveBenchmarks {
+        /// Where (absolute, ending in the format's extension).
+        path: String,
+        /// The file format.
+        format: crate::bench::export::ExportFormat,
+        /// The runs to write, by id (at most 200); an id that no longer exists is skipped.
+        ids: Vec<String>,
+    },
+    /// The graphics adapters the GPU runner sees (answers [`Reply::GpuAdapters`]); starts the runner briefly. Appended.
+    BenchGpuAdapters,
+    /// About how long a chosen run takes and what it writes to each drive (answers [`Reply::BenchEstimate`]; `null` while a drive
+    /// is still to be chosen). Appended.
+    BenchEstimate {
+        /// What is chosen.
+        request: crate::bench::estimate::EstimateRequest,
+    },
 }
 
 /// Dyno's own cost.
@@ -849,6 +888,11 @@ pub enum Reply {
     Firewall(Box<crate::firewall::FirewallView>),
     /// The disk-health tool as offered.
     ToolOffer(Box<crate::tool_offer::ToolOffer>),
+    // ---- benchmarks ----
+    /// The graphics adapters, for the picker.
+    GpuAdapters(Vec<crate::bench::gpu::GpuAdapter>),
+    /// The estimate for a chosen run; `None` until a drive is chosen.
+    BenchEstimate(Option<crate::bench::estimate::RunEstimate>),
 }
 
 /// The inventory report that was written.
@@ -935,6 +979,8 @@ impl Reply {
             Reply::IntelEdited(x) => v(x),
             Reply::Geo(x) => v(x),
             Reply::Firewall(x) => v(x),
+            Reply::GpuAdapters(x) => v(x),
+            Reply::BenchEstimate(x) => v(x),
         }
     }
 }

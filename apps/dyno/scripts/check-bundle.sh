@@ -29,9 +29,9 @@ case "$(uname -s)" in
     tree=$(mktemp -d)
     trap 'rm -rf "$tree"' EXIT
     dpkg-deb -x "$deb" "$tree"
-    found_app=0 found_agent=0 found_cli=0 found_bench=0
+    found_app=0 found_agent=0 found_cli=0 found_bench=0 found_gpu=0
     while IFS= read -r f; do
-      case "$(basename "$f")" in dyno-app) found_app=1 ;; dyno) found_cli=1 ;; dyno-agent) found_agent=1 ;; dyno-bench) found_bench=1 ;; esac
+      case "$(basename "$f")" in dyno-app) found_app=1 ;; dyno) found_cli=1 ;; dyno-agent) found_agent=1 ;; dyno-bench) found_bench=1 ;; dyno-bench-gpu) found_gpu=1 ;; esac
       file -b "$f" | grep -q '^ELF' || continue
       paths=$(readelf -d "$f" 2>/dev/null | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
       echo "run paths of ${f#"$tree"}: ${paths:-none}"
@@ -65,17 +65,19 @@ case "$(uname -s)" in
     rm -rf "$scripts"
     # Started from the extracted artifact (the release gate): the program must run here.
     if [[ -x "$helper" ]]; then "$helper" --self-test || err "the bundled dyno-helper --self-test failed"; fi
+    (( found_gpu )) || err "the .deb has no dyno-bench-gpu executable (the GPU benchmark runner, ADR 0030)"
     ;;
   Darwin)
     app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null | head -n 1)
     [[ -n "$app" ]] || { echo "::error::no .app under $bundle/macos"; exit 1; }
     codesign --verify --deep --strict "$app" || err "$app does not verify (broken or missing seal)"
     codesign -dv "$app" 2>&1 | grep -E 'Signature|Identifier|flags' || true
-    found_agent=0 found_cli=0 found_bench=0
+    found_agent=0 found_cli=0 found_bench=0 found_gpu=0
     while IFS= read -r f; do
       [[ "$(basename "$f")" == dyno-agent ]] && found_agent=1
       [[ "$(basename "$f")" == dyno ]] && found_cli=1
       [[ "$(basename "$f")" == dyno-bench ]] && found_bench=1
+      [[ "$(basename "$f")" == dyno-bench-gpu ]] && found_gpu=1
       file -b "$f" | grep -q 'Mach-O' || continue
       paths=$(otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
       echo "run paths of ${f#"$app"/}: $(echo "$paths" | paste -sd: -)"
@@ -87,9 +89,10 @@ case "$(uname -s)" in
     (( found_cli )) || err "the .app has no dyno (command line) executable"
     (( found_bench )) || err "the .app has no dyno-bench executable (the benchmark runner, ADR 0030)"
     [[ -x "$app/Contents/MacOS/dyno-helper" ]] || err "the .app has no dyno-helper executable (the program the one password prompt installs)"
+    (( found_gpu )) || err "the .app has no dyno-bench-gpu executable (the GPU benchmark runner, ADR 0030)"
     # Dyno ADR 0026: macOS 27.2 shows a process the whole kernel socket list only when its code-signing identifier has a dot, and
     # Tauri re-signs the sidecars with `codesign --force -s -`: the identifier must come from the embedded Info.plist.
-    for sidecar in dyno-agent dyno dyno-bench dyno-helper; do
+    for sidecar in dyno-agent dyno dyno-bench dyno-bench-gpu dyno-helper; do
       ident="$(codesign -dv "$app/Contents/MacOS/$sidecar" 2>&1 | sed -n 's/^Identifier=//p')"
       echo "code-signing identifier of $sidecar: ${ident:-none}"
       [[ "$ident" =~ ^net\.decryptology\.dyno\. ]] || err "$sidecar has the code-signing identifier '${ident:-none}', not net.decryptology.dyno.* (the Network page would see no sockets of other programs)"

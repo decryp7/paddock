@@ -60,6 +60,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | TRAY | DIALOG] => commands::dyno,
     /// "Save bundle...": the OS save dialog, then the agent writes the redacted diagnostics zip.
     Mutation [MAIN] => commands::save_diagnostics,
+    /// "Export" on the Benchmarks page: the OS save dialog, then the agent writes the chosen runs as JSON or CSV.
+    Mutation [MAIN] => commands::save_benchmarks,
     /// "Export" on the Reports page: the OS save dialog, then the agent writes the week's report.
     Mutation [MAIN] => commands::save_report,
     /// "Export for Debrief" on the Issues page.

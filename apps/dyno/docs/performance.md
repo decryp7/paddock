@@ -397,3 +397,42 @@ cancelled.
 Reading: 2,000 rows per look cost about 1.5 ms at the million-entry limit, so no extra thread is needed. The start-up rebuild
 is 77 ms at 1,000,000 entries, under the 200 ms line for persisting a packed index, so none is persisted. Transient peak while
 building is the lists themselves plus a hash map of the distinct ranges (not measured separately).
+## Disk test, first real run (2026-11-03, ADR 0030 WP-B3)
+
+One manual run of the rebuilt disk test to see that direct I/O reaches the device and not memory. It is not a benchmark of the
+drive and not a test: the numbers move with whatever else the machine and the drive are doing.
+
+- **Commit:** `feat/dyno-benchmark-2`, the commit that records this entry
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; the scratch folder on the external SSD `/Volumes/d7sst7` (APFS)
+- **Load:** 1-minute load about 8 (other agents), so the numbers are indications only
+- **Build:** debug (`target/debug/dyno-bench`), which does not matter for I/O-bound work
+- **Command:** `dyno-bench disk --disk-mib 256 --dir <folder on that drive>` (3 repetitions, ramp at most 1/8 of the file or 1 s); 73 s in all
+
+| Pattern | Median of 3 | Samples |
+|---|---|---|
+| Sequential 1 MiB, 1 thread, read | 511 MB/s | 496, 511, 532 |
+| Sequential 1 MiB, 1 thread, write | 241 MB/s (unsteady, CV 20 %) | 313, 241, 215 |
+| Sequential 1 MiB, 8 threads, read | 508 MB/s | 508, 499, 550 |
+| Sequential 1 MiB, 8 threads, write | 254 MB/s (unsteady, CV 33 %) | 301, 254, 150 |
+| Random 4 KiB, 1 thread, read | 2,400 IOPS (unsteady) | 1,223, 2,756, 2,400 |
+| Random 4 KiB, 1 thread, write | 1,082 IOPS | 1,141, 1,082, 958 |
+| Random 4 KiB, 32 threads, read | 34,337 IOPS (140.6 MB/s) | 34,337, 32,096, 34,758 |
+
+What it shows: reads are in the hundreds of MB/s and 4 KiB single-thread reads in the low thousands of IOPS, the device's order of
+magnitude, where the 1.0 method read the file back from the page cache (memory speed). The `F_NOCACHE` path works on macOS. The
+write medians are marked unsteady by the CV rule, as designed. **Not measured:** Windows and Linux direct I/O (to be checked on the
+runners, WP-B3's remaining item), a spinning disk, a network share, 4 GiB files, and the write budget on a real drive (it is proved
+against a scripted drive in `disk::tests`).
+
+## CPU, memory and GPU kernels, first real runs (2026-11-03, ADR 0030 WP-B4 to B6)
+
+Single runs to see that each kernel gives a plausible number and reaches the hardware. Not benchmarks of the machine and not tests;
+see [Disk test, first real run](#disk-test-first-real-run-2026-11-03-adr-0030-wp-b3) for the setup.
+
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, load average 8 to 20 from other agents; debug build of the runners
+  (the kernels' dependencies are optimised in the dev profile, the runner crates are not, so CPU numbers from a debug build are
+  lower than a shipped build's; they are recorded only to show the order of magnitude)
+- **GPU, `dyno-bench-gpu --smoke`** (one repetition, Metal, Apple M4 Pro): compute 6,920 GFLOPS, copy 204 GB/s, fill 270 Gpixel/s,
+  geometry 494 Mtri/s, 1.9 s in all. The fill figure is probably high: the off-screen target is discarded after each pass, which a
+  tile-based GPU may skip writing back; the label says "fill rate", not "memory bandwidth". **Not measured:** the five-repetition run,
+  discrete GPUs, DX12, Vulkan, the size of the bundle with wgpu (WP-B6 asks for it).

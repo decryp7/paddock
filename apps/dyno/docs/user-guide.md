@@ -111,6 +111,24 @@ changes a backup. A backup older than the limit you set (Settings, Backup health
 and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
 is a normal answer.
 
+## Benchmarks
+
+Open Benchmarks, pick what to run and click Run benchmarks; nothing runs before that. **Quick** measures the processor, memory and the
+system drive with a small test file, **Full** adds the graphics adapter and the drives you tick, **Sustained processor** runs every
+core flat out for 2 to 20 minutes and shows whether the speed holds, and **Custom** lets you choose everything. Under the buttons the
+page says about how long the run takes and the most it writes to each drive.
+
+- **The disk test** writes one temporary file on each drive you choose, with the system's cache bypassed so the numbers are the
+  drive's, and deletes it afterwards, also after Cancel or a crash. It never touches your files. A drive that is read-only, full,
+  disconnected or a network drive (unless you tick the box) is reported with the reason and the other drives still run. If a drive
+  does not let Dyno write at its top, the result offers "Choose a folder on this drive and run again". The optional sustained write
+  names the amount before it runs.
+- **Cancel** works at any moment. A run is never ended by a timer: "Still working" or "Not responding" only tell you; you decide.
+  The sustained processor run stops by itself, with the reason, if the processor stays close to its critical temperature.
+- **Reading the results:** each number is the median of the repetitions with their range, and a number whose repetitions differ by
+  more than 10 % is marked "Unsteady". There is no single score. Runs are compared only when measured the same way on the same drive.
+  On battery Dyno asks first; leave the computer otherwise idle while a run is going.
+
 ## Settings
 
 | Setting | Meaning |

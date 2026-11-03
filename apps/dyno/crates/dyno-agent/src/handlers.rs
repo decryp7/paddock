@@ -50,14 +50,11 @@ pub fn handle(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
 /// Starts a benchmark run after validating the request; the load recorded is the machine's as of the click.
 fn start_benchmark(
     shared: &Arc<Shared>,
-    kinds: &[dyno_core::bench::BenchKind],
-    label: &str,
-    group: Option<&str>,
+    plan: Result<dyno_core::bench::RunPlan, String>,
     phase: Option<dyno_core::bench::BenchPhase>,
-    disk_mib: Option<u32>,
     allow_battery: bool,
 ) -> Answer {
-    let plan = dyno_core::bench::plan(kinds, disk_mib, label, group).map_err(bad)?;
+    let plan = plan.map_err(bad)?;
     let load = {
         let core = lock(&shared.core);
         core.recent
@@ -259,7 +256,25 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             phase,
             disk_mib,
             allow_battery,
-        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib, allow_battery),
+            disk_volumes,
+            allow_network_drives,
+            disk_folders,
+            gpu_adapter,
+            sustained_minutes,
+            sustained_write_gib,
+        } => start_benchmark(
+            shared,
+            dyno_core::bench::plan(&kinds, disk_mib, &label, group.as_deref())
+                .and_then(|p| p.with_drives(&disk_volumes, allow_network_drives))
+                .and_then(|p| p.with_folders(&disk_folders))
+                .map(|mut p| {
+                    p.gpu_adapter = gpu_adapter;
+                    p
+                })
+                .and_then(|p| p.with_sustained(sustained_minutes, sustained_write_gib)),
+            phase,
+            allow_battery,
+        ),
         Request::CancelBenchmark => {
             shared.bench.cancel();
             Ok(Reply::Ok)
@@ -405,6 +420,13 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v)))
         }
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
+        Request::BenchEstimate { request } => Ok(Reply::BenchEstimate(dyno_core::bench::estimate::estimate_run(&dyno_core::bench::estimate::standard(), &request))),
+        Request::BenchGpuAdapters => shared
+            .bench
+            .gpu_adapters()
+            .map(Reply::GpuAdapters)
+            .map_err(|e| AgentError::new(ErrorCode::Unsupported, e)),
+        Request::SaveBenchmarks { path, format, ids } => save_benchmarks(shared, &path, format, &ids).map(Reply::ReportSaved),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
 }
@@ -683,6 +705,42 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
 const MAX_HARDWARE_EPISODES: u32 = 500;
 
 /// Writes the report to the path the user chose in the save dialog (Markdown or HTML).
+/// Writes the chosen benchmark runs as JSON or CSV. The path was chosen in the OS dialog and is checked again here.
+fn save_benchmarks(
+    shared: &Shared,
+    path: &str,
+    format: dyno_core::bench::export::ExportFormat,
+    ids: &[String],
+) -> Result<SavedReport, AgentError> {
+    use dyno_core::bench::export;
+    let dest = export::validate_destination(path, format).map_err(bad)?;
+    if !dest.parent().is_some_and(Path::is_dir) {
+        return Err(bad("The folder to save the results in does not exist."));
+    }
+    if ids.len() > export::MAX_EXPORT_RUNS {
+        return Err(bad(format!("Export at most {} runs at once.", export::MAX_EXPORT_RUNS)));
+    }
+    let runs: Vec<dyno_core::bench::BenchRun> = ids.iter().filter_map(|id| shared.bench.run(id)).collect();
+    if runs.is_empty() {
+        return Err(AgentError::new(ErrorCode::NotFound, "None of those runs exists any more."));
+    }
+    let refs: Vec<&dyno_core::bench::BenchRun> = runs.iter().collect();
+    let text = export::export(&refs, format);
+    std::fs::write(&dest, text.as_bytes()).map_err(|e| {
+        let code = if e.kind() == std::io::ErrorKind::PermissionDenied {
+            ErrorCode::AccessDenied
+        } else {
+            ErrorCode::Internal
+        };
+        AgentError::new(code, format!("Dyno could not write the results ({e}). Choose another folder."))
+    })?;
+    log::info!("dyno-agent: exported {} benchmark runs as {}", runs.len(), format.extension());
+    Ok(SavedReport {
+        path: dest.to_string_lossy().into_owned(),
+        bytes: text.len() as u64,
+    })
+}
+
 fn save_report(shared: &Shared, path: &str, format: ReportFormat, weeks_ago: u32) -> Result<SavedReport, AgentError> {
     let dest = report::validate_destination(path, format).map_err(bad)?;
     if !dest.parent().is_some_and(Path::is_dir) {

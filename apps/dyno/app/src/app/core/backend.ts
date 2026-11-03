@@ -55,6 +55,10 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  GpuAdapter,
+  BenchExportFormat,
+  BenchEstimateRequest,
+  BenchRunEstimate,
   BackupReport,
   ChangeTimeline,
   ChangesQuery,
@@ -212,6 +216,12 @@ export interface DynoBackend {
   startBenchmark(request: StartBenchmark): Promise<BenchOverview>;
   cancelBenchmark(): Promise<void>;
   deleteBenchmark(id: string): Promise<void>;
+  /** The graphics adapters the GPU runner sees (it is started for a moment). */
+  benchGpuAdapters(): Promise<GpuAdapter[]>;
+  /** The engine's estimate of a chosen run; `null` while a drive is still to be chosen. */
+  benchEstimate(request: BenchEstimateRequest): Promise<BenchRunEstimate | null>;
+  /** The shell shows the OS save dialog and the agent writes the chosen runs as JSON or CSV there; `null` when they cancel. */
+  saveBenchmarks(ids: string[], format: BenchExportFormat): Promise<SavedReport | null>;
   compareBenchmarks(before: string, after: string): Promise<BenchComparison>;
 
   // Reports, settings, plugins.

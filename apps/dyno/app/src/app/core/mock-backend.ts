@@ -68,6 +68,10 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  GpuAdapter,
+  BenchExportFormat,
+  BenchEstimateRequest,
+  BenchRunEstimate,
   BackupReport,
   ChangeTimeline,
   ChangesQuery,
@@ -109,7 +113,7 @@ import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './m
 import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
-import { mockCompare, mockKindResult, mockRun } from './mock/bench';
+import { MOCK_ESTIMATES, mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
 import { mockHistory } from './mock/history';
 import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
@@ -1083,12 +1087,33 @@ export class MockBackend implements DynoBackend {
     ]);
   }
 
+  /** The overview the page shows; a scenario written to `localStorage['dyno.mock.bench']` (the screenshots do) replaces it. */
+  private benchOverview(): BenchOverview {
+    try {
+      const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('dyno.mock.bench');
+      if (raw) return JSON.parse(raw) as BenchOverview;
+    } catch {
+      /* no storage or a damaged scenario: the default below */
+    }
+    return { running: this.benchRunning, runs: this.runs(), diskTestEnabled: true, estimates: MOCK_ESTIMATES };
+  }
+
   benchmarks(): Promise<BenchOverview> {
-    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs(), diskTestEnabled: false }));
+    return this.reply('benchmarks', () => this.benchOverview());
   }
 
   startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
     return this.reply('startBenchmark', () => {
+      // A start error written to `localStorage['dyno.mock.bench.start-error']` as {code, message} (the screenshots show the battery question).
+      try {
+        const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('dyno.mock.bench.start-error');
+        if (raw && !r.allowBattery) {
+          const e = JSON.parse(raw) as { code: Parameters<typeof err>[0]; message: string };
+          throw err(e.code, e.message);
+        }
+      } catch (e) {
+        if (e instanceof Error === false && typeof e === 'object' && e !== null && 'code' in e) throw e;
+      }
       if (this.benchRunning) throw err('busy', 'A benchmark is already running; wait for it or cancel it.');
       if (!r.kinds.length) throw err('badRequest', 'Choose at least one benchmark to run.');
       const kinds = [...new Set(r.kinds)];
@@ -1116,13 +1141,49 @@ export class MockBackend implements DynoBackend {
         }, 900);
       };
       step(0);
-      return { running: this.benchRunning, runs: this.runs(), diskTestEnabled: false };
+      return this.benchOverview();
     });
   }
 
   cancelBenchmark(): Promise<void> {
     return this.reply('cancelBenchmark', () => {
       this.benchRunning = null;
+    });
+  }
+
+  /** The engine's `estimate_run`, for the mock only. */
+  benchEstimate(r: BenchEstimateRequest): Promise<BenchRunEstimate | null> {
+    return this.reply('benchEstimate', () => {
+      if (r.kinds.includes('disk') && r.drives === 0) return null;
+      let seconds = 0;
+      let bytes = 0;
+      for (const k of r.kinds) {
+        if (k === 'disk') {
+          const d = MOCK_ESTIMATES.disk.find((x) => x.mib === (r.diskMib ?? MOCK_ESTIMATES.quickMib)) ?? MOCK_ESTIMATES.disk[0]!;
+          seconds += d.seconds * r.drives;
+          bytes = d.bytesWritten;
+          if (r.sustainedWriteGib) {
+            seconds += (MOCK_ESTIMATES.sustainedWrite.find((w) => w.gib === r.sustainedWriteGib)?.seconds ?? 0) * r.drives;
+            bytes += r.sustainedWriteGib * 1024 ** 3;
+          }
+        } else if (k === 'cpu' && r.sustainedMinutes) seconds += r.sustainedMinutes * 60;
+        else seconds += MOCK_ESTIMATES.kinds.find((x) => x.kind === k)?.seconds ?? 0;
+      }
+      return { seconds, bytesPerDrive: bytes };
+    });
+  }
+
+  benchGpuAdapters(): Promise<GpuAdapter[]> {
+    return this.reply('benchGpuAdapters', () => [
+      { index: 0, name: 'Apple M4 Pro', kind: 'integrated', backend: 'Metal', driver: '' },
+      { index: 1, name: 'AMD Radeon Pro (external)', kind: 'discrete', backend: 'Metal', driver: '' },
+    ]);
+  }
+
+  saveBenchmarks(ids: string[], format: BenchExportFormat): Promise<SavedReport | null> {
+    return this.reply('saveBenchmarks', () => {
+      if (!ids.length) throw err('notFound', 'None of those runs exists any more.');
+      return { path: `/Users/me/dyno-benchmarks.${format}`, bytes: 4_096 };
     });
   }
 
@@ -1136,8 +1197,10 @@ export class MockBackend implements DynoBackend {
 
   compareBenchmarks(before: string, after: string): Promise<BenchComparison> {
     return this.reply('compareBenchmarks', () => {
-      const b = this.runs().find((x) => x.id === before);
-      const a = this.runs().find((x) => x.id === after);
+      // The runs the page shows: a screenshot scenario's, or the mock's own.
+      const shown = this.benchOverview().runs;
+      const b = shown.find((x) => x.id === before);
+      const a = shown.find((x) => x.id === after);
       if (!a || !b) throw err('notFound', 'That benchmark run no longer exists.');
       return mockCompare(b, a);
     });

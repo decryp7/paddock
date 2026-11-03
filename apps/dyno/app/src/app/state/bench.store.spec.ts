@@ -92,4 +92,43 @@ describe('BenchStore', () => {
     expect(store.error()).not.toBeNull();
     expect(store.overview()).toBeNull();
   });
+
+  it('reads the drives for the picker', async () => {
+    const { store } = setup();
+    await store.loadVolumes();
+    expect(store.volumes().length).toBeGreaterThan(0);
+    expect(store.volumes()[0]?.mount).toBeTruthy();
+  });
+
+  it('runs a drive again with the folder the person chose, for that drive only', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    const spy = vi.spyOn(mock, 'startBenchmark');
+    await store.start({ kinds: ['cpu', 'disk'], label: 'Full', diskVolumes: ['/Volumes/A', '/Volumes/B'] });
+    await vi.advanceTimersByTimeAsync(4000);
+    await store.runWithFolder('/Volumes/B');
+    const again = spy.mock.calls.at(-1)?.[0];
+    expect(again?.kinds).toEqual(['disk']);
+    expect(again?.diskVolumes).toEqual(['/Volumes/B']);
+    expect(again?.diskFolders).toEqual([{ volume: '/Volumes/B', folder: '/Users/alex/Projects' }]);
+    expect(again?.label).toContain('Full');
+    store.stop();
+  });
+
+  it('exports the chosen runs and says where they went; a cancelled dialog changes nothing', async () => {
+    const { store, mock } = setup();
+    await store.load();
+    await store.exportRuns(['r1'], 'csv');
+    expect(store.exported()?.path).toContain('.csv');
+    const spy = vi.spyOn(mock, 'saveBenchmarks').mockResolvedValue(null);
+    await store.exportRuns(['r1'], 'json');
+    expect(spy).toHaveBeenCalled();
+    expect(store.exported()?.path).toContain('.csv');
+  });
+
+  it('lists the graphics adapters for the picker', async () => {
+    const { store } = setup();
+    await store.loadAdapters();
+    expect(store.adapters().map((a) => a.name)).toContain('Apple M4 Pro');
+  });
 });

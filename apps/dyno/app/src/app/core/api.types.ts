@@ -1168,6 +1168,14 @@ export interface BenchKindResult {
   millis: number;
   /** The method version it was measured with; 1 is Dyno 1.0's. */
   method: number;
+  /** The device measured when a kind runs once per device (the drive's name for the disk test); absent otherwise. */
+  device?: string | null;
+  /** The drive's top is not writable: offer to choose a folder on it and run again. */
+  needsFolder?: boolean;
+  /** The sustained CPU run's trace, one point a second. */
+  trace?: BenchTracePoint[];
+  /** How it was measured, in words (file system, bus, whether the cache was bypassed, the vector width). */
+  details?: string[];
 }
 
 export interface LoadAtRun {
@@ -1215,6 +1223,41 @@ export interface BenchProgress {
   liveness: BenchLiveness;
   /** Set when the run cannot have full-confidence conditions (Linux without a user manager). */
   limited: string | null;
+  /** The sustained run's points so far (the page draws them live); empty otherwise. */
+  trace?: BenchTracePoint[];
+}
+
+/** One second of a sustained run. */
+export interface BenchTracePoint {
+  secs: number;
+  /** Work done that second, in the metric's unit (GFLOPS). */
+  throughput: number;
+  freqMhz?: number | null;
+  tempC?: number | null;
+}
+
+export interface BenchKindEstimate {
+  kind: BenchKind;
+  seconds: number;
+}
+
+export interface BenchDiskEstimate {
+  mib: number;
+  /** The most bytes the disk test writes to one drive (the engine's `disk_write_budget`). */
+  bytesWritten: number;
+  seconds: number;
+}
+
+/** What the picker shows before a run; the page adds these up for what is chosen. */
+export interface BenchEstimates {
+  kinds: BenchKindEstimate[];
+  disk: BenchDiskEstimate[];
+  sustainedMinutes: number[];
+  noSensorMaxMinutes: number;
+  sustainedWriteMaxGib: number;
+  quickMib: number;
+  /** The sustained disk write at each offered amount, per drive. */
+  sustainedWrite: { gib: number; seconds: number }[];
 }
 
 export interface BenchOverview {
@@ -1222,6 +1265,13 @@ export interface BenchOverview {
   runs: BenchRun[];
   /** False while the engine keeps the disk test off (ADR 0030 D10); the page shows it as unavailable. */
   diskTestEnabled: boolean;
+  estimates?: BenchEstimates;
+}
+
+/** A folder chosen for a drive whose top is not writable. */
+export interface BenchDiskFolder {
+  volume: string;
+  folder: string;
 }
 
 export type BenchVerdict = 'better' | 'worse' | 'same';
@@ -1249,6 +1299,33 @@ export interface BenchComparison {
   warnings: string[];
 }
 
+/** A graphics adapter, as the GPU runner lists it. */
+export interface GpuAdapter {
+  index: number;
+  name: string;
+  kind: 'discrete' | 'integrated' | 'virtual' | 'cpu' | 'other';
+  backend: string;
+  driver: string;
+}
+
+/** What a run is going to be, for the engine's estimate. */
+export interface BenchEstimateRequest {
+  kinds: BenchKind[];
+  diskMib: number | null;
+  /** How many drives are ticked. */
+  drives: number;
+  sustainedMinutes: number | null;
+  sustainedWriteGib: number | null;
+}
+
+/** About how long it takes and the most it writes to each drive. */
+export interface BenchRunEstimate {
+  seconds: number;
+  bytesPerDrive: number;
+}
+
+export type BenchExportFormat = 'json' | 'csv';
+
 export interface StartBenchmark {
   kinds: BenchKind[];
   label: string;
@@ -1257,6 +1334,18 @@ export interface StartBenchmark {
   diskMib?: number | null;
   /** The person agreed to run on battery, for this run only. */
   allowBattery?: boolean;
+  /** The volumes the disk test measures, by id (mount point); empty or absent means the system drive. */
+  diskVolumes?: string[];
+  /** Network drives may be tested in this run; their results are marked network. */
+  allowNetworkDrives?: boolean;
+  /** Folders chosen for drives whose top is not writable. */
+  diskFolders?: BenchDiskFolder[];
+  /** The graphics adapter to measure, by index in the adapter list; absent is the default (the discrete one). */
+  gpuAdapter?: number | null;
+  /** Run the CPU kind as a sustained run of this many minutes (2, 5, 10 or 20). */
+  sustainedMinutes?: number | null;
+  /** Also run the sustained disk write, up to this many GiB per drive; the person confirmed the amount. */
+  sustainedWriteGib?: number | null;
 }
 
 // -------------------------------------------------------------------------------------------------------- network

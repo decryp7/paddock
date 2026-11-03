@@ -37,6 +37,11 @@ fn request(run: &str) -> ChildRequest {
         kind: BenchKind::Cpu,
         scratch: std::path::PathBuf::new(),
         disk_mib: 16,
+        rotational: false,
+        sustained_secs: None,
+        sustained_write_mib: 0,
+        available_mib: None,
+        gpu_adapter: None,
     }
 }
 

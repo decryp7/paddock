@@ -9,7 +9,7 @@
   "angularDir": "app",
   "windowsClippy": true,
   "processPatterns": [
-    "{build}[/\\\\]debug[/\\\\](dyno-test-plugin|dyno-bench)(\\.exe)?( |$)",
+    "{build}[/\\\\]debug[/\\\\](dyno-test-plugin|dyno-bench|dyno-bench-gpu)(\\.exe)?( |$)",
     "{tmp}[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
   ],
   "checks": [

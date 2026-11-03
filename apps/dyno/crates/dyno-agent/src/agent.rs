@@ -312,6 +312,32 @@ impl crate::bench::BenchEnv for AgentBenchEnv {
             .back()
             .and_then(|s| s.battery.value().map(|b| b.source == dyno_core::metrics::PowerSource::Battery))
     }
+
+    fn volumes(&self) -> Vec<dyno_core::disk::volume::Volume> {
+        self.0.upgrade().map(|shared| shared.disk.volumes()).unwrap_or_default()
+    }
+
+    fn available_memory(&self) -> Option<u64> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent.back().map(|s| s.memory.available)
+    }
+
+    fn throttle_input(&self) -> Option<dyno_core::throttle::ThrottleInput> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent
+            .back()
+            .map(|s| {
+                // What the OS says about its own limits is read by the hardware centre while the CPU is busy, as a run is.
+                let ctx = shared.hardware.context();
+                dyno_core::throttle::ThrottleInput::from_sample(s, ctx.power_saver, ctx.os)
+            })
+    }
+
+    fn space(&self, mount: &str) -> Option<(u64, u64)> {
+        dyno_platform::volumes::capacity(mount)
+    }
 }
 
 impl Shared {

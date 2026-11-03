@@ -7,6 +7,8 @@ pub mod alarms;
 pub mod baselines;
 pub mod bench;
 pub mod bench_child;
+pub mod bench_disk_target;
+pub mod bench_scratch;
 pub mod cache;
 pub mod cli;
 pub mod counters;

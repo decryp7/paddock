@@ -33,7 +33,7 @@
     "active": true,
     "targets": ["nsis", "dmg", "app"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "externalBin": ["binaries/dyno-agent", "binaries/dyno", "binaries/dyno-bench", "binaries/dyno-helper"],
+    "externalBin": ["binaries/dyno-agent", "binaries/dyno", "binaries/dyno-bench", "binaries/dyno-bench-gpu", "binaries/dyno-helper"],
     "category": "Utility",
     "shortDescription": "Measures and explains your PC",
     "longDescription": "Dyno measures your PC, explains why it is slow: a background agent keeps the history and the tray icon shows the load. It only looks and changes nothing on your computer."
