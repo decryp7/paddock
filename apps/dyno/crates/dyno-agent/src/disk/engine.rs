@@ -1872,6 +1872,43 @@ mod tests {
         assert!(matches!(end, End::Failed(ScanFailure::VolumeUnreachable { .. })), "{end:?}");
     }
 
+    /// More timeouts in total than the run limit, but a folder read well breaks every run: the scan is not a lost volume.
+    /// The order is sequenced: one reader takes the newest-listed folder first, so the folders are listed in the reverse of
+    /// the order they are read, and the test asserts the order it got instead of assuming it.
+    #[test]
+    fn a_folder_read_well_between_timeouts_resets_the_run() {
+        let burst = (MAX_UNREACHABLE_IN_A_ROW - 2) as usize;
+        let mut read_order: Vec<(String, bool)> = Vec::new(); // (name, times out)
+        for round in 0..3 {
+            for n in 0..burst {
+                read_order.push((format!("slow{round}-{n}"), true));
+            }
+            if round < 2 {
+                read_order.push((format!("good{round}"), false));
+            }
+        }
+        assert!(read_order.iter().filter(|(_, slow)| *slow).count() > MAX_UNREACHABLE_IN_A_ROW as usize);
+        let fs = FakeFs::new();
+        let r = fs.root();
+        for (name, slow) in read_order.iter().rev() {
+            let d = fs.dir(&r, name);
+            if *slow {
+                fs.fail_open(&d, ReadError::Unreachable("Operation timed out (os error 60)".into()));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        fs.on_read(move |p| {
+            if let Some(n) = p.file_name().and_then(|n| n.to_str()).filter(|n| *n != "fake-root") {
+                lock(&log).push(n.to_string());
+            }
+        });
+        let (_, _, end) = run(Arc::new(fs), r, cfg(1));
+        let expected: Vec<String> = read_order.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(*lock(&seen), expected, "the sequence the test relies on");
+        assert_eq!(end, End::Done);
+    }
+
     #[test]
     fn a_few_timeouts_below_the_run_limit_do_not_stop_the_scan() {
         let fs = FakeFs::new();

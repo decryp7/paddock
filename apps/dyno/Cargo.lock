@@ -1274,6 +1274,7 @@ dependencies = [
  "libc",
  "log",
  "netstat2",
+ "paddock-jobs",
  "paddock-proc",
  "plist",
  "serde",
