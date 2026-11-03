@@ -1194,3 +1194,16 @@ found the list shorter by then ("element(s) not found" at index 9, light theme o
 index with it later; use the locator that names the position. (Same day, run 7453: the Angular dev server of the Dyno chromium
 shard 2 died with `lmdb` "Cannot read properties of null (reading 'refCount')" in its build cache before the first test; the cause
 is not found, the job passed on the other shard and in earlier runs; if it repeats, set `NG_BUILD_CACHE=false` for e2e.)
+
+## A stall test read the runner's log right after the exit event (2026-11-03, Pitcrew; CI run 7459)
+
+`a_stalled_runner_is_stopped_gracefully_and_restarted` failed once ("the runner shut down by itself after the stop request", 434 of
+435 passed, nothing in Pitcrew changed). Candidates and what refuted them: the supervisor treats a self-exit after a graceful stop
+differently (no: the `Exited { expected: true }` event the test had already seen is that path); the fake never logs the line (no:
+it logs before it exits; 100 stress runs under four busy loops at nice 19 all passed); the log file is flushed late (no:
+`write_line` runs in `line()`). The cause: the runner's output reaches the supervisor through a reader thread and a channel, the
+exit through a probe of the process, so the exit can be handled before the last line; the test waited for the exit and then read
+the log once. Confirmed by putting the cause back: a temporary 300 ms delay per line in `read_lines` failed the old test with the
+reported message every time, and the waiting test passes 10 of 10 with it. The test now waits on the line with the real clock.
+**Lesson (class: two event sources, one assumed order):** a test that waits for event A on one path never reads state fed by
+event B on another path without waiting for B; to measure a rare order race, inject the delay on the path that is assumed fast.

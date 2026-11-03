@@ -436,10 +436,11 @@ fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
     h.until("graceful exit", Duration::from_millis(200), |h| {
         count(&h.history(), |k| matches!(k, HistoryKind::Exited { expected: true, .. })) == 1
     });
-    assert!(
-        h.log().contains("shutdown initiated"),
-        "the runner shut down by itself after the stop request"
-    );
+    // The runner's output comes through a reader thread, so its last line can reach the log after the supervisor has
+    // seen the exit: wait for the line (the real clock, no clock step), do not assume it came first.
+    h.until("the runner's shutdown line is logged", Duration::ZERO, |h| {
+        h.log().contains("shutdown initiated")
+    });
     assert!(h.log().contains("supervisor: runner stalled"));
     h.pump(Duration::from_secs(11));
     h.until("restart", Duration::from_millis(200), |h| {
