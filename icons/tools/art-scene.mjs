@@ -260,7 +260,9 @@ export function camera({ simple = false, tiny = false, shadow = true } = {}) {
     const glint = 'M' + seq.map(i => arc[i].join(' ')).join('L');
     out.push(`<g clip-path="url(#${id('glass')})"><path d="${glint}" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity="0.75"/>${disc([gc[0] - 10, gc[1], gc[2] + 12], ax, 30, '#FFFFFF', ' opacity="0.07"')}</g>`);
     // Highlight along the body's top-front edge (lighter ink).
-    out.push(`<path d="M${P3([R, 0, top - 8]).join(' ')}L${P3([W - R, 0, top - 8]).join(' ')}" stroke="${m.highlight}" stroke-width="2.5"/>`);
+    // A light rim along the body's top edges (front and end), so the dark body's top reads against the lavender tile at every size.
+    out.push(`<path d="M${P3([R, 0, top - 6]).join(' ')}L${P3([W - R, 0, top - 6]).join(' ')}" stroke="${m.highlight}" stroke-width="${simple ? 7 : 4.5}" stroke-linecap="round"/>`);
+    out.push(`<path d="M${P3([W - 6, R, top - 6]).join(' ')}L${P3([W - 6, D - R, top - 6]).join(' ')}" stroke="${m.highlight}" stroke-opacity="0.6" stroke-width="${simple ? 6 : 3.5}" stroke-linecap="round"/>`);
     return out.join('\n');
   }, { ...fit, tile: PALETTE.sighter.base, foot: shadow ? [20, W - 10, 10, D] : undefined, contacts: feet.map(([a, b]) => [a, b, 13]) });
 }

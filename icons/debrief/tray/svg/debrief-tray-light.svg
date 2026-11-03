@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <title>Debrief tray</title>
-  <defs><mask id="debrief-tray-default-light-m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M4 3H12V9H4Z" fill="#000"/></mask></defs>
-  <g><path d="M3 2H13V10H3Z" fill="#1C1C1E" mask="url(#debrief-tray-default-light-m0)" shape-rendering="crispEdges"/><path d="M4 6h2v1h-2ZM6 4h1v2h-1ZM7 3h1v1h-1ZM8 4h1v4h-1ZM9 7h1v1h-1ZM10 6h2v1h-2Z" fill="#1C1C1E" shape-rendering="crispEdges"/><path d="M2 11H14V12H2Z" fill="#1C1C1E" shape-rendering="crispEdges"/></g>
-  
+  <defs><mask id="debrief-st-light-32-default-b-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(1 -1)"><rect x="4" y="6" width="24" height="16" rx="2" fill="#fff"/><rect x="6" y="8" width="20" height="12" rx="0.8" fill="#000"/><path d="M9 14L11 14L14 10L17 18L19 13L21 14L24 14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="square" stroke-linejoin="round"/><rect x="2" y="24" width="28" height="2" rx="1" fill="#fff"/></g></mask></defs>
+  <rect x="-4" y="-4" width="40" height="40" fill="#1C1C1E" mask="url(#debrief-st-light-32-default-b-g)"/>
 </svg>

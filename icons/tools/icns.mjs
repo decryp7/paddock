@@ -2,7 +2,7 @@
 // tools/build.mjs swaps those for the hand-tuned frames with `withSmallFrames`.
 import { inflateSync } from 'node:zlib';
 
-const TYPES = { icp4: 16, icp5: 32, ic11: 32, ic12: 64 };
+const TYPES = { icp4: 16, icp5: 32, ic11: '16@2x', ic12: 64 };
 const CLASSIC = { 16: ['is32', 's8mk'], 32: ['il32', 'l8mk'] };
 
 /** Decodes an 8-bit, non-interlaced RGBA PNG (what resvg writes) to { w, h, rgba }. */
@@ -79,12 +79,14 @@ export function writeIcns(entries) {
 }
 
 /**
- * Replaces the small frames of an .icns with hand-tuned PNGs: `frames` maps a pixel size (16, 32, 64) to its PNG. 16 pt is `icp4`,
+ * Replaces the small frames of an .icns with hand-tuned PNGs: `frames` maps a pixel size (16, 32, 64, and '16@2x' for the 16 pt slot
+ * at 2x when it is not the 32 frame) to its PNG. 16 pt is `icp4`,
  * 32 px is `icp5` and 16 pt at 2x (`ic11`), 64 px is 32 pt at 2x (`ic12`). The classic entries (`is32`/`s8mk`, `il32`/`l8mk`: what
  * `iconutil` and older readers decode) are rewritten from the same two frames.
  */
 export function withSmallFrames(icns, frames) {
   const keep = readIcns(icns).filter(([t]) => !(t in TYPES) && !Object.values(CLASSIC).flat().includes(t));
-  const small = Object.entries(TYPES).map(([t, px]) => [t, frames[px]]);
+  // 16 pt at 2x (`ic11`) may differ from the 32 pt frame (`icp5`): the family shows the flat glyph in the 16 pt slot at every scale.
+  const small = Object.entries(TYPES).map(([t, px]) => [t, frames[px] ?? frames[32]]);
   return writeIcns([...classic(16, frames[16]), ...classic(32, frames[32]), ...small, ...keep]);
 }

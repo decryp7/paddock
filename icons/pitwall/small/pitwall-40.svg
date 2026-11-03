@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 32 32">
+  <title>Pitwall 32px</title>
+  <defs>
+    <linearGradient id="pitwall-fl40-40-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
+    
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#pitwall-fl40-40-bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="pitwall-fl40-40-am" maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40"><rect width="40" height="40" fill="#000"/><rect x="11" y="2" width="3" height="12" rx="1.5" fill="#fff"/><rect x="22" y="10" width="5" height="4" rx="1" fill="#fff"/><rect x="11" y="13" width="18" height="25" rx="4" fill="#fff"/><rect x="14" y="16" width="12" height="9" rx="0.75" fill="#000"/><rect x="15" y="23" width="2" height="2" fill="#fff"/><rect x="19" y="20" width="2" height="5" fill="#fff"/><rect x="23" y="18" width="2" height="7" fill="#fff"/><rect x="14" y="28" width="12" height="2" fill="#000"/><rect x="14" y="32" width="12" height="2" fill="#000"/></mask></defs><g transform="translate(0 3)"><rect width="40" height="40" fill="#24094F" opacity="0.4" mask="url(#pitwall-fl40-40-am)" transform="translate(0 1.25)"/><rect width="40" height="40" fill="#FFFFFF" mask="url(#pitwall-fl40-40-am)"/></g></g>
+</svg>

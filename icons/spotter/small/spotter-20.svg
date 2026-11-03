@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16">
+  <title>Spotter 16px</title>
+  <defs>
+    <linearGradient id="spotter-fl20-20-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD257"/><stop offset="1" stop-color="#E59600"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#spotter-fl20-20-bg)"/>
+  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#7A4E00" stroke-opacity="0.45" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="spotter-fl20-20-am" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20"><rect width="20" height="20" fill="#000"/><rect x="5" y="4" width="3" height="1" rx="0.5" fill="#fff"/><rect x="13" y="4" width="2" height="1" rx="0.5" fill="#fff"/><rect x="4" y="5" width="4" height="6" rx="1" fill="#fff"/><rect x="12" y="5" width="4" height="6" rx="1" fill="#fff"/><rect x="8" y="7" width="4" height="2" fill="#fff"/><path d="M2.75 13a3.75 3.75 0 1 0 7.5 0a3.75 3.75 0 1 0 -7.5 0Z" fill="#fff"/><path d="M10.25 13a3.75 3.75 0 1 0 7.5 0a3.75 3.75 0 1 0 -7.5 0Z" fill="#fff"/><path d="M3.75 13a2.75 2.75 0 1 0 5.5 0a2.75 2.75 0 1 0 -5.5 0Z" fill="#000"/><path d="M11.25 13a2.75 2.75 0 1 0 5.5 0a2.75 2.75 0 1 0 -5.5 0Z" fill="#000"/></mask></defs><g transform="translate(0 -1)"><rect width="20" height="20" fill="#3A2600" mask="url(#spotter-fl20-20-am)"/></g></g>
+</svg>
