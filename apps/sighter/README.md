@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/sighter-icon.svg?v=1564b1d6" alt="Sighter icon" width="96" height="96">
+<img src="docs/images/sighter-icon.svg?v=b140da2e" alt="Sighter icon" width="96" height="96">
 
 # Sighter
 
@@ -11,7 +11,7 @@ tested like any other. Everything runs on your machine.
 
 </div>
 
-![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg?v=2d124e94)
+![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg?v=78ab58c8)
 
 
 > **Status: in design; not usable yet.** There is no product code in this repository. The design is in
@@ -21,9 +21,9 @@ tested like any other. Everything runs on your machine.
 
 ![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=51430f13)
 
-![Sighter features](docs/images/sighter-features.svg?v=8601ea26)
+![Sighter features](docs/images/sighter-features.svg?v=41c6d154)
 
-![How Sighter works](docs/images/sighter-how-it-works.svg?v=139c7c1a)
+![How Sighter works](docs/images/sighter-how-it-works.svg?v=94718759)
 
 - **Find elements from pixels alone.** Send a screenshot (or ask for a window capture) and a query ("the Save button",
   text "Export"); get boxes, confidence and which layer answered. Accessibility trees are an optional label source,

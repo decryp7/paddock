@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/pacenotes-icon.svg?v=90c9ab94" alt="Pacenotes icon" width="96" height="96">
+<img src="docs/images/pacenotes-icon.svg?v=a9bb0f44" alt="Pacenotes icon" width="96" height="96">
 
 # Pacenotes
 
@@ -11,7 +11,7 @@ your local AI the same view over MCP. Everything runs on your machine.
 
 </div>
 
-![Pacenotes: Understand your code, locally](docs/images/pacenotes-hero.svg?v=5cfa4726)
+![Pacenotes: Understand your code, locally](docs/images/pacenotes-hero.svg?v=d6bc42e0)
 
 
 > **Status: in design; implementation starts after Debrief's release.** There is no product code in this repository.
@@ -19,9 +19,9 @@ your local AI the same view over MCP. Everything runs on your machine.
 
 ## What it will do
 
-![Pacenotes features](docs/images/pacenotes-features.svg?v=014a8905)
+![Pacenotes features](docs/images/pacenotes-features.svg?v=1600ef91)
 
-![How Pacenotes works](docs/images/pacenotes-how-it-works.svg?v=083b177c)
+![How Pacenotes works](docs/images/pacenotes-how-it-works.svg?v=16294e59)
 
 ## Understand a new codebase, in any language
 
