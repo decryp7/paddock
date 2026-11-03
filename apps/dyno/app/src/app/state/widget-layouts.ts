@@ -72,6 +72,19 @@ export class WidgetLayouts {
     }
   }
 
+  /** Takes a view an edit answered with (the grid sends its own `arrange` edits) so every reader sees it. */
+  accept(view: SurfaceView): void {
+    this.apply(view);
+  }
+
+  /** Reads `surface` again and returns the view; rejects with the reason (the grid retries a `stale` edit on it). */
+  async reload(surface: DynoSurface): Promise<SurfaceView> {
+    const view = await this.backend.widgetLayout(surface);
+    this.apply(view);
+    this._error.set(null);
+    return view;
+  }
+
   private revisionOf(surface: DynoSurface): number | undefined {
     const view = surface === 'popover' ? this._popover() : surface === 'dashboard' ? this._dashboard() : this._menuBar();
     return view?.revision;

@@ -27,54 +27,51 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
 /** CPU: hero, one sparkline, caption rows; the toggle switches to one live bar per core grouped by core kind. */
 @Component({
   selector: 'dy-cpu-tile',
-  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Tile, Sparkline, RouterLink, Icon],
+  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Sparkline, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-tile title="CPU" icon="cpu" [ready]="live.connected()">
-      @if (cpu()) {
-        <span badge class="head">
-          <pd-segmented-control label="CPU view" [options]="cpuViews" [value]="prefs.cpuView()" (valueChange)="prefs.setCpuView($event === 'cores' ? 'cores' : 'overall')" />
-          <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltipPosition="left" [matTooltip]="'CPU details'"><dy-icon name="arrow-right" /></a>
-        </span>
-      }
-      @if (cpu(); as c) {
+    @if (cpu(); as c) {
+      <div class="head">
         <div class="hero"><b>{{ total(c.total)[0] }}</b><small>{{ total(c.total)[1] }}</small></div>
-        @if (prefs.cpuView() === 'overall') {
-          <dy-sparkline [values]="live.series().cpu" [max]="100" color="var(--accent)" label="CPU use over the last minute" style="--spark-h: 32px" />
-          <div class="cores" role="img" [attr.aria-label]="coreLabel()">
-            @for (v of c.perCore; track $index) {
-              <span class="core" [style.background]="coreColor(v)" [matTooltip]="'Core ' + count($index) + ': ' + pct(v)"></span>
-            }
-          </div>
-          <dl class="caps">
-            <div><dt>Frequency</dt><dd>{{ ghz(c.frequencyMhz) }} · base {{ ghz(c.baseFrequencyMhz) }}</dd></div>
-            <div><dt>Cores</dt><dd>{{ coresText() }}</dd></div>
-          </dl>
-        } @else {
-          <div class="groups">
-            @for (g of groups(); track g.kind) {
-              <section [attr.aria-label]="g.title">
-                <h3>{{ g.title }}</h3>
-                <ul>
-                  @for (core of g.cores; track core.index) {
-                    <li>
-                      <span class="lbl num">{{ core.label }}</span>
-                      <span class="bar-track" role="img" [attr.aria-label]="core.label + ' ' + pct(c.perCore[core.index] ?? 0)"><span [style.width.%]="c.perCore[core.index] ?? 0"></span></span>
-                      <span class="val num">{{ pct(c.perCore[core.index] ?? 0) }}</span>
-                    </li>
-                  }
-                </ul>
-              </section>
-            }
-          </div>
-        }
+        <span class="spacer"></span>
+        <pd-segmented-control label="CPU view" [options]="cpuViews" [value]="prefs.cpuView()" (valueChange)="prefs.setCpuView($event === 'cores' ? 'cores' : 'overall')" />
+        <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltipPosition="left" [matTooltip]="'CPU details'"><dy-icon name="arrow-right" /></a>
+      </div>
+      @if (prefs.cpuView() === 'overall') {
+        <dy-sparkline [values]="live.series().cpu" [max]="100" color="var(--accent)" label="CPU use over the last minute" style="--spark-h: 32px" />
+        <div class="cores" role="img" [attr.aria-label]="coreLabel()">
+          @for (v of c.perCore; track $index) {
+            <span class="core" [style.background]="coreColor(v)" [matTooltip]="'Core ' + count($index) + ': ' + pct(v)"></span>
+          }
+        </div>
+        <dl class="caps">
+          <div><dt>Frequency</dt><dd>{{ ghz(c.frequencyMhz) }} · base {{ ghz(c.baseFrequencyMhz) }}</dd></div>
+          <div><dt>Cores</dt><dd>{{ coresText() }}</dd></div>
+        </dl>
+      } @else {
+        <div class="groups">
+          @for (g of groups(); track g.kind) {
+            <section [attr.aria-label]="g.title">
+              <h3>{{ g.title }}</h3>
+              <ul>
+                @for (core of g.cores; track core.index) {
+                  <li>
+                    <span class="lbl num">{{ core.label }}</span>
+                    <span class="bar-track" role="img" [attr.aria-label]="core.label + ' ' + pct(c.perCore[core.index] ?? 0)"><span [style.width.%]="c.perCore[core.index] ?? 0"></span></span>
+                    <span class="val num">{{ pct(c.perCore[core.index] ?? 0) }}</span>
+                  </li>
+                }
+              </ul>
+            </section>
+          }
+        </div>
       }
-    </dy-tile>
+    }
   `,
   styles: `
-    :host { display: block; min-width: 0; }
-    dy-tile { height: 100%; }
-    .head { display: inline-flex; align-items: center; gap: var(--sp-1); }
+    :host { display: grid; gap: var(--sp-3); min-width: 0; align-content: start; }
+    .head { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+    .spacer { flex: 1; }
     .cores { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; height: 12px; }
     .core { border-radius: 2px; background-color: var(--surface-active); }
     .groups { display: grid; gap: var(--sp-3); }

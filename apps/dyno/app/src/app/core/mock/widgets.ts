@@ -146,8 +146,6 @@ function builtinPresets(): Preset<DashboardWidget, Cells>[] {
 const COLUMNS = 12;
 const MAX_ROWS = 512;
 type Steps = StepsInfo;
-const stepsMin = (s: Steps): number => ('range' in s ? s.range.min : (s.only.values[0] ?? 1));
-const stepsMax = (s: Steps): number => ('range' in s ? s.range.max : (s.only.values[s.only.values.length - 1] ?? 1));
 const stepsNearest = (s: Steps, v: number): number =>
   'range' in s ? Math.min(Math.max(v, s.range.min), s.range.max) : s.only.values.reduce((best, c) => (Math.abs(c - v) < Math.abs(best - v) ? c : best), s.only.values[0] ?? 1);
 const stepsMove = (s: Steps, v: number, up: boolean): number | null => {

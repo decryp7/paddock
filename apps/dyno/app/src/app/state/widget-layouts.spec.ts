@@ -42,3 +42,25 @@ describe('WidgetLayouts', () => {
     expect(read).toHaveBeenCalled();
   });
 });
+
+describe('WidgetLayouts, for the grid', () => {
+  it('accepts a view an edit answered with and reads a surface again on request', async () => {
+    const { mock, layouts } = setup();
+    await layouts.use('dashboard');
+    const answered = await mock.editWidgetLayout({ dashboard: { arrange: { gesture: { nudge: { id: 'health', dir: 'down' } } } } });
+    layouts.accept(answered);
+    expect(layouts.dashboard()).toBe('dashboard' in answered ? answered.dashboard : null);
+    const again = await layouts.reload('dashboard');
+    expect('dashboard' in again && again.dashboard.revision).toBe(layouts.dashboard()!.revision);
+    expect(layouts.error()).toBeNull();
+  });
+
+  it('rejects when the surface cannot be read, and keeps the last view', async () => {
+    const { mock, layouts } = setup();
+    await layouts.use('dashboard');
+    const before = layouts.dashboard();
+    vi.spyOn(mock, 'widgetLayout').mockRejectedValue({ code: 'agentUnavailable', message: 'No agent' });
+    await expect(layouts.reload('dashboard')).rejects.toMatchObject({ code: 'agentUnavailable' });
+    expect(layouts.dashboard()).toBe(before);
+  });
+});

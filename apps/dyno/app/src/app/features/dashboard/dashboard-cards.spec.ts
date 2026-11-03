@@ -6,6 +6,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { DiagnosisStore } from '../../state/diagnosis.store';
+import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
 import { AnomaliesCallout } from './anomalies-callout';
 import { DiagnosisCard } from './diagnosis-card';
@@ -164,23 +165,6 @@ describe('DiagnosisCard', () => {
     expect(el.querySelector('.others li')?.textContent).toContain('Low memory');
     expect(byText(el, 'other possible cause').textContent).toContain('Hide');
   });
-
-  it('shows the error with its hint, and Retry runs the check again', async () => {
-    const { mock } = env();
-    const spy = vi.spyOn(mock, 'whySlow').mockRejectedValueOnce({ code: 'timeout', message: 'Too slow' }).mockResolvedValue(diagnosis());
-    const f = TestBed.createComponent(DiagnosisCard);
-    f.detectChanges();
-    await TestBed.inject(DiagnosisStore).run();
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.err')?.textContent).toContain('Too slow');
-    expect(el.querySelector('.err')?.textContent).toContain('Try again');
-    byText(el, 'Retry').click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(el.querySelector('.err')).toBeNull();
-    expect(el.querySelector('.headline')).not.toBeNull();
-  });
 });
 
 const reason = (id: string, impact: number): HealthReason => ({
@@ -195,13 +179,15 @@ const report = (reasons: HealthReason[]): HealthReport => ({ at: NOW, score: 100
 describe('HealthHero', () => {
   afterEach(() => TestBed.inject(Dialog).closeAll());
 
-  it('shows a skeleton, then the score, grade and the three costliest reasons by impact', async () => {
+  it('draws the score, grade and the three costliest reasons by impact (content only: no card, no loading or error state)', async () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 2), reason('b', 9), reason('c', 5), reason('d', 7)]));
     const f = TestBed.createComponent(HealthHero);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(el.querySelector('.num')).toBeNull();
+    expect(el.querySelector('section.card')).toBeNull();
+    await TestBed.inject(HealthStore).loadReport();
     await settle(f);
     expect(el.querySelector('.num')?.textContent).toBe('77');
     expect([...el.querySelectorAll('li .t')].map((t) => /Reason (\w)/.exec(t.textContent ?? '')?.[1])).toEqual(['b', 'd', 'c']);
@@ -212,23 +198,10 @@ describe('HealthHero', () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([]));
     const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
     await settle(f);
     expect((f.nativeElement as HTMLElement).querySelector('.clear')?.textContent).toContain('Nothing needs your attention');
   });
-
-  it('shows an error with Retry that reloads', async () => {
-    const { mock } = env();
-    const spy = vi.spyOn(mock, 'health').mockRejectedValueOnce({ code: 'agentUnavailable', message: 'No agent' }).mockResolvedValue(report([]));
-    const f = TestBed.createComponent(HealthHero);
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.err')?.textContent).toContain('No agent');
-    byText(el, 'Retry').click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(el.querySelector('.err')).toBeNull();
-  });
-
 });
 
 describe('TopApps', () => {

@@ -86,6 +86,7 @@ const ready = (text: string): WidgetState<V, string> => ({ state: 'ready', value
       (viewChange)="changes.push($event)"
       (action)="actions.push($event)"
       [hasOptions]="hasOptions"
+      [headOf]="head"
       (options)="opened = $event"
       (addWidget)="adds = adds + 1"
       (retry)="retries = retries + 1"
@@ -108,6 +109,8 @@ class Host {
   retries = 0;
   opened = '';
   readonly hasOptions = (k: string) => k === 'cpu';
+  readonly headOn = signal(false);
+  readonly head = (w: W) => (this.headOn() && w.kind === 'cpu' ? 'CPU (busy)' : null);
 }
 
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
@@ -557,6 +560,14 @@ describe('PdWidgetGrid', () => {
       items().at(-1)!.click();
       await settle(f);
       expect(backend.edit).toHaveBeenLastCalledWith({ remove: { id: 'c' } }, 8);
+    });
+
+    it('names a widget by the app\'s own head text when it gives one, else by its kind', async () => {
+      await create();
+      expect(qa('.pd-w-title').map((t) => t.textContent?.trim())).toEqual(['CPU', 'Network', 'Disk']);
+      f.componentInstance.headOn.set(true);
+      await settle(f);
+      expect(qa('.pd-w-title').map((t) => t.textContent?.trim())).toEqual(['CPU (busy)', 'Network', 'Disk']);
     });
 
     it('offers Options… for kinds that have them, and an undo toast after Remove that takes it back', async () => {

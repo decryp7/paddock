@@ -233,7 +233,7 @@ interface Active {
     .pd-wg-cell.pd-wg-lifted { z-index: 3; cursor: grabbing; box-shadow: var(--pd-shadow-3); }
     .pd-wg-cell.pd-wg-resizing { z-index: 3; justify-self: start; align-self: start; }
     .pd-wg-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .pd-wg-more { position: absolute; z-index: 2; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; --mat-icon-button-state-layer-size: 24px; --mat-icon-button-icon-size: 16px; color: var(--pd-text-muted); }
+    .pd-wg-cell .pd-wg-more { position: absolute; z-index: 2; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; --mat-icon-button-state-layer-size: 24px; --mat-icon-button-icon-size: 16px; color: var(--pd-text-muted); }
     .pd-wg-more .mat-mdc-button-touch-target { width: 24px; height: 24px; }
     .pd-wg-h { position: absolute; z-index: 2; color: var(--pd-text-muted); opacity: 0; }
     .pd-wg-cell:hover .pd-wg-h, .pd-wg-cell:focus-within .pd-wg-h, .pd-wg-cell:focus .pd-wg-h, .pd-wg-cell.pd-wg-resizing .pd-wg-h { opacity: 1; }
@@ -289,6 +289,8 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   readonly now = input<number | null>(null);
   /** Right-aligned head text of a fresh placement. */
   readonly meta = input<((id: PlacementId, state: WidgetState<V, A>) => string | null) | null>(null);
+  /** The head text of a widget when it depends on the widget's own settings (a metric's name); null or a null answer keeps the kind's title. */
+  readonly headOf = input<((widget: W) => string | null) | null>(null);
   /** The container width in px when the app knows it better than the grid (a gallery, a test); null measures the grid. */
   readonly width = input<number | null>(null);
   /** False hides the Edit layout bar (a static drawing, such as a gallery's before-and-after boards). */
@@ -392,7 +394,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
         widget: p.widget as unknown as W,
         kind,
         info: k,
-        title: k?.title ?? kind,
+        title: this.headOf()?.(p.widget as unknown as W) ?? k?.title ?? kind,
         template: templates.get(kind) ?? null,
         state,
         meta: meta && state ? meta(o.id, state) : null,

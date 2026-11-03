@@ -1,9 +1,10 @@
+import { MatTooltip } from '@angular/material/tooltip';
+import { PdSkeleton } from '@decryp7/paddock-ui/widgets';
 import { FullTextTip } from '../../shared/full-text-tip';
 import type { Measured } from '../../core/api.types';
 import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Icon } from '../../shared/icon';
-import type { IconName } from '../../shared/icons';
 import { formatBytes, formatPercent } from '../../shared/format';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { Ring } from '../../shared/ring';
@@ -12,8 +13,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
-import type { DashboardKind, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
-import { WidgetLayouts } from '../../state/widget-layouts';
+import type { Cells, DashboardKind, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
 import { AnimatedNumber } from './animated-number';
 import { HealthHero } from '../dashboard/health-hero';
 import { CpuTile } from '../dashboard/tiles';
@@ -22,61 +22,49 @@ import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
 import { counterReading } from './counter-reading';
-import { sentenceCase, seriesFor } from './series';
+import { seriesFor } from './series';
 import { WidgetChoicesStore } from '../../state/widget-choices';
+import type { DyValue } from './dashboard-states';
 
-/** Kinds that draw a panel of their own and ignore the metric. */
-const PANEL_KINDS: readonly DashboardKind[] = ['health', 'issues', 'cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'];
-import { MatTooltip } from '@angular/material/tooltip';
+/** The first width, in columns, at which the health widget shows its hero (the former "span greater than 3"). */
+export const HERO_MIN_WIDTH = 4;
+/** From this many rows the health hero lists three reasons, below it two (the third would be cut). */
+export const HERO_ROWS_FOR_THREE = 11;
 
-const ICON: Record<DashboardKind, IconName> = {
-  graph: 'trend',
-  bigNumber: 'gauge',
-  bars: 'reports',
-  ring: 'gauge',
-  heatmap: 'cpu',
-  topProcesses: 'processes',
-  issues: 'alert',
-  health: 'health',
-  cpu: 'cpu',
-  diagnosis: 'why',
-  events: 'bell',
-  history: 'trend',
-  consumers: 'processes',
-  diskTrend: 'disk',
-};
+/** The placement the body reads while there is no value (never drawn: the twin is). */
+const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1, widget: { kind: 'bigNumber', metric: 'cpuTotal', options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } } };
 
 /**
- * One dashboard widget, drawn from its configuration: a graph, big number, bars, ring, per-core heatmap, top processes,
- * issues or the health score. Neutral by default; the hero uses the accent, and a threshold colour only appears when a
- * threshold is crossed (always with the number printed). Values glide to their new reading.
+ * The body of one dashboard widget, drawn from its configuration: a graph, big number, bars, ring, per-core heatmap, top
+ * processes, issues, the health score or one of the panels. Content only: the shared grid's frame draws the title, the menu,
+ * the focus ring and the loading, empty and error states (family ADR 0044 §5). Without a value the widget is loading and the
+ * body is its skeleton twin (`pdSkeleton` blocks of the ready height). Neutral by default; the hero uses the accent, and a
+ * threshold colour only appears when a threshold is crossed (always with the number printed). Values glide to their reading.
  */
 @Component({
   selector: 'dy-widget',
-  imports: [FullTextTip, MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, PdSkeleton, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '[attr.role]': 'ownCard() ? null : "group"', '[attr.aria-label]': 'ownCard() ? null : title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
+  host: { '[attr.data-kind]': 'kind()', '[style.--wv-rows]': 'rows()' },
   template: `
-    @if (!ownCard()) {
-    <header>
-      <dy-icon [name]="icon()" />
-      <h3 class="truncate">{{ title() }}</h3>
-      @if (reading().reason && widget().kind !== 'topProcesses' && widget().kind !== 'health' && widget().kind !== 'issues') {
-        <span class="faint">Not available</span>
-      }
-    </header>
-    }
-    @switch (widget().kind) {
+    @if (value() === null) {
+      <div class="twin">
+        <b pdSkeleton class="sk-big">00.0</b>
+        <span pdSkeleton class="sk-line">Loading the reading</span>
+        <span pdSkeleton class="sk-line sk-short">Loading</span>
+      </div>
+    } @else {
+    @switch (kind()) {
       @case ('bigNumber') {
         <div class="hero" [attr.data-tone]="reading().tone"><b><dy-animated-number [value]="reading().text" /></b><small>{{ reading().unit }}</small></div>
         @if (reading().reason; as why) {
-          <p class="note">{{ why }}</p>
+          <p class="note"><span>Not available. {{ why }}</span></p>
         }
       }
       @case ('graph') {
         <div class="hero" [attr.data-tone]="reading().tone"><b><dy-animated-number [value]="reading().text" /></b><small>{{ reading().unit }}</small></div>
         @if (reading().reason; as why) {
-          <p class="note">{{ why }}</p>
+          <p class="note"><span>Not available. {{ why }}</span></p>
         } @else if (series(); as s) {
           <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
         } @else {
@@ -92,7 +80,7 @@ const ICON: Record<DashboardKind, IconName> = {
           <dy-ring [value]="reading().percent ?? 0" [tone]="ringTone()" [label]="title() + ' ' + reading().text + reading().unit" style="--ring-size: 84px">
             <span class="rn"><dy-animated-number [value]="reading().text" /></span>
           </dy-ring>
-          <p class="note">{{ reading().reason ?? title() }}</p>
+          <p class="note">@if (reading().reason; as why) {<span>Not available. {{ why }}</span>} @else {<span>{{ title() }}</span>}</p>
         </div>
       }
       @case ('heatmap') {
@@ -132,8 +120,8 @@ const ICON: Record<DashboardKind, IconName> = {
       @case ('consumers') { <dy-consumers-panel /> }
       @case ('diskTrend') { <dy-disk-trend-panel /> }
       @case ('health') {
-        @if (placement().span > 3) {
-          <dy-health-hero />
+        @if (width() >= HERO_MIN_WIDTH) {
+          <dy-health-hero [reasons]="rows() >= HERO_ROWS_FOR_THREE ? 3 : 2" />
         } @else {
         @if (health.report(); as r) {
           <div class="ringrow">
@@ -146,18 +134,15 @@ const ICON: Record<DashboardKind, IconName> = {
         }
       }
     }
+    }
   `,
   styles: `
-    :host { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 132px; padding: var(--sp-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
-    :host(.own-card) > * { display: block; height: 100%; min-width: 0; }
-    :host(.own-card) { display: block; }
-    :host(.own-card) { padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; min-height: 0; }
-    header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); color: var(--text-2); }
-    header dy-icon { --icon-size: 16px; color: var(--text-3); }
-    h3 { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); flex: 1; }
+    :host { display: block; min-width: 0; /* The body's height inside its frame: the placement's rows, less the head and the padding. */ --wv-avail: calc(var(--wv-rows, 4) * var(--pd-widget-row) + (var(--wv-rows, 4) - 1) * var(--pd-card-gap) - 22px - 2 * var(--pd-space-3)); }
+    .twin { display: grid; gap: var(--sp-2); justify-items: start; }
+    .sk-big { display: block; font: var(--fw-semibold) var(--fs-2xl) / 1.1 var(--font-display); }
+    .sk-line { display: block; font-size: var(--fs-sm); }
+    .sk-short { width: 60%; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
-    /* "Not available" sits under the title instead of squeezing it to an ellipsis in a narrow card. */
-    header .faint { flex: 0 0 100%; }
     .hero[data-tone='warn'] b { color: var(--warn); }
     .hero[data-tone='bad'] b { color: var(--bad); }
     .note { color: var(--text-3); font-size: var(--fs-xs); display: flex; align-items: center; gap: 6px; }
@@ -181,22 +166,26 @@ const ICON: Record<DashboardKind, IconName> = {
   `,
 })
 export class WidgetView {
-  /** The dashboard placement to draw (its span is the width on the 12-column board). */
-  readonly placement = input.required<Placement<DashboardWidget>>();
-  /** The engine's reading of this widget's metric (null until the first answer). */
-  readonly metricReading = input<MetricReading | null>(null);
+  /** The kind this body draws (known before the first value arrives, so the loading twin is the right one). */
+  readonly kind = input.required<DashboardKind>();
+  /** The placement (its size is the engine's) and the engine's reading of its metric; null while the widget is loading. */
+  readonly value = input.required<DyValue | null>();
+  protected readonly placement = computed(() => this.value()?.placement ?? NONE);
   protected readonly widget = computed(() => this.placement().widget);
-  private readonly layouts = inject(WidgetLayouts);
+  protected readonly metricReading = computed(() => this.value()?.reading ?? null);
+  /** The placement's width in columns (the health widget shows its hero from `HERO_MIN_WIDTH`). */
+  protected readonly width = computed(() => this.placement().w);
+  protected readonly rows = computed(() => this.placement().h);
+  protected readonly HERO_MIN_WIDTH = HERO_MIN_WIDTH;
+  protected readonly HERO_ROWS_FOR_THREE = HERO_ROWS_FOR_THREE;
   private readonly choices = inject(WidgetChoicesStore);
   protected readonly live = inject(LiveStore);
   protected readonly health = inject(HealthStore);
   private readonly diagnosis = inject(DiagnosisStore);
   private readonly counters = inject(CountersStore);
 
-  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${sentenceCase(this.choices.title(this.widget().metric))}` : PANEL_KINDS.includes(this.widget().kind) ? this.kindTitle() : this.choices.title(this.widget().metric)));
-  /** The panel kinds are cards of their own (they bring header, loading and error states). */
-  protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.placement().span > 3));
-  protected readonly icon = computed(() => ICON[this.widget().kind]);
+  /** The metric's name (the content's accessible names; the frame's head says the same through the board's `titleOf`). */
+  protected readonly title = computed(() => this.choices.title(this.widget().metric));
   /** The performance counter this widget shows, when it shows one. */
   private readonly counterPath = computed(() => {
     const m = this.widget().metric;
@@ -211,8 +200,6 @@ export class WidgetView {
   protected readonly barTone = computed(() => (this.reading().tone === 'ok' ? null : this.reading().tone));
   protected readonly ringTone = computed<'ok' | 'warn' | 'bad' | 'accent'>(() => (this.reading().tone === 'ok' ? 'accent' : this.reading().tone));
   protected readonly percent = computed(() => this.reading().percent !== null);
-  /** The kind's title from the engine's catalogue. */
-  private readonly kindTitle = computed(() => this.layouts.dashboard()?.catalogue.kinds.find((k) => k.kind === this.widget().kind)?.title ?? this.widget().kind);
   protected readonly accent = computed(() => this.widget().options.accent ?? 'var(--accent)');
   protected readonly series = computed(() => {
     const path = this.counterPath();
