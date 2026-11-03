@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: `console::attach_parent_console` for GUI-subsystem sidecars
+- A program built for the Windows GUI subsystem (so a Run entry, a service or the app starts it without a console window) calls it first thing: it attaches to
+  the parent terminal's console, when there is one, and points missing standard handles at `CONIN$`/`CONOUT$`, so `--version` and friends still print.
+  A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
+
 ### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
 - Fixed: on Windows the popover showed and vanished at once. The shell's notification area takes the foreground back right after the tray click, so the
   popover got `Focused(false)` within milliseconds and closed on blur. A blur within `BLUR_GRACE` (600 ms) of showing is now kept (`popover::blur_action`;

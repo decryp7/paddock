@@ -16,6 +16,7 @@
 //!   ([`StallCause::Paused`]); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a
 //!   held OS lock; [`hint`]: a discovery file is only a hint (rule 53).
 //!
+//! - [`console`]: a GUI-subsystem program (no console window at login) that still prints when run from a terminal.
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
 //! Processes are named by identity ([`ProcessId`]: pid plus start time), never by a bare pid, because the OS hands a freed
@@ -26,6 +27,7 @@
 //! crashed. Both are backed by a walk of the process table, by identity, for helpers that left the group or the job.
 
 mod command;
+pub mod console;
 pub mod hint;
 mod identity;
 mod instance;

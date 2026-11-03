@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Windows: `dyno-agent` is a GUI-subsystem program, so the per-user Run entry (`dyno-agent run` at logon) no longer opens a command prompt window that stays open for as long as the agent runs (reproduced in the Windows 11 VM: a Windows Terminal window titled `dyno-agent.exe`). Run from a terminal, `dyno-agent --version` and `service install` still print (it attaches to the parent console); the `dyno` command stays a console program.
+- Windows: the log tells each tray icon: its static image and size, created or why not, and the first drawn image (size, or the refusal). A new icon of an app that was never pinned sits in the taskbar's overflow (the `^` at the right) on Windows 11 until the user turns it on in Settings > Personalization > Taskbar > Other system tray icons; the registry showed Dyno's icon registered there (`NotifyIconSettings`, tooltip `Dyno`).
 - Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
 
 ## [1.0.0] - 2026-10-29

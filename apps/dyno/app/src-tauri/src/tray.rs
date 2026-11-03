@@ -75,7 +75,15 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
 /// Creates the tray icon of one item.
 fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
     let menu = build_menu(app)?;
-    let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))?;
+    let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))
+        .inspect_err(|e| logging::info(&format!("tray icon {}: the static image could not be read: {e}", tray_id(&spec.id))))?;
+    logging::info(&format!(
+        "tray icon {}: static image set, {}x{} px (dark taskbar: {})",
+        tray_id(&spec.id),
+        icon.width(),
+        icon.height(),
+        dark_taskbar()
+    ));
     TrayIconBuilder::with_id(tray_id(&spec.id))
         .tooltip("Dyno")
         .icon(icon)
@@ -107,7 +115,12 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
                 }
             }
         })
-        .build(app)?;
+        .build(app)
+        .inspect_err(|e| logging::info(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
+    logging::info(&format!(
+        "tray icon {} created (on Windows 11 a new icon may sit in the overflow until it is pinned in Settings > Personalization > Taskbar)",
+        tray_id(&spec.id)
+    ));
     lock(&app.state::<TrayState>().items).insert(spec.id.clone());
     Ok(())
 }
@@ -138,11 +151,18 @@ pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     let template = cfg!(target_os = "macos");
     let drawn = if template { frame.icon.as_template() } else { frame.icon.clone() };
     let icon = Image::new_owned(drawn.rgba, drawn.size, drawn.size);
-    let _ = tray.set_icon(Some(icon));
+    let size = drawn.size;
+    let set = tray.set_icon(Some(icon));
     let _ = tray.set_icon_as_template(template);
     let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     if let Some(state) = app.try_state::<TrayState>() {
-        lock(&state.painted).insert(item.to_string(), true);
+        // Told once per item (a draw every second would flood the log), and every failure.
+        let first = lock(&state.painted).insert(item.to_string(), true).is_none();
+        if let Err(e) = &set {
+            logging::info(&format!("tray icon {}: the drawn image ({size}x{size} px) was refused: {e}", tray_id(item)));
+        } else if first {
+            logging::info(&format!("tray icon {}: first drawn image set, {size}x{size} px", tray_id(item)));
+        }
     }
 }
 
