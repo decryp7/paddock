@@ -14,7 +14,7 @@ describe('HelperStore', () => {
   it.each<[MockHelperVariant, string]>([
     ['off', 'off'],
     ['silent', 'notRunning'],
-    ['foreign', 'missing'],
+    ['foreign', 'foreign'],
     ['outdated', 'outdated'],
     ['ready', 'ready'],
     ['notIncluded', 'notIncluded'],

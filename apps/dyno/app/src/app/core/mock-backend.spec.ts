@@ -700,7 +700,7 @@ describe('MockBackend: the helper', () => {
     expect(mockOptionsFromUrl('?helper=foreign').helper).toBe('foreign');
     expect(mockOptionsFromUrl('?helper=root')).not.toHaveProperty('helper');
     expect((await make().helperStatus()).state).toBe('off');
-    for (const [variant, state] of [['silent', 'notRunning'], ['foreign', 'missing'], ['outdated', 'outdated'], ['ready', 'ready'], ['notIncluded', 'notIncluded']] as const) {
+    for (const [variant, state] of [['silent', 'notRunning'], ['foreign', 'foreign'], ['outdated', 'outdated'], ['ready', 'ready'], ['notIncluded', 'notIncluded']] as const) {
       expect((await make({ helper: variant }).helperStatus()).state, variant).toBe(state);
     }
   });

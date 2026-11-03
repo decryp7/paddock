@@ -306,7 +306,7 @@ mod tests {
         let (c, _, clock) = centre_v(false, 0, Ok(()), "1.0.0");
         let err = Run::new().job(|ctx| c.run(ctx, HelperAction::TurnOn)).unwrap_err();
         assert!(
-            matches!(&err, JobError::Failed(m) if m.contains("cannot use it") && m.contains("1.0.0")),
+            matches!(&err, JobError::Failed(m) if m.contains("cannot use it") && m.contains("needs helper version")),
             "{err:?}"
         );
         assert!(

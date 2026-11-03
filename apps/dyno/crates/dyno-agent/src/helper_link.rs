@@ -241,7 +241,7 @@ mod tests {
             (
                 vec![Err(TransportError::Foreign("S-1-5-21-1".into()))],
                 Ok(()),
-                HelperState::Missing,
+                HelperState::Foreign,
             ),
             (
                 vec![Ok(about("1.0.0", HELPER_API)), Ok(HelperReply::Entries(vec![]))],

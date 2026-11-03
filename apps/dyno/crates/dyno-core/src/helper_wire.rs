@@ -233,8 +233,10 @@ pub enum HelperState {
     Off,
     /// Installed but not answering (stopped, or switched off in Login Items on macOS).
     NotRunning,
-    /// Something is wrong with the installation or something else answered on the helper's endpoint: Repair.
+    /// Something is wrong with the installation (damaged, a file missing or not protected): Repair.
     Missing,
+    /// Another program answers where the helper should be: Dyno does not trust it and sends it nothing. Repair takes the place back.
+    Foreign,
     /// Another API, or older than [`MIN_HELPER_VERSION`]: "Update the helper".
     Outdated,
     /// Installed and answering.
@@ -281,6 +283,8 @@ pub struct HelperStatus {
     pub prompt: String,
     /// The last audit entries, newest first.
     pub recent: Vec<AuditEntry>,
+    /// Technical details for a "Details" disclosure (versions, an owner's account id, the OS's words); never the headline.
+    pub detail: Option<String>,
     /// Why the last turn on, update or removal did not work (with what to do), until the next attempt.
     pub error: Option<String>,
 }
@@ -318,9 +322,24 @@ pub fn version_at_least(have: &str, min: &str) -> bool {
 /// What the OS asks for on `host`, in words.
 pub fn prompt_text(host: HelperHost) -> &'static str {
     match host {
-        HelperHost::Windows => "Windows asks you to allow Dyno to make changes to your device (User Account Control).",
-        HelperHost::Macos => "macOS asks for your account password to let Dyno install its helper.",
+        HelperHost::Windows => {
+            "Windows will ask you to allow dyno-helper.exe to make changes to your device. It lists an unknown publisher because Dyno's helper is not signed; choose Yes."
+        }
+        HelperHost::Macos => "macOS asks for your account password, in a window titled by osascript, to let Dyno install its helper.",
         HelperHost::Linux => "Your desktop asks you to authenticate (polkit) so Dyno can install its helper.",
+    }
+}
+
+/// What the helper shows once it is on, per system (the card lists these instead of repeating a version).
+pub fn readings_on(host: HelperHost) -> &'static str {
+    match host {
+        HelperHost::Windows => {
+            "Every process of every account, per-program network traffic, disk health, and what keeps the computer awake and the backup versions."
+        }
+        HelperHost::Macos => "Every process of every account, login items and background tasks, firewall (pf) rules, and temperature and energy readings.",
+        HelperHost::Linux => {
+            "Every process of every account, which program owns each socket and file, firewall (nft) rules, and memory modules."
+        }
     }
 }
 
@@ -329,57 +348,58 @@ pub const HELPER_MISSING: &str =
     "This reading needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
      permission once); nothing else in Dyno needs it.";
 
-/// Decides what to tell the user. `supported` is `Err(reason)` when this build or system has no helper at all.
+/// Decides what to tell the user. `supported` is `Err(reason)` when this build or system has no helper at all. The headline
+/// (`message`) is plain words with the next step; versions, owners and the OS's own words go in `detail`.
 pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our_version: &str) -> HelperStatus {
     let prompt = prompt_text(host).to_string();
-    let status = |state, message: String, version: Option<String>, recent| HelperStatus {
+    let status = |state, message: String, version: Option<String>, recent, detail: Option<String>| HelperStatus {
         state,
         message,
         version,
         prompt: prompt.clone(),
         recent,
+        detail,
         error: None,
     };
     match probe {
         Probe::Absent => match supported {
-            Err(reason) => status(HelperState::NotIncluded, reason, None, vec![]),
+            Err(reason) => status(HelperState::NotIncluded, reason, None, vec![], None),
             Ok(()) => status(
                 HelperState::Off,
                 "Administrator readings are not turned on. Dyno works without them; turn them on to see every process and the few readings that need administrator rights."
                     .into(),
                 None,
                 vec![],
+                None,
             ),
         },
         Probe::Silent(why) => status(
             HelperState::NotRunning,
-            format!("The helper is installed but did not answer ({why}). Start it from Settings."),
+            "The helper is installed but did not answer. Repair it to start it again.".into(),
             None,
             vec![],
+            Some(why),
         ),
         Probe::Foreign(owner) => status(
-            HelperState::Missing,
-            format!("Something other than Dyno's helper answered on its endpoint, so Dyno did not trust it ({owner}). Repair the helper from Settings."),
+            HelperState::Foreign,
+            "Another program is answering where Dyno's helper should be. Dyno does not trust it and sends it nothing. Repair the helper to take its place back.".into(),
             None,
             vec![],
+            Some(owner),
         ),
         Probe::Answered(info, recent) if info.api != HELPER_API || !version_at_least(&info.version, MIN_HELPER_VERSION) => status(
             HelperState::Outdated,
-            format!(
-                "The installed helper is version {} (API {}) and this Dyno needs API {HELPER_API} and version {MIN_HELPER_VERSION} or newer. Update the helper (the system asks for permission once).",
-                info.version, info.api
-            ),
-            Some(info.version),
+            format!("This Dyno needs helper version {MIN_HELPER_VERSION} or newer, and the installed one is older. Update the helper (the system asks for permission once)."),
+            Some(info.version.clone()),
             recent,
+            Some(format!("Installed: version {} (API {}). Needed: API {HELPER_API}, version {MIN_HELPER_VERSION} or newer.", info.version, info.api)),
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
-            format!(
-                "The helper is running (version {}, Dyno {our_version}). It only reads and changes nothing on this computer.",
-                info.version
-            ),
-            Some(info.version),
+            format!("Administrator readings are on. Dyno now shows: {} It only reads and changes nothing on this computer.", readings_on(host)),
+            Some(info.version.clone()),
             recent,
+            Some(format!("Helper version {}, Dyno {our_version}.", info.version)),
         ),
     }
 }
@@ -525,7 +545,10 @@ mod tests {
         let s = assess(w, Ok(()), Probe::Absent, "1.1.0");
         assert_eq!(s.state, HelperState::Off);
         assert!(s.message.contains("turn them on"));
-        assert!(s.prompt.contains("User Account Control"));
+        assert!(
+            s.prompt.contains("unknown publisher") && !s.prompt.contains("password"),
+            "Windows asks about the publisher, not a password"
+        );
         let s = assess(HelperHost::Linux, Err("This build has no helper.".into()), Probe::Absent, "1.1.0");
         assert_eq!(
             (s.state, s.message.as_str()),
@@ -533,16 +556,38 @@ mod tests {
         );
         let s = assess(w, Ok(()), Probe::Silent("timeout".into()), "1.1.0");
         assert_eq!(s.state, HelperState::NotRunning);
-        assert!(s.message.contains("Start it"));
+        assert!(s.message.contains("Repair it") && !s.message.contains("Settings") && !s.message.contains("timeout"));
+        assert_eq!(
+            s.detail.as_deref(),
+            Some("timeout"),
+            "the OS's words are in the details, not the headline"
+        );
         let s = assess(w, Ok(()), Probe::Foreign("S-1-5-21-1-2-3-1001".into()), "1.1.0");
-        assert_eq!(s.state, HelperState::Missing);
-        assert!(s.message.contains("S-1-5-21-1-2-3-1001") && s.message.contains("Repair"));
+        assert_eq!(s.state, HelperState::Foreign);
+        assert!(
+            s.message.contains("does not trust it") && s.message.contains("Repair") && !s.message.contains("S-1-5"),
+            "{}",
+            s.message
+        );
+        assert_eq!(s.detail.as_deref(), Some("S-1-5-21-1-2-3-1001"));
         let s = assess(w, Ok(()), Probe::Answered(info("1.0.9", HELPER_API), vec![]), "1.1.0");
         assert_eq!((s.state, s.version.as_deref()), (HelperState::Outdated, Some("1.0.9")));
+        assert!(
+            s.message.contains(MIN_HELPER_VERSION) && !s.message.contains("API"),
+            "only the needed version in the headline"
+        );
+        assert!(s.detail.as_deref().is_some_and(|d| d.contains("API")));
         let s = assess(w, Ok(()), Probe::Answered(info("1.1.0", HELPER_API - 1), vec![]), "1.1.0");
         assert_eq!(s.state, HelperState::Outdated);
         let s = assess(w, Ok(()), Probe::Answered(info("1.1.0", HELPER_API), vec![]), "1.1.0");
         assert_eq!(s.state, HelperState::Ready);
+        for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
+            let ready = assess(host, Ok(()), Probe::Answered(info("1.1.0", HELPER_API), vec![]), "1.1.0");
+            assert!(
+                ready.message.contains(readings_on(host)) && !ready.message.contains("1.1.0"),
+                "{host:?}: the readings now on, not the version"
+            );
+        }
         // A newer or older-but-supported helper than the app is Ready: the update is offered, never forced.
         let s = assess(w, Ok(()), Probe::Answered(info(MIN_HELPER_VERSION, HELPER_API), vec![]), "1.3.0");
         assert_eq!(s.state, HelperState::Ready);

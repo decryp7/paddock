@@ -1,24 +1,33 @@
 import type { HelperAction, HelperState, HelperStatus } from '../api.types';
 import type { MockOs } from './os';
 
-/** The helper states the mock can start in (`?helper=…`): `silent` and `foreign` are the two ways `notRunning` and `missing` happen. */
-export type MockHelperVariant = HelperState | 'silent' | 'foreign';
+/** The helper states the mock can start in (`?helper=…`): `silent` and `foreign` are the two ways `notRunning` and a distrusted endpoint happen. */
+export type MockHelperVariant = HelperState | 'silent';
 
 export const MOCK_HELPER_VERSION = '1.1.0';
 
+/** What the system asks, as the engine words it (`prompt_text`). */
 const PROMPTS: Record<MockOs, string> = {
-  macos: 'macOS asks for your account password to let Dyno install its helper.',
-  windows: 'Windows asks you to allow Dyno to make changes to your device (User Account Control).',
+  macos: 'macOS asks for your account password, in a window titled by osascript, to let Dyno install its helper.',
+  windows:
+    "Windows will ask you to allow dyno-helper.exe to make changes to your device. It lists an unknown publisher because Dyno's helper is not signed; choose Yes.",
   linux: 'Your desktop asks you to authenticate (polkit) so Dyno can install its helper.',
+};
+
+/** What the helper shows once on (`readings_on`). */
+const READINGS: Record<MockOs, string> = {
+  macos: 'Every process of every account, login items and background tasks, firewall (pf) rules, and temperature and energy readings.',
+  windows: 'Every process of every account, per-program network traffic, disk health, and what keeps the computer awake and the backup versions.',
+  linux: 'Every process of every account, which program owns each socket and file, firewall (nft) rules, and memory modules.',
 };
 
 /** The sentences the engine's `assess` gives, so the card reads the same against the mock. */
 export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): HelperStatus {
   const prompt = PROMPTS[os];
-  const base = { version: null, prompt, recent: [], error: null };
+  const base = { version: null, prompt, recent: [], detail: null, error: null };
   switch (variant) {
     case 'notIncluded':
-      return { ...base, state: 'notIncluded', message: 'This AppImage has no helper. Install Dyno\'s .deb package to use administrator readings.' };
+      return { ...base, state: 'notIncluded', message: "This AppImage has no helper. Install Dyno's .deb package to use administrator readings." };
     case 'off':
       return {
         ...base,
@@ -28,29 +37,31 @@ export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): Helper
       };
     case 'notRunning':
     case 'silent':
-      return { ...base, state: 'notRunning', message: 'The helper is installed but did not answer (timed out). Start it from Settings.' };
+      return { ...base, state: 'notRunning', message: 'The helper is installed but did not answer. Repair it to start it again.', detail: 'The pipe did not answer within 3 s.' };
     case 'missing':
+      return { ...base, state: 'missing', message: 'The helper is installed but part of it is missing or not protected. Repair it to put it back.', detail: 'C:\\Program Files\\Dyno Helper\\dyno-helper.exe: not found.' };
     case 'foreign':
       return {
         ...base,
-        state: 'missing',
-        message:
-          'Something other than Dyno\'s helper answered on its endpoint, so Dyno did not trust it (owner S-1-5-21-1-2-3-1001, expected S-1-5-18). Repair the helper from Settings.',
+        state: 'foreign',
+        message: "Another program is answering where Dyno's helper should be. Dyno does not trust it and sends it nothing. Repair the helper to take its place back.",
+        detail: 'The endpoint is owned by S-1-5-21-1-2-3-1001; only S-1-5-18 (SYSTEM) is trusted.',
       };
     case 'outdated':
       return {
         ...base,
         state: 'outdated',
         version: '1.0.9',
-        message: 'The installed helper is version 1.0.9 (API 2) and this Dyno needs API 2 and version 1.1.0 or newer. Update the helper (the system asks for permission once).',
-        recent: [],
+        message: `This Dyno needs helper version ${MOCK_HELPER_VERSION} or newer, and the installed one is older. Update the helper (the system asks for permission once).`,
+        detail: `Installed: version 1.0.9 (API 2). Needed: API 2, version ${MOCK_HELPER_VERSION} or newer.`,
       };
     case 'ready':
       return {
         ...base,
         state: 'ready',
         version: MOCK_HELPER_VERSION,
-        message: `The helper is running (version ${MOCK_HELPER_VERSION}, Dyno ${MOCK_HELPER_VERSION}). It only reads and changes nothing on this computer.`,
+        message: `Administrator readings are on. Dyno now shows: ${READINGS[os]} It only reads and changes nothing on this computer.`,
+        detail: `Helper version ${MOCK_HELPER_VERSION}, Dyno ${MOCK_HELPER_VERSION}.`,
         recent: [{ at: 1_770_000_000, peer: null, what: 'Dyno asked who is calling', verdict: 'done', detail: '' }],
       };
   }

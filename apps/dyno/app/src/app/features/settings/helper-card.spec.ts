@@ -22,15 +22,16 @@ async function make(helper: MockHelperVariant, fail: string[] = []) {
 describe('HelperCard: every state is words plus an icon, with the one action it needs', () => {
   it.each<[MockHelperVariant, string, string, string | null]>([
     ['off', 'Off', 'Administrator readings are not turned on', 'Turn on administrator readings'],
-    ['silent', 'Not running', 'did not answer', 'Repair the helper'],
-    ['foreign', 'Needs repair', 'did not trust it', 'Repair the helper'],
-    ['outdated', 'Update available', 'Update the helper', 'Update the helper'],
-    ['ready', 'On', 'only reads and changes nothing', null],
+    ['silent', 'Not running', 'did not answer. Repair it', 'Repair the helper'],
+    ['foreign', 'Not trusted', 'does not trust it', 'Repair the helper'],
+    ['outdated', 'Update available', 'needs helper version 1.1.0 or newer', 'Update the helper'],
+    ['ready', 'On', 'Every process of every account', null],
     ['notIncluded', 'Not available here', 'AppImage', null],
   ])('%s', async (variant, chip, message, primary) => {
     const { el, button } = await make(variant);
-    expect(el.querySelector('.chip')?.textContent).toContain(chip);
-    expect(el.querySelector('.chip dy-icon')).not.toBeNull();
+    expect(el.querySelector('pd-status-pill')?.textContent).toContain(chip);
+    expect(el.querySelector('pd-status-pill svg')).not.toBeNull();
+    expect(el.querySelector('[data-testid="helper-message"]')?.textContent ?? '', 'the headline has no account ids or jargon').not.toMatch(/S-1-5|API|timed out|from Settings/);
     expect(el.querySelector('[data-testid="helper-message"]')?.textContent).toContain(message);
     if (primary) expect(button(primary)).toBeDefined();
     else expect([...el.querySelectorAll('button')].filter((b) => /Turn on|Repair|Update/.test(b.textContent ?? ''))).toHaveLength(0);
@@ -46,10 +47,11 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     const { el, button, store, f } = await make('off');
     button('Turn on administrator readings')!.click();
     f.detectChanges();
-    expect(el.querySelector('.running')?.textContent).toContain('Turning on administrator readings');
+    expect(el.querySelector('pd-status-pill')?.textContent).toContain('Turning on');
+    expect(el.querySelector('.cancel-note')?.textContent).toMatch(/prompt/);
     await vi.waitFor(() => expect(store.status()?.state).toBe('ready'));
     f.detectChanges();
-    expect(el.querySelector('.chip')?.textContent).toContain('On');
+    expect(el.querySelector('pd-status-pill')?.textContent).toContain('On');
     expect(button('Turn off')).toBeDefined();
     expect(button('Turn on administrator readings')).toBeUndefined();
   });
@@ -60,13 +62,13 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     await vi.waitFor(() => expect(store.actionError()).not.toBeNull());
     f.detectChanges();
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('declined');
-    expect(el.querySelector('.chip')?.textContent).toContain('Off');
+    expect(el.querySelector('pd-status-pill')?.textContent).toContain('Off');
   });
 
   it('the recent activity is under a disclosure, named in words', async () => {
     const { el } = await make('ready');
-    expect(el.querySelector('details summary')?.textContent).toContain('What the helper did recently');
-    expect(el.querySelector('details li')?.textContent).toContain('Done');
+    expect(el.querySelector('details.audit summary')?.textContent).toContain('What the helper did recently');
+    expect(el.querySelector('details.audit li')?.textContent).toContain('Done');
   });
 
   it('a state that cannot be read is an inline error with Retry, not a blank card', async () => {
@@ -82,5 +84,24 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     await vi.waitFor(() => expect(store.error()).not.toBeNull());
     f.detectChanges();
     expect((f.nativeElement as HTMLElement).querySelector('[role="alert"]')?.textContent).toContain('The agent did not answer.');
+  });
+});
+
+describe('HelperCard: details and the system', () => {
+  it('puts the raw owner of a distrusted endpoint inside Details and the one action is Repair', async () => {
+    const { el, button } = await make('foreign');
+    const details = el.querySelector('details.detail');
+    expect(details?.querySelector('summary')?.textContent).toBe('Details');
+    expect(details?.textContent).toContain('S-1-5-21-1-2-3-1001');
+    expect(el.querySelector('[data-testid="helper-message"]')?.textContent).not.toContain('S-1-5');
+    expect(button('Repair the helper')).toBeDefined();
+  });
+
+  it('turn off is verb plus object, and a helper that cannot exist has no Check again', async () => {
+    const on = await make('ready');
+    expect(on.button('Turn off administrator readings')).toBeDefined();
+    TestBed.resetTestingModule();
+    const here = await make('notIncluded');
+    expect(here.button('Check again')).toBeUndefined();
   });
 });
