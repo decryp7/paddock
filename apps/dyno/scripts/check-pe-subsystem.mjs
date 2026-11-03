@@ -4,6 +4,7 @@
 //   node scripts/check-pe-subsystem.mjs dyno-agent.exe=2 dyno.exe=3 ...   (paths relative to the current folder or absolute)
 //   node scripts/check-pe-subsystem.mjs --dir <folder>                    (the release's own list, in that folder)
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 export const GUI = 2;
 export const CONSOLE = 3;
@@ -43,7 +44,7 @@ export function problems(specs, read = readFileSync) {
   return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const specs = specsFor(process.argv.slice(2));
   const found = problems(specs);
   for (const p of found) console.log(`::error::${p}. Next step: build the program with #![windows_subsystem = "windows"] (agent) and keep the CLI a console program.`);

@@ -234,7 +234,7 @@ impl<R: Runtime> ShellOf<R> {
                             if wanted { "registered again" } else { "not needed (start at login is off)" }
                         )),
                         Ok(false) => {}
-                        Err(e) => logging::info(&format!("the stale agent logon entry could not be repaired: {e}")),
+                        Err(e) => log::warn!(target: "dyno", Error = e.as_str(); "The stale agent logon entry of Dyno 1.0.0 could not be repaired; start at login may start only the agent. Turn Start at login off and on in Settings."),
                     }
                 }
                 Ok(())
