@@ -120,7 +120,7 @@ fn refuse_cut_down(all: &PcbList, own_pid: u32) -> Result<(), PlatformError> {
 pub(crate) fn cut_down_message(identifier: Option<&str>) -> String {
     match identifier {
         Some(id) if id.contains('.') => format!(
-            "macOS showed this program only its own sockets, although its code-signing identifier ({id}) has a dot. This happens when the app started the agent itself instead of the login service: turn on the Dyno login service in Settings and restart Dyno."
+            "macOS showed this program only its own sockets, although its code-signing identifier ({id}) has a dot. macOS does this when the agent runs as the app's own child process; Dyno starts it through launchd instead. Quit Dyno and open it again."
         ),
         Some(id) => format!(
             "macOS showed this program only its own sockets. The agent needs a code-signing identifier with a dot (net.decryptology.dyno.agent); this build has {id}."
@@ -241,7 +241,7 @@ mod tests {
         // The released 1.0.0 agent had the dotted identifier and still got the cut-down view, yet the page said it lacked a dot.
         let m = cut_down_message(Some("net.decryptology.dyno.agent"));
         assert!(!m.contains("needs a code-signing identifier"), "{m}");
-        assert!(m.contains("net.decryptology.dyno.agent") && m.contains("login service"), "{m}");
+        assert!(m.contains("net.decryptology.dyno.agent") && m.contains("child process") && m.contains("Quit Dyno"), "{m}");
         assert!(cut_down_message(Some("dyno-agent-55554944")).contains("this build has dyno-agent-55554944"));
         assert!(cut_down_message(None).contains("could not be read"));
     }
