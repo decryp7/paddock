@@ -1165,7 +1165,11 @@ mod widget_layouts {
         let SurfaceView::MenuBar(m) = view(&peer, DynoSurface::MenuBar) else {
             panic!()
         };
-        assert_eq!(m.layout.placements.len(), 2);
+        // The menu bar starts as the catalogue's own default set, whatever it is.
+        assert_eq!(
+            m.layout.placements,
+            <dyno_core::widgets::MenuBarCatalogue as paddock_widgets::Catalogue>::defaults()
+        );
         assert!(m.editable && !m.can_undo);
         let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
             panic!()

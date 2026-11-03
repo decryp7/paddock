@@ -135,8 +135,43 @@ fn set_picture(tray: &tauri::tray::TrayIcon<Wry>, look: &Look) -> Result<(), Str
     }
 }
 
+/// Proof that the code runs on the main thread. AppKit (`NSStatusItem`) and the shell's tray must be created, changed and dropped
+/// there: dropping a `TrayIcon` anywhere else calls `NSStatusItem _uninstall` off the main thread and the app dies with SIGTRAP
+/// (the crash report of the first macOS VM run). The only way to get one is [`on_main`], and it is not `Send`, so a function that
+/// takes `&MainToken` cannot be reached from another thread.
+///
+/// The guard: a `MainToken` must never become `Send` (this fails to compile if it does).
+///
+/// ```compile_fail
+/// fn needs_send<T: Send>() {}
+/// needs_send::<dyno_app_lib::tray::MainToken>();
+/// ```
+pub struct MainToken {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl MainToken {
+    fn here() -> MainToken {
+        #[cfg(all(target_os = "macos", not(test)))]
+        debug_assert!(objc2::MainThreadMarker::new().is_some(), "tray code must run on the main thread");
+        MainToken {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+}
+
+/// Runs `f` on the main thread (inline when already there) and returns its result. Errors when the main thread cannot be reached.
+pub fn on_main<R: Runtime, T: Send + 'static>(app: &AppHandle<R>, f: impl FnOnce(&MainToken) -> T + Send + 'static) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(f(&MainToken::here()));
+    })
+    .map_err(|e| format!("could not reach the main thread: {e}"))?;
+    rx.recv().map_err(|_| "the main thread dropped the tray work".to_string())
+}
+
 /// Creates the tray icon of one item.
-fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec, initial: Option<&Frame>) -> tauri::Result<()> {
+fn create_item(_main: &MainToken, app: &AppHandle<Wry>, spec: &ItemSpec, initial: Option<&Frame>) -> tauri::Result<()> {
     let menu = build_menu(app)?;
     let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))
         .inspect_err(|e| logging::info(&format!("tray icon {}: the static image could not be read: {e}", tray_id(&spec.id))))?;
@@ -238,6 +273,15 @@ fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
 /// Makes the tray icons match `specs`: an unchanged item keeps its icon (so its place in the bar), a changed or removed one is
 /// removed, a new or changed one is made ([`plan_sync`]). Called only when the items changed. Returns the first error.
 pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> tauri::Result<()> {
+    let (specs, initial, handle) = (specs.to_vec(), initial.to_vec(), app.clone());
+    // Every create and remove runs on the main thread (see [`MainToken`]); the caller is the agent link's thread.
+    on_main(app, move |main| sync_on_main(main, &handle, &specs, &initial)).map_err(|e| {
+        logging::info(&format!("could not update the tray items: {e}"));
+        tauri::Error::FailedToReceiveMessage
+    })?
+}
+
+fn sync_on_main(main: &MainToken, app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> tauri::Result<()> {
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
     }
@@ -261,7 +305,7 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, 
         lock(&state.drawn).remove(id);
     }
     for spec in &plan.create {
-        create_item(app, spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
+        create_item(main, app, spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
     }
     Ok(())
 }

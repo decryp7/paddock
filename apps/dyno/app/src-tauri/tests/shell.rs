@@ -425,7 +425,12 @@ mod widget_wiring {
     }
 
     fn shell(app: &tauri::App<MockRuntime>) -> Arc<ShellOf<MockRuntime>> {
-        ShellOf::new(app.handle().clone(), Hub::default(), Arc::new(NoPixels))
+        ShellOf::new(
+            app.handle().clone(),
+            Hub::default(),
+            Arc::new(NoPixels),
+            dyno_app_lib::shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements),
+        )
     }
 
     fn update(cpu: f32) -> LiveUpdate {

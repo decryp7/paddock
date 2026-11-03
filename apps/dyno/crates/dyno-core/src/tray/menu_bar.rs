@@ -150,9 +150,11 @@ pub fn snap(v: f32, scale: f32) -> f32 {
     (v * scale).round() / scale
 }
 
-/// The baseline of one-line text at `scale`, on a whole device pixel.
+/// The baseline of one-line text at `scale`, on a whole device pixel, rounded **down**: 13.5 pt is half a pixel at 1x, and
+/// rounding it up put the digits one pixel below the clock's in the first macOS VM measurement (ink rows 11 to 19 against the
+/// clock's 9 to 18 at 1x). At @2x 13.5 pt is already a whole pixel (27), which stays; @2x could not be measured in Tart.
 pub fn baseline(scale: f32) -> f32 {
-    snap(BASELINE, scale)
+    (BASELINE * scale).floor() / scale
 }
 
 /// The number as the field shows it.
@@ -632,6 +634,12 @@ mod tests {
             Kind::Network,
             Kind::Temperature,
         ]
+    }
+
+    #[test]
+    fn the_baseline_rounds_down_so_1x_sits_on_the_clock() {
+        assert_eq!(baseline(1.0), 13.0, "13.5 pt at 1x: 13 px, not 14");
+        assert_eq!(baseline(2.0), 13.5, "@2x: 27 px, unchanged");
     }
 
     #[test]

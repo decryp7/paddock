@@ -83,6 +83,13 @@ pub fn alarm_notice(alarm: &dyno_core::alarms::Alarm) -> paddock_health::notify:
     notice
 }
 
+/// The tray items in the agent's saved settings file: the layout the person made. A missing, unreadable or damaged file gives the
+/// defaults, so a start never waits for the agent and a custom layout never flashes the default items first.
+pub fn saved_items(settings_file: &std::path::Path) -> Vec<crate::tray_model::ItemSpec> {
+    let (settings, _) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    initial_items(&settings.unwrap_or_default().menu_bar.layout().placements)
+}
+
 /// The tray items: the menu bar layout the agent keeps, or the comma-separated `DYNO_TRAY_ITEMS` (development and
 /// measurements).
 pub fn initial_items(placements: &[Placement<MenuBarItem>]) -> Vec<crate::tray_model::ItemSpec> {
@@ -190,14 +197,11 @@ pub struct ShellOf<R: Runtime> {
 
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
-    pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>) -> Arc<ShellOf<R>> {
+    pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>, items: Vec<crate::tray_model::ItemSpec>) -> Arc<ShellOf<R>> {
         Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
-            tray: Mutex::new(TrayItems::new(
-                initial_items(&Settings::default().menu_bar.layout().placements),
-                crate::tray_model::Env::native(),
-            )),
+            tray: Mutex::new(TrayItems::new(items, crate::tray_model::Env::native())),
             open_alarms: Mutex::new(Default::default()),
             away: crate::tray_away::AwayTimer::new(Arc::new(paddock_jobs::SystemClock)),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
@@ -639,5 +643,44 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
         }
+    }
+}
+
+#[cfg(test)]
+mod saved_items_tests {
+    use super::*;
+    use dyno_core::widgets::{edit_layout, SurfaceEdit};
+    use paddock_widgets::{Edit, PlacementId};
+
+    fn write(dir: &std::path::Path, text: &str) -> std::path::PathBuf {
+        let path = dir.join("settings.json");
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_saved_custom_layout_is_what_the_tray_starts_with() {
+        let mut s = Settings::default();
+        edit_layout(
+            &mut s,
+            SurfaceEdit::MenuBar(Edit::Remove {
+                id: PlacementId::new("number-2").unwrap(),
+            }),
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(dir.path(), &serde_json::to_string(&s).unwrap());
+        let items = saved_items(&path);
+        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["number", "number-3", "number-4"], "not the four default items");
+    }
+
+    #[test]
+    fn no_file_or_a_damaged_one_gives_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults = initial_items(&Settings::default().menu_bar.layout().placements);
+        assert_eq!(saved_items(&dir.path().join("missing.json")), defaults);
+        let path = write(dir.path(), "{ not json");
+        assert_eq!(saved_items(&path), defaults);
     }
 }
