@@ -206,7 +206,12 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::RemoveTool => match crate::tool_own_copy::remove(&shared.dirs.tools()) {
             Ok(()) => {
                 // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away).
-                crate::hardware::slow_cycle(shared);
+                // Off the request (ER-17): the answer does not wait for smartctl.
+                let shared = Arc::clone(shared);
+                std::thread::Builder::new()
+                    .name("dyno-wear-reread".into())
+                    .spawn(move || crate::hardware::slow_cycle(&shared))
+                    .map_err(|e| AgentError::new(ErrorCode::Internal, format!("The reading could not be refreshed ({}).", e.kind())))?;
                 Ok(Reply::Ok)
             }
             Err(e) => Err(AgentError::new(

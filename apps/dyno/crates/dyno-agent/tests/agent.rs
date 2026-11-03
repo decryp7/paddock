@@ -889,16 +889,27 @@ fn lifespan_forecasts_come_from_stored_readings_and_a_worn_battery_raises_an_ala
     assert!(alarm_rules(&peer).contains(&"lifespan:battery".to_string()));
 }
 
+/// A wear reader that waits for the test to let it answer, so the test controls when the slow read ends.
+struct GatedWear(std::sync::mpsc::Receiver<()>);
+
+impl dyno_core::ports::DiskWearSource for GatedWear {
+    fn read(&mut self) -> dyno_core::metrics::Reading<Vec<dyno_core::hardware::DiskWear>> {
+        let _ = self.0.recv();
+        dyno_core::metrics::Reading::unavailable("the tool is gone; wear is not read")
+    }
+}
+
 #[test]
-fn removing_the_own_tool_reads_the_ssd_wear_again_at_once_instead_of_keeping_an_old_answer_for_hours() {
+fn removing_the_own_tool_answers_at_once_and_reads_the_ssd_wear_again_in_the_background() {
     use dyno_core::metrics::Reading;
-    use dyno_platform::hardware::{FakeBattery, FakeThrottle, FakeWear};
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle};
     let h = Harness::start();
     let peer = h.client();
     let s = shared(&h);
+    let (release, gate) = std::sync::mpsc::channel();
     s.hardware.replace_sources(
         Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
-        Box::new(FakeWear(Reading::unavailable("the tool is gone; wear is not read"))),
+        Box::new(GatedWear(gate)),
         Box::new(FakeBattery(Reading::unavailable("none"))),
     );
     let reason = |peer: &_| {
@@ -913,11 +924,18 @@ fn removing_the_own_tool_reads_the_ssd_wear_again_at_once_instead_of_keeping_an_
             .clone()
     };
     assert!(reason(&peer).contains("Not read yet"), "nothing has read the wear yet");
+    // The read is blocked, yet Remove answers: the request does not wait for it.
     assert_eq!(ask(&peer, Request::RemoveTool).unwrap(), Reply::Ok);
-    assert!(
-        reason(&peer).contains("the tool is gone"),
-        "the wear is read again right after the removal"
-    );
+    assert!(reason(&peer).contains("Not read yet"), "the slow read has not ended");
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while !reason(&peer).contains("the tool is gone") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background read never updated the reading"
+        );
+        std::thread::yield_now();
+    }
 }
 
 #[test]
