@@ -28,6 +28,8 @@ pub mod processes;
 pub mod readability;
 pub mod runner;
 pub mod sensors;
+pub mod smart_reader;
+pub mod tool_install;
 pub mod toolpath;
 #[cfg(unix)]
 #[allow(unsafe_code)]

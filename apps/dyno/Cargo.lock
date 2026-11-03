@@ -1298,6 +1298,7 @@ dependencies = [
  "plist",
  "serde",
  "serde_json",
+ "sha2",
  "starship-battery",
  "sysinfo",
  "tempfile",
