@@ -39,7 +39,7 @@ a second push and a second run (rule 50). Since 2026-10-26:
 | Conformance found only in CI or in the merged batch | `e7ab83545` ("conformance of the merged batch", 10-30), `15edd3c78` (C39 waivers, fmt, 10-31) | the conformance job's `--only` list exists only in YAML |
 | Formatting missed across apps or crates | `402de329b` ("the files the widget and login branches left unformatted", 10-31), `fda51f6c7`, `2fcb46418`, `f73a3d286`, `78cdb999a`, `f3e5827e1` ("its last CI failed on Format") | about 20 rustfmt-only commits from 10-28 to 11-01 |
 | Platform-only clippy: Linux | `297a656e1` (shell: dead code on Linux, 10-29), `1f701932b` (proc, 10-27). The coordinator also reports paddock-chromium and Debrief's chromium-driver; I found no single commit for those (unverified) | |
-| Platform-only clippy: Windows | `63379e552`, `bf95295f1`, `606d113e1` (10-28) | ADR 0021's `xwin clippy` exists but is not run by any hook |
+| Platform-only clippy: Windows | `63379e552`, `bf95295f1`, `606d113e1` (10-28) | ADR 0021's `xwin clippy` is documented, but its wrapper script was never written and no hook runs it |
 | Gallery overflow (the `--project=gallery` Playwright run) | reported by the coordinator; commit not identified (unverified) | |
 | A pre-push hook that fails every push | Pitwall's `pitwall-scripts` (features note, verified there) | |
 
@@ -79,9 +79,10 @@ It expands the plan into (project, phase, OS, commands) and runs each entry wher
 |---|---|
 | macOS | natively |
 | Linux (ubuntu-latest in `paddock-ci:v2`) | in the OrbStack machine `paddock-gate-arm`, through `orb -m paddock-gate-arm`, with the worktree mounted at the same path and a per-worktree `CARGO_TARGET_DIR` inside the machine (rule 2), under `heavy` |
-| Windows | `scripts/xwin-clippy.sh` (ADR 0021 §3) for the clippy lines; tests and bundles are declared `ci-only: "no Windows test host (2026-10-27)"` |
-| Linux steps that need the amd64 image (real-browser tests that need Chrome for Testing) | declared `ci-only: "Chrome for Testing is amd64 only"` unless decision D2 picks the amd64 container |
+| Windows | `./dev clippy --target windows`, a new Rust subcommand that runs `cargo xwin clippy` for the plan's Windows clippy lines (ADR 0021 §3 named a `scripts/xwin-clippy.sh` that was never written, and ADR 0022 G.10 decision 9 allows no new shell tooling); tests and bundles are declared `ci-only: "no Windows test host (2026-10-27)"` |
+| Linux steps that need the amd64 image (real-browser tests that need Chrome for Testing) | declared `ci-only: "Chrome for Testing is amd64 only"` (user decision D2: the Linux leg is native arm64) |
 | WebKit e2e, bundles, release legs | declared `ci-only` with their reasons (rule 3: Chromium only in a branch) |
+| The gallery Playwright run (`--project=gallery`, including its overflow checks) | in the Linux leg in `paddock-gate-arm`, not on the Mac: text widths depend on the installed fonts, so the check is only equal to CI's on Linux. The provisioning installs the image's font packages. The ARM Playwright Chromium is assumed to lay out like CI's amd64 build; WP-3 verifies that on the gallery's goldens, and if it does not hold, the run is declared `ci-only: "font or engine metrics differ on arm64"` |
 
 The output is one table: what ran (with durations), what was skipped (with the declared reason), and what failed, with the
 exact re-run command. The exit code is non-zero on any failure. Every heavy line runs through `heavy` with
@@ -92,10 +93,22 @@ class "Paddock"). The generic pieces it uses (`heavy`; the G26 stamps, `devkit r
 
 ### 4. Linux parity in `paddock-gate-arm`
 
-A provisioning script, which joins the one bootstrap per OS (ADR 0022 G.10 decision 9), installs into the machine the
-same toolchain versions as the CI image: the same Rust toolchain resolution, cargo-nextest, cargo-hakari, cargo-machete,
-cargo-deny, cargo-about 0.9.2 (pinned, `256512cae`), Node from `.nvmrc`, and the Tauri Linux libraries. It reads the
-versions from `ci-image/Dockerfile`, so there is one source.
+The tool versions have no single source today:
+- Rust, cargo-nextest, cargo-llvm-cov and cargo-deny come from the garage base image
+  (`ci-image/Dockerfile`: `GARAGE_IMAGE=…garage:ubuntu-24.04-20261023-r5`);
+- cargo-hakari, cargo-machete and Chrome for Testing are set in `ci-image/Dockerfile` itself;
+- cargo-about is pinned in `.gitea/actions/app-gates/action.yml:76` (`cargo-about@0.9.2`, commit `256512cae`);
+- Node comes from `.nvmrc`.
+
+This ADR introduces one versions file, `ci/tool-versions.toml`. Every tool the gates run gets its version and checksum
+there. The CI image build, the actions that install tools, the `paddock-gate-arm` provisioning and `./dev doctor` all read
+it. A test fails when a Dockerfile `ARG`, an action input or a hook names a version not taken from the file. The garage
+image tag is an entry too, and the tools it brings are listed under it, so a garage update is a change of that file.
+
+Provisioning is a `./dev` Rust subcommand, `./dev gate provision linux`, not a shell script (ADR 0022 G.10 decision 9:
+the bootstrap is Rust after the minimal launcher). It installs into the machine the versions from that file: the Rust
+toolchain resolution, cargo-nextest, cargo-hakari, cargo-machete, cargo-deny, cargo-about, Node, the Tauri Linux
+libraries and the image's font packages.
 
 `./dev doctor` (G16) reports a machine whose versions differ. The app copies of the Linux container scripts (Dyno,
 Pitwall, Debrief's notes) are listed in `docs/known-copies.toml` and deleted by WP-4 (rule 55).
@@ -106,8 +119,11 @@ lefthook's `pre-push` becomes one command, `./dev check --pre-push`, and workspa
 2026-10-31). The broken Pitwall entries are deleted.
 
 After a green gate, a G26 stamp records the head and the input hash. The coordinator's dispatch (`devkit ci dispatch`,
-G17) refuses to dispatch a head without a green stamp unless `--no-stamp <reason>` is given. This ties the gate to rule 50:
-no CI run for a head that has not passed locally.
+G17) checks for that stamp. This ties the gate to rule 50: no CI run for a head that has not passed locally. The user
+decided (2026-11-03) that the guard **warns first**. In the first phase it dispatches and prints a warning naming the head
+and the missing stamp, and the warnings are counted. Once WP-1 to WP-5 are in use and the count has been reviewed, it
+**refuses** a head without a green stamp, unless `--no-stamp <reason>` is given. The switch is one setting in
+`devkit.toml`, changed by the coordinator with the user's approval.
 
 ### 6. Parallelism and cost (rule 51)
 
@@ -134,8 +150,8 @@ The first implementation records its run times in `docs/benchmarks.md` (rule 48)
 
 1. **WP-1:** the executor `./dev ci run` with logging, and `paddock.ci.json` for `crates/` and `conformance/` (where the
    misses were). Their ci.yml jobs call it.
-2. **WP-2:** `--pre-push` over `affected.mjs --ci` (R17), the table output, the macOS leg, Windows `xwin clippy`.
-3. **WP-3:** the Linux leg in `paddock-gate-arm`, the provisioning from the image's versions, `doctor` checks.
+2. **WP-2:** `--pre-push` over `affected.mjs --ci` (R17), the table output, the macOS leg, and `./dev clippy --target windows`.
+3. **WP-3:** `ci/tool-versions.toml` and its test; `./dev gate provision linux`; the Linux leg in `paddock-gate-arm`, the gallery on arm64; `doctor` checks.
 4. **WP-4:** the remaining root jobs (`ui` with the gallery, `e2e`, `tools`, `icons`, `eslint-preset`, `commits`,
    `paddock-dev`) as data; the allow-list test turns strict; the app Linux scripts are deleted.
 5. **WP-5:** the parity golden; the hooks (G13) and the Pitwall fix.
@@ -153,12 +169,12 @@ CI.
 | WP | Days |
 |---|---|
 | WP-1 executor, two root contracts | 2 |
-| WP-2 `--pre-push` (R17, 1.5 in the features note), report, macOS and xwin legs | 2 |
-| WP-3 `paddock-gate-arm` provisioning and Linux leg | 2 |
+| WP-2 `--pre-push` (R17, 1.5 in the features note), report, macOS leg, and the new `./dev clippy --target windows` subcommand (0.5) | 2.5 |
+| WP-3 `ci/tool-versions.toml` with its consistency test (1), `./dev gate provision linux` in Rust, the Linux leg, the gallery check on arm64 | 3.5 |
 | WP-4 remaining root jobs as data, allow-list strict, copies deleted | 1.5 |
 | WP-5 parity golden, hooks | 1 |
 | WP-6 stamp and dispatch refusal | 1 |
-| **Total (new work)** | **9.5** |
+| **Total (new work)** | **11.5** |
 | R4 `./dev plan --json` (already planned in ADR 0022, 2 days; needed only for step 7) | (2) |
 
 ## Consequences
@@ -181,10 +197,11 @@ CI.
 - **Only `--only fmt,clippy` before push.** It is cheaper, but notices, conformance and the gallery were among the misses.
   Rejected as the default; kept as a flag.
 - **A Docker container from `paddock-ci:v2` under Rosetta instead of `paddock-gate-arm`.** This has exact parity with CI,
-  including Chrome for Testing, but it is much slower under emulation. It is offered as decision D2, not chosen.
+  including Chrome for Testing, but it is much slower under emulation. Rejected by the user's decision D2 (2026-11-03).
 
-## Decisions for the user
+## Decisions taken (user, 2026-11-03)
 
-- **D1:** should the dispatch refuse heads without a green stamp (step 6), or only warn?
-- **D2:** the Linux leg in the native arm64 `paddock-gate-arm` (fast; amd64-only steps stay CI-only), which this ADR
-  recommends, or in the amd64 `paddock-ci:v2` image under emulation (exact, slow)?
+- **D1: warn first, refuse later.** The dispatch guard warns about a head without a green stamp, and refuses such heads
+  once the gate is in use and its warning count has been reviewed (§5).
+- **D2: native arm64.** The Linux leg runs natively on arm64 in the OrbStack machine `paddock-gate-arm`. Steps that need
+  the amd64 image stay CI-only and are declared as such.
