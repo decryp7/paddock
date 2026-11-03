@@ -4,6 +4,9 @@
   without the privileged helper. It runs with the user's rights only, is signed with the family updater key, and
   updates per user through the normal Tauri updater. The design below, including the decisions it records for "1.0"
   (D1, D2, D5, D6), now applies to Dyno 1.1 and must be confirmed again for it.
+- 2026-11-03: ADR 0027 (Proposed) is the 1.1.0 plan. It adopts sections 2.1, 2.2 (without the program pin as a
+  boundary), 4, 5 and 6 of this record, and, if the user chooses its D1 = L, defers the per-machine packaging, the `.pkg` and
+  the helper-run updates (sections 1 and 3, D2, D5, D7) until a signing identity exists.
 - Revision 2 (2026-10-28): adds the user's decisions of 2026-10-28 (all processes and administrator-only counters in
   1.0, the helper on all three OS, per-machine Windows, no signing purchases, any local user) and the first
   independent review (P1: updates ran an elevated installer from `%TEMP%`; the protected-location rule was not exact).
