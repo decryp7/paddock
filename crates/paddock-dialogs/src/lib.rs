@@ -59,8 +59,10 @@ pub use registry::{CloseDecision, Dialogs, OpenDialog, SHOW_DEADLINE, Scheduler,
 pub use table::{DialogTable, Entry, Shape, Width};
 pub use window::{
     CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
-    DialogRequest, DialogResult, DialogShown, DialogStart, INPUTS_EVENT, Measure, Parenting,
-    RESULT_EVENT, SHOWN_EVENT, ShowMechanism, Theme, WindowConfig, show_mechanism,
+    DialogReadyWire, DialogRemeasureEvent, DialogRequest, DialogResult, DialogShown,
+    DialogSizeModeEvent, DialogStart, INPUTS_EVENT, Measure, Parenting, REMEASURE_EVENT,
+    RESULT_EVENT, SHOWN_EVENT, SIZE_MODE_EVENT, ShowMechanism, SizeModeName, Theme, WindowConfig,
+    show_mechanism,
 };
 
 #[cfg(feature = "tauri")]

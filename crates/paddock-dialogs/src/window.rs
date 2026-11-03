@@ -27,6 +27,10 @@ pub const CLOSE_REQUESTED_EVENT: &str = "paddock://dialog-close-requested";
 /// points itself there. Sent by the opener's page with `emitTo` (a native event: it reaches another webview, which a
 /// `BroadcastChannel` does not reliably do between the webviews of one app). Payload: `{ dialogId, inputs }`.
 pub const INPUTS_EVENT: &str = "paddock://dialog-inputs";
+/// To a dialog window: its size mode changed (a user resize made it `manual`, ADR 0043 §3). Payload: [`DialogSizeModeEvent`].
+pub const SIZE_MODE_EVENT: &str = "paddock://dialog-size-mode";
+/// To a dialog window: measure again (its scale changed and text may re-wrap, ADR 0043 §4). Payload: [`DialogRemeasureEvent`].
+pub const REMEASURE_EVENT: &str = "paddock://dialog-remeasure";
 
 /// More dialog windows per host window than this are refused.
 pub const MAX_OPEN_PER_HOST: usize = 8;
@@ -104,6 +108,10 @@ pub struct DialogStart {
     pub required_choice: bool,
     #[cfg_attr(test, ts(type = "unknown"))]
     pub input: Option<Value>,
+    /// This page load of the window (1 for the first, raised by every load, also a reload): every measure the page sends
+    /// carries it, so a reloaded page's `seq = 1` is not dropped as stale (ADR 0043 §2).
+    #[cfg_attr(test, ts(type = "number"))]
+    pub epoch: u64,
 }
 
 /// The payload of [`RESULT_EVENT`].
@@ -414,6 +422,51 @@ pub struct Measure {
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub device_pixel_ratio: Option<f64>,
+    /// The body scrolls (`scrollHeight > clientHeight + 1`): logged, so a scrollbar beside one line is seen in a user's
+    /// bundle; never used to size (ADR 0043 §2).
+    #[serde(default)]
+    pub overflow: bool,
+}
+
+/// What the page sends with `dialog_ready` (ADR 0043 §2): measure `seq` of page load `epoch` is the one to show at. It
+/// carries no size; the measure was sent with `dialog_measure`.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DialogReadyWire {
+    #[cfg_attr(test, ts(type = "number"))]
+    pub epoch: u64,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub seq: u64,
+}
+
+/// How a dialog window follows its content now, on the wire (ADR 0043 §1).
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DialogSizeModeName"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SizeModeName {
+    /// The window keeps the size it was given.
+    Manual,
+    /// The height follows the content.
+    Height,
+}
+
+/// The payload of [`SIZE_MODE_EVENT`]: the window's mode changed (a user resize made it `manual`); the page sets
+/// `data-size-mode`.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogSizeModeEvent {
+    pub mode: SizeModeName,
+}
+
+/// The payload of [`REMEASURE_EVENT`]: the window's scale changed; the page measures again (text may re-wrap).
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogRemeasureEvent {
+    /// The window's new scale factor.
+    pub scale: f64,
 }
 
 /// The least and the most a reported `devicePixelRatio` can be (anything else is a wrong report).
@@ -499,6 +552,7 @@ impl Measure {
             min_content: by(self.min_content),
             viewport_height: self.viewport_height.map(|v| v * zoom),
             device_pixel_ratio: None,
+            overflow: false,
         }
     }
 
@@ -735,6 +789,7 @@ mod tests {
             },
             viewport_height: None,
             device_pixel_ratio: None,
+            overflow: false,
         }
     }
 
@@ -1380,10 +1435,11 @@ mod tests {
             modality: Modality::Modal,
             required_choice: true,
             input: None,
+            epoch: 3,
         };
         assert_eq!(
             serde_json::to_value(&start).unwrap(),
-            json!({ "dialogId": "a", "title": "t", "kind": "decision", "modality": "modal", "requiredChoice": true, "input": null })
+            json!({ "dialogId": "a", "title": "t", "kind": "decision", "modality": "modal", "requiredChoice": true, "input": null, "epoch": 3 })
         );
         let info = DialogInfo {
             label: "d-main-1".into(),

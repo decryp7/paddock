@@ -18,7 +18,12 @@ viewportHeight?: number,
  * (browser zoom, an OS text scale) reports CSS px that are not logical px: the fit converts with [`zoom_of`].
  * Absent: CSS px are taken as logical.
  */
-devicePixelRatio?: number, };
+devicePixelRatio?: number, 
+/**
+ * The body scrolls (`scrollHeight > clientHeight + 1`): logged, so a scrollbar beside one line is seen in a user's
+ * bundle; never used to size (ADR 0043 §2).
+ */
+overflow: boolean, };
 
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
 
@@ -59,7 +64,24 @@ export type DialogStart = { dialogId: string, title: string, kind: DialogKind, m
 /**
  * No Cancel: Escape and a close request leave it open.
  */
-requiredChoice: boolean, input: unknown, };
+requiredChoice: boolean, input: unknown, 
+/**
+ * This page load of the window (1 for the first, raised by every load, also a reload): every measure the page sends
+ * carries it, so a reloaded page's `seq = 1` is not dropped as stale (ADR 0043 §2).
+ */
+epoch: number, };
+
+export type DialogReadyWire = { epoch: number, seq: number, };
+
+export type DialogSizeModeName = "manual" | "height";
+
+export type DialogSizeModeEvent = { mode: DialogSizeModeName, };
+
+export type DialogRemeasureEvent = { 
+/**
+ * The window's new scale factor.
+ */
+scale: number, };
 
 export type DialogResult = { label: string, dialogId: string, result: unknown, };
 
@@ -83,13 +105,15 @@ message: string,
  */
 retryable: boolean, };
 
-/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`, `inputs`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`, `inputs`, `sizeMode`, `remeasure`). */
 export const DIALOG_EVENTS = {
   result: 'paddock://dialog-result',
   shown: 'paddock://dialog-shown',
   closed: 'paddock://dialog-closed',
   closeRequested: 'paddock://dialog-close-requested',
   inputs: 'paddock://dialog-inputs',
+  sizeMode: 'paddock://dialog-size-mode',
+  remeasure: 'paddock://dialog-remeasure',
 } as const;
 
 /** The commands every dialog window may call whatever its contract says. */

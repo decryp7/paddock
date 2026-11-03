@@ -757,6 +757,7 @@ fn take_input<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<DialogStart
         modality: entry.modality,
         required_choice: entry.required_choice,
         input: entry.input,
+        epoch: dialogs(app)?.next_epoch(label).ok_or_else(not_a_dialog)?,
     })
 }
 

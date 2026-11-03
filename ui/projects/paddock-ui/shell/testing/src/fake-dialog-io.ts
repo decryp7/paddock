@@ -29,7 +29,7 @@ export class FakeDialogIo implements DialogIo {
   /** When set, `open` fails with it (the window system refused). */
   failOpen: Error | null = null;
   /** What `take` answers. */
-  start: DialogStart = { dialogId: 'x', title: 'X', kind: 'form', modality: 'modeless', requiredChoice: false, input: {} };
+  start: DialogStart = { dialogId: 'x', title: 'X', kind: 'form', modality: 'modeless', requiredChoice: false, input: {}, epoch: 1 };
 
   async open(request: DialogRequest): Promise<DialogInfo> {
     this.opened.push(request);
