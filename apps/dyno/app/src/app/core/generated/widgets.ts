@@ -483,13 +483,19 @@ unit: string,
 /**
  * A short label before it ("CPU").
  */
-label: string, } } | { "graphAndNumber": { 
+label: string, 
+/**
+ * Stacked (the default) or on one line. Absent in older saved settings: stacked.
+ */
+format: NumberFormat, } } | { "graphAndNumber": { 
 /**
  * What it shows.
  */
 metric: Metric, } };
 
 export type MenuBarKind = "lineGraph" | "verticalBars" | "horizontalMeter" | "ring" | "number" | "graphAndNumber";
+
+export type NumberFormat = "stacked" | "line";
 
 export type ValueTone = "ok" | "warn" | "bad";
 

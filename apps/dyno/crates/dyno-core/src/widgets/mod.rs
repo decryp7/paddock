@@ -23,7 +23,7 @@ mod generated;
 
 pub use choices::{widget_choices, DashboardKindChoices, MenuBarKindChoices, MetricChoice, PopoverKindChoices, WidgetChoices};
 pub use dashboard::{DashboardCatalogue, DashboardKind, DashboardWidget, Thresholds, WidgetOptions};
-pub use menu_bar::{MenuBarCatalogue, MenuBarItem, MenuBarKind};
+pub use menu_bar::{MenuBarCatalogue, MenuBarItem, MenuBarKind, NumberFormat};
 pub use metric::Metric;
 pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget, VolumeChoice};
 pub use reading::{read_all, read_metric, with_dashboard_thresholds, MetricReading, ReadingQuery};

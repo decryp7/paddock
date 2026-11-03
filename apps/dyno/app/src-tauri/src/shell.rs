@@ -181,13 +181,12 @@ pub struct ShellOf<R: Runtime> {
     popover_gate: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
     /// Connection to first live update, for the login-start log.
     first_data: crate::first_data::FirstData,
-    /// Counts the times the agent came or went: a timer that wakes to a different count does nothing.
-    away: AtomicU64,
+    /// The open alarms that name a metric, by alarm id: a tray item whose metric an alarm rule covers shows its alert exactly
+    /// while one of these is open.
+    open_alarms: Mutex<std::collections::HashMap<u64, dyno_core::widgets::Metric>>,
+    /// The delay before the tray items show the agent is away (on the injected clock).
+    away: crate::tray_away::AwayTimer,
 }
-
-/// How long the agent must stay away before the tray items show their unavailable frame (a restart of the agent takes about this
-/// long and must not blink the bar).
-const AWAY_DELAY: Duration = Duration::from_secs(3);
 
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
@@ -199,7 +198,8 @@ impl<R: Runtime> ShellOf<R> {
                 initial_items(&Settings::default().menu_bar.layout().placements),
                 crate::tray_model::Env::native(),
             )),
-            away: AtomicU64::new(0),
+            open_alarms: Mutex::new(Default::default()),
+            away: crate::tray_away::AwayTimer::new(Arc::new(paddock_jobs::SystemClock)),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
@@ -242,6 +242,10 @@ impl<R: Runtime> ShellOf<R> {
     /// registers itself unasked.
     pub fn settings_changed(&self, settings: &Settings, link: &AgentLink) -> Result<(), String> {
         self.set_items(initial_items(&settings.menu_bar.layout().placements));
+        self.tray
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_policy(crate::tray_look::AlertPolicy::from_settings(settings));
         lock(&self.popover).set_layout(settings.popover.layout().placements.clone());
         self.notifications.store(settings.notifications, Ordering::Relaxed);
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
@@ -457,16 +461,11 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
-    /// The agent is not running: after [`AWAY_DELAY`], if it is still away, every item shows its unavailable frame.
+    /// The agent is not running: after [`crate::tray_away::AWAY_DELAY`], if it is still away, every item shows its unavailable frame.
     fn agent_away(&self) {
-        let epoch = self.away.fetch_add(1, Ordering::SeqCst) + 1;
         let me = self.me.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(AWAY_DELAY);
+        self.away.lost(move || {
             let Some(shell) = me.upgrade() else { return };
-            if shell.away.load(Ordering::SeqCst) != epoch {
-                return;
-            }
             let frames = shell
                 .tray
                 .lock()
@@ -474,7 +473,7 @@ impl<R: Runtime> ShellOf<R> {
                 .unavailable_frames(crate::tray::dark_taskbar());
             logging::info(&format!(
                 "tray: the agent is still away after {} s, showing {} item(s) as unavailable",
-                AWAY_DELAY.as_secs(),
+                crate::tray_away::AWAY_DELAY.as_secs(),
                 frames.len()
             ));
             shell.pixels.show_disconnected(&shell.app, &frames);
@@ -533,6 +532,21 @@ impl<R: Runtime> Sink for ShellOf<R> {
     }
 
     fn alarm(&self, change: dyno_core::alarms::AlarmChange) {
+        {
+            // The tray items whose metric an alarm rule covers show their alert while an alarm for it is open.
+            let mut open = lock(&self.open_alarms);
+            match (&change.alarm.metric, change.alarm.state.is_open()) {
+                (Some(m), true) => {
+                    open.insert(change.alarm.id, m.clone());
+                }
+                _ => {
+                    open.remove(&change.alarm.id);
+                }
+            }
+            let mut metrics: Vec<dyno_core::widgets::Metric> = open.values().cloned().collect();
+            metrics.dedup();
+            self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_alarmed(metrics);
+        }
         if change.notify {
             // The shell's notification centre: one message per alarm, updated in place while it repeats (an in-app toast
             // when a window is open, the list in the centre otherwise).
@@ -573,7 +587,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         self.hub.report(&status);
         if matches!(status.state, crate::dto::AgentState::Running) {
-            self.away.fetch_add(1, Ordering::SeqCst);
+            self.away.back();
             lock(&self.popover).agent_back();
         } else {
             self.agent_away();

@@ -79,12 +79,36 @@ describe('dy-menu-bar-items', () => {
       expect(rows(el)).toEqual(['Number', 'Number', 'Number', 'Number']);
     });
     expect(el.querySelectorAll('mat-select[aria-label^="Metric of"]')).toHaveLength(4);
+    expect(el.querySelector('[role="note"]')).toBeNull();
     el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
     await vi.waitFor(() => {
       f.detectChanges();
       expect(rows(el)).toHaveLength(5);
     });
     expect(el.querySelector('input[maxlength="8"]')).not.toBeNull();
+    // Past four items the page says what the Mac menu bar and the Windows 11 overflow do with items that do not fit.
+    expect(el.querySelector('[role="note"]')?.textContent).toMatch(/menu bar hides.*overflow flyout/s);
+  });
+
+  it('sets a number item to one line and back', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    const layouts = TestBed.inject(WidgetLayouts);
+    const first = layouts.menuBar()!.layout.placements[0]!;
+    const page = f.componentInstance as unknown as { setFormat(p: typeof first, v: string): void };
+    page.setFormat(first, 'line');
+    await vi.waitFor(() => {
+      const now = layouts.menuBar()!.layout.placements[0]!.widget as { number: { format: string } };
+      expect(now.number.format).toBe('line');
+    });
+    page.setFormat(layouts.menuBar()!.layout.placements[0]!, 'stacked');
+    await vi.waitFor(() => {
+      const now = layouts.menuBar()!.layout.placements[0]!.widget as { number: { format: string } };
+      expect(now.number.format).toBe('stacked');
+    });
   });
 
   it('disables every add button once the menu bar holds its 32 items', async () => {

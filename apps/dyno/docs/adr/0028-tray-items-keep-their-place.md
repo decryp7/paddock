@@ -62,9 +62,14 @@ The renderers are `dyno_core::tray::{menu_bar, pixel, text}` (docs/design/dyno-t
 format and renders it (macOS: 1x and @2x templates of one point size; Windows and Linux: a square icon at the taskbar's pixel size,
 re-read from `Shell_TrayWnd`'s DPI on every update so a DPI or theme change shows within a second). The CoreText adapter of the text
 port is `tray_text.rs`, the app's edge. The macOS pictures reach the status item through the second tray-icon patch
-(`vendor/tray-icon-image-reps.patch`). The default set is four stacked numbers (CPU, memory, network, temperature). The alert shows
-when a load or a temperature stays at 90 for 3 s of sample time and clears 5 points below (`tray_look::AlertGate`; the level is the
-app's, the design leaves it open). When the agent has been away for 3 s every item shows its unavailable frame (a dimmed dash at the
+(`vendor/tray-icon-image-reps.patch`). The default set is four stacked numbers (CPU, memory, network, temperature). The alert comes from
+Dyno's own alarms: an item whose metric an enabled alarm rule covers (the overheating alert for the temperature, the user's
+rules for theirs; `tray_look::AlertPolicy`) shows its alert exactly while the agent has an open alarm for that metric (the shell
+follows the alarm events; an alarm raised before the app connected is not known until it changes: open item). A load no rule
+covers uses the Settings value `alerts.trayAlertPercent` (default 90, 50 to 100): the level held for 3 s of sample time, cleared
+5 points below (`AlertGate`). A number item has a format, stacked (the default) or one line (`NumberFormat` on the wire,
+mirrored by ts-rs, a select in the item's settings), and Settings says what macOS and Windows 11 do with items that do not fit once
+more than four are on. When the agent has been away for 3 s (`tray_away::AwayTimer` on the injected `paddock_jobs::Clock`, rule 60) every item shows its unavailable frame (a dimmed dash at the
 same width) and the live pictures return with the agent.
 
 ## Measured

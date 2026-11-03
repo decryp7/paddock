@@ -6,12 +6,12 @@
 //! them for development and measurements. A small always-visible Windows mini-bar window is a documented stub (off by
 //! default; not built yet).
 
-use crate::tray_look::{alert_level, mac_kind, px_kind, render_mac, render_px, AlertGate, Look, Sample};
+use crate::tray_look::{mac_kind, px_kind, render_mac, render_px, AlertGate, AlertPolicy, Look, Sample};
 use dyno_core::protocol::LiveUpdate;
 use dyno_core::tray::text::TextRaster;
 use dyno_core::tray::{menu_bar, pixel};
 use dyno_core::widgets::menu_bar::MAX_ITEMS;
-use dyno_core::widgets::{read_metric, MenuBarItem, Metric, Thresholds};
+use dyno_core::widgets::{read_metric, MenuBarItem, Metric, NumberFormat, Thresholds};
 use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -76,6 +76,8 @@ pub struct ItemSpec {
     pub label: String,
     /// The unit a number shows in the tooltip (empty: the metric's own).
     pub unit: String,
+    /// Whether a number draws on one line (otherwise stacked).
+    pub line: bool,
 }
 
 impl ItemSpec {
@@ -87,6 +89,7 @@ impl ItemSpec {
             glyph,
             label: String::new(),
             unit: String::new(),
+            line: false,
         }
     }
 }
@@ -97,6 +100,13 @@ pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpe
         .iter()
         .map(|p| {
             let metric = p.widget.metric().clone();
+            let line = matches!(
+                &p.widget,
+                MenuBarItem::Number {
+                    format: NumberFormat::Line,
+                    ..
+                }
+            );
             let (glyph, label, unit) = match &p.widget {
                 MenuBarItem::LineGraph { .. } => (Glyph::Graph, String::new(), String::new()),
                 MenuBarItem::VerticalBars { .. } if metric == Metric::CpuPerCore => (Glyph::CoreBars, String::new(), String::new()),
@@ -112,6 +122,7 @@ pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpe
                 glyph,
                 label,
                 unit,
+                line,
             }
         })
         .collect()
@@ -279,6 +290,9 @@ pub struct TrayItems {
     state: Vec<ItemState>,
     net_peak: f64,
     env: Env,
+    policy: AlertPolicy,
+    /// The metrics the agent has an open alarm for now.
+    alarmed: Vec<Metric>,
 }
 
 /// A measurement: where it sits on the 0-100 drawing scale, and how to say it.
@@ -317,7 +331,19 @@ impl TrayItems {
             state,
             net_peak: NET_FLOOR,
             env,
+            policy: AlertPolicy::default(),
+            alarmed: Vec::new(),
         }
+    }
+
+    /// Which alarm rules cover which metrics, and the fallback level (the settings changed).
+    pub fn set_policy(&mut self, policy: AlertPolicy) {
+        self.policy = policy;
+    }
+
+    /// The metrics with an open alarm (an alarm changed).
+    pub fn set_alarmed(&mut self, alarmed: Vec<Metric>) {
+        self.alarmed = alarmed;
     }
 
     /// The icon size changed (the taskbar's DPI): every item is drawn again at the next update. Returns whether it changed.
@@ -484,7 +510,14 @@ impl TrayItems {
             up,
             down,
         };
-        let alert = self.state[i].alert.update(Some(shown), alert_level(&spec.metric), now);
+        let alert = if self.policy.covers(&spec.metric) {
+            // An alarm rule covers it: the alert is the alarm, with the alarm's own hold and hysteresis.
+            self.state[i].alert = AlertGate::default();
+            self.alarmed.contains(&spec.metric)
+        } else {
+            let level = self.policy.fallback_level(&spec.metric);
+            self.state[i].alert.update(Some(shown), level, now)
+        };
         let text = if spec.unit.is_empty() {
             m.text
         } else {
@@ -583,6 +616,7 @@ mod tests {
                     metric: Metric::Temperature,
                     unit: "C".into(),
                     label: "Hot".into(),
+                    format: NumberFormat::Line,
                 },
             ),
             (1, MenuBarItem::GraphAndNumber { metric: Metric::Memory }),
@@ -604,6 +638,7 @@ mod tests {
             ]
         );
         assert_eq!((items[1].label.as_str(), items[1].unit.as_str()), ("Hot", "C"));
+        assert!(items[1].line && !items[0].line, "only the item set to one line draws on one line");
     }
 
     #[test]
@@ -689,6 +724,55 @@ mod tests {
         assert!(
             items.frames(&update(40.0), true).is_empty(),
             "no redraw when the picture did not change"
+        );
+    }
+
+    fn at(mut u: LiveUpdate, ms: i64) -> LiveUpdate {
+        u.system.at = Timestamp(ms);
+        u
+    }
+
+    fn frame_of(m: &mut TrayItems, u: &LiveUpdate) -> Option<Frame> {
+        m.frames(u, true).pop().map(|(_, f)| f)
+    }
+
+    #[test]
+    fn a_metric_an_alarm_rule_covers_alerts_only_with_an_open_alarm() {
+        let mut m = TrayItems::new(vec![item("c", Metric::CpuTotal, Glyph::Number)], win_env(32));
+        m.set_policy(AlertPolicy {
+            covered: vec![Metric::CpuTotal],
+            fallback_percent: 90.0,
+        });
+        let calm = frame_of(&mut m, &at(update(95.0), 0)).unwrap();
+        // 95 % for 10 s, but the rule has not raised an alarm: no alert, whatever the fallback level says.
+        assert_eq!(frame_of(&mut m, &at(update(95.0), 10_000)), None, "unchanged picture");
+        m.set_alarmed(vec![Metric::CpuTotal]);
+        let alarmed = frame_of(&mut m, &at(update(95.0), 11_000)).unwrap();
+        assert_ne!(alarmed.look.pictures, calm.look.pictures, "the open alarm shows as an alert");
+        m.set_alarmed(vec![]);
+        let cleared = frame_of(&mut m, &at(update(95.0), 12_000)).unwrap();
+        assert_eq!(cleared.look.pictures, calm.look.pictures);
+    }
+
+    #[test]
+    fn a_load_no_rule_covers_uses_the_settings_level_after_three_seconds() {
+        let mut m = TrayItems::new(vec![item("c", Metric::CpuTotal, Glyph::Number)], win_env(32));
+        m.set_policy(AlertPolicy {
+            covered: vec![],
+            fallback_percent: 80.0,
+        });
+        let first = frame_of(&mut m, &at(update(85.0), 0)).unwrap();
+        assert_eq!(frame_of(&mut m, &at(update(85.0), 2_999)), None, "held for less than three seconds");
+        let later = frame_of(&mut m, &at(update(85.0), 3_000)).unwrap();
+        assert_ne!(
+            later.look.pictures, first.look.pictures,
+            "alert after three seconds at the Settings level"
+        );
+        // 76 is inside the five-point band below 80: still alerting; 74 clears it.
+        assert_eq!(
+            frame_of(&mut m, &at(update(76.0), 4_000)).map(|f| f.look.pictures == later.look.pictures),
+            Some(false),
+            "the number changed"
         );
     }
 

@@ -759,6 +759,7 @@ export interface Settings {
     lowDiskPercent: number;
     overheatCelsius: number;
     longHighCpuMinutes: number;
+    trayAlertPercent: number;
   };
   webApi: { enabled: boolean; port: number; lan: boolean };
   // The dashboard, menu-bar items and popup layouts travel in the settings JSON too, but a saved `Settings` never replaces

@@ -11,6 +11,7 @@
 ### Changed
 
 - The menu-bar and tray items have a new look (design `docs/design/dyno-tray/README.md`): stacked label-over-value numbers with tabular figures in the system font, fixed widths per format, a dimmed dash when a value is missing, an alert that needs the level held for 3 s, and whole-pixel icons at the taskbar's own size on Windows (drawn again when the DPI or theme changes). The default set is CPU, memory, network and temperature.
+- A tray item shows its alert while Dyno has an open alarm for its metric (your alarm rules and the overheating alert); a load no rule covers uses the new Settings level "Menu-bar alert level" (default 90 %). A number item can be set to one line, and Settings explains what macOS and Windows 11 do with items that do not fit once more than four are on.
 - When the agent stays away for 3 s the items show a dimmed dash at their usual width instead of the static icon.
 
 ### Fixed

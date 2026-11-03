@@ -14,6 +14,18 @@ pub const MAX_UNIT: usize = 8;
 /// Longest label of a number item, in characters.
 pub const MAX_LABEL: usize = 16;
 
+/// How a number item draws: the label over the value (the narrowest), or label and value on one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum NumberFormat {
+    /// The label over the value.
+    #[default]
+    Stacked,
+    /// "CPU 23%" on one line.
+    Line,
+}
+
 /// One menu-bar item; the variant is how it draws.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
@@ -47,6 +59,9 @@ pub enum MenuBarItem {
         unit: String,
         /// A short label before it ("CPU").
         label: String,
+        /// Stacked (the default) or on one line. Absent in older saved settings: stacked.
+        #[serde(default)]
+        format: NumberFormat,
     },
     /// A line with the number beside it.
     GraphAndNumber {
@@ -112,10 +127,16 @@ impl Widget for MenuBarItem {
 
     fn clamped(self) -> MenuBarItem {
         match self {
-            MenuBarItem::Number { metric, unit, label } => MenuBarItem::Number {
+            MenuBarItem::Number {
+                metric,
+                unit,
+                label,
+                format,
+            } => MenuBarItem::Number {
                 metric,
                 unit: clean_text(&unit, MAX_UNIT),
                 label: clean_text(&label, MAX_LABEL),
+                format,
             },
             other => other,
         }
@@ -176,6 +197,7 @@ impl Catalogue for MenuBarCatalogue {
             metric,
             unit: String::new(),
             label: String::new(),
+            format: NumberFormat::Stacked,
         };
         assign_ids([
             (1, number(Metric::CpuTotal)),
@@ -212,6 +234,7 @@ mod tests {
             metric: Metric::Memory,
             unit: "%\n%%%%%%%%%%%".into(),
             label: "L".repeat(40),
+            format: NumberFormat::Stacked,
         };
         let MenuBarItem::Number { unit, label, .. } = item.clamped() else {
             unreachable!()

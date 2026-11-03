@@ -125,10 +125,10 @@ const DEFAULTS: Record<DynoSurface, () => Placement<W>[]> = {
   dashboard: () => assign<W>(DASH_PRESETS['overview']![1]),
   menuBar: () =>
     assign<W>([
-      [1, { number: { metric: 'cpuTotal', unit: '', label: '' } }],
-      [1, { number: { metric: 'memory', unit: '', label: '' } }],
-      [1, { number: { metric: 'networkDown', unit: '', label: '' } }],
-      [1, { number: { metric: 'temperature', unit: '', label: '' } }],
+      [1, { number: { metric: 'cpuTotal', unit: '', label: '', format: 'stacked' } }],
+      [1, { number: { metric: 'memory', unit: '', label: '', format: 'stacked' } }],
+      [1, { number: { metric: 'networkDown', unit: '', label: '', format: 'stacked' } }],
+      [1, { number: { metric: 'temperature', unit: '', label: '', format: 'stacked' } }],
     ]),
 };
 
@@ -435,7 +435,7 @@ export function mockWidgetChoices(): WidgetChoices {
     menuBar: MENU_KINDS.map((k) => {
       const metric: Metric = 'cpuTotal';
       const kind = k.kind as MenuBarKind;
-      return { kind, default: (kind === 'number' ? { number: { metric, unit: '%', label: '' } } : { [kind]: { metric } }) as MenuBarItem };
+      return { kind, default: (kind === 'number' ? { number: { metric, unit: '%', label: '', format: 'stacked' } } : { [kind]: { metric } }) as MenuBarItem };
     }),
     menuBarMetrics: METRIC_TITLES.map(([m]) => choice(m)),
   };

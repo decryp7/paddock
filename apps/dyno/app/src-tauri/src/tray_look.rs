@@ -1,5 +1,5 @@
 //! How a menu-bar / tray item looks: the mapping from an item's spec and reading to the approved renderers
-//! (`dyno_core::tray::{menu_bar, pixel}`, design `docs/design/dyno-tray/README.md`), and the state rules (alert with hysteresis).
+//! (`dyno_core::tray::{menu_bar, pixel}`, design `docs/design/dyno-tray/README.md`), and the state rules (the alert).
 //! Pure: the text port, the pixel size and the clock (the sample's own timestamp) are passed in. One function per platform
 //! returns the pictures and the item's fixed width; the mechanics around them (identity, one image set, sync) do not care.
 
@@ -8,9 +8,7 @@ use dyno_core::tray::text::TextRaster;
 use dyno_core::tray::{menu_bar as mb, pixel as px};
 use dyno_core::widgets::Metric;
 
-/// The percentage at which a load item goes into alert, and the degrees for a temperature (the design leaves the level to the app).
-pub const ALERT_LEVEL: f32 = 90.0;
-/// How long the level must hold before the alert shows (the sample timestamps' milliseconds).
+/// How long the fallback level must hold before the alert shows (the sample timestamps' milliseconds).
 pub const ALERT_HOLD_MS: i64 = 3_000;
 /// How far below the level the value must fall before the alert goes.
 pub const ALERT_HYSTERESIS: f32 = 5.0;
@@ -78,6 +76,7 @@ pub fn mac_kind(spec: &ItemSpec, cores: usize) -> mb::Kind {
     let unit = mb::Unit::Percent;
     match spec.glyph {
         Glyph::CoreBars => mb::Kind::Cores { cores },
+        Glyph::Number if spec.line => mb::Kind::Value { label, unit },
         Glyph::Number => mb::Kind::Stacked { label, unit },
         Glyph::Bars => mb::Kind::Bar { label },
         Glyph::Graph => mb::Kind::Graph { label },
@@ -106,17 +105,57 @@ pub fn px_kind(spec: &ItemSpec) -> px::Kind {
     }
 }
 
-/// The level above which a metric is in alert; none for metrics with no "too high".
-pub fn alert_level(m: &Metric) -> Option<f32> {
-    match m {
-        Metric::CpuTotal
-        | Metric::CpuPerCore
-        | Metric::Memory
-        | Metric::Swap
-        | Metric::DiskActivity
-        | Metric::GpuLoad
-        | Metric::Temperature => Some(ALERT_LEVEL),
-        _ => None,
+/// Where an item's alert comes from (ISA-18.2 alarms first): a metric some alarm rule covers shows its alert exactly while the
+/// agent has an open alarm for it; a load metric no rule covers uses the Settings level with the hold and hysteresis below.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlertPolicy {
+    /// The metrics an enabled alarm rule covers.
+    pub covered: Vec<Metric>,
+    /// The Settings level in percent for the loads no rule covers.
+    pub fallback_percent: f32,
+}
+
+impl Default for AlertPolicy {
+    fn default() -> Self {
+        AlertPolicy {
+            covered: Vec::new(),
+            fallback_percent: 90.0,
+        }
+    }
+}
+
+impl AlertPolicy {
+    /// The policy for these settings: the built-in overheating alert covers the temperature, the user's enabled rules cover theirs.
+    pub fn from_settings(s: &dyno_core::settings::Settings) -> AlertPolicy {
+        let mut covered = Vec::new();
+        if s.alerts.enabled {
+            covered.push(Metric::Temperature);
+        }
+        for r in s.custom_alerts.iter().filter(|r| r.enabled) {
+            let m = r.metric.widget();
+            if !covered.contains(&m) {
+                covered.push(m);
+            }
+        }
+        AlertPolicy {
+            covered,
+            fallback_percent: s.alerts.tray_alert_percent,
+        }
+    }
+
+    /// Whether an alarm rule covers `m`.
+    pub fn covers(&self, m: &Metric) -> bool {
+        self.covered.contains(m)
+    }
+
+    /// The level for a load metric no rule covers (percent); none for everything else.
+    pub fn fallback_level(&self, m: &Metric) -> Option<f32> {
+        match m {
+            Metric::CpuTotal | Metric::CpuPerCore | Metric::Memory | Metric::Swap | Metric::DiskActivity | Metric::GpuLoad => {
+                Some(self.fallback_percent)
+            }
+            _ => None,
+        }
     }
 }
 
