@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AllocAnyThread, DeclaredClass, Message};
 use objc2_app_kit::{
-    NSCellImagePosition, NSEvent, NSImage, NSMenu, NSStatusBar, NSStatusItem, NSTrackingArea,
+    NSBitmapImageRep, NSCellImagePosition, NSDeviceRGBColorSpace, NSEvent, NSImage, NSMenu, NSStatusBar, NSStatusItem, NSTrackingArea,
     NSTrackingAreaOptions, NSVariableStatusItemLength, NSView, NSWindow,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -218,6 +218,71 @@ impl TrayIcon {
         Ok(())
     }
 
+    /// Paddock patch: sets the image from several pixel representations (one per scale), each made from premultiplied RGBA bytes
+    /// directly, sized `size_pt` points, and the template flag, before a single `setImage`.
+    pub fn set_icon_reps(
+        &mut self,
+        reps: &[(&[u8], u32, u32)],
+        size_pt: (f64, f64),
+        is_template: bool,
+    ) -> crate::Result<()> {
+        let (Some(ns_status_item), Some(tray_target)) = (&self.ns_status_item, &self.tray_target)
+        else {
+            return Ok(());
+        };
+        let button = ns_status_item.button(self.mtm).unwrap();
+        let size = NSSize::new(size_pt.0, size_pt.1);
+        let image = NSImage::initWithSize(NSImage::alloc(), size);
+        for (rgba, width, height) in reps {
+            let (w, h) = (*width as isize, *height as isize);
+            if rgba.len() != (*width as usize) * (*height as usize) * 4 {
+                return Err(Error::OsError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "an image representation's bytes do not match its size",
+                )));
+            }
+            // Safety: null planes make the representation own its buffer; the copy below stays inside `w * h * 4` bytes.
+            let rep = unsafe {
+                NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                    NSBitmapImageRep::alloc(),
+                    std::ptr::null_mut(),
+                    w,
+                    h,
+                    8,
+                    4,
+                    true,
+                    false,
+                    NSDeviceRGBColorSpace,
+                    w * 4,
+                    32,
+                )
+            };
+            let Some(rep) = rep else {
+                return Err(Error::OsError(std::io::Error::other(
+                    "could not make an image representation",
+                )));
+            };
+            let data = rep.bitmapData();
+            if data.is_null() {
+                return Err(Error::OsError(std::io::Error::other(
+                    "an image representation has no bitmap data",
+                )));
+            }
+            // Safety: `data` points to the representation's `w * 4 * h` bytes and `rgba` has exactly that many.
+            unsafe { std::ptr::copy_nonoverlapping(rgba.as_ptr(), data, rgba.len()) };
+            // The point size against the pixel size is the scale the system picks the representation by.
+            rep.setSize(size);
+            image.addRepresentation(&rep);
+        }
+        image.setSize(size);
+        image.setTemplate(is_template);
+        button.setImage(Some(&image));
+        button.setImagePosition(NSCellImagePosition::ImageLeft);
+        tray_target.update_dimensions();
+        self.attrs.icon_is_template = is_template;
+        Ok(())
+    }
+
     pub fn set_show_menu_on_left_click(&mut self, enable: bool) {
         if let Some(tray_target) = &self.tray_target {
             tray_target.ivars().menu_on_left_click.set(enable);
@@ -287,11 +352,13 @@ fn set_icon_for_ns_status_item_button(
         let nsimage = NSImage::initWithData(NSImage::alloc(), &nsdata).unwrap();
         let new_size = NSSize::new(icon_width, icon_height);
 
-        button.setImage(Some(&nsimage));
+        // Paddock patch: the image is complete (size, template flag) before the button shows it; set the other way round the button
+        // renders, for a moment, a non-template image at its pixel size.
         nsimage.setSize(new_size);
+        nsimage.setTemplate(icon_is_template);
+        button.setImage(Some(&nsimage));
         // The image is to the right of the title
         button.setImagePosition(NSCellImagePosition::ImageLeft);
-        nsimage.setTemplate(icon_is_template);
     } else {
         button.setImage(None);
     }

@@ -8,6 +8,11 @@
 - Each item is given a stable identity so the OS can remember where you put it: macOS names every status item (`NSStatusItem.autosaveName`) and keeps a copy of its saved position across the item being removed; Windows gives every icon a GUID (`guidItem`), recovering a GUID the shell refuses and falling back to no GUID rather than losing the icon; Linux's status-notifier id is the item id. Not yet verified on a Mac or a Windows PC. Windows builds are not signed, so a remembered place holds only while the program stays in the same folder. A new item of the same kind as a removed one takes its place.
 - Changing the items only replaces the icons that changed. The log tells each icon's identity (and, on Windows, whether its GUID was accepted) or why it could not be created.
 
+### Changed
+
+- The menu-bar and tray items have a new look (design `docs/design/dyno-tray/README.md`): stacked label-over-value numbers with tabular figures in the system font, fixed widths per format, a dimmed dash when a value is missing, an alert that needs the level held for 3 s, and whole-pixel icons at the taskbar's own size on Windows (drawn again when the DPI or theme changes). The default set is CPU, memory, network and temperature.
+- When the agent stays away for 3 s the items show a dimmed dash at their usual width instead of the static icon.
+
 ### Fixed
 
 - macOS: the menu-bar icons no longer risk flickering: each picture is set with its template flag in one call (it was set, then set again as a template), the tooltip is sent only when it changed, and changing the items replaces only the icons that changed. The log shows every picture set at debug level. Not yet confirmed on the Mac that reported it.

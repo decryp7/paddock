@@ -56,6 +56,17 @@ apart across runs, and `sync_items` removed and made every icon on any change.
 5. **Logs (ER-27):** one line per icon created with its id, metric and identity (and on Windows the GUID outcome), one line per
    sync with what is kept, removed and made, the saved and restored macOS keys, and every refused picture.
 
+## The approved look (2026-11-03)
+
+The renderers are `dyno_core::tray::{menu_bar, pixel, text}` (docs/design/dyno-tray/README.md). `tray_look.rs` maps an item to a
+format and renders it (macOS: 1x and @2x templates of one point size; Windows and Linux: a square icon at the taskbar's pixel size,
+re-read from `Shell_TrayWnd`'s DPI on every update so a DPI or theme change shows within a second). The CoreText adapter of the text
+port is `tray_text.rs`, the app's edge. The macOS pictures reach the status item through the second tray-icon patch
+(`vendor/tray-icon-image-reps.patch`). The default set is four stacked numbers (CPU, memory, network, temperature). The alert shows
+when a load or a temperature stays at 90 for 3 s of sample time and clears 5 points below (`tray_look::AlertGate`; the level is the
+app's, the design leaves it open). When the agent has been away for 3 s every item shows its unavailable frame (a dimmed dash at the
+same width) and the live pictures return with the agent.
+
 ## Measured
 
 2026-11-03, this Mac, debug build, `cargo test -p dyno-app --lib measure_32 -- --ignored --nocapture`: 32 graph items, every

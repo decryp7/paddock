@@ -7,6 +7,7 @@
 
 use crate::logging;
 use crate::tray_identity;
+use crate::tray_look::Look;
 use crate::tray_model::{plan_sync, Frame, ItemSpec};
 use paddock_window::popover::Rect;
 use paddock_window::tauri::{PopoverSpec, Popovers, Tray, TrayBackend};
@@ -76,8 +77,66 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     )
 }
 
+/// The notification-area icon size now: the taskbar's DPI on Windows (queried from the taskbar window, cheap enough for every
+/// update, so a DPI change shows within a second), 22 px on Linux, 18 on macOS (unused there).
+pub fn native_icon_px() -> u32 {
+    #[cfg(windows)]
+    {
+        windows_dpi::taskbar_dpi().map_or(16, crate::tray_look::taskbar_px)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        18
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        22
+    }
+}
+
+#[cfg(windows)]
+mod windows_dpi {
+    //! `GetDpiForWindow` on the taskbar window; the calls are plain queries.
+    #![allow(unsafe_code)]
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+    pub fn taskbar_dpi() -> Option<u32> {
+        let class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
+        // Safety: a null-terminated class name that outlives the call; the result is only a handle value.
+        let hwnd = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+        if hwnd.is_null() {
+            return None;
+        }
+        // Safety: `hwnd` came from FindWindowW a moment ago; 0 means it is gone.
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        (dpi != 0).then_some(dpi)
+    }
+}
+
+/// Shows `look` on the icon: macOS gets both representations in one `setImage` (the patched tray-icon), the others one image.
+fn set_picture(tray: &tauri::tray::TrayIcon<Wry>, look: &Look) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let reps: Vec<(Vec<u8>, u32, u32)> = look.pictures.iter().map(|p| (p.rgba.clone(), p.width, p.height)).collect();
+        let size = (f64::from(look.width), f64::from(look.height));
+        let template = look.template;
+        tray.with_inner_tray_icon(move |t| {
+            let refs: Vec<(&[u8], u32, u32)> = reps.iter().map(|(b, w, h)| (b.as_slice(), *w, *h)).collect();
+            t.set_icon_reps(&refs, size, template).map_err(|e| e.to_string())
+        })
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let p = look.pictures.first().ok_or("no picture")?;
+        tray.set_icon(Some(Image::new_owned(p.rgba.clone(), p.width, p.height)))
+            .map_err(|e| e.to_string())
+    }
+}
+
 /// Creates the tray icon of one item.
-fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
+fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec, initial: Option<&Frame>) -> tauri::Result<()> {
     let menu = build_menu(app)?;
     let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))?;
     #[cfg(target_os = "macos")]
@@ -112,6 +171,13 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
         })
         .build(app)
         .inspect_err(|e| logging::info(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
+    // Start at the item's final width, as unavailable, so nothing resizes when the first live picture arrives.
+    if let Some(frame) = initial {
+        if let Err(e) = set_picture(&tray, &frame.look) {
+            logging::info(&format!("tray icon {}: the first picture was refused: {e}", tray_id(&spec.id)));
+        }
+        let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
+    }
     let identity = apply_identity(&tray, &spec.id);
     logging::info(&format!(
         "tray icon {} created (metric {}, {identity})",
@@ -160,7 +226,7 @@ fn apply_identity(_tray: &tauri::tray::TrayIcon<Wry>, item: &str) -> String {
 
 /// Makes the tray icons match `specs`: an unchanged item keeps its icon (so its place in the bar), a changed or removed one is
 /// removed, a new or changed one is made ([`plan_sync`]). Called only when the items changed. Returns the first error.
-pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()> {
+pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> tauri::Result<()> {
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
     }
@@ -184,7 +250,7 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
         lock(&state.drawn).remove(id);
     }
     for spec in &plan.create {
-        create_item(app, spec)?;
+        create_item(app, spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
     }
     Ok(())
 }
@@ -204,16 +270,11 @@ pub fn save_positions(app: &AppHandle<Wry>) {
     ));
 }
 
-/// Draws a frame on an item: the pixels, and the tooltip when it changed.
+/// Draws a frame on an item: the pictures in one call, and the tooltip when it changed.
 pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
-    // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states), set together
-    // with the picture in one call (two calls render the icon twice); Windows and Linux get Dyno's own colours.
-    let template = cfg!(target_os = "macos");
-    let drawn = if template { frame.icon.as_template() } else { frame.icon.clone() };
-    let icon = Image::new_owned(drawn.rgba, drawn.size, drawn.size);
-    let size = drawn.size;
-    let set = tray.set_icon_with_as_template(Some(icon), template);
+    let (w, h) = (frame.look.width, frame.look.height);
+    let set = set_picture(&tray, &frame.look);
     let Some(state) = app.try_state::<TrayState>() else { return };
     let (ops, count) = {
         let mut map = lock(&state.drawn);
@@ -230,20 +291,19 @@ pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     }
     // One line per picture, at debug: the flow of image sets per tick (a flicker shows as more than one set per tick).
     logging::debug(&format!(
-        "tray icon {}: picture #{count} set ({} call, {size}x{size} px, template {template}), tooltip {}",
+        "tray icon {}: picture #{count} set ({} call, {} representation(s), {w}x{h}, template {}), tooltip {}",
         tray_id(item),
         ops.image_sets,
+        frame.look.pictures.len(),
+        frame.look.template,
         if ops.tooltip { "sent" } else { "unchanged" }
     ));
     let first = lock(&state.painted).insert(item.to_string(), true).is_none();
     // Told once per item and on every failure (a line per second per item would flood the log).
     if let Err(e) = &set {
-        logging::info(&format!(
-            "tray icon {}: the drawn image ({size}x{size} px) was refused: {e}",
-            tray_id(item)
-        ));
+        logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
     } else if first {
-        logging::info(&format!("tray icon {}: first drawn image set, {size}x{size} px", tray_id(item)));
+        logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
     }
     #[cfg(target_os = "macos")]
     if ops.save_position {
@@ -253,20 +313,15 @@ pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     let _ = count;
 }
 
-/// While the agent is away the static icons are back (a frozen bar would look like a measurement).
-pub fn show_disconnected(app: &AppHandle<Wry>) {
-    let Some(state) = app.try_state::<TrayState>() else { return };
-    let painted: Vec<String> = lock(&state.painted).drain().filter(|(_, p)| *p).map(|(id, _)| id).collect();
-    for id in painted {
-        let Some(tray) = app.tray_by_id(&tray_id(&id)) else { continue };
-        if let Ok(icon) = Image::from_bytes(static_icon_bytes(dark_taskbar())) {
-            let _ = tray.set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
-            let _ = tray.set_tooltip(Some("Dyno — the agent is not running"));
-            if let Some(state) = app.try_state::<TrayState>() {
-                // The next picture's tooltip is always sent again.
-                lock(&state.drawn).remove(&id);
-            }
+/// While the agent is away every item shows its unavailable frame (a dimmed dash at the same width): a frozen bar would look
+/// like a measurement.
+pub fn show_disconnected(app: &AppHandle<Wry>, frames: &[(String, Frame)]) {
+    for (id, frame) in frames {
+        if let Some(state) = app.try_state::<TrayState>() {
+            // The next picture's tooltip is always sent again.
+            lock(&state.drawn).remove(id);
         }
+        paint(app, id, frame);
     }
 }
 
@@ -285,7 +340,10 @@ impl DynoTray {
 
 impl TrayBackend<Wry> for DynoTray {
     fn create(&self, app: &AppHandle<Wry>, _view: &TrayView) -> Result<(), String> {
-        sync_items(app, &self.items).map_err(|e| e.to_string())
+        // The icons start as unavailable at their final widths; the first live update replaces them.
+        let initial =
+            crate::tray_model::TrayItems::new(self.items.clone(), crate::tray_model::Env::native()).unavailable_frames(dark_taskbar());
+        sync_items(app, &self.items, &initial).map_err(|e| e.to_string())
     }
 
     fn update(&self, _app: &AppHandle<Wry>, _view: &TrayView) -> Result<(), String> {

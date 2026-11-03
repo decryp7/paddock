@@ -12,6 +12,7 @@
 )]
 
 #[cfg(target_os = "macos")]
+#[path = "../../../../app/src-tauri/src/tray_text.rs"]
 mod coretext;
 #[cfg(target_os = "macos")]
 mod sheet;

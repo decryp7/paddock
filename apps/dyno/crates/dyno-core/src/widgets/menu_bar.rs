@@ -171,9 +171,17 @@ impl Catalogue for MenuBarCatalogue {
     }
 
     fn defaults() -> Vec<Placement<MenuBarItem>> {
+        // The design's default set (docs/design/dyno-tray/README.md §2): four stacked numbers, about 200 pt in a macOS menu bar.
+        let number = |metric| MenuBarItem::Number {
+            metric,
+            unit: String::new(),
+            label: String::new(),
+        };
         assign_ids([
-            (1, MenuBarItem::VerticalBars { metric: Metric::CpuTotal }),
-            (1, MenuBarItem::VerticalBars { metric: Metric::Memory }),
+            (1, number(Metric::CpuTotal)),
+            (1, number(Metric::Memory)),
+            (1, number(Metric::NetworkDown)),
+            (1, number(Metric::Temperature)),
         ])
     }
 }
@@ -184,12 +192,18 @@ mod tests {
     use paddock_widgets::{check_catalogue, read, Edit, Stored, WidgetError};
 
     #[test]
-    fn the_catalogue_is_consistent_and_the_defaults_are_cpu_and_memory_bars() {
+    fn the_catalogue_is_consistent_and_the_defaults_are_four_numbers() {
         check_catalogue::<MenuBarCatalogue>().unwrap();
         let d = MenuBarCatalogue::defaults();
-        assert_eq!(d.len(), 2);
-        assert_eq!(d[0].widget.metric(), &Metric::CpuTotal);
-        assert_eq!(d[1].widget.metric(), &Metric::Memory);
+        let metrics: Vec<&Metric> = d.iter().map(|p| p.widget.metric()).collect();
+        assert_eq!(
+            metrics,
+            [&Metric::CpuTotal, &Metric::Memory, &Metric::NetworkDown, &Metric::Temperature]
+        );
+        assert!(
+            d.iter().all(|p| matches!(p.widget, MenuBarItem::Number { .. })),
+            "numbers draw stacked"
+        );
     }
 
     #[test]

@@ -1,6 +1,9 @@
 //! The macOS adapter of `dyno_core::tray::text::TextRaster`: CoreText draws the system font (AppKit's
 //! `systemFontOfSize:weight:` or, for tabular figures, `monospacedDigitSystemFontOfSize:weight:`) into an alpha-only
-//! `CGBitmapContext`. The system picks the optical size; no font file is read. The app's edge would use the same code.
+//! `CGBitmapContext`. The system picks the optical size; no font file is read. This is the app's edge (the port is
+//! `dyno_core::tray::text::TextRaster`); `examples/tray_sheets` includes this file by path, so there is one implementation.
+//! The only unsafe code is the CoreText and CoreGraphics calls, plain message sends on objects made here.
+#![allow(unsafe_code)]
 
 use dyno_core::tray::text::{TextMask, TextRaster, TextStyle};
 use objc2::rc::Retained;
@@ -21,12 +24,13 @@ fn font(style: &TextStyle) -> Retained<NSFont> {
     }
 }
 
-fn line(text: &str, style: &TextStyle) -> CFRetained<CTLine> {
+/// The line, or `None` when CoreText refuses (the text then measures and draws as nothing, and the item shows no label).
+fn line(text: &str, style: &TextStyle) -> Option<CFRetained<CTLine>> {
     let f = font(style);
     // NSFont is toll-free bridged to CTFont.
     let ct: &CTFont = unsafe { &*(Retained::as_ptr(&f).cast::<CTFont>()) };
     let kern = CFNumber::new_f64(f64::from(style.tracking));
-    let yes: &CFBoolean = unsafe { objc2_core_foundation::kCFBooleanTrue }.expect("kCFBooleanTrue");
+    let yes: &CFBoolean = unsafe { objc2_core_foundation::kCFBooleanTrue }?;
     let keys: [&CFString; 3] = unsafe {
         [
             kCTFontAttributeName,
@@ -37,12 +41,12 @@ fn line(text: &str, style: &TextStyle) -> CFRetained<CTLine> {
     let values: [&CFType; 3] = [ct.as_ref(), kern.as_ref(), yes.as_ref()];
     let dict = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
     let s = CFString::from_str(text);
-    let attr = unsafe { CFAttributedString::new(None, Some(&s), Some(dict.as_opaque())) }.expect("an attributed string");
-    unsafe { CTLine::with_attributed_string(&attr) }
+    let attr = unsafe { CFAttributedString::new(None, Some(&s), Some(dict.as_opaque())) }?;
+    Some(unsafe { CTLine::with_attributed_string(&attr) })
 }
 
 fn bounds(text: &str, style: &TextStyle) -> (f64, f64, f64) {
-    let l = line(text, style);
+    let Some(l) = line(text, style) else { return (0.0, 0.0, 0.0) };
     let (mut ascent, mut descent, mut leading) = (0.0, 0.0, 0.0);
     let w = unsafe { l.typographic_bounds(&mut ascent, &mut descent, &mut leading) };
     (w, ascent, descent)
@@ -80,14 +84,15 @@ impl TextRaster for CoreText {
                     None,
                     CGImageAlphaInfo::Only.0,
                 )
+            };
+            if let (Some(ctx), Some(l)) = (ctx, line(text, style)) {
+                CGContext::set_should_smooth_fonts(Some(&ctx), false);
+                CGContext::scale_ctm(Some(&ctx), s, s);
+                CGContext::set_gray_fill_color(Some(&ctx), 0.0, 1.0);
+                // Bitmap memory is top-down, drawing coordinates bottom-up: the baseline is (height - baseline) from the bottom.
+                CGContext::set_text_position(Some(&ctx), f64::from(pad) / s, f64::from(height - baseline) / s);
+                unsafe { l.draw(&ctx) };
             }
-            .expect("an alpha-only bitmap context");
-            CGContext::set_should_smooth_fonts(Some(&ctx), false);
-            CGContext::scale_ctm(Some(&ctx), s, s);
-            CGContext::set_gray_fill_color(Some(&ctx), 0.0, 1.0);
-            // Bitmap memory is top-down, drawing coordinates bottom-up: the baseline is (height - baseline) from the bottom.
-            CGContext::set_text_position(Some(&ctx), f64::from(pad) / s, f64::from(height - baseline) / s);
-            unsafe { line(text, style).draw(&ctx) };
         }
         TextMask {
             width,

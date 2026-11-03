@@ -73,6 +73,8 @@ tauri-plugin-autostart = "2"
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting (tray icon), read only.
 winreg = "0.56"
+# The taskbar window's DPI (the notification-area icon size).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
 # The GUID provider for the tray icons (the vendored, patched copy: apps/dyno/vendor/PATCHES.md).
 tray-icon = { version = "=0.25.1", default-features = false }
 
@@ -80,7 +82,11 @@ tray-icon = { version = "=0.25.1", default-features = false }
 # Registering the bundled launch agent with SMAppService (macOS 13+).
 objc2 = "0.6"
 # NSStatusItem.autosaveName of the menu-bar items (tray_identity).
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSStatusItem"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSStatusItem", "NSFont", "NSFontDescriptor", "objc2-core-foundation"] }
+# The CoreText adapter of the tray text port (tray_text.rs): the system font, drawn by the system into an alpha bitmap.
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = { version = "0.3.2", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
+objc2-core-text = { version = "0.3.2", features = ["CTLine", "CTFont", "CTStringAttributes"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSUserDefaults", "NSObject"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 

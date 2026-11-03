@@ -97,25 +97,35 @@ pub fn initial_items(placements: &[Placement<MenuBarItem>]) -> Vec<crate::tray_m
 /// What the shell draws in the tray: the native icons in the app ([`NativePixels`]), nothing in a test ([`NoPixels`]).
 pub trait TrayPixels<R: Runtime>: Send + Sync {
     /// The tray items changed.
-    fn sync_items(&self, app: &AppHandle<R>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String>;
+    fn sync_items(
+        &self,
+        app: &AppHandle<R>,
+        specs: &[crate::tray_model::ItemSpec],
+        initial: &[(String, crate::tray_model::Frame)],
+    ) -> Result<(), String>;
     /// Draws one item's frame.
     fn paint(&self, app: &AppHandle<R>, item: &str, frame: &crate::tray_model::Frame);
     /// Shows that the agent is not connected.
-    fn show_disconnected(&self, app: &AppHandle<R>);
+    fn show_disconnected(&self, app: &AppHandle<R>, frames: &[(String, crate::tray_model::Frame)]);
 }
 
 /// The tray icons of the menu bar or notification area.
 pub struct NativePixels;
 
 impl TrayPixels<Wry> for NativePixels {
-    fn sync_items(&self, app: &AppHandle<Wry>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
-        crate::tray::sync_items(app, specs).map_err(|e| e.to_string())
+    fn sync_items(
+        &self,
+        app: &AppHandle<Wry>,
+        specs: &[crate::tray_model::ItemSpec],
+        initial: &[(String, crate::tray_model::Frame)],
+    ) -> Result<(), String> {
+        crate::tray::sync_items(app, specs, initial).map_err(|e| e.to_string())
     }
     fn paint(&self, app: &AppHandle<Wry>, item: &str, frame: &crate::tray_model::Frame) {
         crate::tray::paint(app, item, frame);
     }
-    fn show_disconnected(&self, app: &AppHandle<Wry>) {
-        crate::tray::show_disconnected(app);
+    fn show_disconnected(&self, app: &AppHandle<Wry>, frames: &[(String, crate::tray_model::Frame)]) {
+        crate::tray::show_disconnected(app, frames);
     }
 }
 
@@ -123,11 +133,16 @@ impl TrayPixels<Wry> for NativePixels {
 pub struct NoPixels;
 
 impl<R: Runtime> TrayPixels<R> for NoPixels {
-    fn sync_items(&self, _: &AppHandle<R>, _: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
+    fn sync_items(
+        &self,
+        _: &AppHandle<R>,
+        _: &[crate::tray_model::ItemSpec],
+        _: &[(String, crate::tray_model::Frame)],
+    ) -> Result<(), String> {
         Ok(())
     }
     fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Frame) {}
-    fn show_disconnected(&self, _: &AppHandle<R>) {}
+    fn show_disconnected(&self, _: &AppHandle<R>, _: &[(String, crate::tray_model::Frame)]) {}
 }
 
 /// The installed app's shell glue (the commands' state).
@@ -166,19 +181,25 @@ pub struct ShellOf<R: Runtime> {
     popover_gate: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
     /// Connection to first live update, for the login-start log.
     first_data: crate::first_data::FirstData,
+    /// Counts the times the agent came or went: a timer that wakes to a different count does nothing.
+    away: AtomicU64,
 }
+
+/// How long the agent must stay away before the tray items show their unavailable frame (a restart of the agent takes about this
+/// long and must not blink the bar).
+const AWAY_DELAY: Duration = Duration::from_secs(3);
 
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
     pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>) -> Arc<ShellOf<R>> {
-        let size = if cfg!(target_os = "macos") { 44 } else { 32 };
         Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
             tray: Mutex::new(TrayItems::new(
                 initial_items(&Settings::default().menu_bar.layout().placements),
-                size,
+                crate::tray_model::Env::native(),
             )),
+            away: AtomicU64::new(0),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
@@ -200,7 +221,12 @@ impl<R: Runtime> ShellOf<R> {
     pub fn set_items(&self, specs: Vec<crate::tray_model::ItemSpec>) {
         let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
         if changed {
-            if let Err(e) = self.pixels.sync_items(&self.app, &specs) {
+            let initial = self
+                .tray
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unavailable_frames(crate::tray::dark_taskbar());
+            if let Err(e) = self.pixels.sync_items(&self.app, &specs, &initial) {
                 logging::info(&format!("could not update the tray items: {e}"));
             }
         }
@@ -431,6 +457,30 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
+    /// The agent is not running: after [`AWAY_DELAY`], if it is still away, every item shows its unavailable frame.
+    fn agent_away(&self) {
+        let epoch = self.away.fetch_add(1, Ordering::SeqCst) + 1;
+        let me = self.me.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(AWAY_DELAY);
+            let Some(shell) = me.upgrade() else { return };
+            if shell.away.load(Ordering::SeqCst) != epoch {
+                return;
+            }
+            let frames = shell
+                .tray
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unavailable_frames(crate::tray::dark_taskbar());
+            logging::info(&format!(
+                "tray: the agent is still away after {} s, showing {} item(s) as unavailable",
+                AWAY_DELAY.as_secs(),
+                frames.len()
+            ));
+            shell.pixels.show_disconnected(&shell.app, &frames);
+        });
+    }
+
     fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
         if let Err(e) = self.app.emit(event, payload) {
             logging::info(&format!("could not emit {event}: {e}"));
@@ -454,11 +504,14 @@ impl<R: Runtime> Sink for ShellOf<R> {
             ));
         }
         if self.throttle.lock().unwrap_or_else(|e| e.into_inner()).allow(Instant::now()) {
-            let frames = self
-                .tray
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .frames(&update, crate::tray::dark_taskbar());
+            let mut tray = self.tray.lock().unwrap_or_else(|e| e.into_inner());
+            // The taskbar's DPI may have changed: every item is drawn again at the new size.
+            #[cfg(not(target_os = "macos"))]
+            if tray.set_px(crate::tray::native_icon_px()) {
+                logging::info("tray: the icon size changed, drawing every item again");
+            }
+            let frames = tray.frames(&update, crate::tray::dark_taskbar());
+            drop(tray);
             for (id, frame) in frames {
                 self.pixels.paint(&self.app, &id, &frame);
             }
@@ -520,9 +573,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         self.hub.report(&status);
         if matches!(status.state, crate::dto::AgentState::Running) {
+            self.away.fetch_add(1, Ordering::SeqCst);
             lock(&self.popover).agent_back();
         } else {
-            self.pixels.show_disconnected(&self.app);
+            self.agent_away();
             lock(&self.popover).agent_lost(Timestamp(now_millis()));
             self.emit_popover(Timestamp(now_millis()));
         }

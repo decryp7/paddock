@@ -123,7 +123,13 @@ function builtinPresets(): Preset<DashboardWidget>[] {
 const DEFAULTS: Record<DynoSurface, () => Placement<W>[]> = {
   popover: () => assign<W>([[2, 'activeAlarms'], [2, { diskSpace: { volume: 'all' } }], [2, 'cpuMemory']]),
   dashboard: () => assign<W>(DASH_PRESETS['overview']![1]),
-  menuBar: () => assign<W>([[1, { verticalBars: { metric: 'cpuTotal' } }], [1, { verticalBars: { metric: 'memory' } }]]),
+  menuBar: () =>
+    assign<W>([
+      [1, { number: { metric: 'cpuTotal', unit: '', label: '' } }],
+      [1, { number: { metric: 'memory', unit: '', label: '' } }],
+      [1, { number: { metric: 'networkDown', unit: '', label: '' } }],
+      [1, { number: { metric: 'temperature', unit: '', label: '' } }],
+    ]),
 };
 
 interface Stored {

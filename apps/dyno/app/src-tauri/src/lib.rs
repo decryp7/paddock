@@ -22,9 +22,12 @@ pub mod shell;
 pub mod supervise;
 pub mod tray;
 pub mod tray_identity;
+pub mod tray_look;
 pub mod tray_model;
 #[cfg(target_os = "macos")]
 pub mod tray_position;
+#[cfg(target_os = "macos")]
+pub mod tray_text;
 
 use link::{AgentLink, ProcessLauncher};
 use paddock_shell::{AppIdentity, Builder};
