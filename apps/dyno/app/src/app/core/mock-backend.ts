@@ -788,7 +788,7 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  // -------------------------------------------------------------------------------------------- bad-IP lists, the map, the firewall
+  // -------------------------------------------------------------------------------------------- IP lists, the map, the firewall
 
   /** The mock's lists (their state lives for the life of the mock). */
   readonly intel = new MockIntel(() => this.now());

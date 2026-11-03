@@ -207,7 +207,7 @@ Maintenance view opens and the minute scan grew with the number of windows. **Me
 instants).
 
 
-## Bad-IP check: building and querying the range index (`dyno_core::intel`)
+## IP-list check: building and querying the range index (`dyno_core::intel`)
 
 User lists of addresses, CIDR ranges and host names become one in-memory sorted-segment index (ADR 0031, amendment 1). A lookup
 is one binary search; nothing is queried from a database per connection. The test `intel::tests::bench_index`

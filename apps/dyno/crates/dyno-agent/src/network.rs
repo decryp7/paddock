@@ -4,7 +4,7 @@
 
 use crate::agent::{lock, now, Shared};
 use dyno_core::activity::ActivityKind;
-use dyno_core::network::{build, NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
+use dyno_core::network::{NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
 use dyno_core::network_traffic::{TrafficRow, TrafficTracker};
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
@@ -158,7 +158,15 @@ impl NetCentre {
         record(shared, &events);
         let mut snapshot = {
             let s = lock(&self.state);
-            build(now(), &rows, &processes, &query.normalised(), &s.tracker)
+            let geo = shared.intel.geo();
+            dyno_core::network::build_with_geo(
+                now(),
+                &rows,
+                &processes,
+                &query.normalised(),
+                &s.tracker,
+                geo.is_on().then_some(&*geo as &dyn dyno_core::geo::GeoLookup),
+            )
         };
         (snapshot.traffic, snapshot.traffic_note) = self.traffic();
         Ok(snapshot)

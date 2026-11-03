@@ -133,4 +133,19 @@ describe('NetworkPage', () => {
     expect(el.querySelector('[aria-label="Listening ports"]')).not.toBeNull();
     expect([...el.querySelectorAll('[role="columnheader"]')].map((h) => h.textContent!.trim())).toEqual(expect.arrayContaining(['Program', 'Service', 'Address', 'Protocol', 'Since']));
   });
+
+  it('names the country of public peers and filters the connections to one country with a way back', async () => {
+    const { el, rows, settle, store } = await open();
+    expect(el.querySelectorAll('.cc').length).toBeGreaterThan(0);
+    expect(el.querySelector('[data-testid="country-filter"]')).toBeNull();
+    await store.setQuery({ country: 'IE' });
+    await settle();
+    expect(el.querySelector('[data-testid="country-filter"]')!.textContent).toContain('IE');
+    const items = rows().filter((r) => !r.hasAttribute('aria-expanded'));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((r) => r.textContent!.includes('IE'))).toBe(true);
+    (el.querySelector('[data-testid="country-filter"] button') as HTMLElement).click();
+    await settle();
+    expect(el.querySelector('[data-testid="country-filter"]')).toBeNull();
+  });
 });

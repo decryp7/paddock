@@ -249,7 +249,7 @@ pub struct Shared {
     pub reveal: Reveal,
     /// Open ports and connections (observe-only).
     pub network: crate::network::NetCentre,
-    /// The user's bad-IP lists, the match index, the location databases and the user's own location.
+    /// The user's IP lists, the match index, the location databases and the user's own location.
     pub intel: crate::intel_centre::IntelCentre,
     /// The firewall of this computer (read-only).
     pub firewall: crate::firewall::FirewallCentre,

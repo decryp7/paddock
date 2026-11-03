@@ -1,4 +1,4 @@
-//! The bad-IP check, pure core (ADR 0031 as amended by `0031-amendments.md`): Dyno ships with **no** list. Every list is the
+//! The IP-list check, pure core (ADR 0031 as amended by `0031-amendments.md`): Dyno ships with **no** list. Every list is the
 //! user's own (typed, imported from a file, or fetched from a URL the user added). This module turns the user's enabled lists
 //! into one index and answers, for a remote address, a [`Verdict`].
 //!

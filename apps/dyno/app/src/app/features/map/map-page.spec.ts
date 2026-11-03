@@ -1,4 +1,7 @@
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
+import { NetworkStore } from '../../state/network.store';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import type { GeoSummary } from '../../core/api.types';
@@ -8,11 +11,14 @@ import { MapPage, countryLabel } from './map-page';
 
 const NOW = 1_700_000_000_000;
 
+@Component({ template: '' })
+class Stub {}
+
 async function open(patch: (s: GeoSummary) => GeoSummary = (s) => s, fail: string[] = []) {
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(fail) });
   const original = mock.geoSummary.bind(mock);
   mock.geoSummary = async () => patch(await original());
-  TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([{ path: 'network', component: Stub }]), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(MapPage);
   const settle = async () => {
     for (let i = 0; i < 4; i++) {
@@ -60,12 +66,11 @@ describe('MapPage', () => {
     expect(q('[data-testid="credit"]')!.textContent).toContain('Natural Earth');
   });
 
-  it('offers the same data as a table, sortable, and Enter on a country opens it there', async () => {
+  it('offers the same data as a table, sortable, with a button per country', async () => {
     const { all, q, f, settle } = await open();
-    all('g.spot')[2]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    all('[role="radio"], pd-segmented-control button').find((b) => /Table/.test(b.textContent ?? ''))!.click();
     await settle();
     expect(q('[data-testid="country-table"]')).toBeTruthy();
-    expect(q('tr.picked')!.dataset['country']).toBe('DE');
     const rows = () => all('tbody tr').map((r) => r.dataset['country']);
     expect(rows()[0]).toBe('US');
     all('thead button')[0]!.click();
@@ -73,6 +78,15 @@ describe('MapPage', () => {
     expect(rows()[0]).toBe('BR');
     expect(q('thead th[aria-sort="descending"], thead th[aria-sort="ascending"]')).toBeTruthy();
     expect(f.nativeElement.textContent).toContain('flagged');
+    expect(q('tr[data-country="DE"] button')!.getAttribute('aria-label')).toBe('Show connections to Germany');
+  });
+
+  it('Enter or a click on a country opens the Connections table filtered to that country', async () => {
+    const { all, settle } = await open();
+    all('g.spot')[2]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    expect(TestBed.inject(NetworkStore).query().country).toBe('DE');
+    expect(TestBed.inject(Router).url).toBe('/network');
   });
 
   it('lists the destinations that are on this computer and the unknown ones', async () => {

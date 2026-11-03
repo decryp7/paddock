@@ -45,7 +45,7 @@ pub struct GeoRow {
     pub remote: IpAddr,
     /// The owning program's name.
     pub program: String,
-    /// Whether a bad-IP list flagged it (the verdict is decided elsewhere).
+    /// Whether an IP list flagged it (the verdict is decided elsewhere).
     pub flagged: bool,
 }
 

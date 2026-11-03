@@ -163,7 +163,7 @@ export interface DynoBackend {
   /** Reverse DNS through the OS resolver for up to 64 addresses; cached by the agent. Only on request, never in the background. */
   resolveHosts(addresses: string[]): Promise<HostName[]>;
 
-  /** The user's bad-IP lists, the allow list, the network switches and the location databases (ADR 0031 and its amendments). */
+  /** The user's IP lists, the allow list, the network switches and the location databases (ADR 0031 and its amendments). */
   intelStatus(): Promise<IntelStatus>;
   /** Changes the lists, the allow list or the switches; a "Remove duplicates" preview changes nothing. */
   intelEdit(edit: IntelEdit): Promise<EditOutcome>;

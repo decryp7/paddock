@@ -4,7 +4,7 @@ import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLi
 const owner = { kind: 'process', pid: 1, name: 'node', path: null } as const;
 const unknown = { kind: 'unknown', reason: 'because' } as const;
 const c = (remote: string, o: ConnectionRow['owner'] = owner, lookupOk = true): ConnectionRow => ({
-  proto: 'tcp', ipv6: remote.includes(':'), local: '1.1.1.1', localPort: 1, remote, remotePort: 443, remoteIsLoopback: false, lookupOk, state: 'established', stateLabel: 'ESTABLISHED', owner: o, firstSeen: null,
+  proto: 'tcp', ipv6: remote.includes(':'), local: '1.1.1.1', localPort: 1, remote, remotePort: 443, remoteIsLoopback: false, lookupOk, state: 'established', stateLabel: 'ESTABLISHED', owner: o, firstSeen: null, country: null,
 });
 const l = (port: number, exposure: ListenerRow['exposure']): ListenerRow => ({ proto: 'tcp', ipv6: false, local: '0.0.0.0', port, exposure, owner, firstSeen: null });
 

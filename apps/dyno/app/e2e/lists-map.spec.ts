@@ -1,14 +1,14 @@
 import { expect, test } from '@decryp7/paddock-e2e';
 
-/** The bad-IP lists, the connections map and the firewall against the mock backend (chromium). */
+/** The IP lists, the connections map and the firewall against the mock backend (chromium). */
 const url = (hash: string) => `/?latency=0#/${hash}`;
 
 test.use({ reducedMotion: 'reduce' });
 
-test.describe('bad-IP lists', () => {
+test.describe('IP lists', () => {
   test('adds a typed list, previews and applies "Remove duplicates", subscribes by address and removes a list', async ({ page }) => {
     await page.goto(url('lists'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Bad-IP lists' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'IP lists' })).toBeVisible();
     await expect(page.getByTestId('list-list-1')).toContainText('Work blocklist');
     await expect(page.getByTestId('first-run-note')).toContainText('DB-IP');
 
@@ -62,9 +62,14 @@ test.describe('connections map', () => {
     await us.focus();
     await expect(us).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('country-table')).toBeVisible();
-    await expect(page.locator('tr.picked')).toContainText('United States');
+    await expect(page).toHaveURL(/#\/network$/);
+    await expect(page.getByTestId('country-filter')).toContainText('US');
+    await page.getByRole('button', { name: 'Show all countries' }).click();
+    await expect(page.getByTestId('country-filter')).toHaveCount(0);
 
+    await page.goto(url('map'));
+    await page.getByRole('radio', { name: 'Table' }).click();
+    await expect(page.getByTestId('country-table')).toBeVisible();
     await page.getByRole('radio', { name: 'Map' }).click();
     await expect(page.getByTestId('world-map')).toBeVisible();
   });

@@ -17,6 +17,12 @@ const LISTENERS: ListenerRow[] = [
   { proto: 'tcp', ipv6: false, local: '127.0.0.1', port: 9229, exposure: 'loopback', owner: proc(4120, 'node', '/usr/local/bin/node'), firstSeen: 12 * MIN },
 ];
 
+/** The mock's location database: the few countries its addresses belong to (private and local addresses have none). */
+export function mockCountry(remote: string): string | null {
+  const table: [string, string][] = [['142.250.', 'US'], ['151.101.', 'US'], ['2a00:1450:', 'IE'], ['52.94.', 'US'], ['34.224.', 'US'], ['20.189.', 'IE'], ['35.186.', 'US']];
+  return table.find(([prefix]) => remote.startsWith(prefix))?.[1] ?? null;
+}
+
 const conn = (name: string, pid: number, path: string, remote: string, port: number, state: SocketState, label: string, ago: number, localPort: number): ConnectionRow => ({
   proto: 'tcp',
   ipv6: remote.includes(':'),
@@ -30,6 +36,7 @@ const conn = (name: string, pid: number, path: string, remote: string, port: num
   stateLabel: label,
   owner: proc(pid, name, path),
   firstSeen: ago * MIN,
+  country: mockCountry(remote),
 });
 
 const CONNECTIONS: ConnectionRow[] = [
@@ -59,7 +66,7 @@ export function mockNetwork(q: NetworkQuery, at: number): NetworkSnapshot {
       hit([l.port, l.local, name(l.owner)]),
   ).sort((a, b) => a.port - b.port);
   const connections = CONNECTIONS.filter(
-    (c) => (q.showLoopback || !c.remoteIsLoopback) && !q.exposedOnly && (!q.proto || q.proto === c.proto) && (!q.state || q.state === c.state) && hit([c.remotePort, c.remote, c.localPort, name(c.owner)]),
+    (c) => (q.showLoopback || !c.remoteIsLoopback) && !q.exposedOnly && (!q.proto || q.proto === c.proto) && (!q.state || q.state === c.state) && (!q.country || c.country === q.country) && hit([c.remotePort, c.remote, c.localPort, name(c.owner)]),
   );
   const ago = <T extends { firstSeen: number | null }>(r: T): T => ({ ...r, firstSeen: r.firstSeen === null ? null : at - r.firstSeen });
   return {

@@ -240,6 +240,20 @@ test.describe('settings', () => {
     await expect(page.getByText('Settings saved')).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save changes' })).toBeHidden();
   });
+
+  test('Network ▸ Online data: both switches are on, the note says what goes online, one can be turned off', async ({ page }) => {
+    await openSettings(page);
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: /Online data/ })).toBeVisible();
+    await expect(dialog.getByTestId('first-run-note')).toContainText('Cloudflare');
+    await expect(dialog.getByTestId('attribution')).toContainText('DB-IP');
+    const own = dialog.getByTestId('switch-own-location').getByRole('checkbox');
+    await expect(own).toBeChecked();
+    await own.uncheck();
+    await expect(own).not.toBeChecked();
+    await expect(dialog.getByTestId('switch-databases').getByRole('checkbox')).toBeChecked();
+    await expect(dialog.getByText(/offline mode/i)).toHaveCount(0);
+  });
 });
 
 test.describe('native feel', () => {

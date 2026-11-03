@@ -72,3 +72,8 @@ leaves the computer" sentence of §5 as far as the map's own address is concerne
   Application Firewall reader run in the agent; `pf` and `nft` sources say "These rules need the helper". The page is read-only and
   reads on open and on Refresh; a read is reused for 5 seconds. It is not a job (the reads are short); that is open.
 - **Settings** has "Network ▸ Online data": the two switches, the first-run note and the DB-IP credit.
+
+## Amendment 4 (2026-11-03): the name
+
+The user removed the built-in "bad IP" feature and chose "my lists and my own URLs", so the page and the copy say **IP lists**, not
+"bad-IP lists". A match is still called **flagged**.

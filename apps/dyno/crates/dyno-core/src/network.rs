@@ -267,6 +267,9 @@ pub struct ConnectionRow {
     pub owner: Owner,
     /// When Dyno first saw this connection.
     pub first_seen: Option<Timestamp>,
+    /// The ISO country the location database gives the remote address, when one is loaded and knows it (public addresses only).
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 /// What the page asks for.
@@ -283,11 +286,19 @@ pub struct NetworkQuery {
     pub exposed_only: bool,
     /// Matches a port, an address or a program name (case-insensitive).
     pub search: String,
+    /// Only connections to this country (ISO code, from the location database): what a click on the map asks for.
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 impl NetworkQuery {
     /// The query with the search text bounded and trimmed (parse, don't validate: done once at the edge).
     pub fn normalised(mut self) -> NetworkQuery {
+        self.country = self
+            .country
+            .take()
+            .map(|c| c.trim().to_ascii_uppercase())
+            .filter(|c| c.len() == 2 && c.bytes().all(|b| b.is_ascii_alphabetic()));
         self.search = self.search.trim().chars().take(MAX_SEARCH).collect::<String>().to_lowercase();
         self
     }
@@ -329,6 +340,19 @@ pub struct NetworkSnapshot {
 /// Builds the view: names owners from `processes`, applies `query`, sorts (listeners by port, connections by program) and
 /// caps each list. `seen` supplies first-seen times from the tracker.
 pub fn build(at: Timestamp, rows: &[SocketRow], processes: &[ProcessSample], query: &NetworkQuery, seen: &Tracker) -> NetworkSnapshot {
+    build_with_geo(at, rows, processes, query, seen, None)
+}
+
+/// [`build`] with the location database: each connection row names its country, and `query.country` keeps only the connections to
+/// that country (applied before the row cap, so the filter sees every connection).
+pub fn build_with_geo(
+    at: Timestamp,
+    rows: &[SocketRow],
+    processes: &[ProcessSample],
+    query: &NetworkQuery,
+    seen: &Tracker,
+    geo: Option<&dyn crate::geo::GeoLookup>,
+) -> NetworkSnapshot {
     let names: HashMap<u32, (&str, Option<&str>)> = processes.iter().map(|p| (p.pid, (p.name.as_str(), p.exe.as_deref()))).collect();
     let mut listeners = Vec::new();
     let mut connections = Vec::new();
@@ -377,6 +401,13 @@ pub fn build(at: Timestamp, rows: &[SocketRow], processes: &[ProcessSample], que
                 if !query.matches_text(&[&port.to_string(), &r.local_port.to_string(), &ip.to_string(), &name, &path]) {
                     continue;
                 }
+                let country = geo
+                    .filter(|_| crate::ip_lookup::is_public(ip))
+                    .and_then(|g| g.lookup(&crate::ip_lookup::unwrapped(ip)))
+                    .map(|t| t.country);
+                if query.country.as_ref().is_some_and(|c| country.as_ref() != Some(c)) {
+                    continue;
+                }
                 connections.push(ConnectionRow {
                     proto: r.proto,
                     ipv6: ip.is_ipv6(),
@@ -390,6 +421,7 @@ pub fn build(at: Timestamp, rows: &[SocketRow], processes: &[ProcessSample], que
                     state_label: state.label().into(),
                     owner,
                     first_seen: seen.connection_seen(r),
+                    country,
                 });
             }
         }
@@ -825,5 +857,56 @@ mod tests {
         assert!(!snap.connections.is_empty() && !snap.listeners.is_empty());
         let bytes = postcard::to_stdvec(&snap).unwrap();
         assert_eq!(postcard::from_bytes::<NetworkSnapshot>(&bytes).unwrap(), snap);
+    }
+
+    struct Countries;
+    impl crate::geo::GeoLookup for Countries {
+        fn lookup(&self, ip: &IpAddr) -> Option<crate::geo::GeoTag> {
+            let IpAddr::V4(a) = ip else { return None };
+            let code = match a.octets()[0] {
+                8 => "US",
+                9 => "DE",
+                _ => return None,
+            };
+            Some(crate::geo::GeoTag {
+                country: code.into(),
+                country_name: None,
+                asn: None,
+                as_name: None,
+            })
+        }
+    }
+
+    #[test]
+    fn connections_name_their_country_and_the_country_filter_keeps_only_that_country() {
+        let rows = vec![
+            conn(v4(8, 8, 8, 8), 443, Some(10), SocketState::Established),
+            conn(v4(9, 9, 9, 9), 443, Some(10), SocketState::Established),
+            conn(v4(77, 1, 1, 1), 443, Some(10), SocketState::Established),
+            conn(v4(10, 0, 0, 2), 22, Some(10), SocketState::Established),
+        ];
+        let procs = [proc(10, "firefox")];
+        let q = NetworkQuery::default();
+        let all = build_with_geo(Timestamp(0), &rows, &procs, &q, &Tracker::new(), Some(&Countries));
+        let by: Vec<(String, Option<String>)> = all.connections.iter().map(|c| (c.remote.clone(), c.country.clone())).collect();
+        assert!(by.contains(&("8.8.8.8".into(), Some("US".into()))));
+        assert!(by.contains(&("77.1.1.1".into(), None)), "the database does not know it");
+        assert!(by.contains(&("10.0.0.2".into(), None)), "a private address is never located");
+        let de = NetworkQuery {
+            country: Some("de".into()),
+            ..Default::default()
+        }
+        .normalised();
+        assert_eq!(de.country.as_deref(), Some("DE"));
+        let s = build_with_geo(Timestamp(0), &rows, &procs, &de, &Tracker::new(), Some(&Countries));
+        assert_eq!(s.connections.iter().map(|c| c.remote.as_str()).collect::<Vec<_>>(), ["9.9.9.9"]);
+        let none = build_with_geo(Timestamp(0), &rows, &procs, &de, &Tracker::new(), None);
+        assert!(none.connections.is_empty(), "without a database no connection has a country");
+        let junk = NetworkQuery {
+            country: Some("Germany".into()),
+            ..Default::default()
+        }
+        .normalised();
+        assert_eq!(junk.country, None, "only a two-letter code is a country filter");
     }
 }

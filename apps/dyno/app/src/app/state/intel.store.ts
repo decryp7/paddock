@@ -21,7 +21,7 @@ interface IntelState {
   updating: string[];
 }
 
-/** The user's bad-IP lists, the allow list and the network switches. */
+/** The user's IP lists, the allow list and the network switches. */
 export const IntelStore = signalStore(
   { providedIn: 'root' },
   withState<IntelState>({ status: null, error: null, editError: null, preview: null, updating: [] }),

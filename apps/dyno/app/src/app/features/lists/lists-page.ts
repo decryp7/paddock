@@ -13,7 +13,7 @@ type AddKind = 'typed' | 'file' | 'url';
 const MAX_IMPORT = 16 * 1024 * 1024;
 
 /**
- * The user's own bad-IP lists. Dyno ships with none: a list is typed here, imported from a text file, or subscribed to by
+ * The user's own IP lists. Dyno ships with none: a list is typed here, imported from a text file, or subscribed to by
  * address. Each list has a name, an on/off switch and its own counts; a match names every list that flagged the connection. The
  * allow list below overrides all of them. The terms of a list are the user's responsibility, and the page says so.
  */
@@ -25,7 +25,7 @@ const MAX_IMPORT = 16 * 1024 * 1024;
     <div class="page">
       <header class="page-head">
         <div class="titles">
-          <h1>Bad-IP lists</h1>
+          <h1>IP lists</h1>
           <p>Flag connections to addresses you distrust. Dyno ships with no list: add your own below. A flag is a hint, not proof, and nothing is blocked.</p>
         </div>
       </header>

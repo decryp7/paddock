@@ -83,7 +83,7 @@ impl Default for NetSwitches {
     }
 }
 
-/// Everything the user keeps for the bad-IP check and the map's data.
+/// Everything the user keeps for the IP-list check and the map's data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UserLists {

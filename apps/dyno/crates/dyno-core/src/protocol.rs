@@ -473,7 +473,7 @@ pub enum Request {
         placements: Vec<paddock_widgets::PlacementId>,
     },
 
-    // ---- bad-IP lists and the connections map (ADR 0031 and its amendments) ----
+    // ---- IP lists and the connections map (ADR 0031 and its amendments) ----
     /// The user's lists with their counts and state, the allow list, the network switches and the location databases'
     /// state (answers [`Reply::Intel`]). Appended.
     IntelStatus,
@@ -778,7 +778,7 @@ pub enum Reply {
     /// The popup's values for the asked placements.
     PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
 
-    // ---- bad-IP lists and the connections map ----
+    // ---- IP lists and the connections map ----
     /// The lists page.
     Intel(Box<crate::intel_lists::IntelStatus>),
     /// What an edit produced.

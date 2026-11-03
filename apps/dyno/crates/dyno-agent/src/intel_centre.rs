@@ -1,4 +1,4 @@
-//! The agent's side of the bad-IP check and the map's data (ADR 0031 and `0031-amendments.md`): the user's lists, their
+//! The agent's side of the IP-list check and the map's data (ADR 0031 and `0031-amendments.md`): the user's lists, their
 //! subscriptions, the allow list, the network switches, the matching index, the location databases and the user's own location.
 //!
 //! - **Storage.** User-made lists, the allow list and the switches are `intel-lists.json` in the data folder (versioned; a missing

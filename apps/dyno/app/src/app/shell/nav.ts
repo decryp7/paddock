@@ -20,7 +20,7 @@ export const NAV: NavItem[] = [
   { path: '/disk-map', label: 'Disk map', icon: 'disk', load: () => import('../features/disk-map/disk-map-page').then((m) => m.DiskMapPage) },
   { path: '/network', label: 'Network', icon: 'network', load: () => import('../features/network/network-page').then((m) => m.NetworkPage) },
   { path: '/map', label: 'Connections map', icon: 'globe', load: () => import('../features/map/map-page').then((m) => m.MapPage) },
-  { path: '/lists', label: 'Bad-IP lists', icon: 'shield', load: () => import('../features/lists/lists-page').then((m) => m.ListsPage) },
+  { path: '/lists', label: 'IP lists', icon: 'shield', load: () => import('../features/lists/lists-page').then((m) => m.ListsPage) },
   { path: '/firewall', label: 'Firewall', icon: 'lock', load: () => import('../features/firewall/firewall-page').then((m) => m.FirewallPage) },
   { path: '/counters', label: 'Counters', icon: 'trend', load: () => import('../features/counters/counters-page').then((m) => m.CountersPage) },
   { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', load: () => import('../features/benchmarks/bench-page').then((m) => m.BenchPage) },

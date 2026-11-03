@@ -1212,6 +1212,8 @@ export interface ConnectionRow {
   stateLabel: string;
   owner: NetOwner;
   firstSeen: Timestamp | null;
+  /** The ISO country the location database gives the remote address; null when none is loaded or it does not know it. */
+  country: string | null;
 }
 
 export interface NetworkQuery {
@@ -1220,6 +1222,8 @@ export interface NetworkQuery {
   state: SocketState | null;
   exposedOnly: boolean;
   search: string;
+  /** Only connections to this country (ISO code, from the location database). */
+  country: string | null;
 }
 
 export interface NetworkSnapshot {
@@ -1931,7 +1935,7 @@ export interface BackupSettings {
   overrides: ToolOverride[];
 }
 
-// ---------------------------------------------------------------------------------------------- bad-IP lists, the map, the firewall
+// ---------------------------------------------------------------------------------------------- IP lists, the map, the firewall
 
 /** The switches of the network features: on by default, each its own (there is no Offline mode). */
 export interface NetSwitches {

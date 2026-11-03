@@ -39,7 +39,7 @@ async function open(options: { fail?: string[] } = {}) {
 describe('ListsPage', () => {
   it('shows the lists with their counts, the switches, the first-run note and the credit', async () => {
     const { el, q } = await open();
-    expect(el.querySelector('h1')!.textContent).toContain('Bad-IP lists');
+    expect(el.querySelector('h1')!.textContent).toContain('IP lists');
     expect(q('[data-testid="list-list-1"]')!.textContent).toContain('Work blocklist');
     expect(q('[data-testid="list-list-1"] .counts')!.textContent).toContain('3 entries');
     expect(q('[data-testid="first-run-note"]')!.textContent).toContain('DB-IP');

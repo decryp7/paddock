@@ -75,6 +75,10 @@ function readCollapsed(): Set<string> {
         }
       </div>
 
+      @if (store.query().country; as cc) {
+        <p class="note" data-testid="country-filter"><dy-icon name="globe" /> <span>Showing connections to <b>{{ cc }}</b> only.</span> <button type="button" matButton="outlined" (click)="store.setQuery({ country: null })">Show all countries</button></p>
+      }
+
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
         @if (store.snapshot(); as s) {
           @if (s.unknownOwners > 0 && !noteDismissed()) {
@@ -114,7 +118,7 @@ function readCollapsed(): Set<string> {
                 @if (r.kind === 'group') {
                   <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span></span>
+                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span>@if (r.item.country) { <span class="cc" [title]="'Registered in ' + r.item.country">{{ r.item.country }}</span> }</span>
                 }
               </ng-template>
               <ng-template pdCell="service" let-r>
@@ -198,6 +202,7 @@ function readCollapsed(): Set<string> {
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .muted { color: var(--text-2); }
     .truncate { overflow: hidden; text-overflow: ellipsis; }
+    .cc { margin-inline-start: 6px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); font: var(--fw-regular) var(--fs-xs) / 1.4 var(--font-mono); }
     .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
     .gname { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; }
     .meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }

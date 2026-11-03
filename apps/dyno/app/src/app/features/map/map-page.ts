@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { MatButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import type { AddressClass, CountryCount } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { MapStore } from '../../state/map.store';
+import { NetworkStore } from '../../state/network.store';
 import { LEGEND_STEPS, arcsFor, centreOf, drawnAs, project, stepOf } from './map-geometry';
 import { COUNTRY_PATHS, MAP_VIEW } from './world-map.data';
 
@@ -81,7 +83,7 @@ export function countryLabel(c: CountryCount): string {
                 }
                 @for (c of s.countries; track c.code) {
                   @if (marker(c.code); as m) {
-                    <g class="spot" tabindex="0" role="button" [attr.aria-label]="label(c)" [attr.data-country]="c.code" (keydown.enter)="focusInTable(c.code)" (click)="focusInTable(c.code)">
+                    <g class="spot" tabindex="0" role="button" [attr.aria-label]="label(c)" [attr.data-country]="c.code" (keydown.enter)="showConnections(c.code)" (click)="showConnections(c.code)">
                       <title>{{ label(c) }}</title>
                       <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="4 + step(c.connections) * 1.5" [attr.data-step]="step(c.connections)" />
                       @if (c.flagged > 0) { <circle [attr.cx]="m.x" [attr.cy]="m.y" [attr.r]="8 + step(c.connections)" fill="url(#flagged-hatch)" class="flag" /> }
@@ -107,7 +109,7 @@ export function countryLabel(c: CountryCount): string {
               <tbody>
                 @for (c of rows(); track c.code) {
                   <tr [attr.data-country]="c.code" [class.picked]="picked() === c.code">
-                    <th scope="row">{{ c.name }} <span class="faint">{{ c.code }}</span>@if (c.includesContentNetworks) { <span class="faint"> · includes content networks</span> }</th>
+                    <th scope="row">{{ c.name }} <span class="faint">{{ c.code }}</span>@if (c.includesContentNetworks) { <span class="faint"> · includes content networks</span> } <button type="button" matButton="text" class="show" (click)="showConnections(c.code)" [attr.aria-label]="'Show connections to ' + c.name">Show connections</button></th>
                     <td class="num">{{ c.connections }}</td><td class="num">{{ c.programs }}</td><td class="num">{{ c.hosts }}</td>
                     <td class="num">@if (c.flagged > 0) { <b class="flagword">⚑ {{ c.flagged }} flagged</b> } @else { 0 }</td>
                   </tr>
@@ -176,6 +178,8 @@ export function countryLabel(c: CountryCount): string {
 })
 export class MapPage implements OnInit, OnDestroy {
   protected readonly store = inject(MapStore);
+  private readonly network = inject(NetworkStore);
+  private readonly router = inject(Router);
   protected readonly size = MAP_VIEW;
   protected readonly legend = LEGEND_STEPS;
   protected readonly shapes = Object.entries(COUNTRY_PATHS).map(([code, d]) => ({ code, d }));
@@ -243,9 +247,9 @@ export class MapPage implements OnInit, OnDestroy {
     }
   }
 
-  /** Enter or click on a country shows it in the table, highlighted. */
-  protected focusInTable(code: string): void {
+  /** Enter or a click on a country opens the Connections table filtered to it (the engine names each connection's country). */
+  protected showConnections(code: string): void {
     this.picked.set(code);
-    this.view.set('table');
+    void this.network.setQuery({ country: code }).then(() => this.router.navigateByUrl('/network'));
   }
 }
