@@ -22,9 +22,7 @@ point 3); the Windows installer in two VMs, hashes equal.
   the signatures were made).
 - Taken from `keyserver.ubuntu.com` (keys.openpgp.org has no copy). Its short id `0xFF3AEFF5` matches `KEYID` in upstream's
   `do_release` at the tag.
-- **Open:** smartmontools.org (which lists the keys) refused automated reads, so the full fingerprint has one independent source
-  plus the short id. A person must add the fingerprint as read from smartmontools.org before the release (a checkbox in the
-  release checklist, not something the code can do).
+- Fingerprint confirmed by the user against smartmontools.org, 2026-11-03 (key ID `FF3AEFF5`, matching the keyserver copy above).
 - The Windows installer also carries a valid Authenticode signature (`CN=SignPath Foundation`).
 - The next smartmontools release will be signed with a new key: the pinning step must expect a key change and redo this record.
 
