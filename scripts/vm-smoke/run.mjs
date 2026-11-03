@@ -7,6 +7,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync, cpSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
@@ -152,6 +153,20 @@ async function main(argv) {
     const stage = join(scratch, 'stage');
     mkdirSync(stage);
     cpSync(dmg, join(stage, 'installer.dmg'));
+    if (o.suite === 'power') {
+      // The GUI driver (guest/axdrive.swift) is compiled on the host, never run there, and cached by the hash of its source; the image's own
+      // copy predates `drag`. The guest installs it from the read-only share.
+      const src = join(HERE, 'guest', 'axdrive.swift');
+      const hash = createHash('sha256').update(readFileSync(src)).digest('hex').slice(0, 16);
+      mkdirSync(join(tartHome, '.paddock-vm-gui'), { recursive: true });
+      const bin = join(tartHome, '.paddock-vm-gui', `axdrive-${hash}`);
+      if (!existsSync(bin)) {
+        log('compiling axdrive (once)');
+        const c = await hostRun('swiftc', ['-O', '-o', bin, src], { timeoutMs: 600_000 });
+        if (c.code !== 0) throw new Error(`swiftc failed for axdrive: ${c.stderr.trim().slice(0, 300)}`);
+      }
+      cpSync(bin, join(stage, 'axdrive'));
+    }
 
     // A VM slot, host-wide, the same one tools/macos-vm-smoke.sh takes (`./dev ci slot`, an OS lock the kernel frees with its holder).
     mkdirSync(tartHome, { recursive: true });
@@ -206,6 +221,10 @@ async function main(argv) {
     log(`VM up after ${Math.round((Date.now() - t0) / 1000)} s`);
 
     const guest = { exec, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
+    if (o.suite === 'power') {
+      const i = await exec(`sudo cp '${SHARE}/axdrive' /usr/local/bin/axdrive && sudo chmod 755 /usr/local/bin/axdrive && /usr/local/bin/axdrive trusted; echo trusted=$?`);
+      log(`axdrive installed in the guest (${i.stdout.trim().split('\n').at(-1)})`);
+    }
     const check = new Check(guest, config, { log });
     const started = new Date().toISOString();
     const staged = `${SHARE}/installer.dmg`;
@@ -226,7 +245,9 @@ async function main(argv) {
         const gui = new MacGui(guest, { password: pw, fetch, log });
         power.ui = gui;
         const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
-        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle });
+        const { loadRules, MacTour } = await import('./mac-tour.mjs');
+        const tour = new MacTour(guest, gui, await loadRules(), { log, check });
+        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour });
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
