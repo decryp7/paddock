@@ -66,11 +66,19 @@ fn the_peer_facts_come_from_the_callers_own_token() {
         "{:?}",
         raw.account
     );
-    assert!(matches!(
-        raw.admin,
-        paddock_ipc::identity::AdminEvidence::Token(_)
-    ));
+    let admin = match raw.admin {
+        paddock_ipc::identity::AdminEvidence::Token(admin) => admin,
+        other => panic!("{other:?}"),
+    };
     assert!(raw.audit.program_for_log().is_none());
+    // The local VM runs this binary as several accounts and says what each must see (never set in CI): a standard user is
+    // no administrator, a full or UAC-filtered administrator token is one (D9), SYSTEM is one.
+    if let Ok(expected) = std::env::var("PADDOCK_EXPECT_ADMIN") {
+        assert_eq!(admin, expected == "yes", "account {:?}", raw.account);
+    }
+    if let Ok(sid) = std::env::var("PADDOCK_EXPECT_SID") {
+        assert_eq!(raw.account, AccountId::Sid(sid));
+    }
 }
 
 #[cfg(windows)]
@@ -176,14 +184,21 @@ fn a_pipe_not_owned_by_system_is_refused_before_anything_is_sent() {
 
 #[cfg(windows)]
 #[test]
-fn a_user_cannot_create_a_system_owned_pipe_and_a_taken_name_is_an_error() {
+fn only_system_can_create_a_system_owned_pipe_and_the_first_instance_wins() {
     let name = format!(r"\\.\pipe\paddock-test-{}", std::process::id());
-    // Only SYSTEM may name SYSTEM as owner (ERROR_INVALID_OWNER, 1307).
-    let e = Listener::bind_system(&name, &Access::system_for_all_users())
-        .err()
-        .unwrap();
-    assert!(e.to_string().contains("1307"), "{e}");
-    // The first instance wins: a second pipe with the same name fails, it never shares (ERROR_PIPE_BUSY or ACCESS_DENIED).
+    match Listener::bind_system(&name, &Access::system_for_all_users()) {
+        // Not SYSTEM: a user cannot name SYSTEM as owner (ERROR_INVALID_OWNER, 1307).
+        Err(e) => assert!(e.to_string().contains("1307"), "{e}"),
+        // SYSTEM (the local VM runs this test as LocalSystem): the pipe is owned by SYSTEM, so a client trusts it.
+        Ok(mut listener) => {
+            let server = std::thread::spawn(move || listener.accept(T).map(|_| ()));
+            let client = Stream::connect_system(&name, T);
+            assert!(client.is_ok(), "{:?}", client.err());
+            server.join().unwrap().unwrap();
+        }
+    }
+    // The first instance wins: a second pipe with the same name fails, it never shares.
+    let name = format!(r"\\.\pipe\paddock-test-first-{}", std::process::id());
     let _first = Listener::bind_fixed(&name, &Access::owner_only()).unwrap();
     assert!(Listener::bind_system(&name, &Access::owner_only()).is_err());
 }

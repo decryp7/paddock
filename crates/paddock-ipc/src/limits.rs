@@ -124,14 +124,14 @@ impl Permit {
 impl Drop for Permit {
     fn drop(&mut self) {
         let mut usage = self.limits.usage();
-        if let Some(u) = usage.get_mut(&self.account) {
-            u.total = u.total.saturating_sub(1);
-            if self.weight == Weight::Slow {
-                u.slow = u.slow.saturating_sub(1);
-            }
-            if u.total == 0 {
-                usage.remove(&self.account);
-            }
+        // The entry exists while a permit does; `or_default` only spares an impossible "missing" branch.
+        let u = usage.entry(self.account.clone()).or_default();
+        u.total = u.total.saturating_sub(1);
+        if self.weight == Weight::Slow {
+            u.slow = u.slow.saturating_sub(1);
+        }
+        if u.total == 0 {
+            usage.remove(&self.account);
         }
     }
 }

@@ -68,6 +68,21 @@ impl fmt::Display for Untrusted {
 
 impl std::error::Error for Untrusted {}
 
+impl Untrusted {
+    /// A system endpoint that could not be created: the OS error, by name and number (231 on Windows means the name is
+    /// taken, which is what a squatter that got there first looks like).
+    pub(crate) fn create_failed(e: std::io::Error) -> Untrusted {
+        Untrusted::Unreadable {
+            what: "create the endpoint",
+            cause: format!(
+                "{e} ({:?} os error {})",
+                e.kind(),
+                e.raw_os_error().unwrap_or(0)
+            ),
+        }
+    }
+}
+
 /// The pipe owner must be SYSTEM, compared as the SID string the OS returns (case of the `S` is fixed by the OS).
 pub fn check_pipe_owner(owner_sid: &str) -> Result<(), Untrusted> {
     if owner_sid.eq_ignore_ascii_case(SYSTEM_SID) {
@@ -153,6 +168,17 @@ mod tests {
                 .to_string()
                 .contains("uid 5")
         );
+    }
+
+    #[test]
+    fn a_failed_create_names_the_os_error() {
+        let e = Untrusted::create_failed(std::io::Error::from_raw_os_error(17));
+        assert!(
+            e.to_string().contains("create the endpoint") && e.to_string().contains("os error 17"),
+            "{e}"
+        );
+        let e = Untrusted::create_failed(std::io::Error::other("no code"));
+        assert!(e.to_string().contains("os error 0"), "{e}");
     }
 
     #[test]

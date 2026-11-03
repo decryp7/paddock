@@ -105,14 +105,7 @@ impl Listener {
         sys::check_own_folder(name)?;
         sys::Listener::bind_fixed(name, access)
             .map(Listener)
-            .map_err(|e| Untrusted::Unreadable {
-                what: "create the endpoint",
-                cause: format!(
-                    "{e} ({:?} os error {})",
-                    e.kind(),
-                    e.raw_os_error().unwrap_or(0)
-                ),
-            })
+            .map_err(Untrusted::create_failed)
     }
 
     /// Waits up to `timeout` for a client. Returns the stream and the client's process id when the OS reports it. A
