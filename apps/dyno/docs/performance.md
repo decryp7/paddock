@@ -35,6 +35,73 @@ Dyno has two things called "bench":
 
 ## Results (newest first)
 
+### 2026-11-03, CPU per process in a macOS VM: baseline 1.0.0 and main, and the CPU fixes (perf/dyno-cpu)
+
+Trigger: the user's report on Dyno 1.0.0, "High CPU use".
+
+- **Commit:** baseline: the `dyno-v1.0.0` release dmg (dist profile). A/B: base `a18e18801` (origin/main) → change `74985a3c0`
+  (perf/dyno-cpu), both `tauri build --bundles app` with the release profile from one worktree and target folder
+- **Machine:** a fresh Tart clone of `vmgui-base-tahoe-4aaa751f` (macOS 26.6.2, 4 vCPU, 8 GB, paravirtual GPU), headless,
+  with an Aqua session; host Mac mini M4 Pro, 14 cores, macOS 27.2
+- **Load:** host 1-minute load 11-24 (other agents building; one other Tart VM running); the guest was otherwise idle (no Dyno:
+  0.9-1.9 % of one core for the whole guest, window server 0.0)
+- **Build:** release builds; the 1.0.0 baseline is the stripped dist build
+- **Corpus:** none: the VM's own idle machine (about 400 processes); counters: Memory > Active, Free, Wired and Used By
+  Compressor charted; disk map: a scan of Macintosh HD (9 GB counted, 165 folders unreadable)
+- **Command:** in the guest, `cpu2.sh <label> <windows> <seconds>`: CPU time deltas from `ps -axo pid,time,comm` per
+  process group (app, agent, `com.apple.WebKit.WebContent`, `.GPU`, `WindowServer`, other) in % of one core, plus the
+  whole guest's busy time from `top -l` (it catches short-lived children such as `nettop` and `ioreg`). Pages are
+  opened with the guest's AX driver (`axdrive press Dyno <page> AXLink`), the window is closed with its close button.
+  Agent alone: `dyno-agent bench 60 none|summary`. The scripts are kept with the run notes, not in the repo.
+- **Runs:** baseline: 5 windows of 60 s per state (3 for the reduced-motion pair); A/B: main, change, main, change, 2
+  windows of 60 s per state each, so 4 windows per build and state; ranges are reported
+- **Numbers** (% of one core; app = `dyno-app`, web = the WebContent process, GPU = WebKit's GPU process, WS = WindowServer;
+  "guest" is the whole VM):
+
+  | State | Process | 1.0.0 | main (A) | change (B) | Verdict |
+  |---|---|---|---|---|---|
+  | Dashboard | app | 1.3-1.7 | 1.1-1.4 | 0.8-0.9 | better |
+  | Dashboard | web | 2.5-3.7 | 1.6-2.4 | 1.3-1.6 | better |
+  | Dashboard | GPU | 5.2-8.1 | 4.0-6.8 | 3.0-4.2 | better |
+  | Dashboard | WS | 5.4-6.4 | 4.3-6.0 | 2.6-3.6 | better |
+  | Dashboard | agent | 0.7-0.8 | 0.9-1.0 | 0.9-1.0 | same |
+  | Dashboard | guest | not taken | 17.6-22.4 | 12.2-15.6 | about -30 % |
+  | Counters, 4 charted | app | 2.5-3.3 | 2.5-3.2 | 1.1-1.3 | better |
+  | Counters, 4 charted | web | 5.4-6.7 | 5.2-7.1 | 2.3-2.8 | better |
+  | Counters, 4 charted | GPU | 3.3-4.2 | 3.2-4.9 | 0.7-0.9 | better |
+  | Counters, 4 charted | WS | 9.6-12.4 | 10.0-12.6 | 1.3-1.6 | better |
+  | Counters, 4 charted | guest | not taken | 28.0-36.9 | 8.9-10.3 | about -70 % |
+  | Window closed (tray only) | app | 0.28-0.30 | 0.35-0.38 | 0.20-0.23 | better |
+  | Window closed (tray only) | agent | 0.73-1.00 | 0.85-0.97 | 0.57-0.73 | better |
+  | Window closed (tray only) | WS | 2.1-2.5 | 2.6-3.3 | 2.1-2.5 | slightly better |
+  | Window closed (tray only) | guest | not taken | 5.8-7.0 | 5.0-6.4 | about -10 % |
+  | Network page | app / web / agent / WS | 0.7 / 0.4 / 0.9 / 3.4-4.3 | not re-measured | not re-measured | cheap already |
+  | Disk map scan (9 GB) | agent | 15.9 in the first 30 s (the scan), then 0.8-1.0 | not re-measured | not re-measured | bounded, user-started |
+
+- **Causes, measured:**
+  - The Counters chart was the worst state: `dy-chart` replaces its options whole (`notMerge`) with animation on, so every
+    2 s poll replayed the entry animation, about 18 canvas frames. Fixed: only the first draw animates (WS 10-12.6 → 1.3-1.6).
+  - The dashboard's live numbers (`dy-animated-number`) repainted on every animation frame for 300 ms after each 1 s
+    update. Confirmed with macOS Reduce Motion on the same 1.0.0 build (which turns the glide off): web 1.5-1.7 → 0.95-1.0,
+    GPU 4.4-5.2 → 1.9-2.2, guest 17.0-18.0 → 13.6-16.0. Fixed: 6 steps on a timer.
+  - With the window closed the app still subscribed at the summary level (the tray needs numbers), so the agent read the
+    process table every 2 s: `dyno-agent bench 60` none 0.38-0.39 %, summary 0.72-0.74 % (two runs each, interleaved).
+    Fixed: a `tray` level with the process table at the unwatched pace.
+  - The menu bar items: WS is 0.0 with no Dyno and 2.1-3.3 with Dyno closed to the tray, so the icon redraws are the
+    largest cost of an idle Dyno in this VM. Each update called `set_icon` then `set_icon_as_template` (two redraws) and
+    the tooltip. Fixed: only changed parts, pixels and template in one call. Most of the WS cost remains: one redraw per
+    item per second (follow-up below).
+  - Ruled out: the Network page (agent 0.9, web 0.4) and the Disk map page after a scan are cheap; the 2 s network poll
+    and its `nettop` read do not show above the noise. A disk scan costs the agent about 16 % of one core while it runs,
+    bounded and started by the user. ECharts on the dashboard's history panels does not redraw per tick (no poll).
+- **Memory measure:** not measured (CPU only)
+- **Notes:** a VM's window server and GPU process draw in software, so their numbers overstate a real Mac's; the shares
+  between states and the before/after hold. The user's own Mac shows about 1.4 % of one core for Dyno 1.0.0. Follow-ups,
+  not done (each under 2 % here): a menu bar refresh setting with an Auto default (the remaining WS 2.1-2.5 with the
+  window closed), the agent's unwatched floor (0.4 %; `roll_up` reads three `meta` rows from SQLite every tick, and the
+  sampler thread spent about 2 % of its samples in `pread`), and the Counters page re-reading the whole 5-minute history
+  every 2 s instead of appending.
+
 ### 2026-10-30, ld-prime against rust-lld for incremental debug rebuilds (ci/build-parallelism)
 
 The family results block is in [docs/benchmarks.md](../../../docs/benchmarks.md#2026-10-30-linker-for-dynos-incremental-debug-rebuilds-ld-prime-against-rust-lld-cibuild-parallelism)

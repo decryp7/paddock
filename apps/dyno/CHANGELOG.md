@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Lower CPU use (measured in a macOS VM, `docs/performance.md` 2026-11-03):
+  - With no window open, the app asks the agent for the new `tray` live level instead of the summary: the menu bar icons keep the user's sampling interval, and the process table is read at the unwatched pace (every 10 s instead of every 2 s). A menu bar item that shows one app's numbers keeps the summary level.
+  - Menu bar items are redrawn only in the parts that changed, and on macOS the pixels and the template flag are set in one call (`set_icon` followed by `set_icon_as_template` drew each item twice per update).
+  - Charts animate only their first draw. Options are replaced whole on each update, so a live chart (Counters, every 2 s) replayed its entry animation on every poll.
+  - Live numbers glide in 6 steps over 300 ms instead of one step per display frame (about 18 repaints per update, every second on the dashboard).
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed
