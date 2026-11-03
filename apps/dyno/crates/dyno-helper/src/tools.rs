@@ -115,6 +115,23 @@ pub fn smart_reader(host: HelperHost, tools_dir: &std::path::Path, clock: Arc<dy
     }
 }
 
+/// Who holds which socket or file: Linux reads `/proc` as root.
+pub fn holder_source(host: HelperHost) -> Box<dyn dyno_core::helper_holders::HolderSource> {
+    match host {
+        #[cfg(unix)]
+        HelperHost::Linux => Box::new(dyno_platform::helper_holders::ProcHolders::new(std::time::Duration::from_secs(20))),
+        _ => Box::new(dyno_core::helper_holders::NoHolders),
+    }
+}
+
+/// The Windows extras reader (`powercfg`, `wbadmin`); nothing elsewhere.
+pub fn extras_reader(host: HelperHost) -> Box<dyn dyno_core::helper_extras::ExtrasReader> {
+    match host {
+        HelperHost::Windows => Box::new(dyno_platform::helper_extras::WindowsExtras(Box::new(SystemRunner))),
+        _ => Box::new(dyno_core::helper_extras::NoExtras),
+    }
+}
+
 /// The sensor reader of this system.
 pub fn counter_reader(host: HelperHost) -> Box<dyn dyno_core::helper_counters::CounterReader> {
     Box::new(dyno_platform::helper_counters::SystemCounters::new(host, Box::new(SystemRunner)))

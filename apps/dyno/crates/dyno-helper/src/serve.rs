@@ -109,6 +109,8 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         audit,
         clock: Box::new(now),
         login_items: login_items_reader(),
+        holders: crate::tools::holder_source(paths.host),
+        extras: crate::tools::extras_reader(paths.host),
         counters: crate::tools::counter_reader(paths.host),
         memory: Box::new(dyno_platform::helper_counters::SystemMemory),
         processes: crate::tools::process_sweeper(paths.host),

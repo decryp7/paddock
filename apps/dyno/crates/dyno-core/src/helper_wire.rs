@@ -173,6 +173,12 @@ pub enum HelperReply {
     CounterValues(Vec<crate::helper_counters::CounterAnswer>),
     /// Answer to `MemoryModules`: the slots and what sits in them (no serial numbers).
     Memory(crate::inventory::MemoryLayout),
+    /// Answer to `SocketOwners`: the sockets of programs the caller may see.
+    SocketOwners(crate::helper_holders::SocketOwners),
+    /// Answer to `FileHolders`: the programs holding the file that the caller may see.
+    FileHolders(crate::helper_holders::FileHolders),
+    /// Answer to `Extras` (Windows): detail for the owner and administrators, counts for others.
+    Extras(crate::helper_extras::ExtrasAnswer),
     /// Answer to `Processes`: one page, scoped to the caller.
     Processes(crate::helper_processes::ProcessPage),
     /// Answer to `Smart`.

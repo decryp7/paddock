@@ -18,6 +18,9 @@ pub mod fileid;
 pub mod firewall_readers;
 pub mod hardware;
 pub mod helper_counters;
+pub mod helper_extras;
+#[cfg(unix)]
+pub mod helper_holders;
 pub mod helper_sweep;
 pub mod inventory;
 pub mod issues;

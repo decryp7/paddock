@@ -5,9 +5,12 @@
 use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
 use dyno_core::helper_counters::{answer, CounterReader, CounterValue};
+use dyno_core::helper_extras::{backup_answer, wake_answer, ExtrasReader};
+use dyno_core::helper_holders::{file_answer, socket_answer, HolderSource};
 use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
 use dyno_core::helper_processes::{build_page, ProcessSweeper};
+use dyno_core::helper_requests::ExtrasKind;
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest, HelperUser};
 use dyno_core::network_traffic::MAX_COUNTERS;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
@@ -27,6 +30,10 @@ pub struct Parts {
     pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
     /// The macOS login-items reader (`sfltool dumpbtm` as the helper's account, parsed here).
     pub login_items: Box<dyn LoginItemsReader>,
+    /// Who holds which socket or file (Linux).
+    pub holders: Box<dyn HolderSource>,
+    /// The Windows extras reader.
+    pub extras: Box<dyn ExtrasReader>,
     /// The sensor reader of this system.
     pub counters: Box<dyn CounterReader>,
     /// The memory slot reader of this system.
@@ -57,6 +64,8 @@ pub struct Dispatcher {
     login_items: Box<dyn LoginItemsReader>,
     wakes: Box<dyn WakeScheduler>,
     wol: Box<dyn WolReader>,
+    holders: Box<dyn HolderSource>,
+    extras: Box<dyn ExtrasReader>,
     counters: Box<dyn CounterReader>,
     memory: Box<dyn MemoryReader>,
     processes: Box<dyn ProcessSweeper>,
@@ -112,6 +121,8 @@ impl Dispatcher {
             login_items: parts.login_items,
             wakes: parts.wakes,
             wol: parts.wol,
+            holders: parts.holders,
+            extras: parts.extras,
             counters: parts.counters,
             memory: parts.memory,
             processes: parts.processes,
@@ -119,6 +130,13 @@ impl Dispatcher {
             tools: parts.tools,
             log_tail: parts.log_tail,
         }
+    }
+
+    /// The caller's account for a scoped answer; a request made inside the helper has none.
+    fn account_of(&self, ctx: &Ctx) -> Result<HelperUser, RemoteError> {
+        ctx.account
+            .clone()
+            .ok_or_else(|| RemoteError::new(codes::UNSUPPORTED, "This answer is scoped to an account; this caller has none."))
     }
 
     /// Writes the audit line of a wake change before it happens: a log that cannot be written means nothing was changed.
@@ -198,6 +216,29 @@ impl Dispatcher {
                 log::info!(items = page.items.len(), more = page.next.is_some(); "Helper: processes answered");
                 Ok(HelperReply::Processes(page))
             }
+            HelperRequest::SocketOwners => {
+                let who = self.account_of(ctx)?;
+                let scan = self.holders.sockets().map_err(|e| remote(&e))?;
+                let a = socket_answer(&scan, &who, ctx.view.scope);
+                log::info!(sockets = a.owners.len(), others = a.others, truncated = a.truncated; "Helper: socket owners answered");
+                Ok(HelperReply::SocketOwners(a))
+            }
+            HelperRequest::FileHolders { dev, ino } => {
+                let who = self.account_of(ctx)?;
+                let scan = self.holders.file(dev, ino).map_err(|e| remote(&e))?;
+                let a = file_answer(&scan, &who, ctx.view.scope);
+                log::info!(holders = a.holders.len(), others = a.others, truncated = a.truncated; "Helper: file holders answered");
+                Ok(HelperReply::FileHolders(a))
+            }
+            HelperRequest::Extras(kind) => {
+                let detail = ctx.access == Access::Full;
+                let answer = match kind {
+                    ExtrasKind::WakeRequests => self.extras.wake_requests().map(|i| wake_answer(i, detail)),
+                    ExtrasKind::BackupVersions => self.extras.backup_versions().map(|i| backup_answer(i, detail)),
+                };
+                log::info!(detail = detail, ok = answer.is_ok(); "Helper: extras answered");
+                answer.map(HelperReply::Extras).map_err(|e| remote(&e))
+            }
             HelperRequest::Counters(q) => {
                 let answers = answer(self.counters.as_ref(), &q);
                 log::info!(
@@ -236,9 +277,10 @@ impl Dispatcher {
             }
             // The readers arrive with their work packages (ADR 0027 WP-4 to WP-10); until then the helper
             // says so, and the agent shows the reading as unavailable with this reason.
-            HelperRequest::SocketOwners | HelperRequest::FileHolders { .. } | HelperRequest::Firewall | HelperRequest::Extras(_) => Err(
-                RemoteError::new(codes::UNSUPPORTED, "This reading is not available in this build of the helper yet."),
-            ),
+            HelperRequest::Firewall => Err(RemoteError::new(
+                codes::UNSUPPORTED,
+                "This reading is not available in this build of the helper yet.",
+            )),
             HelperRequest::Uninstall => {
                 self.audit
                     .record(&AuditEntry {
@@ -259,6 +301,7 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dyno_core::helper_extras::ExtrasAnswer;
     use dyno_core::btm::LoginItemsReply;
     use dyno_core::helper::HelperHost;
     use dyno_core::helper_requests::{ProcessQuery, SmartQuery, ToolKind};
@@ -347,6 +390,8 @@ mod tests {
             clock: Box::new(|| 1_000),
             on_uninstall: Box::new(move || flag.store(true, Ordering::SeqCst)),
             login_items: Box::new(Items(Ok(items_reply()))),
+            holders: Box::new(dyno_core::helper_holders::NoHolders),
+            extras: Box::new(dyno_core::helper_extras::NoExtras),
             counters: Box::new(dyno_core::helper_counters::NoCounters),
             memory: Box::new(dyno_core::helper_memory::NoMemory),
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
@@ -449,6 +494,8 @@ mod tests {
             clock: Box::new(|| 5),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Ok(items_reply()))),
+            holders: Box::new(dyno_core::helper_holders::NoHolders),
+            extras: Box::new(dyno_core::helper_extras::NoExtras),
             counters: Box::new(dyno_core::helper_counters::NoCounters),
             memory: Box::new(dyno_core::helper_memory::NoMemory),
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
@@ -502,6 +549,8 @@ mod tests {
             clock: Box::new(|| 1),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Err(PlatformError::AccessDenied("no".into())))),
+            holders: Box::new(dyno_core::helper_holders::NoHolders),
+            extras: Box::new(dyno_core::helper_extras::NoExtras),
             counters: Box::new(dyno_core::helper_counters::NoCounters),
             memory: Box::new(dyno_core::helper_memory::NoMemory),
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
@@ -780,5 +829,98 @@ mod tests {
         assert!(
             matches!(none.d.handle(None, HelperRequest::Counters(q)).unwrap(), HelperReply::CounterValues(a) if matches!(a[0].value, CounterValue::Unavailable(_)))
         );
+    }
+
+    struct FakeHolders;
+    impl HolderSource for FakeHolders {
+        fn sockets(&self) -> Result<dyno_core::helper_holders::HolderScan, PlatformError> {
+            Ok(scan_of(&[100]))
+        }
+        fn file(&self, dev: u64, ino: u64) -> Result<dyno_core::helper_holders::HolderScan, PlatformError> {
+            assert_eq!((dev, ino), (7, 9), "the request's own device and inode reach the reader");
+            Ok(scan_of(&[]))
+        }
+    }
+
+    fn scan_of(sockets: &[u64]) -> dyno_core::helper_holders::HolderScan {
+        use dyno_core::helper_holders::{HolderScan, RawHolder};
+        use dyno_core::helper_processes::RawOwner;
+        let acct = |uid| RawOwner::Account {
+            id: HelperUser::Uid(uid),
+            name: None,
+        };
+        let h = |pid, owner| RawHolder {
+            pid,
+            started: Some(1),
+            name: "x".into(),
+            owner,
+            sockets: sockets.to_vec(),
+        };
+        HolderScan {
+            holders: vec![h(1, acct(501)), h(2, acct(502))],
+            truncated: false,
+        }
+    }
+
+    struct FakeExtras;
+    impl ExtrasReader for FakeExtras {
+        fn wake_requests(&self) -> Result<Vec<dyno_core::helper_extras::WakeRequest>, PlatformError> {
+            Ok(dyno_core::helper_extras::parse_requests("SYSTEM:\n[PROCESS] a.exe\n"))
+        }
+        fn backup_versions(&self) -> Result<Vec<dyno_core::helper_extras::BackupVersion>, PlatformError> {
+            Err(PlatformError::Failed("wbadmin failed: no message".into()))
+        }
+    }
+
+    #[test]
+    fn holders_are_scoped_and_extras_give_detail_only_to_full_access() {
+        let mut r = rig(HelperHost::Linux, Ok(vec![]));
+        r.d.holders = Box::new(FakeHolders);
+        r.d.extras = Box::new(FakeExtras);
+        let ctx = |access, account| Ctx {
+            pid: Some(1),
+            uid: Some(501),
+            account,
+            access,
+            view: CallerView {
+                scope: Visibility::Own(OthersPolicy::Total),
+                tools: vec![],
+            },
+        };
+        let me = Some(HelperUser::Uid(501));
+        match r.d.handle_for(&ctx(Access::Full, me.clone()), HelperRequest::SocketOwners).unwrap() {
+            HelperReply::SocketOwners(a) => assert_eq!((a.owners.len(), a.others), (1, 1)),
+            other => panic!("{other:?}"),
+        }
+        match r
+            .d
+            .handle_for(&ctx(Access::Full, me.clone()), HelperRequest::FileHolders { dev: 7, ino: 9 })
+            .unwrap()
+        {
+            HelperReply::FileHolders(a) => assert_eq!((a.holders.len(), a.others), (1, 1)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            r.d.handle_for(&ctx(Access::Full, None), HelperRequest::SocketOwners)
+                .unwrap_err()
+                .code,
+            codes::UNSUPPORTED
+        );
+        let wake = |access| {
+            r.d.handle_for(&ctx(access, me.clone()), HelperRequest::Extras(ExtrasKind::WakeRequests))
+                .unwrap()
+        };
+        assert!(matches!(
+            wake(Access::Full),
+            HelperReply::Extras(ExtrasAnswer::WakeRequests { count: 1, items: Some(_) })
+        ));
+        assert!(matches!(
+            wake(Access::CountsOnly),
+            HelperReply::Extras(ExtrasAnswer::WakeRequests { count: 1, items: None })
+        ));
+        let e =
+            r.d.handle_for(&ctx(Access::Full, me), HelperRequest::Extras(ExtrasKind::BackupVersions))
+                .unwrap_err();
+        assert!(e.message.contains("wbadmin failed"));
     }
 }
