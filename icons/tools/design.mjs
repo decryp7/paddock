@@ -33,7 +33,8 @@ export const PALETTE = {
   spotter: { top: '#FFD257', base: '#F4B315', bottom: '#E59600', deep: '#7A4E00', light: '#FFE08A' },
   pitwall: { top: '#7B46DB', base: '#5A24B0', bottom: '#43198F', deep: '#24094F', light: '#B99AF2' },
   sighter: { top: '#BFA2EE', base: '#A686D6', bottom: '#8B6DB5', deep: '#3C2D52', light: '#CCBAEC' },
-  pacenotes: { top: '#9A8228', base: '#6D590F', bottom: '#6A5500', deep: '#302501', light: '#C0B491' },
+  // 2026-11-03: chroma +10 % at the same lightness (less khaki); a lighter tile drops protanopia against Pitcrew below 11.6.
+  pacenotes: { top: '#9C8112', base: '#6F5900', bottom: '#6C5400', deep: '#312500', light: '#C0B491' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
   // Asphalt graphite: no app hue of its own (the family's hues ride in its stripe). A near-black tile keeps every family CVD
   // minimum unchanged (tools/cvd.mjs); a lighter slate (#333A44 and up) drops tritanopia against Pitwall.
@@ -703,7 +704,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
       <stop offset="0" stop-color="${top}"/><stop offset="0.55" stop-color="${mid}"/><stop offset="1" stop-color="${bottom}"/>
     </linearGradient>
     <radialGradient id="${uid}sheen" cx="${x + s * 0.28}" cy="${x}" r="${s * 0.85}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="${carbon ? 0.1 : 0.22}"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="${carbon ? 0.1 : art ? 0.26 : 0.22}"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="${uid}edge" x1="0" y1="${x}" x2="0" y2="${x + s}" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="${carbon ? 0.22 : 0.4}"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
@@ -716,7 +717,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
   </defs>
   <path d="${shape}" fill="url(#${uid}bg)"${mac ? ` filter="url(#${uid}ts)"` : ''}/>
   <g clip-path="url(#${uid}clip)">
-    ${bare ? '' : `<path d="M${x - 40} ${x + s * 0.98}L${x + s * 0.98} ${x - 40}L${x + s * 1.12} ${x - 40}L${x - 40} ${x + s * 1.12}Z" fill="${liveryCol}" opacity="${liveryOp}"/>
+    ${bare || art ? '' : `<path d="M${x - 40} ${x + s * 0.98}L${x + s * 0.98} ${x - 40}L${x + s * 1.12} ${x - 40}L${x - 40} ${x + s * 1.12}Z" fill="${liveryCol}" opacity="${liveryOp}"/>
     <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>`}
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>

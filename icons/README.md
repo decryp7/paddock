@@ -163,7 +163,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 - **Glyph area:** about 270 to 754 on the 1024 grid, centred optically.
 - **Strokes:** about 60 to 68 on the 1024 grid, with round caps and joins.
 - **Two tones per glyph:** primary ink at 100% and secondary ink at 60% (55% on Spotter).
-- **Material:** a vertical gradient (top, base, bottom), a top-left radial sheen, an inner edge (light at the top, dark at the bottom), the livery sweep (two diagonal bands of white at 8%), and a glyph shadow in the app's deep tone.
+- **Material:** a vertical gradient (top, base, bottom), a top-left radial sheen, an inner edge (light at the top, dark at the bottom), the livery sweep (two diagonal bands of white at 8%; dropped from the family's isometric masters on 2026-11-03, kept on the demos), and a glyph shadow in the app's deep tone.
 - **Small frames (`<app>/small/`):** 16 is drawn on its own 16 px grid. 24, 32 and 48 come from one 32 px grid. They are snapped to the pixel grid, drop detail (no eyepieces on Spotter, no bottom line on Debrief at 16 px), and add a 0.5 px edge so the tile reads on light taskbars. These frames go into `icon.ico`.
 
 ## Palette
@@ -175,7 +175,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 | Spotter | `#F4B315` | `#FFD257` → `#E59600` | `#7A4E00` | `#3A2600` | 7.8:1 |
 | Pitwall | `#5A24B0` | `#7B46DB` → `#43198F` | `#24094F` | white | 9.1:1 |
 | Dyno | `#BE3584` | `#DE559F` → `#A0226A` | `#5E0E3C` | white | 5.2:1 |
-| Pacenotes | `#6D590F` | `#9A8228` → `#6A5500` | `#302501` | white | 6.8:1 |
+| Pacenotes | `#6F5900` | `#9C8112` → `#6C5400` | `#312500` | white | 6.8:1 |
 | Sighter | `#A686D6` | `#BFA2EE` → `#8B6DB5` | `#3C2D52` | `#2D1D43` (dark) | ink 5.1:1 on base |
 
 - **Ink rule:** the glyph is white wherever white reaches at least 3:1 on the tile. Spotter's amber and Sighter's lavender tiles are the light ones, so they take dark ink.
@@ -190,7 +190,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 - **Spotter:** binoculars and a spark: it watches everywhere and calls the moment a release appears.
 - **Pitwall:** a radio bubble with the voice kept inside it: a private, local model.
 - **Sighter:** a pointer arrow inside a sighting reticle (four ring arcs with ticks through the gaps): it finds UI elements by sight. Lavender tile `#A686D6` (2026-10-24, with the plum UI accent; it replaced the first cyan tile): the closest tile to the plum accent that keeps all four CVD minimums of the family (17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan); a plum tile `#975EA2` dropped them to 10.2, 6.7, 5.1 against Dyno. Lime was rejected earlier (3.3 to 4.3 dE from Spotter or Pitcrew under protan/deutan). Dark ink (`#2D1D43`, 5.1:1) because white reaches only 3.0:1 on the light tile.
-- **Pacenotes:** a portrait spiral notebook with a second page peeking out behind it, rings through punched holes on the left edge, ruled lines, a small route curve drawn like a pacenote and a compact `</>` mark: notes about the road ahead, here the shape of a codebase. The first version (a squarish card with flat tabs) was rejected as not reading as a notebook. At 32 px the code mark drops out, at 16 px only rings, page and one curve remain. A variant with the spiral along the top is `alternative/pacenotes-top-spiral` (the left spiral was clearer at 16 px); the first-round concept `alternative/pacenotes-brackets-road` is kept too. Bronze-olive tile `#6D590F` (2026-10-24, with the olive UI accent; it replaced the first crimson tile): the closest tile to the olive accent that keeps all four CVD minimums (an olive tile `#657C1F` dropped protanopia to 1.6 against Pitcrew). White ink gives 6.8:1.
+- **Pacenotes:** a portrait spiral notebook with a second page peeking out behind it, rings through punched holes on the left edge, ruled lines, a small route curve drawn like a pacenote and a compact `</>` mark: notes about the road ahead, here the shape of a codebase. The first version (a squarish card with flat tabs) was rejected as not reading as a notebook. At 32 px the code mark drops out, at 16 px only rings, page and one curve remain. A variant with the spiral along the top is `alternative/pacenotes-top-spiral` (the left spiral was clearer at 16 px); the first-round concept `alternative/pacenotes-brackets-road` is kept too. Bronze-olive tile `#6D590F` (2026-10-24, with the olive UI accent; it replaced the first crimson tile): the closest tile to the olive accent that keeps all four CVD minimums (an olive tile `#657C1F` dropped protanopia to 1.6 against Pitcrew). White ink gives 6.8:1. On 2026-11-03 its chroma went up 10 % at the same lightness (`#6F5900`, less khaki); a lighter tile drops protanopia against Pitcrew below the family minimum.
 - **Paddock (umbrella mark, not an app):** pit garages under one gable roof, on a shared foundation slab. The roof is the family
   stripe: the seven app hues side by side, in hue order (blue Debrief, violet Pitwall, lavender Sighter, magenta Dyno, orange
   Pitcrew, amber Spotter, olive Pacenotes), so the family literally covers the teams' bays. Asphalt-graphite tile `#2B3038` with

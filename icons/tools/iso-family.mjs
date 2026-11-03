@@ -257,7 +257,14 @@ export const bareSmall = (app, size) => smallSvg(app, size, { glyphs: { 16: [], 
  * 48) for every icon, Paddock included (its 48 was its 32 pixel frame scaled).
  */
 export function iso(app, px = 48, uid = `${app}-iso${px}-`) {
-  return onTile(app, px, 32, u => { const a = art(app, 'simple')(u); return { defs: a.defs, body: `<g transform="translate(16 16) scale(${f(30 / 824)}) translate(-512 -512)">${a.body}</g>` }; }, uid, { clip: true });
+  // At 32 px (the 32 pt slot on a 1x screen) the object is under 30 px: a light unsharp mask on the rendered pixels keeps its edges
+  // and its contrast from going soft.
+  const sharp = px <= 32;
+  return onTile(app, px, 32, u => {
+    const a = art(app, 'simple')(u);
+    const fl = sharp ? `<filter id="${u}sh" x="0" y="0" width="32" height="32" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feConvolveMatrix order="3" kernelMatrix="0 -0.3 0 -0.3 2.2 -0.3 0 -0.3 0" preserveAlpha="true"/></filter>` : '';
+    return { defs: a.defs + fl, body: `<g${sharp ? ` filter="url(#${u}sh)"` : ''}><g transform="translate(16 16) scale(${f(30 / 824)}) translate(-512 -512)">${a.body}</g></g>` };
+  }, uid, { clip: true });
 }
 /** The frame of a MIX entry (`flat` or `iso`) at `px`; `master` entries are the rendered masters. */
 export const mixFrame = (app, px, kind) => (kind === 'flat' ? smallFlat(app, px) : iso(app, px));

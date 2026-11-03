@@ -169,7 +169,13 @@ into blobs at 16 and 24 and was dropped.
 - **Optical centring** (`opticalShift`): the glyph's ink centre, averaged with its box centre, moved onto the tile's centre and 2 %
   above it (a centred mass looks low), in whole pixels, at most 1 px (2 px from 32 up).
 - **Clarity at 16:** each app reads by silhouette on light and dark backgrounds, wallpapers and translucent bars (`clarity.png`).
-  Pacenotes is a route with its start and finish on the tablet (a drawn S read as a letter or a dollar sign).
+  Pacenotes is the tablet with a pacenote's bend arrow on it (a drawn S, a road and a route with a flag read as the letters S, A, 5 and
+  J). Pitcrew is the impact wrench's profile (a round housing, a square anvil collar, a socket wider than the anvil, a raked grip,
+  from 24 px a trigger joined to the grip); Dyno's redline is the bezel's weight set off by a gap, its needle tapered; Pitwall's tall
+  antenna sits at the body's left edge; Paddock's door has two slats at 16 and 20. The line glyphs (Debrief, Paddock) are one pixel
+  heavier from 32 px, to match the solid ones.
+- **The isometric frame at 32 px** (the 32 pt slot on a 1x screen) gets a light unsharp mask on its rendered pixels, so its edges
+  and contrast do not go soft; at 48 and 64 it is drawn as is.
 
 | Container | Entry | Slot | Frame |
 |---|---|---|---|
@@ -227,10 +233,11 @@ The switch-over of the apps (bundles, trays, in-app copies) follows the independ
   the family and the only multicolour element. No app uses more than its own hue.
 - An accent must be visible at 112 without becoming the loudest part at 60. Thicken it in the simple frame or drop it there.
 
-## 8. Tile and gloss (unchanged)
+## 8. Tile and gloss
 
-- Tile gradient top, base and bottom from `PALETTE`; the radial sheen from the top left; the inner edge; the livery sweep (two
-  diagonal white bands at 8 %, 16 % on light tiles).
+- Tile gradient top, base and bottom from `PALETTE`; one soft radial sheen from the top left (26 % white at its centre on the family's
+  masters); the inner edge. The two diagonal livery bands are dropped from the family (2026-11-03: they read as glare stripes); the
+  demo apps keep them.
 - macOS: an 824 squircle at (100, 100) with the drop shadow (y 10, blur 12, black 28 %, sRGB filter). Windows: a 944 rounded square at
   (40, 40), radius 200, no outer shadow.
 - Dark tiles get a light rim (Paddock: 20 % on the master, a full-pixel 40 % rim at 16, 45 % at 24 to 48).

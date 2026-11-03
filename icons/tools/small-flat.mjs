@@ -42,12 +42,14 @@ const CURVE = { 16: 1.5, 20: 1.75, 24: 2.25, 32: 2.75, 40: 3.25 };
  * `poly` (vertices on whole pixels), `circle` (centre on a half pixel, radius scaled), `line` (a polyline whose straight runs sit on the
  * pixel grid for its width), `curve` (a path in 16-grid units, scaled, any width).
  */
-function ctx(n) {
+function ctx(n, { tray = false } = {}) {
   const u = n / 16, w = STROKE[n] ?? Math.max(1, Math.round(n / 16)), dw = DETAIL[n] ?? w, c = CURVE[n] ?? n / 11, p = v => Math.round(v * u);
   const R = (role, x0, y0, x1, y1, r = 0) => { const X0 = p(x0), Y0 = p(y0), X1 = Math.max(X0 + 1, p(x1)), Y1 = Math.max(Y0 + 1, p(y1)); return { role, rect: [X0, Y0, X1, Y1, f(Math.min(r * u, (X1 - X0) / 2, (Y1 - Y0) / 2))] }; };
   const snapL = (v, lw) => Math.round(v * u - lw / 2) + lw / 2;
   return {
-    n, u, w, dw, c, p,
+    n, u, w, dw, c, p, tray,
+    /** One weight heavier from 32 px for the line glyphs on the tile (not in the tray, a menu-bar symbol). */
+    heavy: n >= 32 && !tray,
     rect: R,
     /** A rect in pixels (x, y, width, height), for parts whose size is a number of strokes. */
     px: (role, x, y, wd, ht, r = 0) => ({ role, rect: [x, y, x + wd, y + ht, r] }),
@@ -74,12 +76,14 @@ const bars = (g, role, x0, x1, y0, y1, count, t = g.dw) => {
 
 /** Dyno's tacho with the needle at `k` of the sweep (0.6 normal; the tray's high-load state moves it onto the redline). */
 const tacho = k => g => {
-  const a = (podAngle(k) * Math.PI) / 180, cy = 8.4;
+  // The bezel and the redline at one weight, the redline set off by a gap; a thin needle tapering to its tip from a small hub.
+  const a = (podAngle(k) * Math.PI) / 180, cy = 8.4, r = 6.1, gapDeg = (Math.max(1.25, g.c) / (r * g.u)) * (180 / Math.PI) * 2.6, red = podAngle(POD.red);
+  const tip = [8 + 4.6 * Math.cos(a), cy - 4.6 * Math.sin(a)], base = Math.max(1.5, 0.75 * g.c) / g.u / 2, nx = Math.sin(a) * base, ny = Math.cos(a) * base;
   return [
-    g.curve('ink', arcD(8, cy, 6.1, 225, -45), g.c),
-    g.curve('ink', arcD(8, cy, 5.75, podAngle(POD.red) + 2, podAngle(1)), g.c * 1.9, 'butt'),
-    g.curve('ink', `M8 ${cy}L${f(8 + 3.8 * Math.cos(a))} ${f(cy - 3.8 * Math.sin(a))}`, Math.max(g.w, g.c * 0.85)),
-    g.circle('ink', 8, cy, 1.4),
+    g.curve('ink', arcD(8, cy, r, 225, red + gapDeg / 2), g.tray ? g.c * 1.3 : g.c),
+    g.curve('ink', arcD(8, cy, r, red - gapDeg / 2, -45), g.tray ? g.c * 1.3 : g.c, 'round'),
+    { role: 'ink', d: `M${f((8 - nx) * g.u)} ${f((cy - ny) * g.u)}L${f(tip[0] * g.u)} ${f(tip[1] * g.u)}L${f((8 + nx) * g.u)} ${f((cy + ny) * g.u)}Z`, curved: true },
+    g.circle('ink', 8, cy, Math.max(1.05, 0.9 * (16 / g.n) + 0.45)),
   ];
 };
 /** Tray states whose glyph changes (as FLAT.dyno.tray in tools/art-direct.mjs). */
@@ -90,29 +94,32 @@ const FLAT_STATES = { dyno: { high: tacho(0.88) } };
  * drawn at its own pixels (not scaled) and the details change with the size where they must.
  */
 export const FLAT = {
-  // The garage door under the canopy band of the seven hues: two posts, three slats hanging from the band, the bay open below.
+  // The garage door under the canopy band of the seven hues: two posts, the slats hanging from the band, the bay open below. Line
+  // glyph: one weight heavier from 32 px, to match the solid glyphs.
   paddock: g => {
-    const top = g.p(3), bandH = Math.max(2, Math.round(2 * g.u)), y0 = top + bandH, y1 = g.p(13), xl = g.p(3), xr = g.p(13) - g.w;
+    const lw = g.heavy ? g.w + 1 : g.w, top = g.p(3), bandH = Math.max(2, Math.round(2 * g.u)), y0 = top + bandH, y1 = g.p(13), xl = g.p(3), xr = g.p(13) - lw;
     return [
       ...STRIPE.map((app, i) => ({ ...g.px('ink', g.p(1 + 2 * i), top, g.p(3 + 2 * i) - g.p(1 + 2 * i), bandH), hue: STRIPE_COLOUR(app) })),
-      g.px('ink', xl, y0, g.w, y1 - y0), g.px('ink', xr, y0, g.w, y1 - y0),
-      ...bars(g, 'ink', xl + 2 * g.w, xr - g.w, y0, g.p(10.5), 3, g.w),
+      g.px('ink', xl, y0, lw, y1 - y0), g.px('ink', xr, y0, lw, y1 - y0),
+      // Two slats at 16 and 20 (three read as a list there), three from 24.
+      ...bars(g, 'ink', xl + lw + g.w, xr - g.w, y0, g.p(g.n <= 20 ? 9 : 10.5), g.n <= 20 ? 2 : 3, lw),
     ];
   },
   // The laptop from the front: the lid as a frame round the dark screen with the telemetry trace, the base below.
   debrief: g => {
     const lid = g.rect('ink', 2, 3, 14, 11, 1);
     return [lid, g.inset('inset', lid),
-      g.line('ink', [[4.25, 7], [5.6, 7], [6.8, 4.9], [8.5, 9], [9.6, 6.4], [10.4, 7], [11.75, 7]], g.dw),
+      g.line('ink', [[4.25, 7], [5.6, 7], [6.8, 4.9], [8.5, 9], [9.6, 6.4], [10.4, 7], [11.75, 7]], g.heavy ? g.dw + 1 : g.dw),
       g.px('ink', g.p(1), g.p(12), g.p(15) - g.p(1), g.w, g.w / 2)];
   },
   // The radio: antenna and knob, the body with its screen showing three signal bars, two grille slots.
   pitwall: g => {
-    const body = g.rect('ink', 4, 5, 12, 15, 1.2), [bx0, by0, bx1, by1] = body.rect, w = g.w;
+    // A tall antenna at the left edge (a radio, not a clipboard), a small knob at the right only from 24 px, rounded body corners.
+    const body = g.rect('ink', 4.5, 5, 11.5, 15, 1.6), [bx0, by0, bx1, by1] = body.rect, w = g.w;
     const sx0 = bx0 + w, sx1 = bx1 - w, sy0 = by0 + w, sy1 = g.p(10);
-    const bw = g.dw, cx = Math.round((sx0 + sx1) / 2 - 2.5 * bw), hMax = sy1 - sy0 - g.dw;
+    const bw = g.dw, cx = Math.round((sx0 + sx1) / 2 - 2.5 * bw), hMax = sy1 - sy0 - g.dw, aw = Math.max(w, Math.round(1.25 * g.u));
     return [
-      g.px('ink', g.p(5), g.p(1), Math.max(w, Math.round(1.25 * g.u)), by0 - g.p(1) + 1, 0.5 * g.u), g.px('ink', g.p(9), g.p(4), g.p(11) - g.p(9), by0 - g.p(4) + 1),
+      g.px('ink', bx0, g.p(0.75), aw, by0 - g.p(0.75) + 1, aw / 2), ...(g.n >= 24 ? [g.px('ink', g.p(8.75), g.p(4), g.p(10.75) - g.p(8.75), by0 - g.p(4) + 1, 0.4 * g.u)] : []),
       body, g.px('inset', sx0, sy0, sx1 - sx0, sy1 - sy0, 0.3 * g.u),
       ...[1, 2, 3].map(i => { const h = Math.max(bw, Math.round((hMax * i) / 3)); return g.px('ink', cx + (i - 1) * 2 * bw, sy1 - h, bw, h); }),
       ...bars(g, 'inset', sx0, sx1, sy1 + w, by1 - 2 * w, 2),
@@ -124,32 +131,42 @@ export const FLAT = {
     g.rect('ink', 6, 3, 10, 5.5, 0.5), g.rect('ink', 2, 5, 14, 11.5, 1.2),
     g.circle('inset', 8, 8.25, 3.05), g.circle('ink', 8, 8.25, 1.55), g.circle('inset', 7.45, 7.7, Math.max(0.5, 0.45)),
   ],
-  // The wheel gun in profile: the motor (rounded at the rear), the stepped nose, the socket and the nut; the grip raked back as one
-  // slanted polygon, the trigger in front of it, the air fitting under it.
-  pitcrew: g => [
-    g.rect('ink', 2, 4, 10, 9, 1.6), g.rect('ink', 10, 5, 11.5, 8), g.rect('ink', 11.5, 5.75, 13, 7.25), g.rect('ink', 13, 4.5, 14.5, 8.5, 0.3),
-    g.poly('ink', [4.5, 9], [8.5, 9], [7.25, 13], [3.25, 13]), g.poly('ink', [9.5, 9], [10.75, 9], [10.25, 11.25], [9, 11.25]), g.rect('ink', 3, 13, 6.5, 14.25, 0.3),
-  ],
+  // The impact wrench in profile: a round motor housing (a full radius), a square anvil collar, the thin anvil and a wider socket at
+  // the tip; the grip raked back as one slanted polygon (one clean anti-aliased edge each side) with the air inlet at its foot.
+  pitcrew: g => {
+    const out = [
+      g.circle('ink', 4.25, 6.25, 2.75), g.rect('ink', 4.25, 3.5, 9, 9), g.rect('ink', 9, 4, 10.75, 8.5, 0.25), g.rect('ink', 10.75, 5.25, 11.5, 7.25), g.rect('ink', 11.5, 4.5, 14.75, 8, 0.4),
+      // In the tray (one tone, no trigger) the grip is half a unit slimmer, so the symbol keeps the filled-glyph coverage.
+      g.poly('ink', [3.5, 8.5], [g.tray ? 6.75 : 7.25, 8.5], [g.tray ? 5.5 : 6, 13.75], [2.25, 13.75]),
+    ];
+    // From 24 px, the trigger: a tab joined to the grip's front, below the housing.
+    if (g.n >= 24 && !g.tray) out.push(g.poly('ink', [7, 9.25], [8.5, 9.25], [8.25, 10.75], [6.6, 10.75]));
+    if (!g.tray) out.push(g.rect('ink', 2.75, 13.75, 5.25, 15, 0.3));
+    return out;
+  },
   // The binoculars from the front: eyecups, barrels and the bridge, two objective rings (one stroke wide) round the tile.
   spotter: g => [
     g.rect('ink', 4, 3, 6, 4.25, 0.4), g.rect('ink', 10, 3, 12, 4.25, 0.4), g.rect('ink', 3.5, 4, 6.5, 8.5, 0.8), g.rect('ink', 9.5, 4, 12.5, 8.5, 0.8), g.rect('ink', 6.5, 5.5, 9.5, 7),
     g.circle('ink', 5, 10.5, 3), g.circle('ink', 11, 10.5, 3), g.ring('inset', 5, 10.5, 3, g.n <= 20 ? 1 : 1.25), g.ring('inset', 11, 10.5, 3, g.n <= 20 ? 1 : 1.25),
   ],
-  // The tablet from the front: the frame and a heavier chin round the screen, and on the screen the route of a stage: from the start
-  // (a dot, bottom left) up, across and up to the finish (a ring, top right), in square turns on the pixel grid. A drawn S read as a
-  // letter at 16; a tapering road as an A.
+  // The tablet from the front: the frame and a heavier chin round the screen, and on the screen a pacenote's bend arrow (the road
+  // turning right). A drawn S, a road and a curved route with a flag read as letters (S, A, 5, J) at 16 to 24.
   pacenotes: g => {
-    const frame = g.rect('ink', 4, 1.5, 12, 14.5, 1.4), scr = g.inset('inset', frame, 1, { bottom: 2 }), lw = g.n <= 20 ? 2 : g.w;
+    const frame = g.rect('ink', 3.5, 1.5, 12.5, 14.5, 1.4), scr = g.inset('inset', frame, 1, { bottom: 2 }), [x0, y0, x1, y1] = scr.rect;
+    const W = x1 - x0, H = y1 - y0, lw = g.n <= 20 ? 1.5 : Math.max(g.w, g.c * 0.95), ah = Math.max(3, 0.4 * W);
+    // A pacenote's bend arrow: the road from the bottom, turning right, the arrowhead toward the exit of the bend.
+    const sx = x0 + 0.24 * W, sy = y1, my = y0 + 0.62 * H, ex = x1 - 0.75 - ah, ey = y0 + 0.32 * H;
+    const shaft = `M${f(sx)} ${f(sy)}L${f(sx)} ${f(my)}C${f(sx)} ${f(ey + 0.08 * H)} ${f(sx + 0.15 * W)} ${f(ey)} ${f(ex + 0.5)} ${f(ey)}`;
     return [frame, scr,
-      g.line('ink', [[6.6, 10], [6.6, 7.9], [9.4, 7.9], [9.4, 5]], lw),
-      g.circle('ink', 6.6, 10.4, g.n <= 20 ? 1.25 : 1.35), g.circle('ink', 9.4, 4.6, g.n <= 20 ? 1.25 : 1.35), ...(g.n >= 24 ? [g.circle('inset', 9.4, 4.6, 0.6)] : []),
+      { role: 'ink', stroke: shaft, w: lw, cap: 'butt' },
+      { role: 'ink', d: `M${f(ex + ah)} ${f(ey)}L${f(ex)} ${f(ey - ah * 0.75)}L${f(ex)} ${f(ey + ah * 0.75)}Z`, curved: true },
     ];
   },
   dyno: tacho(0.6),
 };
 
 /** The glyph's parts at `n` px (a state's glyph for the tray). */
-export const glyphParts = (app, n, state) => (FLAT_STATES[app]?.[state] ?? FLAT[app])(ctx(n));
+export const glyphParts = (app, n, state, opts) => (FLAT_STATES[app]?.[state] ?? FLAT[app])(ctx(n, opts));
 
 /** The glyph as SVG mask content in device pixels: ink parts white, inset parts black, in drawing order. */
 export function flatMask(parts, { hues = false } = {}) {
@@ -171,10 +188,10 @@ export function flatMask(parts, { hues = false } = {}) {
  * edges stay on the grid. Measured on a render, once per glyph and size.
  */
 const OPTICAL = new Map();
-export function opticalShift(app, n, state) {
-  const key = `${app}/${n}/${state ?? ''}`;
+export function opticalShift(app, n, state, opts = {}) {
+  const key = `${app}/${n}/${state ?? ''}/${opts.tray ? 't' : ''}`;
   if (OPTICAL.has(key)) return OPTICAL.get(key);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${n}" height="${n}"><defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="${n}" height="${n}"><rect width="${n}" height="${n}" fill="#000"/>${flatMask(glyphParts(app, n, state), { hues: true })}</mask></defs><rect width="${n}" height="${n}" fill="#000" mask="url(#m)"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${n}" height="${n}"><defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="${n}" height="${n}"><rect width="${n}" height="${n}" fill="#000"/>${flatMask(glyphParts(app, n, state, opts), { hues: true })}</mask></defs><rect width="${n}" height="${n}" fill="#000" mask="url(#m)"/></svg>`;
   const d = new Resvg(svg, { font: { loadSystemFonts: false } }).render().pixels;
   let s = 0, sx = 0, sy = 0, x0 = n, x1 = 0, y0 = n, y1 = 0;
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const a = d[4 * (y * n + x) + 3] / 255; if (!a) continue; s += a; sx += a * (x + 0.5); sy += a * (y + 0.5); x0 = Math.min(x0, x); x1 = Math.max(x1, x + 1); y0 = Math.min(y0, y); y1 = Math.max(y1, y + 1); }
@@ -256,7 +273,7 @@ export function smoothTray(app, theme, { px = 32, status, badge = true, uid = `$
   const title = `${NAMES[app]} tray${status && !['default', 'ok', 'normal'].includes(status) ? ` (${status})` : ''}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="${vb}">
   <title>${title}</title>
-  <defs><mask id="${uid}g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(${opticalShift(app, n, status).join(' ')})">${flatMask(glyphParts(app, n, status), { hues: true })}</g>${inMask}</mask></defs>
+  <defs><mask id="${uid}g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(${opticalShift(app, n, status, { tray: true }).join(' ')})">${flatMask(glyphParts(app, n, status, { tray: true }), { hues: true })}</g>${inMask}</mask></defs>
   <rect x="-4" y="-4" width="40" height="40" fill="${ink}" mask="url(#${uid}g)"/>${onTop}
 </svg>
 `;

@@ -177,7 +177,7 @@ for (const app of flat.SMOOTH_FAMILY) {
           const [x0, y0, x1, y1] = p.rect;
           for (const v of [x0, y0, x1, y1]) assert.ok(Number.isInteger(v), `${app} at ${n}: rect ${p.rect}`);
           assert.ok(x1 - x0 >= 1 && y1 - y0 >= 1, `${app} at ${n}: rect ${p.rect} is under a pixel`);
-        } else if (p.d && !/[aAC]/.test(p.d)) for (const v of p.d.match(/-?[\d.]+/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${p.d}`);
+        } else if (p.d && !p.curved && !/[aAC]/.test(p.d)) for (const v of p.d.match(/-?[\d.]+/g)) assert.ok(Number.isInteger(+v), `${app} at ${n}: ${p.d}`);
         else if (p.stroke) assert.ok(p.w >= 1, `${app} at ${n}: a stroke of ${p.w} px`);
       }
     }

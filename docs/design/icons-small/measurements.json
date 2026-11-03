@@ -2,7 +2,7 @@
   "paddock": {
     "coverage16": {
       "current": 23,
-      "mix": 24
+      "mix": 22
     },
     "contrast": {
       "isoFront": 8.53,
@@ -50,7 +50,7 @@
   "pitwall": {
     "coverage16": {
       "current": 24,
-      "mix": 23
+      "mix": 20
     },
     "contrast": {
       "isoFront": 4.6,
@@ -66,8 +66,8 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 22,
-        "partialEdge": 8
+        "coverage": 20,
+        "partialEdge": 10
       }
     }
   },
@@ -114,8 +114,8 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 29,
-        "partialEdge": 16
+        "coverage": 30,
+        "partialEdge": 14
       }
     }
   },
@@ -149,8 +149,8 @@
       "mix": 26
     },
     "contrast": {
-      "isoFront": 3.52,
-      "flatInk": 6.8
+      "isoFront": 3.5,
+      "flatInk": 6.76
     },
     "blockiness64": {
       "current": 27,
@@ -162,15 +162,15 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 23,
-        "partialEdge": 25
+        "coverage": 24,
+        "partialEdge": 24
       }
     }
   },
   "dyno": {
     "coverage16": {
       "current": 18,
-      "mix": 25
+      "mix": 19
     },
     "contrast": {
       "isoFront": 3.38,
@@ -186,8 +186,8 @@
         "partialEdge": 0
       },
       "smooth32": {
-        "coverage": 23,
-        "partialEdge": 48
+        "coverage": 22,
+        "partialEdge": 46
       }
     }
   },
