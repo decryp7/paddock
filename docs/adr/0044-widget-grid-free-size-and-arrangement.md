@@ -4,7 +4,11 @@
   drag-and-drop arrangement" on the grid-snap model (drag widgets on the dashboard to move them, drag a corner or edge to
   resize in grid steps, tidy and aligned, reflowing on smaller windows, keyboard move and resize). The user added the same
   day: "Maybe need a shared crate for the widgets system": §2 makes the split between the shared crate, the shared UI
-  and the apps explicit.
+  and the apps explicit. Independent review round 1 (2026-11-03) found the model, the split and D1-D7 sound and asked
+  for changes (two P1, seven P2); this revision answers them: the engine's per-widget `moves` (§5), Move to first and
+  last, holes beside tall widgets (§1), the legacy key on upgrade (§4), screen-reader browse mode (§5, WP-D), the
+  mock-ups (pushed History, Material's disabled button, edge grips, guides behind widgets, retuned defaults) and the
+  estimate.
 - Date: 2026-11-03
 - Related: family ADR 0035 (widget layouts are shared; this ADR **amends its §1 placements, edits and undo, §2's
   `KindSpec::spans`, §4's area and chooser for grid surfaces, and §7's dashboard limits**), ADR 0026 §3 (contracts declared
@@ -14,10 +18,11 @@
   cost), rule 56 / ER-27 (logs explain failures), AGENTS.md "Where logic lives", the design guide §1, §2, §6, §8, §9 and
   §13; Dyno ADR 0001 (settings live in the agent) and 0012 (widgets are data).
 - Mock-ups: `docs/design/widgets-grid/renders/*.png`, light and dark: `edit-drag` (moving a widget: lifted widget,
-  snapped drop placeholder, snapping guides, Disk activity previewed in Battery's place: a same-size swap), `edit-resize` (corner resize with
-  the size chip, edge handles, the pushed neighbour), `edit-keyboard` (a focused widget, its ⋯ menu with the keys, the
-  screen-reader announcement), `narrow` (a 1,000 px window: the derived 6-column arrangement, editing explained). Source
-  `mock.html`, rendered by `render.mjs` with Playwright's pinned Chromium.
+  snapped drop placeholder, snapping guides, Disk activity previewed in Battery's place: a same-size swap),
+  `edit-resize` (corner resize with the size chip, edge grips, Recent events, History and Disk space trend pushed down),
+  `edit-keyboard` (a focused widget, its ⋯ menu with the keys, the screen-reader announcement), `narrow` (a 1,000 px
+  window: the derived 6-column arrangement, editing explained). Source `mock.html`, rendered by `render.mjs` with
+  Playwright's pinned Chromium.
 - Evidence read at `origin/main` `a18e18801`, 2026-11-03: `crates/paddock-widgets/src/{catalogue,check,edit,layout,read,view}.rs`,
   `ui/projects/paddock-ui/widgets/src/{area,chooser,frame,widget}.ts`, `apps/dyno/crates/dyno-core/src/widgets/dashboard.rs`,
   `apps/dyno/app/src/app/features/{dashboard/dashboard.ts,widgets/widget-board.ts,widgets/widget-view.ts}`, the dashboards of
@@ -73,7 +78,11 @@ pub struct Rect { pub x: u8, pub y: u16, pub w: u8, pub h: u8 }   // cells; x + 
   minimum and asserts nothing overflows; WP-C2). Popup and menu-bar kinds keep their spans (§1a).
 - **No overlaps, gravity up.** Placements never overlap and float up: after every change the layout is *compacted*,
   each placement in reading order (`y`, then `x`, then id) moving up to the highest free row. A layout on disk is always
-  compact; one that is not (edited by hand) is compacted on read, without a note.
+  compact; one that is not (edited by hand) is compacted on read, without a note. Gravity is vertical only, so it can
+  leave a hole beside a tall widget (a short widget's column under a long neighbour's span stays empty until something
+  fits it); Grafana's grid does the same, and the alternative (sideways filling) moves widgets the person did not touch.
+  A proptest checks the rule exactly: no placement can move up by one row without overlapping, so nothing can rise into
+  a hole, and every hole is one no placement fits from above.
 - **Collisions.** A placement put on a target rectangle (a drop, a keyboard move, a resize) keeps that rectangle; what it
   overlaps is resolved in one deterministic step:
   1. **Swap** when it overlaps exactly one placement of the same size whose cells it covers completely: the two exchange
@@ -109,6 +118,8 @@ pub enum GridGesture {
     Place { id: PlacementId, rect: Rect },          // a drop or a pointer resize: the target rectangle
     Nudge { id: PlacementId, dir: Dir },            // arrow keys
     Grow  { id: PlacementId, dir: Dir },            // Shift+arrow keys: Right wider, Left narrower, Down taller, Up shorter
+    ToFirst { id: PlacementId },                    // Home: first in reading order
+    ToLast  { id: PlacementId },                    // End: last in reading order
 }
 pub enum Dir { Left, Right, Up, Down }
 ```
@@ -152,18 +163,26 @@ no copy is left behind (rule 55 (c)).
 
 - Wire (camelCase, as ADR 0035 §2a.5): `{ "version": 2, "placements": [{ "id": "cpu", "x": 3, "y": 10, "w": 6, "h": 6,
   "widget": { … } }], "presets": [ … ] }`. User presets hold rectangles too.
-- **An upgrade, not a shim.** `Catalogue::upgrade(from: u32, value: Value) -> Result<Value, String>` (default: none) runs
-  in `read` when a stored version is older than the surface's `schema_version`; the crate provides the generic step
-  `upgrade::spans_to_cells::<C>(value)`. Dyno's dashboard goes from schema 1 to 2 with it. For each placement in stored
-  order: `w` = its span (clamped into the kind's widths), `h` = the kind's default height, placed first-fit in reading
-  order exactly as CSS grid's auto-placement placed it in 1.0; then every placement on one visual row gets the row's
-  tallest height (1.0 stretched a row to its tallest card, so the dashboard looks as it did); then compaction. Presets are
-  upgraded the same way. Each entry that cannot be upgraded is dropped and counted (ADR 0035's `Dropped` note).
-- `Read` reports `upgraded: Some(1)`; the store owner writes the layout back at once (one write, logged), so no span
-  layout stays on disk after the first start of 1.1. An upgrade that fails as a whole takes ADR 0035's damaged path: the
-  defaults are shown and the old value is kept unread until the first edit, so nothing is lost.
-- **Downgrade.** Dyno 1.0 reading a version 2 layout takes ADR 0035's newer path: it shows its defaults read-only and
-  writes the layout back unchanged, so returning to 1.1 finds it intact.
+- **An upgrade, not a shim.** `Catalogue::upgrade(from: u32, value: Value) -> Result<Value, String>` (default: none)
+  runs in `read` when a stored version is older than the surface's `schema_version`; the crate provides the generic step
+  `upgrade::spans_to_cells::<C>(value)`. Dyno's dashboard goes from schema 1 to 2 with it, under its new key (below).
+  For each placement in stored order: `w` = its span (clamped into the kind's widths), `h` = the kind's default height,
+  placed first-fit in reading order exactly as CSS grid's auto-placement placed it in 1.0; then every placement on one
+  visual row gets the row's tallest height (1.0 stretched a row to its tallest card, so the dashboard looks as it did);
+  then compaction. Presets are upgraded the same way. Each entry that cannot be upgraded is dropped and counted (ADR
+  0035's `Dropped` note).
+- `Read` reports `upgraded: Some(1)`; the store owner writes the new layout at once (one write, logged) under the new
+  key; the span layout stays only under the old key, for a downgrade, until the first real edit (below). An upgrade that
+  fails as a whole takes ADR 0035's damaged path: the defaults are shown and the old value is kept unread until the
+  first edit, so nothing is lost.
+- **Downgrade: the old value stays under the old key until the first real edit.** A grid surface whose stored value is
+  upgraded writes the new layout under a new key (Dyno: `dashboardGrid`) and leaves the old key (`dashboard`) holding
+  the version 1 value exactly as read. `Read` reports it as `legacy: Some(value)`; `Stored` writes it back unchanged
+  under the old key until the first edit the person makes (an upgrade, a reload or a compaction on read is not one),
+  then drops it, and the old key is removed. So Dyno 1.0 started after 1.1 still shows the person's own dashboard; after
+  their first edit in 1.1 it shows its defaults (and an edit in 1.0 writes only the old key, which 1.1 ignores while the
+  new key exists). Dyno 1.0 never meets a version 2 value, so ADR 0035's newer path is not needed for it; it stays for
+  later schema versions.
 - The upgrade step stays while a supported Dyno release can have written version 1 (all of 1.x); removing it later is a
   normal change that makes such layouts fall back to the defaults with a note.
 - **Revision.** `LayoutView` gains `revision: u64` (in memory, bumped by every applied edit and every reload). A preview
@@ -183,8 +202,8 @@ Grafana's edit state do the same. In edit mode:
 - Every edit is applied and saved at once (ADR 0035: no draft); Undo and Redo cover the session (D4).
 - Widget bodies are `inert` (no focus or clicks inside); each frame shows a ⋯ button in its head and a resize grip in its
   bottom-right corner (two diagonal strokes in `--pd-text-muted`); on hover and focus the right and bottom edges show a
-  7 × 28 px handle that sits on the border, half outside (`--pd-surface-3` with a `--pd-border-control` outline, so it
-  reads as a handle, not a scroll thumb).
+  split-view grip, two short 1.5 px strokes parallel to the edge (16 px long, 5 px apart, `--pd-text-muted`), the same
+  stroke language as the corner grip, never a filled pill that reads as a scroll thumb.
 - The add sheet is the chooser's "Add a widget" list in a side sheet (`pd-widget-chooser` in its `add` mode for grid
   surfaces; the "Shown" list and its reorder are not shown, the grid is the editor). Add puts the widget at its default
   size at the first free place in reading order, selects it and scrolls it into view.
@@ -200,8 +219,9 @@ Grafana's edit state do the same. In edit mode:
   (`{ surface, revision, gesture: Place { id, rect }, seq }`). The reply's rectangles are drawn: the **placeholder** (the
   snapped target: `--pd-accent-tint` fill, 1.5 px dashed `--pd-accent` outline, radius 10), the **snapping
   guides** (1 px dashed lines in `--pd-snap-guide`, the accent at 70 %, continuing the placeholder's left and right edges
-  across the board, above the other widgets and below the lifted one), and every other widget at its previewed place (FLIP with `transform`, 160 ms, `--pd-ease-move`). Replies
-  older than the latest `seq` are dropped.
+  across the board **behind** the other widgets, so they show in the gaps and in empty space and never cross a widget's
+  text), and every other widget at its previewed place (FLIP with `transform`, 160 ms, `--pd-ease-move`). Replies older
+  than the latest `seq` are dropped.
 - **Resize**: from the corner grip or an edge handle; the frame's size follows the pointer, a **size chip** next to the
   handle says "8 × 7" (columns by rows), and the preview's snapped rectangle (clamped to the kind's rule by the engine) is
   the placeholder. At a limit the chip says "Largest size" or "Smallest size".
@@ -227,20 +247,35 @@ Grafana's edit state do the same. In edit mode:
   the kind's rule; neighbours are pushed down as with a pointer resize.
 - **Delete** or **Backspace** removes the widget (undo toast). ⌘Z / ⇧⌘Z undo and redo. **Escape** leaves edit mode when
   no gesture is active (edits are already saved).
-- The ⋯ menu lists the same actions with their keys: Move left, Move right, Move up, Move down, Wider, Narrower, Taller,
-  Shorter, then Options…, then Remove; each item is disabled when the engine says it would not change anything.
+- **Home** and **End** move the widget to the first or the last place in reading order (`GridGesture::ToFirst`,
+  `ToLast`: placed at the top-left or after the last widget at its own size, then settled as in §1), as the chooser's
+  ⌥Home and ⌥End do for a list (`chooser.ts`).
+- The ⋯ menu lists the same actions with their keys: Move left, Move right, Move up, Move down, Move to first, Move to
+  last, Wider, Narrower, Taller, Shorter, then Options…, then Remove. Each item is enabled from the engine's answer, never
+  from UI arithmetic: `LayoutView.moves` maps every placement id to
+  `Moves { left, right, up, down, first, last, wider, narrower, taller, shorter }` (booleans), computed by
+  `paddock-widgets` with every view (each is "would this gesture change the layout", the same function the edit runs;
+  32 placements × 10 gestures are microseconds). A key whose move is false does nothing but announce why.
 - **Announcements** (CDK `LiveAnnouncer`, polite), formatted by the UI from the edit's `Outcome { position, of, after,
   before, size, limit }`: "Memory moved right, after CPU. Position 6 of 15." "Memory resized to 4 by 6." "Memory is
   already at the right edge." "Memory can't get taller: largest size." Pointer drops announce the result the same way.
   Live widget values stay off live regions (ADR 0035 §6).
+- **Screen readers' browse mode.** NVDA and JAWS read a page in browse mode, where arrow keys move the virtual cursor and
+  never reach the page; a focused `role="group"` normally switches them to focus mode, but not reliably. WP-D tests the
+  edit-mode keys with NVDA and JAWS on Windows and VoiceOver on macOS (browse and focus mode, Chrome's WebView2 and
+  WebKit). If arrows do not reach the frame, the fallback, in this order: the edit-mode grid becomes one
+  `role="application"` region whose focused widget is announced through `aria-activedescendant` (focus mode is then
+  automatic; the region's description lists the keys), or the frames use `role="button"` with `aria-describedby` for
+  the keys, which every reader passes keys through after Enter. The menu path works in every mode and is the floor.
 - Hit targets: the ⋯ button 24 × 24; the corner grip a 24 × 24 hit area; edge handles a full-length 8 px strip (pointer
   only, with the keyboard and menu equivalents, WCAG 2.5.8's equivalent exception).
 
 **Measured contrast** (tokens compiled from `ui/projects/paddock-ui/scss`, Dyno accent, 2026-11-03; dark / light): the
-placeholder's dashed outline 6.44 / 5.91 on the window background and 5.43 / 4.71 on its own tint, and under colour-vision
-deficiency (Machado 2009, severity 1) 5.24 / 7.66 protan, 7.25 / 5.12 deutan, 6.45 / 5.85 tritan; the placeholder is told
-apart by its dashed outline, not by colour. Snapping guides 3.54 / 3.72 on surface-1; the corner grip 7.40 / 7.29; the
-edge handle's outline 5.22 / 4.78 on surface-1; the focus ring 6.03 / 6.45 on surface-1; the size chip's text 13.08 /
+placeholder's dashed outline 6.44 / 5.91 on the window background and 5.43 / 4.71 on its own tint, and under
+colour-vision deficiency (Machado 2009, severity 1) 5.24 / 7.66 protan, 7.25 / 5.12 deutan, 6.45 / 5.85 tritan; the
+placeholder is told apart by its dashed outline, not by colour. Snapping guides 3.67 / 3.55 on the window background
+(they are behind the widgets, so the background is what they meet); the corner grip and the edge grips
+(`--pd-text-muted`) 7.40 / 7.29 on surface-1; the focus ring 6.03 / 6.45 on surface-1; the size chip's text 13.08 /
 17.96. Every non-text part is at 3:1 or more (WCAG 1.4.11); WP-B's token test keeps these pairs.
 
 **Reduced motion** (`prefers-reduced-motion: reduce`): no lift scale, no FLIP glide (widgets jump to their new place),
@@ -315,7 +350,7 @@ like the generated TypeScript) and, for any other gesture, places the widget wit
   (CHANGELOG), two tokens (`--pd-widget-row`, `--pd-snap-guide`) and a design guide section.
 - Dyno 1.1: protocol `PROTOCOL_VERSION` 3 → 4 (new edits and the revision); dashboard schema 1 → 2 with the upgrade;
   the dashboard edits in place; the Half/Full toggles and the chooser card above the grid go.
-- Dyno 1.0 after a 1.1 run shows its default dashboard read-only (and keeps the 1.1 layout).
+- Dyno 1.0 after a 1.1 run shows the person's 1.0 dashboard until their first layout edit in 1.1, and its defaults after.
 
 ## Alternatives considered
 
@@ -340,6 +375,9 @@ like the generated TypeScript) and, for any other gesture, places the widget wit
 
 ## Decisions (for the user; recommendations first)
 
+Independent review round 1 (2026-11-03) found each recommendation below sound and recommends it as written; they stay
+recommendations until the user decides.
+
 - **D1. Library: our own grid on the engine, with CDK and Material for the parts they fit (recommended)**, rather than
   angular-gridster2 or gridstack.js: neither has keyboard move and resize or screen-reader support, both keep the layout
   rules in TypeScript, and the engine already owns layouts.
@@ -362,23 +400,25 @@ Order: WP-A's types land first (a compiling skeleton), then WP-A's behaviour and
 after WP-B, WP-D last. WP-A, WP-B, WP-C1 and WP-C2 land on main as one change (rule 43: the shared crate's breaking
 change and its adoption), with Dyno's installer build (rule 54). Estimates in agent-days, reviews excluded.
 
-### WP-A: `crates/paddock-widgets` (implementer, Sonnet; 4 agent-days)
+### WP-A: `crates/paddock-widgets` (implementer, Sonnet; 5 agent-days)
 
 - **Owns:** `crates/paddock-widgets/**`, `ui/projects/paddock-ui/widgets/generated/{widgets.ts,grid-cases.json}`, the
   crate's `crates/README.md` entry.
 - **Build:** §1, §1a, §3, §4 and §5's semantics: `Place`, `Span`, `Cells`, `Rect`, `SizeRule`, `GridGesture`, `Dir`,
-  `settle` (swap, push, compact), `nudge`, `grow`, `derive`, `upgrade::spans_to_cells`, `Catalogue::upgrade`, revision,
-  undo and redo stacks, `Outcome`, `LayoutView` arrangements, `WidgetError::Stale`; the `tauri` feature's `Previews`
-  and its command; `grid-cases.json` from a test.
+  `settle` (swap, push, compact), `nudge`, `grow`, `to_first`, `to_last`, `moves`, `derive`, `upgrade::spans_to_cells`,
+  `Catalogue::upgrade`, revision, undo and redo stacks, `Outcome`, `LayoutView` arrangements, `WidgetError::Stale`; the
+  `tauri` feature's `Previews` and its command; `grid-cases.json` from a test.
 - **Tests:** unit tests for every gesture's success and limit; proptests over random layouts and gestures (no overlap,
-  inside the grid, every size inside its kind's rule, compaction idempotent, gravity holds, deterministic, a swap undone
-  by the reverse nudge, `derive` keeps the design's reading order and has no overlap at 6 and 1 columns); the upgrade
-  of the shipped Dyno 1.0 default and presets, of a hand-written 1.0 layout, of damaged entries; reading a version 2 layout in a
-  version 1 catalogue (newer path); revision mismatch; undo and redo bounds; benches for §7. Coverage ≥ 99 % lines.
+  inside the grid, every size inside its kind's rule, compaction idempotent, gravity holds (no placement can rise one
+  row into a hole), deterministic, `moves` agrees with applying each gesture, a swap undone by the reverse nudge,
+  `derive` keeps the design's reading order and has no overlap at 6 and 1 columns); the upgrade of the shipped Dyno 1.0
+  default and presets, of a hand-written 1.0 layout, of damaged entries; reading a version 2 layout in a version 1
+  catalogue (newer path); the legacy value kept unchanged through reads and dropped by the first edit; Home and End;
+  revision mismatch; undo and redo bounds; benches for §7. Coverage ≥ 99 % lines.
 - **Gates:** `cargo fmt -p paddock-widgets --check`, `cargo clippy -p paddock-widgets --all-targets --all-features -- -D
   warnings`, `cargo test -p paddock-widgets --all-features`, own `CARGO_TARGET_DIR`, `CARGO_BUILD_JOBS=2`.
 
-### WP-B: `@decryp7/paddock-ui/widgets`, gallery, tokens, design guide (implementer, Sonnet; 5 agent-days)
+### WP-B: `@decryp7/paddock-ui/widgets`, gallery, tokens, design guide (implementer, Sonnet; 7 agent-days)
 
 - **Owns:** `ui/projects/paddock-ui/widgets/**` (except `generated/`), the gallery's widgets section and its e2e spec,
   the two tokens (one declared line each in `_tokens.scss`, with the token test), `docs/design-guide.md` §2 and §8 ("Widget
@@ -394,7 +434,7 @@ change and its adoption), with Dyno's installer build (rule 54). Estimates in ag
   themes and in `data-contrast="more"`, the 32-widget frame-time spec. Components 100 %.
 - **Gates:** `cd ui && npm run test:tokens && npm run lint && npm test && npm run build && npx playwright test --project=gallery`.
 
-### WP-C1: Dyno engine, protocol, agent and app adapter (implementer, Sonnet; 2 agent-days)
+### WP-C1: Dyno engine, protocol, agent and app adapter (implementer, Sonnet; 3 agent-days)
 
 - **Owns:** `apps/dyno/crates/dyno-core/src/widgets/{dashboard.rs,mod.rs,generated.rs}`, `protocol.rs` (the widget
   requests and `PROTOCOL_VERSION`), the agent's widget handler, `app/src-tauri` command registration for `Previews`.
@@ -406,8 +446,8 @@ change and its adoption), with Dyno's installer build (rule 54). Estimates in ag
 
 | Kind | Default (w × h) | Widths | Heights |
 |---|---|---|---|
-| Health | 6 × 10 | 3-12 | 5-14 |
-| Why slow | 6 × 10 | 4-12 | 6-14 |
+| Health | 6 × 9 | 3-12 | 5-14 |
+| Why slow | 6 × 9 | 4-12 | 6-14 |
 | Issues | 3 × 6 | 3-6 | 4-12 |
 | CPU | 6 × 6 | 4-12 | 5-10 |
 | Graph | 3 × 4 | 2-12 | 4-8 |
@@ -421,7 +461,7 @@ change and its adoption), with Dyno's installer build (rule 54). Estimates in ag
 | Biggest consumers | 6 × 7 | 4-12 | 5-12 |
 | Disk space trend | 12 × 6 | 6-12 | 4-10 |
 
-### WP-C2: Dyno UI (implementer, Sonnet; 3 agent-days)
+### WP-C2: Dyno UI (implementer, Sonnet; 4 agent-days)
 
 - **Owns:** `apps/dyno/app/src/app/features/{dashboard,widgets}/**`, the dashboard panels' card chrome, the mock backend's
   widget previews.
@@ -432,14 +472,18 @@ change and its adoption), with Dyno's installer build (rule 54). Estimates in ag
 - **Tests:** each kind at its minimum and default with no overflow (both themes, three densities), edit mode end to end
   against the mock backend's golden cases.
 
-### WP-D: end-to-end, screenshots, real-app smoke (implementer, Sonnet; 1.5 agent-days)
+### WP-D: end-to-end, screenshots, real-app smoke, screen readers (implementer, Sonnet; 2.5 agent-days)
 
 - Playwright against the mock: enter edit mode, drag, resize, keyboard move and resize, undo and redo, add, remove,
   narrow window; screenshots for the docs in both themes; the real app on macOS and Windows: a 1.0 layout upgraded on
   first start, a drag with previews from the real engine, the preview round-trip measurement (§7), a 1.0 downgrade check
-  in the local VM.
+  in the local VM (1.0 shows the person's layout after a 1.1 start, its defaults after a 1.1 edit). Screen readers: NVDA
+  and JAWS on the Windows VM and VoiceOver on macOS, in browse and focus mode, every edit-mode key and the menu path;
+  the result decides §5's fallback before the UI lands.
 
-**Total: 15.5 agent-days**, plus the independent reviews (ER-23 for the mock-ups and the screenshots; code review per
+**Total: 21.5 agent-days** (revised from 15.5 after review round 1: the `moves` map and the two extra gestures, the
+legacy key, the screen-reader matrix and its possible fallback, and the measured default sizes were not in the first
+estimate), plus the independent reviews (ER-23 for the mock-ups and the screenshots; code review per
 WP).
 
 ## Research (sources and dates)

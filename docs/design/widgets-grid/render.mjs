@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Renders the widget grid mock-up (family ADR 0044, Dyno 1.1): compiles the family tokens from
+// Renders the widget grid mock-up (family ADR 0044, Dyno 1.1): compiles the family tokens and the Material bridge from
 // ui/projects/paddock-ui/scss (so the mock-up always shows the current tokens and no compiled copy is committed), copies the
-// page next to them in a temporary folder, and shoots every <figure id="f-..."> at 2x in the
-// light and dark schemes into renders/.
+// page next to them in a temporary folder, and shoots every <figure id="f-..."> at 2x in the light and dark schemes into
+// renders/.
 //
 //   npm ci                      # once, at the repository root (sass and @playwright/test come from the ui workspace)
 //   node docs/design/widgets-grid/render.mjs [--open]
@@ -22,7 +22,8 @@ const sass = require('sass');
 const { chromium } = require('@playwright/test');
 
 const work = mkdtempSync(join(tmpdir(), 'widgets-grid-mock-'));
-const css = sass.compile(join(root, 'ui/projects/paddock-ui/scss/entry-tokens.scss'), { style: 'expanded' }).css;
+// The tokens and the Material bridge (the --mat-* component tokens, e.g. the disabled outlined button), as the apps load them.
+const css = sass.compileString("@use 'tokens';\n@use 'material';", { loadPaths: [join(root, 'ui/projects/paddock-ui/scss')], style: 'expanded' }).css;
 writeFileSync(join(work, 'tokens.generated.css'), css);
 copyFileSync(join(here, 'mock.html'), join(work, 'mock.html'));
 const page = join(work, 'mock.html');

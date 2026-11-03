@@ -58,11 +58,12 @@
   .page-head p { margin: 0; color: var(--pd-text-muted); }
 
   /* ---------------- buttons ---------------- */
-  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--pd-button-height); padding: 0 12px; border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-strong); background: var(--pd-surface-1); white-space: nowrap; font-weight: var(--pd-weight-medium); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--pd-button-height); padding: 0 12px; border-radius: var(--pd-radius-control); border: 1px solid var(--mat-button-outlined-outline-color, var(--pd-border-strong)); background: var(--pd-surface-2); white-space: nowrap; font-weight: var(--pd-weight-medium); }
   .btn.primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
   .btn.ghost { border-color: transparent; background: none; }
   .btn.icon { width: var(--pd-button-height); padding: 0; justify-content: center; }
-  .btn[disabled] { color: var(--pd-text-subtle); border-color: var(--pd-hairline); background: none; }
+  /* Material's disabled outlined button, through the Paddock bridge (_material.scss): subtle label, hairline outline, no fill. */
+  .btn[disabled] { color: var(--mat-button-outlined-disabled-label-text-color); border-color: var(--mat-button-outlined-disabled-outline-color); background: transparent; cursor: default; }
   .btn.ghost[disabled] { border-color: transparent; }
   .vsep { width: 1px; height: 20px; background: var(--pd-hairline); margin: 0 4px; }
 
@@ -77,9 +78,9 @@
   /* ---------------- the grid ---------------- */
   .board { position: relative; }
   /* Column guides: drawn in edit mode only, behind the widgets. */
-  /* Snapping guides: while a widget is dragged or resized, 1 px dashed lines continue the placeholder's edges across the
-     board, above the other widgets and below the lifted one. */
-  .guide { position: absolute; z-index: 4; pointer-events: none; }
+  /* Snapping guides: while a widget is dragged, 1 px dashed lines continue the placeholder's edges across the board, behind
+     the other widgets, so they show in the gaps and empty space and never cross a widget's text. */
+  .guide { position: absolute; z-index: 0; pointer-events: none; }
   .guide.v { top: 0; bottom: 0; width: 0; border-left: 1px dashed color-mix(in srgb, var(--pd-accent) 70%, transparent); }
   .guide.h { left: 0; right: 0; height: 0; border-top: 1px dashed color-mix(in srgb, var(--pd-accent) 70%, transparent); }
 
@@ -93,9 +94,10 @@
   .edit .w { cursor: grab; }
   .w .more { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); border: 0; background: none; }
   .w .grip { position: absolute; right: 3px; bottom: 3px; width: 14px; height: 14px; color: var(--pd-text-muted); }
-  /* Edge handles sit on the border (half outside), shown on hover and focus: a raised pill, not a scroll thumb. */
-  .w .edge-r { position: absolute; right: -4px; top: 50%; width: 7px; height: 28px; margin-top: -14px; border-radius: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-border-control); }
-  .w .edge-b { position: absolute; bottom: -4px; left: 50%; height: 7px; width: 28px; margin-left: -14px; border-radius: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-border-control); }
+  /* Edge handles, shown on hover and focus: a split-view grip (two short parallel strokes along the edge, like the corner
+     grip's strokes), not a filled pill that reads as a scroll thumb. The hit area is an 8 px strip over the whole edge. */
+  .w .edge-r { position: absolute; right: 4px; top: 50%; width: 5px; height: 16px; margin-top: -8px; border-left: 1.5px solid var(--pd-text-muted); border-right: 1.5px solid var(--pd-text-muted); }
+  .w .edge-b { position: absolute; bottom: 4px; left: 50%; height: 5px; width: 16px; margin-left: -8px; border-top: 1.5px solid var(--pd-text-muted); border-bottom: 1.5px solid var(--pd-text-muted); }
   .w.hover { border-color: var(--pd-border-strong); }
   .w.focus { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring, var(--pd-accent)); outline-offset: 2px; }
   .w.lifted { z-index: 5; box-shadow: var(--pd-shadow-3); transform: scale(1.02); cursor: grabbing; border-color: var(--pd-border-strong); }
@@ -123,7 +125,7 @@
   .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); white-space: nowrap; }
   .b-warn { background: var(--pd-warning-tint); color: var(--pd-warning); }
   .b-info { background: var(--pd-info-tint); color: var(--pd-info); }
-  .finding { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--pd-hairline); }
+  .finding { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--pd-hairline); }
   .finding:last-child { border-bottom: 0; }
   .finding .d { grid-column: 1 / 3; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
   .finding .s { grid-row: 1 / 3; grid-column: 3; color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
@@ -196,6 +198,8 @@
     <symbol id="narrower" viewBox="0 0 24 24"><path d="M3 12h6M15 12h6M6 8l4 4-4 4M18 8l-4 4 4 4"/></symbol>
     <symbol id="taller" viewBox="0 0 24 24"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/></symbol>
     <symbol id="shorter" viewBox="0 0 24 24"><path d="M12 3v6M12 15v6M8 6l4 4 4-4M8 18l4-4 4 4"/></symbol>
+    <symbol id="to-top" viewBox="0 0 24 24"><path d="M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5"/></symbol>
+    <symbol id="to-bottom" viewBox="0 0 24 24"><path d="M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5"/></symbol>
     <symbol id="tune" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
     <symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5h10L18 7M9 7V4.5h6V7"/></symbol>
     <symbol id="resize-grip" viewBox="0 0 14 14"><path d="M13 5 5 13M13 9l-4 4"/></symbol>
@@ -205,7 +209,7 @@
 
 <!-- 1. Moving a widget: Battery dragged onto Disk activity's place (same size: the two swap). -->
 <figure id="f-edit-drag"><figcaption>Edit mode, dragging Battery onto Disk activity: the placeholder is the snapped target; Disk activity is previewed in Battery's old place (same size: a swap).</figcaption></figure>
-<!-- 2. Resizing from the corner: Top apps by CPU 6 x 6 to 6 x 8; Recent events pushed down by two rows. -->
+<!-- 2. Resizing from the corner: Top apps by CPU 6 x 6 to 6 x 8; Recent events, History and Disk space trend pushed down by two rows. -->
 <figure id="f-edit-resize"><figcaption>Corner resize with the size chip; the neighbour below is pushed.</figcaption></figure>
 <!-- 3. Keyboard: Disk activity selected, moved right with the arrow key (swapped with Network down), its menu open. -->
 <figure id="f-edit-keyboard"><figcaption>Keyboard focus, the widget menu with its keys, and the announcement.</figcaption></figure>
@@ -239,12 +243,12 @@
       <div><div class="finding"><span class="badge b-warn">${icon('alert', 's14')}Warning</span><span class="truncate">Macintosh HD is 78% full</span><span class="s">−8</span><span class="d truncate">210 GB free of 953 GB; full in about 41 days.</span></div>
       <div class="finding"><span class="badge b-warn">${icon('alert', 's14')}Warning</span><span class="truncate">Not restarted for 12 days</span><span class="s">−6</span><span class="d truncate">An update finishes on restart.</span></div>
       <div class="finding"><span class="badge b-info">${icon('info', 's14')}Info</span><span class="truncate">9 apps start at sign-in</span><span class="s">−4</span><span class="d truncate">The desktop takes 48 s to settle.</span></div></div>` },
-    diag: { title: 'Why is my computer slow?', icon: 'why', body: () => `<div class="diag" style="display:flex;flex-direction:column;gap:10px;height:100%">
+    diag: { title: 'Why is my computer slow?', icon: 'why', body: (width = 999) => `<div class="diag" style="display:flex;flex-direction:column;gap:10px;height:100%">
       <h4>A Rust build is using most of your CPU</h4>
       <div class="issue" style="grid-template-columns:20px minmax(0,1fr)">${icon('cpu', 'muted')}<b>rustc is using 42% CPU</b></div>
       <p>cargo is compiling dyno-core with 6 parallel rustc processes. Everything else waits for a free core; it ends when the build finishes.</p>
-      <p class="lbl">rustc (6) 42% CPU · CPU total 77% · for 6 min · confidence 86%</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="btn">Open Processes</span><span class="btn ghost">Show 3 other possible causes</span></div>
+      ${width < 420 ? '' : `<p class="lbl">rustc (6) 42% CPU · CPU total 77% · for 6 min · confidence 86%</p>`}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="btn">Open Processes</span><span class="btn ghost">${width < 420 ? 'Other causes' : 'Show 3 other possible causes'}</span></div>
       <div class="stats"><span>CPU<b>77%</b></span><span>Memory<b>52%</b></span><span>Disk<b>232 MB/s</b></span><span>Busiest<b class="truncate">cargo</b></span></div></div>` },
     issues: { title: 'Issues', icon: 'alert', body: () => `
       <div class="issue"><span class="ic">${icon('trend', 's14')}</span><b class="truncate">Teams memory keeps growing</b><small class="truncate">Memory growth · Microsoft Teams</small></div>
@@ -268,12 +272,12 @@
 
   // The upgraded Overview (ADR 0044 §4): Dyno 1.0's default layout at schema 2. [kind, x, y, w, h]
   const L0 = [
-    ['health', 0, 0, 6, 10], ['diag', 6, 0, 6, 10],
-    ['issues', 0, 10, 3, 6], ['cpu', 3, 10, 6, 6], ['memory', 9, 10, 3, 6],
-    ['disk', 0, 16, 3, 4], ['net', 3, 16, 3, 4], ['gpu', 6, 16, 3, 4], ['battery', 9, 16, 3, 4],
-    ['topcpu', 0, 20, 6, 6], ['topmem', 6, 20, 6, 6],
-    ['events', 0, 26, 6, 7], ['consumers', 6, 26, 6, 7],
-    ['history', 0, 33, 12, 8], ['disktrend', 0, 41, 12, 6],
+    ['health', 0, 0, 6, 9], ['diag', 6, 0, 6, 9],
+    ['issues', 0, 9, 3, 6], ['cpu', 3, 9, 6, 6], ['memory', 9, 9, 3, 6],
+    ['disk', 0, 15, 3, 4], ['net', 3, 15, 3, 4], ['gpu', 6, 15, 3, 4], ['battery', 9, 15, 3, 4],
+    ['topcpu', 0, 19, 6, 6], ['topmem', 6, 19, 6, 6],
+    ['events', 0, 25, 6, 7], ['consumers', 6, 25, 6, 7],
+    ['history', 0, 32, 12, 8], ['disktrend', 0, 40, 12, 6],
   ];
   const with_ = (base, changes) => base.map((r) => (changes[r[0]] ? [r[0], ...changes[r[0]]] : r));
 
@@ -285,7 +289,7 @@
     const k = K[kind];
     const tools = edit ? `<button class="more" aria-label="More for ${k.title}">${icon('more')}</button>` : '';
     const handles = edit ? `<svg class="grip" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><use href="#resize-grip"/></svg>${grips === 'all' ? '<i class="edge-r"></i><i class="edge-b"></i>' : ''}` : '';
-    return `<section class="w ${cls}" style="${px(r)};${style}" aria-label="${k.title}"><div class="w-head">${icon(k.icon)}<span class="t truncate">${k.title}</span>${tools}</div><div class="w-body">${k.body()}</div>${handles}</section>`;
+    return `<section class="w ${cls}" style="${px(r)};${style}" aria-label="${k.title}"><div class="w-head">${icon(k.icon)}<span class="t truncate">${k.title}</span>${tools}</div><div class="w-body">${k.body(r.width)}</div>${handles}</section>`;
   }
 
   function board(layout, { cols = 12, width, edit = false, rows = 60, guide = null, extra = '', per = {} } = {}) {
@@ -298,7 +302,7 @@
     }
     const items = layout.map(([kind, x, y, w, h]) => frame(kind, g.rect(x, y, w, h), { edit, ...(per[kind] || {}) })).join('');
     const height = rows * (ROW + GAP) - GAP;
-    return { html: `<div class="board${edit ? ' edit' : ''}" style="width:${width}px;height:${height}px">${items}${guides}${extra}</div>`, g };
+    return { html: `<div class="board${edit ? ' edit' : ''}" style="width:${width}px;height:${height}px">${guides}${items}${extra}</div>`, g };
   }
 
   const NAV = [['dashboard', 'Dashboard'], ['processes', 'Processes'], ['why', 'Why slow'], ['gauge', 'Throttling'], ['alert', 'Issues'], ['disk', 'Disk map'], ['network', 'Network'], ['trend', 'Counters'], ['bell', 'Alarms'], ['reports', 'Reports'], ['health', 'Health'], ['settings', 'Diagnostics']];
@@ -319,12 +323,12 @@
   // ---------------------------------------------------------------- 1. drag (1920 x 1080 window; the board is 1,440 px, the family maximum)
   {
     const W = 1440;
-    const preview = with_(L0, { disk: [9, 16, 3, 4] }).filter((r) => r[0] !== 'battery');
+    const preview = with_(L0, { disk: [9, 15, 3, 4] }).filter((r) => r[0] !== 'battery');
     const g = geo(12, W);
-    const ph = g.rect(0, 16, 3, 4);
-    const lifted = g.rect(0, 16, 3, 4); lifted.left += 38; lifted.top -= 22;
+    const ph = g.rect(0, 15, 3, 4);
+    const lifted = g.rect(0, 15, 3, 4); lifted.left += 38; lifted.top -= 22;
     const extra = `<div class="ph" style="${px(ph)}"></div>` + frame('battery', lifted, { edit: true, cls: 'lifted' }) + cursor(lifted.left + 150, lifted.top + 18);
-    const b = board(preview, { width: W, edit: true, rows: 24, guide: { rect: [0, 16, 3, 4], v: true }, extra, per: { disk: { cls: 'moved' } } });
+    const b = board(preview, { width: W, edit: true, rows: 24, guide: { rect: [0, 15, 3, 4], v: true }, extra, per: { disk: { cls: 'moved' } } });
     const inner = head + editbar + b.html;
     document.getElementById('f-edit-drag').insertAdjacentHTML('afterbegin', windowFrame(1920, 1080, `<div style="max-width:1440px">${inner}</div>`));
   }
@@ -332,28 +336,30 @@
   // ---------------------------------------------------------------- 2. resize (board crop, scrolled to rows 15-36)
   {
     const W = 1440;
-    const layout = with_(L0, { topcpu: [0, 20, 6, 8], events: [0, 28, 6, 7] });
+    const layout = with_(L0, { topcpu: [0, 19, 6, 8], events: [0, 27, 6, 7], history: [0, 34, 12, 8], disktrend: [0, 42, 12, 6] });
     const g = geo(12, W);
-    const r = g.rect(0, 20, 6, 8);
+    const r = g.rect(0, 19, 6, 8);
     const live = { ...r, height: r.height - 22 };   // the frame follows the pointer; the placeholder is snapped
     const extra = `<div class="ph" style="${px(r)}"></div>` + frame('topcpu', live, { edit: true, cls: 'resizing', grips: 'all' })
       + `<span class="chip" style="left:${live.left + live.width - 40}px;top:${live.top + live.height + 10}px">6 × 8</span>` + cursor(live.left + live.width - 6, live.top + live.height - 6, 'resize');
-    const b = board(layout.filter((x) => x[0] !== 'topcpu'), { width: W, edit: true, rows: 40, extra, per: { topmem: { cls: 'hover', grips: 'all' } } });
-    document.getElementById('f-edit-resize').insertAdjacentHTML('afterbegin', `<div class="crop" style="width:${W + 48}px;height:760px"><div style="margin-top:${-16 * 40 + 16}px">${b.html}</div></div>`);
+    const b = board(layout.filter((x) => x[0] !== 'topcpu'), { width: W, edit: true, rows: 48, extra, per: { topmem: { cls: 'hover', grips: 'all' } } });
+    document.getElementById('f-edit-resize').insertAdjacentHTML('afterbegin', `<div class="crop" style="width:${W + 48}px;height:850px"><div style="margin-top:${-15 * 40 + 16}px">${b.html}</div></div>`);
   }
 
   // ---------------------------------------------------------------- 3. keyboard (board crop, rows 9-31)
   {
     const W = 1440;
-    const layout = with_(L0, { net: [0, 16, 3, 4], disk: [3, 16, 3, 4] });
+    const layout = with_(L0, { net: [0, 15, 3, 4], disk: [3, 15, 3, 4] });
     const g = geo(12, W);
-    const d = g.rect(3, 16, 3, 4);
+    const d = g.rect(3, 15, 3, 4);
     const mx = d.left + d.width - 236 + 4, my = d.top + 44;
     const menu = `<div class="menu" style="left:${mx}px;top:${my}px" role="menu">
       <div class="mi">${icon('arrow-left')}Move left<span class="k"><kbd>←</kbd></span></div>
       <div class="mi on">${icon('arrow-right')}Move right<span class="k"><kbd>→</kbd></span></div>
       <div class="mi">${icon('arrow-up')}Move up<span class="k"><kbd>↑</kbd></span></div>
       <div class="mi">${icon('arrow-down')}Move down<span class="k"><kbd>↓</kbd></span></div>
+      <div class="mi">${icon('to-top')}Move to first<span class="k"><kbd>Home</kbd></span></div>
+      <div class="mi">${icon('to-bottom')}Move to last<span class="k"><kbd>End</kbd></span></div>
       <div class="msep"></div>
       <div class="mi">${icon('wider')}Wider<span class="k"><kbd>⇧</kbd><kbd>→</kbd></span></div>
       <div class="mi">${icon('narrower')}Narrower<span class="k"><kbd>⇧</kbd><kbd>←</kbd></span></div>
@@ -362,19 +368,19 @@
       <div class="msep"></div>
       <div class="mi">${icon('tune')}Options…</div>
       <div class="mi danger">${icon('trash')}Remove<span class="k"><kbd>⌫</kbd></span></div></div>`;
-    const sr = `<div class="sr" style="position:static;max-width:none;margin-top:12px"><b>${icon('keyboard', 's14')} Not product UI: what a screen reader says after → (polite live region)</b>“Disk activity moved right, after Network down. Position 7 of 15.” Focus stays on Disk activity. Shorter is disabled in the menu: 4 rows is the Graph kind's smallest height.</div>`;
+    const sr = `<div class="sr" style="position:static;max-width:none;margin-top:12px"><b>${icon('keyboard', 's14')} Not product UI: what a screen reader says after → (polite live region)</b>“Disk activity moved right, after Network down. Position 7 of 15.” Focus stays on Disk activity. Shorter is disabled in the menu because the engine's <code>moves</code> for this widget say it cannot get shorter (4 rows is the Graph kind's smallest height).</div>`;
     const b = board(layout, { width: W, edit: true, rows: 34, extra: menu, per: { disk: { cls: 'focus' } } });
-    document.getElementById('f-edit-keyboard').insertAdjacentHTML('afterbegin', `<div class="crop" style="width:${W + 48}px;height:700px"><div style="margin-top:${-10 * 40 + 16}px">${b.html}</div></div>${sr}`);
+    document.getElementById('f-edit-keyboard').insertAdjacentHTML('afterbegin', `<div class="crop" style="width:${W + 48}px;height:760px"><div style="margin-top:${-9 * 40 + 16}px">${b.html}</div></div>${sr}`);
   }
 
   // ---------------------------------------------------------------- 4. narrow (1,000 x 760 window; 736 px board, 6 columns, derived)
   {
     const W = 1000 - 216 - 48;
     const derived = [
-      ['health', 0, 0, 3, 10], ['diag', 3, 0, 3, 10],
-      ['issues', 0, 10, 3, 6], ['cpu', 3, 10, 3, 6],
-      ['memory', 0, 16, 3, 6], ['disk', 3, 16, 3, 4], ['net', 3, 20, 3, 4], ['gpu', 0, 22, 3, 4], ['battery', 3, 24, 3, 4],
-      ['topcpu', 0, 26, 3, 6], ['topmem', 3, 28, 3, 6],
+      ['health', 0, 0, 3, 9], ['diag', 3, 0, 3, 9],
+      ['issues', 0, 9, 3, 6], ['cpu', 3, 9, 3, 6],
+      ['memory', 0, 15, 3, 6], ['disk', 3, 15, 3, 4], ['net', 3, 19, 3, 4], ['gpu', 0, 21, 3, 4], ['battery', 3, 23, 3, 4],
+      ['topcpu', 0, 25, 3, 6], ['topmem', 3, 27, 3, 6],
     ];
     const bar = `<div class="bar"><span class="muted">15 widgets</span><span class="spacer"></span><span class="reason">${icon('info', 's14')}Arranging needs a wider dashboard. Make the window wider or collapse the sidebar.</span><button class="btn" disabled>${icon('edit')} Edit layout</button></div>`;
     const b = board(derived, { cols: 6, width: W, rows: 34 });
