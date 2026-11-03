@@ -865,7 +865,8 @@ export type ErrorCode =
   | 'timeout'
   | 'busy'
   | 'needsConsent'
-  | 'internal';
+  | 'internal'
+  | 'stale';
 
 /** What every failed backend call rejects with. */
 export interface CommandError {

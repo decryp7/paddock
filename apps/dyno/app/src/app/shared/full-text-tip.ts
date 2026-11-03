@@ -24,7 +24,8 @@ export class FullTextTip {
   private sync(): void {
     // While a menu is open (a row's context menu, say) the pointer's tooltips stay shut, so Escape closes the menu and nothing else.
     const menuOpen = document.querySelector('.mat-mdc-menu-panel') !== null;
-    const clipped = this.el.scrollWidth > this.el.clientWidth;
+    // Clipped across (an ellipsis) or down (a line clamp).
+    const clipped = this.el.scrollWidth > this.el.clientWidth || this.el.scrollHeight > this.el.clientHeight;
     this.tip.message = clipped && !menuOpen ? (this.dyFullText() ?? '') : '';
   }
 }

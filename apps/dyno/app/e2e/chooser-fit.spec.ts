@@ -1,14 +1,17 @@
 import { expect, test } from '@decryp7/paddock-e2e';
 
 /**
- * The "Add a widget" list shows every row whole: no row is cut through its description and the list does not scroll inside the page
- * (a nested scroll with a half row at its foot was easy to miss and read as a clipped list). Waits are on conditions, never sleeps.
+ * The "Add a widget" list (the shared chooser in its add mode, in the dashboard's side sheet) shows every row whole: no row is cut
+ * through its description and the list does not scroll inside the sheet's page area. Waits are on conditions, never sleeps.
  */
-test('the dashboard chooser shows every row of its add list whole', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+test('the dashboard add sheet shows every row of its list whole', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto('/?latency=0#/');
-  await page.getByRole('button', { name: 'Customize dashboard' }).click();
-  const list = page.locator('ul.pd-wc-addlist');
+  await page.getByRole('button', { name: 'Edit layout' }).click();
+  await page.getByRole('button', { name: 'Add widget' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Add a widget' });
+  await expect(sheet).toBeVisible();
+  const list = sheet.locator('ul.pd-wc-addlist');
   await expect(list).toBeVisible();
   await expect(list.locator('li')).not.toHaveCount(0);
   const clipped = await list.evaluate((ul) => {
@@ -21,6 +24,6 @@ test('the dashboard chooser shows every row of its add list whole', async ({ pag
     };
   });
   expect(clipped.rows).toBeGreaterThan(8);
-  expect(clipped.scrolls, 'the list scrolls inside the page').toBeLessThanOrEqual(1);
+  expect(clipped.scrolls, 'the list scrolls inside the sheet').toBeLessThanOrEqual(1);
   expect(clipped.rowsOutside, 'a row is cut by the list box').toBe(0);
 });

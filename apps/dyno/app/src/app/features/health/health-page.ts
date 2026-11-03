@@ -31,7 +31,11 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
         </div>
       </header>
 
-      <dy-health-hero />
+      <section class="card" aria-label="Health score">
+        <dy-async [loaded]="store.report() !== null" [error]="store.reportError()" [empty]="false" what="health score" [rows]="3" (retry)="store.loadReport()">
+          <div class="hero-body"><dy-health-hero /></div>
+        </dy-async>
+      </section>
 
       <section class="card" aria-label="Start-up items">
         <div class="card-head">
@@ -60,6 +64,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
   styles: `
     :host { display: block; }
     .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
+    .hero-body { padding: var(--sp-5); }
     .tablewrap { margin: 0 var(--sp-4) var(--sp-3); }
     .two { display: grid; min-width: 0; line-height: 1.25; }
     .two > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

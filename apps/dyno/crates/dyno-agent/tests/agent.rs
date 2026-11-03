@@ -777,6 +777,14 @@ fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
     h.running.as_ref().unwrap().shared.clone()
 }
 
+/// The code the agent refused a request with.
+fn ask_code(peer: &BodyPeer<Message>, request: Request) -> dyno_core::protocol::ErrorCode {
+    match peer.call(Message::Request(Box::new(request)), Duration::from_secs(15)) {
+        Ok(Message::Reply(r)) => (*r).expect_err("the request is refused").code,
+        other => panic!("not a reply: {other:?}"),
+    }
+}
+
 fn alarm_rules(peer: &BodyPeer<Message>) -> Vec<String> {
     let Reply::Alarms(list) = ask(
         peer,
@@ -1282,7 +1290,7 @@ mod widget_layouts {
         let (_watching, changed) = watcher(&h);
         let peer = h.client();
         let edit = SurfaceEdit::Popover(Edit::Remove { id: id("cpu-memory") });
-        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit }).unwrap() else {
+        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit, base_revision: None }).unwrap() else {
             panic!("a layout")
         };
         assert_eq!(popover_ids(&after), ["active-alarms", "disk-space"]);
@@ -1309,7 +1317,7 @@ mod widget_layouts {
             span: None,
             at: None,
         });
-        let e = ask(&peer, Request::EditWidgetLayout { edit }).unwrap_err();
+        let e = ask(&peer, Request::EditWidgetLayout { edit, base_revision: None }).unwrap_err();
         assert!(!e.is_empty() && !e.contains("internal"), "{e}");
         assert_eq!(popover_ids(&view(&peer, DynoSurface::Popover)).len(), 3);
         // Events arrive in order: the first one after a refused edit and a good one is the good one's.
@@ -1317,6 +1325,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1325,6 +1334,77 @@ mod widget_layouts {
             DynoSurface::MenuBar,
             "no change event for the refused edit"
         );
+    }
+
+    #[test]
+    fn an_edit_on_an_old_revision_is_refused_and_a_dashboard_gesture_saves_a_new_revision() {
+        let h = Harness::start();
+        let peer = h.client();
+        let SurfaceView::Dashboard(before) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        let first = before.layout.placements[0].id.clone();
+        let nudge = |revision| Request::EditWidgetLayout {
+            edit: SurfaceEdit::Dashboard(Edit::Arrange {
+                gesture: paddock_widgets::GridGesture::Nudge {
+                    id: first.clone(),
+                    dir: paddock_widgets::Dir::Right,
+                },
+            }),
+            base_revision: Some(revision),
+        };
+        let Reply::WidgetLayout(after) = ask(&peer, nudge(before.revision)).unwrap() else {
+            panic!("a layout")
+        };
+        let SurfaceView::Dashboard(after) = *after else { panic!() };
+        assert_eq!(after.revision, before.revision + 1);
+        let e = ask(&peer, nudge(before.revision)).unwrap_err();
+        assert!(e.contains("another window"), "{e}");
+        assert_eq!(ask_code(&peer, nudge(before.revision)), dyno_core::protocol::ErrorCode::Stale);
+    }
+
+    #[test]
+    fn a_dyno_1_0_dashboard_is_upgraded_at_start_written_at_once_and_logged() {
+        let mut h = Harness::start();
+        h.running.take().unwrap().stop();
+        wait_until_free(&h.dirs);
+        let v1 = serde_json::json!({ "version": 1, "placements": [
+            { "id": "graph", "span": 6, "widget": { "kind": "graph", "metric": "memory" } },
+            { "id": "ring", "span": 6, "widget": { "kind": "ring", "metric": "battery" } },
+        ], "presets": [] });
+        std::fs::write(h.dirs.settings(), serde_json::json!({ "dashboard": v1 }).to_string()).unwrap();
+        let again = Running::start(h.dirs.clone(), h.fake.platform(), Box::new(h.fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(h.dirs.settings()).unwrap()).unwrap();
+        assert_eq!(saved["dashboardGrid"]["version"], 2, "written at once, before any edit");
+        assert_eq!(saved["dashboard"], v1, "Dyno 1.0 still finds its own layout");
+        let peer = connect(&h.dirs).unwrap().0;
+        let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+            panic!("activities")
+        };
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.title.contains("Dashboard layout upgraded") && e.detail.contains("2 placements, 0 dropped")),
+            "{entries:?}"
+        );
+        // The first dashboard edit drops the old value.
+        let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        let edit = SurfaceEdit::Dashboard(Edit::Remove {
+            id: d.layout.placements[0].id.clone(),
+        });
+        ask(
+            &peer,
+            Request::EditWidgetLayout {
+                edit,
+                base_revision: Some(d.revision),
+            },
+        )
+        .unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(h.dirs.settings()).unwrap()).unwrap();
+        assert!(saved["dashboard"].is_null());
+        again.stop();
     }
 
     #[test]
@@ -1338,6 +1418,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1345,6 +1426,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::Popover(Edit::Remove { id: id("disk-space") }),
+                base_revision: None,
             },
         )
         .unwrap();

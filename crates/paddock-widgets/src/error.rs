@@ -2,6 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::grid::{Block, Dir};
+use crate::place::StepsInfo;
+
 ts! {
 /// What a limit counts (typed, so the UI and the messages never parse text).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +85,23 @@ pub enum WidgetError {
         /// The allowed spans.
         allowed: Vec<u8>,
     },
+    /// The size is not one the kind allows.
+    #[error("This widget can be {} columns wide and {} rows tall.", steps_text(.widths), steps_text(.heights))]
+    SizeNotAllowed {
+        /// Allowed widths.
+        widths: StepsInfo,
+        /// Allowed heights.
+        heights: StepsInfo,
+    },
+    /// An arrangement gesture that changes nothing, and why.
+    #[error("{}", block_text(.0))]
+    Blocked(Block),
+    /// The edit was computed on an older revision of the layout (another window edited meanwhile): reload the view.
+    #[error("The layout changed in another window; it was reloaded.")]
+    Stale,
+    /// There is no undone edit to redo.
+    #[error("There is nothing to redo.")]
+    NothingToRedo,
     /// Fewer placements than the surface needs.
     #[error("At least {min} {} needed in the {noun}.", if *.min == 1 { "widget is" } else { "widgets are" })]
     TooFew {
@@ -137,4 +157,29 @@ fn join_spans(spans: &[u8]) -> String {
         .map(u8::to_string)
         .collect::<Vec<_>>()
         .join(" or ")
+}
+
+fn steps_text(s: &StepsInfo) -> String {
+    match s {
+        StepsInfo::Range { min, max } if min == max => min.to_string(),
+        StepsInfo::Range { min, max } => format!("{min} to {max}"),
+        StepsInfo::Only { values } => join_spans(values),
+    }
+}
+
+fn block_text(b: &Block) -> String {
+    match b {
+        Block::Edge(dir) => format!(
+            "Already at the {} edge.",
+            match dir {
+                Dir::Left => "left",
+                Dir::Right => "right",
+                Dir::Up => "top",
+                Dir::Down => "bottom",
+            }
+        ),
+        Block::Largest => "Can't get any larger.".into(),
+        Block::Smallest => "Can't get any smaller.".into(),
+        Block::Unchanged => "Nothing to change.".into(),
+    }
 }

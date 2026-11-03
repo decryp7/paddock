@@ -72,6 +72,7 @@ fn tag_error_code(v: &ErrorCode) -> &'static str {
         ErrorCode::Busy => "Busy",
         ErrorCode::Internal => "Internal",
         ErrorCode::NeedsConsent => "NeedsConsent",
+        ErrorCode::Stale => "Stale",
     }
 }
 
@@ -369,6 +370,7 @@ fn error_code_samples() -> Vec<ErrorCode> {
         Busy,
         Internal,
         NeedsConsent,
+        Stale,
     ]
 }
 
@@ -649,6 +651,7 @@ fn request_samples() -> Vec<Request> {
         },
         Request::EditWidgetLayout {
             edit: widgets::SurfaceEdit::Popover(paddock_widgets::Edit::ResetToDefaults),
+            base_revision: Some(3),
         },
         Request::PopoverValues {
             placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],

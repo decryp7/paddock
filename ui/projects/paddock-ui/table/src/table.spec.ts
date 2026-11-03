@@ -255,6 +255,8 @@ describe('pd-table', () => {
     // No column folds: rows keep one line.
     expect(rowEls(f).some((r) => r.classList.contains('pd-folded'))).toBe(false);
     expect(getComputedStyle(el(f).querySelector('.pd-grid')!).overflow).not.toBe('scroll');
+    // The host says which width its columns are fitted to (an e2e waits for it to equal the drawn width before measuring).
+    expect(el(f).querySelector('pd-table')?.getAttribute('data-fit-width') ?? el(f).getAttribute('data-fit-width')).toBe('320');
   });
 
   it('grows every row to two lines when a column folds a second line below its width (review 2 P1-A)', async () => {

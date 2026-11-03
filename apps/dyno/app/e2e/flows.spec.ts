@@ -135,8 +135,8 @@ test.describe('command palette', () => {
 test.describe('dashboard', () => {
   test('shows live tiles, history and the diagnosis on request', async ({ page }) => {
     await page.goto(url());
-    await expect(page.getByRole('group', { name: 'CPU', exact: true })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Memory', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'CPU', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Memory', exact: true })).toBeVisible();
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
     await page.getByRole('button', { name: 'Check now' }).click();
     await expect(page.getByText('A Rust build is using most of your CPU')).toBeVisible();
@@ -167,16 +167,17 @@ test.describe('dashboard', () => {
 
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
     await page.goto(url('/', '&mock=desktop'));
-    const battery = page.getByRole('group', { name: 'Battery', exact: true });
+    const battery = page.getByRole('region', { name: 'Battery', exact: true });
     await expect(battery.getByText('Not available').first()).toBeVisible();
     await expect(battery.getByText(/no battery/i)).toBeVisible();
   });
 
   test('a failed request shows an inline error with Retry, and Retry recovers', async ({ page }) => {
     await page.goto(url('/', '&fail=history'));
-    const alert = page.getByRole('alert').filter({ hasText: 'asked to fail' }).first();
-    await expect(alert).toBeVisible();
-    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
+    // The widget's frame draws the failure: its title, the cause's hint and Retry.
+    const failed = page.locator('pd-widget-frame').filter({ hasText: 'asked to fail' }).first();
+    await expect(failed).toBeVisible();
+    await expect(failed.getByRole('button', { name: 'Retry' })).toBeVisible();
   });
 
 });
@@ -184,17 +185,17 @@ test.describe('dashboard', () => {
 test.describe('cpu per core', () => {
   test('the tile switches to per-core bars grouped by kind and the choice is remembered', async ({ page }) => {
     await page.goto(url());
-    const tile = page.getByRole('group', { name: 'CPU', exact: true });
+    const tile = page.getByRole('region', { name: 'CPU', exact: true });
     await tile.getByRole('radio', { name: 'Per core' }).click();
     await expect(tile.getByRole('heading', { name: 'Performance cores' })).toBeVisible();
     await expect(tile.getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
     await page.reload();
-    await expect(page.getByRole('group', { name: 'CPU', exact: true }).getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'CPU', exact: true }).getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
   });
 
   test('a uniform CPU shows one plain Cores group', async ({ page }) => {
     await page.goto(url('/', '&mock=uniform'));
-    const tile = page.getByRole('group', { name: 'CPU', exact: true });
+    const tile = page.getByRole('region', { name: 'CPU', exact: true });
     await tile.getByRole('radio', { name: 'Per core' }).click();
     await expect(tile.getByRole('heading', { name: 'Cores', exact: true })).toBeVisible();
     await expect(tile.getByRole('heading', { name: 'Performance cores' })).toHaveCount(0);
@@ -395,7 +396,7 @@ test.describe('counters', () => {
     await page.getByRole('menuitem', { name: 'Add to the dashboard' }).click();
     await expect(page.getByText('Added to the dashboard')).toBeVisible();
     await page.getByRole('link', { name: 'Dashboard' }).first().click();
-    await expect(page.getByRole('group', { name: 'Bytes Sent (en0)' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Bytes Sent (en0)' })).toBeVisible();
   });
 
   test('search finds counters by words, a set charts several at once and an empty search is explained', async ({ page }) => {

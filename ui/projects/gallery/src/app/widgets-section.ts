@@ -20,6 +20,7 @@ import {
   type Placement,
   type Preset,
   type Progress,
+  type Span,
   type SurfaceValues,
   type WidgetState,
 } from '@decryp7/paddock-ui/widgets';
@@ -50,7 +51,7 @@ const kind = (k: string, title: string, summary: string, icon: string, spans: nu
   title,
   summary,
   icon,
-  spans,
+  size: { spans: { spans } },
   maxInstances,
   refresh,
 });
@@ -65,6 +66,8 @@ const CATALOGUE: CatalogueInfo<string, string> = {
     kind('apps', 'Top apps', 'The busiest apps by CPU', 'pd:window', [2]),
   ],
 };
+/** The spans a flow kind allows. */
+const spansOf = (info: KindInfo<string>): readonly number[] => ('spans' in info.size ? info.size.spans.spans : []);
 const place = (id: string, k: string, span = 2, volume?: string): Placement<Sample> => ({ id, span, widget: volume ? { kind: k, volume } : { kind: k } });
 const DEFAULTS: Placement<Sample>[] = [place('alarms', 'alarms'), place('disk', 'disk', 2, 'all'), place('cpu', 'cpu'), place('net', 'net', 1), place('backup', 'backup', 1)];
 
@@ -101,8 +104,13 @@ const STOPPED_VALUES: SurfaceValues<Val, Act> = {
 };
 
 const MINIMAL: Preset<Sample> = { id: 'minimal', name: 'Minimal', builtin: true, placements: [place('alarms', 'alarms'), place('cpu', 'cpu')] };
-const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset<Sample>[] = []): LayoutView<string, Sample, string> => ({
+const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset<Sample>[] = []): LayoutView<string, Sample, Span, string> => ({
   layout: { version: 1, placements, presets },
+  revision: 1,
+  arrangements: [],
+  moves: [],
+  canRedo: false,
+  outcome: null,
   catalogue: CATALOGUE,
   builtinPresets: [MINIMAL],
   notes: [],
@@ -185,12 +193,12 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
           @for (col of columns; track col) {
             @let st = stateOf(row, col);
             @if (st.has) {
-              <div class="wg-cell" [class.wg-cell--half]="info.spans[0] === 1" [attr.data-testid]="'wgt-' + row.kind + '-' + col">
+              <div class="wg-cell" [class.wg-cell--half]="spansOf(info)[0] === 1" [attr.data-testid]="'wgt-' + row.kind + '-' + col">
                 <span class="wg-cap">{{ info.title }} · {{ col }}</span>
                 <pd-widget-frame
                   [title]="info.title"
                   [icon]="info.icon"
-                  [span]="info.spans[0] ?? 2"
+                  [span]="spansOf(info)[0] ?? 2"
                   [state]="st.state"
                   [template]="templateOf(row.kind)"
                   [live]="info.refresh === 'live'"
@@ -330,6 +338,7 @@ export class GalWidgets {
     registerPaddockIcons(inject(MatIconRegistry), inject(DomSanitizer));
   }
 
+  protected readonly spansOf = spansOf;
   protected kindInfo(k: string): KindInfo<string> {
     return CATALOGUE.kinds.find((i) => i.kind === k) as KindInfo<string>;
   }
@@ -354,6 +363,9 @@ export class GalWidgets {
     if (edit === 'undo') {
       next = this.previous ?? now;
       this.previous = null;
+    } else if (edit === 'redo') {
+      // The sample list has one level of undo, no redo.
+      next = now;
     } else if (edit === 'resetToDefaults') {
       this.previous = now;
       next = [...DEFAULTS];
@@ -370,7 +382,7 @@ export class GalWidgets {
       undoable = this.chosen().canUndo;
       nextPresets = presets.filter((p) => p.id !== edit.deletePreset.id);
     } else if ('add' in edit) {
-      const span = edit.add.span ?? this.kindInfo(edit.add.widget.kind).spans[0] ?? 2;
+      const span = edit.add.span ?? spansOf(this.kindInfo(edit.add.widget.kind))[0] ?? 2;
       next.push({ id: `${edit.add.widget.kind}-${++this.count}`, span, widget: edit.add.widget });
       this.previous = null;
     } else if ('remove' in edit) {

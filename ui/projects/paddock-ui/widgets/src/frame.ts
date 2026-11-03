@@ -30,7 +30,7 @@ interface Meta {
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [NgTemplateOutlet, MatIcon, MatProgressBar, MatButton, PdGlyph, PdStatusGlyph],
-  host: { class: 'pd-widget-frame', '[style.grid-column]': '"span " + span()' },
+  host: { class: 'pd-widget-frame', '[class.pd-widget-frame--card]': "variant() === 'card'", '[style.grid-column]': '"span " + span()' },
   template: `
     <section class="pd-w" [class.pd-w--loading]="loading()" [attr.aria-labelledby]="titleId" [attr.aria-busy]="loading() ? 'true' : null">
       <header class="pd-w-head">
@@ -55,7 +55,7 @@ interface Meta {
             <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
           </button>
         } @else {
-          <div class="pd-w-st">
+          <div class="pd-w-st" role="status">
             <pd-status-glyph status="info" [size]="16" />
             <span class="pd-w-t">{{ s.title }}</span>
             <span class="pd-w-d">{{ s.detail }}</span>
@@ -65,7 +65,7 @@ interface Meta {
           </div>
         }
       } @else if (s?.state === 'error') {
-        <div class="pd-w-st pd-w-st--error">
+        <div class="pd-w-st pd-w-st--error" role="alert">
           <pd-status-glyph class="pd-w-bad" status="error" [size]="16" />
           <span class="pd-w-t">{{ s.title }}</span>
           @if (s.cause) {
@@ -99,6 +99,15 @@ interface Meta {
   styles: `
     .pd-widget-frame { display: block; min-width: 0; }
     .pd-w { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); color: var(--pd-text); }
+    .pd-widget-frame--card { height: 100%; }
+    /* The bottom padding clears the grid's corner resize grip (24 px at 4 px from the corner) so it never covers the last line. */
+    .pd-widget-frame--card .pd-w { box-sizing: border-box; height: 100%; padding: var(--pd-space-3) var(--pd-space-3) calc(var(--pd-space-3) + var(--pd-widget-grip-clear, 16px)); overflow: hidden; align-content: start; }
+    /* An inert body (the grid while editing) reads as inactive: a filled primary or accent text button loses its emphasis, so the page's own primary action stays the only one. */
+    .pd-widget-frame[inert] .mat-mdc-unelevated-button:not(:disabled) { background-color: transparent; color: var(--pd-text-muted); }
+    .pd-widget-frame[inert] .mat-mdc-button:not(:disabled), .pd-widget-frame[inert] .pd-w-act { color: var(--pd-text-muted); }
+    /* The other body controls (segmented and toggle buttons, checkboxes, selects, switches) read at reduced emphasis too: the chosen state stays visible (ring, tick, label) at 0.7 so it still clears 3:1. */
+    .pd-widget-frame[inert] :is(.mat-button-toggle-group, .mat-mdc-checkbox, .mat-mdc-select, .mat-mdc-slide-toggle, .mat-mdc-radio-button, select, input) { opacity: 0.7; }
+    .pd-widget-frame[inert] .mat-button-toggle-checked .mat-button-toggle-label-content { color: var(--pd-text-muted); }
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-w-icon.mat-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -140,6 +149,8 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly state = input<WidgetState<V, A> | null | undefined>(null);
   /** The app's template for the kind (`PdWidget.template`). */
   readonly template = input<TemplateRef<PdWidgetContext<V>> | null>(null);
+  /** `tile`: a popup tile that sizes to its content. `card`: fills its grid cell (the widget grid, ADR 0044), head and body clipped to the cell. */
+  readonly variant = input<'tile' | 'card'>('tile');
   /** Columns spanned in the area's grid. */
   readonly span = input(2);
   /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */

@@ -39,6 +39,8 @@ use serde::{Deserialize, Serialize};
 /// - network features (ADR 0031): `Request::{IntelStatus, IntelEdit, GeoSummary, Firewall, ToolOffer, RemoveTool}`,
 ///   `Reply::{Intel, IntelEdited, Geo, Firewall, ToolOffer}`, `JobSpec::{UpdateList, UpdateGeo, RebuildIntel, InstallTool}` and
 ///   `JobOutput::{Intel, Tool}` are new;
+/// - widget grid (ADR 0044): `EditWidgetLayout` gained `base_revision`; `ErrorCode::Stale` is new (the layout views travel as JSON
+///   on the link);
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -502,6 +504,9 @@ pub enum Request {
     EditWidgetLayout {
         /// The edit; its variant names the surface.
         edit: crate::widgets::SurfaceEdit,
+        /// The revision of the view the edit was computed on (`LayoutView.revision`). When it is not the layout's current
+        /// one the edit is refused (another window edited meanwhile) and the app reloads the view. `None`: applied as is.
+        base_revision: Option<u64>,
     },
     /// The popup's values for the widgets that are not live (alarms, disk space, backup, last issue, pinned counters),
     /// from state the agent already keeps. Placements that are not in the popup layout, or are live, are left out.
@@ -956,6 +961,9 @@ pub enum ErrorCode {
     Internal,
     /// The person has to agree first (a benchmark on battery); ask, then send the request again with the consent. Appended.
     NeedsConsent,
+    /// The edit was computed on an older revision of a layout (another window edited meanwhile): reload the view and try
+    /// again.
+    Stale,
 }
 
 /// A failed request.
@@ -1234,6 +1242,7 @@ mod tests {
             },
             Request::EditWidgetLayout {
                 edit: crate::widgets::SurfaceEdit::Popover(paddock_widgets::Edit::ResetToDefaults),
+                base_revision: Some(3),
             },
             Request::PopoverValues {
                 placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],

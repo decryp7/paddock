@@ -78,8 +78,8 @@ import type {
   FirewallView,
   ToolOffer,
 } from './api.types';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
@@ -276,8 +276,14 @@ export interface DynoBackend {
   // Widget layouts (family ADR 0035): the engine owns the layouts, their limits, edits and undo; the UI draws and sends edits.
   /** One surface's layout with its catalogue, built-in presets, notes, `canUndo` and `editable`. */
   widgetLayout(surface: DynoSurface): Promise<SurfaceView>;
-  /** Applies one edit; answers the new view, or rejects with the reason it was refused (the message says what to change). */
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView>;
+  /**
+   * Applies one edit; answers the new view, or rejects with the reason it was refused (the message says what to change).
+   * `baseRevision` is the `revision` of the view the edit was computed on: a layout edited since rejects with code
+   * `stale`, and the caller reads the view again and tries once more.
+   */
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView>;
+  /** What a dashboard arrangement gesture would give on `request.revision` (answered in the app's own process; stores nothing). */
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>>;
   /** The popup's values now (the first paint; later ones are pushed). */
   popoverValues(): Promise<PopoverSurfaceValues>;
   /** The popup's values as they are now, for the Settings preview: asking changes nothing about the popover's visibility or its pushes. */

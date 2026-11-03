@@ -16,9 +16,15 @@ pub const MAX_NAME: usize = 64;
 /// What reading a stored layout found.
 pub struct Read<C: Catalogue> {
     /// The layout to use.
-    pub layout: Layout<C::Widget>,
+    pub layout: Layout<C::Widget, C::Place>,
     /// What was wrong, if anything: one note for a fallback, one for dropped entries.
     pub notes: Vec<Note>,
+    /// The version the stored layout was upgraded from ([`Catalogue::upgrade`]), when it was; the store owner writes
+    /// the upgraded layout at once, under the surface's new key, and logs the upgrade once.
+    pub upgraded: Option<u32>,
+    /// The stored value as read when it was upgraded: kept unchanged under the old key until the first edit, so an
+    /// older app version still finds its own layout ([`Stored::legacy`]).
+    pub legacy: Option<Value>,
     /// A value that could not be read cleanly (damaged, too large or a newer version's), kept as read and written back
     /// unchanged. [`Stored::edit`] replaces a damaged or too-large one; a newer one stays and is never edited.
     pub unread: Option<Value>,
@@ -29,6 +35,8 @@ impl<C: Catalogue> Clone for Read<C> {
         Read {
             layout: self.layout.clone(),
             notes: self.notes.clone(),
+            upgraded: self.upgraded,
+            legacy: self.legacy.clone(),
             unread: self.unread.clone(),
         }
     }
@@ -39,6 +47,7 @@ impl<C: Catalogue> std::fmt::Debug for Read<C> {
         f.debug_struct("Read")
             .field("layout", &self.layout)
             .field("notes", &self.notes)
+            .field("upgraded", &self.upgraded)
             .field("unread", &self.unread)
             .finish()
     }
@@ -46,7 +55,11 @@ impl<C: Catalogue> std::fmt::Debug for Read<C> {
 
 impl<C: Catalogue> PartialEq for Read<C> {
     fn eq(&self, other: &Self) -> bool {
-        self.layout == other.layout && self.notes == other.notes && self.unread == other.unread
+        self.layout == other.layout
+            && self.notes == other.notes
+            && self.upgraded == other.upgraded
+            && self.legacy == other.legacy
+            && self.unread == other.unread
     }
 }
 
@@ -65,6 +78,8 @@ fn unreadable<C: Catalogue>(code: NoteCode, message: String, value: &Value) -> R
     Read {
         layout: Layout::defaults::<C>(),
         notes: vec![Note { code, message }],
+        upgraded: None,
+        legacy: None,
         unread: Some(value.clone()),
     }
 }
@@ -101,6 +116,8 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
         return Read {
             layout: Layout::defaults::<C>(),
             notes: Vec::new(),
+            upgraded: None,
+            legacy: None,
             unread: None,
         };
     }
@@ -127,10 +144,31 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
     {
         return cannot_read::<C>(NoteCode::Damaged, value);
     }
-    let Some(entries) = object.get("placements").and_then(Value::as_array) else {
+    let Some(stored) = object.get("placements").and_then(Value::as_array) else {
         return cannot_read::<C>(NoteCode::Damaged, value);
     };
-    let mut dropped = 0u32;
+    let version = object.get("version").and_then(Value::as_u64).unwrap_or(0);
+    let mut upgraded = None;
+    let mut converted: Option<Value> = None;
+    if version < u64::from(s.schema_version) {
+        let from = u32::try_from(version).unwrap_or(0);
+        match C::upgrade(from, value.clone()) {
+            Ok(next) if next.get("version").and_then(Value::as_u64) != Some(version) => {
+                upgraded = Some(from);
+                converted = Some(next);
+            }
+            Ok(_) => {}
+            Err(_) => return cannot_read::<C>(NoteCode::Damaged, value),
+        }
+    }
+    let source = converted.as_ref().unwrap_or(value);
+    let (Some(object), Some(entries)) = (
+        source.as_object(),
+        source.get("placements").and_then(Value::as_array),
+    ) else {
+        return cannot_read::<C>(NoteCode::Damaged, value);
+    };
+    let mut dropped = u32::try_from(stored.len().saturating_sub(entries.len())).unwrap_or(u32::MAX);
     let mut placements = read_placements::<C>(
         entries,
         s.max_placements as usize,
@@ -162,6 +200,8 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
     Read {
         layout,
         notes,
+        upgraded,
+        legacy: upgraded.map(|_| value.clone()),
         unread: None,
     }
 }
@@ -172,13 +212,13 @@ fn read_placements<C: Catalogue>(
     max: usize,
     counted: Counted,
     dropped: &mut u32,
-) -> Vec<Placement<C::Widget>> {
+) -> Vec<Placement<C::Widget, C::Place>> {
     let scan = max.saturating_mul(2);
     let unread = entries.len().saturating_sub(scan);
     *dropped = dropped.saturating_add(u32::try_from(unread).unwrap_or(u32::MAX));
     let mut parsed = Vec::new();
     for entry in entries.iter().take(scan) {
-        match Placement::<C::Widget>::deserialize(entry) {
+        match Placement::<C::Widget, C::Place>::deserialize(entry) {
             Ok(p) => parsed.push(p),
             Err(_) => *dropped = dropped.saturating_add(1),
         }
@@ -195,14 +235,17 @@ struct PresetShell {
     placements: Vec<Value>,
 }
 
-fn read_presets<C: Catalogue>(list: &[Value], dropped: &mut u32) -> Vec<Preset<C::Widget>> {
+fn read_presets<C: Catalogue>(
+    list: &[Value],
+    dropped: &mut u32,
+) -> Vec<Preset<C::Widget, C::Place>> {
     let s = &C::SURFACE;
     let max = s.max_user_presets as usize;
     let scan = max.saturating_mul(2);
     *dropped =
         dropped.saturating_add(u32::try_from(list.len().saturating_sub(scan)).unwrap_or(u32::MAX));
     let builtin = view::builtin_presets::<C>();
-    let mut out: Vec<Preset<C::Widget>> = Vec::new();
+    let mut out: Vec<Preset<C::Widget, C::Place>> = Vec::new();
     for entry in list.iter().take(scan) {
         let Ok(shell) = PresetShell::deserialize(entry) else {
             *dropped = dropped.saturating_add(1);
@@ -259,28 +302,62 @@ pub(crate) fn clean_name(name: &str) -> String {
 pub struct Stored<C: Catalogue> {
     /// What the last read found.
     pub read: Read<C>,
+    /// Counts up with every applied edit; in memory only. A reload starts a new value (a new `Stored`).
+    revision: u64,
+    /// What the last arrangement edit did, for the view (in memory only).
+    pub(crate) outcome: Option<crate::view::Outcome>,
 }
 
 impl<C: Catalogue> Stored<C> {
     /// A stored field holding `layout`, with no notes. The layout is checked ([`Layout::validate`]): a layout that
     /// breaks a limit is refused with the first problem.
-    pub fn new(layout: Layout<C::Widget>) -> Result<Stored<C>, WidgetError> {
+    pub fn new(layout: Layout<C::Widget, C::Place>) -> Result<Stored<C>, WidgetError> {
         layout.validate::<C>()?;
         Ok(Stored::from_valid(layout))
     }
 
-    fn from_valid(layout: Layout<C::Widget>) -> Stored<C> {
+    /// A stored field holding `layout` at a known revision (a view relayed from the store owner). Checked like
+    /// [`Stored::new`].
+    pub fn at(
+        layout: Layout<C::Widget, C::Place>,
+        revision: u64,
+    ) -> Result<Stored<C>, WidgetError> {
+        let mut stored = Stored::new(layout)?;
+        stored.revision = revision;
+        Ok(stored)
+    }
+
+    fn from_valid(layout: Layout<C::Widget, C::Place>) -> Stored<C> {
         Stored {
             read: Read {
                 layout,
                 notes: Vec::new(),
+                upgraded: None,
+                legacy: None,
                 unread: None,
             },
+            revision: 1,
+            outcome: None,
         }
     }
 
+    /// The revision: a number that changes with every applied edit.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The value the layout was upgraded from, to be written back unchanged under the old key until the first edit.
+    pub fn legacy(&self) -> Option<&Value> {
+        self.read.legacy.as_ref()
+    }
+
+    /// The version the layout was upgraded from, once: the store owner writes the new layout and logs it.
+    pub fn take_upgraded(&mut self) -> Option<u32> {
+        self.read.upgraded.take()
+    }
+
     /// The layout.
-    pub fn layout(&self) -> &Layout<C::Widget> {
+    pub fn layout(&self) -> &Layout<C::Widget, C::Place> {
         &self.read.layout
     }
 
@@ -309,10 +386,45 @@ impl<C: Catalogue> Stored<C> {
         if !self.editable() {
             return Err(WidgetError::NewerLayout);
         }
+        let gesture = match &edit {
+            crate::Edit::Arrange { gesture } => Some(gesture.clone()),
+            _ => None,
+        };
         self.read.layout = crate::apply::<C>(&self.read.layout, edit)?;
         self.read.unread = None;
         self.read.notes.clear();
+        self.read.legacy = None;
+        self.revision += 1;
+        self.outcome = gesture.and_then(|g| view::outcome_of::<C>(&self.read.layout, &g));
         Ok(view::view(self))
+    }
+
+    /// [`Stored::edit`] for an edit computed on revision `base`: [`WidgetError::Stale`] when the layout has changed
+    /// since (another window edited meanwhile), so the caller reloads the view.
+    pub fn edit_at(
+        &mut self,
+        base: u64,
+        edit: crate::Edit<C::Widget>,
+    ) -> Result<ViewOf<C>, WidgetError> {
+        if base != self.revision {
+            return Err(WidgetError::Stale);
+        }
+        self.edit(edit)
+    }
+
+    /// What `gesture` would give on revision `base`, without applying it: the view of the result (its arrangements
+    /// and rectangles are the preview). The stored layout and the revision are untouched. [`WidgetError::Stale`] on
+    /// an older revision. Pure, so the app's own process answers it in microseconds.
+    pub fn preview(
+        &self,
+        base: u64,
+        gesture: crate::GridGesture,
+    ) -> Result<ViewOf<C>, WidgetError> {
+        if base != self.revision {
+            return Err(WidgetError::Stale);
+        }
+        let mut copy = self.clone();
+        copy.edit(crate::Edit::Arrange { gesture })
     }
 }
 
@@ -326,6 +438,8 @@ impl<C: Catalogue> Clone for Stored<C> {
     fn clone(&self) -> Self {
         Stored {
             read: self.read.clone(),
+            revision: self.revision,
+            outcome: self.outcome.clone(),
         }
     }
 }
@@ -356,6 +470,8 @@ impl<'de, C: Catalogue> Deserialize<'de> for Stored<C> {
         let value = Value::deserialize(deserializer)?;
         Ok(Stored {
             read: read::<C>(&value),
+            revision: 1,
+            outcome: None,
         })
     }
 }

@@ -681,6 +681,7 @@ mod saved_items_tests {
             SurfaceEdit::MenuBar(Edit::Remove {
                 id: PlacementId::new("number-2").unwrap(),
             }),
+            None,
         )
         .unwrap();
         let dir = tempfile::tempdir().unwrap();

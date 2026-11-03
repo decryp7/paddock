@@ -50,6 +50,10 @@
   - A menu-bar picture is not set again when only its tooltip changed.
   - Charts animate only their first draw with data. Options are replaced whole on each update, so a live chart (Counters, every 2 s) replayed its entry animation on every poll.
   - Live numbers glide in 6 steps over 300 ms instead of one step per display frame (about 18 repaints per update, every second on the dashboard).
+### Changed
+
+- Dashboard widgets sit on a grid of rectangles (shared `paddock-widgets`, ADR 0044) instead of spans; the dashboard layout is schema 2 and stored under the new settings key `dashboardGrid`. A Dyno 1.0 dashboard is upgraded on the first start (logged once in the activity list, written at once); the 1.0 value stays under the old `dashboard` key until the first dashboard edit in 1.1, so Dyno 1.0 started later still shows the person's layout.
+- Wire (the steward bumps `PROTOCOL_VERSION` to 4 with the other changes): `EditWidgetLayout` has `baseRevision` and a stale one is refused with the new error code `stale` (the UI reads the view again and retries once); a layout view has `revision`, `canRedo`, `arrangements`, `moves` and `outcome`; dashboard placements are `{ id, x, y, w, h, widget }`; `Edit` has `Arrange` and `Redo`; grid gestures, sizes and steps are externally tagged enums and a placement is written field by field in postcard, so views and edits stay plain postcard (no second encoding inside a string; a round-trip test covers every edit variant on every surface). New app command `preview_widget_layout` (answered in the app, from the last view the agent sent). Undo is 20 steps for every layout.
 
 ## [1.0.0] - 2026-10-29
 

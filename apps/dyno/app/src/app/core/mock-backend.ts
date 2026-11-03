@@ -2,9 +2,10 @@ import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { EditOutcome, FirewallView, GeoSummary, IntelEdit, IntelStatus, Measured } from './api.types';
 import { MockIntel } from './mock/intel';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import gridCases from '../../../../../../ui/projects/paddock-ui/widgets/generated/grid-cases.json';
+import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
   Alarm,
@@ -244,6 +245,9 @@ export function applyMockPlatform(search: string, root: HTMLElement): void {
 /** A mock reading as a plain number: the mock reads everything. */
 const num = (m: Measured<number>): number => readValue(m) ?? 0;
 
+/** How many seconds of live samples a new summary subscriber gets first (the live store keeps SPARK_CAPACITY = 60 including the current one). */
+export const LIVE_BACKLOG = 59;
+
 export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
   private readonly latencyMs: number;
@@ -316,7 +320,7 @@ export class MockBackend implements DynoBackend {
     this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
-    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, ...(options.widgets ?? {}) });
+    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
@@ -345,7 +349,10 @@ export class MockBackend implements DynoBackend {
   onLive(detail: LiveDetail, listener: (u: LiveUpdate) => void): Unsubscribe {
     this.liveListeners.set(listener, detail);
     setTimeout(() => {
-      if (this.liveListeners.has(listener)) listener(this.liveUpdate(detail));
+      if (!this.liveListeners.has(listener)) return;
+      // The summary subscriber (the shared live store) opens with the last minute already measured, so its sparklines are full width.
+      if (detail === 'summary') for (const u of this.liveBacklog()) listener(u);
+      listener(this.liveUpdate(detail));
     }, 0);
     this.timer ??= setInterval(() => this.tick(), 1000);
     return () => {
@@ -387,9 +394,20 @@ export class MockBackend implements DynoBackend {
     for (const [listener, detail] of this.liveListeners) listener(detail === 'processes' || !wantsProcesses ? update : { ...update, processes: null, groups: null });
   }
 
+  /** The summary updates of the {@link LIVE_BACKLOG} seconds before the current one, oldest first (time comes from the injected clock). */
+  liveBacklog(): LiveUpdate[] {
+    const t = Math.floor(this.now() / 1000);
+    const out: LiveUpdate[] = [];
+    for (let s = t - LIVE_BACKLOG; s < t; s++) out.push(this.liveUpdateAt(s, 'summary'));
+    return out;
+  }
+
   /** The live sample at the current second. */
   liveUpdate(detail: LiveDetail): LiveUpdate {
-    const t = Math.floor(this.now() / 1000);
+    return this.liveUpdateAt(Math.floor(this.now() / 1000), detail);
+  }
+
+  private liveUpdateAt(t: number, detail: LiveDetail): LiveUpdate {
     const samples = this.samplesAt(t);
     const groups = groupSamples(this.processes, samples);
     const system = this.system(t, samples);
@@ -1250,8 +1268,12 @@ export class MockBackend implements DynoBackend {
     return this.reply('widgetLayout', () => this.widgets.view(surface));
   }
 
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
-    return this.reply('editWidgetLayout', () => this.widgets.edit(edit));
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView> {
+    return this.reply('editWidgetLayout', () => this.widgets.edit(edit, baseRevision ?? null));
+  }
+
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>> {
+    return this.reply('previewWidgetLayout', () => this.widgets.preview(request));
   }
 
   popoverValues(): Promise<PopoverSurfaceValues> {

@@ -133,6 +133,19 @@ describe('diskTrendOption', () => {
   });
 });
 
+describe('diskTrendOption value axis', () => {
+  const day = 24 * 3600 * 1000;
+  it('has three ticks (zero, the middle and the top): a short card never crams five labels', () => {
+    for (const free of [400, 500, 7 * 1024 ** 3, 3]) {
+      const points = [{ at: 0, free }, { at: day, free: free / 2 }];
+      const o = diskTrendOption({ disk: 'C:', total: 1000, points, forecast: 'notFilling' }, LIGHT) as { yAxis: { min: number; max: number; interval: number } };
+      expect(o.yAxis.min).toBe(0);
+      expect(o.yAxis.max).toBeGreaterThanOrEqual(free);
+      expect(o.yAxis.max / o.yAxis.interval).toBe(2);
+    }
+  });
+});
+
 describe('diskTrendOption date axis', () => {
   const day = 24 * 3600 * 1000;
   it('puts its ticks a whole number of days apart, about five across the line and its forecast', () => {

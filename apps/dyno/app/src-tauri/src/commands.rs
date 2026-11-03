@@ -6,6 +6,7 @@ use crate::dto::CommandError;
 use crate::link::AgentLink;
 use crate::shell::Shell;
 use dyno_core::protocol::{Reply, Request};
+use paddock_widgets::{PreviewRequest, Previews};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, State, Webview};
@@ -49,22 +50,63 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
 }
 
+/// The previews' copy of a dashboard view the agent sent, so a drag is answered here and never by the agent (ADR 0044 §6).
+fn record_view(previews: &Previews, reply: &Reply) {
+    if let Reply::WidgetLayout(view) = reply {
+        if let dyno_core::widgets::SurfaceView::Dashboard(view) = view.as_ref() {
+            if !previews.record::<dyno_core::widgets::DashboardCatalogue>(view) {
+                log::warn!(
+                    "The dashboard view could not be recorded for previews (revision {}).",
+                    view.revision
+                );
+            }
+        }
+    }
+}
+
 /// One surface's widget layout (the chooser, the dashboard): the agent's view of it.
 #[tauri::command]
-pub async fn widget_layout(link: State<'_, Arc<AgentLink>>, surface: dyno_core::widgets::DynoSurface) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::WidgetLayout { surface })?))
-        .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+pub async fn widget_layout(
+    link: State<'_, Arc<AgentLink>>,
+    previews: State<'_, Arc<Previews>>,
+    surface: dyno_core::widgets::DynoSurface,
+) -> Result<Value, CommandError> {
+    let (link, previews) = (link.inner().clone(), previews.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let reply = link.call(Request::WidgetLayout { surface })?;
+        record_view(&previews, &reply);
+        to_json(reply)
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
 /// An edit of one surface's widget layout. The agent validates the whole result and saves it; a refused edit answers why.
+/// `base_revision` is the revision of the view the edit was computed on: a layout edited meanwhile refuses it.
 #[tauri::command]
-pub async fn edit_widget_layout(link: State<'_, Arc<AgentLink>>, edit: dyno_core::widgets::SurfaceEdit) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::EditWidgetLayout { edit })?))
-        .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+pub async fn edit_widget_layout(
+    link: State<'_, Arc<AgentLink>>,
+    previews: State<'_, Arc<Previews>>,
+    edit: dyno_core::widgets::SurfaceEdit,
+    base_revision: Option<u64>,
+) -> Result<Value, CommandError> {
+    let (link, previews) = (link.inner().clone(), previews.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let reply = link.call(Request::EditWidgetLayout { edit, base_revision })?;
+        record_view(&previews, &reply);
+        to_json(reply)
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// What an arrangement gesture on the dashboard would give (a drag or a resize in edit mode): the view of the result,
+/// computed here, in the app's process, from the last view the agent sent. Nothing is applied or saved. A revision that
+/// is not the recorded one is refused as stale and the webview reloads the view.
+#[tauri::command]
+pub async fn preview_widget_layout(previews: State<'_, Arc<Previews>>, request: PreviewRequest) -> Result<Value, CommandError> {
+    let reply = previews.preview(&request).map_err(|e| CommandError::bad(e.to_string()))?;
+    serde_json::to_value(reply).map_err(|e| CommandError::internal(format!("The preview could not be written: {e}")))
 }
 
 /// The tray popup has opened and asks for its first paint: it counts as visible from now and its slow widgets are asked for

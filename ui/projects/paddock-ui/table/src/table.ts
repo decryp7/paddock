@@ -155,7 +155,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     PdGlyph,
     PdMiddleText,
   ],
-  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
+  host: { '[attr.data-fit-width]': 'width()', '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
   template: `
     @if (toolbar()) {
     <div class="pd-toolbar">
@@ -531,7 +531,7 @@ export class PdTable<T> {
   protected readonly emptySlot = contentChild(PdTableEmpty);
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
 
-  private readonly width = signal(1024);
+  protected readonly width = signal(1024);
   /** The width of the body's scrollbar in pixels (0 when it does not scroll or the bar overlays). */
   protected readonly gutter = signal(0);
   /** The row to focus once the table has drawn it (a virtual table draws a row a frame after it scrolls there). */

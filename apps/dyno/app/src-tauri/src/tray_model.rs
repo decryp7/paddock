@@ -598,7 +598,7 @@ mod tests {
     use dyno_core::time::Timestamp;
     use dyno_core::widgets::MenuBarCatalogue;
     use dyno_platform::fake::quiet_sample;
-    use paddock_widgets::{assign_ids, Catalogue};
+    use paddock_widgets::{assign_spans, Catalogue};
 
     fn mac_env() -> Env {
         Env {
@@ -656,7 +656,7 @@ mod tests {
         assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Number, &Metric::CpuTotal));
         assert_eq!(default[0].id, "number");
         assert_eq!(default[1].id, "number-2");
-        let s = assign_ids([
+        let s = assign_spans([
             (
                 1,
                 MenuBarItem::VerticalBars {
@@ -706,7 +706,7 @@ mod tests {
             Metric::Temperature,
             Metric::Battery,
         ];
-        let s = assign_ids(metrics.iter().cloned().map(|metric| (1, MenuBarItem::Ring { metric })));
+        let s = assign_spans(metrics.iter().cloned().map(|metric| (1, MenuBarItem::Ring { metric })));
         let specs = items_from_settings(&s);
         assert_eq!(specs.len(), 8);
         let ids: std::collections::HashSet<&str> = specs.iter().map(|i| i.id.as_str()).collect();

@@ -2,7 +2,7 @@
 
 use super::metric::Metric;
 use super::DynoSurface;
-use paddock_widgets::{assign_ids, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
+use paddock_widgets::{assign_spans, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
 use serde::{Deserialize, Serialize};
 
 /// Most menu-bar items (one tray icon each). Every metric can be its own item, in several styles; 32 is the bound the dashboard
@@ -152,7 +152,7 @@ const fn spec(kind: MenuBarKind, title: &'static str, summary: &'static str, ico
         title,
         summary,
         icon,
-        spans: &[1],
+        size: &[1],
         max_instances: MAX_ITEMS,
         refresh: Refresh::Live,
     }
@@ -175,6 +175,7 @@ const KINDS: &[KindSpec<MenuBarKind>] = &[
 impl Catalogue for MenuBarCatalogue {
     type SurfaceId = DynoSurface;
     type Widget = MenuBarItem;
+    type Place = paddock_widgets::Span;
     const SURFACE_ID: DynoSurface = DynoSurface::MenuBar;
     const SURFACE: Surface = Surface {
         noun: "menu bar",
@@ -199,7 +200,7 @@ impl Catalogue for MenuBarCatalogue {
             label: String::new(),
             format: NumberFormat::Stacked,
         };
-        assign_ids([
+        assign_spans([
             (1, number(Metric::CpuTotal)),
             (1, number(Metric::Memory)),
             (1, number(Metric::NetworkDown)),
