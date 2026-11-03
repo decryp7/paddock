@@ -2316,6 +2316,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pacenotes-cover"
+version = "0.1.0"
+dependencies = [
+ "pacenotes-core",
+ "pacenotes-xml",
+ "paddock-testkit",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "pacenotes-engine"
 version = "0.1.0"
 dependencies = [
@@ -2497,8 +2508,10 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-workspace-hack",
  "sysinfo",
+ "thiserror",
  "windows-sys 0.61.2",
 ]
 
