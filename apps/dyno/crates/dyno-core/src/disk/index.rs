@@ -10,6 +10,8 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 
+mod records;
+pub use records::{RecordBounds, RecordDecoder, RecordError, RecordWriter, HEADER_LEN, RECORD_FORMAT, RECORD_LEN};
 mod rings;
 pub use rings::{DiskRings, RingNode, MAX_RINGS, MAX_RING_NODES};
 
