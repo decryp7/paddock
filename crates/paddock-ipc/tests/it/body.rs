@@ -130,9 +130,8 @@ fn peer_options_reach_the_underlying_peer() {
     let (x, _y) = endpoint::pair().unwrap();
     let p = BodyPeer::<Msg>::start(
         Connection::raw(x, FrameLimit::default()),
-        BodyOptions::new("a").peer_options(|o| {
-            let mut o = o;
-            o.max_concurrent_calls = 3;
+        BodyOptions::new("a").calls(0, 5).peer_options(|mut o| {
+            o.push_queue = 3;
             o
         }),
     )

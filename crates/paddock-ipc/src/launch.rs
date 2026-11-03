@@ -53,6 +53,8 @@ pub struct ChildSpec {
     pub current_dir: Option<PathBuf>,
     /// End its process tree when it uses more than this many bytes (proportional memory, `paddock-proc`).
     pub memory_limit: Option<u64>,
+    /// Windows: also make `memory_limit` a hard commit limit of the job object (see `MemoryCap::hard_commit`); ignored elsewhere.
+    pub memory_hard: bool,
     /// Pass its stderr through to ours (default: discarded; an app that keeps child logs captures it itself).
     pub inherit_stderr: bool,
     /// The frame limit of the connection.
@@ -83,6 +85,7 @@ impl ChildSpec {
             lower_priority: false,
             current_dir: None,
             memory_limit: None,
+            memory_hard: false,
             inherit_stderr: false,
             limit: FrameLimit::default(),
             protocol: ProtocolVersion::UNVERSIONED,
@@ -227,7 +230,15 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     }
     let spawned = match spec.memory_limit {
         Some(limit) => {
-            Supervised::spawn_capped(cmd, MemoryCap::new(limit, spec.peer.label.clone()))
+            let cap = MemoryCap::new(limit, spec.peer.label.clone());
+            Supervised::spawn_capped(
+                cmd,
+                if spec.memory_hard {
+                    cap.hard_commit()
+                } else {
+                    cap
+                },
+            )
         }
         None => Supervised::spawn(cmd),
     };

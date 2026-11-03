@@ -131,6 +131,7 @@ fn the_child_gets_its_environment_role_and_memory_watch() {
     s.clean_env = false;
     s.lower_priority = true;
     s.memory_limit = Some(4 << 30);
+    s.memory_hard = true;
     s.current_dir = Some(std::env::temp_dir());
     s.inherit_stderr = true;
     let child = launch(&s, Arc::new(NoCalls)).unwrap();

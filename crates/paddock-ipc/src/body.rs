@@ -64,6 +64,15 @@ impl<B> BodyOptions<B> {
         self
     }
 
+    /// At most `running` incoming calls run at once and `waiting` more wait their turn, in order; past that a call is refused
+    /// with `busy` ([`PeerOptions::max_concurrent_calls`], [`PeerOptions::call_queue`]).
+    #[must_use]
+    pub fn calls(mut self, running: usize, waiting: usize) -> Self {
+        self.peer.max_concurrent_calls = running.max(1);
+        self.peer.call_queue = waiting;
+        self
+    }
+
     /// The options of the underlying peer (concurrency, push queue, clock).
     #[must_use]
     pub fn peer_options(mut self, f: impl FnOnce(PeerOptions) -> PeerOptions) -> Self {
