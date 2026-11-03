@@ -83,6 +83,16 @@ pub enum JobSpec {
     UpdateGeo,
     /// Rebuilds the match index from the user's lists (after an edit).
     RebuildIntel,
+    /// Turns the privileged helper on, repairs, updates or turns it off (ADR 0027).
+    Helper {
+        /// What to do.
+        action: crate::helper_wire::HelperAction,
+    },
+    /// Downloads the pinned tool (the user clicked "Download"), checks it and has the helper install it.
+    InstallTool {
+        /// Which tool.
+        tool: crate::helper_requests::ToolKind,
+    },
 }
 
 impl JobSpec {
@@ -100,6 +110,8 @@ impl JobSpec {
             JobSpec::UpdateList { .. } => JobKind::UpdateList,
             JobSpec::UpdateGeo => JobKind::UpdateGeo,
             JobSpec::RebuildIntel => JobKind::RebuildIntel,
+            JobSpec::InstallTool { .. } => JobKind::InstallTool,
+            JobSpec::Helper { .. } => JobKind::Helper,
         }
     }
 }
@@ -130,6 +142,10 @@ pub enum JobKind {
     UpdateGeo,
     /// Rebuilding the match index of the user's lists.
     RebuildIntel,
+    /// Setting up the privileged helper.
+    Helper,
+    /// Downloading the pinned disk-health tool and handing it to the helper.
+    InstallTool,
 }
 
 impl JobKind {
@@ -147,6 +163,8 @@ impl JobKind {
             JobKind::UpdateList => "Updating a list",
             JobKind::UpdateGeo => "Updating the location databases",
             JobKind::RebuildIntel => "Building the match index",
+            JobKind::InstallTool => "Installing the disk-health tool",
+            JobKind::Helper => "Setting up administrator readings",
         }
     }
 
@@ -164,6 +182,8 @@ impl JobKind {
             JobKind::UpdateList => "update-list",
             JobKind::UpdateGeo => "update-geo",
             JobKind::RebuildIntel => "rebuild-intel",
+            JobKind::InstallTool => "install-tool",
+            JobKind::Helper => "helper",
         }
     }
 
@@ -181,6 +201,8 @@ impl JobKind {
             JobKind::UpdateList,
             JobKind::UpdateGeo,
             JobKind::RebuildIntel,
+            JobKind::Helper,
+            JobKind::InstallTool,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -209,6 +231,10 @@ pub enum JobOutput {
     Software(Box<SoftwareInventory>),
     /// From [`JobSpec::UpdateList`], [`JobSpec::UpdateGeo`] and [`JobSpec::RebuildIntel`]: the lists page after the job.
     Intel(Box<crate::intel_lists::IntelStatus>),
+    /// From [`JobSpec::InstallTool`]: what the helper holds of the tool now.
+    Tool(Box<crate::helper_wire::ToolStatus>),
+    /// From [`JobSpec::Helper`]: the helper as it is now.
+    Helper(Box<crate::helper_wire::HelperStatus>),
 }
 
 #[cfg(test)]

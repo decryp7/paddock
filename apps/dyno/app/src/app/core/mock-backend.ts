@@ -46,6 +46,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -72,6 +73,8 @@ import type {
   FinderQuery,
   GpuReport,
   InventoryFormat,
+  HelperAction,
+  ToolOffer,
   MaintenanceStatus,
   SavedInventory,
   IssuesOverview,
@@ -102,6 +105,8 @@ import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
 import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
+import { mockToolOffer } from './mock/tool';
+import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
@@ -138,6 +143,8 @@ export interface MockOptions {
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
   backup?: MockBackupVariant;
+  /** The helper's state at the start (`?helper=ready`, `off`, `silent`, `foreign`, `outdated`, `missing`, `notIncluded`; default `off`). */
+  helper?: MockHelperVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
   /** Keep the widget layouts in `localStorage` (the browser build; unit tests keep them in memory). */
@@ -170,6 +177,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     widgets: mockWidgetOptionsFromUrl(search),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
     ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
+    ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -180,6 +188,7 @@ const FAIL_TEXT: Readonly<Record<string, string>> = {
   geoSummary: 'Dyno could not read the current connections: the system refused the list of sockets. Try again; if it keeps failing, restart Dyno.',
   firewall: 'The firewall could not be read: the system tool did not answer in time. Try again; if it keeps failing, restart Dyno.',
 };
+const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'missing', 'outdated', 'ready', 'silent', 'foreign'];
 
 const copy = <T>(v: T): T => structuredClone(v);
 
@@ -245,6 +254,8 @@ export class MockBackend implements DynoBackend {
   /** Folder choices the mock was asked to show, for tests. */
   pickedFolders = 0;
   private readonly backupVariant: MockBackupVariant;
+  private helperVariant: MockHelperVariant;
+  private toolInstalled = false;
   private backupCheckedAt: number;
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
@@ -274,6 +285,7 @@ export class MockBackend implements DynoBackend {
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
     this.start = this.now();
     this.backupVariant = options.backup ?? 'mixed';
+    this.helperVariant = options.helper ?? 'off';
     this.backupCheckedAt = this.start - 40 * MIN;
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
     this.activityLog = demoActivity(this.start);
@@ -754,6 +766,20 @@ export class MockBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.reply('inventory', () => mockInventory(this.profile.os));
+  }
+
+  removeTool(): Promise<void> {
+    return this.reply('removeTool', () => {
+      this.toolInstalled = false;
+    });
+  }
+
+  toolOffer(): Promise<ToolOffer> {
+    return this.reply('toolOffer', () => mockToolOffer(this.helperVariant, this.profile.os, this.toolInstalled));
+  }
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.reply('helperStatus', () => mockHelperStatus(this.helperVariant, this.profile.os));
   }
 
   counterObjects(): Promise<CounterObjectList> {
@@ -1394,7 +1420,7 @@ export class MockBackend implements DynoBackend {
     job.timer = setTimeout(() => {
       job.step++;
       if (job.step < this.jobSteps) {
-        this.change(job, { state: 'running', phase: mockPhase(job.status.kind as JobKindSlug, job.step, this.jobSteps - 1) });
+        this.change(job, runningStep(job.status.kind as JobKindSlug, job.step, this.jobSteps - 1));
         this.schedule(job);
         return;
       }
@@ -1402,6 +1428,8 @@ export class MockBackend implements DynoBackend {
       if (problem) this.change(job, { state: 'failed', message: problem });
       else {
         if (job.status.kind === 'refresh-backup') this.backupCheckedAt = this.now();
+        if (job.status.kind === 'install-tool') this.toolInstalled = true;
+        if (job.status.kind === 'helper') this.helperVariant = afterHelperAction((objectOf(job.spec)['helper'] as { action: HelperAction }).action);
         this.change(job, { state: 'done' });
       }
     }, this.jobStepMs);
@@ -1414,6 +1442,7 @@ export class MockBackend implements DynoBackend {
       const folder = (o as { findFiles: { query: FinderQuery } }).findFiles.query.folder;
       return folder.startsWith('/') || /^[A-Za-z]:[\\/]/.test(folder) ? null : 'Give the full path of the folder.';
     }
+    if ('helper' in o && this.fail.has('helperJob')) return 'The permission prompt was declined, so nothing was changed.';
     if ('fileHash' in o) {
       const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
       const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
@@ -1442,6 +1471,8 @@ export class MockBackend implements DynoBackend {
     if ('appUsage' in o) return { appUsage: mockUsage() };
     if ('softwareInventory' in o) return { software: mockSoftware() };
     if ('updateList' in o || 'updateGeo' in o || 'rebuildIntel' in o) return { intel: this.intel.status() };
+    if ('helper' in o) return { helper: mockHelperStatus(this.helperVariant, this.profile.os) };
+    if ('installTool' in o) return { tool: { tool: 'smartmontools', installed: '7.5' } };
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
@@ -1549,7 +1580,7 @@ interface MockJob {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1566,6 +1597,8 @@ const JOB_TITLES: Record<JobKindSlug, string> = {
   'update-list': 'Updating a list',
   'update-geo': 'Updating the location databases',
   'rebuild-intel': 'Building the match index',
+  helper: 'Setting up administrator readings',
+  'install-tool': 'Installing the disk-health tool',
 };
 
 const SPEC_KIND: Record<string, JobKindSlug> = {
@@ -1580,6 +1613,8 @@ const SPEC_KIND: Record<string, JobKindSlug> = {
   updateList: 'update-list',
   updateGeo: 'update-geo',
   rebuildIntel: 'rebuild-intel',
+  helper: 'helper',
+  installTool: 'install-tool',
 };
 
 /** The variant of a job spec as an object (a unit variant is a string on the wire). */
@@ -1606,6 +1641,18 @@ function isActive(s: SuJobSnapshot): boolean {
   return s.state === 'queued' || s.state === 'running';
 }
 
+/** The running status of a job at `step`: its phase, and for the helper's permission prompt the reason Cancel waits. */
+function runningStep(kind: JobKindSlug, step: number, last: number): JobStateFields {
+  const phase = mockPhase(kind, step, last);
+  const prompt = kind === 'helper' && phase.id === 'prompt';
+  return {
+    state: 'running',
+    phase,
+    cancellable: !prompt,
+    notCancellableReason: prompt ? "The system's permission prompt is open; Cancel takes effect when you have answered it." : null,
+  } as JobStateFields;
+}
+
 /** The phase of a mock job at step `step` of `last`: counts that only grow, each kind on its own scale. */
 function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
   const part = step / Math.max(1, last);
@@ -1618,6 +1665,18 @@ function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
       return { id: 'tools', label: 'Checking backup tools', unit: 'items', done: Math.min(2, Math.floor(part * 3)), total: 3 };
     case 'file-hash':
       return { id: 'hash', label: 'Reading the file', unit: 'bytes', done: Math.floor(part * 48_231_424), total: 48_231_424 };
+    case 'helper': {
+      const phase = HELPER_PHASES[Math.min(HELPER_PHASES.length - 1, Math.floor(part * HELPER_PHASES.length))] as { id: string; label: string };
+      return { id: phase.id, label: phase.label, unit: 'items', done: 0, total: null };
+    }
+    case 'install-tool': {
+      const phases = [
+        { id: 'download', label: 'Downloading smartmontools', unit: 'bytes' as const, done: Math.floor(part * 1_508_408), total: 1_508_408 },
+        { id: 'check', label: 'Checking the download', unit: 'items' as const, done: 0, total: 1 },
+        { id: 'install', label: 'Installing it through the helper', unit: 'items' as const, done: 0, total: 1 },
+      ];
+      return phases[Math.min(2, Math.floor(part * 3))]!;
+    }
     default:
       return { id: 'read', label: JOB_TITLES[kind], unit: 'items', done: 0, total: null };
   }

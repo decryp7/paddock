@@ -1,13 +1,11 @@
-//! The three commands of the `dyno-helper` program, parsed once at the edge.
+//! The commands of the `dyno-helper` program, parsed once at the edge.
 //!
 //! - `serve`: the daemon (launchd and systemd run it; a person can run it in a terminal for debugging).
 //! - `service`: the daemon under the Windows Service Control Manager.
-//! - `install --user <uid:N|sid:S-1-…> --agent-exe <path>`: the elevated installer Dyno starts after the user clicked.
+//! - `install --for <uid:N|sid:S-1-…>`: the elevated installer Dyno starts after the user clicked (also the update).
 //! - `uninstall`: removes the helper (elevated, for when the daemon cannot be asked).
 
-use crate::install::{execute, install_plan, uninstall_plan, InstallParams, SystemMachine};
 use dyno_core::helper_wire::HelperUser;
-use std::path::PathBuf;
 
 /// What the program was asked to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,90 +16,73 @@ pub enum Command {
     Service,
     /// Install for one user.
     Install {
-        /// The user.
-        user: HelperUser,
-        /// The agent program that may call.
-        agent_exe: PathBuf,
+        /// The account that turned the helper on (its owner).
+        owner: HelperUser,
     },
     /// Remove the helper.
     Uninstall,
     /// Print the version.
     Version,
+    /// Check that this build can run (release gate: started from the extracted artifact).
+    SelfTest,
 }
 
-const USAGE: &str = "usage: dyno-helper serve | service | install --user <uid:N|sid:S-1-…> --agent-exe <path> | uninstall | --version";
+const USAGE: &str = "usage: dyno-helper serve | service | install --for <uid:N|sid:S-1-…> | uninstall | --self-test | --version";
 
 /// Parses the arguments after the program name.
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut it = args.iter().map(String::as_str);
     match it.next() {
         Some("serve") if it.next().is_none() => Ok(Command::Serve),
-        Some("service") if it.next().is_none() => Ok(Command::Service),
+        Some("service" | "--service") if it.next().is_none() => Ok(Command::Service),
         Some("uninstall") if it.next().is_none() => Ok(Command::Uninstall),
         Some("--version" | "version") if it.next().is_none() => Ok(Command::Version),
-        Some("install") => {
-            let (mut user, mut agent) = (None, None);
-            while let Some(flag) = it.next() {
-                let value = it.next().ok_or_else(|| format!("{flag} needs a value. {USAGE}"))?;
-                match flag {
-                    "--user" if user.is_none() => user = Some(HelperUser::parse(value)?),
-                    "--agent-exe" if agent.is_none() => agent = Some(PathBuf::from(value)),
-                    other => return Err(format!("Unexpected {other}. {USAGE}")),
-                }
-            }
-            match (user, agent) {
-                (Some(user), Some(agent_exe)) => Ok(Command::Install { user, agent_exe }),
-                _ => Err(format!("install needs --user and --agent-exe. {USAGE}")),
-            }
-        }
+        Some("--self-test") if it.next().is_none() => Ok(Command::SelfTest),
+        Some("install") => match (it.next(), it.next(), it.next()) {
+            (Some("--for"), Some(owner), None) => Ok(Command::Install {
+                owner: HelperUser::parse(owner)?,
+            }),
+            _ => Err(format!("install needs --for <owner>. {USAGE}")),
+        },
         _ => Err(USAGE.to_string()),
     }
 }
 
-fn install(user: HelperUser, agent_exe: PathBuf) -> Result<(), String> {
-    #[cfg(unix)]
-    if !crate::sys::is_elevated() {
-        return Err("Installing the helper needs administrator rights; start it from Dyno (Settings > Helper).".into());
+fn report(done: &str, r: &paddock_service::privileged::Report) {
+    for p in &r.phases {
+        println!("{done}: {:?} ({} ms) {}", p.phase, p.ms, p.detail);
     }
-    let agent_exe = std::fs::canonicalize(&agent_exe)
-        .ok()
-        .filter(|p| p.is_file())
-        .ok_or_else(|| format!("{} is not a program.", agent_exe.display()))?;
-    let windows = dyno_platform::elevate::windows_roots();
-    let paths = dyno_platform::elevate::helper_paths();
-    let plan = install_plan(
-        &paths,
-        &windows,
-        &InstallParams {
-            user,
-            agent_exe,
-            version: crate::VERSION.to_string(),
-        },
-    )?;
-    let mut machine = SystemMachine::new()?;
-    if let Err(e) = execute(&mut machine, &plan) {
-        // Leave nothing half installed.
-        let _ = execute(&mut machine, &uninstall_plan(&paths, &windows));
-        return Err(e);
-    }
-    Ok(())
 }
 
-fn uninstall() -> Result<(), String> {
-    #[cfg(unix)]
-    if !crate::sys::is_elevated() {
-        return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
+/// The release gate's probe: nothing is installed, started or changed. It checks that the program can hash itself, that its
+/// paths, configuration, policy and log formats work, and says which API it speaks.
+///
+/// # Errors
+/// What does not work, in words.
+pub fn self_test() -> Result<String, String> {
+    use dyno_core::helper_wire::{HelperUser, HELPER_API};
+    use paddock_service::privileged::{ProtectedFiles, RealFiles};
+    let exe = std::env::current_exe().map_err(|e| format!("own path: {e}"))?;
+    let hash = RealFiles.sha256(&exe).map_err(|e| format!("cannot read itself: {e}"))?;
+    let paths = crate::elevate::helper_paths();
+    if paths.endpoint.is_empty() || paths.config.as_os_str().is_empty() {
+        return Err("the helper's places are empty".into());
     }
-    let mut machine = SystemMachine::new()?;
-    execute(
-        &mut machine,
-        &uninstall_plan(&dyno_platform::elevate::helper_paths(), &dyno_platform::elevate::windows_roots()),
-    )
+    let config = crate::config::HelperConfig::new(HelperUser::Uid(1), crate::VERSION);
+    if crate::config::HelperConfig::parse(&config.to_text()).as_ref() != Ok(&config) {
+        return Err("the configuration does not survive a round trip".into());
+    }
+    crate::policy::parse("others = \"total\"").map_err(|e| format!("policy: {e}"))?;
+    Ok(format!(
+        "dyno-helper {} ok: api {HELPER_API}, sha256 {}",
+        crate::VERSION,
+        hash.chars().take(12).collect::<String>()
+    ))
 }
 
 fn serve() -> Result<(), String> {
     crate::serve::serve(
-        &dyno_platform::elevate::helper_paths(),
+        &crate::elevate::helper_paths(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     )
 }
@@ -113,13 +94,14 @@ pub fn run(command: Command) -> i32 {
             println!("dyno-helper {}", crate::VERSION);
             Ok(())
         }
+        Command::SelfTest => self_test().map(|line| println!("{line}")),
         Command::Serve => serve(),
         #[cfg(windows)]
         Command::Service => crate::winsvc::run_as_service(),
         #[cfg(not(windows))]
         Command::Service => Err("The service command is for Windows; use `serve`.".to_string()),
-        Command::Install { user, agent_exe } => install(user, agent_exe),
-        Command::Uninstall => uninstall(),
+        Command::Install { owner } => crate::setup::install(owner).map(|r| report("install", &r)),
+        Command::Uninstall => crate::setup::uninstall().map(|r| report("uninstall", &r)),
     };
     match result {
         Ok(()) => 0,
@@ -142,17 +124,26 @@ mod tests {
     fn the_commands_parse() {
         assert_eq!(parse(&args(&["serve"])), Ok(Command::Serve));
         assert_eq!(parse(&args(&["service"])), Ok(Command::Service));
+        // The SCM starts the service with the verb paddock-service gives every background program.
+        assert_eq!(parse(&args(&["--service"])), Ok(Command::Service));
         assert_eq!(parse(&args(&["uninstall"])), Ok(Command::Uninstall));
         assert_eq!(parse(&args(&["--version"])), Ok(Command::Version));
+        assert_eq!(parse(&args(&["--self-test"])), Ok(Command::SelfTest));
         assert_eq!(
-            parse(&args(&["install", "--user", "uid:501", "--agent-exe", "/a/dyno-agent"])),
+            parse(&args(&["install", "--for", "uid:501"])),
             Ok(Command::Install {
-                user: HelperUser::Uid(501),
-                agent_exe: PathBuf::from("/a/dyno-agent")
+                owner: HelperUser::Uid(501)
             })
         );
-        // Order of the flags does not matter.
-        assert!(parse(&args(&["install", "--agent-exe", "/a", "--user", "sid:S-1-5-21-1"])).is_ok());
+        assert!(parse(&args(&["install", "--for", "sid:S-1-5-21-1"])).is_ok());
+    }
+
+    #[test]
+    fn the_self_test_passes_without_touching_anything() {
+        let line = self_test().unwrap();
+        assert!(line.contains("ok: api 2"), "{line}");
+        assert_eq!(run(Command::SelfTest), 0);
+        assert_eq!(run(Command::Version), 0);
     }
 
     #[test]
@@ -162,11 +153,10 @@ mod tests {
             vec![],
             vec!["serve", "now"],
             vec!["install"],
+            vec!["install", "--for"],
+            vec!["install", "--for", "root"],
+            vec!["install", "--for", "uid:1", "--for", "uid:2"],
             vec!["install", "--user", "uid:1"],
-            vec!["install", "--user", "root", "--agent-exe", "/a"],
-            vec!["install", "--user", "uid:1", "--user", "uid:2", "--agent-exe", "/a"],
-            vec!["install", "--user"],
-            vec!["install", "--shell", "x", "--user", "uid:1", "--agent-exe", "/a"],
             vec!["rm", "-rf"],
         ] {
             let e = parse(&args(&bad)).unwrap_err();

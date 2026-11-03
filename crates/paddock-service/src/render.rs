@@ -10,6 +10,7 @@
 //!   restart on failure after 10 s, 1 min, 5 min, reset after a day).
 //! - [`nsis_hooks`]: `src-tauri/windows/installer-hooks.nsh` (replaces the three hand-written copies).
 
+use crate::hardening::{SDDL_USERS_MAY_START, Sandbox};
 use crate::spec::{Kind, Restart, ServiceSpec};
 use crate::verbs::Verb;
 use std::fmt::Write as _;
@@ -183,7 +184,9 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
     if let Some(url) = spec.docs_url() {
         let _ = writeln!(o, "Documentation={}", systemd_text(url));
     }
-    if spec.kind() == Kind::SystemService {
+    // A sandboxed service has no network (IPAddressDeny=any), so it waits for none.
+    let sandbox = spec.hardening().and_then(|h| h.systemd_sandbox());
+    if spec.kind() == Kind::SystemService && sandbox.is_none() {
         o.push_str("After=network-online.target\nWants=network-online.target\n");
     }
     o.push_str("\n[Service]\nType=simple\n");
@@ -212,6 +215,9 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
     if let Some(mb) = spec.memory_high_mb() {
         let _ = writeln!(o, "MemoryHigh={mb}M");
     }
+    if let Some(sandbox) = sandbox {
+        systemd_sandbox(&mut o, sandbox);
+    }
     o.push_str("\n[Install]\n");
     let _ = writeln!(
         o,
@@ -222,6 +228,31 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
         }
     );
     o
+}
+
+/// The sandbox keys of a system unit (ADR 0027 §1, systemd.exec(5)): the whole file system read-only but the service's
+/// own folders, no home, a private `/tmp`, no new privileges, only the declared capabilities and socket families, no IP
+/// traffic, system calls of a normal service without mounting, nothing writable and executable, files private by default.
+fn systemd_sandbox(o: &mut String, s: &Sandbox) {
+    o.push_str(
+        "ProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\nNoNewPrivileges=yes\n",
+    );
+    let _ = writeln!(o, "RestrictAddressFamilies={}", s.family_list().join(" "));
+    o.push_str("IPAddressDeny=any\n");
+    if !s.capability_list().is_empty() {
+        let _ = writeln!(o, "CapabilityBoundingSet={}", s.capability_list().join(" "));
+    }
+    o.push_str(
+        "SystemCallFilter=@system-service\nSystemCallFilter=~@mount\nProtectKernelModules=yes\nProtectClock=yes\n\
+         ProtectHostname=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nLockPersonality=yes\n\
+         MemoryDenyWriteExecute=yes\nUMask=0077\n",
+    );
+    if let Some(d) = s.state_directory() {
+        let _ = writeln!(o, "StateDirectory={d}\nStateDirectoryMode=0700");
+    }
+    if let Some(d) = s.runtime_directory() {
+        let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");
+    }
 }
 
 /// Quotes one argument the way the C runtime (`CommandLineToArgvW`) splits it back.
@@ -287,6 +318,10 @@ pub struct ScmConfig {
     pub restart_delays: [Duration; 3],
     /// When earlier failures are forgotten.
     pub reset_after: Duration,
+    /// The only privileges the SCM keeps in the token (empty: the SCM default).
+    pub privileges: Vec<String>,
+    /// The service DACL as SDDL (`None`: the SCM default).
+    pub sddl: Option<String>,
 }
 
 /// The Windows service for `spec` running `exe` (the SCM always starts it with `--service`, see [`Verb::WindowsService`]).
@@ -302,6 +337,14 @@ pub fn scm_config(spec: &ServiceSpec, exe: &str) -> ScmConfig {
             Duration::from_secs(300),
         ],
         reset_after: Duration::from_secs(24 * 3600),
+        privileges: spec
+            .hardening()
+            .map(|h| h.privileges().to_vec())
+            .unwrap_or_default(),
+        sddl: spec
+            .hardening()
+            .filter(|h| h.users_start())
+            .map(|_| SDDL_USERS_MAY_START.to_string()),
     }
 }
 
@@ -325,6 +368,12 @@ pub fn sc_commands(c: &ScmConfig) -> Vec<Vec<String>> {
             c.name.clone(),
             c.description.clone(),
         ]);
+    }
+    if !c.privileges.is_empty() {
+        calls.push(vec![s("privs"), c.name.clone(), c.privileges.join("/")]);
+    }
+    if let Some(sddl) = &c.sddl {
+        calls.push(vec![s("sdset"), c.name.clone(), sddl.clone()]);
     }
     let actions: Vec<String> = c
         .restart_delays

@@ -19,7 +19,7 @@ fn the_helper_access_list_names_system_as_owner_and_the_old_service_list_does_to
     }
     let all = Access::system_for_all_users();
     assert_eq!(all.mode, 0o666);
-    assert!(all.sddl.contains("(D;;GA;;;NU)") && all.sddl.contains("(A;;GRGW;;;IU)"));
+    assert!(all.sddl.contains("(D;;GA;;;NU)") && all.sddl.contains("(A;;0x12019b;;;IU)"));
 }
 
 /// A connected pair; the server end has read one byte, so Windows may impersonate.
@@ -67,7 +67,9 @@ fn the_peer_facts_come_from_the_callers_own_token() {
         raw.account
     );
     let admin = match raw.admin {
-        paddock_ipc::identity::AdminEvidence::Token(admin) => admin,
+        paddock_ipc::identity::AdminEvidence::Token(admin) => {
+            matches!(admin, paddock_ipc::identity::TokenAdmin::Admin { .. })
+        }
         other => panic!("{other:?}"),
     };
     assert!(raw.audit.program_for_log().is_none());
@@ -217,4 +219,40 @@ fn only_system_can_create_a_system_owned_pipe_and_the_first_instance_wins() {
 fn a_connection_error_reads_as_a_missing_service() {
     let e = SystemConnectError::Connect(std::io::Error::other("refused"));
     assert!(e.to_string().contains("could not be reached") && e.to_string().contains("refused"));
+}
+
+#[test]
+fn interactive_users_are_never_granted_the_right_to_create_pipe_instances() {
+    // `GRGW` would map to GENERIC_WRITE, which includes FILE_APPEND_DATA = FILE_CREATE_PIPE_INSTANCE on a pipe.
+    for a in [
+        Access::system_for_all_users(),
+        Access::service_for_interactive_users(),
+    ] {
+        assert!(
+            !a.sddl.contains("GRGW") && !a.sddl.contains("GW"),
+            "{}",
+            a.sddl
+        );
+        assert!(a.sddl.contains("(A;;0x12019b;;;IU)"), "{}", a.sddl);
+    }
+    // 0x12019b has no FILE_APPEND_DATA (0x4) bit.
+    assert_eq!(0x0012_019bu32 & 0x4, 0);
+}
+
+/// A second `CreateNamedPipeW` on a running pipe needs `FILE_CREATE_PIPE_INSTANCE`. The rights the interactive users get are
+/// granted here to the creating account itself, so this process is in the position of such a user: its attempt must be denied.
+#[cfg(windows)]
+#[test]
+fn a_second_instance_of_a_running_pipe_is_refused_to_an_account_with_only_the_interactive_rights() {
+    let name = format!(r"\\.\pipe\paddock-ipc-instance-{}", std::process::id());
+    let access = Access {
+        mode: 0o600,
+        sddl: "D:P(A;;0x12019b;;;OW)".into(),
+    };
+    let _first = paddock_ipc::endpoint::Listener::bind_fixed(&name, &access).unwrap();
+    let second = paddock_ipc::endpoint::Listener::bind_fixed(&name, &access);
+    assert_eq!(
+        second.err().map(|e| e.kind()),
+        Some(std::io::ErrorKind::PermissionDenied)
+    );
 }

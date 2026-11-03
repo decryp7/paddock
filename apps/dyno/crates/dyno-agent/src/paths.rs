@@ -97,6 +97,16 @@ impl Dirs {
         self.root.join("intel-fetch.json")
     }
 
+    /// Where Dyno keeps tools it extracted itself (`tools/smartmontools-<version>/`): its own folder, no administrator rights.
+    pub fn tools(&self) -> PathBuf {
+        self.root.join("tools")
+    }
+
+    /// Where a tool download is staged before the helper gets it (rebuildable, so never user data); the job empties it.
+    pub fn tool_staging(&self) -> PathBuf {
+        self.cache_folder().join("tools")
+    }
+
     /// The user's settings.
     pub fn settings(&self) -> PathBuf {
         self.root.join("settings.json")

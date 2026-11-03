@@ -8,12 +8,18 @@ use dyno_core::helper_requests::{SmartQuery, MAX_SMART_DISKS};
 use dyno_core::ports::PlatformError;
 use dyno_core::smart::{SmartReader, SmartReply, SmartSkip};
 use paddock_jobs::time::Clock;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Duration;
+
+/// How long the scan may take.
+const SCAN_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long one disk may take (ADR 0027 section 5: 20 s per disk).
+const DISK_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Reads SMART through a `smartctl` the helper chose (a protected path, never one a caller named).
 pub struct SmartctlReader {
     smartctl: String,
-    runner: Mutex<Box<dyn ToolRunner>>,
+    runner: Box<dyn ToolRunner>,
     clock: Arc<dyn Clock>,
 }
 
@@ -22,7 +28,7 @@ impl SmartctlReader {
     pub fn new(smartctl: impl Into<String>, runner: Box<dyn ToolRunner>, clock: Arc<dyn Clock>) -> Self {
         SmartctlReader {
             smartctl: smartctl.into(),
-            runner: Mutex::new(runner),
+            runner,
             clock,
         }
     }
@@ -31,10 +37,8 @@ impl SmartctlReader {
 impl SmartReader for SmartctlReader {
     fn read(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
         let started = self.clock.monotonic();
-        // One slot of the account holds this worker for every disk, so the runner stays locked for the whole read.
-        let mut runner = self.runner.lock().unwrap_or_else(|p| p.into_inner());
         let scan_tool = tool(&self.smartctl, &["--scan-open", "-j"]);
-        let scan = runner.run(&scan_tool).inspect_err(|e| {
+        let scan = self.runner.run_tool(&scan_tool, SCAN_TIMEOUT).inspect_err(|e| {
             log::warn!(Tool = self.smartctl.as_str(), Error = e.to_string().as_str(); "smartctl scan did not run to completion");
         })?;
         let cap = usize::from(query.max_disks.min(MAX_SMART_DISKS));
@@ -47,7 +51,7 @@ impl SmartReader for SmartctlReader {
                 args.extend(["-d", k]);
             }
             args.push(&dev.name);
-            let outcome = match runner.run(&tool(&self.smartctl, &args)) {
+            let outcome = match self.runner.run_tool(&tool(&self.smartctl, &args), DISK_TIMEOUT) {
                 Ok(out) => parse_disk(&dev.name, &out.stdout, None).map_err(|e| match e {
                     SmartParseError::NotJson if !out.error.is_empty() => format!("smartctl said: {}", out.error),
                     other => other.to_string(),
@@ -91,18 +95,18 @@ mod tests {
     use crate::runner::{Tool, ToolOutput};
     use paddock_jobs::time::FakeClock;
     use std::collections::VecDeque;
-    use std::time::Duration;
+    use std::sync::Mutex;
 
     struct Script {
-        answers: VecDeque<Result<ToolOutput, PlatformError>>,
+        answers: Mutex<VecDeque<Result<ToolOutput, PlatformError>>>,
         seen: Arc<Mutex<Vec<Tool>>>,
         clock: FakeClock,
     }
     impl ToolRunner for Script {
-        fn run(&mut self, t: &Tool) -> Result<ToolOutput, PlatformError> {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
             self.seen.lock().unwrap().push(t.clone());
             self.clock.advance(Duration::from_secs(2));
-            self.answers.pop_front().expect("an unexpected extra run")
+            self.answers.lock().unwrap().pop_front().expect("an unexpected extra run")
         }
     }
 
@@ -120,7 +124,7 @@ mod tests {
         let clock = FakeClock::new();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let script = Script {
-            answers: answers.into(),
+            answers: Mutex::new(answers.into()),
             seen: seen.clone(),
             clock: clock.clone(),
         };

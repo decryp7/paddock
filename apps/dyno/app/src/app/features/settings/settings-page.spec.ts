@@ -1,6 +1,7 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { SettingsStore } from '../../state/settings.store';
@@ -25,8 +26,8 @@ async function settle(f: ComponentFixture<unknown>) {
 }
 
 async function make() {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
-  TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW });
+  TestBed.configureTestingModule({ providers: [provideIcons(), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(SettingsPage);
   await settle(f);
   const el = f.nativeElement as HTMLElement;
@@ -94,8 +95,8 @@ describe('SettingsPage', () => {
     Element.prototype.scrollIntoView = () => undefined;
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     const anchor = signal<SettingsAnchor | null>({ id: 'popup-widgets', at: 1 });
-    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
-    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }, { provide: SETTINGS_ANCHOR, useValue: anchor }] });
+    const { mock, jobs } = mockWithJobs({ now: () => NOW });
+    TestBed.configureTestingModule({ providers: [provideIcons(), jobsProviders(jobs), { provide: BACKEND, useValue: mock }, { provide: SETTINGS_ANCHOR, useValue: anchor }] });
     const f = TestBed.createComponent(SettingsPage);
     await settle(f);
     await vi.waitFor(() => {

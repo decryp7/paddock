@@ -61,6 +61,7 @@ pub mod stats;
 pub mod threads;
 pub mod throttle;
 pub mod time;
+pub mod tool_offer;
 pub mod toolpath;
 pub mod tray;
 pub mod units;

@@ -487,6 +487,13 @@ pub enum Request {
     GeoSummary,
     /// The firewall of this computer, read-only (answers [`Reply::Firewall`]); sources only the helper can read say so. Appended.
     Firewall,
+    /// Whether the privileged helper is off, running, outdated and so on, with the audit entries this account may read
+    /// (ADR 0027). A query; answers [`Reply::HelperStatus`]. Appended (needs the protocol bump the steward makes).
+    HelperStatus,
+    /// What Settings offers for the disk-health tool (answers [`Reply::ToolOffer`]). Appended (the steward's protocol bump covers it).
+    ToolOffer,
+    /// Removes Dyno's own copy of the disk-health tool (macOS); answers [`Reply::Ok`]. Appended.
+    RemoveTool,
 }
 
 /// Dyno's own cost.
@@ -787,6 +794,10 @@ pub enum Reply {
     Geo(Box<crate::geo::GeoSummary>),
     /// The firewall view.
     Firewall(Box<crate::firewall::FirewallView>),
+    /// The helper's state. Appended.
+    HelperStatus(Box<crate::helper_wire::HelperStatus>),
+    /// The disk-health tool as offered.
+    ToolOffer(Box<crate::tool_offer::ToolOffer>),
 }
 
 /// The inventory report that was written.
@@ -871,6 +882,8 @@ impl Reply {
             Reply::IntelEdited(x) => v(x),
             Reply::Geo(x) => v(x),
             Reply::Firewall(x) => v(x),
+            Reply::ToolOffer(x) => v(x),
+            Reply::HelperStatus(x) => v(x),
         }
     }
 }
@@ -1170,6 +1183,8 @@ mod tests {
             Request::PopoverValues {
                 placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
             },
+            Request::ToolOffer,
+            Request::RemoveTool,
             Request::DiskRings {
                 scan: 1,
                 node: Some(2),
@@ -1210,6 +1225,12 @@ mod tests {
                 os: crate::helper::HelperHost::Macos,
                 sources: vec![crate::firewall::FirewallSource::new(crate::firewall::RuleSource::Pf)],
             })),
+            Reply::ToolOffer(Box::new(crate::tool_offer::smartmontools_offer(
+                crate::helper::HelperHost::Linux,
+                None,
+                false,
+                None,
+            ))),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);

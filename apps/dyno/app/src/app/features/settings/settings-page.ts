@@ -16,6 +16,8 @@ import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
 import { OnlineData } from '../lists/online-data';
 import { IntelStore } from '../../state/intel.store';
+import { HelperCard } from './helper-card';
+import { ToolCard } from './tool-card';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
@@ -26,7 +28,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets, OnlineData],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets, OnlineData, HelperCard, ToolCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -56,6 +58,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <mat-slide-toggle [checked]="d.launchAtLogin" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
               </div>
             </section>
+
+            <dy-helper-card />
+
+            <dy-tool-card />
 
             <section class="card" aria-label="Measuring">
               <h2>Measuring and history</h2>

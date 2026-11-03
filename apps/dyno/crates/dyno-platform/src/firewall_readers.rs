@@ -7,27 +7,31 @@ use crate::runner::{tool, ToolOutput, ToolRunner};
 use dyno_core::firewall::{FirewallReader, FirewallSource};
 use dyno_core::ports::PlatformError;
 use paddock_jobs::time::Clock;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Duration;
 
 const SOCKETFILTERFW: &str = "/usr/libexec/ApplicationFirewall/socketfilterfw";
 const PFCTL: &str = "/sbin/pfctl";
 
+/// How long one firewall tool may take (ADR 0027 section 5: 15 s).
+const TIMEOUT: Duration = Duration::from_secs(15);
+
 struct Runs {
-    runner: Mutex<Box<dyn ToolRunner>>,
+    runner: Box<dyn ToolRunner>,
     clock: Arc<dyn Clock>,
 }
 
 impl Runs {
     fn new(runner: Box<dyn ToolRunner>, clock: Arc<dyn Clock>) -> Self {
         Runs {
-            runner: Mutex::new(runner),
+            runner,
             clock,
         }
     }
 
-    fn run(&self, runner: &mut dyn ToolRunner, program: &str, args: &[&str]) -> Result<ToolOutput, PlatformError> {
+    fn run(&self, program: &str, args: &[&str]) -> Result<ToolOutput, PlatformError> {
         let started = self.clock.monotonic();
-        let out = runner.run(&tool(program, args));
+        let out = self.runner.run_tool(&tool(program, args), TIMEOUT);
         let ms = self.clock.monotonic().saturating_sub(started).as_millis() as u64;
         match &out {
             Ok(o) => log::debug!(Tool = program, Ok = o.ok, Ms = ms; "Firewall tool ran"),
@@ -37,8 +41,8 @@ impl Runs {
     }
 
     /// Runs the tool and insists on a clean exit; the error names the tool and its first stderr line.
-    fn run_ok(&self, runner: &mut dyn ToolRunner, program: &str, args: &[&str], hint: &str) -> Result<String, PlatformError> {
-        let out = self.run(runner, program, args)?;
+    fn run_ok(&self, program: &str, args: &[&str], hint: &str) -> Result<String, PlatformError> {
+        let out = self.run(program, args)?;
         if out.ok {
             Ok(out.stdout)
         } else {
@@ -48,10 +52,6 @@ impl Runs {
                 if out.error.is_empty() { "no message" } else { out.error.as_str() }
             )))
         }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Box<dyn ToolRunner>> {
-        self.runner.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -75,18 +75,17 @@ impl AlfReader {
 
 impl FirewallReader for AlfReader {
     fn read(&self) -> Result<FirewallSource, PlatformError> {
-        let mut r = self.0.lock();
         let hint = "The Application Firewall could not be read.";
-        let global = self.0.run_ok(&mut **r, SOCKETFILTERFW, &["--getglobalstate"], hint)?;
+        let global = self.0.run_ok(SOCKETFILTERFW, &["--getglobalstate"], hint)?;
         let block = self
             .0
-            .run_ok(&mut **r, SOCKETFILTERFW, &["--getblockall"], hint)
+            .run_ok(SOCKETFILTERFW, &["--getblockall"], hint)
             .unwrap_or_default();
         let stealth = self
             .0
-            .run_ok(&mut **r, SOCKETFILTERFW, &["--getstealthmode"], hint)
+            .run_ok(SOCKETFILTERFW, &["--getstealthmode"], hint)
             .unwrap_or_default();
-        let apps = self.0.run_ok(&mut **r, SOCKETFILTERFW, &["--listapps"], hint).unwrap_or_default();
+        let apps = self.0.run_ok(SOCKETFILTERFW, &["--listapps"], hint).unwrap_or_default();
         let v = alf_view(&global, &block, &stealth, &apps).map_err(parse_err)?;
         log_view("Application Firewall", &v);
         Ok(v)
@@ -105,10 +104,9 @@ impl PfReader {
 
 impl FirewallReader for PfReader {
     fn read(&self) -> Result<FirewallSource, PlatformError> {
-        let mut r = self.0.lock();
         let hint = "pf can only be read with administrator rights; turn on administrator readings.";
-        let info = self.0.run_ok(&mut **r, PFCTL, &["-s", "info"], hint)?;
-        let rules = self.0.run_ok(&mut **r, PFCTL, &["-s", "rules"], hint)?;
+        let info = self.0.run_ok(PFCTL, &["-s", "info"], hint)?;
+        let rules = self.0.run_ok(PFCTL, &["-s", "rules"], hint)?;
         let v = pf_view(&info, &rules).map_err(parse_err)?;
         log_view("pf", &v);
         Ok(v)
@@ -133,9 +131,7 @@ impl NftReader {
 
 impl FirewallReader for NftReader {
     fn read(&self) -> Result<FirewallSource, PlatformError> {
-        let mut r = self.runs.lock();
         let json = self.runs.run_ok(
-            &mut **r,
             &self.nft,
             &["-j", "list", "ruleset"],
             "nft needs administrator rights, and may not be installed.",
@@ -150,13 +146,14 @@ impl FirewallReader for NftReader {
 mod tests {
     use super::*;
     use crate::runner::Tool;
+    use std::sync::Mutex;
     use dyno_core::firewall::{FirewallSwitch, RuleSource};
     use paddock_jobs::time::FakeClock;
 
     /// Answers by the arguments, so the test says what each command prints.
     struct Table(Vec<(&'static str, Result<ToolOutput, PlatformError>)>, Arc<Mutex<Vec<String>>>);
     impl ToolRunner for Table {
-        fn run(&mut self, t: &Tool) -> Result<ToolOutput, PlatformError> {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
             let line = format!("{} {}", t.program, t.args.join(" "));
             self.1.lock().unwrap().push(line.clone());
             self.0

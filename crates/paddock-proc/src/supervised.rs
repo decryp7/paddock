@@ -267,12 +267,26 @@ impl Supervised {
         // Not reaped yet, so the pid is still this child's.
         let process = identify(pid);
         #[cfg(windows)]
-        let job = crate::job::Job::assign(
-            &child,
-            cap.as_ref().filter(|c| c.hard_commit).map(|c| c.limit),
-        )
-        .ok()
-        .map(Arc::new);
+        let job = {
+            let hard = cap.as_ref().filter(|c| c.hard_commit).map(|c| c.limit);
+            match crate::job::Job::assign(&child, hard) {
+                Ok(job) => Some(Arc::new(job)),
+                // A hard limit that cannot be set must not become a child without one: the launch fails.
+                Err(e) if hard.is_some() => {
+                    let mut child = child;
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    log::error!(
+                        "The hard memory limit of child {pid} could not be set in its job object, so it was not started: {e}"
+                    );
+                    return Err(std::io::Error::new(
+                        e.kind(),
+                        format!("cannot set the hard memory limit in the child's job object: {e}"),
+                    ));
+                }
+                Err(_) => None,
+            }
+        };
         let shared = Arc::new(Shared::default());
         if process.is_none() {
             log::warn!(

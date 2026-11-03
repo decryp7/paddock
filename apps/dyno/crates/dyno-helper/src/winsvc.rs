@@ -50,7 +50,7 @@ fn serve_until_stopped() -> Result<(), windows_service::Error> {
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
         0,
     ))?;
-    let result = crate::serve::serve(&dyno_platform::elevate::helper_paths(), stop);
+    let result = crate::serve::serve(&crate::elevate::helper_paths(), stop);
     let code = u32::from(result.is_err());
     handle.set_service_status(status(ServiceState::Stopped, ServiceControlAccept::empty(), code))?;
     Ok(())

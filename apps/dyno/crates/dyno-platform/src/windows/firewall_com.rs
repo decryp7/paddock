@@ -79,6 +79,9 @@ fn raw_rule(rule: &INetFwRule) -> RawWinRule {
             application: text(rule.ApplicationName()),
             ports: (!ports.is_empty()).then(|| ports.join("; ")),
             addresses: text(rule.RemoteAddresses()),
+            group: text(rule.Grouping()),
+            service: text(rule.ServiceName()),
+            protocol: rule.Protocol().ok(),
         }
     }
 }

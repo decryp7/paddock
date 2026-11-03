@@ -104,6 +104,9 @@ pub fn parse_alf_apps(text: &str) -> Vec<FirewallRule> {
                     addresses: None,
                     profile: FirewallProfile::All,
                     source: RuleSource::ApplicationFirewall,
+                    group: None,
+                    service: None,
+                    protocol: None,
                 });
             }
         }
@@ -213,6 +216,9 @@ pub fn parse_pf_rules(text: &str) -> Vec<FirewallRule> {
             addresses,
             profile: FirewallProfile::All,
             source: RuleSource::Pf,
+            group: None,
+            service: None,
+            protocol: pf_value(&tokens, "proto"),
         });
         if out.len() > MAX_FIREWALL_RULES + 1024 {
             break;
@@ -317,14 +323,19 @@ pub fn parse_nft(json: &str) -> Result<FirewallSource, FirewallParseError> {
             }
         });
         let Some(action) = action else { continue };
-        let (mut ports, mut addrs) = (Vec::new(), Vec::new());
+        let (mut ports, mut addrs, mut protocols) = (Vec::new(), Vec::new(), Vec::<String>::new());
         for e in exprs {
             let m = &e["match"];
             let (left, right) = (&m["left"]["payload"], &m["right"]);
             if let (Some(field), Some(val)) = (left["field"].as_str(), nft_text(right)) {
                 let proto = left["protocol"].as_str().unwrap_or("");
                 match field {
-                    "dport" | "sport" => ports.push(format!("{proto} {field} {val}")),
+                    "dport" | "sport" => {
+                        ports.push(format!("{proto} {field} {val}"));
+                        if !proto.is_empty() && !protocols.iter().any(|p| p == proto) {
+                            protocols.push(proto.to_string());
+                        }
+                    }
                     "saddr" | "daddr" => addrs.push(format!("{field} {val}")),
                     _ => {}
                 }
@@ -349,6 +360,9 @@ pub fn parse_nft(json: &str) -> Result<FirewallSource, FirewallParseError> {
             addresses: (!addrs.is_empty()).then(|| clip(&addrs.join("; "))),
             profile: FirewallProfile::All,
             source: RuleSource::Nftables,
+            group: None,
+            service: None,
+            protocol: protocols.into_iter().next(),
         });
         if rules.len() > MAX_FIREWALL_RULES + 1024 {
             break;
@@ -384,6 +398,12 @@ pub struct RawWinRule {
     pub ports: Option<String>,
     /// `RemoteAddresses`; `*` means any.
     pub addresses: Option<String>,
+    /// `Grouping`.
+    pub group: Option<String>,
+    /// `ServiceName`.
+    pub service: Option<String>,
+    /// `Protocol`: an IANA number, 256 for any.
+    pub protocol: Option<i32>,
 }
 
 fn win_profile(mask: i32) -> FirewallProfile {
@@ -392,6 +412,19 @@ fn win_profile(mask: i32) -> FirewallProfile {
         2 => FirewallProfile::Private,
         4 => FirewallProfile::Public,
         _ => FirewallProfile::All,
+    }
+}
+
+/// The protocol name for an IANA number as `INetFwRule.Protocol` gives it; 256 (any) is none.
+fn win_protocol(n: i32) -> Option<String> {
+    match n {
+        256 => None,
+        6 => Some("tcp".into()),
+        17 => Some("udp".into()),
+        1 => Some("icmpv4".into()),
+        58 => Some("icmpv6".into()),
+        n if (0..256).contains(&n) => Some(n.to_string()),
+        _ => None,
     }
 }
 
@@ -416,6 +449,9 @@ pub fn map_windows_rule(r: &RawWinRule) -> FirewallRule {
         addresses: any(&r.addresses),
         profile: win_profile(first),
         source: RuleSource::WindowsFirewall,
+        group: any(&r.group),
+        service: any(&r.service),
+        protocol: r.protocol.and_then(win_protocol),
     }
 }
 
@@ -472,6 +508,7 @@ block drop in quick inet6 proto udp from any to { 2001:db8::1 2001:db8::2 } port
         assert_eq!(rules[1].direction, RuleDirection::Out);
         assert_eq!(rules[2].addresses.as_deref(), Some("from 192.0.2.0/24 to any"));
         assert_eq!(rules[2].ports.as_deref(), Some("= ssh"));
+        assert_eq!(rules[2].protocol.as_deref(), Some("tcp"));
         assert_eq!(rules[3].addresses.as_deref(), Some("from any to { 2001:db8::1 2001:db8::2 }"));
         assert!(rules.iter().all(|r| r.source == RuleSource::Pf && r.name.starts_with("pf rule ")));
         let v = pf_view("Status: Enabled for 1 days 02:03:04   Debug: Urgent\n", PF).unwrap();
@@ -498,6 +535,7 @@ block drop in quick inet6 proto udp from any to { 2001:db8::1 2001:db8::2 } port
         assert_eq!(v.rule_count, 2, "unhooked chains and rules with no verdict are not listed");
         assert_eq!((v.rules[0].direction, v.rules[0].action), (RuleDirection::In, RuleAction::Allow));
         assert_eq!(v.rules[0].ports.as_deref(), Some("tcp dport 22"));
+        assert_eq!(v.rules[0].protocol.as_deref(), Some("tcp"));
         assert_eq!(
             (v.rules[1].action, v.rules[1].addresses.as_deref()),
             (RuleAction::Block, Some("saddr 198.51.100.0/24"))
@@ -533,6 +571,9 @@ block drop in quick inet6 proto udp from any to { 2001:db8::1 2001:db8::2 } port
             application: Some(r"C:\Program Files\Example\x.exe".into()),
             ports: Some("*".into()),
             addresses: Some("203.0.113.0/24".into()),
+            group: Some("Example Group".into()),
+            service: Some("exampled".into()),
+            protocol: Some(6),
         };
         let r = map_windows_rule(&raw);
         assert_eq!(
@@ -540,6 +581,19 @@ block drop in quick inet6 proto udp from any to { 2001:db8::1 2001:db8::2 } port
             (RuleDirection::Out, RuleAction::Allow, FirewallProfile::Private)
         );
         assert_eq!((r.ports, r.addresses.as_deref()), (None, Some("203.0.113.0/24")));
+        assert_eq!(
+            (r.group.as_deref(), r.service.as_deref(), r.protocol.as_deref()),
+            (Some("Example Group"), Some("exampled"), Some("tcp"))
+        );
+        assert_eq!(
+            map_windows_rule(&RawWinRule {
+                protocol: Some(256),
+                group: Some("*".into()),
+                ..raw.clone()
+            })
+            .protocol,
+            None
+        );
         let all = map_windows_rule(&RawWinRule {
             profiles: 0x7fff_ffff,
             action: 0,

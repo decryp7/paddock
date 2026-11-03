@@ -203,6 +203,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             summary.home_source = home.source;
             Ok(Reply::Geo(Box::new(summary)))
         }
+        Request::RemoveTool => crate::tool_own_copy::remove(&shared.dirs.tools())
+            .map(|()| Reply::Ok)
+            .map_err(|e| AgentError::new(ErrorCode::Internal, format!("The tool could not be removed ({}). Close anything using it and try again.", e.kind()))),
+        Request::ToolOffer => Ok(Reply::ToolOffer(Box::new(crate::tool_download::offer(shared)))),
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {
@@ -252,6 +256,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             ))))
         }
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
+        Request::HelperStatus => Ok(Reply::HelperStatus(Box::new(shared.helper.status()))),
         Request::Issues { query } => crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o))),
         Request::StartJob { spec } => shared.jobs.start(shared, spec).map(|s| Reply::Job(Box::new(s))),
         Request::Jobs => Ok(Reply::Jobs(shared.jobs.statuses())),

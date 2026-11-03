@@ -1860,7 +1860,9 @@ export type JobSpec =
   | 'softwareInventory'
   | { updateList: { id: string } }
   | 'updateGeo'
-  | 'rebuildIntel';
+  | 'rebuildIntel'
+  | { helper: { action: HelperAction } }
+  | { installTool: { tool: ToolKind } };
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
@@ -1872,7 +1874,45 @@ export type JobOutput =
   | { sleep: SleepReport }
   | { boot: BootReport }
   | { appUsage: UsageReport }
-  | { software: SoftwareInventory };
+  | { software: SoftwareInventory }
+  | { helper: HelperStatus }
+  | { tool: ToolStatus };
+
+// ------------------------------------------------------------------------------------- the privileged helper (ADR 0027)
+
+/**
+ * Whether the helper is usable. `notIncluded`: this build or system has no helper (an AppImage). `off`: never turned on.
+ * `notRunning`: installed but not answering. `missing`: damaged, or something else answers on its endpoint. `outdated`: needs
+ * the bundled newer helper. `ready`: running.
+ */
+export type HelperState = 'notIncluded' | 'off' | 'notRunning' | 'missing' | 'outdated' | 'ready';
+
+/** What the user asks of the helper; each runs as a job with phases. */
+export type HelperAction = 'turnOn' | 'repair' | 'update' | 'turnOff';
+
+/** How an audited call ended. */
+export type AuditVerdict = 'done' | 'refused' | 'failed';
+
+/** One line of the helper's audit log. */
+export interface AuditEntry {
+  /** Seconds since 1970. */
+  at: number;
+  peer: number | null;
+  what: string;
+  verdict: AuditVerdict;
+  detail: string;
+}
+
+/** Reply of `helperStatus`: the state, one sentence for the person, and what the OS will ask. */
+export interface HelperStatus {
+  state: HelperState;
+  message: string;
+  version: string | null;
+  /** What the OS asks for when turning it on, in words (shown before the prompt). */
+  prompt: string;
+  recent: AuditEntry[];
+  error: string | null;
+}
 
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
@@ -2102,4 +2142,34 @@ export interface FirewallSource {
 export interface FirewallView {
   os: 'windows' | 'macos' | 'linux';
   sources: FirewallSource[];
+}
+
+// ------------------------------------------------------------------------------------- the disk-health tool (ADR 0027 section 7)
+
+/** A tool the helper can hold. */
+export type ToolKind = 'smartmontools';
+
+/** What the helper holds of one tool. */
+export interface ToolStatus {
+  tool: ToolKind;
+  installed: string | null;
+}
+
+/** Where the offer stands: downloadable, installed (the version), needs the helper first, or not offered here (what to do instead). */
+export type OfferState = 'available' | { installed: string } | { needsHelper: string } | { notHere: string };
+
+/** What the Settings card shows for the disk-health tool. */
+export interface ToolOffer {
+  tool: ToolKind;
+  name: string;
+  version: string;
+  size: number;
+  from: string;
+  licence: string;
+  sourceUrl: string;
+  state: OfferState;
+  /** How it is installed: the helper (Windows) or Dyno's own copy (macOS). */
+  route: 'helper' | 'ownCopy';
+  /** Whether the card can remove it (Dyno's own copy). */
+  removable: boolean;
 }

@@ -39,6 +39,8 @@ const specs: JobSpec[] = [
   'bootAnalysis',
   'appUsage',
   'softwareInventory',
+  { helper: { action: 'turnOn' } },
+  { helper: { action: 'turnOff' } },
 ];
 
 const diskDefaults: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 };
@@ -64,7 +66,7 @@ describe('the jobs wire contract with the engine', () => {
     for (const spec of specs) await backend.startJob(spec);
     const sent = invoke.mock.calls.map((c) => (c[1] as { request: unknown }).request);
     expect(sent).toEqual(wire.requests.slice(0, specs.length));
-    expect(wire.requests.slice(specs.length)).toEqual(['jobs', { cancelJob: { id: 3 } }, { jobResult: { id: 3 } }]);
+    expect(wire.requests.slice(specs.length)).toEqual(['helperStatus', 'jobs', { cancelJob: { id: 3 } }, { jobResult: { id: 3 } }]);
   });
 
   it('what a done job hands over is read by its tag', async () => {

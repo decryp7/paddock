@@ -40,6 +40,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -78,6 +79,7 @@ import type {
   EditOutcome,
   GeoSummary,
   FirewallView,
+  ToolOffer,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -329,6 +331,18 @@ export class TauriBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.request('inventory');
+  }
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.request('helperStatus');
+  }
+
+  toolOffer(): Promise<ToolOffer> {
+    return this.request('toolOffer');
+  }
+
+  removeTool(): Promise<void> {
+    return this.request('removeTool');
   }
 
   counterObjects(): Promise<CounterObjectList> {
