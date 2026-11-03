@@ -40,6 +40,7 @@ describe('unreadable folders', () => {
   it('say why, in words the user can act on, and fall back to a plain reason', () => {
     expect(unreadableText('needsFullDiskAccess')).toBe('Unavailable: Needs Full Disk Access: allow Dyno in System Settings › Privacy & Security › Full Disk Access');
     expect(unreadableText('protected')).toBe('Unavailable: macOS protects this folder');
+    expect(unreadableText('notAnswering')).toBe('Unavailable: This folder did not answer in time (a cloud or network folder)');
     expect(unreadableShort('needsFullDiskAccess')).toBe('Needs Full Disk Access');
     expect(unreadableShort(null)).toBe('Could not be read');
     expect(unreadableText('needsAdmin')).toBe('Unavailable: Needs administrator rights to read');

@@ -44,6 +44,13 @@ describe('HealthStore', () => {
     await store.loadStartup();
     expect(store.startupError()?.message).toBe('s');
   });
+  it('keeps what the engine could not read, so the page can say the list is partial', async () => {
+    const { store, mock } = setup();
+    const real = mock.startupOverview.bind(mock);
+    vi.spyOn(mock, 'startupOverview').mockImplementation(async (f) => ({ ...(await real(f)), unavailable: ['Login items: need administrator rights'] }));
+    await store.loadStartup();
+    expect(store.startupUnavailable()).toEqual(['Login items: need administrator rights']);
+  });
   it('asks the engine to filter the startup list and keeps the counts', async () => {
     const { store } = setup();
     await store.loadStartup();

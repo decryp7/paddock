@@ -194,7 +194,7 @@ shell's `PATH` (so Homebrew installs work from a background service) and an opti
 </picture>
 
 **Built** (view only). `Health` returns a score and grade with reasons (no fix buttons). `StartupEntries` lists what starts at
-login (Windows: not wired yet; macOS: launch agents and login items; Linux: autostart and user units), with a filter that hides
+login (Windows: not wired yet; macOS: launch agents, and login items once the privileged helper can read them (Dyno 1.1; until then the page says they need administrator rights); Linux: autostart and user units), with a filter that hides
 the operating system's entries and signed apps. Dyno does not enable or disable an entry.
 
 ## Throttling, hardware life and what is normal
