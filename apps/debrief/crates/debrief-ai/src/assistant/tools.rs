@@ -281,7 +281,7 @@ impl<'a> EngineTools<'a> {
             ),
             spec(
                 "find_values",
-                "Turns the user's words into the exact values the logs hold: field values and source names with their field, event count and how they matched (userAlias, exact, segmented = same name written differently, parts, prefix, alias = AI-suggested alias, fuzzy = typo). Each value has a short `why`, all `spellings` of the entity and `evidence` event ids: tell the user how a name was matched and cite the evidence. When the reply has `ask_the_user`, ask that question instead of guessing. Use it to get the precise value (e.g. ProcessName = CompanyA.Graphic.Builder.exe) before writing a run_query with `field = \"value\"`.",
+                "Turns the user's words into the exact values the logs hold: field values and source names with their field, event count and how they matched (userAlias, exact, segmented = same name written differently, parts, prefix, alias = AI-suggested alias, abbreviation = the letters of the name's words like gfxbldr for graphic builder, fuzzy = typo). Each value has a short `why`, all `spellings` of the entity and `evidence` event ids: tell the user how a name was matched and cite the evidence. When the reply has `ask_the_user`, ask that question instead of guessing. Use it to get the precise value (e.g. ProcessName = CompanyA.Graphic.Builder.exe) before writing a run_query with `field = \"value\"`.",
                 json!({"text": text, "limit": {"type": "integer"}}),
                 &["text"],
             ),

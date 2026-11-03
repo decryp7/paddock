@@ -61,6 +61,8 @@ pub enum Via {
     Prefix,
     /// An alias suggested by a local model (marked AI-generated).
     Alias,
+    /// The letters of the name's words, in order (`gfxbldr` for `graphic builder`).
+    Abbreviation,
     /// Most of the three-letter groups of the words are in the value (typos).
     Fuzzy,
 }
@@ -75,6 +77,7 @@ impl Via {
             How::Parts => Via::Parts,
             How::Prefix => Via::Prefix,
             How::Alias => Via::Alias,
+            How::Abbreviation => Via::Abbreviation,
             How::Typo => Via::Fuzzy,
         }
     }
@@ -88,6 +91,7 @@ impl Via {
             Via::Parts => "your words are parts of the value",
             Via::Prefix => "your words start the words of the value",
             Via::Alias => "AI alias",
+            Via::Abbreviation => "abbreviation of the value's words",
             Via::Fuzzy => "close spelling (typo)",
         }
     }
@@ -101,6 +105,7 @@ impl Via {
             Via::Parts => 0.85,
             Via::Alias => 0.8,
             Via::Prefix => 0.7,
+            Via::Abbreviation => 0.6,
             Via::Fuzzy => 0.55,
         }
     }
