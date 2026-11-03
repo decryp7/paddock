@@ -221,6 +221,16 @@ function derived(items: Placement<W, Cells>[], columns: number): Arrangement['pl
     out.push({ id: p.id, rect: { x: cursorX, y: cursorY, w, h: p.h } });
     cursorX += w;
   }
+  // The engine's lone-half rule (ADR 0044 §3): a half-width widget with nothing beside it takes the whole row if its kind may be that wide.
+  const half = Math.ceil(columns / 2);
+  const kindOf = new Map(items.map((p) => [p.id, (p.widget as unknown as { kind: string }).kind]));
+  for (const o of out) {
+    if (columns === 1 || o.rect.x !== 0 || o.rect.w !== half) continue;
+    const steps = cellsOf(kindOf.get(o.id)!).widths;
+    const scaledMax = Math.ceil(((('range' in steps ? steps.range.max : Math.max(...steps.only.values))) * columns) / COLUMNS);
+    const hole = { ...o.rect, x: half, w: columns - half };
+    if (scaledMax >= columns && !out.some((q) => overlaps(q.rect, hole))) o.rect.w = columns;
+  }
   return out;
 }
 

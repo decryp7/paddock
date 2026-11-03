@@ -516,14 +516,59 @@ fn derive_halves_and_fulls_in_reading_order() {
     assert_eq!(rect_of(&out, "b"), Rect::new(3, 0, 3, 4));
     assert_eq!(
         rect_of(&out, "c"),
-        Rect::new(0, 4, 3, 4),
-        "6 of 12 is half of 6, but a and b fill the row: next row"
+        Rect::new(0, 4, 6, 4),
+        "6 of 12 is half of 6, but a and b fill the row: next row, where nothing else comes beside it, so it takes the whole row"
     );
     assert_eq!(rect_of(&out, "d"), Rect::new(0, 8, 6, 3));
     let one = derive(&items, 12, 1).unwrap();
     assert!(one.iter().all(|i| i.rect.w == 1 && i.rect.x == 0));
     assert_eq!(ids(&one), ["a", "b", "c", "d"]);
     assert_eq!(rect_of(&one, "d").y, 12);
+}
+
+#[test]
+fn derive_gives_a_half_width_item_alone_in_its_row_the_whole_row() {
+    // The reviewer's hole: an odd number of half-width widgets before a full-width one leaves the last one with an empty right half.
+    let items = vec![
+        item("a", 0, 0, 6, 4),
+        item("b", 6, 0, 6, 4),
+        item("c", 0, 4, 6, 4),
+        item("d", 0, 8, 12, 3),
+    ];
+    let out = derive(&items, 12, 6).unwrap();
+    assert_eq!(rect_of(&out, "c"), Rect::new(0, 4, 6, 4));
+    // Last in the reading order, alone: also the whole row.
+    let last = vec![
+        item("a", 0, 0, 6, 4),
+        item("b", 6, 0, 6, 4),
+        item("c", 0, 4, 6, 4),
+    ];
+    assert_eq!(rect_of(&derive(&last, 12, 6).unwrap(), "c").w, 6);
+    // Something beside it (a later half-width item, or a tall neighbour's short stack): it stays half.
+    let beside = vec![
+        item("a", 0, 0, 6, 4),
+        item("b", 6, 0, 6, 4),
+        item("c", 0, 4, 6, 4),
+        item("e", 6, 4, 6, 4),
+    ];
+    let out = derive(&beside, 12, 6).unwrap();
+    assert_eq!((rect_of(&out, "c").w, rect_of(&out, "e").w), (3, 3));
+    // A kind that is not allowed that wide keeps its half.
+    let narrow = SizeRule {
+        widths: Steps::Range { min: 2, max: 6 },
+        ..RULE
+    };
+    let capped = vec![
+        item("a", 0, 0, 6, 4),
+        Item {
+            id: id("c"),
+            rect: Rect::new(0, 4, 6, 4),
+            rule: narrow,
+        },
+    ];
+    assert_eq!(rect_of(&derive(&capped, 12, 6).unwrap(), "c").w, 3);
+    // At one column everything is full already.
+    assert!(derive(&last, 12, 1).unwrap().iter().all(|i| i.rect.w == 1));
 }
 
 #[test]
@@ -539,7 +584,7 @@ fn derive_respects_the_kinds_scaled_minimum() {
         rule: wide_min,
     }];
     assert_eq!(rect_of(&derive(&items, 12, 6).unwrap(), "a").w, 6);
-    let narrow_ok = vec![item("a", 0, 0, 2, 3)];
+    let narrow_ok = vec![item("a", 0, 0, 2, 3), item("b", 6, 0, 2, 3)];
     assert_eq!(rect_of(&derive(&narrow_ok, 12, 6).unwrap(), "a").w, 3);
 }
 
@@ -697,6 +742,12 @@ proptest! {
     fn derived_arrangements_keep_reading_order_and_do_not_overlap(items in arbitrary_items(), columns in prop::sample::select(vec![1u8, 6])) {
         if let Ok(out) = derive(&items, 12, columns) {
             prop_assert_eq!(ids(&out), ids(&reading_order(items.clone())));
+            // No hole beside a half-width item: something shares its rows, or its kind cannot be that wide.
+            let half = columns.div_ceil(2);
+            for a in out.iter().filter(|a| columns > 1 && a.rect.x == 0 && a.rect.w == half && u32::from(a.rule.widths.max()) * u32::from(columns) >= 12 * u32::from(columns)) {
+                let hole = Rect { x: half, w: columns - half, ..a.rect };
+                prop_assert!(out.iter().any(|b| b.rect.overlaps(&hole)), "a hole beside {:?}", a.rect);
+            }
             for (n, a) in out.iter().enumerate() {
                 prop_assert!(a.rect.fits(columns));
                 for b in &out[n + 1..] {

@@ -151,8 +151,10 @@ no copy is left behind (rule 55 (c)).
 - Narrower arrangements are **derived, not stored**: `derive(layout, columns)` takes the placements in the design's
   reading order, gives each the half or the full width of the narrower grid (the smaller one that is not below its share
   `w × columns / design`, and never below the kind's minimum scaled the same way), keeps each height, and places each one
-  at the first free place after the previous one (CSS grid's sparse auto-placement), without compaction. At 1 column every
-  widget is full width. Reading order, and so focus order, is the design's at every width (a proptest checks it).
+  at the first free place after the previous one (CSS grid's sparse auto-placement), without compaction; one exception: a
+  half-width widget left alone in its rows (nothing beside it, which an odd number of half-width widgets before a
+  full-width one causes) takes the whole row if its kind's maximum width allows (amended 2026-11-04 after the screenshot
+  review: no hole beside a widget). At 1 column every widget is full width. Reading order, and so focus order, is the design's at every width (a proptest checks it).
 - `LayoutView` carries every breakpoint's arrangement, computed by the engine on each change (three arrangements of 32
   rectangles), so a window resize never needs a round trip and the UI only picks one by container width.
 - **Editing happens on the design arrangement.** Below the first breakpoint "Edit layout" is disabled, with the reason

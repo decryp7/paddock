@@ -7,7 +7,9 @@ use super::settle::reading_order;
 ///
 /// In the design's reading order each item gets the half or the full width of the narrow grid (the smaller one not
 /// below its share `w * columns / design`, and not below its kind's minimum scaled the same way), keeps its height, and
-/// goes to the first free place after the previous one (CSS grid's sparse auto-placement), without gravity. At one
+/// goes to the first free place after the previous one (CSS grid's sparse auto-placement), without gravity. A half-width
+/// item left alone in its rows, with nothing beside it, takes the whole row when its kind allows that wide (no hole beside
+/// it, which an odd number of half-width items before a full-width one would leave). At one
 /// column every item is full width. The result is in the design's reading order, so focus order is the same at every
 /// width.
 pub fn derive(items: &[Item], design: u8, columns: u8) -> Result<Vec<Item>, GridError> {
@@ -29,7 +31,32 @@ pub fn derive(items: &[Item], design: u8, columns: u8) -> Result<Vec<Item>, Grid
         cursor = (u32::from(rect.y), u32::from(rect.right()));
         out.push(Item { rect, ..item });
     }
+    fill_lone_halves(&mut out, design, columns, half);
     Ok(out)
+}
+
+/// Widens each half-width item at the left edge whose right half is empty in all of its rows to the whole width, when the
+/// kind's maximum width (scaled to the narrow grid) reaches it. Only widens, so nothing placed overlaps afterwards.
+fn fill_lone_halves(out: &mut [Item], design: u8, columns: u8, half: u8) {
+    if half >= columns {
+        return;
+    }
+    for i in 0..out.len() {
+        let r = out[i].rect;
+        let scaled_max =
+            (u32::from(out[i].rule.widths.max()) * u32::from(columns)).div_ceil(u32::from(design));
+        if r.x != 0 || r.w != half || scaled_max < u32::from(columns) {
+            continue;
+        }
+        let hole = Rect {
+            x: half,
+            w: columns - half,
+            ..r
+        };
+        if !out.iter().any(|o| o.rect.overlaps(&hole)) {
+            out[i].rect.w = columns;
+        }
+    }
 }
 
 /// The first place at or after `cursor` (row, column), scanning rows then columns, where a `w` by `h` rectangle fits
