@@ -1,6 +1,6 @@
 # 3. Tree-sitter grammars for tier 2: which, in what order, under which licence
 
-Status: proposed (2026-10-29), the licence record that package A2 (`pacenotes-parse`) needs before it adds a grammar.
+Status: accepted (2026-11-04, user; proposed 2026-10-29), the licence record that package A2 (`pacenotes-parse`) needs before it adds a grammar.
 Numbered at merge. Docs only: no dependency is added by this ADR.
 
 ## Context
