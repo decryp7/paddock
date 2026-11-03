@@ -26,6 +26,7 @@ export class MacTour {
     if (!opened) return this.result(`GUI: ${label}`, checks, evidence);
     const seen = await this.gui.waitFor(async () => (await this.gui.texts(app)).some((t) => expect.test(t.text)), 25_000);
     checks.push({ ok: seen.ok, detail: seen.ok ? `${label} shows its content (/${expect.source}/)` : `${label} never showed /${expect.source}/` });
+    await this.gui.answerSystemPrompts();
     evidence.push(`screenshot: ${await this.gui.shot(label.replace(/\W+/g, '-').toLowerCase())}`);
     if (this.rules.error) checks.push({ ok: false, detail: `the shared screenshot rules could not be loaded: ${this.rules.error}` });
     else {
@@ -130,13 +131,16 @@ export class MacTour {
 
   async run() {
     const g = this.gui;
+    await g.closeSettings();
+    const prompts = await g.answerSystemPrompts();
+    this.log(`system prompts answered: ${prompts}`);
     const steps = [await this.menuBar(), await this.dashboard(), await this.benchmark()];
     const page = (name) => async () => { await g.press(g.app, '^Dashboard$', 'AXLink'); return g.press(g.app, `^${name}$`, 'AXLink'); };
     steps.push(await this.stop('Connections map page', { open: page('Connections map'), expect: /Connections map/ }));
     steps.push(await this.stop('IP lists page', { open: page('IP lists'), expect: /IP lists/ }));
     steps.push(await this.stop('Settings dialog', { open: async () => (await g.openSettingsSection('^Appearance$')).ok, expect: /Appearance/ }));
     await g.press(g.app, '^Close$', 'AXButton');
-    steps.push(await this.stop('About dialog', { open: () => g.press(g.app, '^About$', 'AXMenuItem'), expect: /Dyno/ }));
+    steps.push(await this.stop('About dialog', { open: () => g.press(g.app, '^About( |$)', 'AXMenuItem'), expect: /Dyno/ }));
     return steps;
   }
 }

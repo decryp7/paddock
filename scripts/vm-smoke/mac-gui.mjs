@@ -105,7 +105,9 @@ export class MacGui {
     const title = 'Admin helper: Turn off removes it';
     const checks = [];
     const evidence = [];
-    const off = await this.press(this.app, UI.turnOff);
+    const nav = await this.openSettingsSection('^Dyno$');
+    checks.push({ ok: nav.ok, detail: nav.detail });
+    const off = await this.waitFor(() => this.press(this.app, UI.turnOff), 15_000).then((r) => r.ok);
     checks.push({ ok: off, detail: off ? 'pressed "Turn off administrator readings"' : 'no "Turn off administrator readings" button' });
     if (off) {
       const extra = await this.waitFor(async () => (await this.has('coreautha', '^OK$')) || (await this.has('SecurityAgent', '^OK$')), 8_000);
@@ -119,6 +121,24 @@ export class MacGui {
     return this.finish(title, checks, evidence, 'Turn off removed the launchd job and the file');
   }
 
+
+  /**
+   * macOS asks "Allow dyno-agent to find devices on local networks?" the first time the agent touches the local network (Wake-on-LAN,
+   * the neighbour table). A person answers Allow; so does the check, and the result says it appeared. Returns how many were answered.
+   */
+  async answerSystemPrompts() {
+    let n = 0;
+    const win = await this.g.exec(this.axCmd('windows'));
+    const owners = [...new Set(win.stdout.split('\n').map((l) => l.split('\t')[0]).filter((o) => o && !/^(Dyno|Control Center|Dock|Window Server|Finder|Terminal|Notification Center|SystemUIServer)$/.test(o)))];
+    for (const who of [...new Set(['UserNotificationCenter', 'CoreServicesUIAgent', ...owners])]) {
+      while (n < 5 && (await this.has(who, '^Allow$'))) { await this.shot(`system-prompt-${++n}`); await this.press(who, '^Allow$'); await this.g.sleep(1000); }
+    }
+    return n;
+  }
+
+  async closeSettings() {
+    if (await this.has(this.app, '^Settings$', 'AXWindow')) await this.press(this.app, '^Close$', 'AXButton');
+  }
 
   /** Index of the first text field whose label matches `re` among the app's text fields, in the order `axdrive setfield` counts them. */
   async fieldIndex(re) {
