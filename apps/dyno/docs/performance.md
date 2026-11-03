@@ -16,6 +16,7 @@ Dyno has two things called "bench":
 | `dyno-agent bench [seconds] [none\|summary\|processes]` (`crates/dyno-agent/src/cli.rs`) | The agent's own CPU (share of one core) and memory with nobody watching, a summary subscriber or a processes subscriber; JSON output | `cargo run --release -p dyno-agent -- bench 25 processes` | The live machine (read-only) | none | No. `scripts/check-bundle.sh` (`dyno-release.yml`) runs `dyno-agent once`, a smoke test with no budget | below; [architecture.md](architecture.md#dynos-own-overhead) |
 | `cargo test --release -p dyno-agent --test finder_bench -- --ignored --nocapture` (`crates/dyno-agent/tests/finder_bench.rs`) | The file finder (large and duplicate files) on a generated tree, by the number of threads reading it | the command | 400 folders, 50,000 small files and 300 files of about 1 MiB (100 files with two copies each), made in a temp folder | none (a measurement; the checks are the finder's unit tests) | no | [File finder](#file-finder-2026-10-29) |
 | `cargo test --release -p dyno-platform --test maintenance_bench -- --ignored --nocapture` (`crates/dyno-platform/tests/maintenance_bench.rs`) | The Maintenance view's status (when the windows close or open next) in the worst case, with the OS zone and a POSIX zone with summer time | the command | 14 windows, all closed now, the next opening almost a week ahead (generated in the test) | none (a measurement; `jumping_to_window_edges_finds_what_scanning_every_minute_finds` checks the answers) | no | [Maintenance status](#maintenance-status-2026-10-30) |
+| `cargo test --release -p dyno-agent --test disk_cache_bench -- --nocapture --include-ignored` (`crates/dyno-agent/tests/disk_cache_bench.rs`) | A saved disk map ([ADR 0029](adr/0029-saved-views-disk-map-cache.md)): the packed record stream raw and deflated (`flate2` level 1), saving into `cache.db`, the start-up listing, loading a first level, and the footprint of a loaded map against a live one | the command (the `--include-ignored` part adds the 5M-node tree) | A generated tree of 1M (and 5M) nodes with `Node`'s real fields (folders, files, refused and partly refused folders, loose totals), names of 8 to 40 bytes, seed fixed in the test | in release builds: start-up listing < 20 ms; first level of a 1M-node map < 300 ms from the request; saving 1M nodes < 2 s; loaded map within 10 % of a live one (debug builds run 30,000 nodes and assert only the round trip) | no | [Saved disk maps](#2026-11-03-a-saved-disk-map-of-1m-and-5m-nodes-in-cachedb-dyno-cached-views) |
 | `app/angular.json` budgets | The initial bundle | `cd app && npx ng build` | — | initial warn 900 kB / error 1.5 MB; component style warn 16 kB / error 32 kB | `ci.yml` Dyno leg | — |
 
 ## Budgets
@@ -63,6 +64,117 @@ Dyno has two things called "bench":
   where the chunks are 22 SQLite rows. The names compress far better than real names would (they are regular), so the
   zlib size is optimistic; WP-5 repeats this in Rust with realistic name lengths and a 5M-node tree before D3 is final.
   Raw output was not kept beyond this block.
+### 2026-11-03, a saved disk map of 1M and 5M nodes in cache.db (feat/dyno-cached-views)
+
+- **Commit:** 74aa0c1c1 plus the bench (`disk_cache_bench.rs`) of the commit that adds this block
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, internal SSD
+- **Load:** 1-minute load 16.2 before the run and 17.3 after (other agents building); the numbers are upper bounds
+- **Build:** release (`cargo test --release`), Rust 1.99, `flate2` 1.1.10 on the `zlib-rs` back end (the one `zip` already links), `rusqlite` 0.40
+  with bundled SQLite, WAL and `synchronous = NORMAL`, `secure_delete = ON`
+- **Corpus:** the generated tree of `crates/dyno-agent/tests/disk_cache_bench.rs`: 1,000,000 nodes (117.0 MB of nodes and names
+  in memory) and 5,000,000 nodes (820.0 MB); about one node in nine a folder, 1 in 1,000 refused and 1 in 1,000 partly refused,
+  loose totals in a quarter of the folders; the record stream is 85.1 MB (1M) and 425.6 MB (5M), cut into 4 MiB chunks; synthetic
+- **Command:** `cargo test --release -p dyno-agent --test disk_cache_bench -- --nocapture --include-ignored`
+- **Runs:** single run, cold process, warm page cache (the file was just written); the machine was busy, so read these as upper bounds
+- **Numbers:**
+
+  | Measure | 1M raw | 1M deflate 1 | 5M raw | 5M deflate 1 | Budget (1M) | Verdict |
+  |---|---|---|---|---|---|---|
+  | Serialise to 4 MiB chunks | 0.011 s | 0.011 s | 0.051 s | 0.051 s | — | — |
+  | Stored size | 85.1 MB (1.00x) | 34.7 MB (2.46x) | 425.6 MB | 173.6 MB (2.45x) | — | — |
+  | Encode all chunks | 0.005 s | 0.244 s | 0.022 s | 1.225 s | — | — |
+  | Decode all chunks (inflate) | 0.001 s | 0.109 s | 0.007 s | 0.550 s | — | — |
+  | Save into `cache.db` (one transaction, off the walk and sampling threads) | 0.329 s | 0.380 s | 1.659 s | 1.845 s | < 2 s | pass |
+  | File size after the save | 85.4 MB | 34.8 MB | 426.6 MB | 174.2 MB | — | — |
+  | Start-up listing of the saved maps | 0.2 ms | 0.2 ms | 0.2 ms | 0.2 ms | < 20 ms | pass |
+  | Load the tree (read, inflate, parse, check) | 0.057 s | 0.155 s | 0.299 s | 0.780 s | — | — |
+  | Load plus the first level (a request for a level of an unloaded map) | 0.058 s | 0.156 s | 0.300 s | 0.781 s | < 300 ms | pass |
+  | Heap of the loaded map against a live one of the same size | 0.958x | 0.958x | 1.095x | 1.095x | within 10 % | pass (1M); 5M is at the edge |
+
+- **Memory measure:** heap by capacity (`DiskIndex::heap_bytes`, nodes and names), not RSS: a loaded map is 112.0 MB against 117.0 MB
+  live (1M) and 897.8 MB against 820.0 MB (5M; the load grows its arrays by doubling, as the walk does, and the 5M tree ends just
+  past a doubling). Rule 26: this is the arena, not the process footprint
+- **Decision (D3):** `flate2` level 1 stays on. The record stream shrinks 2.45x to 2.46x (the criterion was at least 2x) and inflating
+  a million nodes takes 0.109 s (under 0.15 s); the load that the user waits for is 0.155 s against 0.057 s raw, inside the
+  300 ms budget, and the file is 34.8 MB instead of 85.4 MB. Encoding costs 0.24 s per million nodes on the writer thread, which
+  nobody waits for
+- **Python against Rust:** the design measurement (ADR 0029, packed chunks 0.135 s to read and decode 1M nodes) is now 0.057 s raw
+  and 0.155 s deflated in Rust, with every bound of the parser checked
+- **Notes:** a save reads a finished snapshot (`Arc`) chunk by chunk and takes no lock on the walk's index, so queries on the same scan
+  are not held up while it runs (a centre test parks the writer inside a save and queries the scan). 5M nodes need about 1.8 s to
+  save and 0.8 s to load: bounded and off the UI thread, but the 5M budget of the ADR (none) is a measurement, not a check
+- **Verdict:** all four budgets pass at 1M nodes; no regression baseline yet (first record)
+### 2026-11-03, CPU per process in a macOS VM: baseline 1.0.0 and main, and the CPU fixes (perf/dyno-cpu)
+
+Trigger: the user's report on Dyno 1.0.0, "High CPU use".
+
+- **Commit:** baseline: the `dyno-v1.0.0` release dmg (dist profile). A/B: base `a18e18801` (origin/main) → change `74985a3c0`
+  (perf/dyno-cpu), both `tauri build --bundles app` with the release profile from one worktree and target folder
+- **Machine:** a fresh Tart clone of `vmgui-base-tahoe-4aaa751f` (macOS 26.6.2, 4 vCPU, 8 GB, paravirtual GPU), headless,
+  with an Aqua session; host Mac mini M4 Pro, 14 cores, macOS 27.2
+- **Load:** host 1-minute load 11-24 (other agents building; one other Tart VM running); the guest was otherwise idle (no Dyno:
+  0.9-1.9 % of one core for the whole guest, window server 0.0)
+- **Build:** release builds; the 1.0.0 baseline is the stripped dist build
+- **Corpus:** none: the VM's own idle machine (about 400 processes); counters: Memory > Active, Free, Wired and Used By
+  Compressor charted; disk map: a scan of Macintosh HD (9 GB counted, 165 folders unreadable)
+- **Command:** in the guest, `cpu2.sh <label> <windows> <seconds>`: CPU time deltas from `ps -axo pid,time,comm` per
+  process group (app, agent, `com.apple.WebKit.WebContent`, `.GPU`, `WindowServer`, other) in % of one core, plus the
+  whole guest's busy time from `top -l` (it catches short-lived children such as `nettop` and `ioreg`). Pages are
+  opened with the guest's AX driver (`axdrive press Dyno <page> AXLink`), the window is closed with its close button.
+  Agent alone: `dyno-agent bench 60 none|summary`. The scripts are kept with the run notes, not in the repo.
+- **Runs:** baseline: 5 windows of 60 s per state (3 for the reduced-motion pair); A/B: main, change, main, change, 2
+  windows of 60 s per state each, so 4 windows per build and state; ranges are reported
+- **Numbers** (% of one core; app = `dyno-app`, web = the WebContent process, GPU = WebKit's GPU process, WS = WindowServer;
+  "guest" is the whole VM):
+
+  | State | Process | 1.0.0 | main (A) | change (B) | Verdict |
+  |---|---|---|---|---|---|
+  | Dashboard | app | 1.3-1.7 | 1.1-1.4 | 0.8-0.9 | better |
+  | Dashboard | web | 2.5-3.7 | 1.6-2.4 | 1.3-1.6 | better |
+  | Dashboard | GPU | 5.2-8.1 | 4.0-6.8 | 3.0-4.2 | better |
+  | Dashboard | WS | 5.4-6.4 | 4.3-6.0 | 2.6-3.6 | better |
+  | Dashboard | agent | 0.7-0.8 | 0.9-1.0 | 0.9-1.0 | same |
+  | Dashboard | guest | not taken | 17.6-22.4 | 12.2-15.6 | about -30 % |
+  | Counters, 4 charted | app | 2.5-3.3 | 2.5-3.2 | 1.1-1.3 | better |
+  | Counters, 4 charted | web | 5.4-6.7 | 5.2-7.1 | 2.3-2.8 | better |
+  | Counters, 4 charted | GPU | 3.3-4.2 | 3.2-4.9 | 0.7-0.9 | better |
+  | Counters, 4 charted | WS | 9.6-12.4 | 10.0-12.6 | 1.3-1.6 | better |
+  | Counters, 4 charted | guest | not taken | 28.0-36.9 | 8.9-10.3 | about -70 % |
+  | Window closed (tray only) | app | 0.28-0.30 | 0.35-0.38 | 0.20-0.23 | better |
+  | Window closed (tray only) | agent | 0.73-1.00 | 0.85-0.97 | 0.57-0.73 | better |
+  | Window closed (tray only) | WS | 2.1-2.5 | 2.6-3.3 | 2.1-2.5 | slightly better |
+  | Window closed (tray only) | guest | not taken | 5.8-7.0 | 5.0-6.4 | about -10 % |
+  | Network page | app / web / agent / WS | 0.7 / 0.4 / 0.9 / 3.4-4.3 | not re-measured | not re-measured | cheap already |
+  | Disk map scan (9 GB) | agent | 15.9 in the first 30 s (the scan), then 0.8-1.0 | not re-measured | not re-measured | bounded, user-started |
+
+- **Causes, measured:**
+  - The Counters chart was the worst state: `dy-chart` replaces its options whole (`notMerge`) with animation on, so every
+    2 s poll replayed the entry animation, about 18 canvas frames. Fixed: only the first draw animates (WS 10-12.6 → 1.3-1.6).
+  - The dashboard's live numbers (`dy-animated-number`) repainted on every animation frame for 300 ms after each 1 s
+    update. Confirmed with macOS Reduce Motion on the same 1.0.0 build (which turns the glide off): web 1.5-1.7 → 0.95-1.0,
+    GPU 4.4-5.2 → 1.9-2.2, guest 17.0-18.0 → 13.6-16.0. Fixed: 6 steps on a timer.
+  - With the window closed the app still subscribed at the summary level (the tray needs numbers), so the agent read the
+    process table every 2 s: `dyno-agent bench 60` none 0.38-0.39 %, summary 0.72-0.74 % (two runs each, interleaved).
+    Fixed: a `tray` level with the process table at the unwatched pace.
+  - The menu bar items: WS is 0.0 with no Dyno and 2.1-3.3 with Dyno closed to the tray, so the icon redraws are the
+    largest cost of an idle Dyno in this VM (inferred: nothing else draws then). Each update called `set_icon` then
+    `set_icon_as_template` (two redraws) and the tooltip. Fixed in the measured change by sending only the changed parts,
+    pixels and template in one call; on main this is now the tray branch's single-call paint (`feat/dyno-tray-per-metric`,
+    `paint_ops`), plus no picture set when only the tooltip changed (`perf/dyno-cpu-2`). Most of the WS cost remains: one
+    redraw per item per second (follow-up below). The tray branch's new item look was not measured here.
+  - Ruled out: the Network page (agent 0.9, web 0.4) and the Disk map page after a scan are cheap; the 2 s network poll
+    and its `nettop` read do not show above the noise. A disk scan costs the agent about 16 % of one core while it runs,
+    bounded and started by the user. ECharts on the dashboard's history panels does not redraw per tick (no poll).
+- **Memory measure:** not measured (CPU only)
+- **Notes:** every number here is from the VM, which renders in software: the window server and the GPU process cost
+  much more than on a real Mac, so read the shares between states and the before/after, not the absolute values. The
+  menu bar fix was measured only together with the tray level (window closed: WS 2.6-3.3 → 2.1-2.5, app 0.36 → 0.21);
+  the double draw was found in the code (`tray-icon` 0.25.1 `set_icon_as_template` sets the image again), not measured on
+  its own. The user's own Mac shows about 1.4 % of one core for Dyno 1.0.0. Follow-ups,
+  not done (each under 2 % here): a menu bar refresh setting with an Auto default (the remaining WS 2.1-2.5 with the
+  window closed), the agent's unwatched floor (0.4 %; `roll_up` reads three `meta` rows from SQLite every tick, and the
+  sampler thread spent about 2 % of its samples in `pread`), and the Counters page re-reading the whole 5-minute history
+  every 2 s instead of appending.
 
 ### 2026-10-30, ld-prime against rust-lld for incremental debug rebuilds (ci/build-parallelism)
 
@@ -235,3 +347,25 @@ So about 200 times less work per status. It was never slow enough to notice once
 Maintenance view opens and the minute scan grew with the number of windows. **Memory:** not measured (a vector of at most 504
 instants).
 
+
+## Tray items: text rasterising and re-rendering (2026-11-03)
+
+Why: the menu-bar items redraw every second and 32 items are allowed (ADR 0028); the first version made a font and a CoreText
+line for every mask and every width, and rendered every item each tick whether or not its inputs had changed. Rule 51 / ER-20.
+
+- **Machine and build:** this Mac (Apple silicon, macOS 27.2), debug profile, 2026-11-03, `nice -n 19`, load 7 to 11.
+- **Command:** `cargo test -p dyno-app --lib measure_text -- --ignored --nocapture` (the ignored test `tray_text::tests::measure_text`).
+- **Workload:** 100 ticks of 32 stacked-number items, two text masks and one width each (a label and a value that changes every tick,
+  at @2x), measured on `CoreText::uncached()` and `CoreText::new()`.
+
+| Variant | Per tick, 32 items |
+|---|---|
+| `uncached` (a font and a line made for every call, one measurement per mask) | 4.53 ms |
+| `cached` (fonts per style, lines per text and style) | 0.16 ms |
+
+So about 28 times less per tick. The "before" row is the new code with its caches off, not the code as it was: the first version
+also made an `NSFont` per call and measured each line twice per mask, so it was slower still. Not measured: the native image set per
+item (the macOS VM run: Dyno 1.08 % CPU with 32 items), and the saving of the render memo: an item whose value, state, history
+and tooltip did not change returns its last frame without rendering (`an_item_whose_inputs_did_not_change_is_not_rendered_again`
+counts the masks: none for unchanged items). The model alone, 32 graph items all changing every tick, took 0.21 ms per tick with
+the former renderers (the entry in ADR 0028).

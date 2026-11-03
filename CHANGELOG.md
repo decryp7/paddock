@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
+
+- `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
+
 ### `paddock-shell`: `files_*` commands always have their service
 
 An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).
@@ -31,6 +35,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
 - `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
   calls `write`, so other implementations of the port are unchanged.
+
 ### `paddock-health` and `@decryp7/paddock-ui/shell/notify`: delete selected or all notifications
 - New commands `notifications_dismiss_many` (`ids`, at most 1000; returns how many were removed) and `notifications_dismiss_all` (`upTo`: removes the messages up to the newest id the user saw, so one that arrived meanwhile stays; returns the count; no change event when nothing was removed) remove the
   calling window's messages (its project's and the app's list; an app list is saved again, so a deleted message does not return after a restart). Ids the
@@ -44,6 +49,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 
 ### `@decryp7/paddock-ui/table`: `PdTable.expandAllGroups()` and `collapseAllGroups()`
 - Public methods for an app's toolbar on a `groupBy` table (the table kept the fold state to itself); `groupKeys(rows, column)` is exported next to `groupItems`.
+
 ### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: a dialog is fitted to content that arrives after the ready handshake (Dyno 1.0.1)
 - Dyno 1.0.0 showed Updates with a scrollbar beside one line (reproduced on Windows 11, below). The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has
   answered, and sends a refit when it differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so content that
@@ -60,6 +66,36 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   scale, the zoom and a `Phase` (`ready`, `fit`, `scale`). The shell sets `data-fit-settled` on `<html>` once the handshake's measures are sent.
 - `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for no Loading and `data-fit-settled`, and reports a body that scrolls in a window below the cap.
   `MemoryUpdatesOptions.holdStatus` delays the first status (Dyno's browser build takes it from `__pdHoldUpdatesStatus`) for the late-status e2e.
+
+### Dyno moves from `dyno-ipc` to `paddock-ipc`; `paddock-ipc` gains `BodyPeer` (Dyno ADR 0027, WP-1b)
+- New `body` module: `BodyPeer<B>`, `BodyOptions<B>`, `BodyHandler<B>` and `body_handler`, a typed view over `Peer` for apps whose wire is one postcard enum
+  (calls, answers and pushes are all `B`). The frames on the wire are the same as any peer's; a body that does not decode is `invalid` (a call) or counted in
+  `undecodable_pushes` (a push), never a closed connection. `BodyPeer::wrap` views a peer that was started elsewhere (a `Child`'s).
+- `Child::exit_status(wait)` (how a launched child ended, read once from the OS and kept) and `Connection::stream_mut` (the raw stream, for tests that must break the protocol).
+- Dyno's agent, command line, plugin API and host, helper and app now use `paddock-ipc`; `apps/dyno/crates/dyno-ipc` and its three `known-copies.toml` entries are deleted.
+  The one change users of Dyno's wire can see: the IPC handshake carries the app protocol (or the plugin / helper protocol) as its major version, so a peer of
+  another protocol is refused with which side to update. Everything else is kept: calls over the concurrency limit wait in order, a plugin's memory cap is still
+  a hard Windows job-object commit limit.
+- `PeerOptions::call_queue` (and `BodyOptions::calls`): opt-in bounded FIFO for calls over `max_concurrent_calls` (default 0: refused with `busy`, as before).
+- `MemoryCap::hard_commit` / `ChildSpec::memory_hard` (`paddock-proc`, `paddock-ipc`): also set `JOB_OBJECT_LIMIT_PROCESS_MEMORY` on the child's job object (Windows).
+
+### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
+- New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
+  `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through
+  `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
+  `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
+  administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
+  connection (`PeerError`); on Windows the OS may refuse before the client's first bytes arrive (`PeerError::NotReady`; Windows 11 build 26300 identified a client that had sent nothing).
+- New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
+  anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
+  no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
+  checks the same folder rule on the serving side.
+- `Access::system_for_all_users()` (correction, review 2026-11-03: `GRGW` for `IU` included `FILE_CREATE_PIPE_INSTANCE`, now `0x12019b` in both lists; mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+  starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
+  refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
+  `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
+- New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
+  frees its slot on drop and reports `held()` on the injected `Clock`).
 
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
@@ -98,6 +134,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 - The Name column shows the host (`hooks.example.com`, `ntfy.sh/topic`) with the whole address as tooltip and accessible name; Events is wider.
 - The page sits in a card with the family's control height and shape; the home-network control is a switch with its help text aligned; "Other events" is behind Show advanced (names a channel already has stay visible).
 - `SettingsPageDef.autosaves` (default true). A page with its own Save button declares `false` and the Settings footer then omits "Changes are saved as you make them."; the channels page does.
+
 ### `paddock-net`: a public-address limit for `check_host`, and no TLS stack without the `http` feature (additive)
 - `PublicAccess::{Policy, Deny}` and `Egress::check_host_with(host, port, lan, public)`: with `Deny` a name that resolves to any
   public address is refused (`Refusal::TooFar(Class::Public)`, "the name points at a public address"), so a connection that is

@@ -165,12 +165,31 @@ fn quitting_stops_only_an_agent_this_app_started_without_a_service() {
 #[test]
 fn the_connection_asks_for_the_most_any_window_wants() {
     let mut v = DetailVotes::default();
-    assert_eq!(v.effective(), LiveDetail::Summary, "the tray needs numbers with no window open");
+    // With no window open the app used to ask for the summary, so the agent read the process table every 2 s for the menu
+    // bar icons alone (docs/benchmarks.md 2026-11-03); the tray level keeps their numbers without the table.
+    assert_eq!(
+        v.effective(),
+        LiveDetail::Tray,
+        "the tray needs the system numbers, not the process table"
+    );
     v.set("main", LiveDetail::Processes);
     v.set("tray", LiveDetail::Summary);
     assert_eq!(v.effective(), LiveDetail::Processes);
     v.remove("main");
     assert_eq!(v.effective(), LiveDetail::Summary);
+    v.remove("tray");
+    assert_eq!(v.effective(), LiveDetail::Tray);
+}
+
+// An agent older than the tray level cannot read `Subscribe { tray }` and answers "could not read that request": the link
+// then asks for the summary that agent understood, instead of keeping whatever it had before (the processes, perhaps).
+#[test]
+fn an_older_agent_that_cannot_read_the_tray_level_gets_the_summary() {
+    let unreadable = CommandError::new(ErrorCode::BadRequest, "Dyno could not read that request.");
+    assert_eq!(older_agent_fallback(LiveDetail::Tray, &unreadable), Some(LiveDetail::Summary));
+    assert_eq!(older_agent_fallback(LiveDetail::Summary, &unreadable), None);
+    let down = CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.");
+    assert_eq!(older_agent_fallback(LiveDetail::Tray, &down), None);
 }
 
 #[test]

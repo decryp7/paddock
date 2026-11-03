@@ -86,7 +86,7 @@ describe('SettingsPage', () => {
       expect(card.querySelectorAll('pd-widget-chooser')).toHaveLength(2);
     });
     expect(card.querySelector('#popup-widgets')).not.toBeNull();
-    expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(2);
+    expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(4);
     expect(Object.keys(await mock.settings())).not.toContain('trayItems');
   });
   it('scrolls to the section the Settings window was asked for, and again when it is asked again', async () => {
@@ -306,6 +306,40 @@ describe('SettingsPage', () => {
     const sent = spy.mock.calls[0]![0];
     expect(sent.disk).toMatchObject({ readThreads: { fixed: 6 }, finderFiles: 100_000, finderDepth: 20, finderHashGib: 8 });
     expect(sent.jobs).toEqual({ workers: { fixed: 2 } });
+  });
+  it('shows the saved disk maps settings with the engine defaults, says what is wrong with the limit, saves a change and forgets on request', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Saved disk maps"]')!;
+    const limit = section.querySelector<HTMLInputElement>('input[aria-label="Space for saved maps"]')!;
+    expect(limit.value).toBe('1024');
+    expect(section.querySelector('button[role="switch"][aria-label="Keep disk maps"]')!.getAttribute('aria-checked')).toBe('true');
+    expect(section.textContent).toContain('never refreshes by itself');
+    const type = (v: string) => {
+      limit.value = v;
+      limit.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    type('63');
+    expect(section.querySelector('mat-error')?.textContent).toContain('whole number from 64 to 8,192');
+    expect(saveButton()!.disabled).toBe(true);
+    type('2048');
+    const page = f.componentInstance as unknown as { setSavedMaps(p: object): void };
+    page.setSavedMaps({ refreshOnOpen: 'olderThanWeek' });
+    f.detectChanges();
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    expect(spy.mock.calls[0]![0].disk?.savedMaps).toEqual({ enabled: true, maxMb: 2048, refreshOnOpen: 'olderThanWeek' });
+    const forget = vi.spyOn(mock, 'forgetSavedDiskMaps');
+    [...section.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Forget saved maps'))!.click();
+    await settle(f);
+    expect(forget).toHaveBeenCalledTimes(1);
+    const notifier = TestBed.inject(Notifier);
+    expect(notifier.recent().at(-1)?.text).toBe('Saved disk maps forgotten');
+    forget.mockRejectedValueOnce({ code: 'internal', message: 'No.' });
+    [...section.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Forget saved maps'))!.click();
+    await settle(f);
+    expect(notifier.recent().at(-1)).toMatchObject({ text: 'No.', tone: 'bad' });
   });
   it('ignores a learning period outside 1 to 30 and dims its rows when learning is off', async () => {
     const { f, el, saveButton } = await make();

@@ -1,0 +1,76 @@
+{
+  "requests": {
+    "changes": {
+      "changes": {
+        "query": {
+          "around": null,
+          "hours": 72
+        }
+      }
+    },
+    "changesAround": {
+      "changes": {
+        "query": {
+          "around": 1700000000000,
+          "hours": 6
+        }
+      }
+    },
+    "saveReport": {
+      "saveInventoryReport": {
+        "format": "markdown",
+        "path": "/tmp/inventory.md"
+      }
+    },
+    "saveReportJson": {
+      "saveInventoryReport": {
+        "format": "json",
+        "path": "/tmp/inventory.json"
+      }
+    }
+  },
+  "savedReport": {
+    "bytes": 2048,
+    "path": "/tmp/inventory.md"
+  },
+  "software": {
+    "items": [
+      {
+        "name": "bash",
+        "publisher": "GNU",
+        "version": "5.2"
+      },
+      {
+        "name": "curl",
+        "publisher": null,
+        "version": "8.4"
+      }
+    ],
+    "savedAt": null,
+    "truncated": false,
+    "unavailable": null
+  },
+  "softwareSaved": {
+    "items": [
+      {
+        "name": "bash",
+        "publisher": "GNU",
+        "version": "5.2"
+      },
+      {
+        "name": "curl",
+        "publisher": null,
+        "version": "8.4"
+      }
+    ],
+    "savedAt": 1700000100000,
+    "truncated": false,
+    "unavailable": null
+  },
+  "softwareUnavailable": {
+    "items": [],
+    "savedAt": null,
+    "truncated": false,
+    "unavailable": "No package manager Dyno knows answered."
+  }
+}

@@ -6,7 +6,7 @@ import type { DashboardWidget, Placement } from '../../core/generated/widgets';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { CountersStore } from '../../state/counters.store';
 import { LiveStore } from '../../state/live.store';
-import { AnimatedNumber } from './animated-number';
+import { AnimatedNumber, GLIDE_STEPS, glideSteps } from './animated-number';
 import { WidgetBoard } from './widget-board';
 import { WidgetView } from './widget-view';
 
@@ -102,10 +102,44 @@ describe('dy-widget with a performance counter', () => {
   });
 });
 
+describe('glideSteps', () => {
+  it('eases out in a few steps and ends on the exact text', () => {
+    const steps = glideSteps(20, 30.5, '30.50', 2);
+    expect(steps).toHaveLength(GLIDE_STEPS);
+    expect(steps.at(-1)).toBe('30.50');
+    const values = [20, ...steps.map(Number)];
+    const moves = values.slice(1).map((v, i) => v - (values[i] ?? 0));
+    expect(moves.every((m) => m > 0)).toBe(true);
+    // Ease-out: each step covers less ground than the one before.
+    expect(moves).toEqual([...moves].sort((a, b) => b - a));
+    expect(glideSteps(5, 1, '1', 0).at(-1)).toBe('1');
+  });
+});
+
 describe('AnimatedNumber', () => {
-  // The glide runs on animation frames and the clock: both are faked, so the test advances time instead of waiting for it.
-  beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] }));
+  // The glide runs on the timer: it is faked, so the test advances time instead of waiting for it.
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
   afterEach(() => vi.useRealTimers());
+
+  // A glide used to repaint on every animation frame (about 18 frames per update, every second on the dashboard); it
+  // now shows GLIDE_STEPS values, so a live dashboard repaints a few times per update.
+  it('glides in a bounded number of repaints', () => {
+    const f = TestBed.createComponent(AnimatedNumber);
+    f.componentRef.setInput('value', '10');
+    f.detectChanges();
+    f.componentRef.setInput('value', '40');
+    f.detectChanges();
+    const shown: string[] = [];
+    for (let t = 0; t < 400; t += 10) {
+      vi.advanceTimersByTime(10);
+      f.detectChanges();
+      const now = f.nativeElement.textContent as string;
+      if (shown.at(-1) !== now) shown.push(now);
+    }
+    expect(shown).toHaveLength(GLIDE_STEPS);
+    expect(shown.at(-1)).toBe('40');
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it('sets text at once for non-numbers and the first value, and glides to the next', () => {
     const f = TestBed.createComponent(AnimatedNumber);

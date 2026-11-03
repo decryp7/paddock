@@ -114,8 +114,15 @@ export interface DynoBackend {
   // The disk map.
   /** The volumes mounted now: internal, external and network, with capacity. */
   diskVolumes(): Promise<Volume[]>;
-  /** Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. */
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus>;
+  /**
+   * Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. `replaces` is
+   * the kept scan of the same target a Rescan will replace: that map stays readable until the new pass is done.
+   */
+  startDiskScan(target: DiskTarget, replaces?: number | null): Promise<DiskScanStatus>;
+  /** Forgets one saved map: its row in the cache is deleted. A scan of this run stays in memory. */
+  forgetSavedDiskMap(scan: number): Promise<void>;
+  /** Forgets every saved map. */
+  forgetSavedDiskMaps(): Promise<void>;
   /** Stops a scan and resolves at once; what was counted stays. */
   cancelDiskScan(scan: number): Promise<void>;
   /** The status of every kept scan (a window that opens late asks once). */

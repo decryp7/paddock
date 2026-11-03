@@ -131,6 +131,15 @@ export interface MockOptions {
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
   now?: () => number;
+  /** Disk maps the agent "offers from its cache" at start (ADR 0029), as after a restart: a finished scan, `ageMs` old. */
+  savedMaps?: ReadonlyArray<{ target: DiskTarget; ageMs: number; changedBytes: number | null }>;
+  /**
+   * The counter objects and the software list come first from "the cache of the earlier run", this many ms old, with `savedAt`
+   * set (ADR 0029); the next ask has the list read just now (`savedAt` null), as after the agent's background read.
+   */
+  savedListsAgeMs?: number;
+  /** Scans wait where they are until `window.__dynoReleaseScans()` is called (e2e flows that look at a running scan; `?gate=scans`). */
+  holdScans?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -147,7 +156,9 @@ export interface MockOptions {
 
 /**
  * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
- * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps.
+ * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps,
+ * `saved=3` starts with a saved disk map of the startup disk scanned 3 days ago (ADR 0029) and the counter and software lists as the
+ * earlier run saved them, `gate=scans` holds every scan where it is until `window.__dynoReleaseScans()` is called.
  */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
@@ -166,7 +177,19 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     widgetStorage: true,
     widgets: mockWidgetOptionsFromUrl(search),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
+    ...savedFromUrl(q.get('saved')),
+    ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
+  };
+}
+
+/** `?saved=3`: a saved disk map of the startup disk, 3 days old, 12.4 GB more used than when it was scanned, and saved lists. */
+function savedFromUrl(days: string | null): Partial<MockOptions> {
+  const d = days === null || days === '' ? NaN : Number(days);
+  if (!Number.isFinite(d) || d <= 0) return {};
+  return {
+    savedMaps: [{ target: { volume: { id: '/' } }, ageMs: d * 86_400_000, changedBytes: 13_314_398_618 }],
+    savedListsAgeMs: d * 86_400_000,
   };
 }
 
@@ -240,8 +263,19 @@ export class MockBackend implements DynoBackend {
   /** Bundles the mock "saved", for tests. */
   readonly savedBundles: SavedDiagnostics[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** The lists whose saved answer was already given once (`savedListsAgeMs`). */
+  private readonly savedGiven = new Set<string>();
+  private readonly options: MockOptions;
+
+  /** True the first time a list is asked for when `savedListsAgeMs` is set: the saved answer; the next ask has the fresh one. */
+  private takeSaved(list: string): boolean {
+    if (this.options.savedListsAgeMs === undefined || this.savedGiven.has(list)) return false;
+    this.savedGiven.add(list);
+    return true;
+  }
 
   constructor(options: MockOptions = {}) {
+    this.options = options;
     this.machine = options.machine ?? 'laptop';
     const base = osProfile(options.os ?? 'macos');
     this.profile =
@@ -260,6 +294,11 @@ export class MockBackend implements DynoBackend {
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
+    for (const m of options.savedMaps ?? []) this.disk.seedSaved(m.target, m.ageMs, m.changedBytes);
+    if (options.holdScans) {
+      this.disk.hold();
+      if (typeof window !== 'undefined') (window as unknown as { __dynoReleaseScans?: () => void }).__dynoReleaseScans = () => this.disk.release();
+    }
     this.start = this.now();
     this.backupVariant = options.backup ?? 'mixed';
     this.backupCheckedAt = this.start - 40 * MIN;
@@ -688,8 +727,16 @@ export class MockBackend implements DynoBackend {
     return this.reply('diskVolumes', () => this.disk.volumes());
   }
 
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
-    return this.reply('startDiskScan', () => this.disk.start(target));
+  startDiskScan(target: DiskTarget, replaces: number | null = null): Promise<DiskScanStatus> {
+    return this.reply('startDiskScan', () => this.disk.start(target, replaces));
+  }
+
+  forgetSavedDiskMap(scan: number): Promise<void> {
+    return this.reply('forgetSavedDiskMap', () => this.disk.forgetSaved(scan));
+  }
+
+  forgetSavedDiskMaps(): Promise<void> {
+    return this.reply('forgetSavedDiskMaps', () => this.disk.forgetAllSaved());
   }
 
   cancelDiskScan(scan: number): Promise<void> {
@@ -745,7 +792,10 @@ export class MockBackend implements DynoBackend {
   }
 
   counterObjects(): Promise<CounterObjectList> {
-    return this.reply('counterObjects', () => this.counters.objects());
+    return this.reply('counterObjects', () => {
+      const list = this.counters.objects();
+      return this.takeSaved('counters') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list;
+    });
   }
 
   counterObject(name: string): Promise<CounterObject> {
@@ -960,7 +1010,7 @@ export class MockBackend implements DynoBackend {
   }
 
   benchmarks(): Promise<BenchOverview> {
-    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs() }));
+    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs(), diskTestEnabled: false }));
   }
 
   startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
@@ -968,7 +1018,7 @@ export class MockBackend implements DynoBackend {
       if (this.benchRunning) throw err('busy', 'A benchmark is already running; wait for it or cancel it.');
       if (!r.kinds.length) throw err('badRequest', 'Choose at least one benchmark to run.');
       const kinds = [...new Set(r.kinds)];
-      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [] };
+      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [], phase: { phase: 'cpu', label: 'Pass 3 of 5 · Single core', rep: 2, of: 5, count: 2, total: 5 }, liveness: 'running', limited: null };
       this.benchRunning = progress;
       const step = (i: number) => {
         const p = this.benchRunning;
@@ -992,7 +1042,7 @@ export class MockBackend implements DynoBackend {
         }, 900);
       };
       step(0);
-      return { running: this.benchRunning, runs: this.runs() };
+      return { running: this.benchRunning, runs: this.runs(), diskTestEnabled: false };
     });
   }
 
@@ -1407,7 +1457,10 @@ export class MockBackend implements DynoBackend {
     if ('sleepBlockers' in o) return { sleep: mockSleep() };
     if ('bootAnalysis' in o) return { boot: mockBoot(this.now()) };
     if ('appUsage' in o) return { appUsage: mockUsage() };
-    if ('softwareInventory' in o) return { software: mockSoftware() };
+    if ('softwareInventory' in o) {
+      const list = mockSoftware();
+      return { software: this.takeSaved('software') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list };
+    }
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 

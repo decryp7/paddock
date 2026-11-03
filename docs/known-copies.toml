@@ -140,12 +140,6 @@ status = "built"
 adr = "0001"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-ipc/src/endpoint/**"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "The macOS SS_DRAINING EBADF fix (poll-based waits) is needed here and in the canonical one. windows.rs differs in 22 of 245 lines."
-
-  [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/endpoint.rs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
@@ -160,12 +154,6 @@ status = "built"
 adr = "0001"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-ipc/src/frame.rs", "apps/dyno/crates/dyno-ipc/src/host.rs", "apps/dyno/crates/dyno-ipc/src/peer.rs", "apps/dyno/crates/dyno-ipc/src/queue.rs", "apps/dyno/crates/dyno-ipc/src/token.rs", "apps/dyno/crates/dyno-ipc/src/wire.rs"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "ADR 0001: Dyno 1.0 ships on its own copy."
-
-  [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/frame.rs", "apps/debrief/crates/debrief-ipc/src/peer.rs", "apps/debrief/crates/debrief-ipc/src/wire.rs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
@@ -177,12 +165,6 @@ canonical = "paddock-ipc"
 paths = ["crates/paddock-ipc/src/launch.rs", "crates/paddock-ipc/src/child.rs"]
 status = "built"
 adr = "0001"
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-ipc/src/child.rs"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "start_timeout is a fixed start wait (C51)."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/launch.rs", "apps/debrief/crates/debrief-ipc/src/child.rs"]

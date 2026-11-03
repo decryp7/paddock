@@ -3,9 +3,10 @@
 use crate::discovery::Discovery;
 use crate::paths::Dirs;
 use crate::service::{Service, Status};
+use crate::wire;
 use crate::{Running, StartError};
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
-use dyno_ipc::{Client, Peer, PeerOptions};
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -84,7 +85,7 @@ fn spawn_signal_watch() {
 const USAGE: &str = "dyno-agent — measures your computer and keeps its history\n\n\
 usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent status              is an agent running?\n  \
 dyno-agent stop                ask the running agent to exit\n  dyno-agent once                print one measurement as JSON (changes nothing)\n  \
-dyno-agent bench [seconds] [none|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
+dyno-agent bench [seconds] [none|tray|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
 dyno-agent service install|uninstall|status|ensure   register it to start at login\n";
 
 /// The exit code of `run` when another agent already runs for the data folder: this one started nothing and changed
@@ -129,22 +130,22 @@ pub fn main(args: Vec<String>) -> i32 {
 }
 
 /// Connects to the agent named in the discovery file.
-pub fn connect(dirs: &Dirs) -> Result<(Peer<Message>, Discovery), String> {
+pub fn connect(dirs: &Dirs) -> Result<(BodyPeer<Message>, Discovery), String> {
     let d = Discovery::read(&dirs.discovery()).ok_or("No agent is running.")?;
     let token = d.token().ok_or("The discovery file is damaged.")?;
     let conn =
-        Client::connect(&d.endpoint, &token).map_err(|e| format!("The agent in {} did not answer ({e}).", dirs.discovery().display()))?;
-    let peer = Peer::start(conn, PeerOptions::new()).map_err(|e| e.to_string())?;
+        wire::connect(&d.endpoint, &token).map_err(|e| format!("The agent in {} did not answer ({e}).", dirs.discovery().display()))?;
+    let peer = BodyPeer::start(conn, BodyOptions::new("the agent")).map_err(|e| e.to_string())?;
     Ok((peer, d))
 }
 
 /// Sends one request and unwraps the reply.
-pub fn ask(peer: &Peer<Message>, request: Request) -> Result<Reply, String> {
+pub fn ask(peer: &BodyPeer<Message>, request: Request) -> Result<Reply, String> {
     ask_within(peer, request, Duration::from_secs(15))
 }
 
 /// Like [`ask`] with an explicit deadline, for requests that read slow system sources (hardware inventory, diagnostics).
-pub fn ask_within(peer: &Peer<Message>, request: Request, within: Duration) -> Result<Reply, String> {
+pub fn ask_within(peer: &BodyPeer<Message>, request: Request, within: Duration) -> Result<Reply, String> {
     match peer.call(Message::Request(Box::new(request)), within) {
         Ok(Message::Reply(r)) => (*r).map_err(|e| e.message),
         Ok(_) => Err("The agent sent something unexpected.".into()),
@@ -154,7 +155,7 @@ pub fn ask_within(peer: &Peer<Message>, request: Request, within: Duration) -> R
 
 /// Starts the job `spec`, waits until it ends and returns what it produced, or the message it ended with. For callers that
 /// want the answer and have nothing to show meanwhile (the CLI, the tests); the app shows the progress instead.
-pub fn run_job(peer: &Peer<Message>, spec: dyno_core::jobs::JobSpec, within: Duration) -> Result<dyno_core::jobs::JobOutput, String> {
+pub fn run_job(peer: &BodyPeer<Message>, spec: dyno_core::jobs::JobSpec, within: Duration) -> Result<dyno_core::jobs::JobOutput, String> {
     use paddock_jobs::wire::WireState;
     let started = std::time::Instant::now();
     let Reply::Job(job) = ask(peer, Request::StartJob { spec })? else {
@@ -363,7 +364,8 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
         "none" => None,
         "summary" => Some(LiveDetail::Summary),
         "processes" => Some(LiveDetail::Processes),
-        _ => return Err("bench subscribers: none, summary or processes".into()),
+        "tray" => Some(LiveDetail::Tray),
+        _ => return Err("bench subscribers: none, tray, summary or processes".into()),
     };
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
     let tmp = tempfile_dir()?;
@@ -377,10 +379,10 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
         let (conn_peer, _) = connect(&dirs)?;
         drop(conn_peer);
         let d = Discovery::read(&dirs.discovery()).ok_or("agent vanished")?;
-        let conn = Client::connect(&d.endpoint, &d.token().ok_or("bad token")?).map_err(|e| e.to_string())?;
-        Peer::start(
+        let conn = wire::connect(&d.endpoint, &d.token().ok_or("bad token")?).map_err(|e| e.to_string())?;
+        BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     let mut g = crate::agent::lock(&s);
                     g.0 += 1;

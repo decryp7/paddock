@@ -78,6 +78,42 @@ list says in one line that the system hides other accounts' processes. DMI memor
 
 Dyno 1.0 runs only with your own rights; elevation is planned for 1.1 (ADR 0022).
 
+## Benchmarks (ADR 0030, work package B2)
+
+The benchmark runner (`dyno-bench`) is started on a click, never on its own. On Linux with a systemd user manager it runs as a
+named transient unit, outside the agent's cgroup and nice value, so its result is the machine's speed and not the agent's
+lowered share:
+
+```
+systemd-run --user --unit=dyno-bench-<run id>-<kind> --collect --wait --pipe --service-type=exec -- dyno-bench <kind> ... --wait-go
+```
+
+- Cancel, "Not responding" Cancel, a safety stop (the computer switched to battery without consent) and the agent's shutdown all
+  run `systemctl --user stop dyno-bench-<run id>-<kind>.service`; killing the `systemd-run` client would leave the unit running.
+- Before the runner measures, the agent writes the unit's name and `InvocationID` to `bench-units.json` beside the benchmark
+  history and then writes `go` on the runner's stdin. On its next start the agent stops a `dyno-bench-*` unit only if a record
+  has its name and its InvocationID (rule 53: a reused name could be someone else's unit); any other is left alone and logged.
+- Without a user manager the runner is an ordinary supervised child of the agent, and the run records "limited: nice 10, memory
+  limit 256 MiB" and is shown as low confidence.
+
+Verified on a real systemd (Ubuntu 24.04 arm64, systemd user manager, OrbStack test machine `paddock-gate-arm`, 2026-11-03; the
+agent side was run at nice 10 to show the unit does not inherit it):
+
+| Check | Result |
+|---|---|
+| Nice value and memory limit of the unit | `Nice=0`, `MemoryHigh=infinity`, `MemoryMax=infinity` (shown by `systemctl show`); the runner sees `nice 0` and `memory.high = max` from inside |
+| `--pipe`, stdin `go` and the InvocationID | The runner printed nothing before `go`; `go` written to the client's stdin reached it; `systemctl --user show -p InvocationID --value` returned a 32-digit id while the unit ran |
+| Cancel on an all-core burner (8 busy loops) | `systemctl --user stop` took 7 ms by hand; `ProcessLauncher::run` returned in under 2 s after the decision; no process left, unit inactive |
+| Restart cleanup | A recorded leftover unit was stopped; a unit with the same prefix and a foreign InvocationID stayed running; the records were forgotten |
+
+These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They are `#[ignore]`d in a plain
+`cargo test` and FAIL without a user manager (never a silent pass). Run them with `scripts/linux-units-check.sh` (a release
+checklist step, `docs/releasing.md`), which is `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on
+`paddock-gate-arm`. On a headless machine start the manager first
+(`sudo loginctl enable-linger $USER`, then `XDG_RUNTIME_DIR=/run/user/$(id -u)`). Unit tests of the pure parts (command
+lines, parsers, cleanup decisions) are in `dyno_core::bench::unit`, and the agent's logic runs against a scripted child.
+`LINUX_UNITS_VERIFIED` in `bench.rs` switches the unit mode off in one place if it ever has to be.
+
 ## Removing Dyno
 
 Turn off Launch at login (or `dyno-agent service uninstall`), `sudo apt remove dyno`, delete the data folders above.

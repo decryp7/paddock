@@ -258,7 +258,7 @@ fn top(groups: &[AppGroup], key: impl Fn(&AppGroup) -> f64) -> Vec<AppGroup> {
 
 /// The update trimmed to what a subscriber asked for.
 pub fn for_detail(mut live: LiveUpdate, detail: LiveDetail) -> LiveUpdate {
-    if detail == LiveDetail::Summary {
+    if detail != LiveDetail::Processes {
         live.processes = None;
         live.groups = None;
     }

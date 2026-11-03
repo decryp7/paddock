@@ -5,7 +5,7 @@
 //! - [`dispatch`] decides what a request may do and audits refusals and removal ([`audit`]). Pure over its ports, so
 //!   tests use fakes.
 //! - [`auth`] decides who may call (the authorised user, the recorded agent program).
-//! - [`server`] accepts connections on the fixed endpoint ([`paths`]) over `dyno-ipc`.
+//! - [`server`] accepts connections on the fixed endpoint ([`paths`]) over `paddock-ipc`.
 //! - [`install`] is the typed install and uninstall plan per OS (launchd, systemd, the Windows service) and the
 //!   machine that carries it out.
 //!

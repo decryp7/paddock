@@ -4,7 +4,20 @@
 
 ### Added
 
+- Benchmarks: the `dyno-bench` runner is now part of the installers (it was started by the agent but never bundled, so every benchmark answered "missing"). It is built with the other sidecars, signed as `net.decryptology.dyno.bench`, and the release checks start it with `--version`. The disk test stays off in this build (its 1.0 reads came from the memory cache); the page shows it as off until the rebuilt test lands (ADR 0030).
+- Benchmarks: processor and memory runs warm up for a second and repeat five times; the page shows the median with the spread of the repetitions ("2,380 to 2,440") and marks a metric whose repetitions vary by more than 10 % as unsteady. A change counts as better or worse only when it is larger than the noise band and the runs' spreads together. Runs measured by 1.0 are kept, marked "Measured the old way", and never compared with newer runs.
+- Benchmarks: a run is a job (it shows in the Jobs view with the phase it is in, on its own scale) and Cancel works in every phase and ends the measuring program. A run that goes quiet for 30 seconds shows "Not responding" with Cancel, and one that outlasts its plan shows "Still working"; nothing ends it but Cancel. On battery the run asks first ("On battery. Results will be lower and the battery drains faster. Run anyway?") and stops if the computer switches to battery without that consent. Linux: the runner is a named systemd user unit (verified on a real systemd, `docs/linux.md`), stopped on Cancel and cleaned up by invocation id after a crash.
+
 - Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
+- Every metric can be its own menu-bar / tray item: the limit of four items is now 32 (one icon each, so each can be dragged to its own place; ADR 0028).
+- Each item is given a stable identity so the OS can remember where you put it: macOS names every status item (`NSStatusItem.autosaveName`) and keeps a copy of its saved position across the item being removed; Windows gives every icon a GUID (`guidItem`), recovering a GUID the shell refuses and falling back to no GUID rather than losing the icon; Linux's status-notifier id is the item id. Not yet verified on a Mac or a Windows PC. Windows builds are not signed, so a remembered place holds only while the program stays in the same folder. A new item of the same kind as a removed one takes its place.
+- Changing the items only replaces the icons that changed. The log tells each icon's identity (and, on Windows, whether its GUID was accepted) or why it could not be created.
+
+### Changed
+
+- The menu-bar and tray items have a new look (design `docs/design/dyno-tray/README.md`): stacked label-over-value numbers with tabular figures in the system font, fixed widths per format, a dimmed dash when a value is missing, an alert that needs the level held for 3 s, and whole-pixel icons at the taskbar's own size on Windows (drawn again when the DPI or theme changes). The default set is CPU, memory, network and temperature.
+- A tray item shows its alert while Dyno has an open alarm for its metric (your alarm rules and the overheating alert); a load no rule covers uses the new Settings level "Menu-bar alert level" (default 90 %). A number item can be set to one line, and Settings explains what macOS and Windows 11 do with items that do not fit once more than four are on.
+- When the agent stays away for 3 s the items show a dimmed dash at their usual width instead of the static icon.
 
 ### Fixed
 
@@ -24,6 +37,12 @@
 - Notifications: select messages (checkboxes, Shift-click for a range) and delete the selected ones, or delete all after a confirmation. Deleted messages stay gone after a restart (shared `paddock-health` commands).
 - Expand all and Collapse all (icon buttons with tooltips) in the toolbars of Network (programs or remote hosts), Processes (Apps and Tree views), and the grouped lists of What changed (days) and Files (groups). Interaction state only; Network keeps its fold in the same saved list as a single fold.
 - Processes: the Tree view no longer searches the whole process list for every row it draws (a map lookup), so opening a tree of thousands of processes is quick.
+- macOS: the menu-bar icons no longer risk flickering: each picture is set with its template flag in one call (it was set, then set again as a template), the tooltip is sent only when it changed, and changing the items replaces only the icons that changed. The log shows every picture set at debug level. Not yet confirmed on the Mac that reported it.
+- Lower CPU use (measured in a macOS VM, `docs/performance.md` 2026-11-03):
+  - With no window open, the app asks the agent for the new `tray` live level instead of the summary: the menu bar icons keep the user's sampling interval, and the process table is read at the unwatched pace (every 10 s instead of every 2 s). A menu bar item that shows one app's numbers keeps the summary level; an older agent that cannot read the tray level gets the summary.
+  - A menu-bar picture is not set again when only its tooltip changed.
+  - Charts animate only their first draw with data. Options are replaced whole on each update, so a live chart (Counters, every 2 s) replayed its entry animation on every poll.
+  - Live numbers glide in 6 steps over 300 ms instead of one step per display frame (about 18 repaints per update, every second on the dashboard).
 
 ## [1.0.0] - 2026-10-29
 

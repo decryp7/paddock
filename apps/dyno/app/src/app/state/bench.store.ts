@@ -7,11 +7,18 @@ import { toCommandError } from '../core/command-error';
 /** How often the overview is re-read while a run is in progress. */
 export const BENCH_POLL_MS = 1000;
 
+/** A start the engine held back until the person agrees to run on battery (ADR 0030 D6): asked per run, never remembered. */
+export interface BatteryConsent {
+  request: StartBenchmark;
+  message: string;
+}
+
 interface BenchState {
   overview: BenchOverview | null;
   comparison: BenchComparison | null;
   busy: boolean;
   error: CommandError | null;
+  consent: BatteryConsent | null;
 }
 
 /**
@@ -20,7 +27,7 @@ interface BenchState {
  */
 export const BenchStore = signalStore(
   { providedIn: 'root' },
-  withState<BenchState>({ overview: null, comparison: null, busy: false, error: null }),
+  withState<BenchState>({ overview: null, comparison: null, busy: false, error: null, consent: null }),
   withMethods((store, backend = inject(BACKEND), destroyRef = inject(DestroyRef, { optional: true })) => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const stop = () => {
@@ -45,14 +52,26 @@ export const BenchStore = signalStore(
       load,
       stop,
       async start(request: StartBenchmark): Promise<void> {
-        patchState(store, { busy: true, error: null, comparison: null });
+        patchState(store, { busy: true, error: null, comparison: null, consent: null });
         try {
           apply(await backend.startBenchmark(request));
         } catch (e) {
-          patchState(store, { error: toCommandError(e) });
+          const error = toCommandError(e);
+          // The engine's question is not an error: the page asks it and starts again with the answer.
+          if (error.code === 'needsConsent') patchState(store, { consent: { request, message: error.message } });
+          else patchState(store, { error });
         } finally {
           patchState(store, { busy: false });
         }
+      },
+      /** The person agreed to run on battery: start the held request again, for this run only. */
+      async allowBattery(): Promise<void> {
+        const held = store.consent();
+        if (!held) return;
+        await this.start({ ...held.request, allowBattery: true });
+      },
+      declineBattery(): void {
+        patchState(store, { consent: null });
       },
       async cancel(): Promise<void> {
         try {

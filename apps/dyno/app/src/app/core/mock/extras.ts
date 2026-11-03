@@ -163,7 +163,7 @@ const SOFTWARE: [string, string, string][] = [
 ];
 
 export function mockSoftware(): SoftwareInventory {
-  return { items: SOFTWARE.map(([name, version, publisher]) => ({ name, version, publisher })), truncated: false, unavailable: null };
+  return { items: SOFTWARE.map(([name, version, publisher]) => ({ name, version, publisher })), truncated: false, unavailable: null, savedAt: null };
 }
 
 // ----------------------------------------------------------------------------------------------- file finder

@@ -9,7 +9,7 @@ import { Icon } from '../../shared/icon';
 import { BenchStore } from '../../state/bench.store';
 import { DeviceArt } from '../inventory/device-art';
 import { BenchArt } from './bench-art';
-import { barPair, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
+import { barPair, bestValues, kindTitle, livenessNote, methodNote, phaseText, spreadText, statusNote, verdictWord } from './bench-model';
 import { MatButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
@@ -44,7 +44,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <h2><dy-icon name="gauge" /> Run</h2>
               <span class="spacer"></span>
               @if (o.running) {
-                <button type="button" matButton="outlined" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
+                <button type="button" [matButton]="o.running.liveness === 'notResponding' ? 'filled' : 'outlined'" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
               }
             </div>
             @if (o.running; as r) {
@@ -57,15 +57,32 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                   </li>
                 }
               </ol>
+              @if (r.phase; as ph) {
+                <p class="phase" aria-live="polite">
+                  <span>{{ r.current ? title(r.current) + ' · ' : '' }}{{ ph.label }} · {{ phaseWhere(ph) }}</span>
+                  <progress class="bar-live" [value]="ph.rep" [max]="ph.of" [attr.aria-label]="ph.label + ', ' + phaseWhere(ph)"></progress>
+                </p>
+              }
+              @if (liveNote(r.liveness); as ln) { <p class="note" [attr.data-tone]="r.liveness === 'notResponding' ? 'bad' : 'warn'" role="status"><dy-icon name="info" /> {{ ln }}</p> }
+              @if (r.limited) { <p class="note"><dy-icon name="info" /> {{ r.limited }}</p> }
               <p class="note">Keep the computer otherwise idle while this runs; any other work lowers the numbers.</p>
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
                 @for (k of kinds; track k.kind) {
-                  <mat-checkbox class="kind" [attr.data-on]="chosen().has(k.kind)" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)">
-                    <span class="kbody"><dy-icon [name]="icons[k.kind]" /><span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span></span>
+                  <mat-checkbox class="kind" [attr.data-on]="chosen().has(k.kind)" [checked]="chosen().has(k.kind)" [disabled]="k.kind === 'disk' && !o.diskTestEnabled" (change)="toggle(k.kind)">
+                    <span class="kbody"><dy-icon [name]="icons[k.kind]" /><span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.kind === 'disk' && !o.diskTestEnabled ? 'Off for now: being rebuilt to measure the drive, not the memory cache' : k.text }}</span></span></span>
                   </mat-checkbox>
                 }
               </div>
+              @if (store.consent(); as c) {
+                <div class="consent" role="alert">
+                  <p><dy-icon name="info" /> {{ c.message }}</p>
+                  <div class="consent-actions">
+                    <button type="button" matButton="filled" (click)="store.allowBattery()">Run on battery</button>
+                    <button type="button" matButton="outlined" (click)="store.declineBattery()">Don't run</button>
+                  </div>
+                </div>
+              }
               <div class="runbar">
                 <div class="field grow">
                   <label for="bench-label">Name this run</label>
@@ -94,6 +111,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 <span class="spacer"></span>
                 <span class="sub">{{ day(run.startedAt) }}</span>
               </div>
+              @if (oldWay(run); as note) { <p class="load"><span class="badge">Old method</span> {{ note }}</p> }
               <p class="load" aria-label="Machine load when the run started">
                 Machine at the start: <span class="num">{{ pct(run.load.cpuPercent) }}</span> CPU, <span class="num">{{ pct(run.load.memoryPercent) }}</span> memory{{ run.load.onBattery === true ? ', on battery' : run.load.onBattery === false ? ', on mains power' : '' }}
                 @if (run.load.cpuPercent > 20) { <span class="badge" data-tone="warn">Busy machine: numbers may be low</span> }
@@ -114,7 +132,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                         <ul class="metrics">
                           @for (m of ms; track m.id) {
                             <li>
-                              <span class="label">{{ m.label }}</span>
+                              <span class="label">{{ m.label }}@if (spread(m); as sp) { <small class="spread num">{{ sp }}</small> }@if (m.unsteady) { <span class="badge" data-tone="warn">Unsteady</span> }</span>
                               <span class="value num">{{ metric(m.value) }} <small>{{ m.unit }}</small></span>
                               <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" matTooltip="Best earlier run"></b> }</span>
                             </li>
@@ -216,10 +234,16 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .metrics { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
     .metrics li { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--sp-3); }
     .metrics .label { color: var(--text-2); font-size: var(--fs-sm); }
+    .metrics .spread { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .metrics .value { font: var(--fw-semibold) var(--fs-lg) / 1.2 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; }
     .metrics .value small { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-sans); color: var(--text-3); }
     .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--surface-active); }
     .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; min-width: 2px; }
+    .phase { display: grid; gap: var(--sp-1); margin: var(--sp-3) 0 0; color: var(--text-2); font-size: var(--fs-sm); }
+    .bar-live { width: 100%; height: 6px; accent-color: var(--accent); }
+    .consent { margin: var(--sp-3) 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); display: grid; gap: var(--sp-2); }
+    .consent p { margin: 0; }
+    .consent-actions { display: flex; gap: var(--sp-2); }
     .took { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .why { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
     .tablewrap { margin: 0 var(--sp-4) var(--sp-3); }
@@ -236,7 +260,7 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly store = inject(BenchStore);
   protected readonly kinds = KINDS;
-  protected readonly chosen = signal<ReadonlySet<BenchKind>>(new Set<BenchKind>(['cpu', 'memory', 'disk']));
+  protected readonly chosen = signal<ReadonlySet<BenchKind>>(new Set<BenchKind>(['cpu', 'memory']));
   protected readonly label = signal('');
   protected readonly change = signal('');
   protected readonly picked = signal<string[]>([]);
@@ -245,6 +269,10 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly day = formatDayTime;
   protected readonly note = statusNote;
+  protected readonly spread = (m: BenchMetric): string => spreadText(m, formatMetric);
+  protected readonly oldWay = methodNote;
+  protected readonly phaseWhere = phaseText;
+  protected readonly liveNote = livenessNote;
   protected readonly deltaKey = (d: MetricDelta): string => d.kind + d.id;
   protected readonly runKey = (r: BenchRun): string => r.id;
   protected readonly deltaColumns: PdColumn<MetricDelta>[] = [

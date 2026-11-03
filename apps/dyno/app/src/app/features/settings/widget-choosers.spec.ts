@@ -76,24 +76,48 @@ describe('dy-menu-bar-items', () => {
     const { f, el } = setup(MenuBarItems);
     await vi.waitFor(() => {
       f.detectChanges();
-      expect(rows(el)).toEqual(['Bars', 'Bars']);
+      expect(rows(el)).toEqual(['Number', 'Number', 'Number', 'Number']);
     });
-    expect(el.querySelectorAll('mat-select[aria-label^="Metric of"]')).toHaveLength(2);
+    expect(el.querySelectorAll('mat-select[aria-label^="Metric of"]')).toHaveLength(4);
+    expect(el.querySelector('[role="note"]')).toBeNull();
     el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
     await vi.waitFor(() => {
       f.detectChanges();
-      expect(rows(el)).toHaveLength(3);
+      expect(rows(el)).toHaveLength(5);
     });
     expect(el.querySelector('input[maxlength="8"]')).not.toBeNull();
+    // Past four items the page says what the Mac menu bar and the Windows 11 overflow do with items that do not fit.
+    expect(el.querySelector('[role="note"]')?.textContent).toMatch(/menu bar hides.*overflow flyout/s);
   });
 
-  it('disables every add button once the menu bar holds its four items', async () => {
+  it('sets a number item to one line and back', async () => {
     const { f, el } = setup(MenuBarItems);
     await vi.waitFor(() => {
       f.detectChanges();
-      expect(rows(el)).toHaveLength(2);
+      expect(rows(el)).toHaveLength(4);
     });
-    for (const want of [3, 4]) {
+    const layouts = TestBed.inject(WidgetLayouts);
+    const first = layouts.menuBar()!.layout.placements[0]!;
+    const page = f.componentInstance as unknown as { setFormat(p: typeof first, v: string): void };
+    page.setFormat(first, 'line');
+    await vi.waitFor(() => {
+      const now = layouts.menuBar()!.layout.placements[0]!.widget as { number: { format: string } };
+      expect(now.number.format).toBe('line');
+    });
+    page.setFormat(layouts.menuBar()!.layout.placements[0]!, 'stacked');
+    await vi.waitFor(() => {
+      const now = layouts.menuBar()!.layout.placements[0]!.widget as { number: { format: string } };
+      expect(now.number.format).toBe('stacked');
+    });
+  });
+
+  it('disables every add button once the menu bar holds its 32 items', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    for (let want = 5; want <= 32; want++) {
       el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
       await vi.waitFor(() => {
         f.detectChanges();
@@ -103,25 +127,25 @@ describe('dy-menu-bar-items', () => {
     const adds = [...el.querySelectorAll<HTMLButtonElement>('li.pd-wc-add button')];
     expect(adds.length).toBeGreaterThan(0);
     expect(adds.every((b) => b.disabled)).toBe(true);
-    expect(el.querySelector('.pd-wc-limit')?.textContent).toContain('holds 4 widgets');
+    expect(el.querySelector('.pd-wc-limit')?.textContent).toContain('holds 32 widgets');
   });
 
   it('an edit made from a row that is one edit behind keeps the first edit (metric, then unit)', async () => {
     const { f, el } = setup(MenuBarItems);
     await vi.waitFor(() => {
       f.detectChanges();
-      expect(rows(el)).toHaveLength(2);
+      expect(rows(el)).toHaveLength(4);
     });
     el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
     const layouts = TestBed.inject(WidgetLayouts);
-    await vi.waitFor(() => expect(layouts.menuBar()?.layout.placements).toHaveLength(3));
-    const behind = layouts.menuBar()!.layout.placements[2]!;
+    await vi.waitFor(() => expect(layouts.menuBar()?.layout.placements).toHaveLength(5));
+    const behind = layouts.menuBar()!.layout.placements[4]!;
     const page = f.componentInstance as unknown as { setMetric(p: typeof behind, title: string): void; setNumber(p: typeof behind, key: 'unit', value: string): void };
     // The row the person edits is the one drawn before the first edit arrived: both edits are made from it.
     page.setMetric(behind, 'Temperature');
     page.setNumber(behind, 'unit', '°C');
     await vi.waitFor(() => {
-      const now = layouts.menuBar()!.layout.placements[2]!.widget as { number: { metric: unknown; unit: string } };
+      const now = layouts.menuBar()!.layout.placements[4]!.widget as { number: { metric: unknown; unit: string } };
       expect(now.number.unit).toBe('°C');
       expect(now.number.metric).toBe('temperature');
     });
@@ -131,7 +155,7 @@ describe('dy-menu-bar-items', () => {
     const { f, el } = setup(MenuBarItems);
     await vi.waitFor(() => {
       f.detectChanges();
-      expect(rows(el)).toHaveLength(2);
+      expect(rows(el)).toHaveLength(4);
     });
     const choices = TestBed.inject(WidgetChoicesStore);
     expect(choices.menuBarDefault('ring')).toEqual({ ring: { metric: 'cpuTotal' } });

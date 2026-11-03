@@ -284,7 +284,32 @@ impl Stream {
         })
     }
 
+    /// The facts of the client, after the first read (the OS refuses to impersonate before).
+    pub(super) fn raw_peer(&self) -> Result<crate::identity::RawPeer, crate::identity::PeerError> {
+        super::windows_peer::raw_peer(self.pipe.as_raw_handle())
+    }
+
+    /// Connects at identification level and trusts the pipe only when SYSTEM owns it; see
+    /// [`super::Stream::connect_system`].
+    pub(super) fn connect_system(
+        name: &str,
+        timeout: Duration,
+    ) -> Result<Stream, super::SystemConnectError> {
+        let pipe = open_pipe(name, timeout).map_err(super::SystemConnectError::Connect)?;
+        super::windows_peer::check_owner_is_system(pipe.as_raw_handle())
+            .map_err(super::SystemConnectError::Untrusted)?;
+        Stream::new(pipe).map_err(super::SystemConnectError::Connect)
+    }
+
     pub(super) fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
+        Stream::new(open_pipe(name, timeout)?)
+    }
+}
+
+/// Opens the pipe `name`, retrying while it is busy. Identification-level impersonation only: whoever serves the pipe
+/// cannot act as us.
+fn open_pipe(name: &str, timeout: Duration) -> io::Result<OwnedHandle> {
+    {
         let wname = wide(name);
         let deadline = Instant::now() + timeout;
         loop {
@@ -303,7 +328,7 @@ impl Stream {
             };
             if h != INVALID_HANDLE_VALUE {
                 // SAFETY: a fresh, valid handle nobody else owns.
-                return Stream::new(unsafe { OwnedHandle::from_raw_handle(h) });
+                return Ok(unsafe { OwnedHandle::from_raw_handle(h) });
             }
             let err = io::Error::last_os_error();
             if err.raw_os_error() != Some(ERROR_PIPE_BUSY as i32) || Instant::now() >= deadline {
@@ -315,7 +340,9 @@ impl Stream {
             }
         }
     }
+}
 
+impl Stream {
     pub(super) fn try_clone(&self) -> io::Result<Stream> {
         Ok(Stream {
             pipe: self.pipe.clone(),

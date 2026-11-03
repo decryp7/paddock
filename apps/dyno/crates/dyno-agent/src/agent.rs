@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 /// Locks, recovering from poisoning: a panic in one request must not wedge the agent.
@@ -109,11 +109,20 @@ impl VolumesSlot {
     }
 }
 
+/// The value [`Sub::detail`] holds for `detail` (0 is "not subscribed yet").
+pub fn detail_code(detail: LiveDetail) -> u8 {
+    match detail {
+        LiveDetail::Summary => 1,
+        LiveDetail::Processes => 2,
+        LiveDetail::Tray => 3,
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
     pub id: u64,
-    /// 0 = not subscribed yet, 1 = summary, 2 = processes.
+    /// 0 = not subscribed yet, otherwise [`detail_code`] of the detail.
     pub detail: Arc<AtomicU8>,
     /// Bounded: a slow app loses frames, it never slows the sampler.
     pub tx: SyncSender<Message>,
@@ -131,6 +140,7 @@ impl Sub {
         match self.detail.load(Ordering::Relaxed) {
             1 => Some(LiveDetail::Summary),
             2 => Some(LiveDetail::Processes),
+            3 => Some(LiveDetail::Tray),
             _ => None,
         }
     }
@@ -271,11 +281,31 @@ pub struct Shared {
     pub baselines: crate::baselines::BaselineCentre,
     /// The disk map: volumes and scans (read-only).
     pub disk: Arc<crate::disk::centre::DiskCentre>,
+    /// The saved-views cache (ADR 0029), when there is one: the disk map, the counter catalog and the software list keep
+    /// their last answer in it.
+    pub cache: Option<crate::cache::Cache>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     next_conn: AtomicU64,
+}
+
+/// What the benchmark centre gets from the agent: a job in the Jobs view and the latest power source.
+struct AgentBenchEnv(Weak<Shared>);
+
+impl crate::bench::BenchEnv for AgentBenchEnv {
+    fn register_job(&self, title: &str, subject: Option<&str>) -> Option<paddock_jobs::JobContext> {
+        Some(self.0.upgrade()?.jobs.register_external("benchmark", title, subject))
+    }
+
+    fn on_battery(&self) -> Option<bool> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent
+            .back()
+            .and_then(|s| s.battery.value().map(|b| b.source == dyno_core::metrics::PowerSource::Battery))
+    }
 }
 
 impl Shared {
@@ -319,6 +349,19 @@ impl Shared {
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
+        // The saved-maps cache (ADR 0029): a second, rebuildable file in the OS cache folder. Off for this run (said once) when its
+        // folder cannot be written or another process holds the file; the disk map then works without it.
+        let started = crate::cache::Cache::start(
+            dirs.cache_db(),
+            crate::cache::CacheSettings::from(settings.disk.saved_maps),
+            crate::cache::CacheDeps {
+                clock: Arc::new(crate::disk::centre::SystemClock::default()),
+                free: Arc::new(crate::cache::db::OsFreeSpace),
+            },
+        );
+        notes.extend(started.note);
+        let saved_maps = started.cache;
+        let saved_maps_settings = settings.disk.saved_maps;
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let zone = platform.zone.clone();
@@ -347,7 +390,7 @@ impl Shared {
         let (bench, bench_note) = crate::bench::BenchCentre::load(
             dirs.benchmarks(),
             std::env::temp_dir(),
-            Box::new(crate::bench::ProcessLauncher::beside_agent()),
+            Box::new(crate::bench::ProcessLauncher::beside_agent(&dirs.benchmarks())),
         );
         if let Some(n) = bench_note {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
@@ -394,6 +437,7 @@ impl Shared {
             network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
             hardware: crate::hardware::HardwareCentre::new(hardware.signals, hardware.wear, hardware.battery),
             baselines: crate::baselines::BaselineCentre::new(),
+            cache: saved_maps.clone(),
             disk: Arc::new(crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),
                 disk_ports.volumes,
@@ -409,6 +453,10 @@ impl Shared {
             next_conn: AtomicU64::new(1),
         });
         shared.disk.set_read_threads(read_threads);
+        shared.disk.attach_cache(saved_maps.clone());
+        shared.counters.attach_cache(saved_maps);
+        shared.disk.apply_saved_maps(saved_maps_settings);
+        shared.bench.attach(Arc::new(AgentBenchEnv(Arc::downgrade(&shared))));
         Ok((shared, sensors, processes))
     }
 
@@ -447,16 +495,7 @@ impl Shared {
 
     /// The most detailed live view anyone wants.
     pub fn watching(&self) -> Option<LiveDetail> {
-        let subs = lock(&self.subs);
-        let mut best = None;
-        for s in subs.iter() {
-            match s.wants() {
-                Some(LiveDetail::Processes) => return Some(LiveDetail::Processes),
-                Some(LiveDetail::Summary) => best = Some(LiveDetail::Summary),
-                None => {}
-            }
-        }
-        best
+        lock(&self.subs).iter().filter_map(Sub::wants).max_by_key(|d| d.rank())
     }
 
     /// Hands a scan status to every connected app: it replaces the older one of the same scan that has not been sent yet, and

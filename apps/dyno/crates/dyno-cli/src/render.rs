@@ -383,6 +383,7 @@ mod tests {
                 instances_total: 0,
             }],
             truncated: true,
+            saved_at: None,
         };
         let t = objects_text(&objects);
         assert!(t.contains("Memory") && t.contains("cut"));

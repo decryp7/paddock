@@ -7,11 +7,11 @@ use crate::config::{load_token, HelperConfig};
 use crate::dispatch::{Dispatcher, Parts};
 use crate::install::{execute, uninstall_plan, SystemMachine};
 use crate::paths::{endpoint_access, HelperPaths};
-use crate::server::Daemon;
-use dyno_core::helper_wire::{HelperInfo, HELPER_API};
+use crate::server::{wire, Daemon};
+use dyno_core::helper_wire::{HelperInfo, HELPER_API, MAX_FRAME};
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
-use dyno_ipc::{FrameLimit, Host};
+use paddock_ipc::{FrameLimit, Host};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -47,8 +47,15 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         // systemd creates it (RuntimeDirectory); elsewhere the daemon does.
         std::fs::create_dir_all(dir).map_err(|e| format!("The helper cannot create {}: {e}", dir.display()))?;
     }
-    let host = Host::listen_at(&paths.endpoint, &endpoint_access(&config.user), token, FrameLimit::default())
-        .map_err(|e| format!("The helper cannot open its endpoint {}: {e}", paths.endpoint))?;
+    let host = Host::listen_at(
+        &paths.endpoint,
+        &endpoint_access(&config.user),
+        token,
+        FrameLimit::new(MAX_FRAME),
+        wire(),
+    )
+    .map(|host| host.named("Dyno helper"))
+    .map_err(|e| format!("The helper cannot open its endpoint {}: {e}", paths.endpoint))?;
     let host_kind = paths.host;
     let (remove_paths, stop_on_removal) = (paths.clone(), stop.clone());
     let dispatcher = Arc::new(Dispatcher::new(Parts {

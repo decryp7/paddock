@@ -8,6 +8,7 @@ const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'badRequest',
   'timeout',
   'busy',
+  'needsConsent',
   'internal',
 ]);
 

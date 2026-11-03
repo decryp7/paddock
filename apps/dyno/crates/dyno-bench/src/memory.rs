@@ -1,7 +1,10 @@
 //! Memory: copy bandwidth over a buffer much larger than the caches, and random-access latency by chasing a
 //! shuffled cycle through a buffer of the same size.
 
+use crate::emit::{gap_label, kind_phase, pass_done_label, Progress, WARMING_UP};
+use crate::repeat::{repeated, Pace, Repeats, Step};
 use dyno_core::bench::BenchMetric;
+use paddock_bench::Clock;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -52,11 +55,34 @@ pub fn latency_ns(slots: usize, budget: Duration) -> f64 {
     start.elapsed().as_secs_f64() * 1e9 / loads as f64
 }
 
-/// The memory metrics.
-pub fn run(budget: Duration) -> Vec<BenchMetric> {
+/// The memory metrics, each from every repetition. The warm-up runs both for half its time each and is not counted.
+pub fn run(budget: Duration, repeats: Repeats, clock: &dyn Clock, pace: &dyn Pace, progress: &dyn Progress) -> Vec<BenchMetric> {
+    let reps = repeated(
+        clock,
+        pace,
+        repeats,
+        |step| {
+            let (b, prefix, done, of) = match step {
+                Step::Warmup(d) => (d / 2, WARMING_UP.to_string(), 0, repeats.reps),
+                Step::Rep { n, of } => (budget, format!("Pass {n} of {of}"), n - 1, of),
+            };
+            let label = |section: &str| format!("{prefix} · {section}");
+            progress.report(kind_phase("memory", &label("Copy bandwidth"), done, of));
+            let copy = copy_bandwidth(COPY_BYTES, b);
+            progress.report(kind_phase("memory", &label("Random access latency"), done, of));
+            let latency = latency_ns(CHAIN_SLOTS, b);
+            if let Step::Rep { n, of } = step {
+                progress.report(kind_phase("memory", &pass_done_label(n, of), n, of));
+            }
+            (copy, latency)
+        },
+        |done, of| progress.report(kind_phase("memory", &gap_label(done, of), done, of)),
+    );
+    let copy: Vec<f64> = reps.iter().map(|(c, _)| *c).collect();
+    let latency: Vec<f64> = reps.iter().map(|(_, l)| *l).collect();
     vec![
-        BenchMetric::higher("mem-copy", "Copy bandwidth", copy_bandwidth(COPY_BYTES, budget), "GB/s"),
-        BenchMetric::lower("mem-latency", "Random access latency", latency_ns(CHAIN_SLOTS, budget), "ns"),
+        BenchMetric::measured("mem-copy", "Copy bandwidth", &copy, "GB/s", true),
+        BenchMetric::measured("mem-latency", "Random access latency", &latency, "ns", false),
     ]
 }
 

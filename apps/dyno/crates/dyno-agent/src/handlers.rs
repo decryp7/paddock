@@ -51,6 +51,7 @@ fn start_benchmark(
     group: Option<&str>,
     phase: Option<dyno_core::bench::BenchPhase>,
     disk_mib: Option<u32>,
+    allow_battery: bool,
 ) -> Answer {
     let plan = dyno_core::bench::plan(kinds, disk_mib, label, group).map_err(bad)?;
     let load = {
@@ -68,7 +69,7 @@ fn start_benchmark(
     let machine = format!("{} · {}", inv.os, inv.cpu.name);
     shared
         .bench
-        .start(plan, phase, load, machine)
+        .start(plan, phase, load, machine, allow_battery)
         .map(|o| Reply::Benchmarks(Box::new(o)))
 }
 
@@ -144,6 +145,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
+            // After the core lock is released: switching saved maps off waits for the cache writer (a save in progress can take
+            // seconds), and the sampler takes the core lock every tick.
+            shared.disk.apply_saved_maps(s.disk.saved_maps);
             shared.wake_sampler();
             Ok(Reply::Settings(Box::new(s)))
         }
@@ -198,7 +202,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             group,
             phase,
             disk_mib,
-        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib),
+            allow_battery,
+        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib, allow_battery),
         Request::CancelBenchmark => {
             shared.bench.cancel();
             Ok(Reply::Ok)
@@ -316,6 +321,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Baselines => Ok(Reply::Baselines(Box::new(shared.baselines.overview(shared)))),
         r @ (Request::DiskVolumes
         | Request::StartDiskScan { .. }
+        | Request::ForgetSavedDiskMap { .. }
+        | Request::ForgetSavedDiskMaps
         | Request::CancelDiskScan { .. }
         | Request::DiskScans
         | Request::DiskChildren { .. }
@@ -378,8 +385,7 @@ fn alarm_event(shared: &Shared, event: AlarmEvent) -> Answer {
 }
 
 fn subscribe(shared: &Arc<Shared>, conn: &Conn, detail: LiveDetail) -> Answer {
-    conn.detail
-        .store(if detail == LiveDetail::Processes { 2 } else { 1 }, Ordering::Relaxed);
+    conn.detail.store(crate::agent::detail_code(detail), Ordering::Relaxed);
     shared.wake_sampler();
     // Show something at once instead of waiting for the next tick.
     let live = lock(&shared.core).latest.live.clone();

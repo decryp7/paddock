@@ -9,12 +9,14 @@ use crate::frame::{FrameLimit, ProtocolVersion};
 use crate::handshake::Host;
 use crate::peer::{Handler, Peer, PeerOptions};
 use crate::wire::Json;
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, Deadline};
 use paddock_proc::{KEPT_ENV, MemoryCap, Supervised};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{ChildStdin, Stdio};
+use std::process::{ChildStdin, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -53,6 +55,8 @@ pub struct ChildSpec {
     pub current_dir: Option<PathBuf>,
     /// End its process tree when it uses more than this many bytes (proportional memory, `paddock-proc`).
     pub memory_limit: Option<u64>,
+    /// Windows: also make `memory_limit` a hard commit limit of the job object (see `MemoryCap::hard_commit`); ignored elsewhere.
+    pub memory_hard: bool,
     /// Pass its stderr through to ours (default: discarded; an app that keeps child logs captures it itself).
     pub inherit_stderr: bool,
     /// The frame limit of the connection.
@@ -83,6 +87,7 @@ impl ChildSpec {
             lower_priority: false,
             current_dir: None,
             memory_limit: None,
+            memory_hard: false,
             inherit_stderr: false,
             limit: FrameLimit::default(),
             protocol: ProtocolVersion::UNVERSIONED,
@@ -115,6 +120,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Child {
     process: Mutex<Supervised>,
     stdin: Mutex<Option<ChildStdin>>,
+    status: Mutex<Option<ExitStatus>>,
+    /// The clock `exit_status` waits on (the spec's peer clock).
+    clock: Arc<dyn Clock>,
     pid: u32,
     peer: Peer,
     /// Kept so the private socket folder lives as long as the connection.
@@ -141,6 +149,26 @@ impl Child {
     /// Whether the process has exited.
     pub fn exited(&self) -> bool {
         !lock(&self.process).is_running()
+    }
+
+    /// How it ended: waits up to `wait` for the OS to report the exit, then returns the status (`None` while it still runs,
+    /// or when its tree was already ended by [`Child::kill`] / [`Child::stop`], which reap it).
+    pub fn exit_status(&self, wait: Duration) -> Option<ExitStatus> {
+        let deadline = Deadline::after(self.clock.clone(), wait);
+        // The process lock is held for one look at a time, never across a wait, so `kill` and `stop` are not held up.
+        while lock(&self.process).is_running() {
+            if deadline.passed() {
+                return None;
+            }
+            let _ = self
+                .clock
+                .wait(Duration::from_millis(10), &CancelToken::new());
+        }
+        let mut status = lock(&self.status);
+        if status.is_none() {
+            *status = lock(&self.process).wait();
+        }
+        *status
     }
 
     /// The most memory its watcher saw, in bytes (0 without a memory limit).
@@ -208,7 +236,15 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     }
     let spawned = match spec.memory_limit {
         Some(limit) => {
-            Supervised::spawn_capped(cmd, MemoryCap::new(limit, spec.peer.label.clone()))
+            let cap = MemoryCap::new(limit, spec.peer.label.clone());
+            Supervised::spawn_capped(
+                cmd,
+                if spec.memory_hard {
+                    cap.hard_commit()
+                } else {
+                    cap
+                },
+            )
         }
         None => Supervised::spawn(cmd),
     };
@@ -258,6 +294,8 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     Ok(Child {
         process: Mutex::new(process),
         stdin: Mutex::new(stdin),
+        status: Mutex::new(None),
+        clock: spec.peer.clock.clone(),
         pid,
         peer,
         _host: host,

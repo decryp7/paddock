@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { InventoryFormat, SoftwareItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { plural } from '../../shared/format';
+import { formatAgo, plural } from '../../shared/format';
+import { injectNow } from '../../shared/now';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { fileName } from '../../state/diagnostics.store';
@@ -41,6 +42,13 @@ import { MatMenuModule } from '@angular/material/menu';
         } @else if (rows().length === 0) {
           <div class="none"><dy-icon name="search" /><strong>Nothing matches “{{ search() }}”</strong><span>Try a shorter name or the publisher.</span></div>
         } @else {
+          @if (inv.savedAt !== null) {
+            <p class="note" role="status" data-testid="saved-list">
+              <dy-icon name="info" />
+              <span><strong>Last known list</strong>, read {{ ago(inv.savedAt) }}. Dyno is reading the system again.</span>
+              <button type="button" matButton="outlined" (click)="store.loadSoftware()">Refresh</button>
+            </p>
+          }
           <pd-table label="Installed software" [rows]="numberedRows()" [columns]="columns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620">
             <ng-template pdCell="name" let-i><span class="app"><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm">{{ i.name }}</span></span></ng-template>
           </pd-table>
@@ -75,6 +83,8 @@ export class ExtrasInventory implements OnInit {
     if (!d || d.unavailable) return '';
     return this.rows().length === d.items.length ? plural(d.items.length, 'program') : `${this.rows().length} of ${plural(d.items.length, 'program')}`;
   });
+  private readonly now = injectNow();
+  protected readonly ago = (at: number): string => formatAgo(at, this.now());
   protected readonly initial = initial;
   protected readonly numberedRows = computed(() => numbered(this.rows()));
   protected readonly rowNo = numberKey;

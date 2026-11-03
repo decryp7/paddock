@@ -20,7 +20,7 @@ use crate::agent::{lock, JobSlot, ScanSlot, Shared, Sub, VolumesSlot};
 use crate::discovery::Discovery;
 use crate::handlers::{handle, Conn};
 use dyno_core::protocol::{AgentError, ErrorCode, Message, PROTOCOL_VERSION};
-use dyno_ipc::{Host, IpcError, Peer, PeerOptions, RemoteError};
+use paddock_ipc::{codes, BodyOptions, BodyPeer, Connection, Host, IpcError, RemoteError};
 use std::sync::atomic::AtomicU8;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
@@ -31,9 +31,9 @@ const QUEUE: usize = 4;
 
 /// Binds the endpoint and writes the discovery file. Returns the host and the file's content.
 pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
-    let host = Host::listen()?;
+    let host = crate::wire::listen()?;
     let d = Discovery {
-        endpoint: host.name().to_string(),
+        endpoint: host.endpoint().to_string(),
         token: host.token().to_hex(),
         pid: std::process::id(),
         started: crate::agent::now().millis(),
@@ -46,9 +46,9 @@ pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
 
 /// Accepts connections until the agent stops. Each connection gets a [`Peer`] whose handler answers requests.
 pub fn serve(shared: &Arc<Shared>, mut host: Host) {
-    let mut peers: Vec<(u64, Arc<Peer<Message>>, std::time::Instant)> = Vec::new();
+    let mut peers: Vec<(u64, BodyPeer<Message>, std::time::Instant)> = Vec::new();
     // The same fingerprint the app writes when it connects: a connect in the app's log and this run's lines are one story.
-    let run = paddock_log::fingerprint(host.name());
+    let run = paddock_log::fingerprint(host.endpoint());
     while !shared.stopped() {
         // A closed connection loses its subscription; dropping the sender ends its push thread.
         let gone: Vec<u64> = peers.iter().filter(|(_, p, _)| p.is_closed()).map(|(id, _, _)| *id).collect();
@@ -68,7 +68,7 @@ pub fn serve(shared: &Arc<Shared>, mut host: Host) {
                 }
                 Err(e) => log::error!("dyno-agent: could not start a connection: {e}"),
             },
-            Err(IpcError::Timeout(_)) => {}
+            Err(IpcError::Timeout) => {}
             Err(e) => {
                 // A client with the wrong token or version: refused, logged without content.
                 log::error!("dyno-agent: refused a connection: {e}");
@@ -82,7 +82,7 @@ pub fn serve(shared: &Arc<Shared>, mut host: Host) {
     Discovery::remove_if_mine(&shared.dirs.discovery());
 }
 
-fn connect(shared: &Arc<Shared>, conn: dyno_ipc::Connection) -> Result<(u64, Arc<Peer<Message>>), IpcError> {
+fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Message>), IpcError> {
     let id = shared.new_conn_id();
     let detail = Arc::new(AtomicU8::new(0));
     let (tx, rx) = sync_channel::<Message>(QUEUE);
@@ -91,13 +91,10 @@ fn connect(shared: &Arc<Shared>, conn: dyno_ipc::Connection) -> Result<(u64, Arc
     let handler = move |m: Message| -> Result<Message, RemoteError> {
         match m {
             Message::Request(r) => Ok(Message::Reply(Box::new(handle(&s, &ctx, *r)))),
-            _ => Err(RemoteError::new(
-                dyno_ipc::wire::codes::UNSUPPORTED,
-                "The agent only answers requests.",
-            )),
+            _ => Err(RemoteError::new(codes::UNIMPLEMENTED, "The agent only answers requests.")),
         }
     };
-    let peer = Arc::new(Peer::start(conn, PeerOptions::new().serve(handler).workers(4))?);
+    let peer = BodyPeer::start(conn, BodyOptions::new("the app").serve(handler).calls(4, 64))?;
     let scans = Arc::new(ScanSlot::default());
     let volumes = Arc::new(VolumesSlot::default());
     let jobs = Arc::new(JobSlot::default());
@@ -191,6 +188,10 @@ mod tests {
             eta_seconds: None,
             hidden_bytes: None,
             scanned_at: None,
+            origin: ScanOrigin::Live,
+            changed_bytes: None,
+            replaces: None,
+            not_saved: None,
         }
     }
 

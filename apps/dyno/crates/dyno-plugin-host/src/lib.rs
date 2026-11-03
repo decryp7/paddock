@@ -1,7 +1,7 @@
 //! Runs Dyno plugins out of process, for the agent.
 //!
 //! - [`discover`] finds `<plugins dir>/<id>/plugin.toml` and the executable next to it.
-//! - [`PluginHost`] starts each plugin as a child process ([`dyno_ipc::child`]), on Windows in a job object with a
+//! - [`PluginHost`] starts each plugin as a child process (`paddock_ipc::launch`), on Windows in a job object with a
 //!   memory cap (256 MiB by default), and calls it with a timeout per request (sensors 2 s).
 //! - A crash, hang (the plugin is killed), garbage, panic or wrong manifest is an error **attributed to the plugin**
 //!   ([`HostError`]); it never panics the host. The plugin is restarted with exponential backoff and **quarantined**

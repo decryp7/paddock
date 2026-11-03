@@ -1,6 +1,8 @@
-//! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in dyno-ipc frames
+//! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in `paddock-ipc` frames
 //! between the processes, and as camelCase JSON between the Tauri shell and the webview (`api.types.ts` mirrors it).
-//! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`].
+//! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`]. An appended value inside a request (a new
+//! `LiveDetail` in `Subscribe`) still makes an older agent lose the whole request ("could not read that request"), so the
+//! sender needs a fallback for it (the link asks for `Summary` when `Tray` is refused).
 
 use crate::activity::ActivityEntry;
 use crate::alerts::Alert;
@@ -25,8 +27,29 @@ use serde::{Deserialize, Serialize};
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
 ///
-/// 4: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`).
+/// 4 (unreleased; one bump for everything below; the protocol is positional postcard, so an older peer reads these wrongly):
+/// - learning: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`);
+/// - saved disk maps (ADR 0029): `DiskScanStatus` gained `origin`, `changed_bytes`, `replaces` and `not_saved`, `StartDiskScan`
+///   gained `replaces`; `ForgetSavedDiskMap` and `ForgetSavedDiskMaps` are new;
+/// - benchmarks (ADR 0030): `StartBenchmark` gained `allow_battery`; `BenchMetric` gained `samples`, `min`, `max`, `cv`,
+///   `unsteady`; `KindResult` gained `method`; `BenchRun` gained `old_way` and `limited`; `BenchProgress` gained `phase`,
+///   `liveness`, `limited`; `BenchOverview` gained `disk_test_enabled`; `MetricDelta` gained the spreads and `unsteady`;
+///   `ErrorCode::NeedsConsent` is new;
+/// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
+///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
+
+/// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
+/// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the
+/// end of the enums and need no check).
+pub const WIRE_MAJOR: u16 = {
+    assert!(PROTOCOL_VERSION <= u16::MAX as u32);
+    PROTOCOL_VERSION as u16
+};
+
+/// The largest frame between the app and the agent, in bytes. A reply over it fails that one call (disk-map pages and history
+/// are paged to stay far below).
+pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -37,6 +60,21 @@ pub enum LiveDetail {
     Summary,
     /// Also every process and group (the task manager is open).
     Processes,
+    /// Only what the menu bar icons draw: no window shows live data. The agent keeps the user's system interval (the
+    /// icons stay live) but reads the process table at its unwatched pace, and sends no process list.
+    Tray,
+}
+
+impl LiveDetail {
+    /// How much this detail asks of the sampler: `Tray` < `Summary` < `Processes`. The sampler serves the most any
+    /// subscriber wants.
+    pub fn rank(self) -> u8 {
+        match self {
+            LiveDetail::Tray => 1,
+            LiveDetail::Summary => 2,
+            LiveDetail::Processes => 3,
+        }
+    }
 }
 
 /// Something the app asks the agent.
@@ -209,6 +247,9 @@ pub enum Request {
         phase: Option<crate::bench::BenchPhase>,
         /// Scratch file size for the disk test, MiB (default and cap in `bench`).
         disk_mib: Option<u32>,
+        /// The person agreed to run on battery, for this run only (ADR 0030 D6). Without it a run on battery answers `NeedsConsent`.
+        #[serde(default)]
+        allow_battery: bool,
     },
     /// Stops the run in progress after the current kind (that kind is stopped at once). Appended.
     CancelBenchmark,
@@ -372,6 +413,9 @@ pub enum Request {
     StartDiskScan {
         /// What to scan.
         target: crate::disk::scan::DiskTarget,
+        /// The kept scan of the same target this one replaces (Rescan, ADR 0029): the old map stays readable until the new
+        /// pass is done. `None` for a first scan.
+        replaces: Option<u64>,
     },
     /// Stops a scan and returns at once; what was counted stays. Appended.
     CancelDiskScan {
@@ -462,6 +506,14 @@ pub enum Request {
         /// Which placements.
         placements: Vec<paddock_widgets::PlacementId>,
     },
+    /// Forgets one saved disk map (ADR 0029): its row is deleted and its pages overwritten. A map that is also scanning or
+    /// finished in this run stays in memory. Answers [`Reply::Ok`].
+    ForgetSavedDiskMap {
+        /// The scan.
+        scan: u64,
+    },
+    /// Forgets every saved disk map: the cache files are deleted outright. Answers [`Reply::Ok`].
+    ForgetSavedDiskMaps,
 }
 
 /// Dyno's own cost.
@@ -856,6 +908,8 @@ pub enum ErrorCode {
     Busy,
     /// A bug.
     Internal,
+    /// The person has to agree first (a benchmark on battery); ask, then send the request again with the consent. Appended.
+    NeedsConsent,
 }
 
 /// A failed request.
@@ -1081,6 +1135,10 @@ mod tests {
             eta_seconds: None,
             hidden_bytes: None,
             scanned_at: None,
+            origin: ScanOrigin::Saved { saved_at: Timestamp(5) },
+            changed_bytes: Some(-7),
+            replaces: Some(3),
+            not_saved: Some(NotSaved::TooBig),
         }
     }
 
@@ -1108,7 +1166,10 @@ mod tests {
             Request::DiskVolumes,
             Request::StartDiskScan {
                 target: crate::disk::scan::DiskTarget::Volume { id: "/".into() },
+                replaces: Some(2),
             },
+            Request::ForgetSavedDiskMap { scan: 1 },
+            Request::ForgetSavedDiskMaps,
             Request::CancelDiskScan { scan: 1 },
             Request::DiskScans,
             Request::DiskChildren {

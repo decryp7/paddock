@@ -1,6 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Chart, prefersReducedMotion } from './chart';
+import { getInstanceByDom } from 'echarts/core';
+import { Chart, animateDraw, hasData, prefersReducedMotion } from './chart';
 
 @Component({
   imports: [Chart],
@@ -22,6 +23,28 @@ describe('prefersReducedMotion', () => {
   it('is false when matchMedia is missing', () => {
     vi.stubGlobal('matchMedia', undefined);
     expect(prefersReducedMotion()).toBe(false);
+  });
+});
+
+describe('animateDraw', () => {
+  it('animates only the first draw, and never with reduced motion', () => {
+    expect(animateDraw(true, false)).toBe(true);
+    expect(animateDraw(false, false)).toBe(false);
+    expect(animateDraw(true, true)).toBe(false);
+    expect(animateDraw(false, true)).toBe(false);
+  });
+});
+
+describe('hasData', () => {
+  it('counts a series or dataset with points, not an empty or skeleton draw', () => {
+    expect(hasData({})).toBe(false);
+    expect(hasData({ series: [] })).toBe(false);
+    expect(hasData({ series: [{ type: 'line', data: [] }] })).toBe(false);
+    expect(hasData({ series: { type: 'line' } })).toBe(false);
+    expect(hasData({ series: [{ data: [] }, { data: [1] }] })).toBe(true);
+    expect(hasData({ series: { data: [1] } })).toBe(true);
+    expect(hasData({ dataset: { source: [] } })).toBe(false);
+    expect(hasData({ dataset: { source: [[1, 2]] } })).toBe(true);
   });
 });
 
@@ -74,6 +97,35 @@ describe('Chart', () => {
     f.componentInstance.opts.set(null);
     await settleAll(f);
     expect((f.nativeElement as HTMLElement).querySelector('.failed')).toBeNull();
+    f.destroy();
+  });
+
+  // A live chart (Counters polls every 2 s) got its options replaced whole with animation on, so every poll replayed the
+  // entry animation: about 18 canvas frames per update instead of one (measured in the VM, docs/benchmarks.md 2026-11-03).
+  it('animates its first draw only; later options are drawn without animation', async () => {
+    const f = TestBed.createComponent(Host);
+    const line = (n: number) => ({ xAxis: { type: 'category' }, yAxis: { type: 'value' }, series: [{ type: 'line', data: Array.from({ length: n }, (_, i) => i) }] });
+    f.componentInstance.opts.set(line(0));
+    const host = () => (f.nativeElement as HTMLElement).querySelector('dy-chart .host') as HTMLDivElement;
+    const animation = () => (getInstanceByDom(host())?.getOption() as { animation?: boolean } | undefined)?.animation;
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(animation()).toBe(true);
+    });
+    // An empty first draw (a skeleton) keeps the entry animation for the first draw with data.
+    f.componentInstance.opts.set(line(2));
+    await settleAll(f);
+    expect(animation()).toBe(true);
+    f.componentInstance.opts.set(line(3));
+    await settleAll(f);
+    expect(animation()).toBe(false);
+    f.componentInstance.opts.set(line(4));
+    await settleAll(f);
+    expect(animation()).toBe(false);
+    // A chart's own `animation` key does not override the first-draw-only rule.
+    f.componentInstance.opts.set({ ...line(5), animation: true });
+    await settleAll(f);
+    expect(animation()).toBe(false);
     f.destroy();
   });
 

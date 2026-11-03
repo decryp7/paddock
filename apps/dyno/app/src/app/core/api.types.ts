@@ -271,7 +271,8 @@ export interface LiveUpdate {
   otherUsers: OtherUsers | null;
 }
 
-export type LiveDetail = 'summary' | 'processes';
+/** `tray` is the shell's own level with no window open (the menu bar icons); a window asks for `summary` or `processes`. */
+export type LiveDetail = 'summary' | 'processes' | 'tray';
 
 // --------------------------------------------------------------------------------------------------- why slow
 
@@ -458,6 +459,21 @@ export interface DiskSettings {
   finderDepth?: number;
   /** The file finder stops comparing contents after reading this many GiB (1 to 4,096). */
   finderHashGib?: number;
+  /** The disk maps kept for the next time (ADR 0029). */
+  savedMaps?: SavedMapsSettings;
+}
+
+/** When a saved map is refreshed by itself: never (the default), or at the first look at the page when it is older than this. */
+export type RefreshOnOpen = 'off' | 'olderThanDay' | 'olderThanWeek';
+
+/** `Settings.disk.savedMaps`: every key optional. */
+export interface SavedMapsSettings {
+  /** Whether finished scans are kept for the next time; switching it off forgets every saved map. */
+  enabled?: boolean;
+  /** The most all saved maps may take on disk, in MB (64 to 8,192). */
+  maxMb?: number;
+  /** Whether a saved map is refreshed at the first look at the page. */
+  refreshOnOpen?: RefreshOnOpen;
 }
 
 /** A thread count setting: the engine decides (`'auto'`) or exactly this many (the engine holds it to the setting's own range). */
@@ -540,7 +556,21 @@ export interface DiskScanStatus {
   hiddenBytes: number | null;
   /** When the latest pass ended; `null` while the first pass runs. */
   scannedAt: Timestamp | null;
+  /** Scanned in this run, or read back from the saved-maps cache (ADR 0029), where it may be old (its age is `scannedAt`). */
+  origin: ScanOrigin;
+  /** For a saved whole-volume map: the net change in used space since the scan (used now minus used then); `null` otherwise. */
+  changedBytes: number | null;
+  /** The kept scan this one replaces (a Rescan): that map stays on screen until this pass is done. */
+  replaces: number | null;
+  /** Why the finished scan was not saved; `null` when it was, or saving is off. */
+  notSaved: NotSaved | null;
 }
+
+/** Where a scan's tree came from. */
+export type ScanOrigin = 'live' | { saved: { savedAt: Timestamp } };
+
+/** Why a finished scan was not kept in the saved-maps cache. */
+export type NotSaved = 'tooBig' | 'noSpace' | 'failed';
 
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 
@@ -759,6 +789,7 @@ export interface Settings {
     lowDiskPercent: number;
     overheatCelsius: number;
     longHighCpuMinutes: number;
+    trayAlertPercent: number;
   };
   webApi: { enabled: boolean; port: number; lan: boolean };
   // The dashboard, menu-bar items and popup layouts travel in the settings JSON too, but a saved `Settings` never replaces
@@ -826,6 +857,7 @@ export type ErrorCode =
   | 'badRequest'
   | 'timeout'
   | 'busy'
+  | 'needsConsent'
   | 'internal';
 
 /** What every failed backend call rejects with. */
@@ -1106,6 +1138,14 @@ export interface BenchMetric {
   value: number;
   unit: string;
   higherIsBetter: boolean;
+  /** Every repetition, in the order measured; `value` is their median. */
+  samples: number[];
+  min: number;
+  max: number;
+  /** Coefficient of variation of the repetitions (null where the mean is zero). */
+  cv: number | null;
+  /** True when the repetitions varied by more than 10 %. */
+  unsteady: boolean;
 }
 
 export type BenchStatus =
@@ -1118,6 +1158,8 @@ export interface BenchKindResult {
   kind: BenchKind;
   status: BenchStatus;
   millis: number;
+  /** The method version it was measured with; 1 is Dyno 1.0's. */
+  method: number;
 }
 
 export interface LoadAtRun {
@@ -1135,7 +1177,24 @@ export interface BenchRun {
   load: LoadAtRun;
   machine: string;
   results: BenchKindResult[];
+  /** Measured the 1.0 way: kept, shown as "measured the old way", never compared with a current run. */
+  oldWay: boolean;
+  /** Why this run's numbers are low confidence, when they are. */
+  limited: string | null;
 }
+
+/** Where the measuring program is, as it reports it. `rep` 0 is the warm-up; `total` is null while unknown. */
+export interface BenchPhaseProgress {
+  phase: string;
+  label: string;
+  rep: number;
+  of: number;
+  count: number;
+  total: number | null;
+}
+
+/** How alive a run looks: nothing ends it but the person's Cancel (or a named safety stop). */
+export type BenchLiveness = 'running' | 'stillWorking' | 'notResponding';
 
 export interface BenchProgress {
   runId: string;
@@ -1143,11 +1202,18 @@ export interface BenchProgress {
   kinds: BenchKind[];
   current: BenchKind | null;
   done: BenchKind[];
+  /** The phase being measured now (null between phases and kinds). */
+  phase: BenchPhaseProgress | null;
+  liveness: BenchLiveness;
+  /** Set when the run cannot have full-confidence conditions (Linux without a user manager). */
+  limited: string | null;
 }
 
 export interface BenchOverview {
   running: BenchProgress | null;
   runs: BenchRun[];
+  /** False while the engine keeps the disk test off (ADR 0030 D10); the page shows it as unavailable. */
+  diskTestEnabled: boolean;
 }
 
 export type BenchVerdict = 'better' | 'worse' | 'same';
@@ -1161,6 +1227,10 @@ export interface MetricDelta {
   before: number;
   after: number;
   changePercent: number;
+  /** How widely each run's repetitions varied (max minus min). */
+  beforeSpread: number;
+  afterSpread: number;
+  unsteady: boolean;
   verdict: BenchVerdict;
 }
 
@@ -1177,6 +1247,8 @@ export interface StartBenchmark {
   group?: string | null;
   phase?: BenchPhase | null;
   diskMib?: number | null;
+  /** The person agreed to run on battery, for this run only. */
+  allowBattery?: boolean;
 }
 
 // -------------------------------------------------------------------------------------------------------- network
@@ -1319,6 +1391,8 @@ export interface CounterObjectList {
   objects: CounterObjectSummary[];
   /** Something was left out to keep the catalog small. */
   truncated: boolean;
+  /** When the list was last read, when this answer is the one an earlier run saved (shown at once while the agent lists again); `null` when read just now. */
+  savedAt: Timestamp | null;
 }
 
 /** One search match: a counter (of one instance). Paths are `\Object(Instance)\Counter`. */
@@ -1778,6 +1852,8 @@ export interface SoftwareInventory {
   items: SoftwareItem[];
   truncated: boolean;
   unavailable: string | null;
+  /** When the list was last read, when this answer is the one an earlier run saved (shown at once while the agent reads again); `null` when read just now. */
+  savedAt: Timestamp | null;
 }
 
 export type InventoryFormat = 'markdown' | 'json';

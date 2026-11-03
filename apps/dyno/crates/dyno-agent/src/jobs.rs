@@ -117,6 +117,12 @@ impl JobCentre {
             .ok_or_else(|| AgentError::new(ErrorCode::Internal, "The job vanished."))
     }
 
+    /// Registers a job that its owner runs itself (a benchmark run keeps its own thread and process): the job appears in the
+    /// Jobs view, reports phases and honours Cancel like any other, and the owner calls [`JobContext::run`] on it.
+    pub fn register_external(&self, slug: &str, title: &str, subject: Option<&str>) -> JobContext {
+        self.registry.register(slug, title, subject)
+    }
+
     /// Every job that has not ended and the last few that did, oldest first.
     pub fn statuses(&self) -> Vec<WireSnapshot> {
         let mut all: Vec<WireSnapshot> = self
@@ -272,8 +278,10 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             .map_err(|e| JobError::Failed(e.message)),
         JobSpec::AppUsage => tool_step(ctx, "usage", "Reading network and energy use", || crate::extras::app_usage(shared))
             .map(|r| JobOutput::AppUsage(Box::new(r))),
-        JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || crate::extras::software(shared))
-            .map(|r| JobOutput::Software(Box::new(r))),
+        JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || {
+            crate::extras::software_for_page(shared)
+        })
+        .map(|r| JobOutput::Software(Box::new(r))),
     }
 }
 

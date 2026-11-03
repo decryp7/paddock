@@ -10,9 +10,9 @@ use crate::discovery::{discover, Discovered, Invalid};
 use crate::error::{ErrorKind, HostError};
 use crate::launcher::{Launcher, PluginConnection, ProcessLauncher};
 use crate::supervision::{Supervision, Verdict};
-use dyno_ipc::IpcError;
 use dyno_plugin_api::protocol::codes;
 use dyno_plugin_api::{Contribution, PluginReply, PluginRequest, SensorReading, API_VERSION};
+use paddock_ipc::IpcError;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -326,7 +326,7 @@ impl PluginHost {
         let conn = match self.launcher.launch(plugin, &self.config) {
             Ok(conn) => conn,
             Err(err) => {
-                let (kind, message) = describe_failure(&err, None, "could not start");
+                let (kind, message) = describe_failure(&err, None, "could not start", self.config.timeouts.start);
                 return Err(self.record_failure(e, &mut s, kind, message));
             }
         };
@@ -339,7 +339,8 @@ impl PluginHost {
             }
             Err(err) => {
                 conn.kill();
-                let (kind, message) = describe_failure(&err, conn.exit_status(), "failed to describe itself");
+                let (kind, message) =
+                    describe_failure(&err, conn.exit_status(), "failed to describe itself", self.config.timeouts.describe);
                 return Err(self.record_failure(e, &mut s, kind, message));
             }
         };
@@ -370,7 +371,7 @@ impl PluginHost {
         let conn = self.ensure(e)?;
         match conn.call(req, timeout) {
             Ok(reply) => Ok(reply),
-            Err(IpcError::Remote(r)) if r.code != dyno_ipc::wire::codes::PANIC => {
+            Err(IpcError::Remote(r)) if r.code != paddock_ipc::codes::PANIC => {
                 let kind = match r.code.as_str() {
                     codes::UNSUPPORTED => ErrorKind::Unsupported,
                     _ => ErrorKind::Failed,
@@ -378,12 +379,12 @@ impl PluginHost {
                 Err(HostError::new(&e.id, kind, r.message))
             }
             Err(err) => {
-                let status = if matches!(err, IpcError::Closed | IpcError::Io { .. }) {
+                let status = if matches!(err, IpcError::Closed(_) | IpcError::Io { .. }) {
                     conn.exit_status()
                 } else {
                     None
                 };
-                let (kind, message) = describe_failure(&err, status, "failed");
+                let (kind, message) = describe_failure(&err, status, "failed", timeout);
                 Err(self.fail_connection(e, &conn, kind, message))
             }
         }
@@ -436,16 +437,20 @@ impl Drop for PluginHost {
     }
 }
 
-fn describe_failure(err: &IpcError, status: Option<String>, what: &str) -> (ErrorKind, String) {
+fn describe_failure(err: &IpcError, status: Option<String>, what: &str, timeout: Duration) -> (ErrorKind, String) {
     match err {
-        IpcError::Timeout(t) => (
+        IpcError::Timeout => (
             ErrorKind::Timeout,
-            format!("did not answer within {} ms and was stopped", t.as_millis()),
+            format!("did not answer within {} ms and was stopped", timeout.as_millis()),
         ),
         IpcError::Remote(r) => (ErrorKind::Crashed, format!("panicked: {}", r.message)),
         IpcError::Protocol(m) => (ErrorKind::Protocol, format!("sent an invalid message ({m}) and was stopped")),
-        IpcError::Version { .. } | IpcError::Auth(_) => (ErrorKind::Protocol, format!("{what}: {err}")),
-        IpcError::Closed | IpcError::Io { .. } => match status {
+        IpcError::TooLarge { .. } => (
+            ErrorKind::Protocol,
+            format!("sent a message over the size limit and was stopped ({err})"),
+        ),
+        IpcError::Version(_) | IpcError::Auth(_) | IpcError::Denied(_) => (ErrorKind::Protocol, format!("{what}: {err}")),
+        IpcError::Spawn(_) | IpcError::Closed(_) | IpcError::Io { .. } => match status {
             Some(status) => (ErrorKind::Crashed, format!("crashed ({status})")),
             None => (ErrorKind::Crashed, format!("{what}: {err}")),
         },
@@ -464,8 +469,8 @@ mod tests {
     use super::*;
     use crate::clock::ManualClock;
     use crate::config::Policy;
-    use dyno_ipc::RemoteError;
     use dyno_plugin_api::Manifest;
+    use paddock_ipc::RemoteError;
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -513,10 +518,7 @@ mod tests {
             self.launches.fetch_add(1, Ordering::SeqCst);
             if self.fail_launches.load(Ordering::SeqCst) > 0 {
                 self.fail_launches.fetch_sub(1, Ordering::SeqCst);
-                return Err(IpcError::io(
-                    std::io::ErrorKind::BrokenPipe,
-                    "the process exited (exit code: 1) before it connected",
-                ));
+                return Err(IpcError::Spawn("plugin \"p\" exited before it connected".into()));
             }
             Ok(Arc::new(FakeConn {
                 id: self.id.lock().unwrap().clone(),
@@ -593,7 +595,7 @@ mod tests {
     #[test]
     fn crashes_restart_with_backoff_and_quarantine_after_three_in_ten_minutes() {
         let (host, launcher, clock) = setup(0);
-        push(&launcher, Err(IpcError::Closed));
+        push(&launcher, Err(IpcError::Closed("gone".into())));
         let e = host.sensors().remove(0).result.unwrap_err();
         assert_eq!((e.plugin.as_str(), e.kind), ("p", ErrorKind::Crashed));
         assert!(e.message.contains("exit code 3"), "{}", e.message);
@@ -605,7 +607,7 @@ mod tests {
         assert_eq!(wait.kind, ErrorKind::NotRunning);
         assert!(wait.message.contains("restarting in 1 s"), "{}", wait.message);
         clock.advance(Duration::from_secs(1));
-        push(&launcher, Err(IpcError::Timeout(Duration::from_secs(2))));
+        push(&launcher, Err(IpcError::Timeout));
         assert_eq!(host.sensors().remove(0).result.unwrap_err().kind, ErrorKind::Timeout);
         clock.advance(Duration::from_secs(1));
         push(&launcher, Err(IpcError::Remote(RemoteError::new("panic", "boom"))));

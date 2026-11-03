@@ -56,6 +56,8 @@ pub struct AlertSettings {
     pub overheat_celsius: f32,
     /// An app above 50 % CPU for this many minutes (1–240).
     pub long_high_cpu_minutes: u32,
+    /// A menu-bar item shows its alert at or above this percent when no alarm rule covers its metric (50–100).
+    pub tray_alert_percent: f32,
 }
 
 impl Default for AlertSettings {
@@ -65,6 +67,7 @@ impl Default for AlertSettings {
             low_disk_percent: 10.0,
             overheat_celsius: 90.0,
             long_high_cpu_minutes: 15,
+            tray_alert_percent: 90.0,
         }
     }
 }
@@ -77,6 +80,11 @@ impl AlertSettings {
             low_disk_percent: self.low_disk_percent.clamp(1.0, 50.0),
             overheat_celsius: self.overheat_celsius.clamp(60.0, 110.0),
             long_high_cpu_minutes: self.long_high_cpu_minutes.clamp(1, 240),
+            tray_alert_percent: if self.tray_alert_percent.is_finite() {
+                self.tray_alert_percent.clamp(50.0, 100.0)
+            } else {
+                90.0
+            },
         }
     }
 }
@@ -326,6 +334,24 @@ mod tests {
     }
 
     #[test]
+    fn the_tray_alert_level_is_clamped_and_a_non_number_is_the_default() {
+        let level = |v: f32| {
+            AlertSettings {
+                tray_alert_percent: v,
+                ..Default::default()
+            }
+            .clamped()
+            .tray_alert_percent
+        };
+        assert_eq!(level(10.0), 50.0);
+        assert_eq!(level(500.0), 100.0);
+        assert_eq!(level(85.0), 85.0);
+        assert_eq!(level(f32::NAN), 90.0);
+        assert_eq!(level(f32::INFINITY), 90.0);
+        assert_eq!(level(f32::NEG_INFINITY), 90.0);
+    }
+
+    #[test]
     fn disabled_and_clamped() {
         let mut a = Alerts::new();
         let off = AlertSettings {
@@ -340,6 +366,7 @@ mod tests {
             low_disk_percent: 99.0,
             overheat_celsius: 0.0,
             long_high_cpu_minutes: 0,
+            tray_alert_percent: 90.0,
         }
         .clamped();
         assert_eq!((c.low_disk_percent, c.overheat_celsius, c.long_high_cpu_minutes), (50.0, 60.0, 1));

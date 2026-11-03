@@ -153,6 +153,11 @@ One line each. The dated records are in the app files.
     [the record](#2026-10-29-paddock-chromium-browserclose-exit-time-under-load-fixflaky-browser-close).
 - **CI** (2026-10-24, before the monorepo): Paddock `ci.yml` median 3m05s. App builds 15–37 min median; Debrief's is
   24 min. See [ci-timings](research/2026-10-ci-timings.md). The monorepo has no re-run yet.
+- **Dyno** (2026-11-03, macOS VM, A/B, branch `perf/dyno-cpu`): the whole guest with Dyno on the Counters page
+  28–37% → 9–10% of one core, on the dashboard 18–22% → 12–16%, with the window closed 5.8–7.0% → 5.0–6.4% (agent
+  0.85–0.97% → 0.57–0.73%). Causes: chart animations replayed on every poll, number glides painting every frame, the
+  tray-only app subscribing at the summary level, menu bar icons drawn twice per update. See
+  [the record](../apps/dyno/docs/performance.md#2026-11-03-cpu-per-process-in-a-macos-vm-baseline-100-and-main-and-the-cpu-fixes-perfdyno-cpu).
 - **Dyno:** idle, nobody watching, the agent costs about 0.9–1.1% of one core and 30 MB (2026-10-30, release, load 21–61),
   the same with its threads at `UTILITY` as before; the finder is about 4% slower at `UTILITY` on a busy machine. Earlier:
   2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).

@@ -6,8 +6,8 @@
 use crate::paths::{join_windows, HelperPaths, WindowsRoots, LINUX_UNIT, MAC_LABEL, WINDOWS_SERVICE};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_wire::HelperUser;
-use dyno_ipc::Token;
 use dyno_platform::runner::{SystemRunner, Tool, ToolRunner};
+use paddock_ipc::Token;
 use std::path::{Path, PathBuf};
 
 /// One thing the installer does.

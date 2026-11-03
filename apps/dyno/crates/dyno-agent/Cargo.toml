@@ -15,12 +15,14 @@ path = "src/main.rs"
 [dependencies]
 dyno-core.workspace = true
 dyno-platform.workspace = true
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
 dyno-plugin-host.workspace = true
 # The family's job mechanism (phases, throttled progress, cancel tokens, hashing copy): the long operations run on it.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 # One instance per data folder by a held OS lock, discovery files as hints, and the start judge (ADR 0031).
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+# The clock the benchmark child loop takes (a manual one in tests).
+paddock-bench = { path = "../../../../crates/paddock-bench" }
 # The popup layout's placement ids (family ADR 0035).
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 # The agent's own log (one dated paddock-log file per process, panic hook and crash marker) and the folders it lives in.
@@ -36,6 +38,8 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Content hashes for the duplicate file finder (MIT OR Apache-2.0; already in the tree through other dependencies).
 sha2 = "0.10"
+# The saved disk maps' chunks (D3, ADR 0029): deflate level 1, on the same Rust zlib-rs back end as the diagnostics zip.
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

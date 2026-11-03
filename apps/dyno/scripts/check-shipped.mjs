@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 /** The binaries the installers carry. */
-export const SHIPPED = ['dyno-app', 'dyno-agent', 'dyno-cli'];
+export const SHIPPED = ['dyno-app', 'dyno-agent', 'dyno-cli', 'dyno-bench'];
 /** The crates that must not be in any shipped binary's dependency tree. */
 export const FORBIDDEN_CRATES = ['dyno-helper'];
 /** Calls and phrases that ask the OS to run something with administrator rights. */
@@ -66,8 +66,16 @@ export function elevationOffences(root, dirs) {
   return found;
 }
 
+/** The executables `dyno-agent` starts by name: the one list `RUNNER_NAMES` in `crates/dyno-agent/src/bench.rs` (ADR 0030 B0). */
+export function startedByAgent(root) {
+  const text = readFileSync(join(root, 'crates/dyno-agent/src/bench.rs'), 'utf8');
+  const list = /pub const RUNNER_NAMES: &\[&str\] = &\[([^\]]*)\];/.exec(text);
+  if (!list) throw new Error('crates/dyno-agent/src/bench.rs declares no RUNNER_NAMES list');
+  return [...list[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
 /** The folders of the shipped crates. */
-export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-ipc', 'app/src-tauri/src'];
+export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-bench', 'crates/dyno-ipc', 'app/src-tauri/src'];
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
   const root = new URL('..', import.meta.url).pathname;

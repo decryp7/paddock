@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/dyno-core",
-    "crates/dyno-ipc",
     "crates/dyno-plugin-api",
     "crates/dyno-plugin-host",
     "crates/dyno-platform",
@@ -13,7 +12,8 @@ members = [
 ]
 resolver = "2"
 # The privileged helper is not part of Dyno 1.0: its source stays for 1.1 (ADR 0022) but is neither built nor bundled.
-exclude = ["crates/dyno-helper"]
+# vendor/: patched copies of third-party crates (vendor/PATCHES.md), not members.
+exclude = ["crates/dyno-helper", "vendor"]
 
 # Shared by every member: `edition.workspace = true` etc.
 [workspace.package]
@@ -26,7 +26,7 @@ version = "1.0.0"
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
 dyno-core = { path = "crates/dyno-core" }
-dyno-ipc = { path = "crates/dyno-ipc" }
+paddock-ipc = { path = "../../crates/paddock-ipc" }
 dyno-plugin-api = { path = "crates/dyno-plugin-api" }
 dyno-plugin-host = { path = "crates/dyno-plugin-host" }
 dyno-platform = { path = "crates/dyno-platform" }
@@ -66,3 +66,7 @@ missing_docs = "warn"
 [workspace.lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
+
+# tray-icon with a GUID provider (vendor/PATCHES.md, ADR 0028): Windows keeps each tray icon's place by GUID.
+[patch.crates-io]
+tray-icon = { path = "vendor/tray-icon" }

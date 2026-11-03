@@ -6,7 +6,7 @@ use crate::audit::AuditLog;
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, HelperInfo, HelperReply, HelperRequest, MAX_AUDIT_REPLY};
 use dyno_core::network_traffic::MAX_COUNTERS;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
-use dyno_ipc::RemoteError;
+use paddock_ipc::RemoteError;
 
 /// Everything a [`Dispatcher`] needs from outside.
 pub struct Parts {

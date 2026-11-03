@@ -8,9 +8,9 @@ use dyno_agent::Running;
 use dyno_core::history::HistoryRange;
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
-use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::Platform;
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
@@ -85,17 +85,17 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
-    fn subscriber(&self, detail: LiveDetail) -> (Peer<Message>, Receiver<LiveUpdate>) {
+    fn subscriber(&self, detail: LiveDetail) -> (BodyPeer<Message>, Receiver<LiveUpdate>) {
         let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     let _ = tx.send(*l);
                 }
@@ -141,6 +141,31 @@ fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
     let s = summary.recv_timeout(Duration::from_secs(10)).expect("a summary update");
     assert!(s.processes.is_none() && s.groups.is_none());
     assert!(!s.top_cpu.is_empty());
+}
+
+// The menu bar icons alone (no window open) used to subscribe at the summary level, so the process table was read every
+// 2 s for nobody (docs/benchmarks.md 2026-11-03). A tray subscriber gets the system numbers at the user's pace and the
+// process table at the unwatched pace, and a window's summary still wins over it.
+#[test]
+fn a_tray_subscriber_keeps_the_system_pace_and_the_process_table_slows_down() {
+    let h = Harness::start();
+    let (_t, tray) = h.subscriber(LiveDetail::Tray);
+    let wanted = dyno_core::settings::Settings::default().sampling;
+    let slow = loop {
+        let l = tray.recv_timeout(Duration::from_secs(10)).expect("a tray update");
+        assert!(l.processes.is_none() && l.groups.is_none(), "the tray gets no process list");
+        if l.overhead.process_interval_ms == dyno_core::sampling::UNWATCHED_PROCESS_MS {
+            break l;
+        }
+    };
+    assert_eq!(slow.overhead.sampling_interval_ms, wanted.interval_ms);
+    let (_s, summary) = h.subscriber(LiveDetail::Summary);
+    loop {
+        let l = summary.recv_timeout(Duration::from_secs(10)).expect("a summary update");
+        if l.overhead.process_interval_ms == wanted.process_interval_ms {
+            break;
+        }
+    }
 }
 
 #[test]
@@ -302,8 +327,8 @@ fn shutdown_removes_the_discovery_file_and_a_second_agent_is_not_needed() {
 fn a_wrong_token_is_refused_and_the_agent_keeps_serving() {
     let h = Harness::start();
     let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-    let bad = dyno_ipc::Token::from_bytes([1; 32]);
-    assert!(Client::connect(&d.endpoint, &bad).is_err());
+    let bad = paddock_ipc::Token::from_bytes([1; 32]);
+    assert!(dyno_agent::wire::connect(&d.endpoint, &bad).is_err());
     let peer = h.client();
     ask(&peer, Request::Settings).unwrap();
 }
@@ -746,7 +771,7 @@ fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
     h.running.as_ref().unwrap().shared.clone()
 }
 
-fn alarm_rules(peer: &Peer<Message>) -> Vec<String> {
+fn alarm_rules(peer: &BodyPeer<Message>) -> Vec<String> {
     let Reply::Alarms(list) = ask(
         peer,
         Request::Alarms {
@@ -1149,7 +1174,7 @@ mod widget_layouts {
         v.layout.placements.iter().map(|p| p.id.to_string()).collect()
     }
 
-    fn view(peer: &Peer<Message>, surface: DynoSurface) -> SurfaceView {
+    fn view(peer: &BodyPeer<Message>, surface: DynoSurface) -> SurfaceView {
         let Reply::WidgetLayout(v) = ask(peer, Request::WidgetLayout { surface }).unwrap() else {
             panic!("a layout")
         };
@@ -1157,13 +1182,13 @@ mod widget_layouts {
     }
 
     /// A second app connection that reports the surfaces whose layout changed.
-    fn watcher(h: &Harness) -> (Peer<Message>, Receiver<DynoSurface>) {
+    fn watcher(h: &Harness) -> (BodyPeer<Message>, Receiver<DynoSurface>) {
         let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::WidgetLayoutChanged(s) = m {
                     let _ = tx.send(s);
                 }
@@ -1184,7 +1209,11 @@ mod widget_layouts {
         let SurfaceView::MenuBar(m) = view(&peer, DynoSurface::MenuBar) else {
             panic!()
         };
-        assert_eq!(m.layout.placements.len(), 2);
+        // The menu bar starts as the catalogue's own default set, whatever it is.
+        assert_eq!(
+            m.layout.placements,
+            <dyno_core::widgets::MenuBarCatalogue as paddock_widgets::Catalogue>::defaults()
+        );
         assert!(m.editable && !m.can_undo);
         let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
             panic!()

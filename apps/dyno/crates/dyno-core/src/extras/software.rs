@@ -33,6 +33,10 @@ pub struct SoftwareInventory {
     pub truncated: bool,
     /// Why the list could not be read.
     pub unavailable: Option<String>,
+    /// When the list was last read, when this answer is the saved one of an earlier run (shown at once while the agent reads
+    /// again); `None` when it was read just now (ADR 0029).
+    #[serde(default)]
+    pub saved_at: Option<crate::time::Timestamp>,
 }
 
 impl SoftwareInventory {
@@ -46,6 +50,7 @@ impl SoftwareInventory {
             items,
             truncated,
             unavailable: None,
+            saved_at: None,
         }
     }
 

@@ -59,6 +59,21 @@ const clickTab = async (f: Parameters<typeof settle>[0], el: HTMLElement, text: 
 const returns = (mock: MockBackend, output: JobOutput) => vi.spyOn(mock, 'jobResult').mockResolvedValue(output);
 
 describe('dy-extras-page', () => {
+  it('shows the software list an earlier run saved at once, with its age, and Refresh has the fresh one', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+    const { f, el, store } = render('inventory', { savedListsAgeMs: 3 * 3_600_000 });
+    await settle(f);
+    expect(store.software().data!.savedAt).toBe(NOW - 3 * 3_600_000);
+    const note = el.querySelector('[data-testid="saved-list"]')!.textContent!.replace(/\s+/g, ' ');
+    expect(note).toContain('Last known list, read 3 h ago.');
+    expect(el.textContent).toContain('Visual Studio Code');
+    btn(el, 'Refresh').click();
+    await settle(f);
+    expect(store.software().data!.savedAt).toBeNull();
+    expect(el.querySelector('[data-testid="saved-list"]')).toBeNull();
+    vi.useRealTimers();
+  });
+
   it('has the eight tabs in a tablist, opens What changed first, and reads each tab only when opened', async () => {
     const { f, el, mock } = render();
     const spy = vi.spyOn(mock, 'startJob');
@@ -253,11 +268,11 @@ describe('dy-extras-page', () => {
     await store.reload('inventory');
     await settle(f);
     expect(el.textContent).toContain('more packages than Dyno lists');
-    returns(mock, { software: { items: [], truncated: false, unavailable: 'No package manager.' } });
+    returns(mock, { software: { items: [], truncated: false, unavailable: 'No package manager.', savedAt: null } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('No package manager.');
-    returns(mock, { software: { items: [], truncated: false, unavailable: null } });
+    returns(mock, { software: { items: [], truncated: false, unavailable: null, savedAt: null } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('No software found');

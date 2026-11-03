@@ -1,4 +1,4 @@
-import type { BenchKind, BenchMetric, BenchRun, BenchStatus, BenchVerdict } from '../../core/api.types';
+import type { BenchKind, BenchLiveness, BenchMetric, BenchPhaseProgress, BenchRun, BenchStatus, BenchVerdict } from '../../core/api.types';
 
 const TITLES: Record<BenchKind, string> = { cpu: 'Processor', memory: 'Memory', disk: 'Disk', gpu: 'Graphics' };
 
@@ -60,4 +60,32 @@ export function barPair(m: BenchMetric, ref: number | undefined): { fill: number
   const old = m.higherIsBetter ? ref : 1 / ref;
   const top = Math.max(cur, old);
   return { fill: cur / top, marker: old / top };
+}
+
+/** The spread of a metric's repetitions as plain words: "2,380 to 2,440", or '' for a single measurement. */
+export function spreadText(m: BenchMetric, format: (v: number) => string): string {
+  if (m.samples.length < 2 || !Number.isFinite(m.min) || !Number.isFinite(m.max)) return '';
+  return `${format(m.min)} to ${format(m.max)}`;
+}
+
+/** What to say about a run measured with an earlier method (Dyno 1.0's); '' for a current run. */
+export function methodNote(run: BenchRun): string {
+  return run.oldWay ? 'Measured the old way (Dyno 1.0); not compared with newer runs' : '';
+}
+
+/** How far a kind is in words: the passes finished (a pass counts when it ends), so it starts at "0 of 5 passes done". */
+export function phaseText(p: BenchPhaseProgress): string {
+  return `${p.rep} of ${p.of} passes done`;
+}
+
+/** What to tell the person when a run is slow or quiet; '' while it is on plan. Nothing ends the run but their Cancel. */
+export function livenessNote(l: BenchLiveness): string {
+  switch (l) {
+    case 'stillWorking':
+      return 'Still working. This is taking longer than planned; Cancel stops it.';
+    case 'notResponding':
+      return 'Not responding. The measuring program has been quiet for 30 seconds. Wait, or Cancel to stop it.';
+    case 'running':
+      return '';
+  }
 }

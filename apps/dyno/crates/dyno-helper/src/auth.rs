@@ -1,5 +1,5 @@
 //! Who may call the helper (ADR 0016 section 3). Pure over the facts the OS gave about the peer; the real facts come
-//! from `dyno-ipc` (the kernel's user id and process id) and [`crate::sys::process_image`].
+//! from `paddock-ipc` (the kernel's user id and process id) and [`crate::sys::process_image`].
 
 use dyno_core::helper_wire::HelperUser;
 use std::path::{Path, PathBuf};

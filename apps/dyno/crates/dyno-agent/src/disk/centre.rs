@@ -3,11 +3,13 @@
 
 use super::engine::{End, LiveWorkers, RetryError, Snapshot, Walk, WalkConfig, WalkHooks};
 use super::folder;
+use super::keep::{Keeper, Kept, PassEnd};
 use super::volumes::{ListedVolume, VolumeLister};
+use crate::cache::{Cache, SavedRow};
 use dyno_core::disk::index::{DiskChildren, DiskIndex, DiskRings, NodeId, ScanLimits, MAX_RINGS, MAX_RING_NODES};
 use dyno_core::disk::scan::{
-    eta_seconds, hidden_bytes, per_second, walk_threads, DiskScanStatus, DiskTarget, EventGate, ScanFailure, ScanPhase, ScanProgress,
-    ScanState,
+    eta_seconds, hidden_bytes, per_second, walk_threads, DiskScanStatus, DiskTarget, EventGate, NotSaved, ScanFailure, ScanOrigin,
+    ScanPhase, ScanProgress, ScanState,
 };
 use dyno_core::disk::settings::MAX_READ_THREADS;
 use dyno_core::disk::source::{DirSource, ReadError};
@@ -18,13 +20,14 @@ use dyno_core::time::Timestamp;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 /// Scans running at once.
 pub const MAX_RUNNING: usize = 2;
-/// Scans kept (running and finished); the oldest finished one goes first.
+/// Scans kept in memory (running, finished, and saved maps loaded again); the least recently used finished one goes first. A
+/// saved map that is not loaded costs no memory and does not count (ADR 0029).
 pub const MAX_KEPT: usize = 3;
-/// The most nodes the kept scans may hold together, counting the room a new scan may take (the memory bound across scans).
+/// The most nodes the scans in memory may hold together, counting the room a new scan may take (the memory bound across scans).
 pub const MAX_KEPT_NODES: usize = 8_000_000;
 /// How long the first look at a scan's root may take before the start is refused (a dead share must not hold the request).
 pub const STAT_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -114,6 +117,8 @@ struct Pub {
     /// The first pass reads the whole tree, so only it can be estimated.
     first_pass: bool,
     scanned_at: Option<Timestamp>,
+    /// Why the finished pass was not kept in the saved-maps cache.
+    not_saved: Option<NotSaved>,
 }
 
 /// What a scan's events are made from; also the walk's hooks.
@@ -127,6 +132,14 @@ struct Meta {
     state: Mutex<Pub>,
     sink: Arc<dyn StatusSink>,
     clock: Arc<dyn Clock>,
+    /// The kept scan this one replaces (a Rescan).
+    replaces: Option<u64>,
+    /// What the saved-maps cache holds for this scan.
+    kept: Arc<Kept>,
+    keeper: Arc<Keeper>,
+    /// The volume as listed when the scan began.
+    listed: Option<ListedVolume>,
+    this: Weak<Meta>,
 }
 
 impl Meta {
@@ -155,7 +168,27 @@ impl Meta {
                 .then(|| hidden_bytes(snap.progress.total_bytes, snap.progress.bytes))
                 .flatten(),
             scanned_at: p.scanned_at,
+            origin: ScanOrigin::Live,
+            changed_bytes: None,
+            replaces: self.replaces,
+            not_saved: p.not_saved,
         }
+    }
+
+    /// Says in a new event why the finished pass was not kept (or that it was, which changes nothing). A retry that began in
+    /// between has made the status newer than the pass this is about: then nothing is sent.
+    fn kept_result(&self, pass_status: &DiskScanStatus, not_saved: Option<NotSaved>) {
+        let Some(why) = not_saved else { return };
+        let mut p = lock(&self.state);
+        if p.state != pass_status.state || p.scanned_at != pass_status.scanned_at {
+            return;
+        }
+        p.not_saved = Some(why);
+        p.seq += 1;
+        let mut s = pass_status.clone();
+        s.seq = p.seq;
+        s.not_saved = Some(why);
+        self.sink.status(s);
     }
 
     fn current(&self, walk: &Walk) -> DiskScanStatus {
@@ -232,6 +265,25 @@ impl WalkHooks for Meta {
             End::Failed(_) => "failed",
         };
         log::info!(Scan = self.scan, Outcome = outcome, Seq = seq, PassMs = pass_ms, Retry = !first_pass; "Disk scan pass ended");
+        let status = self.current(walk);
+        let (me, told_status) = (self.this.clone(), status.clone());
+        self.keeper.save_pass(
+            PassEnd {
+                scan: self.scan,
+                target: &self.target,
+                listed: self.listed.as_ref(),
+                replaces: self.replaces,
+                kept: &self.kept,
+                status,
+                told: Box::new(move |why| {
+                    if let Some(meta) = me.upgrade() {
+                        meta.kept_result(&told_status, why);
+                    }
+                }),
+            },
+            walk,
+            end,
+        );
     }
 
     fn restarted(&self, walk: &Walk) {
@@ -239,6 +291,7 @@ impl WalkHooks for Meta {
         {
             let mut p = lock(&self.state);
             p.state = ScanState::Running;
+            p.not_saved = None;
             p.first_pass = false;
             p.base = (self.clock.now_ms(), snap.progress.items, snap.progress.bytes);
         }
@@ -246,9 +299,29 @@ impl WalkHooks for Meta {
     }
 }
 
+/// Where a kept scan's tree is.
+enum Tree {
+    /// A scan of this run, running or finished: the walk owns the tree.
+    Live(Arc<Walk>),
+    /// A saved map loaded again: read-only, in memory.
+    Held(Arc<DiskIndex>),
+    /// A saved map not in memory; the cache row (in [`Kept`]) has it. Costs nothing until a level of it is asked for.
+    Saved,
+}
+
 struct Entry {
-    meta: Arc<Meta>,
-    walk: Arc<Walk>,
+    scan: u64,
+    /// The status hooks of a scan of this run; saved maps have none.
+    meta: Option<Arc<Meta>>,
+    tree: Mutex<Tree>,
+    /// Serialises loading a saved map, so two requests load it once (`tree` is never held across a load).
+    loading: Mutex<()>,
+    kept: Arc<Kept>,
+    /// The status of a tree that is not a running walk: a saved map's, or a finished scan's from when it was unloaded.
+    frozen: Mutex<Option<DiskScanStatus>>,
+    target: DiskTarget,
+    /// Orders unloading: the least recently used finished map goes first.
+    last_used: AtomicU64,
     key: String,
     root: PathBuf,
     host: String,
@@ -257,7 +330,45 @@ struct Entry {
 
 impl Entry {
     fn running(&self) -> bool {
-        self.walk.outcome().is_none()
+        self.walk().is_some_and(|w| w.outcome().is_none())
+    }
+
+    /// The walk of a scan of this run (`None` for a saved map, loaded or not, and for a live scan that was unloaded).
+    fn walk(&self) -> Option<Arc<Walk>> {
+        match &*lock(&self.tree) {
+            Tree::Live(w) => Some(w.clone()),
+            _ => None,
+        }
+    }
+
+    /// Whether the tree is in memory.
+    fn loaded(&self) -> bool {
+        !matches!(&*lock(&self.tree), Tree::Saved)
+    }
+
+    /// Nodes the tree holds in memory; a running scan counts what it may grow to.
+    fn memory_nodes(&self) -> usize {
+        match &*lock(&self.tree) {
+            Tree::Live(w) if w.outcome().is_none() => w.with_index(|i| i.limits().max_nodes as usize),
+            Tree::Live(w) => w.with_index(DiskIndex::len),
+            Tree::Held(i) => i.len(),
+            Tree::Saved => 0,
+        }
+    }
+
+    fn touch(&self, tick: &AtomicU64) {
+        self.last_used.store(tick.fetch_add(1, Ordering::Relaxed) + 1, Ordering::Relaxed);
+    }
+
+    /// Turns a finished tree back into a saved map (its row has it). The status it had is kept.
+    fn unload(&self) {
+        let mut tree = lock(&self.tree);
+        if let Tree::Live(w) = &*tree {
+            if let Some(meta) = &self.meta {
+                *lock(&self.frozen) = Some(meta.current(w));
+            }
+        }
+        *tree = Tree::Saved;
     }
 }
 
@@ -265,6 +376,8 @@ struct Resolved {
     name: String,
     root: PathBuf,
     volume: Option<Volume>,
+    /// The volume as listed (the target is a volume), for its identity and used space.
+    listed: Option<ListedVolume>,
     location: VolumeLocation,
     rotational: Option<bool>,
     host: String,
@@ -293,6 +406,12 @@ pub struct DiskCentre {
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
+    /// Hands finished passes to the saved-maps cache.
+    keeper: Arc<Keeper>,
+    /// A counter that orders the use of kept scans.
+    tick: AtomicU64,
+    /// The Setting `disk.savedMaps.enabled` as last applied.
+    saved_on: std::sync::atomic::AtomicBool,
 }
 
 fn err(code: ErrorCode, m: impl Into<String>) -> AgentError {
@@ -310,6 +429,7 @@ impl DiskCentre {
         cores: usize,
         limits: ScanLimits,
     ) -> DiskCentre {
+        let keeper = Arc::new(Keeper::new(lister.clone()));
         DiskCentre {
             source,
             lister,
@@ -328,6 +448,9 @@ impl DiskCentre {
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
+            keeper,
+            tick: AtomicU64::new(0),
+            saved_on: std::sync::atomic::AtomicBool::new(true),
         }
     }
 
@@ -450,18 +573,18 @@ impl DiskCentre {
             DiskTarget::Volume { id } => {
                 let find = |l: Vec<ListedVolume>| l.into_iter().find(|l| &l.volume.id == id);
                 // A volume the last listing did not know, or knew as not answering, is looked for once more.
-                let ListedVolume { volume, root } = find(self.listed(false))
+                let listed = find(self.listed(false))
                     .filter(|l| l.volume.reachable)
                     .or_else(|| find(self.listed(true)))
                     .ok_or_else(|| err(ErrorCode::NotFound, "That volume is not mounted any more."))?;
-                if !volume.reachable {
-                    return Err(err(ErrorCode::Timeout, format!("{} is not answering.", volume.name)));
+                if !listed.volume.reachable {
+                    return Err(err(ErrorCode::Timeout, format!("{} is not answering.", listed.volume.name)));
                 }
                 // The used space as of now, not as of the last listing, is what the progress is measured against.
-                let listed = ListedVolume { volume, root };
                 let used_now = self.lister.capacity_now(&listed).map(|(total, free)| total.saturating_sub(free));
-                let ListedVolume { volume, root } = listed;
+                let (volume, root) = (listed.volume.clone(), listed.root.clone());
                 Ok(Resolved {
+                    listed: Some(listed),
                     name: volume.name.clone(),
                     root,
                     location: volume.location.clone(),
@@ -502,6 +625,7 @@ impl DiskCentre {
                     rotational,
                     total_bytes: None,
                     volume: None,
+                    listed: None,
                 })
             }
         }
@@ -512,7 +636,7 @@ impl DiskCentre {
         let scans = lock(&self.scans);
         let mut starting = lock(&self.starting);
         if let Some(e) = scans.iter().find(|e| e.key == key && e.running()) {
-            return Ok(Some(e.meta.current(&e.walk)));
+            return Ok(e.walk().zip(e.meta.as_ref()).map(|(w, m)| m.current(&w)));
         }
         if starting.contains(key) {
             return Err(err(ErrorCode::Busy, "That scan is just starting."));
@@ -527,7 +651,8 @@ impl DiskCentre {
         let reserved: usize = scans
             .iter()
             .filter(|e| e.running())
-            .map(|e| e.walk.with_index(|i| i.limits().max_nodes as usize))
+            .filter_map(|e| e.walk())
+            .map(|w| w.with_index(|i| i.limits().max_nodes as usize))
             .sum::<usize>()
             + (starting.len() + usize::from(incoming > 0)) * (incoming as usize);
         if incoming > 0 && reserved > self.kept_nodes.load(Ordering::Relaxed) {
@@ -574,22 +699,37 @@ impl DiskCentre {
     /// Starts a scan, or returns the one already running for the same folder. Returns at once: the volume list is the one last
     /// asked for, and the slow parts (the access probe, the first look at the root) happen outside the lock on the scans.
     pub fn start(&self, target: DiskTarget) -> Result<DiskScanStatus, AgentError> {
+        self.start_replacing(target, None)
+    }
+
+    /// [`start`](Self::start) for a Rescan: the new scan replaces the kept scan `replaces` of the same target. That map stays
+    /// readable (and is not unloaded to make room) until the new pass is done; a pass that is cancelled or fails saves nothing
+    /// and leaves it as it was (ADR 0029, D9). An id that is not a kept scan of this target is ignored.
+    pub fn start_replacing(&self, target: DiskTarget, replaces: Option<u64>) -> Result<DiskScanStatus, AgentError> {
         let r = self.resolve(&target)?;
         let key = format!("disk-scan:{}", r.root.display());
         if let Some(running) = self.reserve(&key, &r.host, true, self.limits_now().max_nodes)? {
             return Ok(running);
         }
-        let started = self.begin(target, &r, &key);
+        let replaces = replaces.filter(|old| lock(&self.scans).iter().any(|e| e.scan == *old && e.target == target));
+        let started = self.begin(target, &r, &key, replaces);
         self.release(&key);
         started
     }
 
-    fn begin(&self, target: DiskTarget, r: &Resolved, key: &str) -> Result<DiskScanStatus, AgentError> {
+    fn begin(&self, target: DiskTarget, r: &Resolved, key: &str, replaces: Option<u64>) -> Result<DiskScanStatus, AgentError> {
         let live = lock(&self.live).entry(r.host.clone()).or_default().clone();
-        let meta = Arc::new(Meta {
-            scan: self.next.fetch_add(1, Ordering::Relaxed),
+        let scan = self.next.fetch_add(1, Ordering::Relaxed);
+        let kept = Arc::new(Kept::live(r.listed.as_ref().and_then(|l| l.identity.clone())));
+        let meta = Arc::new_cyclic(|this| Meta {
+            scan,
+            replaces,
+            kept: kept.clone(),
+            keeper: self.keeper.clone(),
+            listed: r.listed.clone(),
+            this: this.clone(),
             name: r.name.clone(),
-            target,
+            target: target.clone(),
             volume: r.volume.clone(),
             fda_missing: self.access.full_disk_access_missing(),
             state: Mutex::new(Pub {
@@ -600,6 +740,7 @@ impl DiskCentre {
                 base: (self.clock.now_ms(), 0, 0),
                 first_pass: true,
                 scanned_at: None,
+                not_saved: None,
             }),
             sink: self.sink.clone(),
             clock: self.clock.clone(),
@@ -634,62 +775,168 @@ impl DiskCentre {
         let status = meta.current(&walk);
         let mut scans = lock(&self.scans);
         // Only now, with the new scan running, do old ones make room: a failed start loses nobody's results.
-        self.evict(&mut scans, limits.max_nodes);
-        scans.push(Arc::new(Entry {
-            meta,
-            walk,
+        self.evict(&mut scans, Some(limits.max_nodes), replaces);
+        let entry = Arc::new(Entry {
+            scan,
+            meta: Some(meta.clone()),
+            tree: Mutex::new(Tree::Live(walk)),
+            loading: Mutex::new(()),
+            kept,
+            frozen: Mutex::new(None),
+            target: meta.target.clone(),
+            last_used: AtomicU64::new(0),
             key: key.to_string(),
             root: r.root.clone(),
             host: r.host.clone(),
             threads,
-        }));
+        });
+        entry.touch(&self.tick);
+        scans.push(entry);
         Ok(status)
     }
 
-    /// Drops the oldest finished scans until there are at most [`MAX_KEPT`] with the new one, and the nodes they hold, with room
-    /// for a new scan of up to `incoming` nodes, stay within [`MAX_KEPT_NODES`]. A running scan is never dropped.
-    fn evict(&self, scans: &mut Vec<Arc<Entry>>, incoming: u32) {
-        // A finished scan holds what it has; a running one may grow to its own limit, so that much is reserved for it.
-        let nodes = |scans: &Vec<Arc<Entry>>| {
-            scans
+    /// Makes room for a new scan of up to `incoming` nodes: while the trees in memory number [`MAX_KEPT`] or more, or hold (with
+    /// the new one) more than [`MAX_KEPT_NODES`] nodes, the least recently used finished one goes. One that has a saved row is
+    /// only unloaded (it stays listed, with its id, and loads again when asked); one without a row is dropped. A running scan,
+    /// one whose save is still reading its tree, and the map a Rescan replaces are never touched.
+    ///
+    /// `incoming` is the size of the scan about to be added; `None` when a saved map was just loaded (room is then made for
+    /// no one else, and the map just loaded counts).
+    fn evict(&self, scans: &mut Vec<Arc<Entry>>, incoming: Option<u32>, protect: Option<u64>) {
+        Self::drop_superseded(scans);
+        loop {
+            let loaded: Vec<&Arc<Entry>> = scans.iter().filter(|e| e.loaded()).collect();
+            let nodes: usize = loaded.iter().map(|e| e.memory_nodes()).sum::<usize>() + incoming.unwrap_or(0) as usize;
+            let few = if incoming.is_some() {
+                loaded.len() < MAX_KEPT
+            } else {
+                loaded.len() <= MAX_KEPT
+            };
+            if few && nodes <= self.kept_nodes.load(Ordering::Relaxed) {
+                return;
+            }
+            let victim = loaded
                 .iter()
-                .map(|e| {
-                    if e.running() {
-                        e.walk.with_index(|i| i.limits().max_nodes as usize)
-                    } else {
-                        e.walk.with_index(DiskIndex::len)
-                    }
-                })
-                .sum::<usize>()
-                + incoming as usize
-        };
-        while scans.len() >= MAX_KEPT || nodes(scans) > self.kept_nodes.load(Ordering::Relaxed) {
-            match scans.iter().position(|e| !e.running()) {
-                Some(old) => {
-                    scans.remove(old);
-                }
-                None => break,
+                .filter(|e| !e.running() && !e.kept.pending() && Some(e.scan) != protect)
+                .min_by_key(|e| e.last_used.load(Ordering::Relaxed))
+                .map(|e| (*e).clone());
+            let Some(victim) = victim else { return };
+            if victim.kept.row().is_some() {
+                log::info!(Scan = victim.scan; "Disk map unloaded from memory; it stays saved");
+                victim.unload();
+            } else {
+                scans.retain(|e| e.scan != victim.scan);
             }
         }
     }
 
+    /// Takes the cache's news into account: rows it removed (replaced or evicted) leave the entries that held them. A saved map
+    /// that is not in memory then has nothing left to load and is dropped; one in memory stays readable without a row.
+    fn apply_removed(&self) {
+        let removed = self.keeper.take_removed();
+        let mut scans = lock(&self.scans);
+        Self::drop_superseded(&mut scans);
+        if removed.is_empty() {
+            return;
+        }
+        scans.retain(|e| {
+            if e.kept.row().is_some_and(|r| removed.contains(&r)) {
+                e.kept.clear_row();
+                return e.loaded();
+            }
+            true
+        });
+    }
+
+    /// Whether a saved or kept map is of a different disk than the one mounted under its volume id now.
+    fn hidden(&self, e: &Entry) -> bool {
+        let (DiskTarget::Volume { id }, Some(was)) = (&e.target, e.kept.identity()) else {
+            return false;
+        };
+        let known = lock(&self.known);
+        known
+            .as_ref()
+            .and_then(|k| k.iter().find(|l| &l.volume.id == id))
+            .and_then(|l| l.identity.as_ref())
+            .is_some_and(|now| *now != was)
+    }
+
+    /// Whether a finished Rescan of the same target has taken this scan's place.
+    fn superseded(scans: &[Arc<Entry>], e: &Entry) -> bool {
+        scans.iter().any(|f| {
+            f.meta.as_ref().is_some_and(|m| m.replaces == Some(e.scan)) && f.walk().is_some_and(|w| w.outcome() == Some(End::Done))
+        })
+    }
+
+    /// Drops the maps a finished Rescan has taken the place of, so a stale one cannot come back into the list or answer a query.
+    fn drop_superseded(scans: &mut Vec<Arc<Entry>>) {
+        let gone: Vec<u64> = scans.iter().filter(|e| Self::superseded(scans, e)).map(|e| e.scan).collect();
+        if !gone.is_empty() {
+            scans.retain(|e| !gone.contains(&e.scan));
+        }
+    }
+
     fn entry(&self, scan: u64) -> Result<Arc<Entry>, AgentError> {
-        lock(&self.scans)
+        self.apply_removed();
+        let e = lock(&self.scans)
             .iter()
-            .find(|e| e.meta.scan == scan)
+            .find(|e| e.scan == scan)
             .cloned()
-            .ok_or_else(|| err(ErrorCode::NotFound, "That scan is no longer kept. Scan again."))
+            .ok_or_else(|| err(ErrorCode::NotFound, "That scan is no longer kept. Scan again."))?;
+        if self.hidden(&e) {
+            return Err(err(ErrorCode::NotFound, "A different disk is mounted here. Scan it again."));
+        }
+        e.touch(&self.tick);
+        Ok(e)
+    }
+
+    /// Runs `f` on a kept scan's tree. A saved map that is not in memory is loaded first (on this thread, which waits for it);
+    /// loading may unload the least recently used other map to stay within the memory bounds. A map that cannot be read is
+    /// dropped and answers "Scan again".
+    fn with_tree<R>(&self, e: &Arc<Entry>, f: impl FnOnce(&DiskIndex) -> R) -> Result<R, AgentError> {
+        let _one_load = lock(&e.loading);
+        let held = match &*lock(&e.tree) {
+            Tree::Live(w) => return Ok(w.with_index(f)),
+            Tree::Held(i) => Some(i.clone()),
+            Tree::Saved => None,
+        };
+        if let Some(i) = held {
+            return Ok(f(&i));
+        }
+        let gone = || err(ErrorCode::NotFound, "That saved map could not be read. Scan again.");
+        let (Some(row), Some(cache)) = (e.kept.row(), self.keeper.cache()) else {
+            lock(&self.scans).retain(|x| x.scan != e.scan);
+            return Err(gone());
+        };
+        match cache.load(row) {
+            Ok(index) => {
+                let index = Arc::new(index);
+                *lock(&e.tree) = Tree::Held(index.clone());
+                // Room for it: the least recently used other map in memory goes back to being saved.
+                self.evict(&mut lock(&self.scans), None, Some(e.scan));
+                Ok(f(&index))
+            }
+            Err(_) => {
+                // The cache dropped the damaged row; the entry goes with it.
+                lock(&self.scans).retain(|x| x.scan != e.scan);
+                Err(gone())
+            }
+        }
     }
 
     /// Blocks until the scan's current pass has ended (tests wait on this instead of on events or time).
     pub fn wait_finished(&self, scan: u64) -> Result<(), AgentError> {
-        self.entry(scan)?.walk.wait();
+        if let Some(w) = self.entry(scan)?.walk() {
+            w.wait();
+        }
         Ok(())
     }
 
     /// Stops a scan and returns at once; what was counted stays. Stopping one that has ended does nothing.
     pub fn cancel(&self, scan: u64) -> Result<(), AgentError> {
-        self.entry(scan)?.walk.cancel();
+        if let Some(w) = self.entry(scan)?.walk() {
+            w.cancel();
+        }
         Ok(())
     }
 
@@ -697,10 +944,14 @@ impl DiskCentre {
     /// (new events, same id) and the tree completes if nothing else was missing. Returns at once with the status.
     pub fn retry(&self, scan: u64) -> Result<DiskScanStatus, AgentError> {
         let e = self.entry(scan)?;
+        // A saved map has no walk to read again with (its hard-link bookkeeping is not saved): a Rescan reads everything.
+        let (Some(walk), Some(meta)) = (e.walk(), e.meta.clone()) else {
+            return Err(err(ErrorCode::BadRequest, "A saved map cannot read folders again. Scan it again."));
+        };
         let key = format!("disk-retry:{scan}");
         // The retry takes a running slot like a start does, so two of them cannot both take the last one.
         self.reserve(&key, &e.host, false, 0)?;
-        let result = e.walk.retry();
+        let result = walk.retry();
         self.release(&key);
         result.map_err(|x| match x {
             RetryError::NotFinished => err(ErrorCode::Busy, "That scan has not finished. Wait for it, or scan again."),
@@ -712,7 +963,7 @@ impl DiskCentre {
         })?;
         // The pass runs on its own threads and may already have ended: the reply says so, and its sequence number places it among
         // the events (a consumer keeps the highest).
-        let status = e.meta.current(&e.walk);
+        let status = meta.current(&walk);
         log::info!(Scan = scan, State = state_name(&status.state), Seq = status.seq; "Disk scan retry started");
         Ok(status)
     }
@@ -722,9 +973,37 @@ impl DiskCentre {
         self.access.open_settings().map_err(AgentError::from)
     }
 
-    /// Every kept scan, newest last.
+    /// Every kept scan, newest last, except saved maps of a different disk than the one mounted now, and scans a finished
+    /// Rescan has taken the place of.
     pub fn scans(&self) -> Vec<DiskScanStatus> {
-        lock(&self.scans).iter().map(|e| e.meta.current(&e.walk)).collect()
+        self.apply_removed();
+        let all = lock(&self.scans).clone();
+        all.iter()
+            .filter(|e| !self.hidden(e) && !Self::superseded(&all, e))
+            .map(|e| self.status_of(e))
+            .collect()
+    }
+
+    /// An entry's status: the live one while it is a walk of this run, otherwise the one kept with it (a saved map's gets the
+    /// net change in used space since it was scanned, from the volume list as last asked for).
+    fn status_of(&self, e: &Entry) -> DiskScanStatus {
+        if let (Some(w), Some(m)) = (e.walk(), &e.meta) {
+            return m.current(&w);
+        }
+        let mut s = lock(&e.frozen).clone().unwrap_or_else(|| unreachable_status(e));
+        if matches!(s.origin, ScanOrigin::Saved { .. }) {
+            s.changed_bytes = self.changed_bytes(e);
+        }
+        s
+    }
+
+    /// Used space now minus used space when the map was scanned: a whole-volume map only (a folder has no cheap figure).
+    fn changed_bytes(&self, e: &Entry) -> Option<i64> {
+        let DiskTarget::Volume { id } = &e.target else { return None };
+        let then = i64::try_from(e.kept.used_then()?).ok()?;
+        let known = lock(&self.known);
+        let now = known.as_ref()?.iter().find(|l| &l.volume.id == id)?.volume.used()?;
+        Some(i64::try_from(now).ok()?.saturating_sub(then))
     }
 
     /// One level of a scan: a page of the children of `node` (the root when `None`), the small ones folded into "other".
@@ -733,9 +1012,10 @@ impl DiskCentre {
             return Err(err(ErrorCode::BadRequest, "The smallest share shown must be between 0 and 1."));
         }
         let e = self.entry(scan)?;
-        e.walk
-            .with_index(|i| i.children(node.map_or_else(|| i.root(), NodeId), offset, limit, min_fraction))
-            .map_err(|x| err(ErrorCode::NotFound, x.to_string()))
+        self.with_tree(&e, |i| {
+            i.children(node.map_or_else(|| i.root(), NodeId), offset, limit, min_fraction)
+        })?
+        .map_err(|x| err(ErrorCode::NotFound, x.to_string()))
     }
 
     /// Several levels of a scan under `node` (the root when `None`) in one answer. The index is locked once, for one pass that
@@ -751,8 +1031,7 @@ impl DiskCentre {
             return Err(err(ErrorCode::BadRequest, format!("Ask for 1 to {MAX_RING_NODES} nodes.")));
         }
         let e = self.entry(scan)?;
-        e.walk
-            .with_index(|i| i.rings(node.map_or_else(|| i.root(), NodeId), rings, min_share, max_nodes))
+        self.with_tree(&e, |i| i.rings(node.map_or_else(|| i.root(), NodeId), rings, min_share, max_nodes))?
             .map_err(|x| err(ErrorCode::NotFound, x.to_string()))
     }
 
@@ -764,12 +1043,161 @@ impl DiskCentre {
     /// The exact path of a node (for Reveal).
     pub fn path_buf(&self, scan: u64, node: u32) -> Result<PathBuf, AgentError> {
         let e = self.entry(scan)?;
-        let names = e
-            .walk
-            .with_index(|i| i.path_components(NodeId(node)))
+        let names = self
+            .with_tree(&e, |i| i.path_components(NodeId(node)))?
             .map_err(|x| err(ErrorCode::NotFound, x.to_string()))?;
         // The root's own name is the scan's name, not part of the path: its path is the folder the scan started from.
-        Ok(super::names::join_components(&e.root, &names))
+        Ok(super::names::join_components(&self.root_of(&e)?, &names))
+    }
+
+    /// Where a kept scan started: a scan of this run knows; a saved folder map is its path; a saved volume map is wherever the
+    /// volume is mounted now.
+    fn root_of(&self, e: &Entry) -> Result<PathBuf, AgentError> {
+        if e.meta.is_some() {
+            return Ok(e.root.clone());
+        }
+        match &e.target {
+            DiskTarget::Folder { path } => Ok(PathBuf::from(path)),
+            DiskTarget::Volume { id } => self
+                .listed(false)
+                .into_iter()
+                .find(|l| &l.volume.id == id)
+                .map(|l| l.root)
+                .ok_or_else(|| err(ErrorCode::NotFound, "That volume is not mounted now.")),
+        }
+    }
+
+    // ---- saved maps (ADR 0029) ----
+
+    /// Gives the centre the saved-maps cache (or takes it away) and offers what it holds: each saved map becomes a kept scan
+    /// with `origin: saved`, its tree not loaded. Scan ids come from the same counter as live scans. Call once at start.
+    pub fn attach_cache(&self, cache: Option<Cache>) {
+        self.keeper.set_cache(cache.clone());
+        let Some(cache) = cache else { return };
+        let rows = cache.list();
+        let mut scans = lock(&self.scans);
+        // Oldest first, so the newest write is listed last like any newest scan.
+        for row in rows.into_iter().rev() {
+            match self.entry_from_row(&row) {
+                Some(e) => scans.push(e),
+                None => {
+                    log::warn!(Row = row.id; "A saved map's description does not parse and is dropped");
+                    cache.forget(row.id);
+                }
+            }
+        }
+        log::info!(Offered = scans.len(); "Saved disk maps offered");
+    }
+
+    fn entry_from_row(&self, row: &SavedRow) -> Option<Arc<Entry>> {
+        let mut status: DiskScanStatus = serde_json::from_str(&row.params.status).ok()?;
+        let target: DiskTarget = serde_json::from_str(&row.params.target).ok()?;
+        let scan = self.next.fetch_add(1, Ordering::Relaxed);
+        status.scan = scan;
+        status.seq = 0;
+        status.target = target.clone();
+        status.origin = ScanOrigin::Saved {
+            saved_at: Timestamp(row.saved_at),
+        };
+        status.replaces = None;
+        status.not_saved = None;
+        status.items_per_second = None;
+        status.eta_seconds = None;
+        Some(Arc::new(Entry {
+            scan,
+            meta: None,
+            tree: Mutex::new(Tree::Saved),
+            loading: Mutex::new(()),
+            kept: Arc::new(Kept::saved(row.id, row.params.volume_identity.clone(), row.params.used_bytes_then)),
+            frozen: Mutex::new(Some(status)),
+            target,
+            last_used: AtomicU64::new(0),
+            key: String::new(),
+            root: PathBuf::new(),
+            host: String::new(),
+            threads: 0,
+        }))
+    }
+
+    /// Forgets a saved map: its cache row is deleted (pages overwritten). A scan of this run stays in memory; a map read back
+    /// from the cache goes with its row.
+    pub fn forget_saved(&self, scan: u64) -> Result<(), AgentError> {
+        let e = self.entry(scan)?;
+        if let (Some(row), Some(cache)) = (e.kept.row(), self.keeper.cache()) {
+            cache.forget_now(row);
+            e.kept.clear_row();
+        }
+        if e.meta.is_none() {
+            lock(&self.scans).retain(|x| x.scan != scan);
+        }
+        log::info!(Scan = scan; "Saved disk map forgotten");
+        Ok(())
+    }
+
+    /// Forgets every saved map: the cache files are deleted and an empty one started.
+    pub fn forget_all_saved(&self) {
+        if let Some(cache) = self.keeper.cache() {
+            cache.forget_all();
+        }
+        self.drop_saved_entries();
+        log::info!("All saved disk maps forgotten");
+    }
+
+    /// Follows the Settings `disk.savedMaps`: the cache's cap and switch. Switching saving off forgets every saved map (the cache
+    /// deletes its files; maps read back from it leave the list, scans of this run stay).
+    pub fn apply_saved_maps(&self, s: dyno_core::disk::settings::SavedMapsSettings) {
+        let s = s.clamped();
+        let was_on = self.saved_on.swap(s.enabled, Ordering::SeqCst);
+        // The cache switches saving off first, then deletes its files (it forgets everything itself when it goes from on to off).
+        if let Some(cache) = self.keeper.cache() {
+            cache.set_settings(crate::cache::CacheSettings::from(s));
+        }
+        if was_on && !s.enabled {
+            self.drop_saved_entries();
+        }
+    }
+
+    /// Removes the maps read back from the cache from the list, and the row of every scan of this run.
+    fn drop_saved_entries(&self) {
+        let mut scans = lock(&self.scans);
+        for e in scans.iter() {
+            e.kept.clear_row();
+        }
+        scans.retain(|e| e.meta.is_some());
+    }
+
+    /// The saved-maps cache, when there is one.
+    pub fn cache(&self) -> Option<Cache> {
+        self.keeper.cache()
+    }
+}
+
+/// A status for an entry that has none kept (never: saved maps and unloaded scans always have one).
+fn unreachable_status(e: &Entry) -> DiskScanStatus {
+    DiskScanStatus {
+        scan: e.scan,
+        seq: 0,
+        name: String::new(),
+        target: e.target.clone(),
+        volume: None,
+        state: ScanState::Failed {
+            failure: ScanFailure::Internal {
+                detail: "this map has no status".into(),
+            },
+        },
+        phase: ScanPhase::ReadingFolders,
+        progress: ScanProgress::default(),
+        truncated: false,
+        unreadable_first: Vec::new(),
+        needs_full_disk_access: false,
+        items_per_second: None,
+        eta_seconds: None,
+        hidden_bytes: None,
+        scanned_at: None,
+        origin: ScanOrigin::Live,
+        changed_bytes: None,
+        replaces: None,
+        not_saved: None,
     }
 }
 
@@ -865,6 +1293,7 @@ mod tests {
                 whole_volume: !network,
             },
             root: root.to_path_buf(),
+            identity: None,
         }
     }
 
@@ -983,8 +1412,8 @@ mod tests {
     }
 
     fn wait_final(r: &Rig, scan: u64) -> DiskScanStatus {
-        let e = lock(&r.centre.scans).iter().find(|e| e.meta.scan == scan).cloned().unwrap();
-        e.walk.wait();
+        let e = lock(&r.centre.scans).iter().find(|e| e.scan == scan).cloned().unwrap();
+        e.walk().unwrap().wait();
         final_status(r, scan)
     }
 
@@ -1950,4 +2379,6 @@ mod tests {
         assert!(c.wall_ms() > 1_700_000_000_000, "a wall-clock time of this century");
         let _ = LiveWorkers::default();
     }
+
+    mod saved;
 }

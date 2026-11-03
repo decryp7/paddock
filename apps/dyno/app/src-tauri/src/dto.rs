@@ -66,6 +66,8 @@ pub enum ErrorCode {
     Busy,
     /// A bug.
     Internal,
+    /// The person has to agree first (a benchmark on battery): ask, then send the request again with the consent.
+    NeedsConsent,
 }
 
 /// `CommandError`: what every failed command rejects with.
@@ -118,6 +120,7 @@ impl From<AgentError> for CommandError {
             AgentCode::Timeout => ErrorCode::Timeout,
             AgentCode::Busy => ErrorCode::Busy,
             AgentCode::Internal => ErrorCode::Internal,
+            AgentCode::NeedsConsent => ErrorCode::NeedsConsent,
         };
         CommandError { code, message: e.message }
     }
@@ -152,6 +155,7 @@ mod tests {
             (AgentCode::Timeout, "timeout"),
             (AgentCode::Busy, "busy"),
             (AgentCode::Internal, "internal"),
+            (AgentCode::NeedsConsent, "needsConsent"),
         ] {
             let ours = serde_json::to_value(CommandError::from(AgentError::new(code, "m"))).unwrap();
             let theirs = serde_json::to_value(AgentError::new(code, "m")).unwrap();

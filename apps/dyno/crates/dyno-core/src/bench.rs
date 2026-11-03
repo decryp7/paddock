@@ -1,8 +1,12 @@
 //! Benchmarks: what is measured, how a run is recorded and how two runs are compared. Pure types and functions; the
 //! measuring itself runs out of process (`dyno-bench`) and is started by the agent only when the user clicks.
 
+pub mod unit;
+pub mod wire;
+
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
+use wire::{Liveness, PhaseProgress};
 
 /// Largest scratch file the disk benchmark may write, in MiB. The agent refuses a bigger request.
 pub const DISK_MAX_MIB: u32 = 512;
@@ -10,8 +14,26 @@ pub const DISK_MAX_MIB: u32 = 512;
 pub const DISK_DEFAULT_MIB: u32 = 128;
 /// Smallest scratch file, in MiB (smaller numbers only measure the cache).
 pub const DISK_MIN_MIB: u32 = 16;
+/// Whether the disk test may run. Off until ADR 0030 WP-B3 replaces the 1.0 method, whose reads came from the page cache
+/// (D10: the 1.0 disk test is never shipped). Turn it on in the same change that lands the rebuilt test.
+pub const DISK_TEST_ENABLED: bool = false;
+/// What the person is told while [`DISK_TEST_ENABLED`] is false.
+pub const DISK_TEST_OFF: &str =
+    "The disk test is being rebuilt to measure the drive and not the memory cache; it returns in a later Dyno 1.1 update.";
 /// Runs kept; the oldest are dropped first.
-pub const MAX_RUNS: usize = 50;
+pub const MAX_RUNS: usize = 200;
+/// Repetitions of a timed kernel (ADR 0030 section 3).
+pub const REPETITIONS: u32 = 5;
+/// The uncounted warm-up before the repetitions, ms.
+pub const WARMUP_MILLIS: u64 = 1_000;
+/// The pause between two repetitions, ms (heat carried from one into the next).
+pub const GAP_MILLIS: u64 = 2_000;
+/// The time budget of one timed section (single core, all cores, copy, latency) in one repetition, ms.
+pub const SECTION_MILLIS: u64 = 1_000;
+/// A metric whose repetitions vary by more than this fraction (coefficient of variation) is marked unsteady.
+pub const UNSTEADY_CV: f64 = 0.10;
+/// The method version of everything measured before 1.1 (single run, no warm-up): a run without a recorded version has this one.
+pub const LEGACY_METHOD: u32 = 1;
 /// Longest label or group name, in characters.
 pub const MAX_LABEL: usize = 80;
 /// A change smaller than this many percent is noise, not better or worse.
@@ -47,6 +69,27 @@ impl BenchKind {
         }
     }
 
+    /// The version of the way this kind is measured. It changes whenever the method does (warm-up, repetitions, kernels, file
+    /// handling), and only runs of the same version are compared (ADR 0030 section 3). Version 1 is the 1.0 method.
+    pub fn method_version(self) -> u32 {
+        match self {
+            // 1.1: a 1 s warm-up and five repetitions, median and spread.
+            BenchKind::Cpu | BenchKind::Memory => 2,
+            // The disk method is rebuilt by WP-B3; the test stays off until then.
+            BenchKind::Disk | BenchKind::Gpu => LEGACY_METHOD,
+        }
+    }
+
+    /// The plain-language name of the kind (sentence case), for job phases and messages.
+    pub fn title(self) -> &'static str {
+        match self {
+            BenchKind::Cpu => "Processor",
+            BenchKind::Memory => "Memory",
+            BenchKind::Disk => "Disk",
+            BenchKind::Gpu => "Graphics",
+        }
+    }
+
     /// Parses [`BenchKind::name`].
     pub fn parse(s: &str) -> Option<BenchKind> {
         BenchKind::ALL.into_iter().find(|k| k.name() == s)
@@ -61,16 +104,31 @@ pub struct BenchMetric {
     pub id: String,
     /// Plain-language name.
     pub label: String,
-    /// The value.
+    /// The headline value: the median of the repetitions.
     pub value: f64,
     /// Unit shown after it, e.g. `MB/s`.
     pub unit: String,
     /// Whether a larger value is better (false for latency).
     pub higher_is_better: bool,
+    /// Every repetition, in the order measured (one for a single measurement).
+    #[serde(default)]
+    pub samples: Vec<f64>,
+    /// The smallest repetition.
+    #[serde(default)]
+    pub min: f64,
+    /// The largest repetition.
+    #[serde(default)]
+    pub max: f64,
+    /// The coefficient of variation of the repetitions (`None` where the mean is zero).
+    #[serde(default)]
+    pub cv: Option<f64>,
+    /// Whether the repetitions varied by more than [`UNSTEADY_CV`].
+    #[serde(default)]
+    pub unsteady: bool,
 }
 
 impl BenchMetric {
-    /// A metric where larger is better.
+    /// A single measurement where larger is better.
     pub fn higher(id: &str, label: &str, value: f64, unit: &str) -> BenchMetric {
         BenchMetric {
             id: id.into(),
@@ -78,7 +136,46 @@ impl BenchMetric {
             value,
             unit: unit.into(),
             higher_is_better: true,
+            samples: vec![value],
+            min: value,
+            max: value,
+            cv: Some(0.0),
+            unsteady: false,
         }
+    }
+
+    /// A metric from its repetitions: the median is the value, the statistics come from `paddock-bench` (ER-22). Without a
+    /// finite repetition the value is zero and the metric has no samples.
+    pub fn measured(id: &str, label: &str, samples: &[f64], unit: &str, higher_is_better: bool) -> BenchMetric {
+        let mut m = BenchMetric::higher(id, label, 0.0, unit);
+        m.higher_is_better = higher_is_better;
+        m.samples = samples.iter().copied().filter(|s| s.is_finite()).collect();
+        m.fill_spread();
+        m
+    }
+
+    /// Sets `value`, `min`, `max`, `cv` and `unsteady` from `samples` (without a finite sample the value stays and there is no spread).
+    pub fn fill_spread(&mut self) {
+        match paddock_bench::summarize(&self.samples) {
+            Some(s) => {
+                self.value = s.median;
+                self.min = s.min;
+                self.max = s.max;
+                self.cv = s.cv();
+                self.unsteady = s.cv().is_some_and(|cv| cv > UNSTEADY_CV);
+            }
+            None => {
+                self.min = self.value;
+                self.max = self.value;
+                self.cv = None;
+                self.unsteady = false;
+            }
+        }
+    }
+
+    /// The width of the repetitions, `max - min`.
+    pub fn spread(&self) -> f64 {
+        (self.max - self.min).max(0.0)
     }
 
     /// A metric where smaller is better (latency).
@@ -191,6 +288,13 @@ pub struct KindResult {
     pub status: BenchStatus,
     /// How long it took, in milliseconds.
     pub millis: u64,
+    /// The method version it was measured with ([`BenchKind::method_version`]); 1.0 runs have [`LEGACY_METHOD`].
+    #[serde(default = "legacy_method")]
+    pub method: u32,
+}
+
+fn legacy_method() -> u32 {
+    LEGACY_METHOD
 }
 
 /// The machine's state when the run was started (before the benchmark itself added load).
@@ -235,9 +339,37 @@ pub struct BenchRun {
     pub machine: String,
     /// Results, one per requested kind.
     pub results: Vec<KindResult>,
+    /// Measured the 1.0 way (one run, no warm-up, the old disk test): kept, shown as "measured the old way" and never compared
+    /// with a run of the current method (ADR 0030 D9).
+    #[serde(default)]
+    pub old_way: bool,
+    /// Why the numbers are low confidence, when the run could not have full-confidence conditions (Linux without a systemd
+    /// user manager: [`unit::LIMITED_NOTE`]).
+    #[serde(default)]
+    pub limited: Option<String>,
 }
 
 impl BenchRun {
+    /// Fills the spread of every metric a 1.0 file saved without one.
+    pub fn normalise(&mut self) {
+        for r in &mut self.results {
+            if let BenchStatus::Done { metrics } = &mut r.status {
+                for m in metrics {
+                    if m.samples.is_empty() && m.value.is_finite() {
+                        // A metric saved by 1.0: one measurement.
+                        m.samples = vec![m.value];
+                    }
+                    m.fill_spread();
+                }
+            }
+        }
+    }
+
+    /// The method version of `kind` in this run, if it was measured.
+    pub fn method_of(&self, kind: BenchKind) -> Option<u32> {
+        self.results.iter().find(|r| r.kind == kind).map(|r| r.method)
+    }
+
     /// The metrics of every kind that finished.
     pub fn metrics(&self) -> impl Iterator<Item = (BenchKind, &BenchMetric)> {
         self.results
@@ -275,6 +407,20 @@ fn clean(s: &str) -> String {
 
 /// Validates a start request: at least one kind, a bounded scratch file, short printable names.
 pub fn plan(kinds: &[BenchKind], disk_mib: Option<u32>, label: &str, group: Option<&str>) -> Result<RunPlan, String> {
+    plan_with(kinds, disk_mib, label, group, DISK_TEST_ENABLED)
+}
+
+/// [`plan`] with the disk switch passed in, so the rule is testable whichever way the build flag is set.
+pub fn plan_with(
+    kinds: &[BenchKind],
+    disk_mib: Option<u32>,
+    label: &str,
+    group: Option<&str>,
+    disk_enabled: bool,
+) -> Result<RunPlan, String> {
+    if !disk_enabled && kinds.contains(&BenchKind::Disk) {
+        return Err(DISK_TEST_OFF.into());
+    }
     let mut unique: Vec<BenchKind> = Vec::new();
     for k in kinds {
         if !unique.contains(k) {
@@ -330,6 +476,12 @@ pub struct MetricDelta {
     pub after: f64,
     /// Change in percent of the earlier value (positive = the number grew).
     pub change_percent: f64,
+    /// How widely the repetitions of the earlier run varied (`max - min`).
+    pub before_spread: f64,
+    /// How widely the repetitions of the later run varied.
+    pub after_spread: f64,
+    /// Whether either run's repetitions varied by more than [`UNSTEADY_CV`].
+    pub unsteady: bool,
     /// Better, worse or the same.
     pub verdict: Verdict,
 }
@@ -348,11 +500,21 @@ pub struct Comparison {
     pub warnings: Vec<String>,
 }
 
-/// Compares `after` with `before`: every metric present in both, with a verdict that ignores changes inside
-/// [`NOISE_PERCENT`]. Warns when the machine differs or the background load differs by [`LOAD_WARNING_POINTS`].
+/// Compares `after` with `before`: every metric present in both and measured with the same method version. A change counts
+/// as better or worse only when it is larger than the noise band ([`NOISE_PERCENT`] of the earlier value) and than the two
+/// runs' spreads together (`max - min` of each); otherwise the verdict is "same". Kinds measured with different method versions
+/// (a 1.0 run against a 1.1 run) are not compared, with a warning. Warns when the machine differs or the background load
+/// differs by [`LOAD_WARNING_POINTS`].
 pub fn compare(before: &BenchRun, after: &BenchRun) -> Comparison {
     let mut deltas = Vec::new();
+    let mut skipped: Vec<BenchKind> = Vec::new();
     for (kind, b) in before.metrics() {
+        if before.method_of(kind) != after.method_of(kind) {
+            if !skipped.contains(&kind) {
+                skipped.push(kind);
+            }
+            continue;
+        }
         let Some((_, a)) = after.metrics().find(|(k, m)| *k == kind && m.id == b.id) else {
             continue;
         };
@@ -362,7 +524,9 @@ pub fn compare(before: &BenchRun, after: &BenchRun) -> Comparison {
             (a.value - b.value) / b.value * 100.0
         };
         let improved = if b.higher_is_better { change_percent } else { -change_percent };
-        let verdict = if improved.abs() < NOISE_PERCENT {
+        let diff = (a.value - b.value).abs();
+        let noise = b.value.abs() * NOISE_PERCENT / 100.0;
+        let verdict = if diff <= noise || diff <= b.spread() + a.spread() {
             Verdict::Same
         } else if improved > 0.0 {
             Verdict::Better
@@ -378,10 +542,24 @@ pub fn compare(before: &BenchRun, after: &BenchRun) -> Comparison {
             before: b.value,
             after: a.value,
             change_percent,
+            before_spread: b.spread(),
+            after_spread: a.spread(),
+            unsteady: b.unsteady || a.unsteady,
             verdict,
         });
     }
     let mut warnings = Vec::new();
+    for kind in skipped {
+        let old = if before.old_way || after.old_way {
+            " (one of them was measured the old way, with Dyno 1.0)"
+        } else {
+            ""
+        };
+        warnings.push(format!(
+            "The {} results were measured with different methods{old}, so they are not compared.",
+            kind.title()
+        ));
+    }
     if before.machine != after.machine {
         warnings.push("The runs are from different machines; the comparison means little.".into());
     }
@@ -416,6 +594,12 @@ pub struct BenchProgress {
     pub current: Option<BenchKind>,
     /// Kinds already finished.
     pub done: Vec<BenchKind>,
+    /// The phase being measured now, as the measuring program reports it (`None` between phases and kinds).
+    pub phase: Option<PhaseProgress>,
+    /// How alive the run looks. Only the person's Cancel (or a named safety stop) ends a slow or quiet run.
+    pub liveness: Liveness,
+    /// Set when the run could not have full-confidence conditions (see [`BenchRun::limited`]).
+    pub limited: Option<String>,
 }
 
 /// What the benchmarks page shows.
@@ -426,6 +610,8 @@ pub struct BenchOverview {
     pub running: Option<BenchProgress>,
     /// Saved runs, newest first.
     pub runs: Vec<BenchRun>,
+    /// Whether the disk test can be chosen ([`DISK_TEST_ENABLED`]); the page shows it as off otherwise.
+    pub disk_test_enabled: bool,
 }
 
 /// The saved run history: versioned, bounded and tolerant of damage.
@@ -439,7 +625,8 @@ pub struct BenchHistory {
 }
 
 /// Current [`BenchHistory::version`].
-pub const HISTORY_VERSION: u32 = 1;
+/// (2: repetitions with spread and method versions; version 1 files are read and their runs marked as measured the old way.)
+pub const HISTORY_VERSION: u32 = 2;
 
 impl Default for BenchHistory {
     fn default() -> Self {
@@ -455,6 +642,17 @@ impl BenchHistory {
     pub fn parse(text: &str) -> (BenchHistory, Option<String>) {
         match serde_json::from_str::<BenchHistory>(text) {
             Ok(mut h) if h.version == HISTORY_VERSION => {
+                h.runs.iter_mut().for_each(BenchRun::normalise);
+                h.runs.truncate(MAX_RUNS);
+                (h, None)
+            }
+            Ok(mut h) if h.version == 1 => {
+                // Dyno 1.0's runs are kept and marked (ADR 0030 D9); they are never compared with the current method.
+                for r in &mut h.runs {
+                    r.old_way = true;
+                    r.normalise();
+                }
+                h.version = HISTORY_VERSION;
                 h.runs.truncate(MAX_RUNS);
                 (h, None)
             }
@@ -508,9 +706,12 @@ mod tests {
                 on_battery: None,
             },
             machine: "m".into(),
+            old_way: false,
+            limited: None,
             results: vec![KindResult {
                 kind: BenchKind::Cpu,
                 millis: 10,
+                method: 2,
                 status: BenchStatus::Done {
                     metrics: values
                         .iter()
@@ -537,11 +738,12 @@ mod tests {
 
     #[test]
     fn a_plan_is_validated_and_cleaned() {
-        let p = plan(
+        let p = plan_with(
             &[BenchKind::Disk, BenchKind::Disk, BenchKind::Cpu],
             None,
             "  Power\u{7}  plan ",
             Some("  "),
+            true,
         )
         .unwrap();
         assert_eq!(p.kinds, vec![BenchKind::Disk, BenchKind::Cpu]);
@@ -549,14 +751,27 @@ mod tests {
         assert_eq!(p.label, "Power  plan");
         assert_eq!(p.group, None);
         assert!(plan(&[], None, "", None).is_err());
-        assert!(plan(&[BenchKind::Disk], Some(DISK_MAX_MIB + 1), "", None).is_err());
-        assert!(plan(&[BenchKind::Disk], Some(1), "", None).is_err());
+        assert!(plan_with(&[BenchKind::Disk], Some(DISK_MAX_MIB + 1), "", None, true).is_err());
+        assert!(plan_with(&[BenchKind::Disk], Some(1), "", None, true).is_err());
         assert_eq!(plan(&[BenchKind::Cpu], None, "", None).unwrap().label, "Benchmark");
         let long = "a".repeat(500);
         assert_eq!(
             plan(&[BenchKind::Cpu], None, &long, Some(&long)).unwrap().label.chars().count(),
             MAX_LABEL
         );
+    }
+
+    #[test]
+    fn the_disk_test_is_refused_while_it_is_off_and_the_default_build_has_it_off() {
+        // The build flag decides; while it is off (until WP-B3, ADR 0030 D10) a plan with Disk is refused with the plain words.
+        let with_disk = plan(&[BenchKind::Cpu, BenchKind::Disk], None, "", None);
+        assert_eq!(with_disk.is_err(), !DISK_TEST_ENABLED);
+        assert_eq!(
+            plan_with(&[BenchKind::Cpu, BenchKind::Disk], None, "", None, false).unwrap_err(),
+            DISK_TEST_OFF
+        );
+        assert!(plan(&[BenchKind::Cpu, BenchKind::Memory], None, "", None).is_ok());
+        assert!(plan_with(&[BenchKind::Disk], None, "", None, true).is_ok());
     }
 
     #[test]
@@ -600,9 +815,98 @@ mod tests {
         r.results.push(KindResult {
             kind: BenchKind::Gpu,
             millis: 0,
+            method: 1,
             status: BenchStatus::Unavailable { reason: "none".into() },
         });
         assert_eq!(r.metrics().count(), 1);
+    }
+
+    fn measured_run(id: &str, method: u32, samples: &[f64]) -> BenchRun {
+        let mut r = run(id, 0.0, &[]);
+        r.results = vec![KindResult {
+            kind: BenchKind::Cpu,
+            millis: 1,
+            method,
+            status: BenchStatus::Done {
+                metrics: vec![BenchMetric::measured("cpu-single", "Single core", samples, "u", true)],
+            },
+        }];
+        r
+    }
+
+    #[test]
+    fn a_metric_keeps_every_repetition_with_the_median_as_its_value_and_marks_unsteady() {
+        let m = BenchMetric::measured("x", "X", &[100.0, 102.0, 98.0, 101.0, 99.0], "u", true);
+        assert_eq!((m.value, m.min, m.max), (100.0, 98.0, 102.0));
+        assert_eq!(m.samples.len(), 5);
+        assert!(!m.unsteady && m.cv.unwrap() < 0.05);
+        assert_eq!(m.spread(), 4.0);
+        let u = BenchMetric::measured("x", "X", &[100.0, 140.0, 60.0, 100.0, 100.0], "u", true);
+        assert!(u.unsteady, "cv {:?}", u.cv);
+        let none = BenchMetric::measured("x", "X", &[f64::NAN], "u", false);
+        assert_eq!(
+            (none.value, none.samples.len(), none.cv, none.unsteady, none.higher_is_better),
+            (0.0, 0, None, false, false)
+        );
+    }
+
+    #[test]
+    fn a_change_inside_the_spreads_is_about_the_same_and_one_outside_counts() {
+        // 10 % better, but the repetitions of each run span 12 points: not a real change.
+        let c = compare(
+            &measured_run("a", 2, &[94.0, 100.0, 106.0]),
+            &measured_run("b", 2, &[104.0, 110.0, 116.0]),
+        );
+        assert_eq!(c.deltas[0].verdict, Verdict::Same);
+        assert_eq!((c.deltas[0].before_spread, c.deltas[0].after_spread), (12.0, 12.0));
+        // The same 10 % with tight repetitions is better.
+        let c = compare(
+            &measured_run("a", 2, &[99.0, 100.0, 101.0]),
+            &measured_run("b", 2, &[109.0, 110.0, 111.0]),
+        );
+        assert_eq!(c.deltas[0].verdict, Verdict::Better);
+        assert!(!c.deltas[0].unsteady);
+        let c = compare(
+            &measured_run("a", 2, &[100.0, 100.0, 100.0]),
+            &measured_run("b", 2, &[100.0, 150.0, 60.0]),
+        );
+        assert!(c.deltas[0].unsteady);
+    }
+
+    #[test]
+    fn runs_of_different_method_versions_are_not_compared() {
+        let mut old = measured_run("a", 1, &[100.0]);
+        old.old_way = true;
+        let c = compare(&old, &measured_run("b", 2, &[150.0, 150.0, 150.0]));
+        assert!(c.deltas.is_empty());
+        assert!(
+            c.warnings.iter().any(|w| w.contains("Processor") && w.contains("old way")),
+            "{:?}",
+            c.warnings
+        );
+    }
+
+    #[test]
+    fn a_1_0_history_is_kept_and_marked_the_old_way() {
+        let v1 = r#"{"version":1,"runs":[{"id":"1","startedAt":5,"label":"Baseline","group":null,"phase":null,
+            "load":{"cpuPercent":3.0,"memoryPercent":40.0,"onBattery":null},"machine":"m",
+            "results":[{"kind":"cpu","millis":900,"status":{"state":"done","metrics":[
+            {"id":"cpu-single","label":"Single core","value":612.0,"unit":"M rounds/s","higherIsBetter":true}]}}]}]}"#;
+        let (h, warn) = BenchHistory::parse(v1);
+        assert!(warn.is_none());
+        assert_eq!(h.version, HISTORY_VERSION);
+        let r = &h.runs[0];
+        assert!(r.old_way);
+        assert_eq!(r.method_of(BenchKind::Cpu), Some(LEGACY_METHOD));
+        let (_, m) = r.metrics().next().unwrap();
+        assert_eq!((m.value, m.samples.clone(), m.min, m.max), (612.0, vec![612.0], 612.0, 612.0));
+        assert!(!m.unsteady);
+        // A 1.0 run is never compared with a current one.
+        let c = compare(r, &measured_run("n", BenchKind::Cpu.method_version(), &[600.0, 610.0, 605.0]));
+        assert!(c.deltas.is_empty());
+        // New runs are not marked.
+        assert!(!measured_run("n", 2, &[1.0]).old_way);
+        assert!(BenchKind::Cpu.method_version() > LEGACY_METHOD && BenchKind::Memory.method_version() > LEGACY_METHOD);
     }
 
     #[test]

@@ -18,7 +18,8 @@ path = "src/main.rs"
 
 [dependencies]
 dyno-core.workspace = true
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
+log = { version = "0.4", features = ["kv"] }
 dyno-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true

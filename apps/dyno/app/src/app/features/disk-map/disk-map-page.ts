@@ -33,7 +33,9 @@ import {
   jobFraction,
   nothingReadable,
   jobRate,
+  notSavedText,
   revealLabel,
+  savedNote,
   phaseLabel,
   shareText,
   sharePercent,
@@ -65,7 +67,7 @@ import {
           <p>{{ subtitle() }}</p>
         </div>
         @if ((store.outcome() === 'done' || store.outcome() === 'cancelled') && !noAccess()) {
-          <button type="button" matButton="filled" [disabled]="store.starting()" (click)="store.rescan()"><dy-icon name="refresh" /> Rescan {{ store.status()?.name }}</button>
+          <button type="button" matButton="filled" [disabled]="store.starting() || store.refreshing() !== null" (click)="store.rescan()"><dy-icon name="refresh" /> Rescan {{ store.status()?.name }}</button>
         }
       </header>
 
@@ -138,6 +140,38 @@ import {
         }
 
         @if (store.status(); as s) {
+          @if (store.refreshingThis() && store.refreshStatus(); as rs) {
+            <section class="job" aria-label="Rescan progress">
+              <div class="job-top">
+                <div class="job-title"><strong>Rescanning {{ rs.name }}</strong><span class="muted">{{ refreshPhase() }} · the map below stays until this is done</span></div>
+                <button type="button" matButton="text" (click)="store.showProgress()">Show progress</button>
+                <button type="button" matButton="outlined" (click)="store.cancel()">Cancel rescan</button>
+              </div>
+              @if (refreshFraction() !== null) {
+                <mat-progress-bar mode="determinate" [value]="refreshPercent()" [attr.aria-label]="'Rescan of ' + rs.name" [attr.aria-valuetext]="refreshCount()" />
+              } @else if (!reducedMotion) {
+                <mat-progress-bar mode="indeterminate" [attr.aria-label]="'Rescan of ' + rs.name" [attr.aria-valuetext]="refreshCount()" />
+              }
+              <p class="job-count" aria-live="off">{{ refreshCount() }}</p>
+            </section>
+          }
+          @if (store.refreshFailure(); as f) {
+            <div class="callout bad" role="alert">
+              <dy-icon name="alert" />
+              <span><strong>The rescan stopped.</strong> The map below is the earlier one and is unchanged.</span>
+              <button type="button" matButton="outlined" [disabled]="store.starting()" (click)="store.rescan()">Rescan again</button>
+            </div>
+          }
+          @if (savedLine(); as line) {
+            <div class="callout info" role="status" data-testid="saved-map">
+              <dy-icon name="info" />
+              <span>{{ line }}</span>
+              <button type="button" matButton="outlined" (click)="store.forgetSaved()">Forget this map</button>
+            </div>
+          }
+          @if (notSavedLine(); as line) {
+            <div class="callout info" role="status" data-testid="not-saved"><dy-icon name="info" /><span>{{ line }}</span></div>
+          }
           @if (store.outcome() === 'running') {
             <section class="job" aria-label="Scan progress">
               <div class="job-top">
@@ -634,7 +668,8 @@ export class DiskMapPage implements OnInit {
     const what = s && !s.volume ? `${s.name} · folder` : v ? `${v.name} · ${volumeMeta(v)}` : 'Where the space on a volume or folder went';
     if (!s) return what;
     const state = { running: 'scanning now', done: 'scanned', cancelled: 'partial scan, stopped by you', failed: 'scan stopped' }[this.store.outcome()!];
-    const when = s.scannedAt !== null && this.store.outcome() === 'done' ? `scanned ${formatAgo(s.scannedAt, this.now())}` : state;
+    const saved = typeof s.origin === 'string' ? '' : ' (saved)';
+    const when = s.scannedAt !== null && this.store.outcome() === 'done' ? `scanned ${formatAgo(s.scannedAt, this.now())}${saved}` : state;
     return `${what} · ${when}`;
   });
   protected readonly pickerIcon = computed(() => {
@@ -645,6 +680,19 @@ export class DiskMapPage implements OnInit {
 
   protected readonly revealText = revealLabel(this.platform);
   protected readonly rate = computed(() => (this.store.status() ? jobRate(this.store.status()!) : null));
+  protected readonly refreshFraction = computed(() => (this.store.refreshStatus() ? jobFraction(this.store.refreshStatus()!.progress) : null));
+  protected readonly refreshPercent = computed(() => Math.round((this.refreshFraction() ?? 0) * 100));
+  protected readonly refreshCount = computed(() => (this.store.refreshStatus() ? jobCount(this.store.refreshStatus()!.progress) : ''));
+  protected readonly refreshPhase = computed(() => (this.store.refreshStatus() ? phaseLabel(this.store.refreshStatus()!) : ''));
+  /** The line under a map read back from the cache: its age, the net change in used space, and what Rescan does. */
+  protected readonly savedLine = computed(() => {
+    const s = this.store.status();
+    return s && s.scannedAt !== null ? savedNote(s, formatAgo(s.scannedAt, this.now()), formatBytes) : null;
+  });
+  protected readonly notSavedLine = computed(() => {
+    const s = this.store.status();
+    return s ? notSavedText(s) : null;
+  });
   protected readonly formatCount = formatCount;
   protected readonly plural = plural;
   protected readonly bytes = formatBytes;
@@ -670,6 +718,7 @@ export class DiskMapPage implements OnInit {
   protected async load(): Promise<void> {
     await this.store.loadVolumes();
     await this.store.restore();
+    await this.store.refreshOnOpen(this.now());
   }
 
   protected pickerFallback(): string {

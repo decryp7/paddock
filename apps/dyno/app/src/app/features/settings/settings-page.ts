@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -134,6 +134,27 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
             </section>
 
+            <section class="card" aria-label="Saved disk maps" id="saved-maps">
+              <h2>Saved disk maps</h2>
+              <p class="sub">A finished scan is kept on this computer so the disk map opens on it at once, with its age, after a restart. Nothing is refreshed unless you press Rescan, or choose below.</p>
+              <div class="row">
+                <div class="lbl"><strong>Keep disk maps</strong><small>Off forgets every saved map, and the saved counter list and software list too, and keeps none. They are stored in the system cache folder and never leave this computer. On macOS Dyno marks them out of Time Machine backups; on Windows and Linux they sit in the cache folder, which backup tools usually skip, but Dyno does not enforce it.</small></div>
+                <mat-slide-toggle [checked]="savedMaps().enabled !== false" aria-label="Keep disk maps" (change)="setSavedMaps({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="savedMaps().enabled === false">
+                <div class="lbl"><strong>Space for saved maps</strong><small>All saved maps together; the least recently shown go first (64 to 8,192 MB).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="64" max="8192" step="64" [disabled]="savedMaps().enabled === false" aria-label="Space for saved maps" [errorStateMatcher]="savedMaxMatcher" [ngModel]="savedMaps().maxMb" (ngModelChange)="setSavedMaps({ maxMb: +$event })" /><span matTextSuffix>MB</span>@if (diskErrors().savedMaxMb; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+              <div class="row" [class.off]="savedMaps().enabled === false">
+                <div class="lbl"><strong>Refresh when opened</strong><small>Scanning a volume is the heaviest thing Dyno does, so it never refreshes by itself unless you choose. It starts at the first look at the page, never in the background.</small></div>
+                <pd-select [options]="refreshChoices" [value]="savedMaps().refreshOnOpen ?? 'off'" ariaLabel="Refresh when opened" (valueChange)="setSavedMaps({ refreshOnOpen: refreshFrom($event) })" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Forget saved maps</strong><small>Deletes the saved maps now. The next scan is kept again if saving is on.</small></div>
+                <button type="button" matButton="outlined" [disabled]="forgetting()" (click)="forgetSavedMaps()">Forget saved maps</button>
+              </div>
+            </section>
+
             <section class="card" aria-label="Parallelism and cost" id="parallelism">
               <h2>Parallelism and cost</h2>
               <p class="sub">How much of this computer Dyno's long reads may use at once. More threads finish sooner and use more of the disk; Auto picks by the kind of volume.</p>
@@ -172,6 +193,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Overheating</strong><small>Alert when a sensor passes this temperature.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="60" max="120" [disabled]="!d.alerts.enabled" aria-label="Overheating temperature" [ngModel]="d.alerts.overheatCelsius" (ngModelChange)="setAlerts({ overheatCelsius: +$event })" /><span matTextSuffix>°C</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!d.alerts.enabled">
+                <div class="lbl"><strong>Menu-bar alert level</strong><small>A menu-bar item shows an alert at this load when none of your alert rules covers it. Items with a rule follow the rule.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="50" max="100" [disabled]="!d.alerts.enabled" aria-label="Menu-bar alert level" [ngModel]="d.alerts.trayAlertPercent" (ngModelChange)="setAlerts({ trayAlertPercent: +$event })" /><span matTextSuffix>%</span></mat-form-field>
               </div>
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Long high CPU</strong><small>Alert when one app keeps the CPU busy this long.</small></div>
@@ -316,6 +341,7 @@ export class SettingsPage implements OnInit {
       finderFiles: bad(d.finderFiles, 1_000, 5_000_000, 'Files looked at'),
       finderDepth: bad(d.finderDepth, 1, 256, 'Folder depth'),
       finderHashGib: bad(d.finderHashGib, 1, 4096, 'Content compared'),
+      savedMaxMb: bad(d.savedMaps?.maxMb, 64, 8192, 'Space for saved maps'),
     };
   });
   protected readonly scanFoldersMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().scanFolders };
@@ -323,6 +349,32 @@ export class SettingsPage implements OnInit {
   protected readonly finderFilesMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderFiles };
   protected readonly finderDepthMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderDepth };
   protected readonly finderHashMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderHashGib };
+  protected readonly savedMaxMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().savedMaxMb };
+  protected readonly savedMaps = computed<SavedMapsSettings>(() => this.disk().savedMaps ?? {});
+  protected readonly refreshChoices: PdSelectOption[] = [
+    { value: 'off', label: 'Never (only when I press Rescan)' },
+    { value: 'olderThanDay', label: 'When the map is more than a day old' },
+    { value: 'olderThanWeek', label: 'When the map is more than 7 days old' },
+  ];
+  protected readonly forgetting = signal(false);
+  protected refreshFrom(v: string): RefreshOnOpen {
+    return v === 'olderThanDay' || v === 'olderThanWeek' ? v : 'off';
+  }
+  protected setSavedMaps(p: SavedMapsSettings): void {
+    this.setDisk({ savedMaps: { ...this.savedMaps(), ...p } });
+  }
+  /** Deletes the saved disk maps now (an engine command; it does not wait for Save). */
+  protected async forgetSavedMaps(): Promise<void> {
+    this.forgetting.set(true);
+    try {
+      await this.backend.forgetSavedDiskMaps();
+      this.notifier.show('Saved disk maps forgotten');
+    } catch (e) {
+      this.notifier.show(toCommandError(e).message, 'bad');
+    } finally {
+      this.forgetting.set(false);
+    }
+  }
   protected readonly diskProblem = computed(() => Object.values(this.diskErrors()).find((e) => e !== null) ?? null);
   protected readonly jobs = computed<JobSettings>(() => this.draft()?.jobs ?? {});
   protected readonly readThreadChoices = threadChoices(16);
