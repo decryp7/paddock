@@ -117,7 +117,7 @@ export function binoculars({ simple = false, ink = INK.spotter, deep = PALETTE.s
  * tall up its slope, H thick, propped at `a` radians on a folio base FB thick; the base reaches fm past it at the sides and back
  * and fd in front, where the stylus lies.
  */
-const tabletGeo = ({ W = 300, Hs = 400, H = 22, a = Math.PI / 6, FB = 40, fm = 22, fd = 74 } = {}) => {
+export const tabletGeo = ({ W = 300, Hs = 400, H = 22, a = Math.PI / 6, FB = 40, fm = 22, fd = 74 } = {}) => {
   const ca = Math.cos(a), sa = Math.sin(a);
   /** A point on the tablet: u across (along s), v up the slope, h out of the screen (h = 0 the back, h = H the glass). */
   const T = (u, v, h) => [u, v * ca - h * sa, FB + v * sa + h * ca];
@@ -211,9 +211,9 @@ export function tablet({ simple = false, deep = PALETTE.pacenotes.deep, route = 
 // ---------------------------------------------------------------- Dyno: tachometer pod
 
 /** Dyno's gauge geometry (iso units) shared by the master and the pixel frames. */
-const POD = { R: 150, len: 112, baseH: 46, sweep: [225, -45], red: 0.74, needle: 0.82 };
+export const POD = { R: 150, len: 112, baseH: 46, sweep: [225, -45], red: 0.74, needle: 0.82 };
 /** Angle (degrees, counter-clockwise from +s in the dial plane) at a fraction k of the gauge sweep. */
-const podAngle = k => POD.sweep[0] + (POD.sweep[1] - POD.sweep[0]) * k;
+export const podAngle = k => POD.sweep[0] + (POD.sweep[1] - POD.sweep[0]) * k;
 
 export function pod({ simple = false, deep = PALETTE.dyno.deep, accent = PALETTE.dyno.top, weight = 0.68, dx = -2, dy = 14 } = {}) {
   const { R, len, baseH } = POD, tc = baseH + R, rd = R - 34, recess = 18;

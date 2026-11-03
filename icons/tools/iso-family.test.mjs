@@ -136,3 +136,30 @@ test('Pitwall paused: the light taskbar badge is dark enough (3:1 on white), the
   assert.ok(!tray('pitwall', 'paused', 'light').includes('#9AA0A6'));
   assert.ok(tray('pitwall', 'paused', 'dark').includes('#9AA0A6'));
 });
+
+// ---------- the smooth small-frame proposal (STYLE.md section 6a) ----------
+const smooth = await import('./small-smooth.mjs');
+const { smoothIso } = await import('./iso.mjs');
+
+test('smoothIso snaps every vertex x to a whole pixel and keeps y exact', () => {
+  const g = smoothIso({ grid: 24, xs: [0, 15], ys: [-10, 5], k: 0.75 });
+  for (const d of [g.face(0, 10, 0, 0, 13), g.end(10, 0, 5, 0, 13), g.flat(0, 10, 0, 5, 13)]) {
+    for (const [, x] of d.matchAll(/[ML](-?[\d.]+) /g)) assert.equal(+x, Math.round(+x), d);
+  }
+  assert.deepEqual(g.P([1, 0, 0]).map(v => +v.toFixed(2)), [+(g.ox + 0.75).toFixed(2), +(g.oy + 0.375).toFixed(2)]);
+});
+
+for (const app of smooth.SMOOTH_FAMILY) {
+  const [lo, hi] = COVERAGE[GLYPH_KIND[app]];
+  test(`${app}: options A and B keep the coverage at 16 within the ${GLYPH_KIND[app]} limits`, () => {
+    for (const [name, svg] of [['A', smooth.smallA(app, 16)], ['B', smooth.smallB(app, 16)]]) {
+      const c = tileCoverage(svg, bareSmall(app, 16), 16);
+      assert.ok(c >= lo && c <= hi, `${app} option ${name} 16 px coverage ${c} % is outside ${lo} to ${hi} %`);
+    }
+  });
+  test(`${app}: the smooth tray template is alpha only and anti-aliased at 2x`, () => {
+    const svg = smooth.smoothTray(app, 'template', { px: 36 }), d = pixels(svg, 36);
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3]) assert.deepEqual([d[i], d[i + 1], d[i + 2]], [0, 0, 0]);
+    assert.ok(partialAlpha(svg, 36).length > 0 || app === 'paddock', `${app}: no anti-aliased edge at 36 px`);
+  });
+}

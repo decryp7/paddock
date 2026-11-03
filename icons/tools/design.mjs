@@ -22,7 +22,7 @@ export const ALL = [...APPS, ...UMBRELLA, ...DEMOS];
 /** Order of the app hues in Paddock's family stripe (by hue: blue, violet, lavender, magenta, orange, amber, olive). */
 export const STRIPE = ['debrief', 'pitwall', 'sighter', 'dyno', 'pitcrew', 'spotter', 'pacenotes'];
 /** Stripe colour per app: the tile's top colour, lifted where it would sink into the graphite tile. */
-const STRIPE_COLOUR = app => ({ pitwall: '#8A5AE6', pacenotes: '#C2A845' })[app] ?? PALETTE[app].top;
+export const STRIPE_COLOUR = app => ({ pitwall: '#8A5AE6', pacenotes: '#C2A845' })[app] ?? PALETTE[app].top;
 
 export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes', paddock: 'Paddock', 'shell-demo': 'Paddock Shell Demo', 'workbench-demo': 'Paddock Workbench Demo' };
 
