@@ -1158,3 +1158,13 @@ time with the same message; pushing a complete running status (no hidden space, 
 The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
 **Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
 current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
+
+## A detached chart host resized to 0 stayed at height 0 (2026-11-03, Dyno; open question)
+
+Dyno 1.0.0: switching the history range left the chart empty until the view was reopened. The panel's skeleton detaches the
+projected `dy-chart` between two answers; the `ResizeObserver` then resized ECharts to 0 px. After the host came back the
+canvas kept `height="0"` (width 982) although the observer saw the 0 to N change, and ECharts warned "Can't get DOM width or
+height". **Why the later resize did not restore the height is not explained** (not reproduced outside the gated e2e, only in
+Chromium). The fix avoids the cause instead of explaining it: `fit()` ignores a container with no size and resizes only
+when the size differs from the chart's own. **Lesson:** do not resize a third-party renderer to a size of 0; if it happens
+again with the fix in place, find the ECharts/zrender step that skips the restore before adding more guards.

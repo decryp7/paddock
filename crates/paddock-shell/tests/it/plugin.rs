@@ -774,7 +774,7 @@ fn files_open_url_has_its_state_without_builder_files() {
         )
     );
     assert!(
-        !refused.contains("not managed") && refused.contains("Err"),
+        !refused.contains("not managed") && refused.contains("only http, https and mailto"),
         "{refused}"
     );
     // And it grants nothing else: no recent lists, no drops granted, no service for the storage commands.
