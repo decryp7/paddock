@@ -1,10 +1,9 @@
 # 49. Small merges behind feature switches, a drift check, wire schemas and notes, and conflict-free shared logs
 
-- Status: Proposed (2026-11-04), revision 3. The user approved the direction on 2026-11-04 and accepted decisions D1 to D6
-  as recommended in revision 1; revision 2 answered the independent review (verdict "needs rework") and adjusted D1, D2,
-  D3 and D5 where the fixes required it; revision 3 answers the re-review ("needs another round": the wire schema, the
-  helper and plugin wires, the freeze's enforcement). The user accepted D7 (the release freeze, with dormant wire changes
-  bumping the shipped protocol) on 2026-11-04; no other decision changed in revision 3.
+- Status: Accepted (2026-11-04; user decisions D1–D7; independent review 3 rounds). The user approved the direction and
+  accepted D1 to D6 as recommended (revision 1) and D7 (revision 3); revision 2 answered the review's "needs rework",
+  revision 3 its "needs another round" (the wire schema, the helper and plugin wires, the freeze's enforcement), and the
+  final edit its last P1 (old goldens are decoded only when the version is not bumped) with its P2 and P3 text.
 - Date: 2026-11-04
 - Related: ER-1 / rule 1 (one release at a time), ER-4 (Conventional Commits), ER-8 / rule 3 (the full suite once on the
   combined result), ER-14 / rule 7 and rule 49 (tests never read the user's environment; no leaked state), ER-21 / rule
@@ -239,35 +238,53 @@ serde name, which erases type parameters, so these instantiations collide under 
   `const SCHEMA: &'static NamedType` per type, so every instantiation of a generic gets its own structural schema, in
   postcard's own data model. It needs `#[derive(Schema)]` on every type reachable from a postcard root (about 515
   `Serialize` derives in `dyno-core` and 34 in `paddock-widgets` on `land-f`; most are reachable), behind a `schema`
-  feature in shared crates, and hand-written impls for types with custom serialisation (`JsonOnLink<T>`, `Timestamp`).
-  The derives are mechanical and cheap next to the alternatives; chosen.
+  feature in shared crates, and hand-written impls for types with custom serialisation. The reviewer's list, which WP-4
+  confirms against the source: `JsonOnLink<T>`, `JsonOnLink<serde_json::Value>` (its own impl), `Timestamp` (which is
+  `#[serde(transparent)]`), `BenchStatus`, `Owner`, `WakeTag`, `IfName` and `Mac`. The derives are mechanical and cheap
+  next to the alternatives; chosen.
+- **Coverage first.** WP-4's first step checks that postcard-schema 0.2.5 has `Schema` for `PathBuf`, `Ipv4Addr`,
+  `IpAddr`, `Duration`, `u128`, `char` and `HashMap`. A missing one gets a local newtype with a hand impl in
+  `paddock-testkit::wire` (or an upstream feature, when one exists), never a change of the wire type.
 
 A test in each owning crate builds the `OwnedNamedType` of every root and writes it, as pretty JSON in a stable order, to
 `<dir>/schema.json`; it fails when the checked-in file differs ("run `./dev wire sync`").
 
 **JSON payloads inside the binary wire.** `JsonOnLink<T>` (`dyno-core/src/widgets/wire.rs`) travels as one JSON string on
-the postcard link, so the postcard schema sees a string. Its hand-written `Schema` impl names its `T` in that node; the
-test lists every such node and fails unless it is in `json_roots`. Each JSON root is checked like a `json` protocol
-(below), in human-readable mode.
+the postcard link. Its hand-written `Schema` is `NewtypeStruct("JsonOnLink", T::SCHEMA)`, so the payload types need the
+derive too, and C80 treats every `JsonOnLink` node as JSON, not as postcard. A node matches a `json_roots` entry when
+the entry equals `JsonOnLink<` + the inner node's name as postcard-schema prints it (for generics, with its parameters'
+names) + `>`; the test lists every such node and fails on one that no entry matches, and on an entry that matches no
+node. Each JSON root is checked like a `json` protocol (below), in human-readable mode.
 
-**The serde lint.** postcard cannot carry `#[serde(tag = "...")]`, `untagged`, `flatten` or `skip_serializing_if`, and the
-derive does not see serde attributes. C80 reads the type names in `schema.json` and refuses those four attributes on any of
-them in the source (JSON roots are exempt: `PopoverSurfaceValues` has `#[serde(flatten)]` at
-`widgets/popover_values/mod.rs:182` and travels inside `JsonOnLink`).
+A second JSON-in-string path exists: `#[serde(with = "crate::widgets::stored_wire")]` on `Settings.menu_bar` and
+`Settings.popover` (`settings.rs:82` and `:85` on `land-f`). WP-4 replaces both with a `JsonOnLink`-style wrapper, so they
+become `json_roots`.
+
+**The serde lint.** The derive does not see serde attributes. C80 reads the type names in `schema.json` and, on any of
+them in the source:
+- **refuses** `#[serde(tag = "...")]`, `untagged`, `flatten` and `skip_serializing_if`, which postcard cannot carry;
+- **requires a hand `Schema` impl** (and fails on a derived one) for `with`, `serialize_with`, `deserialize_with`, `skip`,
+  `transparent`, `from`, `into`, `try_from` and a hand-written `impl Serialize`, because the encoding then differs from
+  the type's shape.
+
+JSON roots are exempt (`PopoverSurfaceValues` has `#[serde(flatten)]` at `widgets/popover_values/mod.rs:182` and travels
+inside `JsonOnLink`).
 
 **Golden encodings.** `./dev wire sync` also writes the round-trip samples (the `*_samples()` functions of the guard,
 moved to `paddock-testkit::wire` for the shared part) as `<dir>/samples.json` (human-readable) and, for postcard, each
 sample's bytes as one hex line in `<dir>/samples.postcard.hex`. They are in every tag's tree. `./dev wire check` extracts
 the last tag's goldens to a temporary folder and runs the crate's golden test against them (path passed as an explicit
-test input): every old postcard sample must decode with the new types and re-encode to the same bytes; every old JSON
-sample must decode.
+test input). When the derived version equals `released`, every old golden must decode and re-encode identically (this
+catches custom-serialisation changes the schema cannot see). When the version is bumped, old goldens are not decoded, and
+new goldens are written for the new version. Unordered collections (`HashMap`, `HashSet`) encode in no fixed order, so
+for a sample that holds one the test compares the decoded values, not the bytes; other samples compare bytes.
 
 **Breaking is decided by the code, never by the note.**
 - `postcard`: the schema diff against the last tag. The only additive change is a variant appended at the end of an enum;
-  anything else (a field added, removed, reordered or retyped; a variant inserted or removed) is breaking. The goldens
-  must pass either way.
-- `json` (Pitcrew's protocol, Debrief's `debrief-ai` worker, the `json_roots`): breaking when an old golden no longer
-  decodes; an added field with a serde default, or a new variant, decodes and is additive.
+  anything else (a field added, removed, reordered or retyped; a variant inserted or removed) is breaking.
+- `json` (Pitcrew's protocol, Debrief's `debrief-ai` worker, the `json_roots`): the last tag's goldens are decoded to
+  decide: breaking when one no longer decodes; an added field with a serde default, or a new variant, decodes and is
+  additive. (A JSON root inside a postcard wire makes that wire's version bump too.)
 - Debrief's store-client wire (`WIRE_VERSION` 3) is positional by the row order of its operation table
   (`debrief-store-client/src/port_table.rs`, `wire_names`): WP-4 writes a manual emitter that lists the rows in order with
   their DTO types as `schema.json`; appended rows are additive, anything else breaking; the DTOs get JSON goldens.
@@ -294,13 +311,15 @@ the last tag's tree is new; a note present in it is shipped and **immutable** (C
 `added` entry appears as a sample. `./dev wire log` prints the history by version; the comment above each constant is one
 line pointing at its folder.
 
-**Two unreleased wires with one number.** Between tags two builds can both say version 4 with different schemas. In
+**Two unreleased wires with one number.** Between tags two builds can both say version 4 with different schemas. Only for
+wires whose `minor` is always 0 (Dyno's three; not Debrief's IPC, which uses real minors), in
 non-release builds each side puts the low 16 bits of the SHA-256 of its `schema.json` (embedded with `include_bytes!`) in
 the existing `minor` of `paddock_ipc::ProtocolVersion`; release builds keep `minor` 0. `ProtocolVersion::accepts` on
 `land-f` takes any child minor up to the host's (`frame.rs:74`), so it would not refuse a different hash: in non-release
-builds the app's and the agent's link code compare the minors for equality right after the handshake and refuse a
-mismatch with "rebuild both: the wire schemas differ". No new field in the shared handshake; if the peer's version is not
-yet readable after `connect`, a read-only accessor is the one change to `paddock-ipc` (WP-4).
+builds the app's and the agent's link code compare the minors for equality right after the handshake, reading the peer's
+version from `Connection::protocol()` (`paddock-ipc/src/handshake.rs:69`), and refuse a mismatch. The client also maps a
+same-major handshake refusal to the same message, "rebuild both: the wire schemas differ", with both versions in the log
+(ER-27). No change to `paddock-ipc`.
 
 **CI fetches tags.** C80 needs the tags and their trees: every job that runs it checks out with `fetch-tags: true` (§6).
 
@@ -424,11 +443,11 @@ its end."
 | WP-1 | `push-check.yml` (partial clone with tags, own runner label, commit-lint, per-package `cargo fmt --check`, summary, `::error::`), the `needs` field on every check, its ci-actions test; one measured run; rule 50 (f) text | 1.5 |
 | WP-2 | `./dev drift`, `[drift]` and `[line]` in `docs/harnesses.toml`, C81 with the freeze rules (`Freeze:`, `Freeze-closed:`, `Release-part:`, warn-only during a freeze), fixtures; the ADR 0042 §3 amendment text | 1.25 |
 | WP-3 | `merge=union` lines in `.gitattributes`; C82 with fixtures for each union blind spot, the near-duplicate warning and the changelog case; `logs --fix`; `./dev adr next` | 1.5 |
-| WP-4 | `wire.toml` with Dyno's three wires, Pitcrew's and Debrief's two; `#[derive(Schema)]` on every type reachable from a postcard root (about 550 in `dyno-core` and `paddock-widgets`, a `schema` feature in shared crates), hand impls for `JsonOnLink<T>` and `Timestamp`; the schema tests; golden samples and postcard bytes with the golden test; the JSON rules and `json_roots`; Debrief's store-client emitter; the serde lint; `./dev wire sync`, `--check`, `log`; notes for the 1.1 changes; C80; the non-release minor hash and the equality check in the link code (and a read-only `paddock-ipc` accessor if needed); `paddock-testkit::wire` | 4.5 |
+| WP-4 | First: postcard-schema 0.2.5 coverage (`PathBuf`, `Ipv4Addr`, `IpAddr`, `Duration`, `u128`, `char`, `HashMap`) and the fallback newtypes. Then `wire.toml` with Dyno's three wires, Pitcrew's and Debrief's two; `#[derive(Schema)]` on every type reachable from a postcard root (about 550 in `dyno-core` and `paddock-widgets`, a `schema` feature in shared crates); hand impls for `JsonOnLink<T>`, `JsonOnLink<serde_json::Value>`, `Timestamp`, `BenchStatus`, `Owner`, `WakeTag`, `IfName`, `Mac`; the two `stored_wire` fields as `JsonOnLink`-style roots; the schema tests; golden samples and postcard bytes with the golden test (values compared for unordered collections); the JSON rules and `json_roots` matching; Debrief's store-client emitter; the serde lint with its hand-impl list; `./dev wire sync`, `--check`, `log`; notes for the 1.1 changes; C80; the non-release minor hash, the equality check and the refusal message in the link code; `paddock-testkit::wire` | 4.75 |
 | WP-5 | `paddock-build::Build::switches` (parser, `Id`, `Switches`, `SHIPPED`, `current()` with the debug `OnceLock`), `compose` taking the table in every app, the backend `switches()` command and the mock's table, `./dev gen switches` with its test, `--switches` on the composing binaries, ADR 0039's probe, C79 with tag refusal, the nightly all-on leg | 4.5 |
 | WP-6 | rule 65, the rule 61 clause, the freeze in the `integrate` skill and AGENTS.md "Working in the monorepo", the landing step (`wire sync --check`, `drift`, `logs`) | 0.5 |
 | WP-7 | after two weeks: push-check minutes per day, conflicts per merge, CI runs per landing, **reviews per landing**, unlanded age; recorded in `docs/benchmarks.md` (rule 48); tune caps and thresholds; decide on changelog fragments | 0.5 |
-| **Total (this ADR)** | | **14.25** |
+| **Total (this ADR)** | | **14.5** |
 | WP-8 (follow-up) | Additive registration for Dyno's hot files: per-feature modules for the API types and the three backends, the command and handler lists generated from per-feature files; as an amendment to ADR 0037. Owner: a designer the coordinator assigns; the amendment is due 2026-11-21, after the Dyno 1.1.0 tag. Estimate to be made from that amendment's work packages (memory note "estimate after design") | (open) |
 
 Order: WP-1 and WP-3 first (no product code), then WP-4 before the next wire change, WP-2, WP-5 after the Dyno 1.1.0 tag,
