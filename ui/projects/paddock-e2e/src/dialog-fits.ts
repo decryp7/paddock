@@ -41,25 +41,11 @@ export async function dialogFitProblems(browser: Browser, id: string, contract: 
           const page = await context.newPage();
           await page.goto(dialogWindowUrl(id, input, { title: id }));
           await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-          // The height the frame last asked for: a dialog that loads its data refits after the handshake, so wait until it is steady.
+          // The height the frame last asked for: a dialog that loads its data refits after the handshake, so wait until the shell has settled.
           const askedNow = () => page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
-          // Steady: unchanged over three animation frames (frames, not wall time: rule 60), so a refit after the handshake is seen.
-          await page.evaluate(
-            () =>
-              new Promise<void>((done) => {
-                const read = () => `${document.documentElement.dataset['fittedHeight']}/${document.documentElement.dataset['minContent']}`;
-                let seen = read();
-                let steady = 0;
-                const frame = () => {
-                  const now = read();
-                  steady = now === seen ? steady + 1 : 0;
-                  seen = now;
-                  if (steady >= 3) done();
-                  else requestAnimationFrame(frame);
-                };
-                requestAnimationFrame(frame);
-              }),
-          );
+          // Settled: the content is drawn (no Loading) and the shell sent its last measure of the handshake (`data-fit-settled`).
+          await page.locator('[data-testid=dialog-loading]').waitFor({ state: 'detached', timeout: 15_000 });
+          await page.locator('html[data-fit-settled]').waitFor({ timeout: 15_000 });
           const asked = await askedNow();
           const minH = Number(asked.min.split('x')[1] ?? '0');
           const height = contract.kind === 'tool' ? Math.min(contract.height ?? capH, capH) : Math.max(Math.min(asked.h, capH), minH);

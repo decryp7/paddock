@@ -1007,8 +1007,21 @@ mod tests {
                 f64::from(physical) < 163.0 * scale + 1.0,
                 "scale {scale}: {physical}"
             );
-            // The outer window is the inner one plus the frame; it is the frame that is added, never taken from the content.
-            assert!((fit.size.height + decor.height) * scale >= 163.0 * scale + frame_px - 1e-6);
+            // The frame is outside the inner size: a content taller than the cap is capped on the inner height, with the
+            // frame taken from the work area (never added to the content, nor taken from it).
+            let tall = plan_fit(
+                Kind::Form,
+                measure(560.0, 4000.0, 400.0, 120.0),
+                0.0,
+                &around(size(560.0, 560.0), decor, Some(m), "windows"),
+            )
+            .unwrap();
+            assert!(
+                (tall.size.height - (CAP_FRACTION * 1040.0 / scale - frame_px / scale)).abs()
+                    < 1e-9,
+                "scale {scale}: {}",
+                tall.size.height
+            );
         }
     }
 

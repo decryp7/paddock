@@ -1123,8 +1123,7 @@ describe('a dialog window', () => {
       const ready = io.ready.bind(io);
       io.ready = (m) => (void ready(m), gate);
       // The handshake is in flight (withheld), so the window is not stable: wait for the measure it sent, not for stability.
-      for (let i = 0; i < 100 && io.measures.length === 0; i++) await new Promise<void>((r) => setTimeout(r, 0));
-      expect(io.measures).toHaveLength(1);
+      await vi.waitFor(() => expect(io.measures).toHaveLength(1));
       // The content grew (its data arrived) while the window system had not yet answered: nothing observes it yet.
       const content = root.querySelector('.pd-frame-content') as HTMLElement;
       vi.spyOn(content, 'getBoundingClientRect').mockReturnValue({ height: 900, width: 700 } as DOMRect);

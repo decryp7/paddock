@@ -199,6 +199,8 @@ export interface MemoryUpdatesOptions {
   readonly releasesPage?: string;
   /** Runs each simulated step of the engine's work (default: the next microtask). */
   readonly schedule?: (step: () => void) => void;
+  /** `status()` answers only once this settles: a spec or an e2e that needs the status to arrive late, after a window's first measure. */
+  readonly holdStatus?: Promise<void>;
 }
 
 const ERRORS: Readonly<Record<'notAvailable' | 'offline' | 'signatureInvalid' | 'busy', UpdateErrorDto>> = {
@@ -270,6 +272,7 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
   }
 
   status(): Promise<UpdateStatus> {
+    if (this.options.holdStatus) return this.options.holdStatus.then(() => this.current);
     return Promise.resolve(this.current);
   }
 

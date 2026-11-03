@@ -1158,3 +1158,13 @@ time with the same message; pushing a complete running status (no hidden space, 
 The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
 **Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
 current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
+
+## A baseline read after an async step hides what changed during it (2026-11-03, Dyno dialogs)
+
+Dyno 1.0.0's Updates window showed a scrollbar beside one line. `DialogFrame.watch()` took its "last measure" from a fresh
+measure read after the `dialog_ready` round trip, so content that arrived during the round trip was taken as already sent and
+never refitted. **Not confirmed as the user's cause:** the report may also come from DPI and frame rounding or the viewport
+delta, which a Windows run with the new fit log (`Phase`, `Current`, `Decor`, `Delta`, `Scale`) has to rule in or out (ER-28).
+The race is real in code and has a regression spec. **Lesson:** a change detector's baseline is what was last sent, never what
+is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
+Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.

@@ -4,12 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: a dialog that loads its data is fitted to it (Dyno 1.0.1)
-- The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has answered, and sends a refit when it
-  differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so a dialog whose content arrived meanwhile (Updates
-  asks the engine for its status) was taken as already fitted: the window kept the height of the empty first state and showed the real content behind a scrollbar.
-- `dialog_ready` and `dialog_fit` log the requested inner size, the size it was, the window's decorations, the viewport delta, the scale and the zoom.
-- `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for the fitted height to be steady and reports a body that scrolls in a window below the cap.
+### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: hardening for content that arrives after the ready handshake (Dyno 1.0.1)
+- Hardening, not yet shown to fix a user report: Dyno 1.0.0 showed Updates with a scrollbar beside one line, and the cause on Windows is not confirmed (the
+  candidates are listed in the commit). The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has
+  answered, and sends a refit when it differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so content that
+  arrived meanwhile was taken as already fitted and the window kept the height of its first state.
+- `dialog_ready`, `dialog_fit` and the scale-change refit log the requested inner size, the size it was, the window's decorations, the viewport delta, the
+  scale, the zoom and a `Phase` (`ready`, `fit`, `scale`). The shell sets `data-fit-settled` on `<html>` once the handshake's measures are sent.
+- `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for no Loading and `data-fit-settled`, and reports a body that scrolls in a window below the cap.
+  `MemoryUpdatesOptions.holdStatus` delays the first status (Dyno's browser build takes it from `__pdHoldUpdatesStatus`) for the late-status e2e.
 
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,

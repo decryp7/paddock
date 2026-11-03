@@ -174,10 +174,15 @@ export class DialogShell implements AfterViewInit {
     // same pinned width the measure was taken at, and sent as a refit. Left to `watch`, whose baseline is read after the
     // pin is released, it would be taken as already fitted and the window would keep its first, empty size.
     const after = frame.measure();
-    if (after.content.height !== measure.content.height || after.minContent.height !== measure.minContent.height) this.fit(after);
+    if (after.content.height !== measure.content.height || after.minContent.height !== measure.minContent.height) {
+      console.debug(`[paddock-dialogs] dialog window ${this.id}: content changed during the ready handshake, refit ${measure.content.height} -> ${after.content.height} px`);
+      this.fit(after);
+    }
     // Shown at its size now: the window's own width rules again.
     frame.pinWidth(null);
     frame.watch();
+    // Every measure the handshake owes has been sent: a check that reads the size may now (the browser build's e2e).
+    if (typeof document !== 'undefined') document.documentElement.dataset['fitSettled'] = 'true';
   }
 
   /** A refit after the ready handshake (the frame coalesces them to one per frame). */

@@ -794,7 +794,7 @@ pub async fn dialog_fit<R: Runtime>(
     measure: Measure,
 ) -> Result<(), DialogError> {
     let monitor = monitor_of_window(&window).map(|m| m.0);
-    fit(&app, &window, measure, monitor, std::env::consts::OS)
+    fit_as(&app, &window, measure, monitor, std::env::consts::OS, "fit")
 }
 
 fn ready<R: Runtime>(
@@ -804,7 +804,7 @@ fn ready<R: Runtime>(
     os: &str,
 ) -> Result<(), DialogError> {
     let monitor = monitor_of_window(window).map(|m| m.0);
-    fit(app, window, measure, monitor, os)?;
+    fit_as(app, window, measure, monitor, os, "ready")?;
     show(app, window.label(), os, false);
     Ok(())
 }
@@ -829,12 +829,25 @@ fn decor_of<R: Runtime>(w: &Window<R>, scale: f64) -> Size {
 
 /// Sizes the dialog window `window` for `measure` (see [`plan_fit`]): the minimum content first (so the size is never
 /// below it), then the size in whole physical px rounded up once, then the move that keeps it on its monitor.
+#[cfg(test)]
 fn fit<R: Runtime>(
     app: &AppHandle<R>,
     window: &Window<R>,
     measure: Measure,
     monitor: Option<Monitor>,
     os: &str,
+) -> Result<(), DialogError> {
+    fit_as(app, window, measure, monitor, os, "fit")
+}
+
+/// [`fit`], logged as `phase`: "ready" (the handshake), "fit" (a refit) or "scale" (the window changed monitor).
+fn fit_as<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &Window<R>,
+    measure: Measure,
+    monitor: Option<Monitor>,
+    os: &str,
+    phase: &str,
 ) -> Result<(), DialogError> {
     let dialogs = dialogs(app)?;
     let entry = dialogs.get(window.label()).ok_or_else(not_a_dialog)?;
@@ -894,7 +907,7 @@ fn fit<R: Runtime>(
         target: TARGET,
         Dialog = entry.dialog_id.as_str(), Content = measure.content.height, Height = plan.size.height,
         Delta = viewport_delta, Current = around.current.height, Decor = around.decor.height, Scale = scale,
-        Zoom = zoom, Resized = plan.resize;
+        Zoom = zoom, Resized = plan.resize, Phase = phase;
         "Dialog window fitted to its content: requested inner {}x{} (content {}x{}), was {}x{}, scale {}",
         plan.size.width, plan.size.height, measure.content.width, measure.content.height,
         around.current.width, around.current.height, scale
@@ -980,7 +993,7 @@ pub fn scale_changed<R: Runtime>(window: &Window<R>) {
         return;
     };
     let monitor = monitor_of_window(window).map(|m| m.0);
-    if let Err(e) = fit(app, window, measure, monitor, std::env::consts::OS) {
+    if let Err(e) = fit_as(app, window, measure, monitor, std::env::consts::OS, "scale") {
         log::warn!(target: TARGET, Window = window.label(); "Dialog refit after a scale change failed: {e}");
     }
 }
