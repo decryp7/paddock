@@ -5,7 +5,7 @@
 
 use crate::runner::ToolRunner;
 use dyno_core::helper::HelperHost;
-use dyno_core::helper_processes::{classify_owner, ProcState, ProcessSweeper, RawOwner, RawProcess, Sweep};
+use dyno_core::helper_processes::{classify_owner, default_first_person, ProcState, ProcessSweeper, RawOwner, RawProcess, Sweep};
 use dyno_core::helper_wire::HelperUser;
 use dyno_core::ports::PlatformError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -70,6 +70,24 @@ pub fn parse_profile_list(text: &str) -> Vec<(HelperUser, String)> {
         }
     }
     out
+}
+
+/// The machine's first person uid: `UID_MIN` of `/etc/login.defs` on Linux (default 1000), 500 on macOS.
+pub fn first_person_uid(host: HelperHost) -> u32 {
+    if host == HelperHost::Linux {
+        if let Some(n) = std::fs::read_to_string("/etc/login.defs").ok().as_deref().and_then(parse_uid_min) {
+            return n;
+        }
+    }
+    default_first_person(host)
+}
+
+/// `UID_MIN   1000` from `login.defs` text; comments and other keys are skipped.
+pub fn parse_uid_min(text: &str) -> Option<u32> {
+    text.lines().find_map(|l| {
+        let mut w = l.split_whitespace();
+        (w.next() == Some("UID_MIN")).then(|| w.next()?.parse().ok()).flatten()
+    })
 }
 
 fn state(s: ProcessStatus) -> ProcState {
@@ -138,14 +156,15 @@ impl ProcessSweeper for SystemSweeper {
             .with_exe(UpdateKind::Always);
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, what);
         let users = Users::new_with_refreshed_list();
+        let first_person = first_person_uid(self.host);
         let processes = sys
             .processes()
             .values()
             .map(|p| {
                 let name = p.user_id().and_then(|u| users.get_user_by_id(u)).map(|u| u.name().to_string());
                 let owner = match p.user_id() {
-                    Some(u) => classify_owner(self.host, &user_of(u), name.as_deref()),
-                    None => RawOwner::Service("unknown".into()),
+                    Some(u) => classify_owner(&user_of(u), name.as_deref(), first_person),
+                    None => RawOwner::Service("unknown".into(), None),
                 };
                 let disk = p.disk_usage();
                 RawProcess {
@@ -194,6 +213,13 @@ mod tests {
                 })
                 .ok_or_else(|| PlatformError::Failed(format!("unscripted {key}")))
         }
+    }
+
+    #[test]
+    fn uid_min_is_read_from_login_defs_text() {
+        assert_eq!(parse_uid_min("# UID_MIN 5\nUID_MIN\t\t500\nUID_MAX 60000\n"), Some(500));
+        assert_eq!(parse_uid_min("UID_MAX 60000\n"), None);
+        assert_eq!(parse_uid_min("UID_MIN lots\n"), None);
     }
 
     #[test]

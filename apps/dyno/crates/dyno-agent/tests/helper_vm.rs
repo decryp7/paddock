@@ -90,6 +90,13 @@ fn the_helper_readers_on_this_machine() {
         }
         Ok(HelperReply::Memory(m)) => println!("{name}: {m:?}"),
         Ok(HelperReply::SocketOwners(a)) => println!("{name}: {} sockets, others={}, truncated={}", a.owners.len(), a.others, a.truncated),
+        Ok(HelperReply::FileHolders(a)) => {
+            println!(
+                "{name}: holders={:?} others={}",
+                a.holders.iter().map(|h| (h.pid, format!("{:?}", h.owner))).collect::<Vec<_>>(),
+                a.others
+            )
+        }
         Ok(HelperReply::Extras(e)) => println!("{name}: {e:?}"),
         Ok(other) => println!("{name}: unexpected {other:?}"),
         Err(e) => println!("{name}: error {e:?}"),
@@ -113,4 +120,21 @@ fn the_helper_readers_on_this_machine() {
     show("sockets", t.call(HelperRequest::SocketOwners));
     show("wakeRequests", t.call(HelperRequest::Extras(ExtrasKind::WakeRequests)));
     show("backupVersions", t.call(HelperRequest::Extras(ExtrasKind::BackupVersions)));
+    // A file this test holds open: the helper must name this process as a holder, by device and inode, without opening it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Ok(held) = std::env::current_exe().and_then(std::fs::File::open) else {
+            panic!("the test program cannot open itself");
+        };
+        let Ok(m) = held.metadata() else { panic!("the test program cannot stat itself") };
+        println!("this process is {}", std::process::id());
+        show(
+            "fileHolders",
+            t.call(HelperRequest::FileHolders {
+                dev: m.dev(),
+                ino: m.ino(),
+            }),
+        );
+    }
 }

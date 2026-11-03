@@ -121,8 +121,8 @@ pub enum RawOwner {
     },
     /// The system account.
     System,
-    /// A service account that is not a person's (by name).
-    Service(String),
+    /// A service account that is not a person's (by name, and its id so the account that is asking still sees its own).
+    Service(String, Option<HelperUser>),
 }
 
 /// What the OS read for one process: the allow-listed fields and the owner, nothing else.
@@ -171,6 +171,15 @@ pub trait ProcessSweeper: Send + Sync {
     fn sweep(&self) -> Result<Sweep, PlatformError>;
 }
 
+/// The first person's uid when the machine does not say otherwise.
+pub fn default_first_person(host: HelperHost) -> u32 {
+    if host == HelperHost::Macos {
+        500
+    } else {
+        1_000
+    }
+}
+
 /// What a system without a process reader says (an unsupported build).
 pub struct NoProcesses;
 
@@ -183,15 +192,19 @@ impl ProcessSweeper for NoProcesses {
 }
 
 /// How an account counts: the system account, a service account (named) or a person's account. Decided from the id and the name
-/// alone, so it is the same for every caller: Unix uid 0 is the system; a uid below the first person's id (500 on macOS, 1000 on
-/// Linux) is a service; Windows `S-1-5-18` is the system, other well-known `S-1-5-` ids with fewer than four sub-authorities (and
+/// alone, so it is the same for every caller: Unix uid 0 is the system; a uid below `first_person` (the machine's own first
+/// person id: 500 on macOS, `UID_MIN` of `/etc/login.defs` on Linux, default 1000; see [`default_first_person`]) is a service; Windows `S-1-5-18` is the system, other well-known `S-1-5-` ids with fewer than four sub-authorities (and
 /// `S-1-5-80-` services, `S-1-5-90-`, `S-1-5-96-` system components) are services; `S-1-5-21-` is a person.
-pub fn classify_owner(host: HelperHost, id: &HelperUser, name: Option<&str>) -> RawOwner {
-    let service = |fallback: &str| RawOwner::Service(name.filter(|n| !n.is_empty()).unwrap_or(fallback).chars().take(64).collect());
+pub fn classify_owner(id: &HelperUser, name: Option<&str>, first_person: u32) -> RawOwner {
+    let service = |fallback: &str| {
+        RawOwner::Service(
+            name.filter(|n| !n.is_empty()).unwrap_or(fallback).chars().take(64).collect(),
+            Some(id.clone()),
+        )
+    };
     match id {
         HelperUser::Uid(0) => RawOwner::System,
         HelperUser::Uid(uid) => {
-            let first_person = if host == HelperHost::Macos { 500 } else { 1_000 };
             if *uid < first_person || *uid == 65_534 {
                 service("system service")
             } else {
@@ -203,8 +216,8 @@ pub fn classify_owner(host: HelperHost, id: &HelperUser, name: Option<&str>) -> 
         }
         HelperUser::Sid(sid) => match sid.as_str() {
             "S-1-5-18" => RawOwner::System,
-            "S-1-5-19" => RawOwner::Service("LOCAL SERVICE".into()),
-            "S-1-5-20" => RawOwner::Service("NETWORK SERVICE".into()),
+            "S-1-5-19" => RawOwner::Service("LOCAL SERVICE".into(), Some(id.clone())),
+            "S-1-5-20" => RawOwner::Service("NETWORK SERVICE".into(), Some(id.clone())),
             s if s.starts_with("S-1-5-80-") || s.starts_with("S-1-5-90-") || s.starts_with("S-1-5-96-") => service("system service"),
             _ => RawOwner::Account {
                 id: id.clone(),
@@ -251,7 +264,8 @@ enum Seen {
 fn see(p: &RawProcess, caller: &HelperUser, scope: Visibility, homes: &[(HelperUser, String)]) -> Seen {
     let (owner, account, other_account) = match &p.owner {
         RawOwner::System => (OwnerKind::System, Some("SYSTEM".to_string()), false),
-        RawOwner::Service(name) => (OwnerKind::Service(name.clone()), Some(name.clone()), false),
+        RawOwner::Service(name, Some(id)) if id == caller => (OwnerKind::Caller, Some(name.clone()), false),
+        RawOwner::Service(name, _) => (OwnerKind::Service(name.clone()), Some(name.clone()), false),
         RawOwner::Account { id, name } if id == caller => (OwnerKind::Caller, name.clone(), false),
         RawOwner::Account { name, .. } => (OwnerKind::OtherUser, name.clone(), true),
     };
@@ -357,7 +371,11 @@ mod tests {
                 raw(1, RawOwner::System, Some("/sbin/launchd")),
                 raw(20, user(501, "ana"), Some("/Users/ana/bin/tool")),
                 raw(30, user(502, "ben"), Some("/Users/ben/Secret Project/app")),
-                raw(40, RawOwner::Service("_mdnsresponder".into()), Some("/usr/sbin/mDNSResponder")),
+                raw(
+                    40,
+                    RawOwner::Service("_mdnsresponder".into(), None),
+                    Some("/usr/sbin/mDNSResponder"),
+                ),
                 raw(50, user(502, "ben"), Some("/Applications/Shared.app/x")),
             ],
         }
@@ -472,34 +490,64 @@ mod tests {
     }
 
     #[test]
-    fn owners_are_told_apart_by_id_and_host() {
-        use HelperHost::{Linux, Macos, Windows};
-        assert_eq!(classify_owner(Linux, &HelperUser::Uid(0), Some("root")), RawOwner::System);
+    fn a_caller_below_the_first_person_id_still_sees_its_own_processes_as_its_own() {
+        let owner = classify_owner(&HelperUser::Uid(501), Some("ana"), 1_000);
+        let sweep = Sweep {
+            processes: vec![raw(7, owner, None)],
+            homes: vec![],
+            taken_at: 1,
+        };
+        let page = build_page(
+            &sweep,
+            &HelperUser::Uid(501),
+            Visibility::Own(OthersPolicy::Total),
+            &query(None, 10),
+        );
+        assert_eq!(page.items[0].owner, OwnerKind::Caller);
+        let other = build_page(
+            &sweep,
+            &HelperUser::Uid(502),
+            Visibility::Own(OthersPolicy::Total),
+            &query(None, 10),
+        );
+        assert_eq!(other.items[0].owner, OwnerKind::Service("ana".into()));
+    }
+
+    #[test]
+    fn owners_are_told_apart_by_id_and_first_person() {
+        use HelperHost::{Linux, Macos};
+        let first = default_first_person;
+        let uid = HelperUser::Uid;
+        assert_eq!(classify_owner(&uid(0), Some("root"), first(Linux)), RawOwner::System);
         assert_eq!(
-            classify_owner(Macos, &HelperUser::Uid(241), Some("_mdnsresponder")),
-            RawOwner::Service("_mdnsresponder".into())
+            classify_owner(&uid(241), Some("_mdnsresponder"), first(Macos)),
+            RawOwner::Service("_mdnsresponder".into(), Some(uid(241)))
         );
         assert!(matches!(
-            classify_owner(Macos, &HelperUser::Uid(501), Some("ana")),
+            classify_owner(&uid(501), Some("ana"), first(Macos)),
             RawOwner::Account { .. }
         ));
         assert!(
-            matches!(classify_owner(Linux, &HelperUser::Uid(501), Some("ana")), RawOwner::Service(_)),
-            "a Linux person starts at 1000"
+            matches!(classify_owner(&uid(501), Some("ana"), first(Linux)), RawOwner::Service(..)),
+            "a Linux person starts at 1000 by default"
+        );
+        assert!(
+            matches!(classify_owner(&uid(501), Some("ana"), 500), RawOwner::Account { .. }),
+            "UID_MIN 500 makes 501 a person"
         );
         assert_eq!(
-            classify_owner(Linux, &HelperUser::Uid(65_534), None),
-            RawOwner::Service("system service".into())
+            classify_owner(&uid(65_534), None, 500),
+            RawOwner::Service("system service".into(), Some(uid(65_534)))
         );
         let sid = |s: &str| HelperUser::Sid(s.into());
-        assert_eq!(classify_owner(Windows, &sid("S-1-5-18"), None), RawOwner::System);
+        assert_eq!(classify_owner(&sid("S-1-5-18"), None, 0), RawOwner::System);
         assert_eq!(
-            classify_owner(Windows, &sid("S-1-5-19"), None),
-            RawOwner::Service("LOCAL SERVICE".into())
+            classify_owner(&sid("S-1-5-19"), None, 0),
+            RawOwner::Service("LOCAL SERVICE".into(), Some(sid("S-1-5-19")))
         );
-        assert!(matches!(classify_owner(Windows, &sid("S-1-5-80-1-2-3"), Some("Spooler")), RawOwner::Service(n) if n == "Spooler"));
+        assert!(matches!(classify_owner(&sid("S-1-5-80-1-2-3"), Some("Spooler"), 0), RawOwner::Service(n, _) if n == "Spooler"));
         assert!(matches!(
-            classify_owner(Windows, &sid("S-1-5-21-1-2-3-1001"), Some("Ana")),
+            classify_owner(&sid("S-1-5-21-1-2-3-1001"), Some("Ana"), 0),
             RawOwner::Account { .. }
         ));
     }

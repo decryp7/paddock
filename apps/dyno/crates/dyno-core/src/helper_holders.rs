@@ -121,7 +121,8 @@ enum Seen {
 fn seen(owner: &RawOwner, caller: &HelperUser, scope: Visibility) -> Seen {
     match owner {
         RawOwner::System => Seen::Show(OwnerKind::System),
-        RawOwner::Service(n) => Seen::Show(OwnerKind::Service(n.clone())),
+        RawOwner::Service(_, Some(id)) if id == caller => Seen::Show(OwnerKind::Caller),
+        RawOwner::Service(n, _) => Seen::Show(OwnerKind::Service(n.clone())),
         RawOwner::Account { id, .. } if id == caller => Seen::Show(OwnerKind::Caller),
         RawOwner::Account { .. } => match scope {
             Visibility::Full | Visibility::Own(OthersPolicy::Detail) => Seen::Show(OwnerKind::OtherUser),

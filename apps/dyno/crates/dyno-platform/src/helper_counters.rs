@@ -208,9 +208,18 @@ impl SystemCounters {
         self
     }
 
+    /// `powermetrics` with the samplers this Mac has: Intel Macs offer `smc` (fans), Apple silicon does not ("unrecognized
+    /// sampler"), so the call is repeated with `cpu_power` alone.
     fn powermetrics(&self) -> Result<(Vec<EnergyDomain>, Vec<FanSpeed>), PlatformError> {
-        let args = ["--samplers", "cpu_power,smc", "-n", "1", "-i", "200"].map(String::from);
-        Ok(parse_powermetrics(&self.runner.run(POWERMETRICS, &args, TIMEOUT)?))
+        let run = |samplers: &str| {
+            let args = ["--samplers", samplers, "-n", "1", "-i", "200"].map(String::from);
+            self.runner.run(POWERMETRICS, &args, TIMEOUT)
+        };
+        let text = match run("cpu_power,smc") {
+            Err(PlatformError::Failed(m)) if m.contains("unrecognized sampler") => run("cpu_power")?,
+            other => other?,
+        };
+        Ok(parse_powermetrics(&text))
     }
 }
 
@@ -224,8 +233,14 @@ impl CounterReader for SystemCounters {
             (HelperHost::Linux, CounterId::Thermal) => Ok(CounterValue::Thermal(linux_thermal(&self.sys))),
             (HelperHost::Linux, CounterId::Fans) => Ok(CounterValue::Fans(linux_fans(&self.sys))),
             (HelperHost::Linux, CounterId::CpuEnergy) => linux_rapl(&self.sys).map(CounterValue::CpuEnergy),
-            (HelperHost::Macos, CounterId::CpuEnergy) => self.powermetrics().map(|(e, _)| CounterValue::CpuEnergy(e)),
-            (HelperHost::Macos, CounterId::Fans) => self.powermetrics().map(|(_, f)| CounterValue::Fans(f)),
+            (HelperHost::Macos, CounterId::CpuEnergy) => match self.powermetrics()?.0 {
+                e if e.is_empty() => Err(nothing("CPU power (powermetrics listed none, as in a virtual machine)")),
+                e => Ok(CounterValue::CpuEnergy(e)),
+            },
+            (HelperHost::Macos, CounterId::Fans) => match self.powermetrics()?.1 {
+                f if f.is_empty() => Err(nothing("fan speeds (Apple silicon Macs have no smc sampler)")),
+                f => Ok(CounterValue::Fans(f)),
+            },
             (HelperHost::Macos, CounterId::Thermal) => Err(PlatformError::Unsupported(
                 "macOS reports a thermal pressure level, not temperatures, to software.".into(),
             )),
@@ -366,6 +381,34 @@ mod tests {
                 error: String::new(),
             })
         }
+    }
+
+    struct FirstRefuses;
+    impl ToolRunner for FirstRefuses {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
+            if t.args.iter().any(|a| a.contains("smc")) {
+                return Ok(ToolOutput {
+                    ok: false,
+                    stdout: String::new(),
+                    error: "powermetrics: unrecognized sampler: smc".into(),
+                });
+            }
+            Ok(ToolOutput {
+                ok: true,
+                stdout: "CPU Power: 700 mW\n".into(),
+                error: String::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn apple_silicon_has_no_smc_sampler_so_energy_comes_from_cpu_power_and_fans_say_why() {
+        let mac = SystemCounters::new(HelperHost::Macos, Box::new(FirstRefuses));
+        assert!(matches!(mac.read(CounterId::CpuEnergy), Ok(CounterValue::CpuEnergy(e)) if e[0].milliwatts == Some(700)));
+        let fans = mac.read(CounterId::Fans).unwrap_err().to_string();
+        assert!(fans.contains("Apple silicon"), "{fans}");
+        let none = SystemCounters::new(HelperHost::Macos, Box::new(Scripted("")));
+        assert!(none.read(CounterId::CpuEnergy).is_err());
     }
 
     #[test]

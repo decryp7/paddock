@@ -43,7 +43,7 @@ impl ProcHolders {
         Ok(pids)
     }
 
-    fn describe(&self, pid: u32, users: &sysinfo::Users) -> Option<RawHolder> {
+    fn describe(&self, pid: u32, users: &sysinfo::Users, first_person: u32) -> Option<RawHolder> {
         let dir = self.proc.join(pid.to_string());
         let uid = uid_of(&dir)?;
         let mut comm = String::new();
@@ -58,7 +58,7 @@ impl ProcHolders {
             } else {
                 name.to_string()
             },
-            owner: classify_owner(HelperHost::Linux, &HelperUser::Uid(uid), account.as_deref()),
+            owner: classify_owner(&HelperUser::Uid(uid), account.as_deref(), first_person),
             sockets: Vec::new(),
         })
     }
@@ -84,6 +84,7 @@ impl HolderSource for ProcHolders {
     fn sockets(&self) -> Result<HolderScan, PlatformError> {
         let started = Instant::now();
         let users = sysinfo::Users::new_with_refreshed_list();
+        let first_person = crate::helper_sweep::first_person_uid(HelperHost::Linux);
         let (mut fds, mut truncated) = (0usize, false);
         let mut holders = Vec::new();
         for (n, pid) in self.pids()?.into_iter().enumerate() {
@@ -108,7 +109,7 @@ impl HolderSource for ProcHolders {
             inodes.sort_unstable();
             inodes.dedup();
             if !inodes.is_empty() {
-                if let Some(mut h) = self.describe(pid, &users) {
+                if let Some(mut h) = self.describe(pid, &users, first_person) {
                     h.sockets = inodes;
                     holders.push(h);
                 }
@@ -124,6 +125,7 @@ impl HolderSource for ProcHolders {
         use std::os::unix::fs::MetadataExt;
         let started = Instant::now();
         let users = sysinfo::Users::new_with_refreshed_list();
+        let first_person = crate::helper_sweep::first_person_uid(HelperHost::Linux);
         let (mut fds, mut truncated) = (0usize, false);
         let mut found: BTreeMap<u32, ()> = BTreeMap::new();
         'procs: for (n, pid) in self.pids()?.into_iter().enumerate() {
@@ -157,7 +159,7 @@ impl HolderSource for ProcHolders {
             }
         }
         // A process that exited meanwhile is not a holder any more.
-        let holders = found.keys().filter_map(|pid| self.describe(*pid, &users)).collect();
+        let holders = found.keys().filter_map(|pid| self.describe(*pid, &users, first_person)).collect();
         Ok(HolderScan { holders, truncated })
     }
 }
