@@ -302,13 +302,17 @@ impl Shared {
                 dirs.root().display()
             ));
         }
-        let (store, note) = match Store::open(&dirs.database(), t) {
-            Ok(x) => x,
+        let (store, note, store_kind) = match Store::open(&dirs.database(), t) {
+            Ok((s, n)) => (s, n, "file"),
             Err(e) => {
                 notes.push(format!(
                     "The history could not be stored on disk ({e}); Dyno keeps it in memory until it restarts."
                 ));
-                (Store::memory().map_err(|e| format!("SQLite is unavailable: {e}"))?, None)
+                (
+                    Store::memory().map_err(|e| format!("SQLite is unavailable: {e}"))?,
+                    None,
+                    "memory (open failed)",
+                )
             }
         };
         notes.extend(note);
@@ -318,6 +322,8 @@ impl Shared {
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let zone = platform.zone.clone();
+        let first_seen = crate::baselines::on_start(&store, t);
+        crate::baselines::log_start(dirs.kind(), store_kind, first_seen, &settings.baselines, t, zone.as_ref());
         let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms, zone.clone());
         let mut core = Core {
             store,

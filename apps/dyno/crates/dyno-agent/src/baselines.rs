@@ -7,8 +7,8 @@ use crate::agent::{lock, now, Shared};
 use crate::store::Store;
 use dyno_core::alarms::feed::from_baseline;
 use dyno_core::baseline::{
-    judge, learn, learning_status, Baseline, BaselineItem, BaselineMetric, BaselineOverview, BaselineSettings, Judgement, Learning,
-    Persistence, State, Strength,
+    judge, learn, learning_days, learning_status, Baseline, BaselineItem, BaselineMetric, BaselineOverview, BaselineSettings, Judgement,
+    Learning, Persistence, State, Strength,
 };
 use dyno_core::hardware::Confidence;
 use dyno_core::history::{AppMinute, HistoryPoint, Tier};
@@ -17,6 +17,41 @@ use dyno_core::time::{LocalZone, Timestamp, DAY, MINUTE};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// Remembers when Dyno first saw this machine, at every agent start: the learning counts from the first start, also of an
+/// agent that no window has asked yet (the Windows `Run` entry at logon). None when the store cannot say.
+pub fn on_start(store: &Store, t: Timestamp) -> Option<Timestamp> {
+    match store.first_seen(t) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            log::warn!(ErrorChain = e.to_string().as_str(); "Baselines: first-seen time unavailable; learning starts over");
+            None
+        }
+    }
+}
+
+/// Logs where the learning stands at start (ER-27): the data folder's kind and the store's (a fresh or in-memory store
+/// restarts the learning), the first-seen time and the days counted by the rule.
+pub fn log_start(
+    folder: &str,
+    store: &str,
+    first_seen: Option<Timestamp>,
+    settings: &BaselineSettings,
+    t: Timestamp,
+    zone: &dyn LocalZone,
+) {
+    let days = first_seen.map_or(0, |f| learning_days(f, t, zone));
+    log::info!(
+        DataFolder = folder,
+        Store = store,
+        FirstSeenMs = first_seen.map_or(-1, |f| f.millis()),
+        DaysDone = days,
+        DaysNeeded = settings.clamped().learning_days,
+        Enabled = settings.enabled,
+        Rule = dyno_core::baseline::LEARNING_RULE;
+        "Baselines learning at start"
+    );
+}
 
 /// Baselines are learned from this many days of history.
 pub const LEARN_DAYS: i64 = 28;
@@ -117,7 +152,7 @@ impl BaselineCentre {
             let rows = core.store.app_minutes(t.minus(RECENT_MINUTES * MINUTE), t).unwrap_or_default();
             (core.settings.baselines, core.zone.clone(), first, recent, rows)
         };
-        let learning = learning_status(&settings, first_seen, t);
+        let learning = learning_status(&settings, first_seen, t, zone.as_ref());
         let mut overview = BaselineOverview {
             at: t,
             learning,

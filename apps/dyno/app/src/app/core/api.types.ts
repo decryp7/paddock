@@ -1457,7 +1457,7 @@ export interface LifespanOverview {
 
 export type BaselineMetric = 'cpu' | 'memory' | 'diskWrite' | 'network' | 'temperature' | 'gpu' | 'appCpu' | 'appMemory';
 
-export type Learning = 'off' | { learning: { daysDone: number; daysNeeded: number } } | { ready: { days: number } };
+export type Learning = 'off' | { learning: { day: number; daysNeeded: number; since: Timestamp | null } } | { ready: { days: number } };
 
 export type BaselineStrength = 'notable' | 'strong';
 

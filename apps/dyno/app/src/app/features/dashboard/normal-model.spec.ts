@@ -1,4 +1,5 @@
 import type { BaselineItem, BaselineOverview, BaselineState } from '../../core/api.types';
+import { formatDate } from '../../shared/format';
 import { itemName, normalLine, unusualItems, unusualStrength } from './normal-model';
 
 const item = (subject: string, state: BaselineState, label = 'CPU'): BaselineItem => ({
@@ -35,8 +36,12 @@ describe('normal model', () => {
     expect(itemName(item('rustc', 'usual', 'CPU'))).toBe('rustc CPU');
   });
   it('has a quiet line while learning or when nothing is unusual, and none when a list follows or it is off', () => {
-    expect(normalLine(overview({ learning: { daysDone: 3, daysNeeded: 7 } }), 0)).toBe('Learning what is normal for this computer: day 3 of 7');
-    expect(normalLine(overview({ learning: { daysDone: 0, daysNeeded: 7 } }), 0)).toBe('Learning what is normal for this computer: day 1 of 7');
+    // The engine's day number is shown as it is (day 1 is the first day): no clamping, no off-by-one in the UI.
+    const since = Date.UTC(2026, 10, 2, 12);
+    expect(normalLine(overview({ learning: { day: 2, daysNeeded: 7, since } }), 0)).toBe(
+      `Learning what is normal for this computer: day 2 of 7, since ${formatDate(since, 0)}`,
+    );
+    expect(normalLine(overview({ learning: { day: 1, daysNeeded: 7, since: null } }), 0)).toBe('Learning what is normal for this computer: day 1 of 7');
     expect(normalLine(overview({ ready: { days: 9 } }), 0)).toBe('Everything looks usual for this time of the week');
     expect(normalLine(overview({ ready: { days: 9 } }), 2)).toBeNull();
     expect(normalLine(overview('off'), 0)).toBeNull();

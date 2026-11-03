@@ -1231,12 +1231,16 @@ mod tests {
         let base = Reply::Baselines(Box::new(crate::baseline::BaselineOverview {
             at: Timestamp(5),
             learning: crate::baseline::Learning::Learning {
-                days_done: 2,
+                day: 3,
                 days_needed: 7,
+                since: Some(Timestamp(1)),
             },
             items: vec![],
         }));
-        assert_eq!(base.into_json().unwrap()["learning"]["learning"]["daysNeeded"], 7);
+        let j = base.into_json().unwrap();
+        assert_eq!(j["learning"]["learning"]["daysNeeded"], 7);
+        assert_eq!(j["learning"]["learning"]["day"], 3);
+        assert_eq!(j["learning"]["learning"]["since"], 1);
     }
 }
 

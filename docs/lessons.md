@@ -1158,3 +1158,17 @@ time with the same message; pushing a complete running status (no hidden space, 
 The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
 **Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
 current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
+
+## "Day 1 of 7" on the second day: elapsed 24-hour periods shown as a calendar day (2026-11-03, Dyno)
+
+A user installed Dyno 1.0.0 on a Monday and, after Tuesday's boot, the "Is this normal?" card still said "day 1 of 7", which
+read as a reset. Suspected first: a different data folder for the Windows `Run` entry's agent than for the app's child, so each
+start saw a fresh database. The code refuted it: both run `dyno-agent run` as the same user with no extra environment or
+working folder, and `Dirs::current` reads only `DYNO_DATA_DIR` and `%LOCALAPPDATA%`; `firstSeen` is never deleted or rewritten.
+The cause was the rule: the engine counted complete 24-hour periods since the first sighting (0 for the first 24 hours, 1 for
+the next 24) and the card showed `max(1, daysDone)`, so both of the first two days said "day 1", and with an evening install
+a morning boot two calendar days later did too. A restart test over one database file on a fake clock reproduced it (Tuesday
+shown as 1, expected 2). Contributing: `firstSeen` was stored lazily on the first Baselines request, so an agent started at
+logon without a window did not start the count, and nothing in the log said what the learning counted from. **Lesson:** a
+progress count shown to people is defined once in the engine in the unit people read (local calendar days, 1-based) and sent
+as such; the UI never clamps or offsets it, and the start of the count is recorded and logged when the process starts.

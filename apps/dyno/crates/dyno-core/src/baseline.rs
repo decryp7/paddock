@@ -8,7 +8,7 @@
 
 use crate::hardware::Confidence;
 use crate::stats::{median, quantile};
-use crate::time::{to_local, LocalZone, Timestamp, DAY, HOUR};
+use crate::time::{local_epoch_day, to_local, LocalZone, Timestamp, DAY, HOUR};
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -150,33 +150,47 @@ pub enum Learning {
     Off,
     /// Still collecting; nothing is highlighted yet.
     Learning {
-        /// Whole days seen so far.
-        days_done: u32,
+        /// Today's number in the learning, by local calendar day: 1 on the day Dyno first saw this machine, 2 the next
+        /// day, whether or not the computer was on in between.
+        day: u32,
         /// Days needed.
         days_needed: u32,
+        /// When Dyno first saw this machine (none when the store could not say).
+        since: Option<Timestamp>,
     },
     /// Ready to judge.
     Ready {
-        /// Days of history behind the baselines.
+        /// Complete local days behind the baselines.
         days: u32,
     },
 }
 
-/// The learning state from when Dyno first saw this machine.
-pub fn learning_status(settings: &BaselineSettings, first_seen: Option<Timestamp>, now: Timestamp) -> Learning {
+/// The learning state from when Dyno first saw this machine, by the rule [`learning_days`] describes.
+pub fn learning_status(settings: &BaselineSettings, first_seen: Option<Timestamp>, now: Timestamp, zone: &dyn LocalZone) -> Learning {
     if !settings.enabled {
         return Learning::Off;
     }
     let needed = settings.clamped().learning_days;
-    let days = first_seen.map_or(0, |f| (now.since(f).max(0) / DAY) as u32);
-    if days >= needed {
-        Learning::Ready { days }
+    let done = first_seen.map_or(0, |f| learning_days(f, now, zone));
+    if done >= needed {
+        Learning::Ready { days: done }
     } else {
         Learning::Learning {
-            days_done: days,
+            day: done + 1,
             days_needed: needed,
+            since: first_seen,
         }
     }
+}
+
+/// The rule, for the logs.
+pub const LEARNING_RULE: &str = "local calendar days since first seen";
+
+/// Complete local calendar days since `first_seen`: 0 on the first day, 1 from the next local midnight on, whatever the
+/// computer did in between (asleep, off, restarted). A clock set back before the first sighting counts 0.
+pub fn learning_days(first_seen: Timestamp, now: Timestamp, zone: &dyn LocalZone) -> u32 {
+    let days = local_epoch_day(now, zone) - local_epoch_day(first_seen, zone);
+    u32::try_from(days.max(0)).unwrap_or(u32::MAX)
 }
 
 /// Robust centre and spread of a slot.
@@ -615,33 +629,44 @@ mod tests {
         let s = BaselineSettings::default();
         let first = at(0, 0);
         assert_eq!(
-            learning_status(&s, Some(first), at(3, 0)),
+            learning_status(&s, Some(first), at(3, 0), UTC),
             Learning::Learning {
-                days_done: 3,
-                days_needed: 7
+                day: 4,
+                days_needed: 7,
+                since: Some(first)
             }
         );
-        assert_eq!(learning_status(&s, Some(first), at(7, 1)), Learning::Ready { days: 7 });
+        assert_eq!(learning_status(&s, Some(first), at(7, 1), UTC), Learning::Ready { days: 7 });
         assert_eq!(
-            learning_status(&s, None, at(7, 1)),
+            learning_status(&s, None, at(7, 1), UTC),
             Learning::Learning {
-                days_done: 0,
-                days_needed: 7
+                day: 1,
+                days_needed: 7,
+                since: None
             }
         );
+        // Late on the first day, then just after the next local midnight: a new day, though under an hour has passed.
+        let late = first.plus(23 * HOUR + 30 * crate::time::MINUTE);
+        assert_eq!(learning_days(late, late.plus(HOUR), UTC), 1);
+        assert_eq!(learning_days(late, late, UTC), 0);
+        // The day follows the zone, not UTC: 20:00 UTC is already the next day at UTC+8.
+        let zone = crate::time::FixedZone(480);
+        assert_eq!(learning_days(first.plus(10 * HOUR), first.plus(20 * HOUR), &zone), 1);
+        assert_eq!(learning_days(first.plus(10 * HOUR), first.plus(20 * HOUR), UTC), 0);
         let long = BaselineSettings { learning_days: 99, ..s };
         assert_eq!(long.clamped().learning_days, 30);
         assert_eq!(BaselineSettings { learning_days: 0, ..s }.clamped().learning_days, 1);
         assert_eq!(
-            learning_status(&BaselineSettings { enabled: false, ..s }, Some(first), at(30, 0)),
+            learning_status(&BaselineSettings { enabled: false, ..s }, Some(first), at(30, 0), UTC),
             Learning::Off
         );
         // A clock that moved backwards after the first run learns for the full period again, never negative.
         assert_eq!(
-            learning_status(&s, Some(at(10, 0)), at(0, 0)),
+            learning_status(&s, Some(at(10, 0)), at(0, 0), UTC),
             Learning::Learning {
-                days_done: 0,
-                days_needed: 7
+                day: 1,
+                days_needed: 7,
+                since: Some(at(10, 0))
             }
         );
     }

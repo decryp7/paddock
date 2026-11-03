@@ -50,7 +50,9 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
   install (smartmontools). A replaced disk or battery starts a new forecast.
 - **Is this normal?** appears on the dashboard once Dyno has learned your usual week (7 days by default). It lists only what is out
   of the ordinary right now, in words ("CPU: higher than usual for Tuesday mornings, 71% against about 14%"). Change the learning
-  period or switch alarms on in **Settings, Hardware and baselines**.
+  period or switch alarms on in **Settings, Hardware and baselines**. While it learns, the card says which day of the period it
+  is, counted in calendar days from the day Dyno first ran on this computer ("day 2 of 7, since 2 Nov"), whether or not the
+  computer was on in between.
 
 ## Issues and new programs
 

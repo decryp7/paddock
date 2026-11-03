@@ -1,4 +1,5 @@
 import type { BaselineItem, BaselineOverview, BaselineStrength } from '../../core/api.types';
+import { formatDate } from '../../shared/format';
 
 /** Most unusual items the dashboard card lists. */
 export const MAX_UNUSUAL = 4;
@@ -28,6 +29,11 @@ export const itemName = (i: BaselineItem): string => (i.subject === 'System' ? i
 export function normalLine(o: BaselineOverview, unusualCount: number): string | null {
   const l = o.learning;
   if (l === 'off') return null;
-  if ('learning' in l) return `Learning what is normal for this computer: day ${Math.max(1, l.learning.daysDone)} of ${l.learning.daysNeeded}`;
+  if ('learning' in l) {
+    // The engine counts local calendar days from the first sighting: the day Dyno first ran is day 1.
+    const { day, daysNeeded, since } = l.learning;
+    const from = since === null ? '' : `, since ${formatDate(since, o.at)}`;
+    return `Learning what is normal for this computer: day ${day} of ${daysNeeded}${from}`;
+  }
   return unusualCount === 0 ? 'Everything looks usual for this time of the week' : null;
 }
