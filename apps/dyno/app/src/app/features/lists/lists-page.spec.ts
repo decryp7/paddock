@@ -63,7 +63,7 @@ describe('ListsPage', () => {
     await type('[data-testid="add-text"]', '8.8.8.8 # dns\n8.8.0.0/16');
     await click('[data-testid="add-list"]');
     expect(store.status()!.lists.map((l) => l.name)).toEqual(['Work blocklist', 'Home']);
-    expect(q('[data-testid="list-list-2"] .counts')!.textContent).toContain('1 entry');
+    expect(q('[data-testid="list-list-2"] .counts')!.textContent).toContain('2 entries');
     await type('[data-testid="add-name"]', 'home');
     await click('[data-testid="add-list"]');
     expect(q('[data-testid="edit-error"]')!.textContent).toContain('Another list already has that name');
@@ -101,7 +101,10 @@ describe('ListsPage', () => {
     await type('[data-testid="add-name"]', 'Messy');
     await type('[data-testid="add-text"]', '8.8.8.8\n8.8.0.0/16\n8.8.8.8\nx.example\ny.x.example');
     await click('[data-testid="add-list"]');
+    expect(q('[data-testid="list-list-2"] .counts')!.textContent).toContain('5 entries');
+    expect(q('[data-testid="list-list-2"] .counts')!.textContent, 'no removal is counted before it is confirmed').not.toMatch(/duplicate|covered/);
     await click('[data-testid="list-list-2"] [data-testid="dedupe"]');
+    expect(q('[data-testid="list-list-2"] .counts')!.textContent).toContain('5 entries');
     const preview = q('[data-testid="preview"]')!;
     expect(q('[data-testid="preview-numbers"]')!.textContent!.replace(/\s+/g, ' ')).toContain('5 entries · 1 duplicate · 2 covered by a wider range. 2 stay.');
     expect(preview.textContent).toContain('8.8.8.8 appears twice');
@@ -110,6 +113,7 @@ describe('ListsPage', () => {
     expect(mock.intel.status().lists[1]!.text).toContain('y.x.example');
     await click('[data-testid="apply-dedupe"]');
     expect(q('[data-testid="preview"]')).toBeNull();
+    expect(q('[data-testid="list-list-2"] .counts')!.textContent).toContain('2 entries');
     expect(store.status()!.lists[1]!.text).toBe('8.8.0.0/16\nx.example');
   });
 

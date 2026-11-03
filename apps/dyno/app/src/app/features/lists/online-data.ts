@@ -47,11 +47,11 @@ export class OnlineData {
   /** Raised after a switch changed. */
   readonly changed = output<void>();
 
-  protected readonly host = 'download.db-ip.com';
+  protected readonly host = '(download.db-ip.com)';
 
   /** The note in pieces, so the download address is never broken across lines at its hyphen. */
   protected noteParts(text: string): string[] {
-    return text.split(/(download\.db-ip\.com)/);
+    return text.split(/(\(download\.db-ip\.com\))/);
   }
 
   protected set(which: 'locationDatabases' | 'ownLocation', on: boolean): void {

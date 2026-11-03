@@ -110,7 +110,7 @@ export function countryLabel(c: CountryCount): string {
                     }
                   }
                   @if (flaggedCountries().length > 3) {
-                    <g class="callout"><rect class="pill" x="10" y="10" width="236" height="22" rx="5" /><text x="18" y="25">⚑ {{ flaggedCountries().length }} countries with flagged connections</text></g>
+                    <g class="callout"><rect class="pill" x="10" y="10" [attr.width]="calloutWidth()" height="22" rx="5" /><text [attr.x]="10 + calloutWidth() / 2" y="25" text-anchor="middle">{{ calloutText() }}</text></g>
                   }
                   @if (home(); as h) {
                     <g class="home"><circle [attr.cx]="h.x" [attr.cy]="h.y" r="6" /><rect class="pill" [attr.x]="h.x + 8" [attr.y]="h.y - 8" width="30" height="16" rx="4" /><text [attr.x]="h.x + 12" [attr.y]="h.y + 4">You</text></g>
@@ -256,6 +256,9 @@ export class MapPage implements OnInit, OnDestroy {
     { key: 'flagged', label: 'Flagged' },
   ];
   protected readonly tip = signal<string | null>(null);
+  protected readonly calloutText = computed(() => `⚑ ${this.flaggedCountries().length} countries with flagged connections`);
+  /** The callout is as wide as its text plus the same padding on both sides. */
+  protected readonly calloutWidth = computed(() => Math.round(this.calloutText().length * 6.6) + 24);
   protected readonly sphere = computed(() => spherePath(this.centre()));
   protected readonly flaggedCountries = computed(() => (this.store.summary()?.countries ?? []).filter((c) => c.flagged > 0));
   protected readonly plain = computed(() => (this.store.summary()?.countries ?? []).filter((c) => c.flagged === 0));
@@ -311,12 +314,12 @@ export class MapPage implements OnInit, OnDestroy {
     return s.homeSource.replace(/^Your location:\s*/, `Your location: ${name}, `);
   }
 
-  /** The tooltip of the focused or hovered country: where it sits (in percent of the map) and its numbers. */
+  /** The tooltip of the focused or hovered country: where it sits (in percent of the map: below the marker, so the flag label above it stays readable) and its numbers. */
   protected readonly tipFor = computed(() => {
     const code = this.tip();
     const country = this.store.summary()?.countries.find((c) => c.code === code);
     const m = code ? this.marker(code) : null;
-    return country && m ? { country, left: Math.min(78, (m.x / this.size.width) * 100), top: Math.max(2, (m.y / this.size.height) * 100 - 14) } : null;
+    return country && m ? { country, left: Math.min(78, (m.x / this.size.width) * 100), top: Math.min(88, (m.y / this.size.height) * 100 + 4) } : null;
   });
 
   /** The step (0 to 4) of a drawn country with connections, or -1. */

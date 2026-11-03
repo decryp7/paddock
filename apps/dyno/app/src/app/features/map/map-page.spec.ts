@@ -135,6 +135,9 @@ describe('MapPage', () => {
     expect(tip.textContent).toContain('54 connections');
     expect(tip.textContent).toContain('1 flagged');
     expect(tip.textContent).toContain('Google Chrome, Slack, Spotify');
+    // Below the marker: the flag label sits above it.
+    const spot = all('g.spot').find((s) => s.dataset['country'] === 'US')!.querySelector('circle.dot')!;
+    expect(Number(spot.getAttribute('cy')) / 491 * 100).toBeLessThan(parseFloat(tip.style.top));
     all('g.spot').find((s) => s.dataset['country'] === 'US')!.dispatchEvent(new Event('blur'));
     await settle();
     expect(q('[data-testid="country-tip"]')).toBeNull();
@@ -162,6 +165,10 @@ describe('MapPage', () => {
     // More than three flagged countries: one callout in words, no per-marker word that could collide or be clipped.
     expect(all('g.flagmark text')).toHaveLength(0);
     expect(q('.callout')!.textContent).toMatch(/\d+ countries with flagged connections/);
+    const rect = q('.callout rect')!;
+    const text = q('.callout text')!;
+    expect(text.getAttribute('text-anchor')).toBe('middle');
+    expect(Number(text.getAttribute('x'))).toBeCloseTo(Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')) / 2, 5);
     expect(all('circle.flag').length).toBeGreaterThan(3);
     // The home marker and the flagged markers are drawn after (above) the plain ones.
     const order = all('svg > g, svg > path').map((n) => n.getAttribute('class') ?? n.tagName);

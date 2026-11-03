@@ -168,9 +168,10 @@ export class MockIntel {
   }
 
   private countsOf(l: Stored): SubscriptionStatus {
-    const p = dedupe(l.text);
-    const rawCount = lines(l.text).length;
-    return { ...EMPTY, entries: p.preview.after, duplicates: p.preview.duplicates, covered: p.preview.covered, skipped: Math.max(0, l.text.split('\n').filter((x) => x.trim() !== '' && !x.trim().startsWith('#')).length - rawCount) };
+    // As typed: duplicates are counted only once "Remove duplicates" was chosen (the preview says what would go).
+    const total = lines(l.text).length;
+    const skipped = Math.max(0, l.text.split('\n').filter((x) => x.trim() !== '' && !x.trim().startsWith('#')).length - total);
+    return { ...EMPTY, entries: total, skipped };
   }
 
   private find(id: string): Stored {

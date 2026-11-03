@@ -220,10 +220,10 @@ impl IntelCentre {
                     _ => {
                         let p = parse_list(&l.text, dyno_core::intel::MAX_TOTAL_ENTRIES);
                         (
+                            // A typed or imported list shows its entries as typed: duplicates are only counted once the user
+                            // chose "Remove duplicates" (the preview says what would go).
                             dyno_core::intel_sub::SubscriptionStatus {
-                                entries: u32::try_from(p.entries.len()).unwrap_or(u32::MAX),
-                                duplicates: p.duplicates,
-                                covered: p.covered,
+                                entries: u32::try_from(p.entries.len() + p.duplicates as usize + p.covered as usize).unwrap_or(u32::MAX),
                                 skipped: p.skipped_count,
                                 ..Default::default()
                             },
@@ -595,7 +595,11 @@ mod tests {
         let st = again.status();
         assert_eq!(st.lists.len(), 1);
         assert_eq!((st.lists[0].id.as_str(), st.lists[0].name.as_str()), (id.as_str(), "Work"));
-        assert_eq!((st.lists[0].counts.entries, st.lists[0].counts.covered), (1, 1));
+        assert_eq!(
+            (st.lists[0].counts.entries, st.lists[0].counts.covered),
+            (2, 0),
+            "as typed, until duplicates are removed"
+        );
         assert_eq!(st.allow, "9.9.9.9");
         assert!(st.geo.switches.location_databases && st.geo.switches.own_location, "on by default");
         assert!(!st.first_run_note.is_empty() && st.geo.attribution.contains("DB-IP"));
