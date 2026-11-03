@@ -857,6 +857,9 @@ pub enum ErrorCode {
     Busy,
     /// A bug.
     Internal,
+    /// The edit was computed on an older revision of a layout (another window edited meanwhile): reload the view and try
+    /// again.
+    Stale,
 }
 
 /// A failed request.

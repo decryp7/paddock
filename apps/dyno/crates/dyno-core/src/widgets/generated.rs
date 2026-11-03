@@ -38,6 +38,8 @@ fn types() -> String {
         pw::Arrangement::decl(),
         pw::PlacementMoves::decl(),
         pw::PreviewRequest::decl(),
+        pw::PreviewReply::<Dummy>::decl(),
+        pw::Outcome::decl(),
         pw::Rect::decl(),
         pw::Dir::decl(),
         pw::GridGesture::decl(),

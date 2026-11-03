@@ -746,6 +746,14 @@ fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
     h.running.as_ref().unwrap().shared.clone()
 }
 
+/// The code the agent refused a request with.
+fn ask_code(peer: &Peer<Message>, request: Request) -> dyno_core::protocol::ErrorCode {
+    match peer.call(Message::Request(Box::new(request)), Duration::from_secs(15)) {
+        Ok(Message::Reply(r)) => (*r).expect_err("the request is refused").code,
+        other => panic!("not a reply: {other:?}"),
+    }
+}
+
 fn alarm_rules(peer: &Peer<Message>) -> Vec<String> {
     let Reply::Alarms(list) = ask(
         peer,
@@ -1249,6 +1257,7 @@ mod widget_layouts {
         assert_eq!(after.revision, before.revision + 1);
         let e = ask(&peer, nudge(before.revision)).unwrap_err();
         assert!(e.contains("another window"), "{e}");
+        assert_eq!(ask_code(&peer, nudge(before.revision)), dyno_core::protocol::ErrorCode::Stale);
     }
 
     #[test]

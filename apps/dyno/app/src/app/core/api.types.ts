@@ -826,7 +826,8 @@ export type ErrorCode =
   | 'badRequest'
   | 'timeout'
   | 'busy'
-  | 'internal';
+  | 'internal'
+  | 'stale';
 
 /** What every failed backend call rejects with. */
 export interface CommandError {

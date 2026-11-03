@@ -346,7 +346,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
 fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit, base_revision: Option<u64>) -> Answer {
     let surface = edit.surface();
     let mut core = lock(&shared.core);
-    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit, base_revision).map_err(|e| bad(e.to_string()))?;
+    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit, base_revision).map_err(|e| match e {
+        paddock_widgets::WidgetError::Stale => AgentError::new(ErrorCode::Stale, e.to_string()),
+        e => bad(e.to_string()),
+    })?;
     core.save_settings(&shared.dirs);
     drop(core);
     shared.broadcast(&Message::WidgetLayoutChanged(surface));
