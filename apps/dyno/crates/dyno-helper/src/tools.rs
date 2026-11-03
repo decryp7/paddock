@@ -115,6 +115,16 @@ pub fn smart_reader(host: HelperHost, tools_dir: &std::path::Path, clock: Arc<dy
     }
 }
 
+/// The firewall reader the helper has: `pf` on macOS, `nft` on Linux. Windows' firewall is read by the agent without rights.
+pub fn firewall_reader(host: HelperHost, clock: Arc<dyn Clock>) -> Box<dyn dyno_core::firewall::FirewallReader> {
+    use dyno_platform::firewall_readers::{NftReader, PfReader};
+    match host {
+        HelperHost::Macos => Box::new(PfReader::new(Box::new(SystemRunner), clock)),
+        HelperHost::Linux => Box::new(NftReader::new("/usr/sbin/nft", Box::new(SystemRunner), clock)),
+        HelperHost::Windows => Box::new(NotHere("On Windows Dyno reads the firewall itself; the helper does not.")),
+    }
+}
+
 /// The installer of this system.
 pub fn installer(host: HelperHost, data_dir: &std::path::Path, clock: Arc<dyn Clock>) -> Box<dyn ToolInstaller> {
     let tools = data_dir.join("tools");
@@ -131,6 +141,12 @@ pub(crate) struct NotHere(pub(crate) &'static str);
 
 impl SmartReader for NotHere {
     fn read(&self, _query: dyno_core::helper_requests::SmartQuery) -> Result<dyno_core::smart::SmartReply, PlatformError> {
+        Err(PlatformError::Unsupported(self.0.into()))
+    }
+}
+
+impl dyno_core::firewall::FirewallReader for NotHere {
+    fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
         Err(PlatformError::Unsupported(self.0.into()))
     }
 }
@@ -228,6 +244,10 @@ mod tests {
             PlatformError::Unsupported(_)
         ));
         assert!(NotHere("x").install(ToolKind::Smartmontools, b"").is_err());
+        for host in [HelperHost::Macos, HelperHost::Linux, HelperHost::Windows] {
+            let _ = firewall_reader(host, clock.clone());
+        }
+        assert!(dyno_core::firewall::FirewallReader::read(&NotHere("x")).is_err());
         let _ = smart_reader(HelperHost::Windows, std::path::Path::new("C:\\t"), clock.clone());
         let _ = smart_reader(HelperHost::Linux, std::path::Path::new("/t"), clock);
     }

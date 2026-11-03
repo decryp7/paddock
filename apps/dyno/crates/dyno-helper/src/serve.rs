@@ -109,6 +109,7 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         audit,
         clock: Box::new(now),
         login_items: login_items_reader(),
+        firewall: crate::tools::firewall_reader(paths.host, Arc::new(SystemClock)),
         smart: crate::tools::smart_reader(paths.host, &paths.data_dir.join("tools"), Arc::new(SystemClock)),
         tools: crate::tools::installer(paths.host, &paths.data_dir, Arc::new(SystemClock)),
         log_tail: Box::new(move |n| logfile::tail(&log_path, n)),

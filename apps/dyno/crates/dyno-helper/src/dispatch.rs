@@ -4,6 +4,7 @@
 
 use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
+use dyno_core::firewall::FirewallReader;
 use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest};
 use dyno_core::network_traffic::MAX_COUNTERS;
@@ -23,6 +24,8 @@ pub struct Parts {
     pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
     /// The macOS login-items reader (`sfltool dumpbtm` as the helper's account, parsed here).
     pub login_items: Box<dyn LoginItemsReader>,
+    /// The firewall reader of this system (`pf` on macOS, `nft` on Linux).
+    pub firewall: Box<dyn FirewallReader>,
     /// The SMART reader of this system.
     pub smart: Box<dyn SmartReader>,
     /// The pinned tool installer of this system.
@@ -41,6 +44,7 @@ pub struct Dispatcher {
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
     on_uninstall: Box<dyn Fn() + Send + Sync>,
     login_items: Box<dyn LoginItemsReader>,
+    firewall: Box<dyn FirewallReader>,
     smart: Box<dyn SmartReader>,
     tools: Box<dyn ToolInstaller>,
     log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
@@ -88,6 +92,7 @@ impl Dispatcher {
             clock: parts.clock,
             on_uninstall: parts.on_uninstall,
             login_items: parts.login_items,
+            firewall: parts.firewall,
             smart: parts.smart,
             tools: parts.tools,
             log_tail: parts.log_tail,
@@ -146,6 +151,14 @@ impl Dispatcher {
                 })?;
                 self.login_items.read(uid).map(HelperReply::LoginItems).map_err(|e| remote(&e))
             }
+            HelperRequest::Firewall => {
+                // Rules for the owner and administrators, state and counts for everyone else (the restriction table).
+                let source = self.firewall.read().map_err(|e| remote(&e))?;
+                source
+                    .for_access(ctx.access)
+                    .map(HelperReply::Firewall)
+                    .ok_or_else(|| RemoteError::new(codes::REFUSED, "This reading is not available to this account."))
+            }
             HelperRequest::Smart(q) => self.smart.read(q).map(HelperReply::Smart).map_err(|e| remote(&e)),
             HelperRequest::InstallTool { tool, bytes } => {
                 let outcome = self.tools.install(tool, &bytes);
@@ -166,7 +179,6 @@ impl Dispatcher {
             | HelperRequest::FileHolders { .. }
             | HelperRequest::Counters(_)
             | HelperRequest::MemoryModules
-            | HelperRequest::Firewall
             | HelperRequest::Extras(_) => Err(RemoteError::new(
                 codes::UNSUPPORTED,
                 "This reading is not available in this build of the helper yet.",
@@ -203,6 +215,13 @@ mod tests {
     impl ProcessTraffic for Traffic {
         fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
             self.0.clone()
+        }
+    }
+
+    struct Fw;
+    impl FirewallReader for Fw {
+        fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
+            Err(PlatformError::Unsupported("no firewall here".into()))
         }
     }
 
@@ -265,6 +284,7 @@ mod tests {
             clock: Box::new(|| 1_000),
             on_uninstall: Box::new(move || flag.store(true, Ordering::SeqCst)),
             login_items: Box::new(Items(Ok(items_reply()))),
+            firewall: Box::new(Fw),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             log_tail: Box::new(|n| (0..n.min(3)).map(|i| format!("line {i}")).collect()),
@@ -335,8 +355,9 @@ mod tests {
         assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
         let bad = HelperRequest::Smart(SmartQuery { max_disks: 99 });
         assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
-        let ok = HelperRequest::Firewall;
+        let ok = HelperRequest::Extras(dyno_core::helper_requests::ExtrasKind::WakeRequests);
         assert_eq!(r.d.handle(None, ok).unwrap_err().code, codes::UNSUPPORTED);
+        assert_eq!(r.d.handle(None, HelperRequest::Firewall).unwrap_err().code, codes::UNSUPPORTED);
     }
 
     #[test]
@@ -362,6 +383,7 @@ mod tests {
             clock: Box::new(|| 5),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Ok(items_reply()))),
+            firewall: Box::new(Fw),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             log_tail: Box::new(|_| vec![]),
@@ -409,6 +431,7 @@ mod tests {
             clock: Box::new(|| 1),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Err(PlatformError::AccessDenied("no".into())))),
+            firewall: Box::new(Fw),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             log_tail: Box::new(|_| vec![]),

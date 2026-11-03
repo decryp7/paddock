@@ -206,6 +206,7 @@ mod tests {
                 clock: Box::new(|| 42),
                 on_uninstall: Box::new(|| {}),
                 login_items: Box::new(NoItems),
+                firewall: Box::new(crate::tools::NotHere("none")),
                 smart: Box::new(crate::tools::NotHere("none")),
                 tools: Box::new(crate::tools::NotHere("none")),
                 log_tail: Box::new(|_| vec![]),
