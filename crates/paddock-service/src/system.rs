@@ -136,20 +136,15 @@ pub fn stable_copy(exe: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
 mod tests {
     #[cfg(unix)]
     #[test]
-    fn a_private_write_is_owner_only_and_a_plain_one_is_not() {
+    fn a_private_write_is_owner_only() {
+        // Only the private file is asserted: a plain write's mode follows the process umask.
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let (private, plain) = (dir.path().join("job.plist"), dir.path().join("unit"));
+        let private = dir.path().join("job.plist");
         let mut sys = RealSystem::new();
         sys.write_private(&private, "x").unwrap();
-        sys.write(&plain, "y").unwrap();
-        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&private), 0o600);
-        assert_ne!(
-            mode(&plain) & 0o044,
-            0,
-            "a plain write stays readable by others"
-        );
+        let mode = std::fs::metadata(&private).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         assert_eq!(sys.read(&private).unwrap(), "x");
     }
 
