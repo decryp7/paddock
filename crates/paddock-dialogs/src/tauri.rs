@@ -45,7 +45,7 @@
 
 use crate::contract::{Grant, Modality, Size};
 use crate::placement::{self, Bounds, Monitor, Placement, Rect, ScreenPosition};
-use crate::registry::{CloseDecision, Dialogs, OpenDialog};
+use crate::registry::{CloseDecision, Dialogs, OpenDialog, OwnSize};
 use crate::window::{
     Around, CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
     DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
@@ -59,7 +59,7 @@ use ::tauri::{
 };
 use paddock_commands::labels::{Label, resolve};
 use serde_json::Value;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// The log target of this crate.
 const TARGET: &str = "paddock_dialogs";
@@ -579,6 +579,28 @@ pub fn moved<R: Runtime>(window: &Window<R>) {
     }
 }
 
+/// A dialog was resized: remember where it is, and whether the user did it (a window system's own rounding of the size
+/// this layer set is not the user's, nor is a resize that comes with a scale change). From a user's resize on, fits leave its
+/// size alone (rule 17: the window is the user's).
+pub fn resized<R: Runtime>(window: &Window<R>) {
+    moved(window);
+    let (Some(d), Ok(size), Ok(scale)) = (
+        window.app_handle().try_state::<Dialogs>(),
+        window.inner_size(),
+        window.scale_factor(),
+    ) else {
+        return;
+    };
+    let was = d.is_user_sized(window.label());
+    if d.note_resized(window.label(), size.width, size.height, scale) && !was {
+        log::info!(
+            target: TARGET,
+            Window = window.label(), Width = size.width, Height = size.height, Scale = scale;
+            "Dialog window resized by the user: its size is no longer fitted to its content"
+        );
+    }
+}
+
 /// A dialog window is gone: forget it, re-enable and refocus its parent, tell the opener where it was.
 pub fn on_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
     on_destroyed_on(app, label, std::env::consts::OS);
@@ -678,7 +700,8 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
                 api.prevent_close();
             }
         }
-        WindowEvent::Moved(_) | WindowEvent::Resized(_) if is_dialog => moved(window),
+        WindowEvent::Moved(_) if is_dialog => moved(window),
+        WindowEvent::Resized(_) if is_dialog => resized(window),
         WindowEvent::ScaleFactorChanged { .. } if is_dialog => scale_changed(window),
         WindowEvent::Destroyed if is_dialog => on_destroyed(app, label),
         WindowEvent::Destroyed if matches!(parsed, Some(Label::Main | Label::Window(_))) => {
@@ -840,7 +863,7 @@ fn fit<R: Runtime>(
     fit_as(app, window, measure, monitor, os, "fit")
 }
 
-/// [`fit`], logged as `phase`: "ready" (the handshake), "fit" (a refit) or "scale" (the window changed monitor).
+/// Sizes the window for `measure` (see [`plan_fit`]), logged as `phase`: "ready" (the handshake), "fit" (a refit) or "scale" (the window changed monitor).
 fn fit_as<R: Runtime>(
     app: &AppHandle<R>,
     window: &Window<R>,
@@ -867,6 +890,7 @@ fn fit_as<R: Runtime>(
         monitor,
         os,
         viewport_delta: 0.0,
+        user_sized: dialogs.is_user_sized(window.label()),
     };
     // The page reports CSS px: logical px once the webview zoom is taken out. The viewport delta is measured once, on the
     // window as it is at the first fit, and kept (a later fit must not read it off a resized window).
@@ -892,12 +916,26 @@ fn fit_as<R: Runtime>(
             placement::physical_ceil(plan.min.height, scale),
         )))
         .map_err(failed)?;
+    // The size the window has from this fit on, noted before the window system reports it, so that report is not taken
+    // for the user's resize.
+    let own = if plan.resize {
+        OwnSize {
+            width: placement::physical_ceil(plan.size.width, scale),
+            height: placement::physical_ceil(plan.size.height, scale),
+            scale,
+        }
+    } else {
+        let now = window.inner_size().map_err(failed)?;
+        OwnSize {
+            width: now.width,
+            height: now.height,
+            scale,
+        }
+    };
+    dialogs.note_own_size(window.label(), own);
     if plan.resize {
         window
-            .set_size(PhysicalSize::new(
-                placement::physical_ceil(plan.size.width, scale),
-                placement::physical_ceil(plan.size.height, scale),
-            ))
+            .set_size(PhysicalSize::new(own.width, own.height))
             .map_err(failed)?;
     }
     if let Some(at) = plan.move_to {
@@ -983,8 +1021,31 @@ fn schedule_deadline<R: Runtime>(app: &AppHandle<R>, dialogs: &Dialogs, label: &
 /// The scale factor of a dialog window changed (it was dragged to another display, or the display's scale was changed):
 /// refit it from its last measure, which is in logical px and so still right; a dialog that has not reported yet has
 /// nothing to refit and is sized by its `dialog_ready` at the scale it has then.
+///
+/// The refit is scheduled, never run inside the event: the window system resizes the window itself after it has told the
+/// app (tao's `WM_DPICHANGED` sends `ScaleFactorChanged`, then calls `SetWindowPos` with its own size), so a size set in
+/// the event is overwritten (Windows VM, 2026-11-03: asked 614.4 px wide, ended 512).
 pub fn scale_changed<R: Runtime>(window: &Window<R>) {
     let app = window.app_handle();
+    let Some(dialogs) = app.try_state::<Dialogs>() else {
+        return;
+    };
+    if dialogs
+        .get(window.label())
+        .and_then(|e| e.measure)
+        .is_none()
+    {
+        return;
+    }
+    let (app, window) = (app.clone(), window.clone());
+    dialogs.scheduler().after(
+        Duration::ZERO,
+        Box::new(move || refit_after_scale(&app, &window)),
+    );
+}
+
+/// The refit of [`scale_changed`], from the dialog's last measure as it is when this runs.
+fn refit_after_scale<R: Runtime>(app: &AppHandle<R>, window: &Window<R>) {
     let Some(measure) = app
         .try_state::<Dialogs>()
         .and_then(|d| d.get(window.label()))

@@ -4,11 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: hardening for content that arrives after the ready handshake (Dyno 1.0.1)
-- Hardening, not yet shown to fix a user report: Dyno 1.0.0 showed Updates with a scrollbar beside one line, and the cause on Windows is not confirmed (the
-  candidates are listed in the commit). The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has
+### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: a dialog is fitted to content that arrives after the ready handshake (Dyno 1.0.1)
+- Dyno 1.0.0 showed Updates with a scrollbar beside one line (reproduced on Windows 11, below). The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has
   answered, and sends a refit when it differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so content that
   arrived meanwhile was taken as already fitted and the window kept the height of its first state.
+- Shown on Windows 11 (Arm VM, Dyno 1.0.0 code, 100 % and 150 %): the Updates window kept the height of its first state (inner 105 px, one line and a
+  scrollbar) because the status arrived after the first measure; with the change it ends at 195 px. The frame (16x39 px at 100 %, 22x56 at 150 %) matched
+  `AdjustWindowRectExForDpi` for the main window and the fit rounds the inner size up.
+- `paddock-dialogs`: a dialog window the user resizes by hand is no longer fitted to its content (`OpenDialog::user_sized`, `Dialogs::note_resized`): a
+  later content change, refit or scale change keeps the user's size (the minimum content still holds). The window system's own rounding and a resize that
+  comes with a scale change are not the user's (2 px tolerance, `OWN_SIZE_TOLERANCE_PX`). `Around` has a new field `user_sized`.
+- `paddock-dialogs`: the scale-change refit is scheduled instead of run inside the `ScaleFactorChanged` event. tao's `WM_DPICHANGED` handler resizes the
+  window itself after the event, so a size set inside it was overwritten (VM: asked 614.4 px wide, ended 512).
 - `dialog_ready`, `dialog_fit` and the scale-change refit log the requested inner size, the size it was, the window's decorations, the viewport delta, the
   scale, the zoom and a `Phase` (`ready`, `fit`, `scale`). The shell sets `data-fit-settled` on `<html>` once the handshake's measures are sent.
 - `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for no Loading and `data-fit-settled`, and reports a body that scrolls in a window below the cap.

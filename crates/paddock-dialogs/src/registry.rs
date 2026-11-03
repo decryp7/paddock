@@ -80,7 +80,24 @@ pub struct OpenDialog {
     pub viewport_delta: Option<f64>,
     /// The webview zoom, taken at `dialog_ready` and changed only as [`zoom_after`] says.
     pub zoom: Option<ZoomState>,
+    /// The inner size, physical px, and scale factor this layer last gave the window ([`Dialogs::note_own_size`]).
+    pub own_size: Option<OwnSize>,
+    /// The user resized the window by hand: its size is theirs from then on and a fit never changes it
+    /// ([`Dialogs::note_resized`]).
+    pub user_sized: bool,
 }
+
+/// An inner size this layer set on a dialog window: physical px, at a scale factor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OwnSize {
+    pub width: u32,
+    pub height: u32,
+    pub scale: f64,
+}
+
+/// How far (physical px) a window's inner size may be from the one this layer set before it counts as the user's:
+/// the window system rounds (ADR 0040: within 2 px).
+pub const OWN_SIZE_TOLERANCE_PX: u32 = 2;
 
 impl OpenDialog {
     /// A dialog opened by `parent` for `host`, as its contract says.
@@ -107,6 +124,8 @@ impl OpenDialog {
             measure: None,
             viewport_delta: None,
             zoom: None,
+            own_size: None,
+            user_sized: false,
         }
     }
 }
@@ -392,6 +411,37 @@ impl Dialogs {
         Some(*e.viewport_delta.get_or_insert_with(first))
     }
 
+    /// This layer set the inner size of `label` to `size` (physical px at `scale`): a resize to it is not the user's.
+    pub fn note_own_size(&self, label: &str, size: OwnSize) {
+        if let Some(e) = self.lock().get_mut(label) {
+            e.own_size = Some(size);
+        }
+    }
+
+    /// The window `label` was resized to `width` x `height` physical px at `scale`. It is the user's resize (and the
+    /// size is theirs from now on: `true`) when the dialog is shown, this layer has set a size, the scale factor is the one
+    /// it set it at (a scale change resizes a window by itself and is refitted instead) and the size differs by more
+    /// than [`OWN_SIZE_TOLERANCE_PX`]. Whether the dialog is user-sized is returned either way.
+    pub fn note_resized(&self, label: &str, width: u32, height: u32, scale: f64) -> bool {
+        let mut map = self.lock();
+        let Some(e) = map.get_mut(label) else {
+            return false;
+        };
+        if let (true, Some(own)) = (e.shown && !e.user_sized, e.own_size)
+            && (own.scale - scale).abs() < 1e-9
+            && (own.width.abs_diff(width) > OWN_SIZE_TOLERANCE_PX
+                || own.height.abs_diff(height) > OWN_SIZE_TOLERANCE_PX)
+        {
+            e.user_sized = true;
+        }
+        e.user_sized
+    }
+
+    /// Whether the user resized the window `label` by hand.
+    pub fn is_user_sized(&self, label: &str) -> bool {
+        self.lock().get(label).is_some_and(|e| e.user_sized)
+    }
+
     /// Records the last measure the page of `label` reported.
     pub fn set_measure(&self, label: &str, measure: Measure) {
         if let Some(e) = self.lock().get_mut(label) {
@@ -428,6 +478,30 @@ mod tests {
 
     fn entry(d: &Dialogs, host: &str, parent: &str, id: &str) -> OpenDialog {
         OpenDialog::new(host, parent, id, d.contracts().get(id).unwrap())
+    }
+
+    #[test]
+    fn only_a_resize_by_hand_of_a_shown_window_makes_it_user_sized() {
+        let d = Dialogs::new(contracts());
+        let l = d.reserve(entry(&d, "main", "main", "ask")).unwrap();
+        let own = OwnSize {
+            width: 700,
+            height: 300,
+            scale: 1.25,
+        };
+        d.note_own_size(&l, own);
+        // Pending (hidden): never the user's.
+        assert!(!d.note_resized(&l, 900, 500, 1.25));
+        d.mark_shown(&l);
+        // The window system's own rounding of the size we set.
+        assert!(!d.note_resized(&l, 701, 299, 1.25));
+        // A resize that comes with a scale change is refitted, not the user's.
+        assert!(!d.note_resized(&l, 900, 500, 1.5));
+        // The user drags it.
+        assert!(d.note_resized(&l, 900, 300, 1.25));
+        // And it stays theirs, even when the size goes back.
+        assert!(d.note_resized(&l, 700, 300, 1.25));
+        assert!(!d.note_resized("d-main-99", 1, 1, 1.0));
     }
 
     #[test]

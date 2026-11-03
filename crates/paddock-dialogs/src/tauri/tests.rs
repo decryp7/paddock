@@ -908,6 +908,25 @@ fn a_scale_change_refits_a_dialog_from_its_last_measure() {
 }
 
 #[test]
+fn a_scale_change_refits_after_the_window_systems_own_resize_not_inside_its_event() {
+    // The window system (tao on Windows) resizes the window itself after it has told the app about the new scale factor;
+    // a refit made inside that event is overwritten by it. The refit is scheduled, so it runs after the event returns.
+    let (app, timer) = manual_app();
+    let h = app.handle().clone();
+    let info = open(&h, "main", request("ai-setup")).unwrap();
+    let dialog = os_window(&app, &info.label);
+    ready(&h, &dialog, measure(300.0, 100.0), "linux").unwrap();
+    timer.deadline_passes();
+    let before = state(&app).get(&info.label).unwrap().own_size;
+    assert!(before.is_some());
+    state(&app).set_measure(&info.label, measure(300.0, 400.0));
+    scale_changed(&dialog);
+    assert_eq!(state(&app).get(&info.label).unwrap().own_size, before);
+    timer.deadline_passes();
+    assert_ne!(state(&app).get(&info.label).unwrap().own_size, before);
+}
+
+#[test]
 fn the_thread_scheduler_runs_its_job() {
     use crate::registry::ThreadScheduler;
     let (tx, rx) = std::sync::mpsc::channel();

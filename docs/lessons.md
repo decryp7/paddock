@@ -1163,8 +1163,10 @@ current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spe
 
 Dyno 1.0.0's Updates window showed a scrollbar beside one line. `DialogFrame.watch()` took its "last measure" from a fresh
 measure read after the `dialog_ready` round trip, so content that arrived during the round trip was taken as already sent and
-never refitted. **Not confirmed as the user's cause:** the report may also come from DPI and frame rounding or the viewport
-delta, which a Windows run with the new fit log (`Phase`, `Current`, `Decor`, `Delta`, `Scale`) has to rule in or out (ER-28).
-The race is real in code and has a regression spec. **Lesson:** a change detector's baseline is what was last sent, never what
+never refitted. **Confirmed on Windows 11 (VM, 2026-11-03, 100 % and 150 %):** the 1.0.0 code ended at inner 105 px (the first,
+loading state) with the scrollbar of the user's screenshot, and the change at 195 px. Ruled out by the new fit log:
+frame rounding (the frame matched `AdjustWindowRectExForDpi`, the inner size is rounded up), the viewport delta (0) and
+fonts (same content height in the later fit). Found on the way: tao resizes the window itself after `ScaleFactorChanged`,
+so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
