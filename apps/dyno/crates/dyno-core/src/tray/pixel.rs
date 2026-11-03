@@ -344,6 +344,30 @@ impl Canvas {
     }
 }
 
+/// The alert notch: a 5 px right triangle in the top left corner (rows of 5, 4, 3, 2, 1), drawn after everything else and
+/// leaving out every pixel that touches (also diagonally) something already drawn, so a gutter of 1 px always separates it
+/// from the digits, the label and the arc, whatever the value.
+fn draw_notch(cv: &mut Canvas, plate: Rgba) {
+    let k = 5;
+    let mut keep = Vec::new();
+    for y in 0..k {
+        for x in 0..k - y {
+            let touches = (-1..=1).any(|dy| {
+                (-1..=1).any(|dx| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    nx >= 0 && ny >= 0 && nx < cv.size && ny < cv.size && cv.pm.pixels()[(ny * cv.size + nx) as usize].alpha() != 0
+                })
+            });
+            if !touches {
+                keep.push((x, y));
+            }
+        }
+    }
+    for (x, y) in keep {
+        cv.rect(x, y, x + 1, y + 1, plate);
+    }
+}
+
 /// The layout of one size.
 #[derive(Clone, Copy, Debug)]
 pub struct Layout {
@@ -576,34 +600,38 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
         c[3] = 0x59;
         c
     };
-    let notch = |cv: &mut Canvas| {
-        let k = 5;
-        for y in 0..k {
-            cv.rect(0, y, k - y, y + 1, plate);
-        }
-    };
-    let bar = |cv: &mut Canvas, v: Option<f32>, y: i32, h: i32| {
-        if state == State::Alert && small_alert {
-            meter_in(cv, &l, v, danger_track, plate, 1, right, y, h);
-        } else {
+    // The notch is drawn last (see `draw_notch`), so that it can keep a gutter from whatever else is on the icon.
+    let want_notch = std::cell::Cell::new(false);
+    let notch = |_: &mut Canvas| want_notch.set(true);
+    // One alert encoding at every size: a danger bar. From 24 px it spans the number's plate (`plate_x0`), else the icon.
+    let bar = |cv: &mut Canvas, v: Option<f32>, y: i32, h: i32, plate_x0: Option<i32>| {
+        if state != State::Alert {
             meter_in(cv, &l, v, t.track(), t.accent(), 1, right, y, h);
+        } else if let (false, Some(x0)) = (small_alert, plate_x0) {
+            meter_in(cv, &l, v, danger_track, plate, x0, s, y, h);
+        } else {
+            meter_in(cv, &l, v, danger_track, plate, 1, right, y, h);
         }
     };
     // The number with its alert plate.
-    let num = |cv: &mut Canvas, text: &str| {
+    // Returns the left edge of the plate (from 24 px) the bar below aligns with.
+    let num = |cv: &mut Canvas, text: &str| -> Option<i32> {
         let n = l.digits;
         if state == State::Alert && small_alert {
             // Below 24 px a knocked-out plate smears the digits: they stay solid ink and the alert is the corner notch and
             // the danger bar under them.
             notch(cv);
             digits(cv, text, n, l.tracking, right, l.digits_y, ink);
+            None
         } else if state == State::Alert {
             let w = text_width(text, n, l.tracking);
             let (x0, x1) = ((right - w - 1).max(0), s);
             cv.rounded(x0, l.digits_y - 1, x1, l.digits_y + n.h + 1, plate);
             digits(cv, text, n, l.tracking, right, l.digits_y, plate_ink);
+            Some(x0)
         } else {
             digits(cv, text, n, l.tracking, right, l.digits_y, ink);
+            None
         }
     };
     match kind {
@@ -612,10 +640,11 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
             let text = value.map_or("-".to_string(), |v| format!("{}", v.clamp(0.0, 100.0).round() as u32));
-            num(&mut cv, &text);
-            bar(&mut cv, value, l.meter_y, l.meter_h);
+            let x0 = num(&mut cv, &text);
+            bar(&mut cv, value, l.meter_y, l.meter_h, x0);
         }
         Kind::Temperature => {
+            let mut x0 = None;
             if l.label_rows > 0 {
                 label(&mut cv, "TMP", l.label_rows, right, l.label_y, ink);
             }
@@ -636,9 +665,9 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                     Some(v) if v >= 99.5 => format!("{}", v.round() as u32),
                     Some(v) => format!("{}°", v.round() as u32),
                 };
-                num(&mut cv, &text);
+                x0 = num(&mut cv, &text);
             }
-            bar(&mut cv, value.map(|v| (v - 20.0) / 0.9), l.meter_y, l.meter_h);
+            bar(&mut cv, value.map(|v| (v - 20.0) / 0.9), l.meter_y, l.meter_h, x0);
         }
         Kind::Meter { label: lb } => {
             let mh = (s / 4).max(4);
@@ -650,7 +679,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             if l.label_rows > 0 {
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
-            bar(&mut cv, value, my, mh);
+            bar(&mut cv, value, my, mh, None);
             if state == State::Alert {
                 notch(&mut cv);
             }
@@ -760,6 +789,9 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 }
             }
         }
+    }
+    if want_notch.get() {
+        draw_notch(&mut cv, plate);
     }
     let dim = if state == State::Unavailable { 0.45 } else { 1.0 };
     let size = l.size as u32;
