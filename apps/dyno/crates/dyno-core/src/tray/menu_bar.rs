@@ -12,7 +12,7 @@ pub const HEIGHT: f32 = 18.0;
 /// Baseline of one-line text, points below the image top: 13 pt caps centred on the 24 pt bar like the clock's.
 pub const BASELINE: f32 = 13.5;
 /// Alpha of tracks and empty parts.
-pub const TRACK: f32 = 0.28;
+pub const TRACK: f32 = 0.5;
 /// Alpha of an area graph's fill.
 pub const AREA: f32 = 0.38;
 /// Alpha of a graph's plate.
@@ -635,6 +635,31 @@ mod tests {
             Kind::Network,
             Kind::Temperature,
         ]
+    }
+
+    #[test]
+    fn the_track_has_3_to_1_contrast_on_light_and_dark_menu_bars() {
+        let lum = |v: f32| {
+            let v = v / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        // The template is drawn black on a light bar (about #e5e5e5 to white) and white on a dark one (about #2b2b2b and darker).
+        for (ink, bg) in [
+            (0.0f32, 229.0f32),
+            (0.0, 243.0),
+            (0.0, 255.0),
+            (255.0, 0.0),
+            (255.0, 43.0),
+            (255.0, 60.0),
+        ] {
+            let mix = ink * TRACK + bg * (1.0 - TRACK);
+            let (hi, lo) = (lum(mix).max(lum(bg)), lum(mix).min(lum(bg)));
+            assert!((hi + 0.05) / (lo + 0.05) >= 3.0, "ink {ink} on {bg}");
+        }
     }
 
     #[test]

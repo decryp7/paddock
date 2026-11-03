@@ -562,7 +562,12 @@ impl TrayItems {
         } else {
             format!("{:.0}{}", m.scale, spec.unit)
         };
-        let tooltip = format!("Dyno — {name} {text}");
+        // Below 24 px alerts on different metrics differ only by their order, so the tooltip says it in words.
+        let tooltip = if alert {
+            format!("Dyno — {name} {text} · alert: above its limit")
+        } else {
+            format!("Dyno — {name} {text}")
+        };
         self.frame(&spec, &s, if alert { Visual::Alert } else { Visual::Normal }, dark, tooltip)
     }
 }
@@ -827,6 +832,37 @@ mod tests {
             Some(false),
             "the number changed"
         );
+    }
+
+    #[test]
+    fn an_alert_is_named_in_the_tooltip_in_words_with_the_metric() {
+        let mut m = TrayItems::new(
+            vec![
+                item("c", Metric::CpuTotal, Glyph::Number),
+                item("m", Metric::MemoryPressure, Glyph::Number),
+            ],
+            win_env(16),
+        );
+        m.set_policy(AlertPolicy {
+            covered: vec![Metric::CpuTotal],
+            fallback_percent: 90.0,
+            enabled: true,
+        });
+        m.set_alarmed(vec![Metric::CpuTotal]);
+        let f = m.frames(&update(95.0), true);
+        let cpu = &f.iter().find(|(id, _)| id == "c").unwrap().1.tooltip;
+        assert!(cpu.contains("CPU") && cpu.contains("alert"), "{cpu}");
+        let mem = &f.iter().find(|(id, _)| id == "m").unwrap().1.tooltip;
+        assert!(!mem.contains("alert"), "{mem}");
+    }
+
+    #[test]
+    fn the_pictures_follow_the_taskbar_theme() {
+        let mut m = TrayItems::new(vec![item("c", Metric::CpuTotal, Glyph::Number)], win_env(32));
+        let dark = m.frames(&update(42.0), true);
+        let light = m.frames(&update(42.0), false);
+        assert_eq!(light.len(), 1, "a theme change redraws the item");
+        assert_ne!(dark[0].1.look.pictures, light[0].1.look.pictures);
     }
 
     /// A text port that counts the masks it is asked for.
