@@ -34,6 +34,7 @@ mod spans;
 mod sql;
 pub mod stats;
 mod tail;
+mod turns;
 mod writer;
 
 pub use compact::Compaction;
@@ -384,6 +385,13 @@ impl Inner {
         conn.execute("DELETE FROM analysis_cache WHERE version < ?", params![next])
             .map_err(engine)?;
         conn.execute_batch(&lanes::prune_sql(next)).map_err(engine)?;
+        // The background loops wait for news, not for the clock: every change of the data is news.
+        if let Some(f) = &self.fts {
+            f.wake();
+        }
+        if let Some(c) = &self.catalogue {
+            c.wake();
+        }
         Ok(())
     }
 

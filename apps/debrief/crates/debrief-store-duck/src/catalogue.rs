@@ -13,6 +13,7 @@
 //!   remove and refresh. A source built with another [`VERSION`] is built again.
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
+use crate::turns::{wait_after, Turn};
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -193,10 +194,10 @@ impl Drop for CatalogueService {
     }
 }
 
-/// One turn: tidy, then build the next source. True when a source was built (go on at once).
-fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
+/// One turn: tidy, then build the next source.
+fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     let todo = {
-        let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+        let Ok(_writing) = write_lock.try_lock() else { return Ok(Turn::Blocked) };
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
@@ -207,7 +208,7 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     let failed = lock(&s.failed).clone();
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
-    let Some(&source) = todo.first() else { return Ok(false) };
+    let Some(&source) = todo.first() else { return Ok(Turn::Idle) };
     let built = match build(conn, source) {
         Ok(b) => b,
         Err(e) => {
@@ -218,27 +219,25 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    let Ok(_writing) = write_lock.try_lock() else { return Ok(Turn::Blocked) };
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
-    Ok(true)
+    Ok(Turn::Worked)
 }
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
     while !s.stop.load(Ordering::SeqCst) {
-        match step(s, conn, write_lock) {
-            Ok(true) => continue,
-            Ok(false) => {}
-            Err(e) => log::warn!("catalogue: {e:#}"),
-        }
+        let turn = match step(s, conn, write_lock) {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!("catalogue: {e:#}");
+                Turn::Blocked
+            }
+        };
+        let Some(wait) = wait_after(turn) else { continue };
         let mut woken = lock(&s.wake.0);
         if !*woken {
-            woken = s
-                .wake
-                .1
-                .wait_timeout(woken, Duration::from_millis(500))
-                .map(|r| r.0)
-                .unwrap_or_else(|p| p.into_inner().0);
+            woken = s.wake.1.wait_timeout(woken, wait).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0);
         }
         *woken = false;
     }

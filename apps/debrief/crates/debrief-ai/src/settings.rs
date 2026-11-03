@@ -102,7 +102,7 @@ impl Default for AiSettings {
         AiSettings {
             version: SETTINGS_VERSION,
             active_model: None,
-            autoload: true,
+            autoload: false,
             idle_unload_minutes: 15,
             gpu_offload: GpuOffload::Auto,
             context_length: 8192,
@@ -313,6 +313,14 @@ mod tests {
         // missing keys take defaults, unknown keys are ignored
         let p: AiSettings = serde_json::from_str("{\"autoload\": false, \"future\": 1}").unwrap();
         assert!(!p.autoload && p.context_length == 8192);
+    }
+
+    #[test]
+    fn autoload_is_off_by_default() {
+        // 1.2: the model loads on first use, not at start (memory the user saw, rule 46).
+        assert!(!AiSettings::default().autoload);
+        let missing: AiSettings = serde_json::from_str("{}").unwrap();
+        assert!(!missing.autoload);
     }
 
     #[test]
