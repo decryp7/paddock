@@ -131,7 +131,7 @@ export class MacGui {
     const win = await this.g.exec(this.axCmd('windows'));
     const owners = [...new Set(win.stdout.split('\n').map((l) => l.split('\t')[0]).filter((o) => o && !/^(Dyno|Control Center|Dock|Window Server|Finder|Terminal|Notification Center|SystemUIServer)$/.test(o)))];
     for (const who of [...new Set(['UserNotificationCenter', 'CoreServicesUIAgent', ...owners])]) {
-      while (n < 5 && (await this.has(who, '^Allow$'))) { await this.shot(`system-prompt-${++n}`); await this.press(who, '^Allow$'); await this.g.sleep(1000); }
+      while (n < 5 && (await this.has(who, '^Allow( |$)'))) { await this.shot(`system-prompt-${++n}`); await this.press(who, '^Allow( |$)'); await this.g.sleep(1000); }
     }
     return n;
   }
