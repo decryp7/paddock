@@ -99,6 +99,7 @@ pub fn main(args: Vec<String>) -> i32 {
         ["status"] => status(),
         ["stop"] => stop(),
         ["once"] => once(),
+        ["view"] => view(),
         ["bench"] => bench(60, "processes"),
         ["bench", n] => n
             .parse()
@@ -244,6 +245,7 @@ fn run() -> Result<(), StartError> {
     let running = Running::start_os(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     log::info!(ElapsedMs = crate::logging::elapsed_ms(), Pid = running.discovery.pid; "Agent running");
+    log_socket_view();
     RUNNING.store(true, Ordering::SeqCst);
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
@@ -279,6 +281,41 @@ fn stop() -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(100));
     }
     Err("The agent was asked to stop but is still running.".into())
+}
+
+/// Rule 56 (ER-27): on macOS the start line says which code-signing identifier this process has and how much of the kernel's
+/// socket list the OS shows it, so a "only its own sockets" page can be explained from the log alone (Dyno ADR 0026).
+fn log_socket_view() {
+    #[cfg(target_os = "macos")]
+    match dyno_platform::macos::pcblist::socket_view() {
+        Ok(v) => log::info!(
+            SigningIdentifier = v.identifier.as_deref().unwrap_or("unreadable"),
+            Announced = v.announced,
+            Sent = v.sent,
+            CutDown = v.cut_down,
+            ParentName = crate::logging::parent_name();
+            "Agent socket view"
+        ),
+        Err(e) => log::warn!(Error = e.to_string().as_str(); "Agent socket view unreadable"),
+    }
+}
+
+/// `dyno-agent view`: prints the socket view as one line (`identifier=… announced=… sent=… cut_down=…`), for the bundle check.
+fn view() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let v = dyno_platform::macos::pcblist::socket_view().map_err(|e| e.to_string())?;
+        println!(
+            "identifier={} announced={} sent={} cut_down={}",
+            v.identifier.as_deref().unwrap_or("unreadable"),
+            v.announced,
+            v.sent,
+            v.cut_down
+        );
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("the socket view is a macOS check".into())
 }
 
 fn once() -> Result<(), String> {

@@ -18,6 +18,12 @@ pub struct JobReport {
     pub needs_lwcr_update: bool,
     /// `has LWCR`: a launch constraint from the registered build is stored.
     pub has_lwcr: bool,
+    /// `pid = <n>`: the process launchd runs for the job now (only while it runs).
+    pub pid: Option<u32>,
+    /// `last exit code = <n>`: how the job's last process exited (`None`: it never exited, or a signal ended it).
+    pub last_exit_code: Option<i32>,
+    /// `last terminating signal = …`: a signal ended the job's last process.
+    pub last_signal: bool,
 }
 
 /// Reads the report of `launchctl print` (catalogue R03). Only the job's own keys count: nested blocks (`arguments`,
@@ -44,8 +50,14 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
             job.running = line == "state = running";
         } else if line == "job state = spawn failed" {
             job.spawn_failed = true;
-        } else if line.starts_with("last exit code = 78") {
-            job.exit_config = true;
+        } else if let Some(code) = line.strip_prefix("last exit code = ") {
+            // `78: EX_CONFIG` on newer systems, `78` on older ones, `(never exited)` before the first exit.
+            job.last_exit_code = code.split(':').next().and_then(|c| c.trim().parse().ok());
+            job.exit_config = job.last_exit_code == Some(78);
+        } else if let Some(pid) = line.strip_prefix("pid = ") {
+            job.pid = pid.trim().parse().ok().filter(|p| *p > 0);
+        } else if line.starts_with("last terminating signal = ") {
+            job.last_signal = true;
         } else if line.starts_with("properties = ") {
             job.needs_lwcr_update = line.contains("needs LWCR update");
             job.has_lwcr = line.contains("has LWCR");
@@ -597,5 +609,55 @@ mod tests {
         );
         assert_eq!(launchctl_output(&mut sys, &["print", "gui/501/gone"]), None);
         assert_eq!(launchctl_output(&mut sys, &["print", "gui/501/slow"]), None);
+    }
+
+    /// A launcher that runs a program as a launchd job tracks it by launchd's report: the pid while it runs, then how it
+    /// exited (Dyno ADR 0026, amendment "the app starts its agent through launchd"). Only the job's own keys count.
+    #[test]
+    fn the_pid_and_the_last_exit_are_read_from_the_jobs_own_keys() {
+        let running = parse_job(HEALTHY);
+        assert_eq!(
+            (running.pid, running.last_exit_code, running.last_signal),
+            (Some(88412), None, false)
+        );
+        // A real macOS 26 report of a job that runs again after an earlier exit: the coalitions' blocks are skipped.
+        let real = parse_job(REAL_RUNNING);
+        assert_eq!(
+            (real.running, real.pid, real.last_exit_code),
+            (true, Some(978), Some(3))
+        );
+        let exited =
+            parse_job("x = {\n\tstate = not running\n\truns = 1\n\tlast exit code = 3\n}\n");
+        assert_eq!(
+            (
+                exited.found,
+                exited.running,
+                exited.pid,
+                exited.last_exit_code
+            ),
+            (true, false, None, Some(3))
+        );
+        assert!(!exited.exit_config && !exited.stale());
+        let refused = parse_job(SPAWN_FAILED);
+        assert_eq!(refused.last_exit_code, Some(78));
+        assert!(refused.exit_config);
+        let signalled = parse_job(
+            "x = {\n\tstate = not running\n\tlast exit code = (never exited)\n\tlast terminating signal = Terminated: 15\n}\n",
+        );
+        assert_eq!(
+            (signalled.last_exit_code, signalled.last_signal),
+            (None, true)
+        );
+        // A pid or an exit code inside a nested block (a coalition, the environment) is not the job's.
+        let nested = parse_job(
+            "x = {\n\tstate = not running\n\tthing = {\n\t\tpid = 7\n\t\tlast exit code = 9\n\t}\n}\n",
+        );
+        assert_eq!((nested.pid, nested.last_exit_code), (None, None));
+        assert_eq!(parse_job("x = {\n\tpid = 0\n\tpid = junk\n}\n").pid, None);
+        let other = parse_job("x = {\n\tlast exit code = 780\n}\n");
+        assert_eq!(
+            (other.last_exit_code, other.exit_config),
+            (Some(780), false)
+        );
     }
 }
