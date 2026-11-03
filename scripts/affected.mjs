@@ -277,6 +277,8 @@ const OWNERS = [
   [/^paddock\.(conformance\.json|waivers\.toml)$/, ['conformance']],
   [/^(tools\/paddock-dev\/|dev$|dev\.cmd$)/, ['paddock-dev']], // the developer tool (ADR 0022): its own three-OS leg
   [/^(tools|templates)\//, ['tools']],
+  // The per-crate coverage gate (ADR 0050) is run by the `crates` job on its lcov file, besides its tests in the ui and tools jobs.
+  [/^scripts\/coverage-(gate|register)(\.test)?\.mjs$/, ['tools', 'ui', 'crates']],
   // The scripts' tests run in the ui job (`npm run test:scripts`) and in the tools job.
   [/^scripts\//, ['tools', 'ui']],
   [/^icons\//, ['icons']],

@@ -1060,3 +1060,18 @@ fn a_leaf_table_marks_exactly_the_commands_open_to_dialogs() {
     assert!(std::panic::catch_unwind(|| prefix(&["ab"], "abc")).is_err());
     assert!(std::panic::catch_unwind(|| prefix(&["xab"], "ab")).is_err());
 }
+
+#[test]
+fn the_dialog_helpers_also_work_at_run_time() {
+    use crate::DialogCallable;
+    use crate::table::{dialog_count, dialog_names};
+    let specs = [
+        spec("a :: one", Windows::MAIN, DEFAULT_LIMIT),
+        spec("a :: two", Windows::DIALOG, DEFAULT_LIMIT),
+        spec("a :: three", Windows::MAIN.with(Windows::DIALOG), DEFAULT_LIMIT),
+    ];
+    assert_eq!(dialog_count(&specs), 2);
+    assert_eq!(dialog_names::<2>(&specs), ["two", "three"]);
+    assert_eq!(dialog_count(&[]), 0);
+    assert_eq!(DialogCallable::__prefix("app_").wire(), "app_*");
+}

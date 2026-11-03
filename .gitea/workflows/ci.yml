@@ -346,18 +346,30 @@ jobs:
       # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
       PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
+      # The whole history: the coverage ratchet compares the register with the base's and reads the change's commit trailers.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
-      - run: cargo fmt --all --check
+
+      # The checks below are independent: each runs unless the job was cancelled, so one failure never hides another, and the
+      # last step lists every step's result.
+      - name: Format
+        id: fmt
+        run: cargo fmt --all --check
 
       # cargo-hakari and cargo-machete come with the image (ci-image/).
       # One feature set per dependency (docs/dev-setup.md): the workspace-hack crate is current and every member uses it.
       - name: Workspace hack up to date
+        id: hakari
+        if: ${{ !cancelled() }}
         run: cargo hakari generate --diff && cargo hakari manage-deps --dry-run && cargo hakari verify
 
       # Unused dependencies. A false report goes into `ignored` of [workspace.metadata.cargo-machete] (Cargo.toml) or of the
       # crate's own [package.metadata.cargo-machete], with the reason; the workspace-hack crate is depended on for features.
       - name: Unused dependencies
+        id: machete
+        if: ${{ !cancelled() }}
         run: cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspace-hack/$')
 
       # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances),
@@ -365,41 +377,76 @@ jobs:
       # crates/coverage.toml (a reason, a review date, a minimum that is its recorded figure and only goes up; never under 90 %).
       # Whole files that cannot run in unit tests are excluded one by one in the same register, each with its reason (the native
       # glue, the re-executed test children, the real-window probe, the process entries); the --ignore-filename-regex below is
-      # generated from those entries, not written here. The gate (scripts/coverage-gate.mjs) also leaves out the
-      # `#[tauri::command]` attribute lines: llvm-cov charges every region of the macro's generated wrapper to that line, which
-      # no test can all reach. It prints one ::error:: per failing crate and a per-crate table in the job summary.
+      # generated from those entries, not written here.
       # This is also Linux's all-features test run (the crate leg skips its own on Linux): the real-browser tests of
       # paddock-chromium must find the image's Chrome for Testing instead of skipping.
-      - name: Coverage (per crate, crates/coverage.toml)
-        id: coverage
+      - name: Coverage run (llvm-cov, every test)
+        id: cov
+        if: ${{ !cancelled() }}
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: |
           IGNORE="$(node ../scripts/coverage-gate.mjs regex coverage.toml)"
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex "$IGNORE" --lcov --output-path lcov.info
-          node ../scripts/coverage-gate.mjs check lcov.info coverage.toml --root .
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex "$IGNORE" --lcov --output-path lcov.info || {
+            echo "::error::coverage run failed (a test or the build, see the lines above), so no per-crate table was made. Next step: fix the failing test locally with cargo llvm-cov nextest --profile ci --workspace --all-features."
+            exit 1
+          }
 
-      # Its own step, run even when the coverage step failed, so a coverage failure never hides a licence or advisory failure.
+      # The gate (scripts/coverage-gate.mjs) judges the lcov file per crate and leaves out the `#[tauri::command]` attribute lines:
+      # llvm-cov charges every region of the macro's generated wrapper to that line, which no test can all reach. It prints one
+      # ::error:: per failing crate and the per-crate table in the job summary. The ratchet compares the register with the base's;
+      # a run without a base (tag, nightly, dispatch) skips it, said in the summary. `suggest` prints the measured blocks.
+      - name: Coverage gate (per crate, crates/coverage.toml)
+        id: gate
+        if: ${{ !cancelled() && steps.cov.outcome == 'success' }}
+        env:
+          BASE: ${{ needs.plan.outputs.base }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ARGS=()
+          [ -n "$BASE" ] && ARGS+=(--base "$BASE")
+          node ../scripts/coverage-gate.mjs check lcov.info coverage.toml --root . "${ARGS[@]}" || {
+            echo "--- measured [[crate]] blocks (node scripts/coverage-gate.mjs suggest): ---"
+            node ../scripts/coverage-gate.mjs suggest lcov.info coverage.toml --root .
+            exit 1
+          }
+
+      # Its own step, run even when the coverage steps failed, so a coverage failure never hides a licence or advisory failure.
       - name: Dependency policy (cargo deny)
         id: deny
         if: ${{ !cancelled() }}
-        run: cargo deny check
+        run: |
+          cargo deny check || {
+            echo "::error::cargo deny check failed (a licence, advisory, ban or source). Next step: read the lines above, or run cargo deny check in crates."
+            exit 1
+          }
 
-      # What ran and how it ended (ER-27): the coverage table is in the summary above; this lists each step's result.
+      # What ran and how it ended (ER-27): every step's result, skipped ones named as such. The per-crate table is in the summary
+      # only when the gate step ran. The failing steps printed their own ::error::.
       - name: Job summary
         if: ${{ !cancelled() }}
         env:
-          COVERAGE: ${{ steps.coverage.outcome }}
+          FMT: ${{ steps.fmt.outcome }}
+          HAKARI: ${{ steps.hakari.outcome }}
+          MACHETE: ${{ steps.machete.outcome }}
+          COV: ${{ steps.cov.outcome }}
+          GATE: ${{ steps.gate.outcome }}
           DENY: ${{ steps.deny.outcome }}
         run: |
           {
             echo "### crates job steps"
             echo "| Step | Result |"
             echo "| --- | --- |"
-            echo "| Coverage (per crate) | ${COVERAGE} |"
-            echo "| cargo deny check | ${DENY} |"
+            for row in "cargo fmt:$FMT" "workspace hack:$HAKARI" "unused dependencies:$MACHETE" "coverage run:$COV" "coverage gate (per crate table above):$GATE" "cargo deny check:$DENY"; do
+              name="${row%%:*}"; result="${row#*:}"
+              echo "| $name | ${result:-skipped} |"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
-          [ "$COVERAGE" = success ] && [ "$DENY" = success ] || echo "::error::crates job: coverage was ${COVERAGE}, cargo deny was ${DENY}; both ran, see their steps above."
+          bad=""
+          for row in "fmt:$FMT" "hakari:$HAKARI" "machete:$MACHETE" "cov:$COV" "gate:$GATE" "deny:$DENY"; do
+            [ "${row#*:}" = success ] || bad="$bad ${row%%:*}=${row#*:}"
+          done
+          [ -z "$bad" ] && echo "::notice::crates job: every step succeeded." || echo "::notice::crates job steps not successful:$bad (each failed step printed its own ::error::)."
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 

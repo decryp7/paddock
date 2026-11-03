@@ -143,6 +143,14 @@ describe('the graph of this tree', () => {
     assert.deepEqual([i.ciImage, i.ui, i.apps], [true, true, []]);
   });
 
+  test('the coverage gate scripts also mark the crates job, which runs them (ADR 0050)', () => {
+    for (const f of ['scripts/coverage-gate.mjs', 'scripts/coverage-register.mjs', 'scripts/coverage-gate.test.mjs']) {
+      const s = run(f);
+      assert.deepEqual([s.tools, s.ui, s.crates], [true, true, true], f);
+    }
+    assert.equal(run('crates/coverage.toml').crates, true);
+  });
+
   test('the developer tool is its own project: its folder and the ./dev wrapper mark it, and the shared crates it uses reach it', () => {
     const own = run('tools/paddock-dev/src/lib.rs');
     assert.deepEqual([own.paddockDev, own.tools, own.crates, own.apps], [true, false, false, []]);
