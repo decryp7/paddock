@@ -61,11 +61,11 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
 export const FRAME_STYLES = `
     :host { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--pd-text); }
     :host(.pd-frame--pinned) { flex: none; max-width: none; width: var(--pd-frame-pinned-width); }
-    .pd-frame-alert { flex: none; display: flex; align-items: center; gap: var(--pd-space-3, 12px); margin: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; padding: var(--pd-space-2, 8px) var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 0; background: var(--pd-danger-tint); }
+    .pd-frame-alert { flex: none; max-width: 80ch; display: flex; align-items: center; gap: var(--pd-space-3, 12px); margin: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; padding: var(--pd-space-2, 8px) var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 0; background: var(--pd-danger-tint); }
     .pd-frame-alert-icon { flex: none; display: inline-grid; color: var(--pd-danger); }
     /* Try again gets the focus by script after a refusal: its ring shows then too, not only after a key press. */
     .pd-frame-alert .pd-frame-btn:focus { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; max-width: 72ch; overflow-wrap: anywhere; }
+    .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
     .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
     .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: var(--pd-space-4, 16px); outline: none; }
     .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
@@ -78,7 +78,7 @@ export const FRAME_STYLES = `
     /* A decision is one continuous surface: no divider or band under its question (ADR 0026 mockups). */
     :host([data-kind='decision']) .pd-frame-foot { border-top: 0; background: transparent; padding-block-start: var(--pd-space-2, 8px); padding-block-end: var(--pd-space-4, 16px); }
     /* Content taller than the window: the body scrolls, and that must show: a shadow on its lower edge and the footer's divider (also for a decision, so cut-off text never runs into the buttons). */
-    .pd-frame-body[data-overflow='true'] { box-shadow: inset 0 -10px 8px -8px var(--pd-border-strong); }
+    .pd-frame-body[data-overflow='true']:not([data-scroll-end='true']) { box-shadow: inset 0 -10px 8px -8px var(--pd-border-strong); }
     :host(.pd-frame--overflow[data-kind='decision']) .pd-frame-foot { border-top: 1px solid var(--pd-hairline); }
     :host([data-kind='tool']) .pd-frame-content { height: 100%; }
     :host([data-kind='tool']) .pd-frame-content > :not(.pd-frame-loading):not(.pd-frame-failed) { flex: 1 1 auto; min-height: 0; }
@@ -133,6 +133,8 @@ export const FRAME_STYLES = `
       #body
       data-testid="dialog-body"
       [attr.data-overflow]="overflowing() ? 'true' : null"
+      [attr.data-scroll-end]="overflowing() && scrolledToEnd() ? 'true' : null"
+      (scroll)="updateOverflow()"
       [class.pd-frame-body--decision]="decision()"
       [attr.inert]="busy() !== null ? '' : null"
       [attr.role]="ownsRole() && kind() === 'decision' ? 'alertdialog' : null"
@@ -261,6 +263,8 @@ export class DialogFrame {
   protected readonly rejected = signal<Rejection | null>(null);
   /** The body scrolls (its content is taller than the window): the cue is a scroll-edge shadow and the footer's divider. */
   protected readonly overflowing = signal(false);
+  /** The body is scrolled to its end: the shadow on its lower edge has nothing more to say. */
+  protected readonly scrolledToEnd = signal(false);
   /** A dismissal waits for a non-abortable action to settle (the signal draws "Finishing…"; the field is read after awaits). */
   private readonly finishing = signal(false);
   private finishingNow = false;
@@ -487,10 +491,12 @@ export class DialogFrame {
   }
 
   /** Reads whether the body scrolls and keeps the cue in step with it; returns it. */
-  private updateOverflow(): boolean {
+  protected updateOverflow(): boolean {
     const body = this.bodyEl().nativeElement;
     const over = body.scrollHeight > body.clientHeight + 1;
     if (over !== this.overflowing()) this.overflowing.set(over);
+    const end = body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+    if (end !== this.scrolledToEnd()) this.scrolledToEnd.set(end);
     return over;
   }
 
