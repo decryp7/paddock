@@ -108,6 +108,7 @@ fn tag_job_spec(v: &JobSpec) -> &'static str {
         JobSpec::BootAnalysis => "BootAnalysis",
         JobSpec::AppUsage => "AppUsage",
         JobSpec::SoftwareInventory => "SoftwareInventory",
+        JobSpec::Helper { .. } => "Helper",
     }
 }
 
@@ -121,6 +122,7 @@ fn tag_job_output(v: &JobOutput) -> &'static str {
         JobOutput::Boot(_) => "Boot",
         JobOutput::AppUsage(_) => "AppUsage",
         JobOutput::Software(_) => "Software",
+        JobOutput::Helper(_) => "Helper",
     }
 }
 
@@ -130,15 +132,44 @@ fn tag_helper_request(v: &HelperRequest) -> &'static str {
         HelperRequest::Traffic => "Traffic",
         HelperRequest::Audit(_) => "Audit",
         HelperRequest::Uninstall => "Uninstall",
+        HelperRequest::Processes(_) => "Processes",
+        HelperRequest::SocketOwners => "SocketOwners",
+        HelperRequest::FileHolders { .. } => "FileHolders",
+        HelperRequest::LoginItems => "LoginItems",
+        HelperRequest::Counters(_) => "Counters",
+        HelperRequest::MemoryModules => "MemoryModules",
+        HelperRequest::Smart(_) => "Smart",
+        HelperRequest::InstallTool { .. } => "InstallTool",
+        HelperRequest::Firewall => "Firewall",
+        HelperRequest::Extras(_) => "Extras",
+        HelperRequest::LogTail(_) => "LogTail",
+        HelperRequest::ScheduleWake { .. } => "ScheduleWake",
+        HelperRequest::CancelWake { .. } => "CancelWake",
+        HelperRequest::ListWakes => "ListWakes",
+        HelperRequest::WolState { .. } => "WolState",
     }
 }
 
 fn tag_helper_reply(v: &HelperReply) -> &'static str {
     match v {
-        HelperReply::About(_) => "About",
+        HelperReply::About(..) => "About",
         HelperReply::Counters(_) => "Counters",
         HelperReply::Entries(_) => "Entries",
         HelperReply::Bye => "Bye",
+        HelperReply::Firewall(_) => "Firewall",
+        HelperReply::Wakes(_) => "Wakes",
+        HelperReply::WakeCancelled(_) => "WakeCancelled",
+        HelperReply::Wol(_) => "Wol",
+        HelperReply::CounterValues(_) => "CounterValues",
+        HelperReply::Memory(_) => "Memory",
+        HelperReply::SocketOwners(_) => "SocketOwners",
+        HelperReply::FileHolders(_) => "FileHolders",
+        HelperReply::Extras(_) => "Extras",
+        HelperReply::Processes(_) => "Processes",
+        HelperReply::Smart(_) => "Smart",
+        HelperReply::Installed(_) => "Installed",
+        HelperReply::LoginItems(_) => "LoginItems",
+        HelperReply::Log(_) => "Log",
     }
 }
 
@@ -222,6 +253,7 @@ fn tag_request(v: &Request) -> &'static str {
         Request::StartDiskScan { .. } => "StartDiskScan",
         Request::ForgetSavedDiskMap { .. } => "ForgetSavedDiskMap",
         Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
+        Request::HelperStatus => "HelperStatus",
         Request::CancelDiskScan { .. } => "CancelDiskScan",
         Request::DiskScans => "DiskScans",
         Request::DiskChildren { .. } => "DiskChildren",
@@ -302,6 +334,7 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::JobOutput(_) => "JobOutput",
         Reply::WidgetLayout(_) => "WidgetLayout",
         Reply::PopoverValues(_) => "PopoverValues",
+        Reply::HelperStatus(_) => "HelperStatus",
     }
 }
 
@@ -353,6 +386,7 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::BootAnalysis,
         JobSpec::AppUsage,
         JobSpec::SoftwareInventory,
+        JobSpec::Helper { action: dyno_core::helper_wire::HelperAction::TurnOn },
     ]
 }
 
@@ -366,6 +400,7 @@ fn job_output_samples() -> Vec<JobOutput> {
         JobOutput::Boot(zero()),
         JobOutput::AppUsage(zero()),
         JobOutput::Software(zero()),
+        JobOutput::Helper(Box::new(zero())),
     ]
 }
 
@@ -375,15 +410,44 @@ fn helper_request_samples() -> Vec<HelperRequest> {
         HelperRequest::Traffic,
         HelperRequest::Audit(25),
         HelperRequest::Uninstall,
+        HelperRequest::Processes(zero()),
+        HelperRequest::SocketOwners,
+        HelperRequest::FileHolders { dev: 7, ino: 9 },
+        HelperRequest::LoginItems,
+        HelperRequest::Counters(zero()),
+        HelperRequest::MemoryModules,
+        HelperRequest::Smart(zero()),
+        HelperRequest::InstallTool { tool: zero(), bytes: vec![1, 2, 3] },
+        HelperRequest::Firewall,
+        HelperRequest::Extras(zero()),
+        HelperRequest::LogTail(50),
+        HelperRequest::ScheduleWake { tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap(), at_utc: 1_700_000_000 },
+        HelperRequest::CancelWake { tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap() },
+        HelperRequest::ListWakes,
+        HelperRequest::WolState { ifname: dyno_core::wake::IfName::parse("eth0").unwrap() },
     ]
 }
 
 fn helper_reply_samples() -> Vec<HelperReply> {
     vec![
-        HelperReply::About(zero()),
+        HelperReply::About(zero(), zero()),
         HelperReply::Counters(vec![]),
         HelperReply::Entries(vec![]),
         HelperReply::Bye,
+        HelperReply::Firewall(zero()),
+        HelperReply::Wakes(vec![]),
+        HelperReply::WakeCancelled(true),
+        HelperReply::Wol(zero()),
+        HelperReply::CounterValues(vec![]),
+        HelperReply::Memory(zero()),
+        HelperReply::SocketOwners(zero()),
+        HelperReply::FileHolders(zero()),
+        HelperReply::Extras(zero()),
+        HelperReply::Processes(zero()),
+        HelperReply::Smart(zero()),
+        HelperReply::Installed(zero()),
+        HelperReply::LoginItems(zero()),
+        HelperReply::Log(vec!["a line".into()]),
     ]
 }
 
@@ -528,6 +592,7 @@ fn request_samples() -> Vec<Request> {
         },
         Request::ForgetSavedDiskMap { scan: 1 },
         Request::ForgetSavedDiskMaps,
+        Request::HelperStatus,
         Request::CancelDiskScan { scan: 1 },
         Request::DiskScans,
         Request::DiskChildren {
@@ -700,6 +765,7 @@ fn reply_samples() -> Vec<Reply> {
         Reply::JobOutput(Box::new(JobOutput::Backup(zero()))),
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
+        Reply::HelperStatus(Box::new(zero())),
     ]
 }
 
