@@ -7,13 +7,94 @@ use crate::schema::{canonical_columns, parquet_from, READY};
 use crate::segments::SEGMENTS_DIR;
 use crate::{engine, lock, DuckStore};
 use debrief_core::batch::{EventBatch, EventId, BATCH_ROWS};
-use debrief_core::ports::{Positions, StoreResult, MAX_PAGE_ROWS};
+use debrief_core::ports::{Positions, StoreError, StoreResult, MAX_PAGE_ROWS};
 use duckdb::arrow::array::{RecordBatch, StructArray};
 use duckdb::{params, Connection};
 
 /// The sort key of the last positioned event, kept in `meta` so a later append can tell whether new events sort
 /// after it (`ts,source,line`; untimed events sort last).
 const LAST_KEY: &str = "ord_last";
+
+/// `meta` key set to 1 while the positions are missing or stale because a rebuild failed: the store rebuilds them when
+/// it opens and at the next maintenance (they must never stay missing).
+pub(crate) const STALE: &str = "ord_stale";
+
+/// Attempts of a rebuild before it is reported as failed.
+pub(crate) const ATTEMPTS: usize = 2;
+
+/// [`rebuild`], tried [`ATTEMPTS`] times; marks the positions [`STALE`] when every attempt failed (and clears the mark
+/// when one succeeded). The error is the last attempt's. Between attempts a best-effort `CHECKPOINT` writes out what the
+/// catalog holds in memory, so its blocks can be evicted before the second attempt (not measured to help; the caller
+/// already gave the ordering the import memory, `Inner::reorder`).
+pub(crate) fn rebuild_or_mark(conn: &Connection) -> duckdb::Result<()> {
+    rebuild_or_mark_with(conn, rebuild)
+}
+
+/// [`rebuild_or_mark`] with the rebuild given (tests count and fail attempts).
+fn rebuild_or_mark_with(conn: &Connection, rebuild: impl Fn(&Connection) -> duckdb::Result<()>) -> duckdb::Result<()> {
+    let mut last = None;
+    for attempt in 1..=ATTEMPTS {
+        match rebuild(conn) {
+            Ok(()) => {
+                if let Err(e) = crate::writer::set_meta(conn, STALE, 0) {
+                    log::warn!("could not clear {STALE}: {e:#}");
+                }
+                return Ok(());
+            }
+            // Cancelled (the job's Cancel interrupted the statement): no second attempt, which DuckDB would no longer
+            // interrupt (it resets the interrupt after the failed statement); the rebuild rolled back, so the old
+            // positions and their mark stay as they were.
+            Err(e) if cancelled(&e) => {
+                log::info!("ordering the events by time was cancelled");
+                return Err(e);
+            }
+            Err(e) => {
+                log::warn!("time-order positions could not be rebuilt (attempt {attempt} of {ATTEMPTS}): {e}");
+                last = Some(e);
+                if attempt < ATTEMPTS {
+                    if let Err(e) = conn.execute_batch("CHECKPOINT") {
+                        log::warn!("checkpoint before the next ordering attempt failed: {e}");
+                    }
+                }
+            }
+        }
+    }
+    if let Err(e) = crate::writer::set_meta(conn, STALE, 1) {
+        log::error!("could not mark the positions stale: {e:#}");
+    }
+    Err(last.unwrap_or(duckdb::Error::QueryReturnedNoRows))
+}
+
+/// Whether there are as many positions as visible events (missing positions leave fewer). Two counts, cheap enough for
+/// [`Positions::order_complete`] after every open.
+pub(crate) fn complete(conn: &Connection) -> duckdb::Result<bool> {
+    conn.query_row("SELECT (SELECT count(*) FROM ord) = (SELECT count(*) FROM events)", [], |r| {
+        r.get(0)
+    })
+}
+
+/// Positions the events with ids from `first_new` on after every positioned event, in their own time order, without
+/// checking that they sort after them: for stale positions, so new events are listed while the ordering job repairs
+/// the order. The stale mark stays.
+pub(crate) fn append_at_end(conn: &Connection, first_new: u64) -> duckdb::Result<()> {
+    let positioned = conn.query_row("SELECT count(*) FROM ord", [], |r| r.get::<_, u64>(0))?;
+    conn.execute(
+        "INSERT INTO ord SELECT (? + row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT, id FROM events WHERE id >= ? ORDER BY 1",
+        params![positioned, first_new],
+    )?;
+    Ok(())
+}
+
+/// Whether `e` ended a statement that was cancelled: the thread's control was cancelled, or DuckDB says interrupted
+/// (duckdb-rs maps no error code to an interrupt; its own tests match this text too).
+fn cancelled(e: &duckdb::Error) -> bool {
+    debrief_core::ql::QueryControl::current().is_some_and(|c| c.is_cancelled()) || e.to_string().contains("Interrupted")
+}
+
+/// Whether a failed rebuild left the positions stale.
+pub(crate) fn is_stale(conn: &Connection) -> bool {
+    crate::writer::meta_u64(conn, STALE) == 1
+}
 
 /// Renumbers the visible events.
 pub(crate) fn rebuild(conn: &Connection) -> duckdb::Result<()> {
@@ -61,9 +142,15 @@ fn last_key(conn: &Connection) -> Option<(i64, u32, u32)> {
 }
 
 /// Positions the events with ids from `first_new` on after the ones already positioned, when they all sort after
-/// them (the usual case when files grow); otherwise renumbers everything. `before` is the number of events that
-/// were visible before the new ones: positions are only extended when exactly that many are positioned.
-pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::Result<()> {
+/// them (the usual case when files grow). `before` is the number of events that were visible before the new ones:
+/// positions are only extended when exactly that many are positioned. False when they cannot be extended and every
+/// event must be renumbered (the caller does that through `Inner::reorder`, never here).
+pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::Result<bool> {
+    // Stale positions may have the right count in the wrong order: extending them would hide that (and only the
+    // ordering clears the mark).
+    if is_stale(conn) {
+        return Ok(false);
+    }
     let positioned = conn.query_row("SELECT count(*) FROM ord", [], |r| r.get::<_, u64>(0))?;
     let smallest = conn.query_row(
         "SELECT coalesce(ts, 9223372036854775807), source, line FROM events WHERE id >= ? ORDER BY 1, 2, 3 LIMIT 1",
@@ -73,18 +160,19 @@ pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::
     let smallest = match smallest {
         Ok(k) => k,
         // The new ids hold no visible events.
-        Err(duckdb::Error::QueryReturnedNoRows) => return Ok(()),
+        Err(duckdb::Error::QueryReturnedNoRows) => return Ok(true),
         Err(e) => return Err(e),
     };
     match last_key(conn) {
         Some(last) if positioned == before && smallest > last => {}
-        _ => return rebuild(conn),
+        _ => return Ok(false),
     }
     conn.execute(
         "INSERT INTO ord SELECT (? + row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT, id FROM events WHERE id >= ? ORDER BY 1",
         params![positioned, first_new],
     )?;
-    remember_last(conn)
+    remember_last(conn)?;
+    Ok(true)
 }
 
 impl Positions for DuckStore {
@@ -113,6 +201,11 @@ impl Positions for DuckStore {
         let conn = self.inner.conn()?;
         conn.query_row("SELECT count(*) FROM ord", [], |r| r.get::<_, u64>(0))
             .map_err(engine)
+    }
+
+    fn order_complete(&self) -> StoreResult<bool> {
+        let conn = self.inner.conn()?;
+        Ok(!is_stale(&conn) && complete(&conn).map_err(engine)?)
     }
 }
 
@@ -206,10 +299,64 @@ impl DuckStore {
         Ok(n)
     }
 
-    /// Renumbers the events now (normally done by imports and removals).
+    /// Renumbers the events now (normally done by imports and removals), through `Inner::reorder`.
     pub fn rebuild_positions(&self) -> StoreResult<()> {
         let _writing = lock(&self.inner.write_lock);
         let conn = self.inner.conn()?;
-        rebuild(&conn).map_err(engine)
+        match self.inner.reorder(&conn) {
+            None => Ok(()),
+            Some(notice) => Err(StoreError::Engine(notice)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use debrief_core::ql::QueryControl;
+    use std::cell::Cell;
+
+    fn catalog() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        conn
+    }
+
+    fn failing<'a>(attempts: &'a Cell<u32>, message: &'a str) -> impl Fn(&Connection) -> duckdb::Result<()> + 'a {
+        move |_| {
+            attempts.set(attempts.get() + 1);
+            Err(duckdb::Error::InvalidParameterName(message.into()))
+        }
+    }
+
+    #[test]
+    fn a_cancelled_ordering_is_not_tried_again_and_leaves_the_mark_as_it_was() {
+        let conn = catalog();
+        let attempts = Cell::new(0);
+        let control = QueryControl::new();
+        control.cancel();
+        let r = control.scope(|| rebuild_or_mark_with(&conn, failing(&attempts, "INTERRUPT Error: Interrupted!")));
+        assert!(r.is_err());
+        assert_eq!(attempts.get(), 1, "Cancel stops the ordering; no second, uninterruptible attempt");
+        assert!(!is_stale(&conn), "the old positions are kept (rolled back), not marked");
+    }
+
+    #[test]
+    fn an_interrupted_statement_counts_as_cancelled_without_a_control() {
+        let conn = catalog();
+        let attempts = Cell::new(0);
+        assert!(rebuild_or_mark_with(&conn, failing(&attempts, "INTERRUPT Error: Interrupted!")).is_err());
+        assert_eq!(attempts.get(), 1);
+        assert!(!is_stale(&conn));
+    }
+
+    #[test]
+    fn a_failed_ordering_is_tried_again_once_and_then_marked_stale() {
+        let conn = catalog();
+        let attempts = Cell::new(0);
+        assert!(rebuild_or_mark_with(&conn, failing(&attempts, "Out of Memory Error: failed to pin block")).is_err());
+        assert_eq!(attempts.get(), ATTEMPTS as u32);
+        assert!(is_stale(&conn));
     }
 }

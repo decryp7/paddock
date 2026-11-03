@@ -11,7 +11,10 @@
 //!   usable at once and import speed does not depend on indexing speed. A segment is indexed by deleting
 //!   the documents of its key, adding its rows and committing, then marking it `indexed` in the catalog: a
 //!   crash in between is repaired by indexing it again, never by duplicates.
-//! - The writer's heap is [`WRITER_HEAP`] (64 MB, the ADR budget) and only exists while indexing.
+//! - The writer runs one thread per usable core, at most [`MAX_AUTO_WRITER_THREADS`], with [`WRITER_HEAP_PER_THREAD`] each, as
+//!   many as fit in [`WRITER_HEAP_MAX`]
+//!   (the import memory: the index is built when an import has finished); the heaps only exist while indexing. Its
+//!   threads run at lowered priority (QoS utility on macOS, nice 10 on Linux; they take the indexing thread's).
 //! - The commit payload names the catalog's `fts_epoch`; an index that is missing, damaged or from another
 //!   epoch is recreated and every segment indexed again.
 
@@ -36,12 +39,23 @@ use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextO
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tantivy::{doc, DocId, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, SegmentReader, Term};
 
+/// The writer's threads (at least one) and each thread's heap (the budget's share, at least
+/// [`MIN_HEAP_PER_THREAD`]). Unlike Tantivy's `writer_with_num_threads`, not capped at 8 threads.
+fn writer_shape(budget: WriterBudget) -> (usize, usize) {
+    let threads = budget.threads.max(1);
+    (threads, (budget.heap / threads).max(MIN_HEAP_PER_THREAD))
+}
+
 /// Folder of the index in a store folder.
 pub const INDEX_DIR: &str = "index";
 
-/// Heap of the index writer (ADR 0014 memory budget), shared by its threads.
-pub const WRITER_HEAP: usize = 64 << 20;
-pub const WRITER_THREADS: usize = 2;
+/// Heap of each index writer thread by default (Settings ▸ Performance ▸ Search index memory per thread).
+pub const WRITER_HEAP_PER_THREAD: usize = 64 << 20;
+/// The most the writer's heaps take together by default: the import memory budget (ADR 0014, 768 MB).
+pub const WRITER_HEAP_MAX: usize = 768 << 20;
+/// Most writer threads chosen automatically: past 4, the single reader and in-order feeder of the indexing pipeline
+/// (and its commit every few segments) are the limit, and 13 threads indexed slower than 4 (performance.md).
+pub const MAX_AUTO_WRITER_THREADS: usize = 4;
 
 /// What the index writer may use while indexing: its heap (bytes, shared by its threads; Tantivy needs at least
 /// 15 MB per thread) and threads.
@@ -67,9 +81,11 @@ impl WriterBudget {
 
 impl Default for WriterBudget {
     fn default() -> Self {
+        // ER-20: CPU-bound work gets the cores minus one, here also bounded by the memory.
+        let threads = threads(WorkKind::Cpu, None).clamp(1, (WRITER_HEAP_MAX / WRITER_HEAP_PER_THREAD).min(MAX_AUTO_WRITER_THREADS));
         WriterBudget {
-            heap: WRITER_HEAP,
-            threads: WRITER_THREADS,
+            heap: threads * WRITER_HEAP_PER_THREAD,
+            threads,
         }
     }
 }
@@ -184,11 +200,12 @@ fn schema() -> (Schema, Fields) {
     let source = b.add_u64_field("source", INDEXED);
     let seg = b.add_u64_field("seg", INDEXED);
     b.add_i64_field("ts", FAST);
-    // Words and their counts, no positions (half the size): phrases are checked on the rows.
+    // Words only, no counts or positions: hits are ordered by time and never scored, and phrases are checked on the
+    // rows. (An index made with counts keeps them; it answers the same.)
     let words = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer(TOKENIZER)
-            .set_index_option(IndexRecordOption::WithFreqs),
+            .set_index_option(IndexRecordOption::Basic),
     );
     let text = b.add_text_field("text", words);
     (b.build(), Fields { id, source, seg, text })
@@ -257,18 +274,25 @@ impl Fts {
         Ok((Fts { index, reader, f, budget }, true))
     }
 
+    /// The index writer, with [`writer_shape`]'s threads and heaps. Its threads are started by the calling thread and
+    /// take its priority on macOS and Linux (the indexing thread runs lowered; Windows starts them at normal priority).
     fn writer(&self) -> Result<IndexWriter> {
-        let threads = self.budget.threads.max(1);
-        Ok(self
-            .index
-            .writer_with_num_threads(threads, self.budget.heap.max(threads * (15 << 20)))?)
+        let (threads, heap_per_thread) = writer_shape(self.budget);
+        let options = tantivy::indexer::IndexWriterOptions::builder()
+            .num_worker_threads(threads)
+            .memory_budget_per_thread(heap_per_thread)
+            .build();
+        Ok(self.index.writer_with_options(options)?)
     }
 
     fn commit(&self, w: &mut IndexWriter, epoch: u64) -> Result<()> {
         let mut prepared = w.prepare_commit()?;
         prepared.set_payload(&payload(epoch));
         prepared.commit()?;
-        self.reader.reload()?;
+        // Committed: a reader that cannot reload now shows the change after a later commit reloads it.
+        if let Err(e) = self.reader.reload() {
+            log::warn!("the full-text index reader could not reload after a commit: {e}");
+        }
         Ok(())
     }
 
@@ -345,7 +369,8 @@ impl Fts {
         let ts_field = self.index.schema().get_field("ts")?;
         let keys: Vec<u64> = files.iter().map(|f| segment_key(f)).collect();
         let mut batches = SegmentBatches::new(seg_dir, files);
-        let input = std::iter::from_fn(|| batches.next_batch());
+        // Reading stops once the process exits (the exit handler waits for running steps only so long).
+        let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { batches.next_batch() });
         let mut first_error: Option<anyhow::Error> = None;
         let mut finished = 0usize;
         let mut seen = vec![false; files.len()];
@@ -517,6 +542,11 @@ pub struct FtsShared {
     pub pending: AtomicU64,
     /// The last indexing failure.
     pub failure: Mutex<Option<String>>,
+    /// The store's flag of a running bulk import (`Inner::bulk_import`; not a live refresh).
+    bulk_import: Arc<AtomicBool>,
+    /// Tests: the next writes through [`FtsService`] fail after their operations are queued.
+    #[cfg(test)]
+    pub(crate) fail_writes: AtomicBool,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -528,7 +558,13 @@ pub struct FtsService {
 
 impl FtsService {
     /// Opens (or recreates) the index of the store in `dir` and starts indexing what is missing.
-    pub fn start(dir: &Path, conn: Connection, write_lock: Arc<Mutex<()>>, budget: WriterBudget) -> Result<FtsService> {
+    pub fn start(
+        dir: &Path,
+        conn: Connection,
+        write_lock: Arc<Mutex<()>>,
+        bulk_import: Arc<AtomicBool>,
+        budget: WriterBudget,
+    ) -> Result<FtsService> {
         let epoch = match meta_u64(&conn, "fts_epoch") {
             0 => {
                 set_meta(&conn, "fts_epoch", 1)?;
@@ -547,7 +583,11 @@ impl FtsService {
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failure: Mutex::new(None),
+            bulk_import,
+            #[cfg(test)]
+            fail_writes: AtomicBool::new(false),
         });
+        crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let store_dir = dir.to_path_buf();
         let handle = std::thread::Builder::new()
@@ -566,7 +606,7 @@ impl FtsService {
         self.shared.wake.1.notify_all();
     }
 
-    /// Runs `f` with the writer and commits.
+    /// Runs `f` with the writer and commits; when either fails, what `f` queued is rolled back.
     fn with_writer(&self, f: impl FnOnce(&mut IndexWriter) -> Result<()>) -> Result<()> {
         let fts = &self.shared.fts;
         let mut slot = crate::lock(&self.shared.writer);
@@ -574,8 +614,28 @@ impl FtsService {
             Some(w) => w,
             None => slot.insert(fts.writer()?),
         };
-        f(w)?;
-        fts.commit(w, self.epoch)
+        let done = f(w).and_then(|()| self.injected_failure()).and_then(|()| fts.commit(w, self.epoch));
+        if done.is_err() {
+            // What was queued must not ride along with the next commit (the indexer's).
+            if let Err(e) = w.rollback() {
+                log::warn!("the full-text index writer could not roll back: {e}");
+            }
+        }
+        done
+    }
+
+    /// Tests: fails while [`FtsShared::fail_writes`] is set.
+    #[cfg(test)]
+    fn injected_failure(&self) -> Result<()> {
+        if self.shared.fail_writes.load(Ordering::SeqCst) {
+            anyhow::bail!("an injected index write failure");
+        }
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    fn injected_failure(&self) -> Result<()> {
+        Ok(())
     }
 
     /// Deletes a source's documents (it was removed).
@@ -583,6 +643,21 @@ impl FtsService {
         let field = self.shared.fts.f.source;
         self.with_writer(|w| {
             w.delete_term(Term::from_field_u64(field, source as u64));
+            Ok(())
+        })
+    }
+
+    /// Deletes the documents of the id blocks `first .. end` (rows rewritten into new segments, indexed again from
+    /// those): a range query on the `id` fast field, so it does not depend on which file held the rows.
+    pub fn delete_blocks(&self, blocks: &[(u64, u64)]) -> Result<()> {
+        let field = self.shared.fts.f.id;
+        self.with_writer(|w| {
+            for (first, end) in blocks {
+                w.delete_query(Box::new(tantivy::query::RangeQuery::new(
+                    std::ops::Bound::Included(Term::from_field_u64(field, *first)),
+                    std::ops::Bound::Excluded(Term::from_field_u64(field, *end)),
+                )))?;
+            }
             Ok(())
         })
     }
@@ -654,7 +729,19 @@ fn stages(cancel: &AtomicBool) -> Stages<'_> {
 /// Indexes the next segments (up to [`SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
 /// some; true when it did.
 fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<bool> {
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    // Counted by the exit handler like a borrowed connection: no step starts once the process exits, and a running
+    // one is waited for (a step's statement during exit crashed DuckDB in its static destructors).
+    let Some(_running) = crate::shutdown::Active::enter() else {
+        return Ok(false);
+    };
+    let Ok(_writing) = write_lock.try_lock() else {
+        // An import holds the store, with its own memory budget: the index writer's heaps are given back now, so the
+        // two never add up; the next step starts a new writer. A brief holder (a live refresh) keeps the writer.
+        if s.bulk_import.load(Ordering::SeqCst) {
+            drop_writer(s);
+        }
+        return Ok(false);
+    };
     let (files, ready) = todo(conn)?;
     s.pending.store(files.len() as u64, Ordering::SeqCst);
     if files.is_empty() {
@@ -681,10 +768,19 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![bad])?;
         return Err(e.context(format!("indexing {bad}")));
     }
-    s.fts.commit(w, epoch)?;
-    for file in batch {
-        conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![file])?;
+    // The process is exiting: nothing more is written (the documents added go with the writer and the segments stay
+    // unindexed, so they are indexed again next time).
+    if crate::shutdown::down() {
+        let _ = w.rollback();
+        return Ok(false);
     }
+    s.fts.commit(w, epoch)?;
+    // One statement (one commit, one write-ahead-log sync) for the step's segments, not one per segment.
+    let marks = vec!["?"; batch.len()].join(", ");
+    conn.execute(
+        &format!("UPDATE segments SET indexed = TRUE WHERE file IN ({marks})"),
+        duckdb::params_from_iter(batch.iter()),
+    )?;
     s.pending.store(total - batch.len() as u64, Ordering::SeqCst);
     Ok(true)
 }
@@ -695,7 +791,31 @@ fn failing_segment<'a>(e: &anyhow::Error, batch: &'a [String]) -> Option<&'a Str
     batch.iter().find(|f| text.contains(f.as_str()))
 }
 
+/// Whether the indexing thread (and the writer's threads it starts) run lowered. Rule 52: work a person waits for is
+/// never starved. This thread holds the store's write lock for a whole step, and live follow waits for that lock. On
+/// macOS (QoS utility) and Linux (nice 10) a lowered thread still gets its turn; on Windows, where the writer's threads
+/// would not inherit it anyway, a below-normal thread holding the lock could keep a waiting refresh behind other work,
+/// so it stays at normal priority there until steps can be cancelled.
+const LOWER_INDEXING_THREAD: bool = !cfg!(windows);
+
+/// Lets the background merges finish (they hold memory and allocate until they do), drops the index writer and gives its
+/// heaps and its threads' pages back to the OS. The slot stays locked until the writer is gone: a clear or a source
+/// removal in that window would find the slot empty, try to open a second writer and fail on the index's lock.
+fn drop_writer(s: &FtsShared) {
+    let mut slot = crate::lock(&s.writer);
+    if let Some(w) = slot.take() {
+        if let Err(e) = w.wait_merging_threads() {
+            log::warn!("full-text index merges failed: {e}");
+        }
+        debrief_alloc::release();
+    }
+}
+
 fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) {
+    if LOWER_INDEXING_THREAD {
+        // For this thread and the writer's threads it starts (they inherit it on macOS and Linux).
+        lower_priority();
+    }
     let seg_dir = dir.join(SEGMENTS_DIR);
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
@@ -710,17 +830,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
         }
         // Idle: free the writer's heap and wait for news (or retry a busy lock soon).
         if s.pending.load(Ordering::SeqCst) == 0 {
-            // The slot stays locked until the writer is gone: a clear or a source removal in that window would find the
-            // slot empty, try to open a second writer and fail on the index's lock (leaving the old documents searchable).
-            let mut slot = crate::lock(&s.writer);
-            if let Some(w) = slot.take() {
-                // Let the background merges finish (they hold memory and allocate until they do), then give the
-                // index build's heap and its threads' pages back to the OS: the process may idle now.
-                if let Err(e) = w.wait_merging_threads() {
-                    log::warn!("full-text index merges failed: {e}");
-                }
-                debrief_alloc::release();
-            }
+            drop_writer(s);
         }
         let mut woken = crate::lock(&s.wake.0);
         if !*woken {
@@ -761,5 +871,258 @@ mod tests {
             ]
         );
         assert!(!WordsTokenizer.token_stream("").advance());
+    }
+
+    #[test]
+    fn the_writer_is_dropped_only_when_an_import_holds_the_store() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            fts,
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(1),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
+        };
+        let write_lock = Mutex::new(());
+        let held = write_lock.lock().unwrap();
+        // A brief holder (a live refresh): the writer stays for the next step.
+        assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
+        assert!(crate::lock(&s.writer).is_some(), "a live refresh does not cost the writer");
+        // An import: its budget and the writer's heaps never add up.
+        s.bulk_import.store(true, Ordering::SeqCst);
+        assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "an import's budget and the writer's heaps never add up"
+        );
+        drop(held);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn words_are_indexed_without_frequencies_or_positions() {
+        // Searches order hits by time and never score them: the postings only need the documents.
+        let (schema, f) = schema();
+        let tantivy::schema::FieldType::Str(options) = schema.get_field_entry(f.text).field_type() else {
+            panic!("text is a text field")
+        };
+        let indexing = options.get_indexing_options().expect("indexed");
+        assert_eq!(indexing.index_option(), IndexRecordOption::Basic);
+        assert!(
+            !schema.fields().any(|(_, e)| e.is_stored()),
+            "nothing is stored: DuckDB has the rows"
+        );
+    }
+
+    #[test]
+    fn the_writer_runs_the_configured_threads_each_with_its_share_of_the_heap() {
+        let mb = 1 << 20;
+        assert_eq!(
+            writer_shape(WriterBudget {
+                heap: 6 * 64 * mb,
+                threads: 6
+            }),
+            (6, 64 * mb)
+        );
+        // More than Tantivy's 8-thread convenience constructor allows.
+        assert_eq!(
+            writer_shape(WriterBudget {
+                heap: 13 * 32 * mb,
+                threads: 13
+            }),
+            (13, 32 * mb)
+        );
+        // Tantivy's floor of 15 MB a thread; at least one thread.
+        assert_eq!(writer_shape(WriterBudget { heap: mb, threads: 4 }), (4, 15 * mb));
+        assert_eq!(writer_shape(WriterBudget { heap: 0, threads: 0 }), (1, 15 * mb));
+        // The writer is built with that shape.
+        let dir = std::env::temp_dir().join(format!("debrief-fts-shape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (fts, _) = Fts::open_or_create(
+            &dir,
+            1,
+            WriterBudget {
+                heap: 10 * 16 * mb,
+                threads: 10,
+            },
+        )
+        .unwrap();
+        let w = fts.writer().expect("10 threads of 16 MB");
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A store with two small invented logs, indexed, with its indexing thread stopped, so a test decides every write.
+    struct Indexed {
+        dir: std::path::PathBuf,
+        store: crate::DuckStore,
+    }
+
+    impl Drop for Indexed {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    impl Indexed {
+        fn new(tag: &str) -> Indexed {
+            use debrief_core::ports::Ingest;
+            let dir = std::env::temp_dir().join(format!("debrief-fts-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let logs = dir.join("logs");
+            std::fs::create_dir_all(&logs).unwrap();
+            std::fs::write(
+                logs.join("a.log"),
+                "2026-10-14 10:00:00 INFO alpha a1\n2026-10-14 10:00:10 INFO alpha a2\n",
+            )
+            .unwrap();
+            std::fs::write(
+                logs.join("b.log"),
+                "2026-10-14 10:00:05 INFO alpha b1\n2026-10-14 10:00:15 INFO alpha b2\n",
+            )
+            .unwrap();
+            let store = crate::DuckStore::create(
+                &dir.join("store"),
+                debrief_core::Profile::default_profile(),
+                debrief_core::PluginRegistry::new(),
+            )
+            .unwrap();
+            store.open(&[logs]).unwrap().wait().unwrap();
+            assert!(store.wait_for_index(Duration::from_secs(60)).unwrap().ready);
+            let f = store.inner.fts.as_ref().unwrap();
+            f.shared.stop.store(true, Ordering::SeqCst);
+            f.wake();
+            let handle = f.handle.as_ref().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while !handle.is_finished() {
+                assert!(std::time::Instant::now() < deadline, "the indexing thread did not stop");
+                std::thread::yield_now();
+            }
+            Indexed { dir, store }
+        }
+
+        fn fts(&self) -> &FtsService {
+            self.store.inner.fts.as_ref().unwrap()
+        }
+
+        fn source(&self, file: &str) -> u32 {
+            use debrief_core::ports::Query;
+            self.store
+                .summary()
+                .unwrap()
+                .sources
+                .iter()
+                .find(|s| s.path.ends_with(file))
+                .unwrap()
+                .id
+        }
+
+        fn hits(&self) -> Vec<EventId> {
+            use debrief_core::ports::{Search, SearchRequest};
+            let r = self
+                .store
+                .search(&SearchRequest {
+                    text: "alpha".into(),
+                    limit: 0,
+                })
+                .unwrap();
+            assert_eq!(r.total as usize, r.ids.len());
+            r.ids
+        }
+
+        fn ids_of(&self, source: u32) -> Vec<EventId> {
+            let conn = self.store.inner.conn().unwrap();
+            let mut stmt = conn.prepare("SELECT id FROM events WHERE source = ? ORDER BY id").unwrap();
+            stmt.query_map(params![source], |r| r.get::<_, u64>(0))
+                .unwrap()
+                .map(|r| EventId(r.unwrap()))
+                .collect()
+        }
+    }
+
+    /// A write that fails after its operations were queued is rolled back: the next commit does not carry them.
+    #[test]
+    fn a_failed_index_write_is_rolled_back_not_committed_with_the_next_one() {
+        let t = Indexed::new("rollback");
+        assert_eq!(t.hits().len(), 4);
+        t.fts().shared.fail_writes.store(true, Ordering::SeqCst);
+        assert!(t.fts().delete_source(t.source("a.log")).is_err());
+        t.fts().shared.fail_writes.store(false, Ordering::SeqCst);
+        t.fts().delete_source(u32::MAX).unwrap();
+        assert_eq!(t.hits().len(), 4, "the failed delete was not committed later");
+    }
+
+    /// A clock offset whose index delete fails keeps the moved events' documents (old times) and marks the new files
+    /// indexed, so every event is found once, also after the next commit.
+    #[test]
+    fn a_clock_offset_whose_index_delete_fails_keeps_one_hit_per_event() {
+        use debrief_core::ports::Skew;
+        use debrief_core::skew::{OffsetSpec, SetOffsetRequest};
+        let t = Indexed::new("skew-fail");
+        t.fts().shared.fail_writes.store(true, Ordering::SeqCst);
+        t.store
+            .set_source_offset(&SetOffsetRequest {
+                spec: OffsetSpec::Manual {
+                    source: t.source("b.log"),
+                    offset_ms: 20_000,
+                },
+            })
+            .unwrap();
+        t.fts().shared.fail_writes.store(false, Ordering::SeqCst);
+        let conn = t.store.inner.conn().unwrap();
+        let indexed: bool = conn.query_row("SELECT bool_and(indexed) FROM segments", [], |r| r.get(0)).unwrap();
+        assert!(indexed, "the new files keep the old documents instead of being indexed twice");
+        t.fts().delete_source(u32::MAX).unwrap();
+        let mut hits = t.hits();
+        hits.sort();
+        hits.dedup();
+        assert_eq!(hits.len(), 4, "every event once");
+    }
+
+    /// The skew rewrite deletes the moved blocks' documents also for a segment that is not marked indexed (its
+    /// documents may already be committed), so indexing it again cannot add them twice.
+    #[test]
+    fn a_clock_offset_deletes_the_old_documents_of_an_unindexed_segment_too() {
+        use debrief_core::ports::Skew;
+        use debrief_core::skew::{OffsetSpec, SetOffsetRequest};
+        let t = Indexed::new("skew-unindexed");
+        let b = t.source("b.log");
+        let moved = t.ids_of(b);
+        assert!(moved.iter().all(|id| t.hits().contains(id)));
+        t.store
+            .inner
+            .conn()
+            .unwrap()
+            .execute_batch("UPDATE segments SET indexed = FALSE")
+            .unwrap();
+        t.store
+            .set_source_offset(&SetOffsetRequest {
+                spec: OffsetSpec::Manual {
+                    source: b,
+                    offset_ms: 20_000,
+                },
+            })
+            .unwrap();
+        let hits = t.hits();
+        assert!(
+            moved.iter().all(|id| !hits.contains(id)),
+            "old documents of the moved events: {hits:?}"
+        );
     }
 }
