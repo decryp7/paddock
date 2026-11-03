@@ -286,7 +286,9 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
   /** The app's per-kind option controls. */
+  /* v8 ignore start: the compiler generates this query's accessor; the specs read the query through its consumers */
   readonly options = contentChildren<PdWidgetOption<W>>(PdWidgetOption);
+  /* v8 ignore stop */
   /** An edit for the engine. */
   readonly edit = output<Edit<W>>();
 

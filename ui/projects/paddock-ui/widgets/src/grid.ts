@@ -333,7 +333,9 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   /** The element that scrolls while a widget is dragged; the page when null. */
   readonly scroller = input<HTMLElement | null>(null);
   /** The app's per-kind templates, declared as content. */
+  /* v8 ignore start: the compiler generates this query's accessor; the specs read the query through its consumers */
   readonly widgets = contentChildren<PdWidget<V>>(PdWidget);
+  /* v8 ignore stop */
   /** Templates declared elsewhere; a content template of the same kind wins. */
   readonly templates = input<readonly PdWidget<V>[]>([]);
   /** Edit mode: widgets can be moved and resized. */

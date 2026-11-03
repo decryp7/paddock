@@ -583,6 +583,11 @@ describe('PdWidgetGrid', () => {
       expect(qa('.pd-w-title').map((t) => t.textContent?.trim())).toEqual(['CPU (busy)', 'Network', 'Disk']);
     });
 
+    it('has no options for any kind until the app says which have them', () => {
+      const bare = TestBed.createComponent(PdWidgetGrid);
+      expect(bare.componentInstance.hasOptions()('cpu')).toBe(false);
+    });
+
     it('offers Options… for kinds that have them, and an undo toast after Remove that takes it back', async () => {
       await create();
       await edit();
