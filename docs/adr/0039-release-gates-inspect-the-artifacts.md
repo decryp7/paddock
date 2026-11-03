@@ -26,17 +26,19 @@
       the Mach-O twin). That is fixed in `a11410909` on `fix/first-release-notes-mawk`, which is not yet on `main`.
   - `conformance/release/windows-crt-imports.mjs` runs only in `.gitea/workflows/debrief.yml:972`. No other app's
     installers are checked for `VCRUNTIME140.dll` imports.
-  - The in-progress fix on `fix/dyno-agent-signing-id` (uncommitted in its worktree, read 2026-11-03, so unverified until
-    committed): its amendment to Dyno ADR 0026 records that the published `Dyno_1.0.0` bundle has the right identifiers
+  - `fix/dyno-agent-signing-id` at `4998c742c` (pushed 2026-11-03): its amendment to Dyno ADR 0026 records that the published `Dyno_1.0.0` bundle has the right identifiers
     (`net.decryptology.dyno.agent`, `net.decryptology.dyno.cli`), and that macOS 27.2 shows the agent only its own sockets
     when the agent runs as a child of the ad-hoc signed `.app` started by LaunchServices. It sees the whole list from a
     shell or as a launchd job. Its `check-bundle.sh` adds a run of `dyno-agent view` as a launchd job.
+  - User decision 2026-11-03: Dyno starts its agent through launchd, not as a child of the app (in progress on
+    `fix/dyno-agent-via-launchd`). From then on, a launchd job is the product's own way of starting the agent.
+  - The CI image has no 7-Zip (`ci-image/Dockerfile`: no `7z` or `7zip` package, 2026-11-03).
 
 ## Context
 
 | # | Date | Instance | What the gate checked | What was wrong |
 |---|---|---|---|---|
-| 1 | 2026-11-01 (released), 2026-11-03 (reported) | Dyno 1.0.0: the macOS Network page said "macOS showed this program only its own sockets… needs a code-signing identifier with a dot" | the identifier string of two files in the build folder | per the in-progress fix: the identifier was right, and the behaviour the property stands for (the whole socket list) failed in the way the app launches its agent. The gate checked a proxy, not the behaviour as shipped |
+| 1 | 2026-11-01 (released), 2026-11-03 (reported) | Dyno 1.0.0: the macOS Network page said "macOS showed this program only its own sockets… needs a code-signing identifier with a dot" | the identifier string of two files in the build folder | per `4998c742c`: the identifier was right, and the behaviour the property stands for (the whole socket list) failed because the app started its agent as a child. The failure shows only when LaunchServices starts the app, which a CI job cannot reproduce. The gate checked a proxy, not the behaviour as shipped |
 | 2 | 2026-11-01 | the Dyno signing-identifier test saw a 0-byte `dyno-da39a3ee…`: tauri-build copied empty sidecar placeholders over the linked binaries (fix `f61bd8805`) | a binary in the build folder at a moment that depended on build order | 20 of 20 failures in the rerun loop (lesson). The same placeholders exist in Pitwall and Pitcrew (`origin/fix/sidecar-placeholders-shared`) |
 | 3 | 2026-10-30 | Dyno's installer build failed on a clean runner; a leftover `ui/dist` hid it (rule 54) | the steps' exit codes on a warm working tree | the artifact was never built from a clean tree |
 | 4 | 2026-10-30 (ADR 0032) | sidecars imported `VCRUNTIME140.dll`; only a clean PC shows it | Debrief only | Dyno, Spotter, Pitwall and Pitcrew installers are not checked |
@@ -74,7 +76,7 @@ probe = ["--self-test"]             # started from the extracted artifact (rule 
 
 [[probe]]                           # behaviour checks, started the way the product starts them
 os = "macos"
-how = "launched-by-app"             # | "launchd-job" | "direct"
+how = "launchd-job"                 # | "direct"
 run = ["dyno-agent", "view"]
 expect = "cut_down=false"           # the evidence line the program prints
 
@@ -101,16 +103,29 @@ logic lives in shell pipelines, and instance 5's class goes away with them. It r
 | Patterns, exactly one match each; versions in file names | file names | Linux job |
 | `latest.json`: versions, URLs and signatures match the artifacts | parse, `minisign` verification with the public key | Linux job |
 | `.deb` and AppImage contents: executables, sizes, run paths, notices | `ar`/`tar` readers; AppImage via `--appimage-extract` in a temp folder | Linux job |
-| Windows PE: version resources, manifest, imports (ADR 0032), sizes | an object-file reader crate (`object` or `pelite`, licences checked by `cargo deny` at implementation); NSIS unpacked with `7z` from the image | Linux job (no Windows host needed to read a PE) |
+| Windows PE: version resources, manifest, imports (ADR 0032), sizes | an object-file reader crate (`object` or `pelite`, licences checked by `cargo deny` at implementation); NSIS unpacked with 7-Zip, which the CI image gains (the `7zip` Ubuntu package, version from ADR 0038's `ci/tool-versions.toml`; it is a CI tool and is never shipped) | Linux job (no Windows host needed to read a PE) |
 | macOS: DMG mounted read-only, `codesign --verify --deep --strict`, identifier and Team ID of every Mach-O, run paths, notices | `hdiutil`, `codesign -dv`, a Mach-O reader for load commands | macOS job |
-| Probes: each executable's `probe`, and each `[[probe]]` started as declared (`launched-by-app` starts the app's own launcher path in a test mode; `launchd-job` uses `launchctl submit` with a unique label, then removes it) | the extracted artifact, in a temp folder | the OS's job; on macOS, the probes that show windows run in the local VM (decision "VMs are local only"), not on the CI Mac (ER-14) |
+| Probes: each executable's `probe` (`--self-test`), and each `[[probe]]` started as declared (`direct`, or `launchd-job`: `launchctl submit` with a unique label, wait for its output, then `launchctl remove`) | the extracted artifact, in a temp folder | the OS's job: macOS and Linux in their verify jobs; Windows in a Windows verify job (below). No probe opens a window; the GUI smoke is ADR 0037's |
+| No test entry points: the released app refuses `--smoke` and has no debug test commands (ADR 0037 §8) | start the main executable with `--smoke` and expect the refusal exit code without a window; check the command table the binary reports with `--list-commands` | each OS's verify job |
+
+**The Dyno probe is the CI check for instance 1.** Since Dyno starts its agent through launchd (decision D2), the macOS
+verify job does what the product does: it `launchctl submit`s the agent from the extracted bundle under a unique label and
+requires a full socket view (`cut_down=false`, with as many entries sent as announced). It then removes the label. This
+runs on the CI macOS runner: a launchd job opens no window, and it leaves nothing behind (ER-14). A future change back to
+starting the agent as a child would fail the same probe in the VM smoke (ADR 0037 §8), which starts the app through
+LaunchServices.
+
+**Windows verify job.** The Linux job extracts the `.exe` files from the NSIS installer and uploads them as a
+short-lived artifact. A Windows verify job downloads them into its job folder and runs each executable's `--self-test`
+there. It does not run the installer, which would write the user's registry on the CI PC (ER-14). Installing and
+uninstalling stays in the local VM's checks.
 
 Each check prints what it saw ("4 Mach-O checked: dyno-app net.decryptology.dyno … "). If it checked fewer items than
 declared, or none at all, it fails. Every failure is one `::error::` line with the cause and the next step (rule 56).
 
 ### 3. The verifier gates the release, and runs again on what was published
 
-`app-release.yml` gets a `verify` job (matrix Linux and macOS) that `needs: [bundle]`. It downloads the uploaded artifacts,
+`app-release.yml` gets a `verify` job (matrix Linux, macOS and Windows) that `needs: [bundle]`. It downloads the uploaded artifacts,
 which are exactly the files the `release` job will publish, and runs the verifier. `release` `needs: [verify]`. After
 publishing, the `release` job downloads the assets from the Gitea release and runs the Linux checks once more (sizes,
 hashes, `latest.json`), so a publish step that drops or corrupts a file fails the run.
@@ -140,8 +155,7 @@ the next tag, so the remaining shell steps of release workflows cannot lie that 
 
 Instance 1 shows that a correct identifier string was a proxy. When a design depends on an OS behaviour (the kernel's
 socket list, a login item's registration, a launch context), the app's `release.toml` names a probe that exercises it
-from the artifact, started the way the product starts it. Dyno's `dyno-agent view` (`launched-by-app` and `launchd-job`)
-is the first. A design or ADR that relies on such a behaviour names its probe (a review question, added to the release
+from the artifact, started the way the product starts it. Dyno's `dyno-agent view` as a `launchd-job` is the first. A design or ADR that relies on such a behaviour names its probe (a review question, added to the release
 checklist).
 
 ## Checks that make the class detected
@@ -161,15 +175,22 @@ checklist).
    AppImage, PE versions, manifest, CRT imports, notices), and the broken-artifact tests.
 2. **WP-2:** the macOS checks (DMG, codesign per Mach-O, Team ID, run paths); delete the three macOS verify copies and
    Dyno's `check-bundle.sh`.
-3. **WP-3:** probes: `--self-test` per executable from the artifact; `[[probe]]` with `launchd-job` and
-   `launched-by-app`; Dyno's `view` probe (with the `fix/dyno-agent-signing-id` outcome).
-4. **WP-4:** the `verify` job, `release` `needs: [verify]`, post-publish re-verify, C69.
+3. **WP-3:** probes: `--self-test` per executable from the artifact; `[[probe]]` with `direct` and `launchd-job`; the
+   no-test-entry-points check; Dyno's `view` probe, which needs `fix/dyno-agent-via-launchd`.
+4. **WP-4:** the `verify` job on Linux, macOS and Windows, `release` `needs: [verify]`, post-publish re-verify, C69.
 5. **WP-5:** C62 to `main` (already written; merge only).
 6. **Adoption:** Dyno first (1.1.0), then Spotter (1.0), Pitwall (1.1), Pitcrew (1.1), the demos, and Debrief (its own
    `debrief.yml`, whose CRT step is replaced).
 
-Rule 1 orders this against the tags. WP-5 and Dyno's probe come before Dyno 1.1.0. Whether the Spotter 1.0 tag waits for
-WP-1 to WP-4 is decision D1.
+Rule 1 orders this against the tags. WP-5 and Dyno's probe come before Dyno 1.1.0. **The Spotter 1.0 tag waits for WP-1
+to WP-4** (user decision D1, 2026-11-03; about 9 agent-days).
+
+**ADR 0022 G.7 exception.** G.7 keeps release-path changes out of an app's release window, and WP-4 changes
+`app-release.yml` inside Spotter's window. The user's decision D1 is this exception, and it is bounded:
+- only WP-1 to WP-5 may change the release path in that window;
+- before Spotter is tagged, the changed `app-release.yml` is proved by a dispatched release run with the installers
+  built (rule 54), for Spotter and for Dyno;
+- no other tooling package touches a release path until the Spotter tag.
 
 **Rollback.** The `verify` job can be made non-blocking (`continue-on-error`) for one tag, with a written waiver in the
 release notes PR. The existing bundle checks remain until WP-2 deletes them.
@@ -178,13 +199,13 @@ release notes PR. The existing bundle checks remain until WP-2 deletes them.
 
 | WP | Days |
 |---|---|
-| WP-1 schema, verifier core, Linux-job checks, broken fixtures | 3.5 |
+| WP-1 schema, verifier core, Linux-job checks, broken fixtures, 7-Zip in the CI image (0.5) | 4 |
 | WP-2 macOS checks, copies deleted | 2 |
-| WP-3 probes (generic launch modes, Dyno's view) | 1.5 |
-| WP-4 workflow jobs, post-publish, C69 | 1 |
+| WP-3 probes (`direct`, `launchd-job`, no test entry points, Dyno's view) | 1.25 |
+| WP-4 workflow jobs incl. the Windows self-test leg (0.75), post-publish, C69 | 1.75 |
 | WP-5 C62 to `main` | 0.25 |
 | Adoption: 6 apps plus 2 demos, about 0.4 each (mostly a `release.toml`) | 3 |
-| **Total** | **11.25** |
+| **Total** | **12.25** |
 
 ## Consequences
 
@@ -193,8 +214,9 @@ release notes PR. The existing bundle checks remain until WP-2 deletes them.
 - What a release promises is readable in one file per app, and reviews of a release-path change (rule 54) read it.
 - Probes that start programs from the artifact must leave nothing behind (ER-14): temp folders, unique launchd labels
   removed, processes ended by identity (rule 53).
-- macOS probes that need a GUI context stay in the local VM. The CI `verify` job covers everything else, and the tag
-  checklist (memory "tag when green") requires the VM probe to be green.
+- The CI `verify` job opens no windows. The GUI checks (start through LaunchServices, tray, dialogs) are ADR 0037's
+  real-app smoke, which runs in the local VM on macOS. The tag checklist requires both to be green.
+- Declared gap: Windows installs (registry, Start menu, uninstall) are not checked in CI. They stay with the local VM.
 
 ## Alternatives considered
 
@@ -206,10 +228,8 @@ release notes PR. The existing bundle checks remain until WP-2 deletes them.
 - **Verify only after publishing.** That is too late: a bad release is already on the updater feed. Kept as the second
   pass only.
 
-## Decisions for the user
+## Decisions taken (user, 2026-11-03)
 
-- **D1:** does the Spotter 1.0 tag wait for WP-1 to WP-4 (about 8 agent-days before the tag), or does it ship with today's
-  checks plus WP-5 and a manual artifact inspection, adopting the verifier in 1.0.1?
-- **D2:** the instance-1 root cause is still open on `fix/dyno-agent-signing-id`: "start the agent from the app through
-  launchd instead of as a child" (the open design question there). The probe in §5 checks either answer, but the choice
-  is Dyno's.
+- **D1: Spotter 1.0 waits** for this gate (WP-1 to WP-4), with the bounded G.7 exception above.
+- **D2: Dyno starts its agent through launchd** (`fix/dyno-agent-via-launchd`). The `launchd-job` probe is therefore the
+  product's own path, and the CI check for instance 1.
