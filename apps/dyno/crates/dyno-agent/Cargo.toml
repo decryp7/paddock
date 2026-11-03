@@ -26,6 +26,9 @@ paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 # The agent's own log (one dated paddock-log file per process, panic hook and crash marker) and the folders it lives in.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# Subscriptions to the user's own lists and the geo databases: the one outbound door (https only, public reach, Offline switch).
+paddock-net = { path = "../../../../crates/paddock-net" }
+paddock-download = { path = "../../../../crates/paddock-download", default-features = false }
 log = { version = "0.4", features = ["kv"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true

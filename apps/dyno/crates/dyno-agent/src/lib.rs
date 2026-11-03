@@ -18,6 +18,7 @@ pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
 pub mod instance;
+pub mod intel_fetch;
 pub mod inventory;
 pub mod issues;
 pub mod jobs;
