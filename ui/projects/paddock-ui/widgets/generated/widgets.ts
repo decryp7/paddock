@@ -66,6 +66,102 @@ export type Refresh = "live" | { "every": {
  */
 secs: number, } } | "onChange";
 
+export type Rect = { 
+/**
+ * Left column, 0-based.
+ */
+x: number, 
+/**
+ * Top row, 0-based.
+ */
+y: number, 
+/**
+ * Width in columns.
+ */
+w: number, 
+/**
+ * Height in rows.
+ */
+h: number, };
+
+export type Dir = "left" | "right" | "up" | "down";
+
+export type GridGesture = { "gesture": "place", 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The target.
+ */
+rect: Rect, } | { "gesture": "nudge", 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The direction.
+ */
+dir: Dir, } | { "gesture": "grow", 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The direction.
+ */
+dir: Dir, } | { "gesture": "toFirst", 
+/**
+ * The placement.
+ */
+id: PlacementId, } | { "gesture": "toLast", 
+/**
+ * The placement.
+ */
+id: PlacementId, };
+
+export type Moves = { 
+/**
+ * Move left.
+ */
+left: boolean, 
+/**
+ * Move right.
+ */
+right: boolean, 
+/**
+ * Move up.
+ */
+up: boolean, 
+/**
+ * Move down.
+ */
+down: boolean, 
+/**
+ * Move to first.
+ */
+first: boolean, 
+/**
+ * Move to last.
+ */
+last: boolean, 
+/**
+ * Wider.
+ */
+wider: boolean, 
+/**
+ * Narrower.
+ */
+narrower: boolean, 
+/**
+ * Taller.
+ */
+taller: boolean, 
+/**
+ * Shorter.
+ */
+shorter: boolean, };
+
 export type Placement<W> = { 
 /**
  * Unique within its layout.

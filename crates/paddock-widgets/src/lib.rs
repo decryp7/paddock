@@ -30,6 +30,7 @@ mod edit;
 mod error;
 #[cfg(test)]
 mod generated;
+mod grid;
 mod id;
 mod layout;
 mod read;
@@ -39,6 +40,10 @@ mod view;
 pub use catalogue::{Catalogue, KindSpec, Refresh, Surface, Widget, check_catalogue};
 pub use edit::{Edit, apply};
 pub use error::{Counted, Note, NoteCode, WidgetError};
+pub use grid::{
+    Block, Dir, GridError, GridGesture, Item, MAX_ROWS, Moves, Rect, Size, SizeRule, Steps,
+    arrange, compact, derive, moves, reading_order,
+};
 pub use id::{BadId, MAX_ID, PlacementId, PresetId};
 pub use layout::{Layout, Placement, Preset, assign_ids};
 pub use read::{MAX_NAME, Read, Stored, read};

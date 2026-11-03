@@ -4,6 +4,7 @@ mod broken;
 mod catalogue;
 mod edits;
 mod errors;
+mod grid;
 mod props;
 mod read;
 mod round_trip;
