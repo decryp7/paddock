@@ -46,6 +46,8 @@ pub trait HelperTransport: Send + Sync {
 pub struct HelperLink<T: HelperTransport> {
     transport: T,
     clock: Arc<dyn Clock>,
+    /// The state last logged at info, so a poll that finds the same state logs at debug (one line per change, not per poll).
+    last_state: std::sync::Mutex<Option<HelperState>>,
 }
 
 fn to_platform(e: TransportError) -> PlatformError {
@@ -69,7 +71,11 @@ fn unexpected(what: &str) -> PlatformError {
 impl<T: HelperTransport> HelperLink<T> {
     /// A link over `transport`; `clock` times the calls for the log.
     pub fn new(transport: T, clock: Arc<dyn Clock>) -> Self {
-        HelperLink { transport, clock }
+        HelperLink {
+            transport,
+            clock,
+            last_state: std::sync::Mutex::new(None),
+        }
     }
 
     fn call(&self, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
@@ -105,7 +111,13 @@ impl<T: HelperTransport> HelperLink<T> {
             Err(TransportError::Remote { code, message }) => Probe::Silent(format!("{code}: {message}")),
         };
         let status = assess(host, supported, probe, our_version);
-        log::info!(State = format!("{:?}", status.state).as_str(); "Helper state");
+        let mut last = self.last_state.lock().unwrap_or_else(|p| p.into_inner());
+        if *last == Some(status.state) {
+            log::debug!(State = format!("{:?}", status.state).as_str(); "Helper state unchanged");
+        } else {
+            log::info!(State = format!("{:?}", status.state).as_str(); "Helper state");
+            *last = Some(status.state);
+        }
         status
     }
 

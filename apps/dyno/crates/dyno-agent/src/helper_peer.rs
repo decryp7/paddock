@@ -1,4 +1,5 @@
-//! The real [`HelperTransport`]: one connection per call through `dyno-helper-service`'s trusted connect (the pipe's owner must
+//! The real [`HelperTransport`]: a connection kept between calls (a status poll is one connect, not one per call; every connect is
+//! one log line in the helper) through `dyno-helper-service`'s trusted connect (the pipe's owner must
 //! be SYSTEM, the socket's folder root's, before a byte is sent). A helper that is not installed is `Absent`; one that is
 //! installed but does not answer is `Silent`; a squatted endpoint is `Foreign` and is never sent anything.
 
@@ -7,6 +8,7 @@ use crate::helper_link::{HelperTransport, TransportError};
 use dyno_core::helper_wire::{HelperMessage, HelperReply, HelperRequest};
 use dyno_helper_service::client::{connect, ConnectError};
 use paddock_ipc::{BodyPeer, IpcError};
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// How long an ordinary request may take before the agent stops waiting for the helper (the helper's own tool timeouts are
@@ -22,6 +24,8 @@ pub struct PeerTransport {
     endpoint: String,
     installed: Box<dyn Fn() -> bool + Send + Sync>,
     open: Opener,
+    /// The connection kept for the next call. A call takes it, so two calls at once use two connections.
+    kept: Mutex<Option<BodyPeer<HelperMessage>>>,
 }
 
 impl PeerTransport {
@@ -32,6 +36,7 @@ impl PeerTransport {
             endpoint: endpoint.into(),
             installed: Box::new(installed),
             open: Box::new(connect),
+            kept: Mutex::new(None),
         }
     }
 
@@ -49,9 +54,9 @@ fn wait_for(request: &HelperRequest) -> Duration {
     }
 }
 
-impl HelperTransport for PeerTransport {
-    fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
-        let peer = (self.open)(&self.endpoint).map_err(|e| match e {
+impl PeerTransport {
+    fn connect(&self) -> Result<BodyPeer<HelperMessage>, TransportError> {
+        (self.open)(&self.endpoint).map_err(|e| match e {
             ConnectError::NotRunning(why) if !(self.installed)() => {
                 log::debug!(why = why.as_str(); "the helper is not installed");
                 TransportError::Absent
@@ -59,19 +64,69 @@ impl HelperTransport for PeerTransport {
             ConnectError::NotRunning(why) => TransportError::Silent(why),
             ConnectError::Untrusted(owner) => TransportError::Foreign(owner),
             ConnectError::Peer(e) => TransportError::Silent(e.to_string()),
-        })?;
+        })
+    }
+
+    fn take(&self) -> Option<BodyPeer<HelperMessage>> {
+        self.kept.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+
+    /// Keeps `peer` for the next call; a connection another call already kept is closed instead.
+    fn keep(&self, peer: BodyPeer<HelperMessage>) {
+        let mut slot = self.kept.lock().unwrap_or_else(|p| p.into_inner());
+        if slot.is_none() {
+            *slot = Some(peer);
+        } else {
+            peer.close();
+        }
+    }
+}
+
+impl HelperTransport for PeerTransport {
+    fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
         let wait = wait_for(&request);
-        let answer = peer.call(HelperMessage::Request(request), wait);
-        peer.close();
-        match answer {
-            Ok(HelperMessage::Reply(r)) => Ok(r),
-            Ok(HelperMessage::Request(_)) => Err(TransportError::Silent("it answered with a request".into())),
-            Err(IpcError::Remote(r)) => Err(TransportError::Remote {
-                code: r.code.to_string(),
-                message: r.message.to_string(),
-            }),
-            Err(IpcError::Timeout) => Err(TransportError::Silent(format!("no answer within {} s", wait.as_secs()))),
-            Err(e) => Err(TransportError::Silent(e.to_string())),
+        let mut reused = true;
+        loop {
+            let peer = match self.take() {
+                Some(p) => p,
+                None => {
+                    reused = false;
+                    self.connect()?
+                }
+            };
+            let answer = peer.call(HelperMessage::Request(request.clone()), wait);
+            match answer {
+                Ok(HelperMessage::Reply(r)) => {
+                    self.keep(peer);
+                    return Ok(r);
+                }
+                Ok(HelperMessage::Request(_)) => {
+                    peer.close();
+                    return Err(TransportError::Silent("it answered with a request".into()));
+                }
+                // The helper refused or failed the request but the connection is fine.
+                Err(IpcError::Remote(r)) => {
+                    self.keep(peer);
+                    return Err(TransportError::Remote {
+                        code: r.code.to_string(),
+                        message: r.message.to_string(),
+                    });
+                }
+                // A kept connection may have gone stale (the helper restarted): once, try again on a fresh one.
+                Err(IpcError::Closed(_) | IpcError::Io { .. } | IpcError::Protocol(_)) if reused => {
+                    peer.close();
+                    reused = false;
+                    continue;
+                }
+                Err(IpcError::Timeout) => {
+                    peer.close();
+                    return Err(TransportError::Silent(format!("no answer within {} s", wait.as_secs())));
+                }
+                Err(e) => {
+                    peer.close();
+                    return Err(TransportError::Silent(e.to_string()));
+                }
+            }
         }
     }
 }
@@ -82,7 +137,8 @@ mod tests {
     use dyno_core::helper_requests::SmartQuery;
     use paddock_ipc::endpoint::pair;
     use paddock_ipc::{BodyHandler, BodyOptions, Connection, FrameLimit, RemoteError};
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     struct Server(Result<HelperMessage, RemoteError>);
     impl BodyHandler<HelperMessage> for Server {
@@ -146,6 +202,47 @@ mod tests {
             refusing(peer, true).call(HelperRequest::Info),
             Err(TransportError::Silent(_))
         ));
+    }
+
+    /// A server that answers `Bye` and counts the connections it was given.
+    fn counting() -> (PeerTransport, Arc<AtomicUsize>) {
+        let opens = Arc::new(AtomicUsize::new(0));
+        let count = opens.clone();
+        let t = PeerTransport::new("x", || true).with_opener(Box::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+            let (ours, theirs) = pair().expect("a stream pair");
+            let server = BodyPeer::<HelperMessage>::start(
+                Connection::raw(theirs, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)),
+                BodyOptions::new("test helper").serve(Server(Ok(HelperMessage::Reply(HelperReply::Bye)))),
+            )
+            .expect("the test server starts");
+            std::mem::forget(server);
+            BodyPeer::start(
+                Connection::raw(ours, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)),
+                BodyOptions::new("the helper"),
+            )
+            .map_err(ConnectError::Peer)
+        }));
+        (t, opens)
+    }
+
+    #[test]
+    fn a_poll_of_many_calls_is_one_connection() {
+        let (t, opens) = counting();
+        for _ in 0..20 {
+            assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
+        }
+        assert_eq!(opens.load(Ordering::SeqCst), 1, "one connect for twenty calls");
+    }
+
+    #[test]
+    fn a_stale_kept_connection_is_replaced_once_and_the_call_still_answers() {
+        let (t, opens) = counting();
+        assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
+        // The helper went away: close the kept connection under the transport.
+        t.kept.lock().unwrap().as_ref().expect("kept").close();
+        assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
+        assert_eq!(opens.load(Ordering::SeqCst), 2);
     }
 
     #[test]

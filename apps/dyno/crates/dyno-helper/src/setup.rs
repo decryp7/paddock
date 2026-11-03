@@ -76,7 +76,58 @@ pub fn uninstall() -> Result<Report, String> {
     if !crate::sys::is_elevated() {
         return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
     }
-    uninstall_in_place(os_of(this_host()), &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())
+    let report =
+        uninstall_in_place(os_of(this_host()), &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())?;
+    // The program and the registration are gone: what the helper wrote next to them goes too (its log of the removal is the
+    // installer's own phase list above, printed by the command).
+    match remove_data_folder(&helper_paths()) {
+        Ok(note) => log::info!(note = note.as_str(); "uninstall: the data folder"),
+        Err(why) => log::warn!(why = why.as_str(); "uninstall: the data folder was kept"),
+    }
+    Ok(report)
+}
+
+/// The helper's own files in its data folder (a name or a prefix of the rotated logs).
+const OWN_FILES: [&str; 3] = ["config.json", "audit.jsonl", "helper.log"];
+/// The helper's own folders in its data folder (the installed tools and the install staging).
+const OWN_DIRS: [&str; 2] = ["tools", "staging"];
+
+/// Removes what the helper wrote into its data folder (`config.json`, the audit log, the logs, the tools and the staging
+/// folder) and then the folder itself when nothing else is in it. A folder that is a link is refused (never followed), anything
+/// else in it stays and is said so. Returns what happened in words for the log.
+///
+/// # Errors
+/// What could not be removed.
+pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
+    let dir = &paths.data_dir;
+    let meta = match std::fs::symlink_metadata(dir) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok("was not there".into()),
+        Err(e) => return Err(format!("{} cannot be read: {e}", dir.display())),
+    };
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(format!(
+            "{} is not the helper's own folder (a link or not a folder), so it was not touched",
+            dir.display()
+        ));
+    }
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{} cannot be read: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        let own_file = kind.is_file() && OWN_FILES.iter().any(|n| name == *n || name.starts_with(&format!("{n}.")));
+        let own_dir = kind.is_dir() && OWN_DIRS.contains(&name.as_str());
+        let path = entry.path();
+        if own_file {
+            std::fs::remove_file(&path).map_err(|e| format!("{} could not be removed: {e}", path.display()))?;
+        } else if own_dir {
+            std::fs::remove_dir_all(&path).map_err(|e| format!("{} could not be removed: {e}", path.display()))?;
+        }
+    }
+    match std::fs::remove_dir(dir) {
+        Ok(()) => Ok("removed".into()),
+        Err(_) => Ok(format!("left in place: {} holds something the helper did not write", dir.display())),
+    }
 }
 
 /// The daemon removing itself after an `Uninstall` request: the files first, the stop of its own job last.
@@ -159,5 +210,48 @@ mod tests {
         assert_eq!(os_of(HelperHost::Macos), Os::MacOs);
         assert_eq!(os_of(HelperHost::Windows), Os::Windows);
         assert_eq!(os_of(HelperHost::Linux), Os::Linux);
+    }
+
+    #[test]
+    fn removing_the_data_folder_takes_only_the_helpers_own_files_and_the_folder_when_it_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::create_dir_all(paths.data_dir.join("tools").join("smartmontools-7.5")).unwrap();
+        std::fs::create_dir_all(paths.data_dir.join("staging")).unwrap();
+        for f in [
+            "config.json",
+            "audit.jsonl",
+            "helper.log",
+            "helper.log.1",
+            "tools/smartmontools-7.5/smartctl",
+            "staging/setup.exe",
+        ] {
+            std::fs::write(paths.data_dir.join(f), b"x").unwrap();
+        }
+        std::fs::write(paths.data_dir.join("notes.txt"), b"someone else's").unwrap();
+        let note = remove_data_folder(&paths).unwrap();
+        assert!(note.contains("left in place"), "{note}");
+        let left: Vec<_> = std::fs::read_dir(&paths.data_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, ["notes.txt"], "only what the helper wrote went: {left:?}");
+        std::fs::remove_file(paths.data_dir.join("notes.txt")).unwrap();
+        assert_eq!(remove_data_folder(&paths).unwrap(), "removed");
+        assert!(!paths.data_dir.exists());
+        assert_eq!(remove_data_folder(&paths).unwrap(), "was not there");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_that_is_a_link_is_never_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("config.json"), b"not ours").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &paths.data_dir).unwrap();
+        assert!(remove_data_folder(&paths).is_err());
+        assert!(elsewhere.join("config.json").exists());
     }
 }
