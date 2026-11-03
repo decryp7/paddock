@@ -495,6 +495,10 @@ fn moves_agree_with_applying_each_gesture() {
     assert_eq!(none, Default::default());
     let overlapping = vec![item("a", 0, 0, 6, 4), item("b", 3, 0, 6, 4)];
     assert_eq!(moves(&overlapping, 12, &id("a")), Default::default());
+    assert_eq!(
+        paddock_widgets::moves_all(&overlapping, 12),
+        vec![Default::default(); 2]
+    );
 }
 
 // ---- Derive ----
@@ -639,6 +643,7 @@ fn assert_gravity(items: &[Item]) {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
     #[test]
     fn arrangements_stay_valid_compact_and_deterministic(
         items in arbitrary_items(),
@@ -666,13 +671,26 @@ proptest! {
     }
 
     #[test]
-    fn moves_match_applying_the_gesture(items in arbitrary_items(), pick in any::<usize>()) {
+    fn moves_match_applying_every_gesture(items in arbitrary_items(), pick in any::<usize>()) {
         let id = items[pick % items.len()].id.clone();
         let m = moves(&items, 12, &id);
         let ok = |g| arrange(&items, 12, &g).is_ok();
-        prop_assert_eq!(m.right, ok(GridGesture::Nudge { id: id.clone(), dir: Dir::Right }));
-        prop_assert_eq!(m.taller, ok(GridGesture::Grow { id: id.clone(), dir: Dir::Down }));
-        prop_assert_eq!(m.first, ok(GridGesture::ToFirst { id }));
+        let n = |dir| GridGesture::Nudge { id: id.clone(), dir };
+        let g = |dir| GridGesture::Grow { id: id.clone(), dir };
+        prop_assert_eq!(m.left, ok(n(Dir::Left)));
+        prop_assert_eq!(m.right, ok(n(Dir::Right)));
+        prop_assert_eq!(m.up, ok(n(Dir::Up)));
+        prop_assert_eq!(m.down, ok(n(Dir::Down)));
+        prop_assert_eq!(m.wider, ok(g(Dir::Right)));
+        prop_assert_eq!(m.narrower, ok(g(Dir::Left)));
+        prop_assert_eq!(m.taller, ok(g(Dir::Down)));
+        prop_assert_eq!(m.shorter, ok(g(Dir::Up)));
+        prop_assert_eq!(m.first, ok(GridGesture::ToFirst { id: id.clone() }));
+        prop_assert_eq!(m.last, ok(GridGesture::ToLast { id: id.clone() }));
+        // The batch answer is the single one.
+        let all = paddock_widgets::moves_all(&items, 12);
+        let position = items.iter().position(|i| i.id == id).unwrap();
+        prop_assert_eq!(all[position], m);
     }
 
     #[test]
@@ -687,4 +705,40 @@ proptest! {
             }
         }
     }
+}
+
+// ---- A board with no room below ----
+
+/// 36 full-width items of 14 rows: the stack ends at row 504 of 512.
+fn full_board() -> Vec<Item> {
+    (0..36u16)
+        .map(|n| item(&format!("f{n}"), 0, n * 14, 12, 14))
+        .collect()
+}
+
+#[test]
+fn a_push_past_the_last_row_is_no_room() {
+    let r = arrange(&full_board(), 12, &place("f0", Rect::new(0, 10, 12, 14))).map(|v| v.len());
+    assert_eq!(r, Err(GridError::NoRoom));
+}
+
+#[test]
+fn moves_on_a_board_with_no_room_are_still_what_applying_each_gesture_says() {
+    let items = full_board();
+    let all = paddock_widgets::moves_all(&items, 12);
+    for (n, i) in items.iter().enumerate() {
+        let id = i.id.clone();
+        let ok = |g| arrange(&items, 12, &g).is_ok();
+        let m = all[n];
+        assert_eq!(m.up, ok(nudge(id.as_str(), Dir::Up)), "{id}");
+        assert_eq!(m.down, ok(nudge(id.as_str(), Dir::Down)), "{id}");
+        assert_eq!(m.left, ok(nudge(id.as_str(), Dir::Left)), "{id}");
+        assert_eq!(m.taller, ok(grow(id.as_str(), Dir::Down)), "{id}");
+        assert_eq!(m.shorter, ok(grow(id.as_str(), Dir::Up)), "{id}");
+        assert_eq!(m.first, ok(GridGesture::ToFirst { id: id.clone() }), "{id}");
+        assert_eq!(m.last, ok(GridGesture::ToLast { id: id.clone() }), "{id}");
+    }
+    // The first of the stack cannot go up or be first; passing the second needs 14 more rows than there are.
+    assert!(!all[0].up && !all[0].first);
+    assert!(!all[0].down || arrange(&items, 12, &nudge("f0", Dir::Down)).is_ok());
 }

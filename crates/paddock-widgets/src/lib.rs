@@ -47,7 +47,7 @@ pub use edit::{Edit, apply};
 pub use error::{Counted, Note, NoteCode, WidgetError};
 pub use grid::{
     Block, Dir, GridError, GridGesture, Item, MAX_ROWS, Moves, Rect, Size, SizeRule, Steps,
-    arrange, compact, derive, moves, reading_order,
+    arrange, compact, derive, moves, moves_all, reading_order,
 };
 pub use id::{BadId, MAX_ID, PlacementId, PresetId};
 pub use layout::{Layout, Placement, Preset, UNDO_DEPTH, assign_ids, assign_spans};

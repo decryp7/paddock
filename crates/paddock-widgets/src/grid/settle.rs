@@ -8,7 +8,7 @@ use super::steps::SizeRule;
 use crate::id::PlacementId;
 
 /// Reading order: row, then column, then id.
-fn order(a: &Item, b: &Item) -> Ordering {
+pub(crate) fn order(a: &Item, b: &Item) -> Ordering {
     (a.rect.y, a.rect.x, a.id.as_str()).cmp(&(b.rect.y, b.rect.x, b.id.as_str()))
 }
 
@@ -63,7 +63,7 @@ fn index_of(items: &[Item], id: &PlacementId) -> Result<usize, GridError> {
 }
 
 /// A valid arrangement: every rectangle inside the grid, no overlap, no repeated id.
-fn validate(items: &[Item], columns: u8) -> Result<(), GridError> {
+pub(crate) fn validate(items: &[Item], columns: u8) -> Result<(), GridError> {
     for (n, a) in items.iter().enumerate() {
         if !a.rect.fits(columns) {
             return Err(GridError::Invalid);
@@ -101,15 +101,12 @@ fn put(mut items: Vec<Item>, i: usize, target: Rect) -> Result<Vec<Item>, GridEr
         }
     }
     items[i].rect = target;
-    let mut placed = vec![target];
-    for item in reading_order(
-        items
-            .iter()
-            .filter(|it| it.id != items[i].id)
-            .cloned()
-            .collect(),
-    ) {
-        let mut rect = item.rect;
+    let mut placed = Vec::with_capacity(items.len());
+    placed.push(target);
+    let mut order: Vec<usize> = (0..items.len()).filter(|&j| j != i).collect();
+    order.sort_by(|&a, &b| self::order(&items[a], &items[b]));
+    for j in order {
+        let mut rect = items[j].rect;
         while let Some(bottom) = placed
             .iter()
             .filter(|p| p.overlaps(&rect))
@@ -119,9 +116,7 @@ fn put(mut items: Vec<Item>, i: usize, target: Rect) -> Result<Vec<Item>, GridEr
             rect = rect.at_row(bottom).ok_or(GridError::NoRoom)?;
         }
         placed.push(rect);
-        if let Some(slot) = items.iter_mut().find(|it| it.id == item.id) {
-            slot.rect = rect;
-        }
+        items[j].rect = rect;
     }
     compact(items)
 }
@@ -134,10 +129,13 @@ fn exchange(mut items: Vec<Item>, i: usize, j: usize) -> Result<Vec<Item>, GridE
     compact(items)
 }
 
+/// Whether both lists hold the same rectangles per id. Linear when both are in the same order (the usual case: the
+/// arrangement is kept in reading order).
 fn same_rects(a: &[Item], b: &[Item]) -> bool {
     a.len() == b.len()
-        && a.iter()
-            .all(|x| b.iter().any(|y| y.id == x.id && y.rect == x.rect))
+        && (a.iter().zip(b).all(|(x, y)| x.id == y.id && x.rect == y.rect)
+            // Not in the same order: the first rectangle that differs ends the search, the usual case of a change.
+            || a.iter().all(|x| b.iter().any(|y| y.id == x.id && y.rect == x.rect)))
 }
 
 /// Applies one gesture to a valid arrangement of `columns` columns and returns the new one, compact and in reading
@@ -145,38 +143,43 @@ fn same_rects(a: &[Item], b: &[Item]) -> bool {
 /// [`GridGesture::Place`] on its own place is accepted and changes nothing.
 pub fn arrange(items: &[Item], columns: u8, gesture: &GridGesture) -> Result<Vec<Item>, GridError> {
     validate(items, columns)?;
-    let items = items.to_vec();
+    arrange_valid(items, columns, gesture)
+}
+
+/// [`arrange`] for an arrangement already known to be valid. Works on the slice and clones only when the gesture does
+/// something, so the many probes of [`super::moves`] stay cheap.
+pub(crate) fn arrange_valid(
+    items: &[Item],
+    columns: u8,
+    gesture: &GridGesture,
+) -> Result<Vec<Item>, GridError> {
     match gesture {
         GridGesture::Place { id, rect } => {
-            let i = index_of(&items, id)?;
+            let i = index_of(items, id)?;
             let target = clamp(*rect, &items[i].rule, columns);
-            put(items, i, target)
+            put(items.to_vec(), i, target)
         }
         GridGesture::Nudge { id, dir } => {
-            let i = index_of(&items, id)?;
-            let before = items.clone();
-            let next = match keys::nudge(&items, i, *dir, columns).map_err(GridError::Blocked)? {
-                Move::To(rect) => put(items, i, rect)?,
-                Move::Exchange(j) => exchange(items, i, j)?,
+            let i = index_of(items, id)?;
+            let next = match keys::nudge(items, i, *dir, columns).map_err(GridError::Blocked)? {
+                Move::To(rect) => put(items.to_vec(), i, rect)?,
+                Move::Exchange(j) => exchange(items.to_vec(), i, j)?,
             };
-            changed(&before, next)
+            changed(items, next)
         }
         GridGesture::Grow { id, dir } => {
-            let i = index_of(&items, id)?;
-            let before = items.clone();
+            let i = index_of(items, id)?;
             let rect = keys::grow(&items[i], *dir, columns).map_err(GridError::Blocked)?;
-            changed(&before, put(items, i, rect)?)
+            changed(items, put(items.to_vec(), i, rect)?)
         }
         GridGesture::ToFirst { id } => {
-            let i = index_of(&items, id)?;
-            let before = items.clone();
+            let i = index_of(items, id)?;
             let rect = keys::first(&items[i]);
-            changed(&before, put(items, i, rect)?)
+            changed(items, put(items.to_vec(), i, rect)?)
         }
         GridGesture::ToLast { id } => {
-            let i = index_of(&items, id)?;
-            let before = items.clone();
-            changed(&before, to_last(items, i, columns)?)
+            let i = index_of(items, id)?;
+            changed(items, to_last(items.to_vec(), i, columns)?)
         }
     }
 }

@@ -170,9 +170,10 @@ Results of shared crates (rule 48: shared code records here), newest first.
 
 ### 2026-11-03, paddock-widgets: grid engine, 32 placements (feat/widgets-grid)
 
-- **What:** `cargo bench -p paddock-widgets` (`crates/paddock-widgets/benches/grid.rs`): ADR 0044 §7 budgets, a 32-widget board of 3 by 4 cells.
+- **What:** `cargo bench -p paddock-widgets` (`crates/paddock-widgets/benches/grid.rs`): ADR 0044 §7 budgets, a 32-widget board of 3 by 4 cells; each line is the fastest of 15 batches (the machine is shared).
 - **Machine and load:** Mac mini, release build, run through the plock queue (load about 4 to 20), single thread.
-- **Results:** a drop (`arrange`, Place) 4.3 us per run against the 50 us budget; a nudge 3.5 us; the derived 6- and 1-column arrangements plus `moves` for all 32 placements (320 gestures applied) 1.54 ms per run. The ADR's 200 us budget for a view with its arrangements does not hold once the moves of every placement are included (each of the 320 gestures clones the board); an edit or a preview still stays far under the 8 ms round-trip budget. Optimising `moves` (one validation, no per-gesture clone) is open.
+- **Before** (first version, mean of 200 runs): a drop 4.3 us (budget 50); the derived 6- and 1-column arrangements plus the moves of all 32 placements 1,538 us against the ADR's 200 us budget: 320 gestures were each applied to a clone of the board.
+- **After** (rule 51, cheaper): a drop 2.4 us; a nudge 2.4 us; both derived arrangements 4.0 us; the moves of all 32 placements 58.6 us; the whole view computation 63.2 us (budget 200). What changed: ids are `Arc<str>` (a board clone allocates nothing); one validation and one room check for all placements; a gesture that has somewhere to go is known to change the arrangement when no push can run past the last row (the proptest `moves_match_applying_every_gesture` checks the shortcut against applying each of the ten gestures, 1,000 random boards), so only End is applied to be answered; a drop settles with indices instead of looking ids up. Intermediate steps on the way: 236 us with the slice-based probes alone, 225 us with the index-based settle.
 
 ### 2026-10-29, paddock-chromium: Browser.close exit time under load (fix/flaky-browser-close)
 

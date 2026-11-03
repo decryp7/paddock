@@ -5,7 +5,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use paddock_widgets::{
-    Dir, GridGesture, Item, PlacementId, Rect, Size, SizeRule, Steps, arrange, derive, moves,
+    Dir, GridGesture, Item, PlacementId, Rect, Size, SizeRule, Steps, arrange, derive, moves_all,
 };
 
 const RULE: SizeRule = SizeRule {
@@ -24,15 +24,19 @@ fn board() -> Vec<Item> {
         .collect()
 }
 
+/// The fastest of 15 batches (the machine is shared and loaded; the minimum is the least disturbed one).
 fn time<T>(name: &str, runs: u32, mut f: impl FnMut() -> T) {
-    let start = Instant::now();
-    for _ in 0..runs {
-        black_box(f());
-    }
-    println!(
-        "{name}: {:.1} us per run ({runs} runs)",
-        start.elapsed().as_secs_f64() * 1e6 / f64::from(runs)
-    );
+    let batch = (runs / 15).max(1);
+    let best = (0..15)
+        .map(|_| {
+            let start = Instant::now();
+            for _ in 0..batch {
+                black_box(f());
+            }
+            start.elapsed().as_secs_f64() * 1e6 / f64::from(batch)
+        })
+        .fold(f64::MAX, f64::min);
+    println!("{name}: {best:.1} us per run (best of 15 batches of {batch})");
 }
 
 fn main() {
@@ -58,16 +62,17 @@ fn main() {
             },
         )
     });
+    time("derive 6 and 1 columns", 2000, || {
+        (derive(&items, 12, 6), derive(&items, 12, 1))
+    });
+    time("moves of all 32 placements", 2000, || moves_all(&items, 12));
     time(
         "view: three arrangements and the moves of 32 placements",
-        200,
+        2000,
         || {
             let _ = derive(&items, 12, 6);
             let _ = derive(&items, 12, 1);
-            items
-                .iter()
-                .filter(|i| moves(&items, 12, &i.id).first)
-                .count()
+            moves_all(&items, 12)
         },
     );
 }

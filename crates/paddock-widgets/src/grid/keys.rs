@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::model::{Block, Dir, GridGesture, Item, Rect};
-use super::settle::arrange;
+use super::settle::{arrange_valid, validate};
 
 /// Where a nudge sends the placement.
 pub(crate) enum Move {
@@ -144,42 +144,73 @@ pub struct Moves {
 /// The [`Moves`] of one placement: each gesture is applied and kept if it works, so the answer is the edit's own.
 /// An unknown id or an invalid arrangement gives all `false`.
 pub fn moves(items: &[Item], columns: u8, id: &crate::PlacementId) -> Moves {
-    let ok = |g: GridGesture| arrange(items, columns, &g).is_ok();
-    let id = || id.clone();
+    if validate(items, columns).is_err() {
+        return Moves::default();
+    }
+    probe(items, columns, id, room_for_any_push(items))
+}
+
+/// The [`Moves`] of every placement, in the items' order: one validation and one room check for all of them.
+pub fn moves_all(items: &[Item], columns: u8) -> Vec<Moves> {
+    if validate(items, columns).is_err() {
+        return vec![Moves::default(); items.len()];
+    }
+    let room = room_for_any_push(items);
+    items
+        .iter()
+        .map(|i| probe(items, columns, &i.id, room))
+        .collect()
+}
+
+/// Whether no push can run past the last row: the bottom of the arrangement plus every height still fits, so a resize
+/// that its rule allows cannot fail for lack of room and need not be applied to be known to work.
+fn room_for_any_push(items: &[Item]) -> bool {
+    let bottom = items.iter().map(|i| i.rect.bottom()).max().unwrap_or(0);
+    let heights: u32 = items.iter().map(|i| u32::from(i.rect.h)).sum();
+    bottom + heights + u32::from(u8::MAX) <= u32::from(super::MAX_ROWS)
+}
+
+fn probe(items: &[Item], columns: u8, id: &crate::PlacementId, room: bool) -> Moves {
+    let Some(idx) = items.iter().position(|i| &i.id == id) else {
+        return Moves::default();
+    };
+    let item = &items[idx];
+    let ok = |g: GridGesture| arrange_valid(items, columns, &g).is_ok();
+    // With room below (no push can run past the last row), a gesture that has somewhere to go always changes the
+    // arrangement: the placement ends on another rectangle, or exchanges places with another one. So the keys are
+    // answered from where the gesture would go, without settling the arrangement for each of them.
+    let nudges = |dir: Dir| match nudge(items, idx, dir, columns) {
+        Ok(_) if room => true,
+        Ok(_) => ok(GridGesture::Nudge {
+            id: item.id.clone(),
+            dir,
+        }),
+        Err(_) => false,
+    };
+    let grows = |dir: Dir| match grow(item, dir, columns) {
+        Ok(_) if room => true,
+        Ok(_) => ok(GridGesture::Grow {
+            id: item.id.clone(),
+            dir,
+        }),
+        Err(_) => false,
+    };
+    let at_origin = item.rect.x == 0 && item.rect.y == 0;
     Moves {
-        left: ok(GridGesture::Nudge {
-            id: id(),
-            dir: Dir::Left,
+        left: nudges(Dir::Left),
+        right: nudges(Dir::Right),
+        up: nudges(Dir::Up),
+        down: nudges(Dir::Down),
+        first: !at_origin && room
+            || ok(GridGesture::ToFirst {
+                id: item.id.clone(),
+            }),
+        last: ok(GridGesture::ToLast {
+            id: item.id.clone(),
         }),
-        right: ok(GridGesture::Nudge {
-            id: id(),
-            dir: Dir::Right,
-        }),
-        up: ok(GridGesture::Nudge {
-            id: id(),
-            dir: Dir::Up,
-        }),
-        down: ok(GridGesture::Nudge {
-            id: id(),
-            dir: Dir::Down,
-        }),
-        first: ok(GridGesture::ToFirst { id: id() }),
-        last: ok(GridGesture::ToLast { id: id() }),
-        wider: ok(GridGesture::Grow {
-            id: id(),
-            dir: Dir::Right,
-        }),
-        narrower: ok(GridGesture::Grow {
-            id: id(),
-            dir: Dir::Left,
-        }),
-        taller: ok(GridGesture::Grow {
-            id: id(),
-            dir: Dir::Down,
-        }),
-        shorter: ok(GridGesture::Grow {
-            id: id(),
-            dir: Dir::Up,
-        }),
+        wider: grows(Dir::Right),
+        narrower: grows(Dir::Left),
+        taller: grows(Dir::Down),
+        shorter: grows(Dir::Up),
     }
 }
