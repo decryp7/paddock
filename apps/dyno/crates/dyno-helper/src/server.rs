@@ -4,7 +4,7 @@
 
 use crate::auth::{ImageOf, Policy};
 use crate::dispatch::Dispatcher;
-use dyno_core::helper_wire::{codes, HelperMessage, MAX_FRAME, WIRE_MAJOR};
+use dyno_core::helper_wire::{codes, HelperMessage, WIRE_MAJOR};
 use paddock_ipc::ProtocolVersion;
 use paddock_ipc::{BodyHandler, BodyOptions, BodyPeer, Host, IpcError, RemoteError};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -113,6 +113,7 @@ mod tests {
     use dyno_core::helper::HelperHost;
     use dyno_core::helper_wire::{HelperInfo, HelperReply, HelperRequest, HelperUser};
     use dyno_core::ports::{PlatformError, ProcessTraffic};
+    use dyno_core::helper_wire::MAX_FRAME;
     use paddock_ipc::{Client, FrameLimit, Token};
     use std::path::PathBuf;
 
