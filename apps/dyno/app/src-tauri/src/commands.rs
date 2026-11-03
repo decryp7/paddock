@@ -227,9 +227,11 @@ pub async fn open_taskbar_settings(app: AppHandle) -> Result<Value, CommandError
     if !cfg!(windows) {
         return Err(CommandError::bad("The taskbar settings page exists on Windows only."));
     }
-    app.opener()
-        .open_url(TASKBAR_SETTINGS_URL, None::<&str>)
-        .map_err(|e| CommandError::internal(format!("The Windows taskbar settings could not be opened ({e}). Open Settings > Personalization > Taskbar.")))?;
+    app.opener().open_url(TASKBAR_SETTINGS_URL, None::<&str>).map_err(|e| {
+        CommandError::internal(format!(
+            "The Windows taskbar settings could not be opened ({e}). Open Settings > Personalization > Taskbar."
+        ))
+    })?;
     Ok(Value::Null)
 }
 

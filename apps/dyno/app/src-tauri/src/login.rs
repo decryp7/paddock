@@ -127,9 +127,8 @@ impl CliService {
 #[cfg(not(target_os = "macos"))]
 impl AgentService for CliService {
     fn installed(&mut self) -> bool {
-        self.service().is_ok_and(|mut s| {
-            !s.app_is_logon_entry() && !matches!(s.status(), dyno_agent::service::Status::NotInstalled)
-        })
+        self.service()
+            .is_ok_and(|mut s| !s.app_is_logon_entry() && !matches!(s.status(), dyno_agent::service::Status::NotInstalled))
     }
 
     fn install(&mut self) -> Result<(), String> {
@@ -740,8 +739,14 @@ mod tests {
 
     fn upgrade(stale: bool, start_at_login: bool) -> (Result<bool, String>, Vec<String>) {
         let calls = Calls::default();
-        let mut s = StaleService { stale, calls: calls.0.clone() };
-        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let mut s = StaleService {
+            stale,
+            calls: calls.0.clone(),
+        };
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
         let r = repair_stale_agent_entry(start_at_login, &mut s, &mut a);
         let log = calls.0.lock().unwrap().clone();
         (r, log)
@@ -749,7 +754,10 @@ mod tests {
 
     #[test]
     fn upgrading_from_1_0_0_with_start_at_login_on_puts_the_apps_entry_back() {
-        assert_eq!(upgrade(true, true), (Ok(true), vec!["repair".to_string(), "autostart true".to_string()]));
+        assert_eq!(
+            upgrade(true, true),
+            (Ok(true), vec!["repair".to_string(), "autostart true".to_string()])
+        );
     }
 
     #[test]

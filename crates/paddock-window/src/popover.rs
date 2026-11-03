@@ -162,7 +162,11 @@ pub fn click_closes(since_closed: Option<Duration>) -> bool {
 
 /// The blur grace of platform `os`: [`BLUR_GRACE`] on Windows, none elsewhere (macOS and Linux keep closing on every blur).
 pub fn blur_grace_for(os: &str) -> Duration {
-    if os == "windows" { BLUR_GRACE } else { Duration::ZERO }
+    if os == "windows" {
+        BLUR_GRACE
+    } else {
+        Duration::ZERO
+    }
 }
 
 /// What a blur (the popover lost the focus) does.
@@ -211,7 +215,10 @@ pub fn grace_end(focused: bool, shell_foreground: bool) -> GraceEnd {
 pub fn is_shell_class(class: &str) -> bool {
     matches!(
         class,
-        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "NotifyIconOverflowWindow" | "TopLevelWindowForOverflowXamlIsland"
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
     )
 }
 
@@ -316,10 +323,16 @@ mod tests {
     fn a_blur_right_after_showing_keeps_the_popover_a_later_one_closes_it() {
         let g = BLUR_GRACE;
         assert_eq!(blur_action(Duration::from_millis(5), g), BlurAction::Keep);
-        assert_eq!(blur_action(g - Duration::from_millis(1), g), BlurAction::Keep);
+        assert_eq!(
+            blur_action(g - Duration::from_millis(1), g),
+            BlurAction::Keep
+        );
         assert_eq!(blur_action(g, g), BlurAction::Close);
         assert_eq!(blur_action(Duration::from_secs(30), g), BlurAction::Close);
-        assert_eq!(blur_action(Duration::ZERO, Duration::ZERO), BlurAction::Close);
+        assert_eq!(
+            blur_action(Duration::ZERO, Duration::ZERO),
+            BlurAction::Close
+        );
     }
 
     #[test]

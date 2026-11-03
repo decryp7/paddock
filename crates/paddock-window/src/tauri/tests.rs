@@ -21,8 +21,8 @@ use ::tauri::{
     WindowEvent,
 };
 use paddock_commands::tauri::Guard;
-use paddock_jobs::FakeClock;
 use paddock_dialogs::placement::{Monitor, Rect};
+use paddock_jobs::FakeClock;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1080,7 +1080,10 @@ fn only_windows_gives_a_blur_grace_unless_one_is_set() {
     assert_eq!(windows.grace(), crate::popover::BLUR_GRACE);
     let mac = Popovers::new().style(style("macos"));
     assert_eq!(mac.grace(), Duration::ZERO);
-    assert_eq!(mac.blur_grace(Duration::from_secs(1)).grace(), Duration::from_secs(1));
+    assert_eq!(
+        mac.blur_grace(Duration::from_secs(1)).grace(),
+        Duration::from_secs(1)
+    );
 }
 
 #[test]
@@ -1091,7 +1094,10 @@ fn a_blur_right_after_showing_keeps_the_popover_while_the_shell_has_the_foregrou
     let h = app.handle();
     assert_eq!(toggle_popover(h, None, icon()), Ok(true));
     blur(&app, "tray");
-    assert!(app.state::<Popovers>().is_open("tray"), "an immediate blur must not close it");
+    assert!(
+        app.state::<Popovers>().is_open("tray"),
+        "an immediate blur must not close it"
+    );
     // The grace is over: the shell still has the foreground, the popover asks for the focus again and stays.
     assert!(clock.wait_for_started(1, GUARD));
     clock.advance(crate::popover::BLUR_GRACE);

@@ -77,8 +77,12 @@ mod tests {
 
     #[test]
     fn only_a_value_that_starts_the_agent_is_the_stale_entry() {
-        assert!(is_agent_run_value("    Dyno    REG_SZ    \"C:\\Users\\a\\AppData\\Local\\Dyno\\dyno-agent.exe\" run\r\n"));
-        assert!(!is_agent_run_value("    Dyno    REG_SZ    C:\\Users\\a\\AppData\\Local\\Dyno\\dyno-app.exe --hidden"));
+        assert!(is_agent_run_value(
+            "    Dyno    REG_SZ    \"C:\\Users\\a\\AppData\\Local\\Dyno\\dyno-agent.exe\" run\r\n"
+        ));
+        assert!(!is_agent_run_value(
+            "    Dyno    REG_SZ    C:\\Users\\a\\AppData\\Local\\Dyno\\dyno-app.exe --hidden"
+        ));
         assert!(!is_agent_run_value(""));
     }
 

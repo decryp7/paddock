@@ -241,7 +241,10 @@ mod tests {
         // The released 1.0.0 agent had the dotted identifier and still got the cut-down view, yet the page said it lacked a dot.
         let m = cut_down_message(Some("net.decryptology.dyno.agent"));
         assert!(!m.contains("needs a code-signing identifier"), "{m}");
-        assert!(m.contains("net.decryptology.dyno.agent") && m.contains("child process") && m.contains("Quit Dyno"), "{m}");
+        assert!(
+            m.contains("net.decryptology.dyno.agent") && m.contains("child process") && m.contains("Quit Dyno"),
+            "{m}"
+        );
         assert!(cut_down_message(Some("dyno-agent-55554944")).contains("this build has dyno-agent-55554944"));
         assert!(cut_down_message(None).contains("could not be read"));
     }

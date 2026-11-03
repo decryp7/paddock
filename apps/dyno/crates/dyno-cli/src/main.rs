@@ -13,7 +13,10 @@ fn main() {
 /// Runs the `dyno-agent` program next to this one with `args`, on this console, and returns its exit code. The CLI never
 /// links the agent (ADR 0014); on Windows the agent is a GUI-subsystem program and a prompt neither waits for it nor shows its
 /// output, but a console program that starts it and waits does.
-#[expect(clippy::disallowed_methods, reason = "the CLI has no process helper crate; a fixed sibling program, inherited stdio")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the CLI has no process helper crate; a fixed sibling program, inherited stdio"
+)]
 fn run_agent(args: &[String]) -> i32 {
     let exe = match std::env::current_exe() {
         Ok(p) => p.with_file_name(if cfg!(windows) { "dyno-agent.exe" } else { "dyno-agent" }),

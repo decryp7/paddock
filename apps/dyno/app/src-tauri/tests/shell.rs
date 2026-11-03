@@ -294,7 +294,11 @@ fn the_start_sets_up_the_user_files_service_the_about_link_needs() {
         let _ = tx.send(has);
     });
     let has = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the start finished");
-    assert_eq!(has, Ok(true), "files_open_url has no service: About's releases link cannot open the browser");
+    assert_eq!(
+        has,
+        Ok(true),
+        "files_open_url has no service: About's releases link cannot open the browser"
+    );
 }
 
 /// Started at log-in (`--hidden`) with a tray: Dyno stays in the tray without a window.

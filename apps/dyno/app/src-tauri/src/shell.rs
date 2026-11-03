@@ -231,10 +231,16 @@ impl<R: Runtime> ShellOf<R> {
                     match login::repair_stale_agent_entry(wanted, service.as_mut(), autostart.as_mut()) {
                         Ok(true) => logging::info(&format!(
                             "removed the stale agent logon entry that Dyno 1.0.0 wrote; the app's own entry is {}",
-                            if wanted { "registered again" } else { "not needed (start at login is off)" }
+                            if wanted {
+                                "registered again"
+                            } else {
+                                "not needed (start at login is off)"
+                            }
                         )),
                         Ok(false) => {}
-                        Err(e) => log::warn!(target: "dyno", Error = e.as_str(); "The stale agent logon entry of Dyno 1.0.0 could not be repaired; start at login may start only the agent. Turn Start at login off and on in Settings."),
+                        Err(e) => {
+                            log::warn!(target: "dyno", Error = e.as_str(); "The stale agent logon entry of Dyno 1.0.0 could not be repaired; start at login may start only the agent. Turn Start at login off and on in Settings.")
+                        }
                     }
                 }
                 Ok(())

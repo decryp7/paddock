@@ -103,7 +103,10 @@ pub(crate) fn foreground_class() -> Option<String> {
         }
         let mut buf = [0u16; 256];
         let n = GetClassNameW(hwnd, &mut buf);
-        usize::try_from(n).ok().filter(|n| *n > 0).map(|n| String::from_utf16_lossy(&buf[..n]))
+        usize::try_from(n)
+            .ok()
+            .filter(|n| *n > 0)
+            .map(|n| String::from_utf16_lossy(&buf[..n]))
     }
 }
 

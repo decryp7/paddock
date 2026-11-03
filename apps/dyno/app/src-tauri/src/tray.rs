@@ -159,7 +159,10 @@ pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
         // Told once per item (a draw every second would flood the log), and every failure.
         let first = lock(&state.painted).insert(item.to_string(), true).is_none();
         if let Err(e) = &set {
-            logging::info(&format!("tray icon {}: the drawn image ({size}x{size} px) was refused: {e}", tray_id(item)));
+            logging::info(&format!(
+                "tray icon {}: the drawn image ({size}x{size} px) was refused: {e}",
+                tray_id(item)
+            ));
         } else if first {
             logging::info(&format!("tray icon {}: first drawn image set, {size}x{size} px", tray_id(item)));
         }

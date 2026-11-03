@@ -209,7 +209,9 @@ impl Service {
                 Ok(())
             }
             Os::Windows => {
-                let _ = self.runner.run("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE, "/f"]);
+                let _ = self
+                    .runner
+                    .run("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE, "/f"]);
                 self.clear_stale_run_entry().map(|_| ())
             }
         }
@@ -242,7 +244,10 @@ impl Service {
                     .unwrap_or(false);
                 Status::Installed { running, current }
             }
-            Os::Windows => match self.runner.run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE]) {
+            Os::Windows => match self
+                .runner
+                .run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE])
+            {
                 Ok((true, out)) => Status::Installed {
                     running: true,
                     current: out.contains(&*self.exe.to_string_lossy()),
@@ -264,7 +269,10 @@ impl Service {
         if self.os != Os::Windows {
             return Ok(false);
         }
-        match self.runner.run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_APP_VALUE]) {
+        match self
+            .runner
+            .run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_APP_VALUE])
+        {
             Ok((true, out)) if spec::is_agent_run_value(&out) => {
                 self.check("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_APP_VALUE, "/f"])?;
                 Ok(true)

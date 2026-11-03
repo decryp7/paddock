@@ -5,17 +5,20 @@
 use super::manager::{apply_feel, lock};
 use crate::feel::WebviewFeel;
 use crate::popover::{
-    BlurAction, CLOSING_SCRIPT, DEFAULT_HEIGHT, FADE, GraceEnd, Material, Rect, Style, blur_action, blur_grace_for,
-    click_closes, fit_height, fit_width, grace_end, init_script, is_popover, is_shell_class, label_for, place, refit_top,
+    BlurAction, CLOSING_SCRIPT, DEFAULT_HEIGHT, FADE, GraceEnd, Material, Rect, Style, blur_action,
+    blur_grace_for, click_closes, fit_height, fit_width, grace_end, init_script, is_popover,
+    is_shell_class, label_for, place, refit_top,
 };
-use paddock_jobs::{CancelToken, Clock, SystemClock};
 use crate::wire::{WindowError, WindowErrorCode};
+#[cfg(windows)]
+use ::tauri::WebviewWindow;
 use ::tauri::utils::config::{Color, WindowEffectsConfig};
 use ::tauri::window::{Effect, EffectState};
 use ::tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, Runtime, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder, WindowEvent,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, Runtime, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
 };
+use paddock_jobs::{CancelToken, Clock, SystemClock};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -116,13 +119,17 @@ impl Popovers {
     }
 
     /// Where the class of the foreground window comes from (tests; the OS by default).
-    pub fn foreground_class(mut self, f: impl Fn() -> Option<String> + Send + Sync + 'static) -> Self {
+    pub fn foreground_class(
+        mut self,
+        f: impl Fn() -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
         self.foreground = Arc::new(f);
         self
     }
 
     pub(crate) fn grace(&self) -> Duration {
-        self.blur_grace.unwrap_or_else(|| blur_grace_for(self.style.os))
+        self.blur_grace
+            .unwrap_or_else(|| blur_grace_for(self.style.os))
     }
 
     /// Runs `f` on a helper thread that [`Popovers::join_threads`] can wait for.
@@ -133,7 +140,9 @@ impl Popovers {
                 threads.retain(|t| !t.is_finished());
                 threads.push(h);
             }
-            Err(e) => log::warn!(Thread = name, Error = e.to_string().as_str(); "Could not start a thread"),
+            Err(e) => {
+                log::warn!(Thread = name, Error = e.to_string().as_str(); "Could not start a thread")
+            }
         }
     }
 
@@ -238,7 +247,9 @@ pub fn toggle_popover<R: Runtime>(
         return Ok(false);
     }
     // The click that blurred it, or a click while it still fades out.
-    let since = lock(&pops.closed_at).get(&label).map(|at| pops.clock.monotonic().saturating_sub(*at));
+    let since = lock(&pops.closed_at)
+        .get(&label)
+        .map(|at| pops.clock.monotonic().saturating_sub(*at));
     if click_closes(since) || app.get_webview_window(&label).is_some() {
         log::info!(Label = label.as_str(); "Popover show ignored: the click came right after it closed, or it is still fading out");
         return Ok(false);
@@ -347,7 +358,9 @@ pub fn fit_popover<R: Runtime>(
     let pops = popovers(app)?;
     let (below, width) = lock(&pops.open)
         .get(label)
-        .map_or((true, crate::popover::DEFAULT_WIDTH), |o| (o.below, o.width));
+        .map_or((true, crate::popover::DEFAULT_WIDTH), |o| {
+            (o.below, o.width)
+        });
     let scale = w.scale_factor()?;
     let pos = w.outer_position()?;
     let old_h = f64::from(w.outer_size()?.height);
@@ -471,9 +484,13 @@ fn grace_ended<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let shell = class.as_deref().is_some_and(is_shell_class);
     let foreground = class.as_deref().unwrap_or("unknown");
     match grace_end(focused, shell) {
-        GraceEnd::Stay => log::info!(Label = label; "Popover has the focus again after the grace; stays"),
+        GraceEnd::Stay => {
+            log::info!(Label = label; "Popover has the focus again after the grace; stays")
+        }
         GraceEnd::Refocus => match w.set_focus() {
-            Ok(()) => log::info!(Label = label, Foreground = foreground; "Popover refocused after the grace (the shell had the foreground)"),
+            Ok(()) => {
+                log::info!(Label = label, Foreground = foreground; "Popover refocused after the grace (the shell had the foreground)")
+            }
             Err(e) => {
                 log::warn!(Label = label, Error = e.to_string().as_str(); "Popover could not take the focus back after the grace");
                 close_with(app, label, "focus refused");
