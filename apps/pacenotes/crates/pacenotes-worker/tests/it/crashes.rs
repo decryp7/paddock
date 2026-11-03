@@ -101,6 +101,7 @@ fn cancel_ends_a_stuck_call_and_a_paused_worker_is_never_judged_stuck() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)] // runs the worker binary under test
 fn the_worker_program_answers_its_self_test() {
     let out = std::process::Command::new(WORKER).arg("--self-test").output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));

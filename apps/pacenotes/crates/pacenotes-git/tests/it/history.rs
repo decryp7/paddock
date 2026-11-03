@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! C2: the `History` port over gix, the log, hot spots, and the trap rows for History (audit PN1, plan A3a). Repositories are
 //! built here with the git binary under the same isolation the trap fixture uses; the product code never runs it.
 
@@ -36,6 +36,7 @@ impl Repo {
         repo
     }
 
+    #[allow(clippy::disallowed_methods)] // the test repository is built with the git binary under isolation
     pub fn git(&self, args: &[&str], time: i64) -> String {
         let date = format!("@{time} +0000");
         let out = std::process::Command::new("git")

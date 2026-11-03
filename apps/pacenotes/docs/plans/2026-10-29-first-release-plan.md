@@ -359,7 +359,7 @@ Order: top to bottom; two packages run at once when load allows. Designs and the
   scripted draw.io round-trip fixtures (`crates/pacenotes-diagram/tests/fixtures/roundtrip/`, 97 files, partial: no crate, no code, no
   test reads them), so `pacenotes-diagram` (writer, reader, merge, diff) is still to build and the fixtures to bring in with it; ADR 0011
   (the canonical form) is landed. The C52 conformance check (`cargo-metadata` off) of the same branch changes shared code and waits for
-  stage 2; until then `scripts/check-no-cargo-metadata.mjs` (`cargo tree -e features`) is the guard.
+  stage 2; until then `scripts/check-no-cargo-metadata.mjs` (`cargo tree -e features`) is the guard. Follow-up: the branch deleted the app's `scripts/release/publish.mjs` (a C08 copy); that is left for its own change.
 - **DG1's real round trips are a user task** (ER-14: tests never touch the user's installed apps). The agent writes the
   generated files and a short list of edits; the user opens, edits and saves them in draw.io desktop, draw.io on the web
   and the VS Code extension; the saved files are committed as fixtures, and the tests read only those.

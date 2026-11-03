@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! C2b: who wrote each line, renames followed, bounded and cancellable, and the safe-open rules of ADR 0004 unchanged. Repositories are
 //! built with the git binary under the same isolation as in `history.rs`; the product code never runs it.
 
