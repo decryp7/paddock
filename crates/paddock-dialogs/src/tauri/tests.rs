@@ -33,7 +33,7 @@ paddock_commands::command_table! {
     Query [DIALOG] => crate::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * paddock_commands::MIB => crate::tauri::dialog_close,
     Quiet [DIALOG] => crate::tauri::dialog_ready,
-    Quiet [DIALOG] => crate::tauri::dialog_fit,
+    Quiet [DIALOG] => crate::tauri::dialog_measure,
     Query [WINDOW] => app_status,
     Query [WINDOW] => app_secret,
 }
@@ -486,45 +486,72 @@ fn measure(content_h: f64, min_h: f64) -> Measure {
     }
 }
 
+/// The sequence number of the next measure a test sends (per test thread; only its order matters).
+fn next_seq() -> u64 {
+    thread_local!(static SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+    SEQ.with(|s| {
+        s.set(s.get() + 1);
+        s.get()
+    })
+}
+
+/// The page's handshake as the window system makes it happen: measure `m`, the OS reports the size the window got (the
+/// mock runtime sends no `Resized`, so the test does), then the page says ready.
+fn ready(
+    h: &AppHandle<MockRuntime>,
+    w: &Window<MockRuntime>,
+    m: Measure,
+    os: &str,
+) -> Result<(), DialogError> {
+    let seq = next_seq();
+    sizing::measure(h, w, 1, seq, m, os)?;
+    // The OS answers the request with the size it was given (the mock window keeps no size of its own).
+    let asked = match h.state::<Dialogs>().take_size(w.label()) {
+        Some(Some(s)) => {
+            let r = s.last_request();
+            h.state::<Dialogs>().put_size(w.label(), s);
+            r
+        }
+        _ => None,
+    };
+    if let Some(r) = asked {
+        sizing::resized(w, PhysicalSize::new(r.width, r.height));
+    }
+    sizing::ready(h, w, 1, seq, os)
+}
+
 #[test]
-fn a_refit_sizes_the_window_by_kind_on_its_own_monitor() {
+fn a_measure_sizes_the_window_and_is_refused_when_it_is_not_a_size() {
     let app = app();
     let h = app.handle().clone();
     open(&h, "main", request("about")).unwrap();
     let dialog = os_window(&app, "d-main-1");
-    // The mock window measures 0x0 at (0, 0); a monitor whose work area starts below it moves it down into place.
-    let m = Monitor {
-        work: Rect {
-            x: 0.0,
-            y: 25.0,
-            width: 2560.0,
-            height: 1415.0,
-        },
-        scale: 1.0,
-    };
-    for os in ["windows", "macos"] {
-        assert_eq!(fit(&h, &dialog, measure(700.0, 200.0), Some(m), os), Ok(()));
+    for os in ["windows", "macos", "linux"] {
+        assert_eq!(ready(&h, &dialog, measure(700.0, 200.0), os), Ok(()));
     }
-    assert_eq!(
-        fit(&h, &dialog, measure(700.0, 200.0), None, "linux"),
-        Ok(())
-    );
-    assert_eq!(
-        state(&app).get("d-main-1").unwrap().measure,
-        Some(measure(700.0, 200.0)),
-        "the last measure is kept for a scale change"
-    );
-    let e = fit(&h, &dialog, measure(f64::NAN, 200.0), None, "linux").unwrap_err();
-    assert_eq!(e.code, DialogErrorCode::Invalid);
-    let e = fit(
+    let kept = state(&app).take_size("d-main-1");
+    let Some(Some(size)) = kept else {
+        panic!("the measure made a size state: {kept:?}");
+    };
+    assert_eq!(size.mode(), crate::Kind::Viewer.policy().size_mode);
+    assert!(size.is_shown());
+    let e = sizing::measure(
         &h,
-        &os_window(&app, "main"),
-        measure(300.0, 100.0),
-        None,
+        &dialog,
+        1,
+        next_seq(),
+        measure(f64::NAN, 200.0),
         "linux",
     )
     .unwrap_err();
-    assert_eq!(e.code, DialogErrorCode::NotADialog);
+    assert_eq!(e.code, DialogErrorCode::Invalid);
+    // A window that is not a dialog is only logged: the command has already answered.
+    let main = os_window(&app, "main");
+    assert_eq!(
+        sizing::measure(&h, &main, 1, next_seq(), measure(300.0, 100.0), "linux"),
+        Ok(())
+    );
+    assert_eq!(state(&app).take_size("main"), None);
 }
 
 /// Runs the show deadline's job by hand: the tests never sleep (ER-12).
@@ -634,7 +661,7 @@ fn a_page_that_never_reports_is_shown_at_the_deadline_and_a_late_ready_fits_it_o
             .count(),
         1
     );
-    assert!(state(&app).get(&info.label).unwrap().measure.is_some());
+    assert!(matches!(state(&app).take_size(&info.label), Some(Some(_))));
     // A dialog closed before its deadline is simply gone when the deadline passes.
     let gone = open(&h, "main", request("settings")).unwrap();
     on_destroyed(&h, &gone.label);
@@ -878,54 +905,32 @@ fn macos_attaches_an_owned_dialog_to_its_parent_when_it_shows_never_when_it_is_b
 }
 
 #[test]
-fn a_scale_change_refits_a_dialog_from_its_last_measure() {
-    let (app, _t) = manual_app();
-    let h = app.handle().clone();
-    let info = open(&h, "main", request("ai-setup")).unwrap();
-    let dialog = os_window(&app, &info.label);
+fn a_scale_change_posts_one_refit_and_tells_the_page_to_measure_again() {
     // (`WindowEvent::ScaleFactorChanged` is non-exhaustive and cannot be built here; the event arm only calls this.)
-    // Nothing reported yet: nothing to refit, and nothing fails.
-    scale_changed(&dialog);
-    assert!(state(&app).get(&info.label).unwrap().measure.is_none());
-    ready(&h, &dialog, measure(300.0, 100.0), "linux").unwrap();
-    scale_changed(&dialog);
-    // A window that is not a dialog has nothing to refit.
-    scale_changed(&os_window(&app, "main"));
-    // A refit that fails (a measure that is not a size) is logged, not raised.
-    let bad = crate::Size {
-        width: f64::NAN,
-        height: 1.0,
-    };
-    state(&app).set_measure(
-        &info.label,
-        Measure {
-            content: bad,
-            min_content: bad,
-            viewport_height: None,
-            device_pixel_ratio: None,
-            overflow: false,
-        },
-    );
-    scale_changed(&dialog);
-}
-
-#[test]
-fn a_scale_change_refits_after_the_window_systems_own_resize_not_inside_its_event() {
     // The window system (tao on Windows) resizes the window itself after it has told the app about the new scale factor;
     // a refit made inside that event is overwritten by it. The refit is scheduled, so it runs after the event returns.
     let (app, timer) = manual_app();
     let h = app.handle().clone();
     let info = open(&h, "main", request("ai-setup")).unwrap();
     let dialog = os_window(&app, &info.label);
+    let remeasure = recorder(&window(&app, &info.label), crate::REMEASURE_EVENT);
     ready(&h, &dialog, measure(300.0, 100.0), "linux").unwrap();
     timer.deadline_passes();
-    let before = state(&app).last_requested(&info.label);
-    assert!(before.is_some());
-    state(&app).set_measure(&info.label, measure(300.0, 400.0));
     scale_changed(&dialog);
-    assert_eq!(state(&app).last_requested(&info.label), before);
+    assert!(
+        remeasure.lock().unwrap().is_empty(),
+        "nothing happens inside the event"
+    );
     timer.deadline_passes();
-    assert_ne!(state(&app).last_requested(&info.label), before);
+    assert_eq!(
+        remeasure.lock().unwrap().len(),
+        1,
+        "one remeasure per scale change"
+    );
+    // A window that is not a dialog has nothing to refit.
+    scale_changed(&os_window(&app, "main"));
+    timer.deadline_passes();
+    assert_eq!(remeasure.lock().unwrap().len(), 1);
 }
 
 #[test]
@@ -1057,11 +1062,15 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     assert_eq!(invoke(&dialog, "app_status", json!({})), Ok(json!("ok")));
     let measure = json!({ "content": { "width": 960, "height": 400 }, "minContent": { "width": 500, "height": 200 } });
     assert_eq!(
-        invoke(&dialog, "dialog_ready", json!({ "measure": measure })),
+        invoke(
+            &dialog,
+            "dialog_measure",
+            json!({ "epoch": 1, "seq": 1, "measure": measure })
+        ),
         Ok(Value::Null)
     );
     assert_eq!(
-        invoke(&dialog, "dialog_fit", json!({ "measure": measure })),
+        invoke(&dialog, "dialog_ready", json!({ "epoch": 1, "seq": 1 })),
         Ok(Value::Null)
     );
     assert!(
@@ -1094,14 +1103,19 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     assert!(
         invoke(
             &dialog,
-            "dialog_fit",
-            json!({ "measure": { "content": "tall" } })
+            "dialog_measure",
+            json!({ "epoch": 1, "seq": 2, "measure": { "content": "tall" } })
         )
         .is_err()
     );
     let nan = json!({ "content": { "width": 1, "height": 0 }, "minContent": { "width": 1, "height": 1 } });
     assert_eq!(
-        invoke(&dialog, "dialog_fit", json!({ "measure": nan })).unwrap_err()["code"],
+        invoke(
+            &dialog,
+            "dialog_measure",
+            json!({ "epoch": 1, "seq": 3, "measure": nan })
+        )
+        .unwrap_err()["code"],
         "invalid"
     );
     // A dialog's own command errors come back typed.
@@ -1255,43 +1269,22 @@ fn a_close_whose_task_runs_before_the_queued_disable_still_ends_enabled() {
 }
 
 #[test]
-fn a_first_fit_keeps_the_viewport_delta_and_the_zoom_converts_the_measure_to_logical_px() {
+fn a_measure_is_converted_to_logical_px_with_the_zoom_and_the_viewport_delta_every_time() {
     let (app, _t) = manual_app();
     let h = app.handle().clone();
     let info = open(&h, "main", request("ai-setup")).unwrap();
     let dialog = os_window(&app, &info.label);
-    assert_eq!(state(&app).get(&info.label).unwrap().viewport_delta, None);
-    // The mock window is 0x0 at scale 1: the delta taken at ready is 0; a page at devicePixelRatio 2 is zoom 2.
+    // The mock window is 0x0 at scale 1: no delta; a page at devicePixelRatio 2 is zoom 2.
     let mut m = measure(300.0, 100.0);
     m.viewport_height = Some(150.0);
     m.device_pixel_ratio = Some(2.0);
-    ready(&h, &dialog, m, "linux").unwrap();
-    let e = state(&app).get(&info.label).unwrap();
-    assert_eq!(e.viewport_delta, Some(0.0));
-    let kept = e.measure.unwrap();
-    assert_eq!(
-        (
-            kept.content.height,
-            kept.min_content.height,
-            kept.viewport_height,
-            kept.device_pixel_ratio
-        ),
-        (600.0, 200.0, Some(300.0), None)
-    );
-    // A later fit reuses the recorded delta; it does not read it off the window again.
-    state(&app).remove(&info.label);
-    let info = open(&h, "main", request("ai-setup")).unwrap();
-    let dialog = os_window(&app, &info.label);
-    assert_eq!(
-        state(&app).viewport_delta_or(&info.label, || 7.0),
-        Some(7.0)
-    );
-    fit(&h, &dialog, m, None, "linux").unwrap();
-    assert_eq!(
-        state(&app).get(&info.label).unwrap().viewport_delta,
-        Some(7.0)
-    );
-    assert_eq!(state(&app).viewport_delta_or("d-main-99", || 1.0), None);
+    let got = sizing::measured_of(&dialog, m, 1.0).unwrap();
+    assert_eq!((got.content.height, got.min_content.height), (600.0, 200.0));
+    // The same page at a scale of 2 is not zoomed: the ratio is read fresh, not kept from an earlier scale.
+    let got = sizing::measured_of(&dialog, m, 2.0).unwrap();
+    assert_eq!(got.content.height, 300.0);
+    m.content.height = f64::NAN;
+    assert!(sizing::measured_of(&dialog, m, 1.0).is_err());
 }
 
 #[test]
@@ -1342,21 +1335,6 @@ fn the_applied_state_is_recorded_only_when_the_caller_says_the_window_took_it() 
     assert_eq!(dialogs.parent_change("main"), Some(false));
     dialogs.applied("main", false);
     assert_eq!(dialogs.parent_change("main"), None);
-}
-
-#[test]
-fn the_zoom_is_kept_on_the_entry_and_a_monitor_change_does_not_change_it() {
-    let (app, _t) = manual_app();
-    let h = app.handle().clone();
-    let info = open(&h, "main", request("ai-setup")).unwrap();
-    let dialogs = state(&app);
-    assert_eq!(dialogs.zoom_for(&info.label, Some(2.0), 1.0), Some(2.0));
-    assert_eq!(dialogs.get(&info.label).unwrap().zoom.unwrap().zoom, 2.0);
-    // The scale factor changed (monitor move) with a stale ratio: kept.
-    assert_eq!(dialogs.zoom_for(&info.label, Some(2.0), 2.0), Some(2.0));
-    // The page zoomed at the unchanged scale: read again.
-    assert_eq!(dialogs.zoom_for(&info.label, Some(3.0), 2.0), Some(1.5));
-    assert_eq!(dialogs.zoom_for("d-main-99", Some(3.0), 2.0), None);
 }
 
 /// Inside a plugin hook (Tauri holds its plugin store there) a dialog is refused with its own code instead of

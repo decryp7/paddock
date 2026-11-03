@@ -10,11 +10,25 @@
 
 #[cfg(all(feature = "tauri", target_os = "linux"))]
 pub mod linux;
+// The mock runtime has no native windows: there is nothing to observe, and `ns_window` would hand out a dangling pointer.
+#[cfg(all(
+    feature = "tauri",
+    target_os = "macos",
+    not(any(test, feature = "mock-runtime"))
+))]
+pub mod macos;
 #[cfg(all(feature = "tauri", windows))]
 pub mod windows;
 
 use crate::contract::Size;
 use crate::size::{Env, physical};
+
+/// Whether `os` (`std::env::consts::OS`) tells a user resize from the echo of our own `set_size` by an OS signal
+/// (Windows: `WM_SIZING`, `SC_SIZE`; macOS: the live-resize notification). Where it does not (Linux: X11 and Wayland) the
+/// size state infers it from an unexplained `Resized` (ADR 0043 D4).
+pub const fn has_resize_signal(os: &str) -> bool {
+    matches!(os.as_bytes(), b"windows" | b"macos")
+}
 
 /// Windows' base DPI: a scale of 1.0.
 pub const BASE_DPI: u32 = 96;

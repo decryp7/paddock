@@ -19,7 +19,7 @@ pub const BASE_COMMANDS: [&str; 6] = [
     "dialog_take_input",
     "dialog_close",
     "dialog_ready",
-    "dialog_fit",
+    "dialog_measure",
     "notifications_post",
     "notifications_list",
 ];

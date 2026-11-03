@@ -67,7 +67,7 @@ export const FRAME_STYLES = `
     .pd-frame-alert .pd-frame-btn:focus { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
     .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
-    .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--pd-space-4, 16px); outline: none; }
+    .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: var(--pd-space-4, 16px); outline: none; }
     .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
     .pd-frame-body--decision { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--pd-space-4, 16px); align-items: start; padding-block-end: var(--pd-space-2, 8px); }
     .pd-frame-icon { display: inline-grid; place-items: center; inline-size: 40px; block-size: 40px; border-radius: 50%; background: var(--pd-info-tint); color: var(--pd-info); }
@@ -239,7 +239,7 @@ export class DialogFrame {
   /** The user dismissed it (Cancel/Close, Escape, Cmd/Ctrl+W, an OS close). The host asks `dialogCanClose` first. */
   readonly dismissed = output<void>();
   /** The content's natural size changed after the first measure (at most once per frame). */
-  readonly refit = output<DialogMeasure>();
+  readonly refit = output<void>();
 
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly errorHandler = inject(ErrorHandler);
@@ -498,26 +498,14 @@ export class DialogFrame {
   private pinnedWidth: number | null = null;
 
   /**
-   * Watches what changes the size after the first measure (ADR 0026 §2): the content's natural size, the footer and
-   * alert, the fonts, the theme, density and font settings on `<html>`, and `requestFit()`; at most one refit per frame.
+   * Watches what changes the size after the first measure (ADR 0026 §2, ADR 0043 §2): the content's natural size, the
+   * footer and alert, the fonts, the theme, density and font settings on `<html>`, and `requestFit()`. Each says "measure
+   * again" through `refit`, at most once per frame; the loop that measures and compares keeps the baseline.
    */
   watch(): void {
     if (this.watching) return;
     this.watching = true;
-    let last = '';
-    const check = () => {
-      const m = this.measure();
-      const key = `${m.content.width}x${m.content.height}/${m.minContent.width}x${m.minContent.height}`;
-      if (key === last) return;
-      last = key;
-      this.refit.emit(m);
-    };
-    const fit = oncePerFrame(check);
-    this.flushFit = () => {
-      fit.cancel();
-      check();
-    };
-    last = ((m) => `${m.content.width}x${m.content.height}/${m.minContent.width}x${m.minContent.height}`)(this.measure());
+    const fit = oncePerFrame(() => this.refit.emit());
     this.requestFit = fit.ask;
     const observers: { disconnect(): void }[] = [];
     if (typeof ResizeObserver !== 'undefined') {
@@ -544,11 +532,4 @@ export class DialogFrame {
 
   /** Asks for a refit (the content changed what it shows without a resize the frame sees). A no-op before `watch`. */
   requestFit: () => void = () => undefined;
-
-  /**
-   * Reads the size now and sends it when it differs from the last one sent, without waiting for the frame that
-   * `requestFit` and the observers coalesce to (a no-op before `watch`). The shell uses it to send the size the content
-   * reached when its pending work ended, before it reports the window settled.
-   */
-  flushFit: () => void = () => undefined;
 }

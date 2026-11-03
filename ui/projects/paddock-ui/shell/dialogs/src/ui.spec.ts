@@ -849,7 +849,7 @@ describe('dialogs as windows', () => {
 describe('a dialog window', () => {
   function boot(def: DialogDef, start: Partial<FakeDialogIo['start']> = {}, route = { id: def.id, host: 'main', label: 'd-main-1' }) {
     const io = new FakeDialogIo();
-    io.start = { dialogId: def.id, title: `Window ${def.id}`, kind: def.kind, modality: def.modality, requiredChoice: false, input: { who: 'Lin' }, ...start };
+    io.start = { dialogId: def.id, title: `Window ${def.id}`, kind: def.kind, modality: def.modality, requiredChoice: false, input: { who: 'Lin' }, epoch: 1, ...start };
     const config = dialogWindowConfig({ dialogs: ALL, route });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
@@ -934,14 +934,15 @@ describe('a dialog window', () => {
       const widths: string[] = [];
       const { io, root, settle } = boot(DECISION);
       const original = io.ready.bind(io);
-      io.ready = (m) => {
+      io.ready = (epoch, seq) => {
         const el = root.querySelector<HTMLElement>('pd-dialog-frame')!;
         widths.push(el.classList.contains('pd-frame--pinned') ? el.style.getPropertyValue('--pd-frame-pinned-width') : 'unpinned');
-        return original(m);
+        return original(epoch, seq);
       };
       // The start is a pending task until the handshake: whenStable would wait for the font.
       await tick(5);
-      expect(io.readied).toBeNull();
+      // The first measure may be sent already (the loop measures whenever it can); the window is not told to show until the font is in.
+      expect(io.readySeq).toBeNull();
       late.resolve(undefined);
       await settle();
       expect(io.readied!.content.width).toBe(400);
@@ -966,10 +967,28 @@ describe('a dialog window', () => {
     expect(io.titles).toEqual(['Delete 3 runners?']);
   });
 
+  it('names the measure to show at, sends in its epoch, remeasures on the event and shows the size mode (ADR 0043)', async () => {
+    const { io, settle } = boot(DECISION, { epoch: 4 });
+    await settle();
+    expect(io.sent.length).toBeGreaterThan(0);
+    expect(io.sent.every((s) => s.epoch === 4)).toBe(true);
+    expect(io.sent.map((s) => s.seq)).toEqual(io.sent.map((_, i) => i + 1));
+    expect(io.readySeq).toEqual({ epoch: 4, seq: 1 });
+    expect(document.documentElement.dataset['fitSeq']).toBe(String(io.sent.at(-1)!.seq));
+    const before = io.sent.length;
+    io.emit(DIALOG_EVENTS.remeasure, { scale: 1.5 });
+    expect(io.sent).toHaveLength(before);
+    io.emit(DIALOG_EVENTS.sizeMode, { mode: 'manual' });
+    expect(document.documentElement.dataset['sizeMode']).toBe('manual');
+    io.emit(DIALOG_EVENTS.sizeMode, { mode: 7 });
+    expect(document.documentElement.dataset['sizeMode']).toBe('manual');
+    delete document.documentElement.dataset['sizeMode'];
+  });
+
   it('starts even when the window system cannot listen for close requests', async () => {
     const io = new FakeDialogIo();
     io.listen = () => Promise.reject(new Error('no events'));
-    io.start = { dialogId: 't.form', title: 'F', kind: 'form', modality: 'modeless', requiredChoice: false, input: {} };
+    io.start = { dialogId: 't.form', title: 'F', kind: 'form', modality: 'modeless', requiredChoice: false, input: {}, epoch: 1 };
     const config = dialogWindowConfig({ dialogs: ALL, route: { id: 't.form', host: 'main', label: 'd-main-1' } });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
@@ -1121,7 +1140,7 @@ describe('a dialog window', () => {
       let answer!: () => void;
       const gate = new Promise<void>((r) => (answer = r));
       const ready = io.ready.bind(io);
-      io.ready = (m) => (void ready(m), gate);
+      io.ready = (epoch, seq) => (void ready(epoch, seq), gate);
       // The handshake is in flight (withheld), so the window is not stable: wait for the measure it sent, not for stability.
       await vi.waitFor(() => expect(io.measures).toHaveLength(1));
       // The content grew (its data arrived) while the window system had not yet answered: nothing observes it yet.

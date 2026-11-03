@@ -15,7 +15,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "diagnostics_preview",
     "diagnostics_save",
     "dialog_close",
-    "dialog_fit",
+    "dialog_measure",
     "dialog_open",
     "dialog_ready",
     "dialog_take_input",

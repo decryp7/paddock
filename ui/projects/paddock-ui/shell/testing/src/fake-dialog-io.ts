@@ -13,9 +13,9 @@ export class FakeDialogIo implements DialogIo {
   readonly titles: string[] = [];
   /** The heights the dialog asked its window to fit (the ready handshake's first), in order. */
   readonly fitted: number[] = [];
-  /** The ready handshake's measure (`null` until the frame sent it). */
+  /** The first measure sent (`null` until the frame sent one). */
   readied: DialogMeasure | null = null;
-  /** Every measure sent (ready, then each fit), with its minimum content. */
+  /** Every measure sent, with its minimum content. */
   readonly measures: DialogMeasure[] = [];
   /**
    * When true, `ready` never settles: the window system has not answered, as when the webview is paused, so a spec can
@@ -61,15 +61,19 @@ export class FakeDialogIo implements DialogIo {
   async setTitle(title: string): Promise<void> {
     this.titles.push(title);
   }
-  ready(measure: DialogMeasure): Promise<void> {
-    this.readied = measure;
+  /** The `(epoch, seq)` of the measure the page said to show at (`null` until the frame said ready). */
+  readySeq: { epoch: number; seq: number } | null = null;
+  /** Every `(epoch, seq)` sent, in order. */
+  readonly sent: { epoch: number; seq: number }[] = [];
+  async measure(epoch: number, seq: number, measure: DialogMeasure): Promise<void> {
+    this.sent.push({ epoch, seq });
     this.measures.push(measure);
     this.fitted.push(measure.content.height);
-    return this.withholdReady ? new Promise<void>(() => undefined) : Promise.resolve();
+    this.readied ??= measure;
   }
-  async fit(measure: DialogMeasure): Promise<void> {
-    this.measures.push(measure);
-    this.fitted.push(measure.content.height);
+  ready(epoch: number, seq: number): Promise<void> {
+    this.readySeq = { epoch, seq };
+    return this.withholdReady ? new Promise<void>(() => undefined) : Promise.resolve();
   }
 
   /** Plays an event of the dialog layer. */

@@ -82,7 +82,7 @@ paddock_commands::command_table! {
     /// The calling dialog's page measured itself: sizes its window, makes the minimum content the OS minimum, shows it.
     Quiet [DIALOG] => tauri::dialog_ready,
     /// Refits the calling dialog to a new measure.
-    Quiet [DIALOG] => tauri::dialog_fit,
+    Quiet [DIALOG] => tauri::dialog_measure,
 }
 
 #[cfg(test)]
