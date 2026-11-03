@@ -67,7 +67,7 @@ export const UNSAVED_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.unsaved'], {
 
 /** The size-to-content fixtures, one per kind (ADR 0043 check 4): the same content in a decision, a form, a viewer and a tool. */
 const fixture = (id: 'sd.fixture-decision' | 'sd.fixture-form' | 'sd.fixture-viewer' | 'sd.fixture-tool') =>
-  defineDialog(DIALOG_CONTRACTS[id], { title: msg(`${id}`, 'Size fixture'), load: () => import('./dialogs/fixture-dialog').then((m) => m.FixtureDialog) });
+  defineDialog(DIALOG_CONTRACTS[id], { title: msg('sd.dialog.fixture', 'Size fixture'), load: () => import('./dialogs/fixture-dialog').then((m) => m.FixtureDialog) });
 export const FIXTURE_DIALOGS = [fixture('sd.fixture-decision'), fixture('sd.fixture-form'), fixture('sd.fixture-viewer'), fixture('sd.fixture-tool')] as const;
 
 /** A required choice: a modal without Cancel. */
