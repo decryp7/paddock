@@ -1,12 +1,13 @@
 # 44. Widget grid: free size and drag-and-drop arrangement on a snapped grid, computed by `paddock-widgets`
 
-- Status: Proposed (2026-11-03). Asked for by the user on 2026-11-03 for Dyno 1.1.0: dashboard widgets get "free size and
+- Status: Accepted (2026-11-03; user decisions 2026-11-03: D1-D7 as recommended; independent review approved, round 1
+  and a delta review of `25e1d694d`). Asked for by the user on 2026-11-03 for Dyno 1.1.0: dashboard widgets get "free size and
   drag-and-drop arrangement" on the grid-snap model (drag widgets on the dashboard to move them, drag a corner or edge to
   resize in grid steps, tidy and aligned, reflowing on smaller windows, keyboard move and resize). The user added the same
   day: "Maybe need a shared crate for the widgets system": §2 makes the split between the shared crate, the shared UI
   and the apps explicit. Independent review round 1 (2026-11-03) found the model, the split and D1-D7 sound and asked
   for changes (two P1, seven P2); this revision answers them: the engine's per-widget `moves` (§5), Move to first and
-  last, holes beside tall widgets (§1), the legacy key on upgrade (§4), screen-reader browse mode (§5, WP-D), the
+  last, holes beside tall widgets (§1), the legacy key on upgrade (§4), screen-reader browse mode (§5, WP-SR), the
   mock-ups (pushed History, Material's disabled button, edge grips, guides behind widgets, retuned defaults) and the
   estimate.
 - Date: 2026-11-03
@@ -129,7 +130,7 @@ pub enum Dir { Left, Right, Up, Down }
 | Layer | Owns | Never |
 |---|---|---|
 | **`crates/paddock-widgets`** (pure core) | The layout model (§1, §1a), placement validation, collision, swap and compaction, keyboard nudge and grow semantics, responsive derivation (§3), versioned reading, the upgrade from span layouts (§4), the undo and redo stack, presets, `LayoutView` with every breakpoint's arrangement, the `Outcome` of each edit (what moved where, for announcements), the per-kind size rules' checks. | I/O, Tauri, pixels, app types. |
-| **`paddock-widgets` `tauri` feature** (new adapter) | `paddock_widgets::tauri::Previews`: the app's Rust side keeps the last `LayoutView` per surface it relayed (with its revision) and answers `plugin:widgets|preview { surface, revision, gesture, seq }` from it with the pure `preview` function, in-process, never through the agent. Surfaces register with one line each (`Previews::new().grid::<DashboardCatalogue>()`), keyed by the serialised surface id. | Storing or saving layouts (the app's store owner does: Dyno's agent). |
+| **`paddock-widgets` `tauri` feature** (new adapter) | `paddock_widgets::tauri::Previews`: the app's Rust side keeps the last `LayoutView` per surface it relayed (with its revision) and answers `plugin:widgets\|preview { surface, revision, gesture, seq }` from it with the pure `preview` function, in-process, never through the agent. Surfaces register with one line each (`Previews::new().grid::<DashboardCatalogue>()`), keyed by the serialised surface id. | Storing or saving layouts (the app's store owner does: Dyno's agent). |
 | **`@decryp7/paddock-ui/widgets`** | `pd-widget-grid` (the grid view, breakpoint choice by container width, placement by CSS grid lines), edit mode, the pointer gesture directive (move and resize, snapping, the placeholder, auto-scroll, cancel), keyboard handling and focus, `LiveAnnouncer` messages formatted from `Outcome`, motion and reduced motion, the frame's card variant, the add sheet, undo and redo controls. Calls the engine through an injected `WidgetGridBackend` (preview, edit). | Collision, compaction, size clamping or derivation: it shows what the engine returns. Pixel to cell rounding of the pointer is its only arithmetic (a purely visual transform). |
 | **Apps** | Their catalogue (kinds, titles, icons, `SizeRule`s, defaults, presets), their widget renderers (`*pdWidget` templates, which receive the placement's size), their store owner (where the layout is saved) and the protocol to it, their upgrade hook. | A grid, a drag handler, an edit mode or a copy of a rule above. |
 
@@ -261,7 +262,7 @@ Grafana's edit state do the same. In edit mode:
   already at the right edge." "Memory can't get taller: largest size." Pointer drops announce the result the same way.
   Live widget values stay off live regions (ADR 0035 §6).
 - **Screen readers' browse mode.** NVDA and JAWS read a page in browse mode, where arrow keys move the virtual cursor and
-  never reach the page; a focused `role="group"` normally switches them to focus mode, but not reliably. WP-D tests the
+  never reach the page; a focused `role="group"` normally switches them to focus mode, but not reliably. WP-SR tests the
   edit-mode keys with NVDA and JAWS on Windows and VoiceOver on macOS (browse and focus mode, Chrome's WebView2 and
   WebKit). If arrows do not reach the frame, the fallback, in this order: the edit-mode grid becomes one
   `role="application"` region whose focused widget is announced through `aria-activedescendant` (focus mode is then
@@ -277,6 +278,11 @@ placeholder is told apart by its dashed outline, not by colour. Snapping guides 
 (they are behind the widgets, so the background is what they meet); the corner grip and the edge grips
 (`--pd-text-muted`) 7.40 / 7.29 on surface-1; the focus ring 6.03 / 6.45 on surface-1; the size chip's text 13.08 /
 17.96. Every non-text part is at 3:1 or more (WCAG 1.4.11); WP-B's token test keeps these pairs.
+
+**Follow-up (not part of this ADR):** the disabled outlined button ("Edit layout" below the first breakpoint) uses
+Material's disabled tokens as the family bridge sets them (`--pd-text-subtle` label, `--pd-hairline` outline;
+`ui/projects/paddock-ui/scss/_material.scss:481-482`). Whether a disabled control should look more clearly disabled is a
+family token change for every app, to be proposed and measured on its own.
 
 **Reduced motion** (`prefers-reduced-motion: reduce`): no lift scale, no FLIP glide (widgets jump to their new place),
 no placeholder fade, instant scroll-into-view; the dragged widget still follows the pointer (direct manipulation is not
@@ -373,10 +379,10 @@ like the generated TypeScript) and, for any other gesture, places the widget wit
 - **Per-breakpoint stored layouts** (react-grid-layout's model): see D2.
 - **Always-on dragging** (Grafana's panel headers): see D3.
 
-## Decisions (for the user; recommendations first)
+## Decisions
 
-Independent review round 1 (2026-11-03) found each recommendation below sound and recommends it as written; they stay
-recommendations until the user decides.
+**The user accepted D1-D7 as recommended on 2026-11-03**, after independent review round 1 (2026-11-03) had found each
+recommendation sound and the delta review approved the revision. The alternatives stay recorded for a later change.
 
 - **D1. Library: our own grid on the engine, with CDK and Material for the parts they fit (recommended)**, rather than
   angular-gridster2 or gridstack.js: neither has keyboard move and resize or screen-reader support, both keep the layout
@@ -396,8 +402,8 @@ recommendations until the user decides.
 
 ## Work packages
 
-Order: WP-A's types land first (a compiling skeleton), then WP-A's behaviour and WP-B in parallel, WP-C1 after WP-A, WP-C2
-after WP-B, WP-D last. WP-A, WP-B, WP-C1 and WP-C2 land on main as one change (rule 43: the shared crate's breaking
+Order: WP-A's types land first (a compiling skeleton), then WP-A's behaviour, WP-B and WP-SR in parallel (WP-SR decides
+§5's keyboard focus model before WP-B builds it into the UI), WP-C1 after WP-A, WP-C2 after WP-B, WP-D last. WP-A, WP-B, WP-C1 and WP-C2 land on main as one change (rule 43: the shared crate's breaking
 change and its adoption), with Dyno's installer build (rule 54). Estimates in agent-days, reviews excluded.
 
 ### WP-A: `crates/paddock-widgets` (implementer, Sonnet; 5 agent-days)
@@ -472,16 +478,23 @@ change and its adoption), with Dyno's installer build (rule 54). Estimates in ag
 - **Tests:** each kind at its minimum and default with no overflow (both themes, three densities), edit mode end to end
   against the mock backend's golden cases.
 
-### WP-D: end-to-end, screenshots, real-app smoke, screen readers (implementer, Sonnet; 2.5 agent-days)
+### WP-SR: screen-reader check of the edit-mode focus model (implementer, Sonnet; 1 agent-day; alongside WP-B)
+
+- A gallery prototype of the edit-mode frame (`role="group"` with the keys and announcements of §5, and the two
+  fallbacks behind a switch), before WP-B builds the real component. NVDA and JAWS on the Windows VM and VoiceOver on
+  macOS, in browse and focus mode, in WebView2 and WebKit: every edit-mode key, the announcements and the menu path.
+  The result picks §5's model (the group, or a fallback) and is recorded in this ADR's WP-B brief before WP-B's keyboard
+  work starts.
+
+### WP-D: end-to-end, screenshots, real-app smoke (implementer, Sonnet; 1.5 agent-days)
 
 - Playwright against the mock: enter edit mode, drag, resize, keyboard move and resize, undo and redo, add, remove,
   narrow window; screenshots for the docs in both themes; the real app on macOS and Windows: a 1.0 layout upgraded on
   first start, a drag with previews from the real engine, the preview round-trip measurement (§7), a 1.0 downgrade check
-  in the local VM (1.0 shows the person's layout after a 1.1 start, its defaults after a 1.1 edit). Screen readers: NVDA
-  and JAWS on the Windows VM and VoiceOver on macOS, in browse and focus mode, every edit-mode key and the menu path;
-  the result decides §5's fallback before the UI lands.
+  in the local VM (1.0 shows the person's layout after a 1.1 start, its defaults after a 1.1 edit); a short screen-reader
+  pass over the finished UI with the model WP-SR chose.
 
-**Total: 21.5 agent-days** (revised from 15.5 after review round 1: the `moves` map and the two extra gestures, the
+**Total: 21.5 agent-days** (WP-A 5, WP-B 7, WP-SR 1, WP-C1 3, WP-C2 4, WP-D 1.5; revised from 15.5 after review round 1: the `moves` map and the two extra gestures, the
 legacy key, the screen-reader matrix and its possible fallback, and the measured default sizes were not in the first
 estimate), plus the independent reviews (ER-23 for the mock-ups and the screenshots; code review per
 WP).
