@@ -64,6 +64,9 @@ fn save_lists(dirs: &Dirs, lists: &UserLists) -> std::io::Result<()> {
     crate::intel_fetch::replace(&tmp, &path)
 }
 
+/// What the home location says before any lookup ran.
+const HOME_NOT_LOOKED_UP: &str = "not looked up yet";
+
 /// The user's location from the OS region setting: the country of the locale. Nothing is sent anywhere.
 fn region_home() -> HomeInfo {
     let env = |k: &str| std::env::var(k).ok();
@@ -137,7 +140,7 @@ impl IntelCentre {
             index_error: Mutex::new(None),
             home: Mutex::new(HomeInfo {
                 country: None,
-                source: "not found yet".into(),
+                source: HOME_NOT_LOOKED_UP.into(),
             }),
             home_tried_ms: Mutex::new(None),
             net: Mutex::new(net),
@@ -259,7 +262,7 @@ impl IntelCentre {
                 }),
                 country: store.lists.get(COUNTRY.id).map(|s| s.status.clone()).unwrap_or_default(),
                 asn: store.lists.get(ASN.id).map(|s| s.status.clone()).unwrap_or_default(),
-                home_source: lock(&self.home).source.clone(),
+                home_source: self.home().source,
                 attribution: ATTRIBUTION.to_string(),
             },
             first_run_note: note,
@@ -396,9 +399,13 @@ impl IntelCentre {
         *lock(&self.home) = info;
     }
 
-    /// The user's own location as last found.
+    /// The user's own location as last found. Until a lookup has run, the OS region setting is read (it needs no network).
     pub fn home(&self) -> HomeInfo {
-        lock(&self.home).clone()
+        let mut h = lock(&self.home);
+        if h.country.is_none() && h.source == HOME_NOT_LOOKED_UP {
+            *h = region_home();
+        }
+        h.clone()
     }
 
     /// The jobs that are due now: location databases (when their switch is on and a month is missing), subscriptions on a schedule,
@@ -801,5 +808,19 @@ mod tests {
         );
         assert!(!h.source.contains("public IP"), "the address lookup was not made");
         assert_eq!(r.wire.sends(), 0);
+    }
+
+    #[test]
+    fn before_any_lookup_the_home_is_the_region_setting_not_a_blank() {
+        let r = rig(vec![]);
+        let h = r.centre.home();
+        assert!(
+            h.source == "Your location: from your region setting" || h.source == "Your location: unknown (no region setting found)",
+            "{}",
+            h.source
+        );
+        assert_eq!(h.country.is_some(), h.source.contains("from your region setting"));
+        assert_eq!(r.centre.status().geo.home_source, h.source, "the page says the same");
+        assert_eq!(r.wire.sends(), 0, "reading the region setting sends nothing");
     }
 }

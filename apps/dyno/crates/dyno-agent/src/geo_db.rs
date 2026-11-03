@@ -280,6 +280,7 @@ impl GeoReader {
 
 /// A writer of tiny MMDB files in the published format (<https://maxmind.github.io/MaxMind-DB/>), for tests and the fuzz seed.
 #[cfg(any(test, feature = "testdb"))]
+#[allow(clippy::unwrap_used)] // a test helper: it panics on a wrong fixture
 pub mod testdb {
     use std::net::IpAddr;
 

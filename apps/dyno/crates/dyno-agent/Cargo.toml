@@ -56,5 +56,10 @@ proptest = "1"
 [features]
 testdb = []
 
+# A scripted run against a real running agent in a disposable VM (see the file's header).
+[[example]]
+name = "real_run"
+required-features = ["testdb"]
+
 [lints]
 workspace = true

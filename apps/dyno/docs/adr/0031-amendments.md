@@ -77,3 +77,18 @@ leaves the computer" sentence of §5 as far as the map's own address is concerne
 
 The user removed the built-in "bad IP" feature and chose "my lists and my own URLs", so the page and the copy say **IP lists**, not
 "bad-IP lists". A match is still called **flagged**.
+
+## Real-engine run (2026-11-03)
+
+The IP lists, the map and the firewall were driven against a **real running `dyno-agent`** (not the mock) in a clone of the Tart VM
+`vmgui-base-tahoe-4aaa751f` (macOS 26, headless, deleted afterwards), by `crates/dyno-agent/examples/real_run.rs` over the agent's real
+IPC. Both network switches were turned off first, so nothing reached a list or database publisher; a tiny location database for the
+test host's /24 was staged in the cache folder. What differed from the mock, and what was done:
+
+| Found | Fix |
+| --- | --- |
+| Before any lookup the map's "you" was "not found yet" with no country, so no arcs were drawn even though the region setting names one. | `IntelCentre::home()` reads the OS region setting when no lookup has run (VM: `AppleLocale` `en_US` gives US). |
+| A subscription to `https://127.0.0.1:8099/list.txt` was accepted as an address and then failed with "kept failing (the request is invalid (127.0.0.1 was not contacted ...)); check the network and run it again to resume". | The address is refused when added ("Dyno fetches lists only from public addresses: this one points to this computer or a private network"); a name that resolves to a private address gets the same plain message at fetch time. A local test URL cannot be served to the real engine by design (https only, public addresses only, ADR 0031 section 2.3). |
+| `http://` is refused at the door with a clear message (as in the mock). | none needed |
+| The Application Firewall read took 120 ms on the first run and 253 ms on the second in the VM (about 0 ms per command on the Mac itself). | The read runs on its own thread; a request waits at most 2 s and otherwise answers "Still reading", with the result served to the next request. |
+| The connection to the test host was placed in "Testland" by the real database lookup, was flagged by the list holding its /24, and the Connections request filtered to that country returned it. | matches the mock |

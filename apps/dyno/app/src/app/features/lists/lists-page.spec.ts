@@ -82,6 +82,9 @@ describe('ListsPage', () => {
     await type('[data-testid="add-url"]', 'http://lists.example/feed.txt');
     await click('[data-testid="add-list"]');
     expect(q('[data-testid="edit-error"]')!.textContent).toContain('https://');
+    await type('[data-testid="add-url"]', 'https://127.0.0.1:8099/list.txt');
+    await click('[data-testid="add-list"]');
+    expect(q('[data-testid="edit-error"]')!.textContent).toContain('only from public addresses');
     await type('[data-testid="add-url"]', 'https://lists.example/feed.txt');
     await click('[data-testid="add-list"]');
     const feed = store.status()!.lists.find((l) => l.name === 'Feed')!;

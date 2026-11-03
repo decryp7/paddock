@@ -169,6 +169,10 @@ pub(crate) fn map_download(e: DownloadError) -> FetchError {
         DownloadError::TooLarge { .. } => FetchError::TooBig,
         DownloadError::DiskFull | DownloadError::NotEnoughSpace { .. } => FetchError::Save("disk full".into()),
         DownloadError::Io(e) => FetchError::Save(e.kind().to_string()),
+        // The door refused an address of this computer or a private network (a name that resolves to one, or a redirect to one).
+        other if other.to_string().contains("points at this computer") || other.to_string().contains("private network") => FetchError::Net(
+            "That address leads to this computer or a private network. Dyno fetches lists only from public addresses.".into(),
+        ),
         other => FetchError::Net(other.to_string()),
     }
 }

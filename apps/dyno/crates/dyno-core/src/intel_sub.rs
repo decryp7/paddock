@@ -40,6 +40,9 @@ pub enum UrlError {
     /// No host.
     #[error("The address needs a host name.")]
     Host,
+    /// An address of this computer or a private network.
+    #[error("Dyno fetches lists only from public addresses: this one points to this computer or a private network.")]
+    Local,
 }
 
 /// Checks a subscription address. The network layer checks it again (https only, public reach, no login) before every request.
@@ -58,7 +61,32 @@ pub fn validate_url(text: &str) -> Result<String, UrlError> {
     if authority.is_empty() || authority.starts_with(':') {
         return Err(UrlError::Host);
     }
+    if host_is_local(authority) {
+        return Err(UrlError::Local);
+    }
     Ok(t.to_string())
+}
+
+/// Whether the host part of an address (`host`, `host:port`, `[v6]:port`) is this computer or a private network: `localhost`, a name
+/// ending in `.localhost`, `.local`, `.lan`, `.internal` or `.home.arpa`, or an IP address that is not public. A name that merely
+/// resolves to a private address is refused by the network layer at fetch time.
+fn host_is_local(authority: &str) -> bool {
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        authority
+            .rsplit_once(':')
+            .filter(|(_, port)| port.bytes().all(|b| b.is_ascii_digit()))
+            .map_or(authority, |(h, _)| h)
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return !crate::ip_lookup::is_public(&ip);
+    }
+    host == "localhost"
+        || [".localhost", ".local", ".lan", ".internal", ".home.arpa"]
+            .iter()
+            .any(|s| host.ends_with(s))
 }
 
 /// An update interval in whole hours, within [`MIN_INTERVAL`] and [`MAX_INTERVAL`].
@@ -139,6 +167,22 @@ mod tests {
         assert_eq!(validate_url("file:///etc/passwd"), Err(UrlError::NotHttps));
         assert_eq!(validate_url("https://user:pw@lists.example/x"), Err(UrlError::Credentials));
         assert_eq!(validate_url("https:///x"), Err(UrlError::Host));
+        for local in [
+            "https://127.0.0.1:8099/list.txt",
+            "https://localhost/list.txt",
+            "https://LOCALHOST:8443/x",
+            "https://192.168.1.5/x",
+            "https://10.0.0.2:9/x",
+            "https://[::1]/x",
+            "https://printer.local/x",
+            "https://nas.lan:8443/x",
+            "https://host.internal/x",
+            "https://169.254.169.254/latest",
+        ] {
+            assert_eq!(validate_url(local), Err(UrlError::Local), "{local}");
+        }
+        assert!(validate_url("https://8.8.8.8/list").is_ok(), "a public address literal is fine");
+        assert!(validate_url("https://lists.example:8443/l.txt").is_ok());
         assert_eq!(validate_url(""), Err(UrlError::Shape));
         assert_eq!(validate_url("https://a b/x"), Err(UrlError::Shape));
         assert_eq!(

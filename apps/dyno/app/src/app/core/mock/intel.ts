@@ -62,6 +62,18 @@ function ipv4(entry: string): { start: number; end: number } | null {
   return { start, end: (start | host) >>> 0 };
 }
 
+/** Whether an https address points to this computer or a private network (the agent refuses these when the list is added). */
+export function isLocalAddress(url: string): boolean {
+  const m = /^https:\/\/(\[[^\]]*\]|[^/:?#]+)/i.exec(url.trim());
+  const host = (m?.[1] ?? '').replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  if (host === 'localhost' || /\.(localhost|local|lan|internal)$/.test(host) || host.endsWith('.home.arpa')) return true;
+  if (host === '::1' || host.startsWith('fe80:') || /^f[cd]/.test(host) && host.includes(':')) return true;
+  const o = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host)?.slice(1).map(Number);
+  if (!o) return false;
+  const [a, b] = [o[0]!, o[1]!];
+  return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+}
+
 /** What a typed list would lose to "Remove duplicates" (the same rules as the agent: exact repeats, wider ranges, parent names). */
 export function dedupe(text: string): { kept: string[]; preview: DedupePreview } {
   const all = lines(text);
@@ -170,6 +182,7 @@ export class MockIntel {
       const name = this.checkName(edit.addList.name);
       const s = edit.addList.source;
       if ('url' in s && !/^https:\/\/[^\s@/]+/.test(s.url.url.trim())) throw err('badRequest', 'The address must start with https://. Plain http is not used.');
+      if ('url' in s && isLocalAddress(s.url.url)) throw err('badRequest', 'Dyno fetches lists only from public addresses: this one points to this computer or a private network.');
       const id = `list-${this.nextId++}`;
       if ('url' in s) {
         const hours = Math.min(720, Math.max(1, s.url.everyHours ?? 24));
