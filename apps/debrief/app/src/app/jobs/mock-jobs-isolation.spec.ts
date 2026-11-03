@@ -1,4 +1,5 @@
 import { tinyBackend } from '../../testing/helpers';
+import { mockNotifications } from '../notifications/mock-notifications';
 import { mockJobs, resetMockJobs } from './mock-jobs';
 
 // Spec files share one window and one module graph (the Angular builder runs Vitest with `isolate: false`), so the mock
@@ -40,5 +41,20 @@ describe('mock jobs between tests', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(heard).not.toHaveBeenCalled();
     expect(mockJobs()).not.toBe(old);
+  });
+
+  // jobs.spec 'asks for attention' failed on main when a Save-problem-report job of an earlier spec finished late and
+  // posted "Finished: ..." into the notification centre the next test had just reset.
+  it('a job of a replaced instance that finishes later posts no notification', async () => {
+    let finish: () => void = () => undefined;
+    const old = mockJobs();
+    const job = old.start(
+      { kind: 'export', title: 'Left running' },
+      () => new Promise<{ value: null; result: { type: 'file'; path: string } }>((resolve) => (finish = () => resolve({ value: null, result: { type: 'file', path: '/x.zip' } }))),
+    );
+    resetMockJobs();
+    finish();
+    await job.done;
+    expect((await mockNotifications().list()).notices).toEqual([]);
   });
 });
