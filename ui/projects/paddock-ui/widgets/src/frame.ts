@@ -100,7 +100,11 @@ interface Meta {
     .pd-widget-frame { display: block; min-width: 0; }
     .pd-w { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); color: var(--pd-text); }
     .pd-widget-frame--card { height: 100%; }
-    .pd-widget-frame--card .pd-w { box-sizing: border-box; height: 100%; padding: var(--pd-space-3); overflow: hidden; align-content: start; }
+    /* The bottom padding clears the grid's corner resize grip (24 px at 4 px from the corner) so it never covers the last line. */
+    .pd-widget-frame--card .pd-w { box-sizing: border-box; height: 100%; padding: var(--pd-space-3) var(--pd-space-3) calc(var(--pd-space-3) + var(--pd-widget-grip-clear, 16px)); overflow: hidden; align-content: start; }
+    /* An inert body (the grid while editing) reads as inactive: a filled primary or accent text button loses its emphasis, so the page's own primary action stays the only one. */
+    .pd-widget-frame[inert] .mat-mdc-unelevated-button:not(:disabled) { background-color: transparent; color: var(--pd-text-muted); }
+    .pd-widget-frame[inert] .mat-mdc-button:not(:disabled), .pd-widget-frame[inert] .pd-w-act { color: var(--pd-text-muted); }
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-w-icon.mat-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

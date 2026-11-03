@@ -83,11 +83,12 @@ class AreaHost {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdWidgetFrame, PdWidget],
   template: `
-    <pd-widget-frame title="Disk space" icon="pd:folder" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
-    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p></ng-template>
+    <pd-widget-frame title="Disk space" icon="pd:folder" [attr.inert]="inert() ? '' : null" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
+    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p><button type="button" class="mat-mdc-unelevated-button mdc-button">Check now</button></ng-template>
   `,
 })
 class FrameHost {
+  readonly inert = signal(false);
   readonly w: V | null = null;
   readonly state = signal<WidgetState<V, A> | null | undefined>(undefined);
   readonly span = signal(2);
@@ -190,6 +191,21 @@ describe('pd-widget-frame', () => {
     f.componentInstance.state.set(null);
     await settle(f);
     expect(s.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('drops the filled emphasis of a body button while the frame is inert, so the page keeps one primary action', async () => {
+    const f = await setup();
+    f.componentInstance.state.set(ready('182 GB'));
+    await settle(f);
+    const button = q(f, '.mat-mdc-unelevated-button')!;
+    expect(getComputedStyle(button).color).not.toContain('pd-text-muted');
+    f.componentInstance.inert.set(true);
+    await settle(f);
+    expect(frame(f, 0).hasAttribute('inert')).toBe(true);
+    expect(getComputedStyle(button).color).toContain('pd-text-muted');
+    f.componentInstance.inert.set(false);
+    await settle(f);
+    expect(getComputedStyle(button).color).not.toContain('pd-text-muted');
   });
 
   it('draws the ready template with a value, a fresh reading with its meta and the span as a grid column', async () => {

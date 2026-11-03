@@ -298,7 +298,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   Outside edit mode it is just the dashboard plus one outlined **Edit layout** button; below 840 px the button is disabled and
   the reason sits under it ("Arranging needs a wider dashboard. Make the window wider or collapse the sidebar.").
   - **Edit mode** (explicit, never always on): a sticky bar "Editing layout" with one muted hint line, **Undo**, **Redo**,
-    **Add widget** (outlined) and **Done** (the one primary). Widget bodies are inert. Each widget is one tab stop
+    **Add widget** (outlined) and **Done** (the one primary). Widget bodies are inert and read as inactive: a filled or accent button inside one loses its fill
+    and accent (`pd-widget-frame[inert]`), and a card's bottom padding (`--pd-widget-grip-clear`) keeps the corner grip off its last line. Each widget is one tab stop
     (`role="group"`, `aria-roledescription="widget"`, named by its title, described by "6 by 4, position 1 of 15" and the hint);
     its "⋯" button (24 × 24, the next tab stop) lists Move left, right, up, down, to first, to last, Wider, Narrower, Taller,
     Shorter, then Remove, each enabled only when the engine's `moves` says it would change the layout.
