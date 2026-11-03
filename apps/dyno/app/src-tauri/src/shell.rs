@@ -48,6 +48,8 @@ pub mod events {
     pub const POWER: &str = "dyno://power";
     /// `WolView`: the Wake-on-LAN list changed.
     pub const WOL: &str = "dyno://wol";
+    /// `WakesView`: the scheduled wakes changed.
+    pub const WAKES: &str = "dyno://wakes";
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -741,6 +743,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         }
         self.popover_changed();
         self.emit(events::ALARM, change);
+    }
+
+    fn wakes_changed(&self, view: dyno_core::power::schedule::WakesView) {
+        self.emit(events::WAKES, view);
     }
 
     fn wol_changed(&self, view: dyno_core::wol::WolView) {

@@ -5,6 +5,7 @@
 pub mod awake;
 pub mod energy;
 pub mod idle;
+pub mod schedule;
 pub mod settings;
 
 use serde::{Deserialize, Serialize};

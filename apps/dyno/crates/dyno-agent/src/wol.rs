@@ -239,6 +239,11 @@ impl WolCentre {
         }
     }
 
+    /// The ids of the saved computers (a schedule may wake only these).
+    pub fn device_ids(&self, shared: &Shared) -> Result<Vec<u64>, AgentError> {
+        Ok(self.devices(shared)?.into_iter().map(|d| d.id).collect())
+    }
+
     /// A saved computer's name, for a job's subject.
     pub fn name_of(&self, shared: &Shared, id: u64) -> Option<String> {
         self.devices(shared).ok()?.into_iter().find(|d| d.id == id).map(|d| d.name)

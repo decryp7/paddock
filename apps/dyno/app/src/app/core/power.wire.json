@@ -177,6 +177,9 @@
       "enabled": false,
       "entries": []
     },
+    "wake": {
+      "enabled": false
+    },
     "wol": {
       "directedBroadcast": true,
       "discovery": true,

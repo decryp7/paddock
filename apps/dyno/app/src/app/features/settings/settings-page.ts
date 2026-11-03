@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DEFAULT_POWER } from '../power/power-model';
-import type { WolSettings, EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import type { WakeSettings, WolSettings, EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -352,6 +352,11 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <div class="lbl"><strong>Test wake waits up to</strong><small>How long to wait for the computer to answer (10 to 600 seconds).</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="10" max="600" [disabled]="!wol().enabled" aria-label="Seconds a test wake waits for an answer" [ngModel]="wol().testTimeoutSecs" (ngModelChange)="setWol({ testTimeoutSecs: +$event })" /><span matTextSuffix>seconds</span></mat-form-field>
               </div>
+              <h3 class="sub-h">Scheduled wake</h3>
+              <div class="row">
+                <div class="lbl"><strong>Allow scheduled wake</strong><small>Lets Dyno set a wake of this computer at the times you choose on the Power page's Schedule tab, and act then. It cannot wake a computer that is shut down. On macOS and Linux it needs the administrator helper.</small></div>
+                <mat-slide-toggle [checked]="wake().enabled" aria-label="Allow scheduled wake" (change)="setWake({ enabled: $event.checked })" />
+              </div>
             </section>
           </div>
         }
@@ -567,6 +572,10 @@ export class SettingsPage implements OnInit {
   /** A number box's value, or null when it is empty (an unset figure is not 0). */
   protected num(v: unknown): number | null {
     return v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
+  }
+  protected readonly wake = computed<WakeSettings>(() => this.draft()?.power?.wake ?? DEFAULT_POWER.wake);
+  protected setWake(p: Partial<WakeSettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), wake: { ...this.wake(), ...p } } } : d));
   }
   protected readonly wol = computed<WolSettings>(() => this.draft()?.power?.wol ?? DEFAULT_POWER.wol);
   protected setWol(p: Partial<WolSettings>): void {

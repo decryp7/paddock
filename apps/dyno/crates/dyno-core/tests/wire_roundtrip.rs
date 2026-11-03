@@ -98,6 +98,7 @@ fn tag_message(v: &Message) -> &'static str {
         Message::WidgetLayoutChanged(_) => "WidgetLayoutChanged",
         Message::PowerChanged(_) => "PowerChanged",
         Message::WolChanged(_) => "WolChanged",
+        Message::WakesChanged(_) => "WakesChanged",
     }
 }
 
@@ -266,6 +267,9 @@ fn tag_request(v: &Request) -> &'static str {
         Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
         Request::HelperStatus => "HelperStatus",
         Request::PowerState => "PowerState",
+        Request::PowerWakes => "PowerWakes",
+        Request::PowerSetWake { .. } => "PowerSetWake",
+        Request::PowerCancelWake { .. } => "PowerCancelWake",
         Request::WolDevices => "WolDevices",
         Request::WolCandidates => "WolCandidates",
         Request::WolSave { .. } => "WolSave",
@@ -368,6 +372,7 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::PopoverValues(_) => "PopoverValues",
         Reply::HelperStatus(_) => "HelperStatus",
         Reply::Power(_) => "Power",
+        Reply::PowerWakes(_) => "PowerWakes",
         Reply::Wol(_) => "Wol",
         Reply::WolCandidates(_) => "WolCandidates",
         Reply::WolReadiness(_) => "WolReadiness",
@@ -668,6 +673,9 @@ fn request_samples() -> Vec<Request> {
         Request::ForgetSavedDiskMaps,
         Request::HelperStatus,
         Request::PowerState,
+        Request::PowerWakes,
+        Request::PowerSetWake { entry: zero() },
+        Request::PowerCancelWake { id: 2 },
         Request::WolDevices,
         Request::WolCandidates,
         Request::WolSave { device: zero() },
@@ -860,6 +868,7 @@ fn reply_samples() -> Vec<Reply> {
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),
         Reply::Power(Box::default()),
+        Reply::PowerWakes(Box::new(zero())),
         Reply::Wol(Box::new(zero())),
         Reply::WolCandidates(vec![]),
         Reply::WolReadiness(Box::new(zero())),
@@ -898,6 +907,7 @@ fn message_samples() -> Vec<Message> {
         Message::WidgetLayoutChanged(dyno_core::widgets::DynoSurface::Popover),
         Message::PowerChanged(Box::default()),
         Message::WolChanged(Box::new(zero())),
+        Message::WakesChanged(Box::new(zero())),
     ]
 }
 

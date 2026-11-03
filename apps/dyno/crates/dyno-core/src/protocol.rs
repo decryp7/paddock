@@ -49,6 +49,8 @@ use serde::{Deserialize, Serialize};
 ///   `Reply::{Power, Energy}` and `Message::PowerChanged` are new;
 /// - Wake-on-LAN (ADR 0032): `Request::{WolDevices, WolCandidates, WolSave, WolRemove, WolWake, WolReadiness}`,
 ///   `Reply::{Wol, WolCandidates, WolReadiness}`, `Message::WolChanged`, `JobSpec::WolWake` and `JobOutput::Wol` are new;
+/// - scheduled wake (ADR 0032 section 5): `Request::{PowerWakes, PowerSetWake, PowerCancelWake}`, `Reply::PowerWakes` and
+///   `Message::WakesChanged` are new;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -637,6 +639,18 @@ pub enum Request {
     },
     /// This PC's Wake-on-LAN readiness. Answers [`Reply::WolReadiness`].
     WolReadiness,
+    /// The scheduled wakes and who sets the OS wake here (ADR 0032 section 5). Answers [`Reply::PowerWakes`].
+    PowerWakes,
+    /// Adds a scheduled wake or changes one. Answers [`Reply::PowerWakes`] or `BadRequest` (the message says what to fix).
+    PowerSetWake {
+        /// What the person chose.
+        entry: crate::power::schedule::WakeInput,
+    },
+    /// Cancels a scheduled wake (its OS wake too). Answers [`Reply::PowerWakes`].
+    PowerCancelWake {
+        /// Which.
+        id: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -958,6 +972,8 @@ pub enum Reply {
     WolCandidates(Vec<crate::wol::Neighbour>),
     /// This PC's Wake-on-LAN readiness.
     WolReadiness(Box<crate::wol::ThisPcWol>),
+    /// The scheduled wakes.
+    PowerWakes(Box<crate::power::schedule::WakesView>),
 }
 
 /// The inventory report that was written.
@@ -1051,6 +1067,7 @@ impl Reply {
             Reply::Wol(x) => v(x),
             Reply::WolCandidates(x) => v(x),
             Reply::WolReadiness(x) => v(x),
+            Reply::PowerWakes(x) => v(x),
         }
     }
 }
@@ -1145,6 +1162,8 @@ pub enum Message {
     PowerChanged(Box<crate::power::PowerView>),
     /// Agent -> app: the Wake-on-LAN list changed (a save, a remove, or a wake that ended). Appended.
     WolChanged(Box<crate::wol::WolView>),
+    /// Agent -> app: the scheduled wakes changed (a save, a cancel, or a schedule that ran). Appended.
+    WakesChanged(Box<crate::power::schedule::WakesView>),
 }
 
 #[cfg(test)]
@@ -1320,6 +1339,34 @@ mod tests {
             let m = Message::Reply(Box::new(Ok(r)));
             assert_eq!(round(&m), m);
         }
+        {
+            use crate::power::schedule::{DynoJob, Repeat, RowState, WakeInput, WakeRoute, WakeRouteState, WakeRow, WakeSchedule, WakesView};
+            let entry = WakeInput {
+                id: Some(1),
+                name: "Morning".into(),
+                minute_of_day: 420,
+                repeat: Repeat::Days { mask: 0b101 },
+                stay_awake_minutes: Some(30),
+                wake_devices: vec![1],
+                job: Some(DynoJob::BackupCheck),
+                enabled: true,
+            };
+            for r in [Request::PowerWakes, Request::PowerCancelWake { id: 2 }, Request::PowerSetWake { entry }] {
+                let m = Message::Request(Box::new(r));
+                assert_eq!(round(&m), m);
+            }
+            for state in [RowState::Armed { route: WakeRoute::Helper }, RowState::Off, RowState::Paused, RowState::NeedsHelper, RowState::Failed { why: "w".into() }] {
+                let view = WakesView { rows: vec![WakeRow { entry: WakeSchedule::default(), state }], route: WakeRouteState::HelperReady };
+                let m = Message::Reply(Box::new(Ok(Reply::PowerWakes(Box::new(view)))));
+                assert_eq!(round(&m), m);
+            }
+            for route in [WakeRouteState::Agent { note: "n".into(), cant_tell: vec!["c".into()] }, WakeRouteState::NeedsHelper { reason: "r".into() }, WakeRouteState::Unavailable { reason: "r".into() }] {
+                let m = Message::Reply(Box::new(Ok(Reply::PowerWakes(Box::new(WakesView { rows: vec![], route })))));
+                assert_eq!(round(&m), m);
+            }
+        }
+        let wakes = Message::WakesChanged(Box::new(crate::power::schedule::WakesView { rows: vec![], route: crate::power::schedule::WakeRouteState::HelperReady }));
+        assert_eq!(round(&wakes), wakes);
         let push = Message::WolChanged(Box::new(WolView { enabled: false, devices: vec![], can_send: crate::power::Capability::Known }));
         assert_eq!(round(&push), push);
         let job = Message::Request(Box::new(Request::StartJob { spec: crate::jobs::JobSpec::WolWake { id: 1, test: false } }));

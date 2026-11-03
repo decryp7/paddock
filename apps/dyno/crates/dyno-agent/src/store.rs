@@ -29,6 +29,7 @@ mod extras;
 mod hardware;
 mod issues;
 mod recorder;
+mod wake_schedules;
 mod wol;
 
 pub use hardware::kind as hardware_kind;
@@ -156,6 +157,7 @@ impl Store {
         conn.execute_batch(issues::SCHEMA_SQL)?;
         conn.execute_batch(extras::SCHEMA_SQL)?;
         conn.execute_batch(wol::SCHEMA_SQL)?;
+        conn.execute_batch(wake_schedules::SCHEMA_SQL)?;
         Ok(Store { conn })
     }
 
@@ -168,6 +170,7 @@ impl Store {
         conn.execute_batch(issues::SCHEMA_SQL)?;
         conn.execute_batch(extras::SCHEMA_SQL)?;
         conn.execute_batch(wol::SCHEMA_SQL)?;
+        conn.execute_batch(wake_schedules::SCHEMA_SQL)?;
         let version: Option<String> = conn
             .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0))
             .optional()?;

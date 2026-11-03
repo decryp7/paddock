@@ -65,6 +65,7 @@ const settings: PowerSettings = {
   },
   timed: { enabled: false, entries: [] },
   wol: { enabled: true, discovery: true, directedBroadcast: true, testTimeoutSecs: 120 },
+  wake: { enabled: false },
 };
 
 const idleViews: Record<string, IdleView> = {

@@ -168,6 +168,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
                 // Turning the feature off ends a hold already taken (and clears a notice).
                 shared.power.stop(shared);
             }
+            // Turning scheduled wake on or off sets or clears the OS wakes now.
+            shared.wakes.sync_all(shared);
             shared.wake_sampler();
             Ok(Reply::Settings(Box::new(s)))
         }
@@ -423,6 +425,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             shared.wol.check_wake(shared, id)?;
             shared.jobs.start(shared, dyno_core::jobs::JobSpec::WolWake { id, test }).map(|s| Reply::Job(Box::new(s)))
         }
+        Request::PowerWakes => shared.wakes.view(shared).map(|v| Reply::PowerWakes(Box::new(v))),
+        Request::PowerSetWake { entry } => shared.wakes.set(shared, entry).map(|v| Reply::PowerWakes(Box::new(v))),
+        Request::PowerCancelWake { id } => shared.wakes.cancel(shared, id).map(|v| Reply::PowerWakes(Box::new(v))),
         Request::WolReadiness => Ok(Reply::WolReadiness(Box::new(shared.wol.readiness()))),
         Request::Shutdown => {
             log::info!("Shutdown requested by a client");

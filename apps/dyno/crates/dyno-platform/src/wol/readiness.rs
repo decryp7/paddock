@@ -5,18 +5,17 @@
 //! physical cards may wake the computer; the cards come from WMI `Win32_NetworkAdapter`). Linux: `sysfs` `power/wakeup` of each
 //! physical card (the card's own `ethtool` mode needs the helper and is not read here).
 
-use crate::runner::{tool, ToolRunner};
+use crate::runner::{tool, ToolRunner, TOOL_TIMEOUT};
 use dyno_core::wol::readiness::{
     adapter_item, cant_tell, fast_startup_item, firmware_item, linux_wakeup_item, parse_pmset_womp, parse_powercfg_a, parse_reg_dword,
     sleep_mode_item, ReadinessItem, ReadinessKind, MAX_ADAPTERS,
 };
 use dyno_core::wol::{ReadinessSource, ThisPcWol};
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 /// Reads the settings the OS lets a user read.
 pub struct OsReadiness {
-    runner: Mutex<Box<dyn ToolRunner>>,
+    runner: Box<dyn ToolRunner>,
     sysfs_net: PathBuf,
 }
 
@@ -24,14 +23,13 @@ impl OsReadiness {
     /// Over `runner`.
     pub fn new(runner: Box<dyn ToolRunner>) -> OsReadiness {
         OsReadiness {
-            runner: Mutex::new(runner),
+            runner,
             sysfs_net: "/sys/class/net".into(),
         }
     }
 
     fn text(&self, program: &str, args: &[&str]) -> Result<String, String> {
-        let r = self.runner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        match r.run_tool(&tool(program, args), crate::runner::TOOL_TIMEOUT) {
+        match self.runner.run_tool(&tool(program, args), TOOL_TIMEOUT) {
             Ok(o) if o.ok => Ok(o.stdout),
             Ok(o) => Err(format!("{program} failed: {}", o.error)),
             Err(e) => Err(format!("{program} is not available: {e}")),

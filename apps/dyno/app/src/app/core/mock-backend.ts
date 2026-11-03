@@ -80,6 +80,8 @@ import type {
   ThisPcWol,
   WolDeviceInput,
   WolView,
+  WakeInput,
+  WakesView,
   WolOutcome,
   ChangeTimeline,
   ChangesQuery,
@@ -122,6 +124,7 @@ import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { type MockIdleVariant, MockPower, type MockPowerVariant, mockEnergy } from './mock/power';
 import { MockWol, type MockWolVariant } from './mock/wol';
+import { MockWakes, type MockWakeVariant } from './mock/wakes';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { MOCK_ESTIMATES, mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
@@ -177,6 +180,8 @@ export interface MockOptions {
   idle?: MockIdleVariant;
   /** Which Wake-on-LAN state the mock starts in (`?wol=empty|off|cantSend|noNeighbours|neighboursFail|readinessCantTell|timeout`; default two saved computers). */
   wol?: MockWolVariant;
+  /** Which Schedule state the mock starts in (`?wake=empty|needsHelper|unavailable|agent|failed`; default two schedules through the helper). */
+  wake?: MockWakeVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
   /** Keep the widget layouts in `localStorage` (the browser build; unit tests keep them in memory). */
@@ -222,6 +227,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
     ...(['unavailable', 'ended', 'waiting', 'busy', 'quiet'].includes(q.get('power') ?? '') ? { power: q.get('power') as MockPowerVariant } : {}),
     ...(['empty', 'off', 'cantSend', 'noNeighbours', 'neighboursFail', 'readinessCantTell', 'timeout'].includes(q.get('wol') ?? '') ? { wol: q.get('wol') as MockWolVariant } : {}),
+    ...(['on', 'empty', 'off', 'needsHelper', 'unavailable', 'agent', 'failed'].includes(q.get('wake') ?? '') ? { wake: q.get('wake') as MockWakeVariant } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -316,7 +322,9 @@ export class MockBackend implements DynoBackend {
   private readonly keepAwake: MockPower;
   private readonly powerListeners = new Set<(v: PowerView) => void>();
   private readonly wolMock: MockWol;
+  private readonly wakeMock: MockWakes;
   private readonly wolListeners = new Set<(v: WolView) => void>();
+  private readonly wakesListeners = new Set<(v: WakesView) => void>();
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -374,6 +382,10 @@ export class MockBackend implements DynoBackend {
       this.settingsValue = { ...this.settingsValue, power: { ...p, energy: { ...p.energy, wattsOn: 65, wattsSleep: 1.5, tariffPerKwh: 0.32, currency: 'S$', co2GPerKwh: 408 } } };
     }
     this.wolMock = new MockWol(options.wol ?? 'normal', this.now, () => this.settingsValue.power.wol.enabled);
+    this.wakeMock = new MockWakes(options.wake ?? 'normal', this.now, () => this.settingsValue.power.wake.enabled);
+    // Scheduled wake is off on a fresh install (the engine's default); a variant that shows the tab at work turns it on.
+    if (options.wake !== undefined && options.wake !== 'off' && options.wake !== 'normal') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wake: { enabled: true } } };
+    if (options.wake === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wake: { enabled: false } } };
     if (options.wol === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wol: { ...this.settingsValue.power.wol, enabled: false } } };
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
     this.activityLog = demoActivity(this.start);
@@ -1395,6 +1407,28 @@ export class MockBackend implements DynoBackend {
 
   wolReadiness(): Promise<ThisPcWol> {
     return this.reply('wolReadiness', () => this.wolMock.readiness());
+  }
+
+  powerWakes(): Promise<WakesView> {
+    return this.reply('powerWakes', () => this.wakeMock.view());
+  }
+
+  powerSetWake(entry: WakeInput): Promise<WakesView> {
+    return this.reply('powerSetWake', () => this.pushWakes(this.wakeMock.set(entry, this.wolMock.view().devices.map((d) => d.id))));
+  }
+
+  powerCancelWake(id: number): Promise<WakesView> {
+    return this.reply('powerCancelWake', () => this.pushWakes(this.wakeMock.cancel(id)));
+  }
+
+  onWakes(listener: (v: WakesView) => void): Unsubscribe {
+    this.wakesListeners.add(listener);
+    return () => this.wakesListeners.delete(listener);
+  }
+
+  private pushWakes(view: WakesView): WakesView {
+    for (const l of [...this.wakesListeners]) l(view);
+    return view;
   }
 
   onWol(listener: (v: WolView) => void): Unsubscribe {

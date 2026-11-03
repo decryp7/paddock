@@ -56,6 +56,8 @@ pub enum Command {
         /// Wait for it to answer and say whether it woke.
         test: bool,
     },
+    /// `dyno wake-schedule list|add|cancel`: scheduled wakes of this computer (ADR 0032 section 5).
+    WakeSchedule(WakeScheduleCmd),
     /// `dyno --help`.
     Help,
     /// `dyno --version`.
@@ -71,6 +73,33 @@ pub enum IdleCmd {
     Cancel,
     /// Snooze it this many minutes.
     Snooze(u32),
+}
+
+/// What `dyno wake-schedule` does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WakeScheduleCmd {
+    /// Show the schedules.
+    List,
+    /// Add one: at a time of day, then stay awake, wake saved computers or run a job.
+    Add {
+        /// The schedule's name.
+        name: String,
+        /// The local time of day, minutes after midnight.
+        at: u16,
+        /// `once`, `daily`, `weekdays` or `weekends`.
+        repeat: String,
+        /// Stay awake this many minutes.
+        stay: Option<u32>,
+        /// Saved computers to wake, by name or hardware address.
+        devices: Vec<String>,
+        /// `backup` or `software`.
+        job: Option<String>,
+    },
+    /// Cancel one, by name or id.
+    Cancel {
+        /// Its name or id.
+        target: String,
+    },
 }
 
 /// What `dyno awake` does.
@@ -175,6 +204,8 @@ idle [status|cancel|snooze MIN]       the sleep/shut down rules: what they wait 
 awake [on|off|status] [--for 90m|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]\n  \
                                       keep the computer awake (on without --for or --until: until `awake off`)\n  \
 wake NAME|ADDRESS [--test] [--json]   wake a saved computer (Wake-on-LAN); --test waits for it to answer\n  \
+wake-schedule list|add NAME --at 07:30 [--repeat once|daily|weekdays|weekends] [--stay 30m] [--device NAME]... [--job backup|software]|cancel NAME|ID\n  \
+                                      scheduled wakes of this computer\n  \
 why-slow [--json]                     why it feels slow, in plain words\n  \
 top [--by cpu|memory] [-n N] [--json] the busiest apps\n  \
 alarms [--all] [--json]               alarms that need attention\n  \
@@ -185,7 +216,7 @@ counters get PATH... [--json]         read counters now (PATH looks like \\Memor
 agent COMMAND...                      the background agent's own commands (--version, status, stop, once,\n  \
                                       service install|uninstall|status|ensure); on Windows the agent program\n  \
                                       has no console, so use this to see its output and exit code\n\n\
-Dyno only looks: no command changes anything on your computer, except `awake` and `wake` (power, only when you ask), `agent stop` and `agent service`.\n\
+Dyno only looks: no command changes anything on your computer, except `awake`, `wake` and `wake-schedule` (power, only when you ask), `agent stop` and `agent service`.\n\
 exit codes: 0 done, 1 failed, 2 wrong usage, 3 versions differ, 4 Dyno is not running\n";
 
 /// Why a command line is not usable (the message says what to type instead).
@@ -217,6 +248,10 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     let mut busy: Option<BusyKinds> = None;
     let mut while_pid: Option<u32> = None;
     let mut test = false;
+    let mut repeat: Option<String> = None;
+    let mut devices: Vec<String> = Vec::new();
+    let mut job: Option<String> = None;
+    let mut stay: Option<u32> = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -224,6 +259,28 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             "--all" => all = true,
             "--display" => display = true,
             "--test" => test = true,
+            "--repeat" => {
+                repeat = match it.next().map(String::as_str) {
+                    Some(r @ ("once" | "daily" | "weekdays" | "weekends")) => Some(r.to_string()),
+                    _ => return err("--repeat takes once, daily, weekdays or weekends."),
+                }
+            }
+            "--device" => match it.next() {
+                Some(d) if !d.starts_with('-') => devices.push(d.clone()),
+                _ => return err("--device takes the name or hardware address of a saved computer."),
+            },
+            "--job" => {
+                job = match it.next().map(String::as_str) {
+                    Some(j @ ("backup" | "software")) => Some(j.to_string()),
+                    _ => return err("--job takes backup or software."),
+                }
+            }
+            "--stay" => {
+                stay = match it.next().map(|n| parse_minutes(n)) {
+                    Some(Some(n)) => Some(n),
+                    _ => return err("--stay takes a length such as 30m or 2h."),
+                }
+            }
             "--for" => {
                 for_minutes = match it.next().map(|n| parse_minutes(n)) {
                     Some(Some(n)) => Some(n),
@@ -242,7 +299,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
                     _ => return err("--while-pid takes the process id of a running program."),
                 }
             }
-            "--until" => {
+            "--until" | "--at" => {
                 until_clock = match it.next().map(|n| parse_clock(n)) {
                     Some(Some(n)) => Some(n),
                     _ => return err("--until takes a time of day such as 18:30."),
@@ -331,6 +388,40 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
                 test,
             }
         }
+        Some("wake-schedule") => match w.next().map(String::as_str) {
+            None | Some("list") => Command::WakeSchedule(WakeScheduleCmd::List),
+            Some("add") => {
+                let name = w.by_ref().map(String::as_str).collect::<Vec<_>>().join(" ");
+                let Some(at) = until_clock else {
+                    return err("Say when with --at 07:30, for example: dyno wake-schedule add Morning --at 07:30 --stay 30m");
+                };
+                if name.trim().is_empty() {
+                    return err("Name the schedule, for example: dyno wake-schedule add Morning --at 07:30 --stay 30m");
+                }
+                Command::WakeSchedule(WakeScheduleCmd::Add {
+                    name: name.trim().to_string(),
+                    at,
+                    repeat: repeat.unwrap_or_else(|| "daily".into()),
+                    stay,
+                    devices,
+                    job,
+                })
+            }
+            Some("cancel") => {
+                let target = w.by_ref().map(String::as_str).collect::<Vec<_>>().join(" ");
+                if target.trim().is_empty() {
+                    return err("Say which schedule to cancel, by name or id: dyno wake-schedule cancel Morning");
+                }
+                Command::WakeSchedule(WakeScheduleCmd::Cancel {
+                    target: target.trim().to_string(),
+                })
+            }
+            Some(other) => {
+                return err(format!(
+                    "wake-schedule takes list, add or cancel, not \"{other}\". Try: dyno --help"
+                ))
+            }
+        },
         Some("counters") => match w.next().map(String::as_str) {
             Some("list") => Command::CountersList {
                 object: {
@@ -464,6 +555,38 @@ mod tests {
             "idle cancel now",
             "idle later",
             "idle status extra",
+        ] {
+            assert!(p(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn wake_schedule_takes_list_add_and_cancel() {
+        assert_eq!(p("wake-schedule").unwrap().command, Command::WakeSchedule(WakeScheduleCmd::List));
+        assert_eq!(
+            p("wake-schedule add Morning run --at 07:30 --repeat weekdays --stay 30m --device NAS --job backup")
+                .unwrap()
+                .command,
+            Command::WakeSchedule(WakeScheduleCmd::Add {
+                name: "Morning run".into(),
+                at: 450,
+                repeat: "weekdays".into(),
+                stay: Some(30),
+                devices: vec!["NAS".into()],
+                job: Some("backup".into()),
+            })
+        );
+        assert_eq!(
+            p("wake-schedule cancel 3").unwrap().command,
+            Command::WakeSchedule(WakeScheduleCmd::Cancel { target: "3".into() })
+        );
+        for bad in [
+            "wake-schedule add Morning",
+            "wake-schedule add --at 07:30",
+            "wake-schedule cancel",
+            "wake-schedule frob",
+            "wake-schedule add x --at 07:30 --repeat sometimes",
+            "wake-schedule add x --at 07:30 --job rm",
         ] {
             assert!(p(bad).is_err(), "{bad}");
         }

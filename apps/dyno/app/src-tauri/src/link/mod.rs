@@ -92,6 +92,8 @@ pub trait Sink: Send + Sync {
     fn power_changed(&self, _view: dyno_core::power::PowerView) {}
     /// The Wake-on-LAN list changed (a save or remove from any window, or a wake that ended).
     fn wol_changed(&self, _view: dyno_core::wol::WolView) {}
+    /// The scheduled wakes changed (a save, a cancel, or a schedule that ran).
+    fn wakes_changed(&self, _view: dyno_core::power::schedule::WakesView) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.

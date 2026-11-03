@@ -55,6 +55,8 @@ import type {
   ThisPcWol,
   WolDeviceInput,
   WolView,
+  WakeInput,
+  WakesView,
   NetworkSnapshot,
   BenchOverview,
   StartBenchmark,
@@ -196,6 +198,12 @@ export interface DynoBackend {
   wolSave(device: WolDeviceInput): Promise<WolView>;
   wolRemove(id: number): Promise<WolView>;
   wolReadiness(): Promise<ThisPcWol>;
+  // Scheduled wake (ADR 0032 section 5): the schedules and who sets the OS wake. The agent validates and acts.
+  powerWakes(): Promise<WakesView>;
+  powerSetWake(entry: WakeInput): Promise<WakesView>;
+  powerCancelWake(id: number): Promise<WakesView>;
+  /** The schedules changed (a save or cancel from any window, or a schedule that ran). */
+  onWakes(listener: (v: WakesView) => void): Unsubscribe;
   /** The list changed (a save or remove from any window, or a wake that ended). */
   onWol(listener: (v: WolView) => void): Unsubscribe;
 

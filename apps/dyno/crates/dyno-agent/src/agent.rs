@@ -288,12 +288,14 @@ pub struct Shared {
     /// The saved-views cache (ADR 0029), when there is one: the disk map, the counter catalog and the software list keep
     /// their last answer in it.
     pub cache: Option<crate::cache::Cache>,
-    /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
-    pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
     /// Keep awake: the OS hold and its state machine (ADR 0032).
     pub power: Arc<crate::power::PowerCentre>,
     /// Wake-on-LAN: the saved computers and the wake job (ADR 0032).
     pub wol: crate::wol::WolCentre,
+    /// Scheduled wake: the schedules, their OS wakes and what happens at their time (ADR 0032 section 5).
+    pub wakes: crate::wakes::WakeCentre,
+    /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
+    pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -517,7 +519,6 @@ impl Shared {
                 cores,
                 settings_limits,
             )),
-            helper: crate::helper_os::centre(),
             power: Arc::new(crate::power::PowerCentre::new(
                 power.os,
                 power.events,
@@ -525,7 +526,9 @@ impl Shared {
                 power.signals,
                 power_marker,
             )),
+            wakes: crate::wakes::WakeCentre::new(wol.wake_timer.clone(), Arc::new(crate::wakes::SharedHelper::new(me.clone()))),
             wol: crate::wol::WolCentre::new(wol),
+            helper: crate::helper_os::centre(),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
@@ -554,6 +557,7 @@ impl Shared {
         self.stop.store(true, Ordering::SeqCst);
         self.wake_sampler();
         self.power.wake();
+        self.wakes.wake();
     }
 
     /// Cuts the sampler's sleep short (a subscriber arrived, settings changed, the agent is stopping).

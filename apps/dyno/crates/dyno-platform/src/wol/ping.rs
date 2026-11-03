@@ -1,21 +1,20 @@
 //! One echo through the OS's own `ping` program (no raw socket, no elevated right), with a short timeout. Only IPv4 addresses are
 //! pinged; the address is parsed first so nothing but an address ever reaches the program's arguments.
 
-use crate::runner::{tool, ToolRunner};
+use crate::runner::{tool, ToolRunner, TOOL_TIMEOUT};
 use dyno_core::wol::wake::Prober;
 use std::net::IpAddr;
-use std::sync::Mutex;
 
 /// Pings through a [`ToolRunner`].
 pub struct OsProber {
-    runner: Mutex<Box<dyn ToolRunner>>,
+    runner: Box<dyn ToolRunner>,
 }
 
 impl OsProber {
     /// A prober over `runner`.
     pub fn new(runner: Box<dyn ToolRunner>) -> OsProber {
         OsProber {
-            runner: Mutex::new(runner),
+            runner,
         }
     }
 }
@@ -44,8 +43,7 @@ impl Prober for OsProber {
         if !addr.is_ipv4() {
             return Err("ping of an IPv6 address is not supported".into());
         }
-        let runner = self.runner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        match runner.run_tool(&echo_tool(&addr.to_string()), crate::runner::TOOL_TIMEOUT) {
+        match self.runner.run_tool(&echo_tool(&addr.to_string()), TOOL_TIMEOUT) {
             // On Windows an unreachable host can exit zero, with "Destination host unreachable" in the output.
             Ok(out) => Ok(out.ok && !out.stdout.contains("unreachable") && !out.stdout.contains("timed out")),
             Err(e) => Err(format!("ping is not available: {e}")),
@@ -58,6 +56,7 @@ mod tests {
     use super::super::script::{fail, out, Script};
     use super::*;
     use dyno_core::ports::PlatformError;
+    use std::sync::Mutex;
 
     fn prober(
         answers: Vec<(&'static str, Result<crate::runner::ToolOutput, PlatformError>)>,

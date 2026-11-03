@@ -133,6 +133,7 @@ fn execute(agent: &dyn Agent, i: &Invocation) -> Result<String, Problem> {
         Command::Awake(cmd) => awake(agent, *cmd, json),
         Command::Idle(cmd) => idle(agent, *cmd, json),
         Command::Wake { target, test } => wake(agent, target, *test, json),
+        Command::WakeSchedule(cmd) => wake_schedule(agent, cmd, json),
         Command::Help | Command::Version => Ok(String::new()),
     }
 }
@@ -264,6 +265,119 @@ fn wake(agent: &dyn Agent, target: &str, test: bool, json: bool) -> Result<Strin
         },
         Ok(_) => Err(unexpected()),
         Err(_) => Ok("Cancelled.\n".into()),
+    }
+}
+
+/// `dyno wake-schedule`: the agent validates and says what to fix; this resolves names to ids and prints what it answers.
+fn wake_schedule(agent: &dyn Agent, cmd: &args::WakeScheduleCmd, json: bool) -> Result<String, Problem> {
+    use args::WakeScheduleCmd;
+    use dyno_core::power::schedule::{DynoJob, Repeat, RowState, WakeInput, WakeRouteState, WakesView};
+    let view = |r: Reply| match r {
+        Reply::PowerWakes(v) => Ok(*v),
+        _ => Err(unexpected()),
+    };
+    let text = |v: &WakesView| {
+        let mut out = String::new();
+        match &v.route {
+            WakeRouteState::NeedsHelper { reason } | WakeRouteState::Unavailable { reason } => out.push_str(&format!("{reason}\n")),
+            _ => {}
+        }
+        if v.rows.is_empty() {
+            out.push_str("No scheduled wakes.\n");
+        }
+        for r in &v.rows {
+            let e = &r.entry;
+            let state = match &r.state {
+                RowState::Armed { .. } => "armed".to_string(),
+                RowState::Off => "off".to_string(),
+                RowState::Paused => "paused (scheduled wake is off)".to_string(),
+                RowState::NeedsHelper => "needs the helper".to_string(),
+                RowState::Failed { why } => format!("not set: {why}"),
+            };
+            out.push_str(&format!(
+                "{}  {}  {:02}:{:02}  {}\n",
+                e.id,
+                e.name,
+                e.minute_of_day / 60,
+                e.minute_of_day % 60,
+                state
+            ));
+        }
+        out
+    };
+    match cmd {
+        WakeScheduleCmd::List => {
+            let v = view(agent.call(Request::PowerWakes)?)?;
+            Ok(data(json, &v, || text(&v)))
+        }
+        WakeScheduleCmd::Cancel { target } => {
+            let now = view(agent.call(Request::PowerWakes)?)?;
+            let found: Vec<_> = now
+                .rows
+                .iter()
+                .filter(|r| r.entry.name.eq_ignore_ascii_case(target) || r.entry.id.to_string() == *target)
+                .collect();
+            let id = match found.as_slice() {
+                [one] => one.entry.id,
+                [] => {
+                    return Err(Problem::Failed(format!(
+                        "No schedule is called \"{target}\". See: dyno wake-schedule list"
+                    )))
+                }
+                _ => return Err(Problem::Failed("More than one schedule matches; use its id.".into())),
+            };
+            let v = view(agent.call(Request::PowerCancelWake { id })?)?;
+            Ok(data(json, &v, || text(&v)))
+        }
+        WakeScheduleCmd::Add {
+            name,
+            at,
+            repeat,
+            stay,
+            devices,
+            job,
+        } => {
+            let Reply::Wol(saved) = agent.call(Request::WolDevices)? else {
+                return Err(unexpected());
+            };
+            let mut ids = Vec::new();
+            for d in devices {
+                let mac = dyno_core::wol::Mac::parse(d).ok();
+                match saved.devices.iter().find(|s| Some(s.mac) == mac || s.name.eq_ignore_ascii_case(d)) {
+                    Some(s) => ids.push(s.id),
+                    None => {
+                        return Err(Problem::Failed(format!(
+                            "No saved computer is called \"{d}\". Save it on the Power page first (Wake devices)."
+                        )))
+                    }
+                }
+            }
+            let repeat = match repeat.as_str() {
+                "once" => Repeat::Once,
+                "weekdays" => Repeat::Days { mask: 0b0011111 },
+                "weekends" => Repeat::Days { mask: 0b1100000 },
+                _ => Repeat::Daily,
+            };
+            let job = job.as_deref().map(|j| {
+                if j == "backup" {
+                    DynoJob::BackupCheck
+                } else {
+                    DynoJob::SoftwareInventory
+                }
+            });
+            let entry = WakeInput {
+                id: None,
+                name: name.clone(),
+                minute_of_day: *at,
+                repeat,
+                stay_awake_minutes: *stay,
+                wake_devices: ids,
+                job,
+                enabled: true,
+            };
+            let v = view(agent.call(Request::PowerSetWake { entry })?)?;
+            Ok(data(json, &v, || text(&v)))
+        }
     }
 }
 

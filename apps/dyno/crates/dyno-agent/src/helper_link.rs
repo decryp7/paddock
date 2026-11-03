@@ -121,6 +121,30 @@ impl<T: HelperTransport> HelperLink<T> {
         status
     }
 
+    /// Sets the wake `tag` at `at_utc` (seconds since 1970): the helper's own caps and refusals come back as the error.
+    pub fn schedule_wake(&self, tag: &dyno_core::wake::WakeTag, at_utc: i64) -> Result<(), PlatformError> {
+        match self.call("schedule-wake", HelperRequest::ScheduleWake { tag: tag.clone(), at_utc }).map_err(to_platform)? {
+            HelperReply::Wakes(_) => Ok(()),
+            _ => Err(unexpected("ScheduleWake")),
+        }
+    }
+
+    /// Cancels the wake `tag`; whether there was one.
+    pub fn cancel_wake(&self, tag: &dyno_core::wake::WakeTag) -> Result<bool, PlatformError> {
+        match self.call("cancel-wake", HelperRequest::CancelWake { tag: tag.clone() }).map_err(to_platform)? {
+            HelperReply::WakeCancelled(b) => Ok(b),
+            _ => Err(unexpected("CancelWake")),
+        }
+    }
+
+    /// Dyno's pending wakes, soonest first.
+    pub fn list_wakes(&self) -> Result<Vec<dyno_core::wake::WakeEntry>, PlatformError> {
+        match self.call("list-wakes", HelperRequest::ListWakes).map_err(to_platform)? {
+            HelperReply::Wakes(w) => Ok(w),
+            _ => Err(unexpected("ListWakes")),
+        }
+    }
+
     /// The tools the helper holds for this account (from its `Info` answer); empty when it does not answer.
     pub fn tools(&self) -> Vec<ToolStatus> {
         match self.call("info", HelperRequest::Info) {

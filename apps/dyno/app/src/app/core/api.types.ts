@@ -2463,12 +2463,75 @@ export interface WolSettings {
   testTimeoutSecs: number;
 }
 
+export interface WakeSettings {
+  enabled: boolean;
+}
+
 export interface PowerSettings {
   keepAwake: KeepAwakeSettings;
   energy: EnergySettings;
   idle: IdleSettings;
   timed: TimedSettings;
   wol: WolSettings;
+  wake: WakeSettings;
+}
+
+// ------------------------------------------------------------------------------------------ scheduled wake (ADR 0032 section 5)
+
+/** When a scheduled wake repeats: once, every day, or on weekdays (bit 0 Monday to bit 6 Sunday). */
+export type WakeRepeat = 'once' | 'daily' | { days: { mask: number } };
+
+/** The jobs a schedule may run: a fixed list, never a command. */
+export type DynoJob = 'backupCheck' | 'softwareInventory';
+
+export interface WakeLastRun {
+  at: Timestamp;
+  summary: string;
+}
+
+/** A saved schedule. */
+export interface WakeSchedule {
+  id: number;
+  name: string;
+  minuteOfDay: number;
+  repeat: WakeRepeat;
+  stayAwakeMinutes: number | null;
+  wakeDevices: number[];
+  job: DynoJob | null;
+  enabled: boolean;
+  nextAt: Timestamp | null;
+  lastRun: WakeLastRun | null;
+}
+
+/** What the person chose when adding or changing a schedule. */
+export interface WakeInput {
+  id: number | null;
+  name: string;
+  minuteOfDay: number;
+  repeat: WakeRepeat;
+  stayAwakeMinutes: number | null;
+  wakeDevices: number[];
+  job: DynoJob | null;
+  enabled: boolean;
+}
+
+export type WakeRoute = 'agent' | 'helper';
+
+/** How a schedule's row is doing (externally tagged). */
+export type WakeRowState = 'off' | 'paused' | 'needsHelper' | { armed: { route: WakeRoute } } | { failed: { why: string } };
+
+export interface WakeRow {
+  entry: WakeSchedule;
+  state: WakeRowState;
+}
+
+/** Who sets the OS wake here and whether it can be done now. */
+export type WakeRouteState = 'helperReady' | { agent: { note: string; cantTell: string[] } } | { needsHelper: { reason: string } } | { unavailable: { reason: string } };
+
+/** What the Schedule tab shows. */
+export interface WakesView {
+  rows: WakeRow[];
+  route: WakeRouteState;
 }
 
 export type BlockerKind = 'audio' | 'fullScreen' | 'stayAwake' | 'cpu' | 'disk' | 'network' | 'program' | 'battery';

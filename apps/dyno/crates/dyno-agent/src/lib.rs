@@ -52,8 +52,9 @@ pub mod tool_download;
 pub mod tool_own_copy;
 pub mod tool_pins;
 pub mod unusual;
-pub mod wire;
+pub mod wakes;
 pub mod wol;
+pub mod wire;
 
 use agent::Shared;
 use std::sync::Arc;
@@ -284,6 +285,13 @@ impl Running {
                 .name("dyno-power".into())
                 .spawn(move || power::run(&s))
                 .map_err(|e| format!("could not start the power watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-wakes".into())
+                .spawn(move || wakes::run(&s))
+                .map_err(|e| format!("could not start the scheduled-wake watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

@@ -10,6 +10,7 @@ pub mod pdh;
 pub mod power;
 pub mod topology;
 pub mod traffic;
+pub mod wake_timer;
 
 use crate::processes::{NoDetails, SysinfoProcesses};
 use crate::sensors::SysinfoSensors;

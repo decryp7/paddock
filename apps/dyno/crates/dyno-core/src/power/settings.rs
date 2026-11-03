@@ -56,6 +56,14 @@ impl Default for WolSettings {
     }
 }
 
+/// Scheduled wake settings (ADR 0032 section 9): off until the person turns it on, because it wakes the computer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WakeSettings {
+    /// Scheduled wakes are available (Dyno sets OS wakes and acts at their time only when this is on).
+    pub enabled: bool,
+}
+
 /// All power settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -70,6 +78,8 @@ pub struct PowerSettings {
     pub timed: super::idle::TimedSettings,
     /// Wake-on-LAN.
     pub wol: WolSettings,
+    /// Scheduled wake.
+    pub wake: WakeSettings,
 }
 
 impl PowerSettings {
@@ -106,6 +116,13 @@ mod tests {
         assert!(p.keep_awake.display);
         assert_eq!(p.keep_awake.grace_secs, 120);
         assert_eq!(serde_json::from_str::<PowerSettings>("{}").unwrap(), PowerSettings::default());
+    }
+
+    #[test]
+    fn scheduled_wake_is_off_by_default() {
+        assert!(!PowerSettings::default().wake.enabled);
+        let p: PowerSettings = serde_json::from_str(r#"{"wake":{"enabled":true}}"#).unwrap();
+        assert!(p.wake.enabled && p.wol.enabled);
     }
 
     #[test]

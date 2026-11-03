@@ -261,6 +261,33 @@ fn idle_says_the_rules_are_off_and_cancel_is_harmless() {
 }
 
 #[test]
+fn wake_schedule_lists_adds_and_cancels_through_the_agent_and_sets_nothing_real() {
+    // The fake platform's wake timer records and sets nothing (ER-14).
+    let h = Harness::start();
+    let (code, _, err) = h.dyno("wake-schedule add Morning --at 07:30 --stay 30m");
+    assert_eq!(code, 1);
+    assert!(err.contains("turned off in Settings"), "{err}");
+    let c = dyno_agent::cli::connect(&h.dirs).unwrap().0;
+    let dyno_core::protocol::Reply::Settings(s) = dyno_agent::cli::ask(&c, dyno_core::protocol::Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    let mut s = *s;
+    s.power.wake.enabled = true;
+    dyno_agent::cli::ask(&c, dyno_core::protocol::Request::SaveSettings { settings: Box::new(s) }).unwrap();
+    let (code, out, err) = h.dyno("wake-schedule add Morning --at 07:30 --stay 30m --repeat weekdays");
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Morning") && out.contains("07:30") && out.contains("armed"), "{out}");
+    assert!(h.dyno("wake-schedule list").1.contains("Morning"));
+    let (code, _, err) = h.dyno("wake-schedule add Bad --at 07:30");
+    assert_eq!(code, 1);
+    assert!(err.contains("what happens"), "{err}");
+    let (code, out, _) = h.dyno("wake-schedule cancel morning");
+    assert_eq!(code, 0);
+    assert!(out.contains("No scheduled wakes."), "{out}");
+    assert!(h.dyno("wake-schedule cancel Morning").2.contains("No schedule is called"));
+}
+
+#[test]
 fn wake_finds_the_computer_by_name_or_address_and_says_how_it_ended_without_sending_anything_real() {
     use dyno_agent::cli::{ask, connect};
     use dyno_core::protocol::Request;

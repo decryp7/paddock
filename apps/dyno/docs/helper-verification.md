@@ -139,6 +139,17 @@ the data folder, the kept connection) were not run again in the Windows VM in th
 3. **Windows: re-run after the fixes** (the stop race, the data folder, the kept connection, the Not trusted card) from a clean snapshot.
 4. **macOS 15 and 27**: the same run; how the plist daemon shows in Login Items on each.
 5. **A second, standard account** on each system: it sees the total only (the table is tested; the account is not).
+6. **Scheduled wake through the installed helper (ADR 0032 section 5).** With the helper turned on from the card: add a schedule on the Power
+   page's Schedule tab; `pmset -g sched` (macOS) or `systemctl list-timers 'dyno-wake-*'` (Linux) must show exactly Dyno's tagged event, an event
+   Dyno did not make must be left alone, and Cancel (or turning Scheduled wake off in Settings) must remove only Dyno's. Checked so far: the macOS
+   adapter alone, as root in a Tart clone (`crates/dyno-platform/tests/pmset_wakes_vm.rs`, `PADDOCK_VM=1 --ignored`); not through the helper's
+   request path, not on Linux, and not the computer actually waking at the time.
+7. **Windows: the agent's wake timer** (`crates/dyno-platform/src/windows/wake_timer.rs`): a schedule a few minutes ahead wakes the computer from
+   sleep with "Allow wake timers" on, and does nothing with it off; on a Modern Standby image the result is recorded (the tab says Dyno cannot tell).
+   Checked so far (Fusion Windows 11 Arm test VM, as `paddock-admin`, `crates/dyno-platform/tests/windows_wake_timer_vm.rs`, `PADDOCK_VM=1 --ignored`):
+   the timer is created with the resume flag, a 20 s timer fires after 20.0 s, Cancel clears it. That VM has no sleep state at all (`powercfg /a`: no S1 to S3,
+   no hibernation, no Modern Standby), so `powercfg /waketimers` lists nothing and the computer cannot be woken from sleep there: the registration
+   and the real wake still need a machine or image with S3 or Modern Standby.
 
 ## Settings card, every state (mock backend, independent review)
 

@@ -2,12 +2,11 @@
 //! `/proc/net/arp` when `ip` is missing; Windows the IP Helper table (`GetIpNetTable2`, in `win.rs`). Bounded and parsed by
 //! `dyno_core::wol::neighbours`, which never panics.
 
-use crate::runner::{tool, ToolRunner};
+use crate::runner::{tool, ToolRunner, TOOL_TIMEOUT};
 use dyno_core::ports::PlatformError;
 use dyno_core::wol::neighbours::{parse_arp_an, parse_ip_neigh, parse_ndp_an, parse_proc_net_arp, MAX_NEIGHBOURS};
 use dyno_core::wol::wake::NeighbourSource;
 use dyno_core::wol::{Neighbour, NeighbourState};
-use std::sync::Mutex;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -15,7 +14,7 @@ mod win;
 
 /// Reads the tables the way this OS offers them.
 pub struct OsNeighbours {
-    runner: Mutex<Box<dyn ToolRunner>>,
+    runner: Box<dyn ToolRunner>,
     proc_net_arp: std::path::PathBuf,
 }
 
@@ -23,7 +22,7 @@ impl OsNeighbours {
     /// Over `runner`, reading `/proc/net/arp` where Linux falls back to it.
     pub fn new(runner: Box<dyn ToolRunner>) -> OsNeighbours {
         OsNeighbours {
-            runner: Mutex::new(runner),
+            runner,
             proc_net_arp: "/proc/net/arp".into(),
         }
     }
@@ -35,8 +34,7 @@ impl OsNeighbours {
     }
 
     fn run(&self, program: &str, args: &[&str]) -> Result<String, PlatformError> {
-        let r = self.runner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let out = r.run_tool(&tool(program, args), crate::runner::TOOL_TIMEOUT)?;
+        let out = self.runner.run_tool(&tool(program, args), TOOL_TIMEOUT)?;
         if out.ok {
             Ok(out.stdout)
         } else {

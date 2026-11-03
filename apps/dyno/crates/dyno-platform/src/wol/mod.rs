@@ -34,6 +34,53 @@ pub struct WolPorts {
     pub secrets: Arc<dyn paddock_secrets::Secrets>,
     /// The clock a wake waits on.
     pub clock: Arc<dyn dyno_core::wol::WolClock>,
+    /// Sets the OS wake for a scheduled wake from inside the agent (Windows: a waitable timer that wakes the computer); `None` where
+    /// the administrator helper does it (macOS, Linux) (ADR 0032 section 5).
+    pub wake_timer: Option<Arc<dyn dyno_core::wake::WakeScheduler>>,
+}
+
+/// The agent's own wake timer where the OS has one the agent may set (Windows); the helper does it elsewhere.
+#[cfg(windows)]
+fn real_wake_timer() -> Option<Arc<dyn dyno_core::wake::WakeScheduler>> {
+    Some(Arc::new(crate::windows::wake_timer::WakeTimers::default()))
+}
+
+/// The agent's own wake timer where the OS has one the agent may set (Windows); the helper does it elsewhere.
+#[cfg(not(windows))]
+fn real_wake_timer() -> Option<Arc<dyn dyno_core::wake::WakeScheduler>> {
+    None
+}
+
+/// A wake timer that only records (ER-14: a test never sets a real wake). Pending wakes are kept, soonest first.
+#[derive(Default)]
+pub struct FakeWakeTimer {
+    pending: std::sync::Mutex<Vec<dyno_core::wake::WakeEntry>>,
+    /// When set, every schedule is refused with this message (the OS said no).
+    pub refuse: std::sync::Mutex<Option<String>>,
+}
+
+impl dyno_core::wake::WakeScheduler for FakeWakeTimer {
+    fn schedule(&self, tag: &dyno_core::wake::WakeTag, at_utc: i64) -> Result<(), dyno_core::ports::PlatformError> {
+        if let Some(m) = self.refuse.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+            return Err(dyno_core::ports::PlatformError::Failed(m));
+        }
+        let mut p = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        p.retain(|w| &w.tag != tag);
+        p.push(dyno_core::wake::WakeEntry { tag: tag.clone(), at_utc });
+        p.sort_by_key(|w| w.at_utc);
+        Ok(())
+    }
+
+    fn cancel(&self, tag: &dyno_core::wake::WakeTag) -> Result<bool, dyno_core::ports::PlatformError> {
+        let mut p = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = p.len();
+        p.retain(|w| &w.tag != tag);
+        Ok(p.len() != before)
+    }
+
+    fn list(&self) -> Result<Vec<dyno_core::wake::WakeEntry>, dyno_core::ports::PlatformError> {
+        Ok(self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
+    }
 }
 
 /// The real clock: monotonic time and a real sleep.
@@ -74,6 +121,7 @@ impl WolPorts {
             readiness: Arc::new(OsReadiness::new(runner())),
             secrets: Arc::new(paddock_secrets::KeyringSecrets::os("Dyno")),
             clock: Arc::new(RealClock::new()),
+            wake_timer: real_wake_timer(),
         }
     }
 }
@@ -95,6 +143,7 @@ impl WolPorts {
             readiness: Arc::new(FakeReadiness(dyno_core::wol::ThisPcWol::default())),
             secrets: Arc::new(paddock_secrets::MemorySecrets::new("Dyno")),
             clock: Arc::new(dyno_core::wol::fake::FakeClock::default()),
+            wake_timer: Some(Arc::new(FakeWakeTimer::default())),
         }
     }
 }

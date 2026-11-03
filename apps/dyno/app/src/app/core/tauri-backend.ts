@@ -70,6 +70,8 @@ import type {
   ThisPcWol,
   WolDeviceInput,
   WolView,
+  WakeInput,
+  WakesView,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
@@ -115,6 +117,7 @@ export const EVENTS = {
   agent: 'dyno://agent',
   power: 'dyno://power',
   wol: 'dyno://wol',
+  wakes: 'dyno://wakes',
   alarm: 'dyno://alarm',
   diskScan: 'dyno://disk-scan',
   diskVolumes: 'dyno://disk-volumes',
@@ -163,6 +166,7 @@ export class TauriBackend implements DynoBackend {
   private readonly agentChannel: EventChannel<AgentStatus>;
   private readonly powerChannel: EventChannel<PowerView>;
   private readonly wolChannel: EventChannel<WolView>;
+  private readonly wakesChannel: EventChannel<WakesView>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
   private readonly diskScanChannel: EventChannel<DiskScanStatus>;
   private readonly diskVolumesChannel: EventChannel<Volume[]>;
@@ -184,6 +188,7 @@ export class TauriBackend implements DynoBackend {
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
     this.powerChannel = new EventChannel(listenFn, EVENTS.power);
     this.wolChannel = new EventChannel(listenFn, EVENTS.wol);
+    this.wakesChannel = new EventChannel(listenFn, EVENTS.wakes);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
     this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
     this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
@@ -220,6 +225,10 @@ export class TauriBackend implements DynoBackend {
 
   onPower(listener: (v: PowerView) => void): Unsubscribe {
     return this.powerChannel.add(listener);
+  }
+
+  onWakes(listener: (v: WakesView) => void): Unsubscribe {
+    return this.wakesChannel.add(listener);
   }
 
   onWol(listener: (v: WolView) => void): Unsubscribe {
@@ -742,6 +751,18 @@ export class TauriBackend implements DynoBackend {
 
   wolRemove(id: number): Promise<WolView> {
     return this.request({ wolRemove: { id } });
+  }
+
+  powerWakes(): Promise<WakesView> {
+    return this.request('powerWakes');
+  }
+
+  powerSetWake(entry: WakeInput): Promise<WakesView> {
+    return this.request({ powerSetWake: { entry } });
+  }
+
+  powerCancelWake(id: number): Promise<WakesView> {
+    return this.request({ powerCancelWake: { id } });
   }
 
   wolReadiness(): Promise<ThisPcWol> {

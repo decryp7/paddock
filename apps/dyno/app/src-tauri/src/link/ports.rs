@@ -456,6 +456,7 @@ pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Messa
         Message::WidgetLayoutChanged(surface) => sink.widget_layout_changed(surface),
         Message::PowerChanged(view) => sink.power_changed(*view),
         Message::WolChanged(view) => sink.wol_changed(*view),
+        Message::WakesChanged(view) => sink.wakes_changed(*view),
         _ => {}
     });
     BodyPeer::start(conn, opts).map(Arc::new).map_err(|e| e.to_string())

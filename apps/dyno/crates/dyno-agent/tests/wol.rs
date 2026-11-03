@@ -72,6 +72,7 @@ impl Harness {
             })),
             secrets: secrets.clone(),
             clock: Arc::new(FakeClock::default()),
+            wake_timer: None,
         };
         let running = Running::start(dirs.clone(), platform, Box::new(fake), Box::new(|_| Ok(()))).unwrap();
         Harness {
