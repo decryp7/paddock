@@ -224,7 +224,8 @@ async function main(argv) {
         const power = new PowerChecks(guest, 'macos', { bundle: `/Applications/${config.bundle}`, log });
         const pw = process.env.PADDOCK_VM_PASSWORD ?? 'admin'; // the pinned image's admin account; never printed
         const gui = new MacGui(guest, { password: pw, fetch, log });
-        const idle = new MacIdleChecks(guest, power, check, { log });
+        power.ui = gui;
+        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
         return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle });
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });

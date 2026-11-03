@@ -119,6 +119,56 @@ export class MacGui {
     return this.finish(title, checks, evidence, 'Turn off removed the launchd job and the file');
   }
 
+
+  /** Index of the first text field whose label matches `re` among the app's text fields, in the order `axdrive setfield` counts them. */
+  async fieldIndex(re) {
+    const rows = await this.texts();
+    const fields = rows.filter((r) => r.role === 'AXTextField' || r.role === 'AXSecureTextField');
+    return fields.findIndex((f) => re.test(f.text));
+  }
+
+  async setField(re, value) {
+    const n = await this.fieldIndex(re);
+    if (n < 0) return false;
+    return (await this.g.exec(`printf '%s' ${sq(value)} | ${this.axCmd(`setfield ${sq(this.app)} ${n}`)}`)).code === 0;
+  }
+
+  /** The Power page on one of its tabs (the real tab buttons; AXPress on a radio needs the trailing value in its label, so no `$`). */
+  async openPower(tab) {
+    if (!(await this.has(this.app, '^Power$', 'AXHeading'))) await this.press(this.app, '^Power$', 'AXLink');
+    const ok = await this.waitFor(() => this.press(this.app, `^${tab}( |$)`, 'AXRadioButton'), 20_000);
+    if (ok.ok) await this.waitFor(async () => (await this.texts()).some((t) => t.role === 'AXRadioButton' && t.text.startsWith(tab)), 5_000);
+    return ok.ok;
+  }
+
+  async headingMatches(re) { return (await this.texts()).some((t) => t.role === 'AXHeading' && re.test(t.text)); }
+
+  /** Wake devices > Add by hand: name and address, then Add computer. */
+  async addWakeDevice(name, mac) {
+    if (!(await this.openPower('Wake devices'))) return { ok: false, detail: 'no Wake devices tab' };
+    if (!(await this.press(this.app, '^Add by hand$'))) return { ok: false, detail: 'no "Add by hand" button' };
+    const f = await this.waitFor(() => this.fieldIndex(/^Name of the computer/).then((i) => i >= 0), 10_000);
+    if (!f.ok) return { ok: false, detail: 'the Add a computer form did not open' };
+    const set = (await this.setField(/^Name of the computer/, name)) && (await this.setField(/^Hardware address/, mac));
+    const add = set && (await this.press(this.app, '^Add computer$'));
+    const row = add && (await this.waitFor(async () => this.has(this.app, `^Wake ${name}`), 15_000)).ok;
+    return { ok: Boolean(row), detail: row ? `saved "${name}" (${mac}) in Wake devices; its row offers "Wake ${name}"` : 'the computer was not saved' };
+  }
+
+  /** Schedule > Turn on scheduled wake (when offered) > Add schedule: name, time of day (12-hour text), Once, then Add schedule. */
+  async addSchedule(name, time12) {
+    if (!(await this.openPower('Schedule'))) return { ok: false, detail: 'no Schedule tab' };
+    if (await this.has(this.app, '^Turn on scheduled wake$')) await this.press(this.app, '^Turn on scheduled wake$');
+    if (!(await this.waitFor(() => this.press(this.app, '^Add schedule$'), 15_000)).ok) return { ok: false, detail: 'no "Add schedule" button' };
+    const open = await this.waitFor(async () => (await this.fieldIndex(/^Name of the schedule/)) >= 0, 10_000);
+    if (!open.ok) return { ok: false, detail: 'the Add a schedule form did not open' };
+    const set = (await this.setField(/^Name of the schedule/, name)) && (await this.setField(/^Time of day to wake/, time12));
+    await this.press(this.app, '^Once', 'AXRadioButton');
+    const add = set && (await this.press(this.app, '^Add schedule$'));
+    const row = add && (await this.waitFor(async () => (await this.texts()).some((t) => t.text === name && t.role === 'AXStaticText'), 15_000)).ok;
+    return { ok: Boolean(row), detail: row ? `added the schedule "${name}" at ${time12}, Once` : 'the schedule was not added' };
+  }
+
   finish(title, checks, evidence, passSummary = '') {
     const failed = checks.filter((c) => !c.ok);
     return { title, status: failed.length ? 'fail' : 'pass', summary: failed.length ? failed.map((c) => c.detail).join('; ').slice(0, 240) : passSummary, checks, evidence };

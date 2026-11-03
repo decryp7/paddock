@@ -25,6 +25,7 @@
       "role": "helper",
       "max": 1,
       "argsPattern": "^ run( |$)",
+      "parentJob": "net.decryptology.dyno.agent.ondemand",
       "parents": [
         "app",
         "launchd"

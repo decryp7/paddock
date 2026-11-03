@@ -34,6 +34,13 @@ export class Check {
   async snapshot() {
     const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,lstart=,command=');
     const procs = parsePs(r.stdout);
+    // A helper with a launchd job of its own (spec.parentJob) that runs under launchd: ask launchd for the job, so the judge can check the pid.
+    procs.jobs = {};
+    for (const spec of this.config.processes) {
+      if (spec.parentJob && instancesOf(procs, spec, this.bundle).some((p) => p.ppid === 1)) {
+        procs.jobs[spec.parentJob] = parseLaunchctlPrint((await this.g.exec(`launchctl print gui/$(id -u)/${spec.parentJob} 2>&1`)).stdout);
+      }
+    }
     this.trace.push({ at: this.g.now(), procs });
     return procs;
   }
@@ -143,6 +150,11 @@ export class Check {
       { ok: gone.ok, detail: gone.ok ? `every process of the app ended ${(gone.tookMs / 1000).toFixed(0)} s after Quit` : 'processes of the app still running after the 40 s guard' },
       ...left.map((o) => ({ ok: false, detail: `left behind: ${o.name} pid ${o.pid} (parent ${o.ppid}${o.orphan ? ', an orphan of launchd' : ''}, age ${o.etime})` })),
     ];
+    for (const spec of this.config.processes.filter((s) => s.parentJob)) {
+      const lc = await this.g.exec(`launchctl print gui/$(id -u)/${spec.parentJob} >/dev/null 2>&1; echo $?`);
+      const loaded = lc.stdout.trim() === '0';
+      checks.push({ ok: !loaded, detail: `launchd job ${spec.parentJob}: ${loaded ? 'STILL LOADED after Quit (ADR 0026: the job must be gone)' : 'gone after Quit'}` });
+    }
     for (const f of (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
       const c = await this.readFile(f.path);
       checks.push({ ok: c == null, detail: `${f.path}: ${c == null ? 'removed' : 'still there after Quit'}` });

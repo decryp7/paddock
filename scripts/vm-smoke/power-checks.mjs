@@ -82,7 +82,8 @@ async function until(g, fn, guardMs, intervalMs = 1500) {
 
 export class PowerChecks {
   /** @param guest {exec(cmd), now(), sleep(ms)}  @param os 'macos'|'linux'|'windows'  @param bundle where Dyno's `dyno` command is */
-  constructor(guest, os, { bundle, log = () => {}, intervalMs = 1500 } = {}) {
+  constructor(guest, os, { bundle, log = () => {}, intervalMs = 1500, ui = null } = {}) {
+    this.ui = ui; // a MacGui: the real window is clicked where it can be, the OS table still decides
     this.g = guest;
     this.os = ADAPTERS[os];
     if (!this.os) throw new Error(`no power adapter for ${os}`);
@@ -101,18 +102,32 @@ export class PowerChecks {
     const evidence = [];
     const before = await this.os.readHold(this.g);
     checks.push({ ok: !before.held, detail: before.held ? 'a Dyno hold was already there before "on" (dirty guest)' : 'no Dyno hold before "on"' });
-    const on = await this.dyno('awake on --for 1h');
-    evidence.push(`$ dyno awake on --for 1h (exit ${on.code})`, ...on.stdout.trimEnd().split('\n'));
-    checks.push({ ok: on.code === 0, detail: `dyno awake on --for 1h exit ${on.code}` });
+    if (this.ui) {
+      const opened = await this.ui.openPower('Keep awake');
+      const pressed = opened && (await this.ui.press(this.ui.app, '^Keep awake for 1 hour$'));
+      checks.push({ ok: Boolean(pressed), detail: pressed ? 'pressed "Keep awake for 1 hour" on the Power page' : 'no "Keep awake for 1 hour" button on the Power page' });
+      const head = await this.ui.waitFor(() => this.ui.headingMatches(/^Keeping awake/), 15_000);
+      checks.push({ ok: head.ok, detail: head.ok ? 'the page says "Keeping awake, ... left"' : 'the page never said it is keeping awake' });
+      evidence.push(`screenshot: ${await this.ui.shot('keep-awake-on')}`);
+    } else {
+      const on = await this.dyno('awake on --for 1h');
+      evidence.push(`$ dyno awake on --for 1h (exit ${on.code})`, ...on.stdout.trimEnd().split('\n'));
+      checks.push({ ok: on.code === 0, detail: `dyno awake on --for 1h exit ${on.code}` });
+    }
     const held = await until(this.g, async () => { const h = await this.os.readHold(this.g); return h.held ? h : null; }, 20_000, this.interval);
     const held_ev = held.ok ? held.value : await this.os.readHold(this.g);
     evidence.push(...held_ev.evidence);
     checks.push({ ok: held.ok, detail: held.ok ? 'the OS lists a Dyno hold that blocks sleep' : 'the OS never listed a Dyno hold within 20 s' });
     const status = await this.dyno('awake status');
     evidence.push(`$ dyno awake status (exit ${status.code})`, ...status.stdout.trimEnd().split('\n'));
-    const off = await this.dyno('awake off');
-    evidence.push(`$ dyno awake off (exit ${off.code})`, ...off.stdout.trimEnd().split('\n'));
-    checks.push({ ok: off.code === 0, detail: `dyno awake off exit ${off.code}` });
+    if (this.ui) {
+      const stop = await this.ui.press(this.ui.app, '^Stop keeping awake$');
+      checks.push({ ok: stop, detail: stop ? 'pressed "Stop keeping awake"' : 'no "Stop keeping awake" button' });
+    } else {
+      const off = await this.dyno('awake off');
+      evidence.push(`$ dyno awake off (exit ${off.code})`, ...off.stdout.trimEnd().split('\n'));
+      checks.push({ ok: off.code === 0, detail: `dyno awake off exit ${off.code}` });
+    }
     const gone = await until(this.g, async () => !(await this.os.readHold(this.g)).held, 20_000, this.interval);
     evidence.push(...(await this.os.readHold(this.g)).evidence);
     checks.push({ ok: gone.ok, detail: gone.ok ? 'the OS no longer lists a Dyno hold after "off"' : 'the Dyno hold was still listed 20 s after "off"' });
@@ -128,12 +143,24 @@ export class PowerChecks {
     const at = clock.stdout.trim().split('\n').at(-1);
     if (!/^\d\d:\d\d$/.test(at)) return { title, status: 'fail', summary: `could not read the guest clock (${at})`, checks: [], evidence: [clock.stderr] };
     const name = 'vm-check';
-    const add = await this.dyno(`wake-schedule add ${name} --at ${at} --repeat once --stay 10m`);
-    evidence.push(`$ dyno wake-schedule add ${name} --at ${at} --repeat once --stay 10m (exit ${add.code})`, ...add.stdout.trimEnd().split('\n'));
-    if (add.code !== 0 && /helper/i.test(add.stdout) && this.os.wakeNeedsHelper) {
+    let add;
+    if (this.ui) {
+      const t12 = (await this.g.exec(`date -v+5M '+%I:%M %p'`)).stdout.trim();
+      const r = await this.ui.addSchedule(name, t12);
+      evidence.push(`screenshot: ${await this.ui.shot('schedule-added')}`);
+      checks.push({ ok: r.ok, detail: r.detail });
+      add = { code: r.ok ? 0 : 1, stdout: (await this.dyno('wake-schedule list')).stdout };
+      evidence.push('$ dyno wake-schedule list', ...add.stdout.trimEnd().split('\n'));
+    } else {
+      add = await this.dyno(`wake-schedule add ${name} --at ${at} --repeat once --stay 10m`);
+      evidence.push(`$ dyno wake-schedule add ${name} --at ${at} --repeat once --stay 10m (exit ${add.code})`, ...add.stdout.trimEnd().split('\n'));
+    }
+    if (this.helperOn && /needs the helper/i.test(add.stdout) && this.os.wakeNeedsHelper) {
+      checks.push({ ok: false, detail: 'the schedule says "Needs the helper" although the helper check ran first: the helper is not usable (a helper older than the app needs "Update the helper")' });
+    } else if (add.code !== 0 && /helper/i.test(add.stdout) && this.os.wakeNeedsHelper) {
       return { title, status: 'skip', summary: 'Dyno needs the admin helper to set a wake on this OS and it is not on: run the admin helper check first (it is a GUI row, see README)', checks, evidence };
     }
-    checks.push({ ok: add.code === 0, detail: `wake-schedule add exit ${add.code}` });
+    if (!this.ui) checks.push({ ok: add.code === 0, detail: `wake-schedule add exit ${add.code}` });
     const listed = await until(this.g, async () => { const w = await this.os.readWakes(this.g); return w.entries.length ? w : null; }, 20_000, this.interval);
     const w = listed.ok ? listed.value : await this.os.readWakes(this.g);
     evidence.push(...w.evidence);
@@ -163,18 +190,29 @@ export class PowerChecks {
     if (!this.os.capture) return { title, status: 'skip', summary: `no packet capture is wired for ${this.os.id} guests (no tcpdump in the guest); run it from a macOS or Linux guest`, checks: [] };
     const file = '/tmp/vmsmoke-wol.txt';
     await this.g.exec(`rm -f ${file}`);
+    const pre = [];
+    if (this.ui) {
+      const added = await this.ui.addWakeDevice('vm-peer', TEST_MAC);
+      this.uiWakeReady = added.ok;
+      pre.push({ ok: added.ok, detail: added.detail });
+    }
     const cap = await this.os.capture(this.g, { file });
     const started = await this.g.exec(cap.start);
     const tpid = Number(started.stdout.trim().split('\n').at(-1));
-    const checks = [];
+    const checks = [...pre];
     const evidence = [];
     let text = '';
     try {
       const ready = await until(this.g, async () => (await this.g.exec(cap.ready)).code === 0, 15_000, 500);
       checks.push({ ok: ready.ok, detail: ready.ok ? `tcpdump listening on ${cap.iface}` : 'tcpdump did not start listening within 15 s' });
-      const send = await this.dyno(`wake ${TEST_MAC}`);
-      evidence.push(`$ dyno wake ${TEST_MAC} (exit ${send.code})`, ...send.stdout.trimEnd().split('\n'));
-      checks.push({ ok: send.code === 0, detail: `dyno wake exit ${send.code}` });
+      if (this.ui) {
+        const pressed = this.uiWakeReady && (await this.ui.press(this.ui.app, '^Wake vm-peer'));
+        checks.push({ ok: Boolean(pressed), detail: pressed ? 'pressed "Wake vm-peer" on the Wake devices tab' : 'the saved computer "vm-peer" has no Wake button' });
+      } else {
+        const send = await this.dyno(`wake ${TEST_MAC}`);
+        evidence.push(`$ dyno wake ${TEST_MAC} (exit ${send.code})`, ...send.stdout.trimEnd().split('\n'));
+        checks.push({ ok: send.code === 0, detail: `dyno wake exit ${send.code}` });
+      }
       const got = await until(this.g, async () => { const r = await this.g.exec(`cat ${file}`); return /UDP/.test(r.stdout) ? r.stdout : null; }, 15_000, 500);
       text = got.ok ? got.value : (await this.g.exec(`cat ${file}`)).stdout;
       checks.push({ ok: got.ok, detail: got.ok ? 'a UDP packet to port 9 or 7 was captured' : 'no UDP packet to port 9 or 7 within 15 s' });
@@ -225,7 +263,7 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
   // A failed start judgement (for example a parent rule) does not stop the checks: each step fails by itself if the app is not there.
   {
     const power = makePower();
-    if (gui) push(await gui.helperOn());
+    if (gui) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
     push(await power.keepAwake());
     push(await power.scheduledWake());
     push(await power.wakeOnLan());

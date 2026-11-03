@@ -9,14 +9,17 @@ export const idleRule = { enabled: true, action: 'sleep', afterSecs: 60, countdo
 
 export class MacIdleChecks {
   /** @param power a PowerChecks (for dyno()), @param check the vm-smoke Check (start/quit/reset), @param opts {log} */
-  constructor(guest, power, check, { log = () => {} } = {}) {
-    Object.assign(this, { g: guest, power, check, log });
+  constructor(guest, power, check, { log = () => {}, ui = null } = {}) {
+    Object.assign(this, { g: guest, power, check, log, ui });
   }
 
   async seedRule() {
     const py = `import json,os;p=os.path.expandvars(${sq(SETTINGS)});d=json.load(open(p)) if os.path.exists(p) else {};d.setdefault('power',{})['idle']=${JSON.stringify(idleRule).replace(/true/g, 'True').replace(/false/g, 'False').replace(/null/g, 'None')};os.makedirs(os.path.dirname(p),exist_ok=True);json.dump(d,open(p,'w'))`;
     return this.g.exec(`python3 -c ${sq(py)}`);
   }
+
+  /** A real HID event (a tiny pointer drag through the HID event tap), which resets the idle time Dyno reads; `caffeinate -u` does not. */
+  async activity() { await this.g.exec('/usr/local/bin/axdrive drag 500 400 505 405'); }
 
   async poll(re, guardMs, intervalMs = 3000) {
     const t0 = this.g.now();
@@ -43,24 +46,45 @@ export class MacIdleChecks {
     const cd = await this.poll(/Counting down to sleep/, 240_000);
     evidence.push('$ dyno idle (countdown)', ...cd.text.trimEnd().split('\n'));
     checks.push({ ok: cd.ok, detail: cd.ok ? 'the countdown appeared after the idle time' : `no countdown within 240 s (last: ${cd.text.trim().split('\n')[0]})` });
-    const cancel = await this.power.dyno('idle cancel');
-    evidence.push(`$ dyno idle cancel (exit ${cancel.code})`, ...cancel.stdout.trimEnd().split('\n'));
+    let cancel;
+    if (this.ui) {
+      const shown = (await this.ui.openPower('Sleep and shut down')) && (await this.ui.waitFor(() => this.ui.headingMatches(/^Will sleep in/), 60_000)).ok;
+      checks.push({ ok: shown, detail: shown ? 'the Power page shows the countdown ("Will sleep in ...")' : 'the Power page showed no "Will sleep in" countdown' });
+      evidence.push(`screenshot: ${await this.ui.shot('idle-countdown')}`);
+      const pressed = await this.ui.press(this.ui.app, '^Cancel sleep$');
+      checks.push({ ok: pressed, detail: pressed ? 'pressed "Cancel sleep"' : 'no "Cancel sleep" button' });
+      cancel = { code: pressed ? 0 : 1 };
+    } else {
+      cancel = await this.power.dyno('idle cancel');
+      evidence.push(`$ dyno idle cancel (exit ${cancel.code})`, ...cancel.stdout.trimEnd().split('\n'));
+    }
     const stopped = await this.poll(/will not try again|Watching/, 20_000, 1500);
     checks.push({ ok: cancel.code === 0 && stopped.ok && !/Counting down/.test(stopped.text), detail: `Cancel stopped the countdown: ${stopped.text.trim().split('\n')[0]}` });
 
     // 2. New activity re-arms the rule; a second countdown is Snoozed.
-    await this.g.exec('caffeinate -u -t 2');
+    await this.activity();
     const cd2 = await this.poll(/Counting down to sleep/, 240_000);
     checks.push({ ok: cd2.ok, detail: cd2.ok ? 'after new activity the countdown came again' : 'no second countdown after activity' });
-    const snooze = await this.power.dyno('idle snooze 30');
-    evidence.push(`$ dyno idle snooze 30 (exit ${snooze.code})`, ...snooze.stdout.trimEnd().split('\n'));
+    let snooze;
+    if (this.ui) {
+      await this.ui.openPower('Sleep and shut down');
+      const pressed = (await this.ui.waitFor(() => this.ui.press(this.ui.app, '^Snooze 30 minutes$'), 30_000)).ok;
+      checks.push({ ok: pressed, detail: pressed ? 'pressed "Snooze 30 minutes"' : 'no "Snooze 30 minutes" button' });
+      snooze = { code: pressed ? 0 : 1 };
+      const head = await this.ui.waitFor(() => this.ui.headingMatches(/^Snoozed/), 15_000);
+      checks.push({ ok: head.ok, detail: head.ok ? 'the page says "Snoozed"' : 'the page never said "Snoozed"' });
+    } else {
+      snooze = await this.power.dyno('idle snooze 30');
+      evidence.push(`$ dyno idle snooze 30 (exit ${snooze.code})`, ...snooze.stdout.trimEnd().split('\n'));
+    }
     const snoozed = await this.poll(/Snoozed/, 20_000, 1500);
     evidence.push(...snoozed.text.trimEnd().split('\n'));
     checks.push({ ok: snooze.code === 0 && snoozed.ok && !/Counting down/.test(snoozed.text), detail: snoozed.ok ? 'Snooze 30 minutes: the rule is watching and snoozed' : 'the rule was not snoozed' });
     await this.power.dyno('idle cancel');
 
     // 3. Audio: the rule waits and says so. The sound is a long spoken file played by the guest's own audio device.
-    await this.g.exec('caffeinate -u -t 2; [ -f /tmp/vmsmoke-long.aiff ] || say -o /tmp/vmsmoke-long.aiff "$(yes hello | head -400)"; (nohup afplay /tmp/vmsmoke-long.aiff >/dev/null 2>&1 &)');
+    await this.activity();
+    await this.g.exec('[ -f /tmp/vmsmoke-long.aiff ] || say -o /tmp/vmsmoke-long.aiff "$(yes hello | head -400)"; (nohup afplay /tmp/vmsmoke-long.aiff >/dev/null 2>&1 &)');
     const wait = await this.poll(/Waiting because .*audio/i, 240_000);
     evidence.push('$ dyno idle (audio playing)', ...wait.text.trimEnd().split('\n'));
     checks.push({ ok: wait.ok && !/Counting down/.test(wait.text), detail: wait.ok ? 'with a sound playing the rule waits and says: ' + wait.text.match(/Waiting because [^\n]*/)[0] : 'the rule did not report waiting for audio' });
