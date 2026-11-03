@@ -32,14 +32,17 @@ pub struct PreviewRequest {
 }
 }
 
-/// The reply: the request's `seq` and the view the gesture would give.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+ts! {
+/// The reply: the request's `seq` and the view the gesture would give (its `outcome` says where the placement would land).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewReply {
+pub struct PreviewReply<V> {
     /// The request's counter.
+    #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
     pub seq: u64,
-    /// The previewed [`crate::LayoutView`] as JSON.
-    pub view: Value,
+    /// The previewed [`crate::LayoutView`].
+    pub view: V,
+}
 }
 
 trait Slot: Send {
@@ -123,7 +126,7 @@ impl Previews {
 
     /// Answers a preview request from the recorded view. [`WidgetError::Stale`] when the revision is not the recorded
     /// one or nothing is recorded yet; an unknown surface is refused.
-    pub fn preview(&self, request: &PreviewRequest) -> Result<PreviewReply, WidgetError> {
+    pub fn preview(&self, request: &PreviewRequest) -> Result<PreviewReply<Value>, WidgetError> {
         let map = self.surfaces.lock().unwrap_or_else(PoisonError::into_inner);
         let slot = map.get(&request.surface).ok_or_else(|| {
             WidgetError::Invalid(format!(

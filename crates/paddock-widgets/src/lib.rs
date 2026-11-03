@@ -59,6 +59,6 @@ pub use state::{
 };
 pub use upgrade::spans_to_cells;
 pub use view::{
-    Arrangement, CatalogueInfo, KindInfo, LayoutView, Placed, PlacementMoves, SurfaceInfo, ViewOf,
-    builtin_presets, info, view,
+    Arrangement, CatalogueInfo, KindInfo, LayoutView, Outcome, Placed, PlacementMoves, SurfaceInfo,
+    ViewOf, builtin_presets, info, view,
 };

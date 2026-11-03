@@ -39,7 +39,7 @@ pub enum Dir {
 
 /// One arrangement gesture on a grid surface: what a drop, a resize or a key asks for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "gesture")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum GridGesture {
     /// A drop or a pointer resize: the target rectangle, clamped to the kind's rule and the grid.
     Place {

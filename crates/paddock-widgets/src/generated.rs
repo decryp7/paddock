@@ -35,6 +35,8 @@ fn types() -> String {
         crate::Arrangement::decl(),
         crate::PlacementMoves::decl(),
         crate::PreviewRequest::decl(),
+        crate::PreviewReply::<Dummy>::decl(),
+        crate::Outcome::decl(),
         crate::Rect::decl(),
         crate::Dir::decl(),
         crate::GridGesture::decl(),

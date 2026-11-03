@@ -304,6 +304,8 @@ pub struct Stored<C: Catalogue> {
     pub read: Read<C>,
     /// Counts up with every applied edit; in memory only. A reload starts a new value (a new `Stored`).
     revision: u64,
+    /// What the last arrangement edit did, for the view (in memory only).
+    pub(crate) outcome: Option<crate::view::Outcome>,
 }
 
 impl<C: Catalogue> Stored<C> {
@@ -335,6 +337,7 @@ impl<C: Catalogue> Stored<C> {
                 unread: None,
             },
             revision: 1,
+            outcome: None,
         }
     }
 
@@ -383,11 +386,16 @@ impl<C: Catalogue> Stored<C> {
         if !self.editable() {
             return Err(WidgetError::NewerLayout);
         }
+        let gesture = match &edit {
+            crate::Edit::Arrange { gesture } => Some(gesture.clone()),
+            _ => None,
+        };
         self.read.layout = crate::apply::<C>(&self.read.layout, edit)?;
         self.read.unread = None;
         self.read.notes.clear();
         self.read.legacy = None;
         self.revision += 1;
+        self.outcome = gesture.and_then(|g| view::outcome_of::<C>(&self.read.layout, &g));
         Ok(view::view(self))
     }
 
@@ -431,6 +439,7 @@ impl<C: Catalogue> Clone for Stored<C> {
         Stored {
             read: self.read.clone(),
             revision: self.revision,
+            outcome: self.outcome.clone(),
         }
     }
 }
@@ -462,6 +471,7 @@ impl<'de, C: Catalogue> Deserialize<'de> for Stored<C> {
         Ok(Stored {
             read: read::<C>(&value),
             revision: 1,
+            outcome: None,
         })
     }
 }
