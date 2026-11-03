@@ -20,6 +20,7 @@ import {
   type Placement,
   type Preset,
   type Progress,
+  type Span,
   type SurfaceValues,
   type WidgetState,
 } from '@decryp7/paddock-ui/widgets';
@@ -50,7 +51,7 @@ const kind = (k: string, title: string, summary: string, icon: string, spans: nu
   title,
   summary,
   icon,
-  spans,
+  size: { arrangement: 'spans', spans },
   maxInstances,
   refresh,
 });
@@ -101,8 +102,12 @@ const STOPPED_VALUES: SurfaceValues<Val, Act> = {
 };
 
 const MINIMAL: Preset<Sample> = { id: 'minimal', name: 'Minimal', builtin: true, placements: [place('alarms', 'alarms'), place('cpu', 'cpu')] };
-const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset<Sample>[] = []): LayoutView<string, Sample, string> => ({
+const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset<Sample>[] = []): LayoutView<string, Sample, Span, string> => ({
   layout: { version: 1, placements, presets },
+  revision: 1,
+  arrangements: [],
+  moves: [],
+  canRedo: false,
   catalogue: CATALOGUE,
   builtinPresets: [MINIMAL],
   notes: [],
