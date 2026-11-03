@@ -1,6 +1,7 @@
 # 29. Saved views: the disk map (and slow lists) are kept in a cache database, shown at once with their age
 
-- Status: Proposed (2026-11-03)
+- Status: Accepted (2026-11-03; user decisions 2026-11-03: D1 to D9 as recommended; independent review approved, round 1
+  and a delta review)
 - Date: 2026-11-03
 - Revision 2 (2026-11-03): answers the independent review of `488a62e44` (P1: kept scans against `evict`, the wire style
   and the missing contract tests; P2: parser bounds, like-for-like figures, staleness wording, privacy of freed pages and
@@ -62,8 +63,8 @@ complete.
 - **Where:** the OS cache folder, not the data folder: a new `Dirs::cache_db()` (`dyno-agent/src/paths.rs`) =
   `~/Library/Caches/Dyno/cache.db` (macOS), `$XDG_CACHE_HOME/dyno/cache.db` or `~/.cache/dyno/cache.db` (Linux),
   `%LOCALAPPDATA%\Dyno\Cache\cache.db` (Windows, not roamed). This keeps it out of backups: `~/Library/Caches` is
-  left out of Time Machine by default (the reviewer's statement, not checked here), and WP-2 also sets the item's backup
-  exclusion on macOS so that does not depend on it. With `DYNO_DATA_DIR` set (tests, ER-14) the cache is
+  commonly reported to be left out of Time Machine by default, which is not relied on: WP-2 sets the item's backup
+  exclusion on macOS explicitly. With `DYNO_DATA_DIR` set (tests, ER-14) the cache is
   `<DYNO_DATA_DIR>/cache/cache.db`. Unix: the folder `0700`, the file `0600`.
 - **Single writer:** a `dyno-cache` thread in the agent owns the only write connection and takes save, forget and evict
   commands over a bounded channel (capacity 4; a save that finds the channel full drops the older save of the same target,
@@ -120,8 +121,9 @@ back end Dyno would get).
 - **Bounds before allocation:** the header's node count and name bytes are checked against the row's `nodes` and
   `stored_bytes` columns and against `HARD_MAX_NODES` **before** anything is allocated from them; buffers grow from what
   was actually read, never reserved from a header. Each chunk inflates into at most 4 MiB (a chunk that would inflate
-  further is an error), the whole stream into at most the row's `stored_bytes`, and the expansion ratio of any chunk is
-  limited to 64:1 (a zip-bomb guard; real records compress far less). Every limit has a broken-stream test.
+  further is an error) and the whole stream into at most the row's `stored_bytes`; these two output caps are the guard
+  against a decompression bomb, so no ratio limit is set (a tree of identical empty files compresses very well and is
+  legitimate). Every limit has a broken-stream test.
 - **Why not one row per node:** measured on a synthetic 1M-node tree ([performance.md](../performance.md#2026-11-03-a-saved-disk-map-tree-of-1m-nodes-in-sqlite-rows-against-packed-chunks-docsdyno-cached-views)):
   like for like (read and decode to node values), chunks take 0.135 s (0.042 s read plus 0.093 s decode) against 0.89 s for
   rows, about 6.5x, and write in 0.51 s (with packing) against 1.24 s; Python numbers, repeated in Rust by WP-5. Rows would
@@ -169,7 +171,7 @@ back end Dyno would get).
   readable, with a phase-labelled progress strip (rule 11); when the new pass is **Done** the page swaps to it and the
   save replaces the old row. Cancel keeps the old map on screen and saves nothing; a failed refresh keeps the old map and
   shows the failure. This changes today's Rescan, which switches the page to the growing tree at once; the growing tree
-  stays one click away ("Show progress") for those who want to watch it. This is a UX change for the user to decide (D9).
+  stays one click away ("Show progress") for those who want to watch it. This UX change was decided by the user (D9).
 - **No background refresh by default** (D5). Scanning a volume is the heaviest thing Dyno does and it is a monitor; the
   `changedBytes` hint tells the user when a refresh is worth it. Setting `disk.savedMaps.refreshOnOpen` (off | older than
   1 day | older than 7 days) for those who want it; when on, the refresh starts at the first look at the page, never on
@@ -240,7 +242,8 @@ nothing sleeps or asserts elapsed time (proposed rule 60, family ADR 0041). Data
 - `dyno-core`: round trip `to_records` / `from_records` on generated trees (property test) gives identical `children`,
   `rings` and `path_components` answers; partial, truncated and refused-folder trees keep their completeness flags; a
   fuzz target and a table of broken streams (cut short, parent after child, name out of range, count over the cap, a
-  header count larger than the row's `nodes`, a chunk that inflates past 4 MiB or past 64:1, totals that disagree) each give a typed error, never a panic; a test pins the record size.
+  header count larger than the row's `nodes`, a chunk that inflates past 4 MiB, a stream that inflates past `stored_bytes`, totals that disagree), and a round trip
+  of a tree of millions of identical zero-byte files (highly compressible, must load) each give a typed error, never a panic; a test pins the record size.
 - `dyno-agent` cache: creates, migrates, refuses-and-recreates a newer schema, recreates a file of garbage bytes, drops a
   single damaged row, leaves a busy file alone; the swap keeps the old map when the save transaction fails half-way
   (injected error); eviction by `last_shown_at` on the fake clock and by the size cap; no save under the free-space floor
@@ -273,28 +276,28 @@ nothing sleeps or asserts elapsed time (proposed rule 60, family ADR 0041). Data
 WP-2 and WP-5 can run in parallel; WP-3 needs WP-1 and WP-2; WP-4 needs WP-3's wire shape (fixed by this record, so the
 UI can start on the mock).
 
-## Decisions for the user (recommendation first)
+## Decisions (recommendation first)
 
-The independent reviewer (revision 1) agreed with every recommendation below, D1 to D8, as recorded; D9 was added at the
-reviewer's request. The user decides after the delta review.
+The independent review agreed with every recommendation, D1 to D8; D9 was added in revision 2. **The user accepted D1 to
+D9 as recommended on 2026-11-03**; the first option of each is the decision.
 
-- **D1. Where:** a separate `cache.db` with its own writer thread (**recommended**: no load on the core lock, damage and
+- **D1. Where:** a separate `cache.db` with its own writer thread (**decided**: no load on the core lock, damage and
   size isolated, may be deleted) / tables in `dyno.db`.
-- **D2. Tree layout:** packed versioned records in chunks (**recommended**: about 6.5x faster to read and decode like for like in the synthetic Python measurement; WP-5
+- **D2. Tree layout:** packed versioned records in chunks (**decided**: about 6.5x faster to read and decode like for like in the synthetic Python measurement; WP-5
   repeats it in Rust) / one row per
   node (queryable from SQL, slower, a second query path).
 - **D3. Compression:** `flate2` level 1 if WP-5 shows at least 2x smaller on realistic names at < 0.15 s per 1M nodes
-  (**recommended**) / none.
-- **D4. What is saved:** done scans and partial ones marked as partial (**recommended**: a cancelled whole-disk scan is
+  (**decided**) / none.
+- **D4. What is saved:** done scans and partial ones marked as partial (**decided**: a cancelled whole-disk scan is
   still most of the answer) / done scans only.
 - **D5. Refresh:** on demand, with the "net change in used space" hint and an opt-in "refresh on open when older than" Setting
-  (**recommended**) / automatic on open when older than a day.
-- **D6. Bounds:** one map per target, 16 targets, 1 GB total by default (**recommended**) / other values.
-- **D7. Small lists in 1.1:** save the counter catalog and the software list (WP-6) (**recommended**) / disk map only.
+  (**decided**) / automatic on open when older than a day.
+- **D6. Bounds:** one map per target, 16 targets, 1 GB total by default (**decided**) / other values.
+- **D7. Small lists in 1.1:** save the counter catalog and the software list (WP-6) (**decided**) / disk map only.
 - **D8. Incremental:** none in 1.1; FSEvents in 1.2; the change journal after the helper; no live watchers
-  (**recommended**).
+  (**decided**).
 - **D9. Rescan behaviour (a UX change):** Rescan keeps the old map on screen until the new pass is Done, with progress
-  and "Show progress" for the growing tree, and Cancel keeps the old map (**recommended**) / today's behaviour (the page
+  and "Show progress" for the growing tree, and Cancel keeps the old map (**decided**) / today's behaviour (the page
   switches to the growing tree at once; the saved map is replaced only when the new pass is Done).
 
 ## Sources (read 2026-11-03)
