@@ -203,9 +203,20 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             summary.home_source = home.source;
             Ok(Reply::Geo(Box::new(summary)))
         }
-        Request::RemoveTool => crate::tool_own_copy::remove(&shared.dirs.tools())
-            .map(|()| Reply::Ok)
-            .map_err(|e| AgentError::new(ErrorCode::Internal, format!("The tool could not be removed ({}). Close anything using it and try again.", e.kind()))),
+        Request::RemoveTool => match crate::tool_own_copy::remove(&shared.dirs.tools()) {
+            Ok(()) => {
+                // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away).
+                crate::hardware::slow_cycle(shared);
+                Ok(Reply::Ok)
+            }
+            Err(e) => Err(AgentError::new(
+                ErrorCode::Internal,
+                format!(
+                    "The tool could not be removed ({}). Close anything using it and try again.",
+                    e.kind()
+                ),
+            )),
+        },
         Request::ToolOffer => Ok(Reply::ToolOffer(Box::new(crate::tool_download::offer(shared)))),
         Request::LookupIp { ip, template } => {
             let settings = match template {

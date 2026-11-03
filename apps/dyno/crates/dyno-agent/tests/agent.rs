@@ -890,6 +890,37 @@ fn lifespan_forecasts_come_from_stored_readings_and_a_worn_battery_raises_an_ala
 }
 
 #[test]
+fn removing_the_own_tool_reads_the_ssd_wear_again_at_once_instead_of_keeping_an_old_answer_for_hours() {
+    use dyno_core::metrics::Reading;
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle, FakeWear};
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(FakeWear(Reading::unavailable("the tool is gone; wear is not read"))),
+        Box::new(FakeBattery(Reading::unavailable("none"))),
+    );
+    let reason = |peer: &_| {
+        let Reply::Lifespan(o) = ask(peer, Request::Lifespan).unwrap() else {
+            panic!("lifespan")
+        };
+        o.forecasts
+            .iter()
+            .find(|f| f.subject == dyno_core::lifespan::LifeSubject::Ssd)
+            .unwrap()
+            .explanation
+            .clone()
+    };
+    assert!(reason(&peer).contains("Not read yet"), "nothing has read the wear yet");
+    assert_eq!(ask(&peer, Request::RemoveTool).unwrap(), Reply::Ok);
+    assert!(
+        reason(&peer).contains("the tool is gone"),
+        "the wear is read again right after the removal"
+    );
+}
+
+#[test]
 fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
     use dyno_core::baseline::{Learning, State};
     use dyno_core::history::{HistoryPoint, Tier};
