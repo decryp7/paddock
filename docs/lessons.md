@@ -1281,3 +1281,12 @@ caught each one are named.
   titles. Both pass on the Mac with the old CSS (narrower font): layout checks need the Linux run.
 - `widget-grid.spec` "frame budget": ADR 0044 §7 sets 16.7 ms for the CI Mac; the Linux runner's software rasteriser measured 31.6 ms
   for the same drag. The budget is now asserted on macOS and only recorded (annotation) elsewhere.
+
+## The real-window probe is outside the coverage gate (2026-11-04, paddock-dialogs)
+
+`paddock-dialogs/src/probe.rs` (feature `probe`, 554 lines) is the ADR 0026 section 6 harness that opens real webview windows. It runs only
+with `PADDOCK_REAL_WINDOWS=1` where there is a window system, so the line-coverage gate of the `crates` job (98.67% with it, over the 99%
+line) never sees it, like the other harnesses it joins in the ignore regex (`paddock-proc` test child, `paddock-chromium` fake browser,
+`paddock-ipc` test child). Its check is the `dialog-window-probe` job instead. **Lesson:** a harness is excluded by name with its reason beside
+the regex, never by lowering the gate; and a job that stops at its first failing step (here coverage, before `cargo deny check`) hides the
+steps after it: read a red job's later steps as not run, not as passed.
