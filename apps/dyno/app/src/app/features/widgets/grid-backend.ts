@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
-import type { PreviewReply, WidgetGridBackend } from '@decryp7/paddock-ui/widgets';
+import type { WidgetGridBackend } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
-import type { DashboardKind, DashboardWidget, DynoSurface, Edit, PreviewRequest, SurfaceView } from '../../core/generated/widgets';
+import type { DashboardKind, DashboardWidget, DynoSurface, Edit, PreviewReply, PreviewRequest, SurfaceView } from '../../core/generated/widgets';
 import type { DashboardView } from '../../core/widget-types';
 import { WidgetLayouts } from '../../state/widget-layouts';
 
@@ -15,7 +15,7 @@ export class DynoGridBackend implements WidgetGridBackend<DashboardWidget, Dashb
   private readonly backend = inject(BACKEND);
   private readonly layouts = inject(WidgetLayouts);
 
-  preview(request: PreviewRequest): Promise<PreviewReply<DashboardWidget, DashboardKind, DynoSurface>> {
+  preview(request: PreviewRequest): Promise<PreviewReply<DashboardView>> {
     return this.backend.previewWidgetLayout(request);
   }
 

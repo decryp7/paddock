@@ -1,7 +1,6 @@
 import { CdkTrapFocus } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked, viewChildren } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, signal, untracked, viewChildren } from '@angular/core';
 import { MatButton } from '@angular/material/button';
-import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid } from '@decryp7/paddock-ui/widgets';
 import type { DashboardKind, DashboardWidget, Edit, Metric } from '../../core/generated/widgets';
@@ -39,24 +38,13 @@ type Sheet = { readonly mode: 'add' } | { readonly mode: 'options'; readonly id:
  */
 @Component({
   selector: 'dy-widget-board',
-  imports: [PdWidgetGrid, PdWidget, PdWidgetChooser, PdSelect, MatButton, MatMenu, MatMenuItem, MatMenuTrigger, WidgetView, CdkTrapFocus],
+  imports: [PdWidgetGrid, PdWidget, PdWidgetChooser, PdSelect, MatButton, WidgetView, CdkTrapFocus],
   host: { '(document:keydown.escape)': 'closeSheet()' },
   providers: [DynoGridBackend, { provide: PD_WIDGET_GRID_BACKEND, useExisting: DynoGridBackend }],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (kind of kinds; track kind) {
       <ng-template [pdWidget]="kind" [pdWidgetOf]="sample" let-v><dy-widget [kind]="kind" [value]="v" /></ng-template>
-    }
-    @if (editing()) {
-      <div class="layout-tools">
-        <button matButton="outlined" type="button" [matMenuTriggerFor]="presetMenu">Presets</button>
-        <mat-menu #presetMenu="matMenu">
-          @for (p of presets(); track p.id) {
-            <button mat-menu-item type="button" (click)="edit({ applyPreset: { id: p.id } })">{{ p.name }}</button>
-          }
-          <button mat-menu-item type="button" (click)="edit('resetToDefaults')">Reset to defaults</button>
-        </mat-menu>
-      </div>
     }
     <pd-widget-grid
       [view]="view()"
@@ -66,6 +54,7 @@ type Sheet = { readonly mode: 'add' } | { readonly mode: 'options'; readonly id:
       [headOf]="titleOf"
       [hasOptions]="hasOptions"
       [(editing)]="editing"
+      [scroller]="scroller()"
       (action)="run($event)"
       (options)="sheet.set({ mode: 'options', id: $event })"
       (addWidget)="sheet.set({ mode: 'add' })"
@@ -92,7 +81,6 @@ type Sheet = { readonly mode: 'add' } | { readonly mode: 'options'; readonly id:
     .sheet { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; display: grid; align-content: start; gap: var(--pd-space-3); width: min(420px, 100vw); padding: var(--pd-space-4); overflow: auto; background: var(--pd-surface-3); box-shadow: var(--pd-shadow-3); }
     .sheet h2 { font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     .close { justify-self: end; }
-    .layout-tools { display: flex; justify-content: flex-end; margin-bottom: var(--pd-space-2); }
   `,
 })
 export class WidgetBoard {
@@ -109,6 +97,8 @@ export class WidgetBoard {
   protected readonly view = this.layouts.dashboard;
   protected readonly error = computed(() => this.layouts.error()?.message ?? null);
   protected readonly editing = signal(false);
+  /** The page's scrolling element (the shell's `<main>`), so a drag near its top or bottom edge scrolls it (ADR 0044 §5). */
+  protected readonly scroller = signal<HTMLElement | null>(null);
   protected readonly sheet = signal<Sheet | null>(null);
   protected readonly kinds = DASHBOARD_KINDS;
   /** The type witness of the templates (`pdWidgetOf`). */
@@ -120,8 +110,6 @@ export class WidgetBoard {
   protected readonly readings = inject(MetricReadings).follow(() =>
     (this.view()?.layout.placements ?? []).map((p) => ({ key: p.id, query: { metric: p.widget.metric, thresholds: p.widget.thresholds } })),
   );
-  /** The built-in presets, then the person's own. */
-  protected readonly presets = computed(() => [...(this.view()?.builtinPresets ?? []), ...(this.view()?.layout.presets ?? [])]);
   private readonly placements = computed(() => this.view()?.layout.placements ?? []);
   private readonly feedEmpty = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), FEED_LIMIT).length === 0);
   private readonly snapshot = computed<DashboardSnapshot>(() => ({
@@ -149,6 +137,8 @@ export class WidgetBoard {
   protected readonly hasOptions = (kind: string): boolean => (this.choices.choices()?.dashboard ?? []).some((k) => k.kind === kind && k.metrics.length > 1);
 
   constructor() {
+    const host = inject<ElementRef<HTMLElement>>(ElementRef);
+    afterNextRender(() => this.scroller.set(host.nativeElement.closest<HTMLElement>('main')));
     void this.layouts.use('dashboard');
     void this.choices.load();
     // The widgets read these; load them once when the board opens (a frame that shows an error does not draw its body).

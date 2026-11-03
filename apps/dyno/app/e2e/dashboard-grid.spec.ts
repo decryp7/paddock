@@ -94,10 +94,33 @@ test.describe('dashboard grid', () => {
     expect(outside).toBe(0);
     const graph = cells(page).filter({ has: page.locator('dy-widget[data-kind="graph"]') }).first();
     await graph.getByRole('button', { name: /^Actions for/ }).click();
-    await page.getByRole('menuitem', { name: 'Options…' }).click();
+    await page.getByRole('menuitem', { name: /^Options for/ }).click();
     const sheet = page.getByRole('dialog', { name: 'Widget options' });
     await expect(sheet).toBeVisible();
     await expect(sheet.getByRole('combobox', { name: /^Metric of/ })).toBeVisible();
+  });
+
+  test('dragging a widget near the bottom and top edge of the page scrolls the shell main element', async ({ page }) => {
+    await open(page, 1280, 600);
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    await expect(page.getByText('Editing layout')).toBeVisible();
+    const main = page.locator('main');
+    const scrollTop = (): Promise<number> => main.evaluate((m) => m.scrollTop);
+    expect(await scrollTop()).toBe(0);
+    const first = await box(cells(page).first());
+    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    await page.mouse.down();
+    const area = await main.boundingBox();
+    if (!area) throw new Error('the page has no box');
+    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2 + 40, { steps: 5 });
+    await page.mouse.move(first.x + first.width / 2, area.y + area.height - 6, { steps: 8 });
+    await expect.poll(scrollTop, { timeout: 15_000 }).toBeGreaterThan(0);
+    // Back up: near the top edge it scrolls the other way.
+    const down = await scrollTop();
+    await page.mouse.move(first.x + first.width / 2, area.y + 6, { steps: 8 });
+    await expect.poll(scrollTop, { timeout: 15_000 }).toBeLessThan(down);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
   });
 
   test('a window too narrow to arrange disables Edit layout and says why', async ({ page }) => {
@@ -131,12 +154,11 @@ test.describe('dashboard grid screenshots', () => {
       await page.getByRole('button', { name: 'Edit layout' }).click();
       await expect(page.getByText('Editing layout')).toBeVisible();
       await page.screenshot({ path: join(dir, `dashboard-edit-${theme}.png`), fullPage: true });
-      if (theme === 'light') {
-        await open(page, 900, 2800);
-        await page.screenshot({ path: join(dir, 'dashboard-900-six-columns.png'), fullPage: true });
-        await open(page, 500, 5200);
-        await page.screenshot({ path: join(dir, 'dashboard-500-one-column.png'), fullPage: true });
-      }
+      const suffix = theme === 'light' ? '' : '-dark';
+      await open(page, 900, 2800);
+      await page.screenshot({ path: join(dir, `dashboard-900-six-columns${suffix}.png`), fullPage: true });
+      await open(page, 500, 5200);
+      await page.screenshot({ path: join(dir, `dashboard-500-one-column${suffix}.png`), fullPage: true });
     });
   }
 });

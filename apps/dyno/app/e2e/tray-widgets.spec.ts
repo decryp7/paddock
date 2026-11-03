@@ -174,11 +174,11 @@ test.describe('dashboard and menu-bar editors', () => {
     await expect(cells).toHaveCount(14);
     await page.getByRole('button', { name: 'Undo' }).first().click();
     await expect(cells).toHaveCount(15);
-    await page.getByRole('button', { name: 'Presets' }).click();
-    await page.getByRole('menuitem', { name: 'Developer' }).click();
+    await page.getByRole('button', { name: 'More layout actions' }).click();
+    await page.getByRole('menuitem', { name: /Developer/ }).click();
     await expect(cells).toHaveCount(7);
-    await page.getByRole('button', { name: 'Presets' }).click();
-    await page.getByRole('menuitem', { name: 'Reset to defaults' }).click();
+    await page.getByRole('button', { name: 'More layout actions' }).click();
+    await page.getByRole('menuitem', { name: /Reset to defaults/ }).click();
     await expect(cells).toHaveCount(15);
   });
 

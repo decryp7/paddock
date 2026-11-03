@@ -258,7 +258,7 @@ describe('pd-widget-frame', () => {
     f.componentInstance.state.set({ state: 'empty', title: 'No active alarms', detail: 'checked 2 min ago', next: act('open', 'Open alarms'), calm: false });
     await settle(f);
     expect(q(f, 'button.pd-w-calm')).toBeNull();
-    expect(q(f, '.pd-w-st')).not.toBeNull();
+    expect(q(f, '.pd-w-st')!.getAttribute('role')).toBe('status');
   });
 
   it('draws an error with its cause and Retry, never as the whole surface', async () => {
@@ -266,6 +266,7 @@ describe('pd-widget-frame', () => {
     f.componentInstance.state.set({ state: 'error', title: "Couldn't read volumes", cause: 'The volume list did not answer.', next: act('retry', 'Retry') });
     await settle(f);
     expect(q(f, '.pd-w-st--error .pd-w-d')!.textContent).toBe('The volume list did not answer.');
+    expect(q(f, '.pd-w-st--error')!.getAttribute('role')).toBe('alert');
     q(f, '.pd-w-act')!.click();
     expect(f.componentInstance.actions).toEqual(['retry']);
     f.componentInstance.state.set({ state: 'error', title: 'E', cause: null, next: null });

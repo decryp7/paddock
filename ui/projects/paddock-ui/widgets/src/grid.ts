@@ -262,7 +262,7 @@ interface Active {
     .pd-wg-h { position: absolute; z-index: 2; color: var(--pd-text-muted); opacity: 0; }
     .pd-wg-cell:hover .pd-wg-h, .pd-wg-cell:focus-within .pd-wg-h, .pd-wg-cell:focus .pd-wg-h, .pd-wg-cell.pd-wg-resizing .pd-wg-h { opacity: 1; }
     .pd-wg-grid--busy .pd-wg-cell:not(.pd-wg-resizing) .pd-wg-h, .pd-wg-grid--busy .pd-wg-more { opacity: 0; }
-    .pd-wg-h--se { right: 4px; bottom: 4px; width: 24px; height: 24px; cursor: nwse-resize; }
+    .pd-wg-h--se { opacity: 1; right: 4px; bottom: 4px; width: 24px; height: 24px; cursor: nwse-resize; }
     .pd-wg-h--e { top: 24px; bottom: 24px; right: 4px; width: 8px; cursor: ew-resize; }
     .pd-wg-h--s { left: 24px; right: 24px; bottom: 4px; height: 8px; cursor: ns-resize; }
     .pd-wg-h--e::after, .pd-wg-h--s::after { content: ''; position: absolute; }
@@ -504,7 +504,8 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   }
 
   protected kindOfId(id: string): string {
-    return (this.rows().find((r) => r.id === id) as Row<W, V, A>).kind;
+    // The menu's content can draw once more after its widget is gone (Remove, a preset): no row then, no kind.
+    return this.rows().find((r) => r.id === id)?.kind ?? '';
   }
 
   protected allowed(id: string, name: MoveName): boolean {

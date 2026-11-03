@@ -173,6 +173,19 @@ describe('dy-widget-board', () => {
     });
   });
 
+  it('gives the grid the page scroller, the shell main element, for auto-scroll while dragging', async () => {
+    env();
+    const main = document.createElement('main');
+    document.body.append(main);
+    const f = TestBed.createComponent(WidgetBoard);
+    main.append(f.nativeElement);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(f.debugElement.query(By.directive(PdWidgetGrid)).componentInstance.scroller()).toBe(main);
+    });
+    main.remove();
+  });
+
   it('has a template for every dashboard kind the engine offers', async () => {
     env();
     const view = await TestBed.inject(BACKEND).widgetLayout('dashboard');

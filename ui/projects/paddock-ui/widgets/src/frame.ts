@@ -55,7 +55,7 @@ interface Meta {
             <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
           </button>
         } @else {
-          <div class="pd-w-st">
+          <div class="pd-w-st" role="status">
             <pd-status-glyph status="info" [size]="16" />
             <span class="pd-w-t">{{ s.title }}</span>
             <span class="pd-w-d">{{ s.detail }}</span>
@@ -65,7 +65,7 @@ interface Meta {
           </div>
         }
       } @else if (s?.state === 'error') {
-        <div class="pd-w-st pd-w-st--error">
+        <div class="pd-w-st pd-w-st--error" role="alert">
           <pd-status-glyph class="pd-w-bad" status="error" [size]="16" />
           <span class="pd-w-t">{{ s.title }}</span>
           @if (s.cause) {

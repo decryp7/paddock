@@ -341,6 +341,9 @@ describe('PdWidgetGrid', () => {
       expect(document.getElementById(cell('c').getAttribute('aria-describedby')!.split(' ')[0]!)!.textContent).toBe('12 by 4, position 3 of 3');
       expect(a.querySelector('pd-widget-frame')!.hasAttribute('inert')).toBe(true);
       expect(a.querySelectorAll('.pd-wg-h')).toHaveLength(3);
+      // The corner grip is always drawn in edit mode; the edge grips wait for hover or focus.
+      expect(getComputedStyle(a.querySelector('.pd-wg-h--se')!).opacity).toBe('1');
+      expect(getComputedStyle(a.querySelector('.pd-wg-h--e')!).opacity).toBe('0');
       expect(button('Undo').disabled).toBe(true);
       expect(button('Redo').disabled).toBe(true);
       button('Add widget').click();
@@ -792,7 +795,7 @@ describe('PdWidgetGrid', () => {
   });
 
   describe('odd input and rare paths', () => {
-    type Internals = { applyPreset(id: string, n: string): Promise<void>; reset(): Promise<void>; arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
+    type Internals = { applyPreset(id: string, n: string): Promise<void>; reset(): Promise<void>; arrangementIndex(): number; kindOfId(id: string): string; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
     const grid = () => f.debugElement.children[0]!.componentInstance as unknown as Internals;
 
     it('never throws without a view: nothing to draw, nothing to send', async () => {
@@ -803,6 +806,7 @@ describe('PdWidgetGrid', () => {
       expect(grid().columns()).toBe(1);
       expect(grid().arrangementIndex()).toBe(-1);
       expect(grid().allowed('a', 'left')).toBe(false);
+      expect(grid().kindOfId('gone')).toBe('');
       await grid().undoRedo('undo');
       grid().targetChanged({ id: 'a', kind: 'move', rect: R(0, 0, 1, 1) });
       expect(backend.edit).not.toHaveBeenCalled();
