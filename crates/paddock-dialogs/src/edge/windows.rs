@@ -278,8 +278,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, HWND_MESSAGE, SC_MOVE, SC_SIZE, SendMessageW,
-        WS_OVERLAPPEDWINDOW,
+        CreateWindowExW, DestroyWindow, HWND_MESSAGE, SendMessageW, WS_OVERLAPPEDWINDOW,
     };
     use windows::core::w;
 
@@ -368,16 +367,13 @@ mod tests {
     }
 
     #[test]
-    fn sc_size_and_wm_sizing_are_a_user_resize_and_sc_move_is_not() {
+    fn wm_sizing_is_a_user_resize_and_the_end_of_a_move_is_reported() {
+        // WM_SYSCOMMAND is not sent here: its default handling (SC_SIZE, SC_MOVE) starts a modal loop that never
+        // returns on a message-only window (found in the VM run); `is_size_command` is tested in `edge`.
         let h = window();
         let (events, log) = sink(None);
         install(h, events).unwrap();
         unsafe {
-            SendMessageW(h, WM_SYSCOMMAND, Some(WPARAM(SC_MOVE as usize)), None);
-        }
-        assert_eq!(log.borrow().resize, 0, "a move is not a resize");
-        unsafe {
-            SendMessageW(h, WM_SYSCOMMAND, Some(WPARAM(SC_SIZE as usize | 0x8)), None);
             let mut r = RECT::default();
             SendMessageW(
                 h,
@@ -386,7 +382,7 @@ mod tests {
                 Some(LPARAM((&raw mut r) as isize)),
             );
         }
-        assert_eq!(log.borrow().resize, 2);
+        assert_eq!(log.borrow().resize, 1);
         unsafe {
             SendMessageW(h, WM_EXITSIZEMOVE, None, None);
         }
