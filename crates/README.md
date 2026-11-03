@@ -315,7 +315,7 @@ paddock_commands::command_table! {
     Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_ready,
-    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_measure,
     // ... the app's commands
 }
 tauri::Builder::default()

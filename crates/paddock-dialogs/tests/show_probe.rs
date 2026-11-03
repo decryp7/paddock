@@ -28,7 +28,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use tauri::test::mock_context;
 use tauri::utils::acl::capability::Capability;
@@ -91,7 +91,7 @@ paddock_commands::command_table! {
     Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * paddock_commands::MIB => paddock_dialogs::tauri::dialog_close,
     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_ready,
-    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_measure,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -258,6 +258,9 @@ fn main() {
     // Whether the dialog window was still hidden when its page's `dialog_ready` arrived (checked before it is handled).
     let hidden_at_ready = Arc::new(AtomicBool::new(false));
     let saw_ready = Arc::new(AtomicBool::new(false));
+    // The content height (CSS px) of the last `dialog_measure` the page sent: what the window should have been sized to.
+    let measured_content = Arc::new(Mutex::new(None::<f64>));
+    let measured_sink = measured_content.clone();
     let (hidden_flag, ready_flag) = (hidden_at_ready.clone(), saw_ready.clone());
     let trace = Arc::new(Trace::default());
     let watchdog_trace = trace.clone();
@@ -281,6 +284,12 @@ fn main() {
             "window_pong" | "window_ready" => {
                 invoke.resolver.resolve(());
                 true
+            }
+            "dialog_measure" => {
+                if let tauri::ipc::InvokeBody::Json(v) = invoke.message.payload() {
+                    *measured_sink.lock().unwrap() = v["measure"]["content"]["height"].as_f64();
+                }
+                guarded(invoke)
             }
             "dialog_ready" => {
                 let hidden = invoke
@@ -356,11 +365,11 @@ fn main() {
             // the layout of a just-shown window can take a moment, and neither is awaited by sleeping.
             let code = match report_rx.recv() {
                 Ok(first) => {
-                    let mut failures = check(&handle, &first, &hidden_at_ready, &saw_ready);
+                    let mut failures = check(&handle, &first, &hidden_at_ready, &saw_ready, &measured_content);
                     if !failures.is_empty()
                         && let Ok(second) = report_rx.recv()
                     {
-                        failures = check(&handle, &second, &hidden_at_ready, &saw_ready);
+                        failures = check(&handle, &second, &hidden_at_ready, &saw_ready, &measured_content);
                     }
                     finish(&failures)
                 }
@@ -395,6 +404,7 @@ fn check(
     r: &Report,
     hidden_at_ready: &AtomicBool,
     saw_ready: &AtomicBool,
+    measured_content: &Mutex<Option<f64>>,
 ) -> Vec<String> {
     let dialogs = app.state::<Dialogs>();
     let Some(label) = dialogs.of_host("main").into_iter().next() else {
@@ -414,8 +424,8 @@ fn check(
     if !entry.shown {
         failures.push("the window was not shown".to_string());
     }
-    let Some(measured) = entry.measure.map(|m| m.content.height) else {
-        failures.push("ready did not record a measure".to_string());
+    let Some(measured) = *measured_content.lock().unwrap() else {
+        failures.push("the page sent no dialog_measure".to_string());
         return failures;
     };
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole

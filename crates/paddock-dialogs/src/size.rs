@@ -116,9 +116,9 @@ pub struct SizeState {
     shown: bool,
 }
 
-/// `ceil(logical * scale)` physical px.
+/// `ceil(logical * scale)` physical px, as the placement rounds it ([`crate::placement::physical_ceil`]).
 pub fn physical(logical: f64, scale: f64) -> u32 {
-    (logical * scale - 1e-9).ceil().max(1.0) as u32
+    crate::placement::physical_ceil(logical, scale)
 }
 
 impl SizeState {
