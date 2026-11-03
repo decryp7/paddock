@@ -1102,6 +1102,7 @@ mod tests {
         let root = fs.root();
         let a = fs.dir(&root, "a");
         fs.fail_open(&a, ReadError::Unreachable("ETIMEDOUT".into()));
+        fs.drop_volume_at(&a);
         let r = rig(fs.clone(), vec![vol("nas", &root, net("nas.local"))]);
         let s = r.centre.start(DiskTarget::Volume { id: "nas".into() }).unwrap();
         let st = wait_final(&r, s.scan);

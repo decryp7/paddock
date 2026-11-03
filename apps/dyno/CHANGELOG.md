@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Disk map: one folder answering "Operation timed out" (os error 60, a File Provider or network-backed folder) no longer stops the whole scan as "the link dropped". The scan root is asked again: if it answers, only that folder is marked incomplete and the scan goes on; only when the root stops answering too is the volume lost. The log tells which (`Disk scan: one folder ... the volume still answers` or `... the volume is lost`, with the raw error text).
+- macOS start-up items: the list now includes the login items and app-registered agents of System Settings > Login Items & Extensions (read with `sfltool dumpbtm`, parsed strictly), not only launch agent plists. A source that cannot be read is logged with its reason, and when nothing could be read the page shows the reason (with "needs administrator rights" when sfltool says so) instead of "No startup items".
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed
