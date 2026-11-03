@@ -550,12 +550,7 @@ fn check(
         frame,
         16.0,
     );
-    let wrong = match spec().expect {
-        // A tool is opened at its declared size capped by the screen. Finding (VM, 2026-11-04): the cap is computed before
-        // the window has a frame, so it opens up to one frame taller than the cap; only that it fits the screen is judged.
-        Expect::Tool => r.inner < floor || r.inner > hi.max(work - frame + 16.0),
-        _ => r.inner < lo - 1.0 || r.inner > hi + 1.0,
-    };
+    let wrong = r.inner < lo - 1.0 || r.inner > hi + 1.0;
     if wrong {
         failures.push(format!(
             "the viewport is {} px for a measured frame of {measured} px (floor, then a viewport delta)",
