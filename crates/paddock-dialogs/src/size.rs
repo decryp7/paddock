@@ -296,6 +296,7 @@ impl SizeState {
             Some(i) => {
                 self.pending.drain(..=i);
             }
+            None if self.current.matches(width, height) => {}
             None => {
                 plan.unexplained = true;
                 if self.pending.is_empty()
@@ -527,6 +528,19 @@ mod tests {
         let mut s = state(Kind::Form, 1.0, false);
         let plain = s.on_resized(640, 480);
         assert!(plain.unexplained && plain.mode_change.is_none());
+    }
+
+    #[test]
+    fn a_resized_equal_to_the_size_the_window_already_has_is_neither_unexplained_nor_the_user() {
+        // A hidden GTK window gets no configure for a size asked of it, so the glue reads the size back and reports it
+        // as the echo; the configure that comes with the map then repeats that size.
+        let mut s = state(Kind::Form, 1.0, true);
+        let p = s.on_measure(1, 1, measured(300.0));
+        let r = p.request.unwrap();
+        s.on_resized(r.width, r.height);
+        let again = s.on_resized(r.width, r.height);
+        assert!(!again.unexplained && again.mode_change.is_none());
+        assert_eq!(s.mode(), Kind::Form.policy().size_mode);
     }
 
     #[test]

@@ -231,7 +231,23 @@ fn dist() -> Result<PathBuf, String> {
     }
 }
 
+/// The dialogs' own log lines (the fit log of ADR 0043 §3) on stderr, so a run that ends "no report" shows why.
+struct StderrLog;
+
+impl log::Log for StderrLog {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.target().starts_with("paddock")
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            eprintln!("show_probe: log {} {}", r.level(), r.args());
+        }
+    }
+    fn flush(&self) {}
+}
+
 fn main() {
+    let _ = log::set_logger(&StderrLog).map(|()| log::set_max_level(log::LevelFilter::Debug));
     if std::env::var("PADDOCK_REAL_WINDOWS").as_deref() != Ok("1") {
         eprintln!("show_probe: skipped (set PADDOCK_REAL_WINDOWS=1 to open a real window)");
         return;
@@ -317,6 +333,8 @@ fn main() {
                 .build(),
         )
         .invoke_handler(move |invoke| app_invoke(invoke))
+        // The app forwards window events to the dialogs (its `Resized` is what lets a measured dialog be shown, ADR 0043 §3).
+        .on_window_event(|window, event| paddock_dialogs::tauri::on_window_event(window, event))
         .build(context)
         .unwrap_or_else(|e| die("the real-runtime app does not build", e));
     let rename = Entry::new("sd.rename", Shape::Form(paddock_dialogs::Modality::Modal));
@@ -442,9 +460,11 @@ fn check(
     };
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole
     // footer is inside it.
-    if (r.inner - measured).abs() >= 1.0 {
+    // A frame shorter than the dialog floor (`DIALOG_MIN`) is shown at the floor: the content never needs more.
+    let expected = measured.max(paddock_dialogs::contract::DIALOG_MIN.height);
+    if (r.inner - expected).abs() >= 1.0 {
         failures.push(format!(
-            "the viewport is {} px for a measured frame of {measured} px (a viewport delta)",
+            "the viewport is {} px for a measured frame of {measured} px (floor, then a viewport delta)",
             r.inner
         ));
     }
