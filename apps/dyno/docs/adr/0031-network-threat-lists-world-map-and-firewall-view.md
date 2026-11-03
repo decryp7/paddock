@@ -1,6 +1,7 @@
 # 31. Network: threat lists, the connections world map and the firewall view, in the core with downloaded data
 
-- Status: Proposed (2026-11-03)
+- Status: Accepted (2026-11-03; user decisions D1 to D10 as recommended, 2026-11-03; independent review approved, round 1
+  and a delta review of `692c6d4c5`)
 - Date: 2026-11-03
 - Revision 2 (2026-11-03): answers the independent review of `54c861678` (P1: hostname allows could be spoofed through
   reverse names, the data folder contradicted ADR 0029, the DROP fetch floor, the source record; P2: Feodo dropped, more
@@ -372,7 +373,7 @@ Agent-days are ranges for one agent. No package changes `crates/` (Dyno adopts `
 Critical path N1 → N2 → N3 → N4 → N8 → N10, about 14 to 19 working days; N6 and N7
 run beside it. This adds to ADR 0027's 43 to 65 days for 1.1.0; WP-9 there is not counted again.
 
-## Decisions for the user (with recommendations)
+## Decisions (accepted by the user, 2026-11-03: D1 to D10 as recommended)
 
 - **D1. Default lists.** Recommended (and the reviewer's answer): **Spamhaus DROP v4 and v6 only**, turned on by the user;
   FireHOL level 1 offered but off (unclear licences, bogons); Feodo, URLhaus and ThreatFox not in 1.1.0.
@@ -407,6 +408,14 @@ run beside it. This adds to ADR 0027's 43 to 65 days for 1.1.0; WP-9 there is no
   switch to `mmap` if N4's measurement shows a resident-memory win worth `memmap2`'s unsafe surface (files are replaced by
   versioned name, so a mapped file is never overwritten on Windows).
 
+**Recorded decisions (the user, 2026-11-03):** D1 Spamhaus DROP v4 and v6 only; D2 DB-IP Country Lite and ASN Lite;
+D3 a runtime-data scope in `crates/paddock-deps/licences.toml` (public domain, CC0, CC-BY-4.0, named publisher terms; no
+CC-BY-SA-4.0 until IPinfo is adopted); D4 no automatic reverse lookups; D5 Windows Defender Firewall and the macOS
+Application Firewall in the agent, `pf` and `nft` through the helper in 1.1.0; D6 plain SVG map, ECharts `geo` as
+fallback; D7 automatic updates once a source is on, with DROP's 24 h floor also for "Update now"; D8 `flaggedConnection`
+on when a list is on; D9 upstream downloads only, no mirror; D10 MMDB files read into memory, `mmap` only if N4 measures a
+win.
+
 ## Consequences
 
 - Dyno makes its first outbound requests of its own beyond the updater and ADR 0027's tool download, all behind
@@ -435,7 +444,8 @@ run beside it. This adds to ADR 0027's 43 to 65 days for 1.1.0; WP-9 there is no
 - Natural Earth terms: <https://www.naturalearthdata.com/about/terms-of-use/>.
 - `maxminddb` crate: <https://docs.rs/crate/maxminddb> (ISC, 0.27; the LICENSE file itself not read). MMDB format:
   <https://maxmind.github.io/MaxMind-DB/> (not re-read; cited for the test writer).
-- Natural Earth `ISO_A2` / `ISO_A2_EH` and the countries missing at 1:110m, and the abuse.ch terms date (2026-10-21):
-  from the independent review of revision 1, not re-read here.
+- abuse.ch terms dated 2026-10-21: verified on the publisher's page by the independent reviewer on 2026-11-03.
+- Natural Earth `ISO_A2` / `ISO_A2_EH` and the countries missing at 1:110m: from the independent review, **unverified**
+  until N7's test checks them against the data.
 - Not verified here and marked in the text: IPinfo's download size, DShield's licence,
   `resolvectl show-cache` rights, `IWSCProductList` as a standard user, ECharts 6 `geo` projection options.
