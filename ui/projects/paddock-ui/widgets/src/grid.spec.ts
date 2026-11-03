@@ -84,6 +84,8 @@ const ready = (text: string): WidgetState<V, string> => ({ state: 'ready', value
       [(editing)]="editing"
       (viewChange)="changes.push($event)"
       (action)="actions.push($event)"
+      [hasOptions]="hasOptions"
+      (options)="opened = $event"
       (addWidget)="adds = adds + 1"
       (retry)="retries = retries + 1"
     >
@@ -103,6 +105,8 @@ class Host {
   actions: string[] = [];
   adds = 0;
   retries = 0;
+  opened = '';
+  readonly hasOptions = (k: string) => k === 'cpu';
 }
 
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
@@ -262,6 +266,14 @@ describe('PdWidgetGrid', () => {
       expect(b.getAttribute('aria-describedby')).toBe(reason.id);
     });
 
+    it('hides the bar when asked, and has none for an empty layout', async () => {
+      await create();
+      expect(button('Edit layout')).toBeDefined();
+      f.componentInstance.view.set(mkView({ layout: { version: 2, placements: [], presets: [] }, arrangements: [], moves: [] }));
+      await settle(f);
+      expect(button('Edit layout')).toBeUndefined();
+    });
+
     it('disables Edit layout for a read-only layout without the width reason', async () => {
       await create();
       f.componentInstance.view.set(mkView({ editable: false }));
@@ -391,8 +403,26 @@ describe('PdWidgetGrid', () => {
       key(cell('a'), 'ArrowLeft');
       await settle(f);
       expect(backend.edit).not.toHaveBeenCalled();
-      expect(say).toHaveBeenCalledWith("CPU can't move left.", 'polite');
+      expect(say).toHaveBeenCalledWith('CPU is already at the left edge.', 'polite');
       expect(q('.pd-wg-feedback--bad')!.getAttribute('role')).toBe('alert');
+    });
+
+    it('says the engine-style words for every refused key, and clears them on Done and on the next key', async () => {
+      f.componentInstance.view.set(mkView({ moves: [{ id: 'a', moves: { ...ALL, left: false, first: false, wider: false, shorter: false } }] }));
+      await settle(f);
+      for (const [k, shift, text] of [['Home', false, 'CPU is already first.'], ['ArrowRight', true, "CPU can't get any larger."], ['ArrowUp', true, "CPU can't get any smaller."]] as const) {
+        key(cell('a'), k, { shiftKey: shift });
+        await settle(f);
+        expect(q('.pd-wg-feedback')!.textContent).toContain(text);
+      }
+      f.componentInstance.view.set(mkView({ moves: [{ id: 'a', moves: { ...ALL, last: false } }] }));
+      await settle(f);
+      key(cell('a'), 'End');
+      await settle(f);
+      expect(q('.pd-wg-feedback')!.textContent).toContain('CPU is already last.');
+      button('Done').click();
+      await settle(f);
+      expect(q('.pd-wg-feedback')).toBeNull();
     });
 
     it('ignores other keys, modified keys, and keys that come from inside the widget', async () => {
@@ -516,8 +546,8 @@ describe('PdWidgetGrid', () => {
       backend.edit.mockResolvedValue(moved());
       (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).toEqual(['Move left', 'Move right', 'Move up', 'Move down', 'Move to first', 'Move to last', 'Wider', 'Narrower', 'Taller', 'Shorter', 'Remove']);
-      expect(items().map((i) => i.hasAttribute('disabled') || i.getAttribute('aria-disabled') === 'true')).toEqual([true, false, false, false, false, false, false, false, false, false, false]);
+      expect(items().map((i) => i.textContent?.trim())).toEqual(['Move left', 'Move right', 'Move up', 'Move down', 'Move to first', 'Move to last', 'Wider', 'Narrower', 'Taller', 'Shorter', 'Options…', 'Remove']);
+      expect(items().map((i) => i.hasAttribute('disabled') || i.getAttribute('aria-disabled') === 'true')).toEqual([true, false, false, false, false, false, false, false, false, false, false, false]);
       items()[1]!.click();
       await settle(f);
       expect(backend.edit).toHaveBeenCalledWith({ arrange: { gesture: { gesture: 'nudge', id: 'a', dir: 'right' } } }, 7);
@@ -526,6 +556,30 @@ describe('PdWidgetGrid', () => {
       items().at(-1)!.click();
       await settle(f);
       expect(backend.edit).toHaveBeenLastCalledWith({ remove: { id: 'c' } }, 8);
+    });
+
+    it('offers Options… for kinds that have them, and an undo toast after Remove that takes it back', async () => {
+      await create();
+      await edit();
+      (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
+      await settle(f);
+      expect(items().map((i) => i.textContent?.trim())).toContain('Options…');
+      items().find((i) => i.textContent?.trim() === 'Options…')!.click();
+      expect(f.componentInstance.opened).toBe('a');
+      await settle(f);
+      (cell('b').querySelector('.pd-wg-more') as HTMLElement).click();
+      await settle(f);
+      expect(items().map((i) => i.textContent?.trim())).not.toContain('Options…');
+      backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
+      items().at(-1)!.click();
+      await settle(f);
+      const snack = document.querySelector('.pd-undo-snack')!;
+      expect(snack.textContent).toContain('Network removed.');
+      backend.edit.mockClear();
+      backend.edit.mockResolvedValue(mkView({}, 9));
+      (snack.querySelector('button') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenCalledWith('undo', 8);
     });
 
     it('ignores a menu action for a widget that is gone', async () => {

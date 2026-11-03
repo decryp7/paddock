@@ -1,13 +1,15 @@
-import { ChangeDetectionStrategy, Component, inject, signal, viewChildren } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal, viewChildren } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
-import { PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetGrid, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
-import { GOLDEN_CASES, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
+import { MatButton } from '@angular/material/button';
+import { PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
+import { GOLDEN_CASES, kindOfId, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
 
 type View = GridView<GridSample, string, string>;
 type Val = { readonly size: string };
 
+const kindName = (id: string): string => { const k = kindOfId(id); return k.charAt(0).toUpperCase() + k.slice(1); };
 const R = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
 /** The interactive board: eight widgets of mixed sizes, with a hole beside the tall one (gravity is vertical only). */
 const BOARD = [
@@ -49,7 +51,7 @@ export class GalBigBoard {
 @Component({
   selector: 'gal-widget-grid',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdWidgetGrid, PdWidget, GalBigBoard],
+  imports: [PdWidgetGrid, PdWidget, PdWidgetChooser, MatButton, GalBigBoard],
   providers: [{ provide: PD_WIDGET_GRID_BACKEND, useFactory: () => new MockGridBackend(BOARD) }],
   template: `
     <section class="gal-section" data-testid="widget-grid" aria-labelledby="h-wgrid">
@@ -62,7 +64,13 @@ export class GalBigBoard {
       <ng-template pdWidget="echo" [pdWidgetOf]="w" let-v><span class="wgg-size">{{ v?.size }}</span></ng-template>
       <ng-template pdWidget="foxtrot" [pdWidgetOf]="w" let-v><span class="wgg-size">{{ v?.size }}</span></ng-template>
       <div class="wgg-board" data-testid="wgg-board">
-        <pd-widget-grid [view]="view()" [values]="values" [templates]="templates()" [(editing)]="editing" (viewChange)="view.set($event)" (addWidget)="added = added + 1" />
+        <pd-widget-grid [view]="view()" [values]="values()" [templates]="templates()" [hasOptions]="hasOptions" (options)="optioned = $event" [(editing)]="editing" (viewChange)="view.set($event)" (addWidget)="sheet.set(true)" />
+        @if (sheet()) {
+          <aside class="wgg-sheet" role="dialog" aria-label="Add a widget" data-testid="wgg-sheet">
+            <pd-widget-chooser mode="add" [view]="chooserView()" [widgetFor]="widgetFor" (edit)="addEdit($event)" />
+            <button matButton="outlined" type="button" (click)="sheet.set(false)">Close</button>
+          </aside>
+        }
 
       </div>
 
@@ -72,24 +80,24 @@ export class GalBigBoard {
 
       <h3>States</h3>
       <div class="wgg-states">
-        <figure class="wgg-fig" data-testid="wgg-loading"><figcaption>Loading</figcaption><pd-widget-grid [view]="null" /></figure>
-        <figure class="wgg-fig" data-testid="wgg-error"><figcaption>Error</figcaption><pd-widget-grid [view]="null" error="The agent did not answer." (retry)="retried = retried + 1" /></figure>
-        <figure class="wgg-fig" data-testid="wgg-empty"><figcaption>Empty</figcaption><pd-widget-grid [view]="empty" /></figure>
-        <figure class="wgg-fig" data-testid="wgg-narrow"><figcaption>Below the first breakpoint (700 px)</figcaption><pd-widget-grid [view]="small" [values]="values" [templates]="templates()" [width]="700" /></figure>
+        <figure class="wgg-fig" data-testid="wgg-loading"><figcaption>Loading</figcaption><pd-widget-grid [view]="null" [bar]="false" /></figure>
+        <figure class="wgg-fig" data-testid="wgg-error"><figcaption>Error</figcaption><pd-widget-grid [view]="null" [bar]="false" error="The agent did not answer." (retry)="retried = retried + 1" /></figure>
+        <figure class="wgg-fig" data-testid="wgg-empty"><figcaption>Empty</figcaption><pd-widget-grid [view]="empty" [bar]="false" /></figure>
+        <figure class="wgg-fig" data-testid="wgg-narrow"><figcaption>Below the first breakpoint (700 px)</figcaption><pd-widget-grid [view]="small" [values]="values()" [templates]="templates()" [width]="700" /></figure>
       </div>
 
       <h3>Golden scenarios</h3>
       <p>Each is a layout, a gesture and what the engine answered, from <code>grid-cases.json</code>.</p>
       <div class="wgg-cases" data-testid="wgg-cases">
-        @for (c of cases; track c.name) {
+        @for (c of cases; track c.title) {
           <article class="wgg-case" [attr.data-testid]="'wgg-case-' + $index">
-            <h4>{{ $index + 1 }}. {{ c.name }}</h4>
+            <h4>{{ $index + 1 }}. {{ c.title }}</h4>
             <p class="wgg-gesture">{{ gesture(c) }}</p>
             <div class="wgg-pair">
-              <figure><figcaption>Before</figcaption><pd-widget-grid [view]="c.before" [values]="c.values" [templates]="templates()" [width]="1000" /></figure>
+              <figure><figcaption>Before</figcaption><pd-widget-grid [view]="c.before" [bar]="false" [values]="c.values" [templates]="templates()" [width]="1000" /></figure>
               <figure><figcaption>After</figcaption>
                 @if (c.after) {
-                  <pd-widget-grid [view]="c.after" [values]="c.values" [templates]="templates()" [width]="1000" />
+                  <pd-widget-grid [view]="c.after" [bar]="false" [values]="c.values" [templates]="templates()" [width]="1000" />
                 } @else {
                   <p class="wgg-refused" role="status">Refused: {{ c.error }}</p>
                 }
@@ -104,6 +112,7 @@ export class GalBigBoard {
     h3 { margin: var(--pd-space-4) 0 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     h4 { margin: 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     .wgg-board { padding: var(--pd-space-4); background: var(--pd-surface-1); border-radius: var(--pd-radius-card); }
+    .wgg-sheet { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; display: grid; align-content: start; gap: var(--pd-space-3); width: min(420px, 100vw); padding: var(--pd-space-4); overflow: auto; background: var(--pd-surface-3); box-shadow: var(--pd-shadow-3); }
     .wgg-size { font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: var(--pd-numeric); }
     .wgg-states { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--pd-space-4); }
     .wgg-fig, .wgg-pair figure { margin: 0; min-width: 0; }
@@ -125,9 +134,22 @@ export class GalWidgetGrid {
   protected retried = 0;
   protected readonly empty: View = viewOf([]);
   protected readonly small: View = viewOf(BOARD.slice(0, 3));
-  protected readonly values = valuesOf(BOARD.map((b) => b.id), (id) => BOARD.find((b) => b.id === id)?.rect);
+  protected readonly sheet = signal(false);
+  protected optioned = '';
+  protected readonly hasOptions = (kind: string) => kind === 'alpha';
+  protected readonly widgetFor = (kind: string): GridSample => ({ kind });
+  /** Each widget says its live size, read from the view the engine last returned. */
+  protected readonly values = computed(() => {
+    const v = this.view();
+    const rects = new Map((v?.layout.placements ?? []).map((p) => [p.id, p] as const));
+    return valuesOf([...rects.keys()], (id) => rects.get(id));
+  });
+  protected readonly chooserView = computed(() => this.view() as View);
+  protected addEdit(edit: Edit<GridSample>): void {
+    void this.backend.edit(edit, (this.view() as View).revision).then((v) => this.view.set(v));
+  }
   protected readonly cases = GOLDEN_CASES.map((c) => ({
-    name: c.name,
+    title: c.name.charAt(0).toUpperCase() + c.name.slice(1),
     gesture: c.gesture,
     values: valuesOf(c.items.map((i) => i.id), (id) => c.items.find((i) => i.id === id)?.rect),
     before: viewOf(c.items),
@@ -142,7 +164,9 @@ export class GalWidgetGrid {
   protected gesture(c: { gesture: { gesture: string } & Record<string, unknown> }): string {
     const g = c.gesture;
     const rect = g['rect'] as { x: number; y: number; w: number; h: number } | undefined;
-    const detail = rect ? `to x ${rect.x}, y ${rect.y}, ${rect.w} by ${rect.h}` : g['dir'] ? String(g['dir']) : '';
-    return `${g.gesture} ${String(g['id'])} ${detail}`.trim();
+    const who = kindName(String(g['id']));
+    if (rect) return `${g.gesture === 'place' ? 'Place' : g.gesture} ${who} at column ${rect.x + 1}, row ${rect.y + 1}, ${rect.w} by ${rect.h}`;
+    const words: Record<string, string> = { nudge: 'Nudge', grow: 'Grow', toFirst: 'Move to first', toLast: 'Move to last' };
+    return `${words[g.gesture] ?? g.gesture} ${who}${g['dir'] ? ' ' + String(g['dir']) : ''}`;
   }
 }

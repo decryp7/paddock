@@ -28,7 +28,7 @@ import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/m
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
-import type { Edit, KindInfo, LayoutView, Placement as GenericPlacement, Preset as GenericPreset, Span } from '../generated/widgets';
+import type { Edit, KindInfo, LayoutView, Cells, Placement as GenericPlacement, Preset as GenericPreset, Span } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
 /** The family's undo toast class (the safe area above the status bar is in `_material.scss`). */
@@ -73,6 +73,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         @for (note of view().notes; track $index) {
           <p class="pd-wc-limit pd-wc-note" role="status"><pd-status-glyph status="info" [size]="16" />{{ note.message }}</p>
         }
+        @if (mode() === 'edit') {
         <div class="pd-wc-label">
           <span [id]="ids + '-shown'">Shown in the {{ noun() }}</span>
           <span class="pd-wc-count">{{ placements().length }} of {{ surface().maxPlacements }}</span>
@@ -129,6 +130,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         </mat-menu>
         <p class="pd-wc-hint" [id]="ids + '-hint'"><pd-glyph name="keyboard" [size]="16" /><span class="pd-wc-hint-text">Drag a widget, or focus its handle and hold {{ mac ? 'Option' : 'Alt' }} with the arrow keys, Home or End to move it.</span></p>
 
+        }
+
         <div class="pd-wc-label"><span>Add a widget</span></div>
         @if (atLimit()) {
           <p class="pd-wc-limit" role="status"><pd-status-glyph status="info" [size]="16" />The {{ noun() }} holds {{ surface().maxPlacements }} widgets. Remove one to add another.</p>
@@ -151,7 +154,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
           }
         </ul>
         </div>
-        @if (hasPresets()) {
+        @if (mode() === 'edit' && hasPresets()) {
           <div class="pd-wc-label">
             <span [id]="ids + '-presets'">Presets</span>
             <span class="pd-wc-count">{{ userPresets().length }} of {{ surface().maxUserPresets }} saved</span>
@@ -269,7 +272,9 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private readonly snackBar = inject(MatSnackBar);
 
   /** The engine's view of the surface: layout, catalogue, notes, `canUndo` and `editable`. */
-  readonly view = input.required<LayoutView<S, W, Span, K>>();
+  readonly view = input.required<LayoutView<S, W, Span, K> | LayoutView<S, W, Cells, K>>();
+  /** `edit`: the Shown list, the add list and presets (flow surfaces). `add`: only the add list, for the side sheet of a grid surface (ADR 0044 §5: the grid is the editor). */
+  readonly mode = input<'edit' | 'add'>('edit');
   /** A new widget value of a kind, with its default options (`Edit.add`). */
   readonly widgetFor = input.required<(kind: K) => W>();
   /** The kind (wire name) of a widget value; see `defaultKindOf`. */
@@ -286,15 +291,15 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   readonly edit = output<Edit<W>>();
 
   protected readonly ids = `pd-wc-${nextId++}`;
-  protected readonly placements = computed(() => this.view().layout.placements);
+  protected readonly placements = computed(() => this.view().layout.placements as Placement<W>[]);
   protected readonly surface = computed(() => this.view().catalogue.surface);
   /** What the surface is called in the texts, from the catalogue ("popup"). */
   protected readonly noun = computed(() => this.surface().noun);
   protected readonly kinds = computed(() => this.view().catalogue.kinds);
   protected readonly editable = computed(() => this.view().editable);
   protected readonly atLimit = computed(() => this.placements().length >= this.surface().maxPlacements);
-  protected readonly userPresets = computed(() => this.view().layout.presets);
-  protected readonly presets = computed(() => [...this.view().builtinPresets, ...this.userPresets()]);
+  protected readonly userPresets = computed(() => this.view().layout.presets as Preset<W>[]);
+  protected readonly presets = computed(() => [...(this.view().builtinPresets as Preset<W>[]), ...this.userPresets()]);
   protected readonly hasPresets = computed(() => this.surface().maxUserPresets > 0 || this.presets().length > 0);
   protected readonly presetName = signal('');
   protected readonly canSave = computed(() => this.presetName().trim() !== '' && this.userPresets().length < this.surface().maxUserPresets);

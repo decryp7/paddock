@@ -18,6 +18,7 @@ import {
   ViewEncapsulation,
 } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import type { Edit, GridGesture, KindInfo, PlacementId, PlacementState, Rect, SurfaceValues, WidgetState } from '../generated/widgets';
@@ -25,13 +26,14 @@ import { PD_WIDGET_GRID_BACKEND, type GridView } from './grid-backend';
 import { PdGridGesture, reducedMotion, type GridGestureTarget } from './grid-gesture';
 import { columnLines, rowLines, sameRect, type GridGeometry } from './grid-math';
 import { PdWidgetFrame } from './frame';
-import { blockOf, blockText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText, type MoveName } from './grid-text';
+import { blockOf, blockText, cantText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText, type MoveName } from './grid-text';
 import { defaultKindOf, PdWidget } from './widget';
 
 let nextId = 0;
 /** Extra empty rows under the last one while a widget is dragged (the dragged height plus this), so it can be dropped at the end. */
 const SPARE_ROWS = 4;
 const FLIP_MS = 160;
+const UNDO_SECONDS = 8;
 const FLIP_EASE = 'cubic-bezier(0.3, 0, 0.2, 1)';
 
 /** One drawn widget: the placement, what the catalogue says about its kind, and where it is on the arrangement on screen. */
@@ -76,23 +78,25 @@ interface Active {
   imports: [PdWidgetFrame, PdGridGesture, MatButton, MatIconButton, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-grid', '(keydown)': 'hostKey($event)' },
   template: `
+    @if (bar() && (editing() || rows().length > 0)) {
     <div class="pd-wg-bar" [class.pd-wg-bar--editing]="editing()">
       @if (editing()) {
         <div class="pd-wg-bar-text">
           <span class="pd-wg-bar-title">Editing layout</span>
-          <span class="pd-wg-hint" [id]="hintId">Drag to move. Drag an edge or the corner to resize. Arrow keys move the selected widget; Shift with arrow keys resizes.</span>
+          <span class="pd-wg-hint" [id]="hintId">Drag to move. Drag an edge or the corner to resize. Arrow keys move the focused widget; Shift with arrow keys resizes.</span>
         </div>
         <button matButton type="button" class="pd-wg-undo" [disabled]="!view_()?.canUndo || busy()" (click)="undoRedo('undo')">Undo</button>
         <button matButton type="button" class="pd-wg-redo" [disabled]="!view_()?.canRedo || busy()" (click)="undoRedo('redo')">Redo</button>
         <button matButton="outlined" type="button" class="pd-wg-add" (click)="addWidget.emit()">Add widget</button>
         <button matButton="filled" type="button" class="pd-wg-done" (click)="editing.set(false)">Done</button>
       } @else if (view_(); as v) {
-        <button matButton="outlined" type="button" class="pd-wg-edit" [disabled]="!canEdit()" [attr.aria-describedby]="canEdit() ? null : reasonId" (click)="editing.set(true)">Edit layout</button>
+        <button matButton="outlined" type="button" class="pd-wg-edit" [disabled]="!canEdit()" [attr.aria-describedby]="canEdit() ? null : reasonId" (click)="editing.set(true)"><pd-glyph name="edit" [size]="16" />Edit layout</button>
         @if (!canEdit() && v.editable) {
           <span class="pd-wg-reason" [id]="reasonId">Arranging needs a wider dashboard. Make the window wider or collapse the sidebar.</span>
         }
       }
     </div>
+    }
     @if (feedback(); as f) {
       <p class="pd-wg-feedback" [class.pd-wg-feedback--bad]="feedbackBad()" [attr.role]="feedbackBad() ? 'alert' : 'status'">
         <pd-status-glyph [status]="feedbackBad() ? 'warning' : 'info'" [size]="16" />{{ f }}
@@ -104,7 +108,7 @@ interface Active {
     @if (view_(); as v) {
       @if (rows().length === 0) {
         <div class="pd-wg-empty">
-          <pd-glyph name="settings" [size]="16" />
+          <pd-glyph name="columns" [size]="16" />
           <span class="pd-wg-et">Nothing on the {{ v.catalogue.surface.noun }} yet</span>
           <span class="pd-wg-ed">Add widgets to see them here.</span>
           <button matButton="text" type="button" class="pd-wg-ea" (click)="addWidget.emit()">Add widget</button>
@@ -120,11 +124,10 @@ interface Active {
           @if (placeholder(); as ph) {
             <div class="pd-wg-guide pd-wg-guide--left" aria-hidden="true" [style.grid-column]="ph.x + 1 + ' / span 1'" [style.grid-row]="'1 / span ' + rowCount()"></div>
             <div class="pd-wg-guide pd-wg-guide--right" aria-hidden="true" [style.grid-column]="ph.x + ph.w + ' / span 1'" [style.grid-row]="'1 / span ' + rowCount()"></div>
-            <div class="pd-wg-ph" aria-hidden="true" [style.grid-column]="cols(ph)" [style.grid-row]="rws(ph)">
-              @if (chip(); as c) {
-                <span class="pd-wg-chip">{{ c }}</span>
-              }
-            </div>
+            <div class="pd-wg-ph" aria-hidden="true" [style.grid-column]="cols(ph)" [style.grid-row]="rws(ph)"></div>
+            @if (chip(); as c) {
+              <div class="pd-wg-chipbox" aria-hidden="true" [style.grid-column]="cols(ph)" [style.grid-row]="rws(ph)"><span class="pd-wg-chip">{{ c }}</span></div>
+            }
           }
           @for (row of rows(); track row.id) {
             <div
@@ -205,6 +208,9 @@ interface Active {
         @for (name of names; track name) {
           <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)">{{ actions[name].label }}</button>
         }
+        @if (hasOptions()(kindOfId(id))) {
+          <button mat-menu-item type="button" class="pd-wg-options" (click)="options.emit(id)">Options…</button>
+        }
         <button mat-menu-item type="button" (click)="removeById(id)">Remove</button>
       </ng-template>
     </mat-menu>
@@ -216,14 +222,14 @@ interface Active {
     .pd-wg-bar-text { display: grid; flex: 1; min-width: 0; }
     .pd-wg-bar-title { font-weight: var(--pd-weight-semibold); }
     .pd-wg-hint, .pd-wg-reason { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
-    .pd-wg-reason { flex-basis: 100%; text-align: end; }
+    .pd-wg-reason { flex-basis: 100%; text-align: start; overflow-wrap: anywhere; }
     .pd-wg-feedback { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-3); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-wg-feedback--bad { color: var(--pd-text); }
     .pd-wg-grid { position: relative; display: grid; gap: var(--pd-card-gap); grid-auto-rows: var(--pd-widget-row); min-width: 0; }
     .pd-wg-cell { position: relative; z-index: 1; min-width: 0; min-height: 0; border-radius: var(--pd-radius-card); }
     .pd-wg-cell > .pd-widget-frame { height: 100%; }
     .pd-wg-grid--editing .pd-wg-cell { cursor: grab; touch-action: none; user-select: none; }
-    .pd-wg-cell:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-wg-grid--editing .pd-wg-cell:focus, .pd-wg-cell:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-wg-cell.pd-wg-lifted { z-index: 3; cursor: grabbing; box-shadow: var(--pd-shadow-3); }
     .pd-wg-cell.pd-wg-resizing { z-index: 3; justify-self: start; align-self: start; }
     .pd-wg-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -231,18 +237,20 @@ interface Active {
     .pd-wg-more .mat-mdc-button-touch-target { width: 24px; height: 24px; }
     .pd-wg-h { position: absolute; z-index: 2; color: var(--pd-text-muted); opacity: 0; }
     .pd-wg-cell:hover .pd-wg-h, .pd-wg-cell:focus-within .pd-wg-h, .pd-wg-cell:focus .pd-wg-h, .pd-wg-cell.pd-wg-resizing .pd-wg-h { opacity: 1; }
-    .pd-wg-h--se { right: 0; bottom: 0; width: 24px; height: 24px; cursor: nwse-resize; opacity: 1; }
-    .pd-wg-h--e { top: 24px; bottom: 24px; right: -4px; width: 8px; cursor: ew-resize; }
-    .pd-wg-h--s { left: 24px; right: 24px; bottom: -4px; height: 8px; cursor: ns-resize; }
+    .pd-wg-grid--busy .pd-wg-cell:not(.pd-wg-resizing) .pd-wg-h, .pd-wg-grid--busy .pd-wg-more { opacity: 0; }
+    .pd-wg-h--se { right: 4px; bottom: 4px; width: 24px; height: 24px; cursor: nwse-resize; }
+    .pd-wg-h--e { top: 24px; bottom: 24px; right: 4px; width: 8px; cursor: ew-resize; }
+    .pd-wg-h--s { left: 24px; right: 24px; bottom: 4px; height: 8px; cursor: ns-resize; }
     .pd-wg-h--e::after, .pd-wg-h--s::after { content: ''; position: absolute; }
     .pd-wg-h--e::after { top: 50%; left: 0.75px; height: 16px; width: 6.5px; transform: translateY(-50%); border-inline: 1.5px solid currentColor; }
     .pd-wg-h--s::after { left: 50%; top: 0.75px; width: 16px; height: 6.5px; transform: translateX(-50%); border-block: 1.5px solid currentColor; }
     .pd-wg-ph { z-index: 0; border-radius: var(--pd-radius-card); background: var(--pd-accent-tint); outline: 1.5px dashed var(--pd-accent); outline-offset: -1.5px; position: relative; }
-    .pd-wg-chip { position: absolute; right: var(--pd-space-2); bottom: var(--pd-space-2); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); box-shadow: var(--pd-shadow-1); }
-    .pd-wg-guide { z-index: 0; pointer-events: none; margin-inline: calc(var(--pd-card-gap) / -2); }
+    .pd-wg-chipbox { z-index: 5; pointer-events: none; display: flex; justify-content: flex-end; align-items: flex-end; }
+    .pd-wg-chip { margin: 0 0 calc(-1 * (var(--pd-space-2) + 24px)) 0; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); box-shadow: var(--pd-shadow-1); }
+    .pd-wg-guide { z-index: 0; pointer-events: none; }
     .pd-wg-guide--left { border-left: 1px dashed var(--pd-snap-guide); }
     .pd-wg-guide--right { border-right: 1px dashed var(--pd-snap-guide); }
-    .pd-wg-empty, .pd-wg-state { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--pd-space-0) var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
+    .pd-wg-empty, .pd-wg-state { min-width: 0; overflow-wrap: anywhere; box-sizing: border-box; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--pd-space-0) var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
     .pd-wg-empty > pd-glyph, .pd-wg-state > pd-status-glyph, .pd-wg-state > pd-glyph { margin-top: var(--pd-space-0); color: var(--pd-text-muted); }
     .pd-wg-state .pd-wg-bad { color: var(--pd-danger); }
     .pd-wg-et { font-weight: var(--pd-weight-semibold); }
@@ -266,6 +274,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
   private readonly announcer = inject(LiveAnnouncer);
+  private readonly snack = inject(MatSnackBar);
   private readonly backend = inject(PD_WIDGET_GRID_BACKEND);
 
   /** The surface's view; null while it loads. */
@@ -282,6 +291,8 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   readonly meta = input<((id: PlacementId, state: WidgetState<V, A>) => string | null) | null>(null);
   /** The container width in px when the app knows it better than the grid (a gallery, a test); null measures the grid. */
   readonly width = input<number | null>(null);
+  /** False hides the Edit layout bar (a static drawing, such as a gallery's before-and-after boards). */
+  readonly bar = input(true);
   /** The element that scrolls while a widget is dragged; the page when null. */
   readonly scroller = input<HTMLElement | null>(null);
   /** The app's per-kind templates, declared as content. */
@@ -297,6 +308,10 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   readonly viewChange = output<GridView<W, K, S>>();
   /** "Add widget" (the bar, or the empty state): the app opens its add sheet. */
   readonly addWidget = output<void>();
+  /** Which kinds have options (the app's `pdWidgetOption` controls): their ⋯ menu gets "Options…". */
+  readonly hasOptions = input<(kind: string) => boolean>(() => false);
+  /** "Options…" in a widget's ⋯ menu: the app opens its options for that placement. */
+  readonly options = output<PlacementId>();
   /** "Retry" on the error state. */
   readonly retry = output<void>();
 
@@ -418,6 +433,8 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     // effect-state: `editing` is a two-way model the app also writes, so it cannot be a computed.
     effect(() => {
       if (this.editing() && !this.canEdit()) this.editing.set(false);
+      // A refusal said in edit mode does not outlive it.
+      if (!this.editing()) this.feedback.set('');
     });
   }
 
@@ -438,6 +455,10 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   /** "6 by 6, position 5 of 15" for a screen reader. */
   protected describe(row: Row<W, V, A>): string {
     return sizeText(row.rect, row.position, row.of);
+  }
+
+  protected kindOfId(id: string): string {
+    return this.rows().find((r) => r.id === id)?.kind ?? '';
   }
 
   protected allowed(id: string, name: MoveName): boolean {
@@ -476,8 +497,9 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     const row = this.rows().find((r) => r.id === id);
     if (!row || this.busy()) return;
     const act = MOVE_ACTIONS[name];
+    this.feedback.set('');
     if (!this.allowed(id, name)) {
-      this.say(`${row.title} ${act.cant}.`, true);
+      this.say(cantText(row.title, name), true);
       return;
     }
     const gesture = act.gesture(id);
@@ -497,7 +519,10 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   private async remove(id: string, title: string): Promise<void> {
     if (this.busy()) return;
     const next = await this.apply({ remove: { id } }, title);
-    if (next) this.say(`${title} removed. Undo is in the bar.`, false);
+    if (!next) return;
+    this.say(`${title} removed. Undo is in the bar.`, false);
+    // The undo toast (the family's class, as the chooser's): Undo takes the removal back.
+    this.snack.open(`${title} removed.`, 'Undo', { duration: UNDO_SECONDS * 1000, panelClass: 'pd-undo-snack' }).onAction().subscribe(() => void this.undoRedo('undo'));
   }
 
   protected async undoRedo(which: 'undo' | 'redo'): Promise<void> {
