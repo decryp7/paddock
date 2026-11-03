@@ -191,7 +191,7 @@ struct Inner {
 #[derive(Default)]
 struct Gate {
     running: usize,
-    waiting: std::collections::VecDeque<(u64, Vec<u8>)>,
+    waiting: std::collections::VecDeque<(u64, Vec<u8>, Arc<Served>)>,
 }
 
 static NEXT_PEER: AtomicU64 = AtomicU64::new(1);
@@ -562,33 +562,31 @@ impl Peer {
                 drop(gate);
                 return self.refuse_call(id, "too many calls are running; try again");
             }
-            served.insert(
-                id,
-                Arc::new(Served {
-                    state: Mutex::new(ServedState {
-                        credit: u64::from(credit),
-                        streams: credit > 0,
-                        cancelled: false,
-                    }),
-                    cv: Condvar::new(),
+            let call = Arc::new(Served {
+                state: Mutex::new(ServedState {
+                    credit: u64::from(credit),
+                    streams: credit > 0,
+                    cancelled: false,
                 }),
-            );
+                cv: Condvar::new(),
+            });
+            served.insert(id, call.clone());
             if gate.running < opts.max_concurrent_calls {
                 gate.running += 1;
-                true
+                Some(call)
             } else {
-                gate.waiting.push_back((id, body.clone()));
-                false
+                gate.waiting.push_back((id, body.clone(), call));
+                None
             }
         };
-        if !started_now {
+        let Some(first) = started_now else {
             return;
-        }
+        };
         let (peer, handler) = (self.clone(), handler.clone());
         let started = spawn("paddock-ipc-call", move || {
-            let mut next = Some((id, body));
-            while let Some((id, body)) = next {
-                peer.run_call(&handler, id, body);
+            let mut next = Some((id, body, first));
+            while let Some((id, body, served)) = next {
+                peer.run_call(&handler, id, body, served);
                 next = peer.next_waiting();
             }
         });
@@ -600,21 +598,18 @@ impl Peer {
     }
 
     /// The next waiting call that is still wanted (the connection did not end it); frees the slot when there is none.
-    fn next_waiting(&self) -> Option<(u64, Vec<u8>)> {
+    fn next_waiting(&self) -> Option<(u64, Vec<u8>, Arc<Served>)> {
         let mut gate = lock(&self.inner.gate);
-        while let Some((id, body)) = gate.waiting.pop_front() {
+        while let Some((id, body, served)) = gate.waiting.pop_front() {
             if lock(&self.inner.served).contains_key(&id) {
-                return Some((id, body));
+                return Some((id, body, served));
             }
         }
         gate.running -= 1;
         None
     }
 
-    fn run_call(&self, handler: &Arc<dyn Handler>, id: u64, body: Vec<u8>) {
-        let Some(served) = lock(&self.inner.served).get(&id).cloned() else {
-            return;
-        };
+    fn run_call(&self, handler: &Arc<dyn Handler>, id: u64, body: Vec<u8>, served: Arc<Served>) {
         let ctx = CallCtx {
             peer: self.clone(),
             id,

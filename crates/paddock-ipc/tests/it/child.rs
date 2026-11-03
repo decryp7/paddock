@@ -172,6 +172,16 @@ fn the_bootstrap_line_roundtrips_and_bad_lines_are_refused() {
 }
 
 #[test]
+fn a_memory_limit_without_the_hard_commit_limit_still_runs_and_is_watched() {
+    let mut s = spec(&["echo"]);
+    s.memory_limit = Some(4 << 30);
+    s.memory_hard = false;
+    let child = launch(&s, Arc::new(NoCalls)).unwrap();
+    assert_eq!(child.peer().call(b"ok".to_vec(), T).unwrap(), b"ok");
+    assert_eq!(child.stopped_over_memory(), None);
+}
+
+#[test]
 fn exit_status_waits_for_the_exit_and_is_kept() {
     let child = launch(&spec(&["echo"]), Arc::new(NoCalls)).unwrap();
     // Still running: no status after a short wait.

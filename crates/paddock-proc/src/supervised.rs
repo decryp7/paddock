@@ -900,10 +900,13 @@ mod tests {
         let nice = |pid: u32| unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
         let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
         let pid = s.id().unwrap();
-        // The child starts at our level; make it lower than the target first.
-        unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, 15) };
+        // The child starts at our level; make it lower than the target first. Under a niced runner (plock's `nice -n 19`) we
+        // are already lower than 15 and an unprivileged process cannot raise a child's priority, so start from our own level
+        // when that is lower.
+        let level = nice(0).max(15);
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, level) };
         assert!(s.lower_priority(), "already below the target");
-        assert_eq!(nice(pid), 15, "never raised");
+        assert_eq!(nice(pid), level, "never raised");
         s.kill();
     }
 }
