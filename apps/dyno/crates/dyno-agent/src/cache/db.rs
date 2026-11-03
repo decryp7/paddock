@@ -986,4 +986,111 @@ pub(crate) mod tests {
         assert_eq!(get_view(db.path(), "counters").unwrap(), Some((1, 20, "{\"a\":2}".into())));
         assert_eq!(get_view(db.path(), "software").unwrap(), None);
     }
+
+    /// Everything on disk that could hold a name: the database and its write-ahead log.
+    fn on_disk(db: &Path) -> Vec<u8> {
+        let [main, wal, _] = files_of(db);
+        let mut all = std::fs::read(main).unwrap_or_default();
+        all.extend(std::fs::read(wal).unwrap_or_default());
+        all
+    }
+
+    fn holds(bytes: &[u8], needle: &str) -> bool {
+        bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
+    }
+
+    fn private_params(tag: &str) -> SaveParams {
+        let path = format!("/Users/alice/__PRIVATE_{tag}__");
+        SaveParams {
+            target_key: format!("folder:{path}"),
+            target: format!("{{\"folder\":{{\"path\":\"{path}\"}}}}"),
+            volume_identity: None,
+            status: format!("{{\"name\":\"__PRIVATE_{tag}__\"}}"),
+            limits: "{}".into(),
+            scanned_at: 1,
+            used_bytes_then: None,
+        }
+    }
+
+    /// ADR 0029 section 6: forgetting leaves no path in freed pages. The chunks are stored raw here so the names are there to
+    /// find (compressed, they would not be readable even before); `secure_delete` overwrites freed pages and the write-ahead log
+    /// is emptied after a forget, a replacement and an eviction.
+    #[test]
+    fn a_forgotten_replaced_or_evicted_map_leaves_no_name_in_the_file_or_its_wal() {
+        let d = tempfile::tempdir().unwrap();
+        let mut db = open_in(d.path());
+        let raw = CacheLimits {
+            max_bytes: 1 << 30,
+            compress: false,
+        };
+
+        // Forgotten.
+        let a = db
+            .save_disk(&private_params("alpha"), &tree("__PRIVATE_alpha__", 30), 1, raw, &Roomy)
+            .unwrap();
+        assert!(
+            holds(&on_disk(db.path()), "__PRIVATE_alpha__"),
+            "the names are in the file before (the check is not vacuous)"
+        );
+        assert!(
+            holds(&on_disk(db.path()), "/Users/alice/__PRIVATE_alpha__"),
+            "and the target's path in its row"
+        );
+        db.forget(a.id).unwrap();
+        assert!(!holds(&on_disk(db.path()), "__PRIVATE_alpha__"), "forgotten: no name, no path");
+
+        // Replaced by a newer map of the same target.
+        db.save_disk(&private_params("beta"), &tree("__PRIVATE_beta_old__", 30), 2, raw, &Roomy)
+            .unwrap();
+        assert!(holds(&on_disk(db.path()), "__PRIVATE_beta_old__"));
+        let replaced = db
+            .save_disk(&private_params("beta"), &tree("__PRIVATE_beta_new__", 30), 3, raw, &Roomy)
+            .unwrap();
+        assert_eq!(replaced.removed.len(), 1);
+        let after = on_disk(db.path());
+        assert!(!holds(&after, "__PRIVATE_beta_old__"), "replaced: the old names are gone");
+        assert!(holds(&after, "__PRIVATE_beta_new__"), "the new map is there");
+
+        // Evicted to make room for another.
+        let one = db
+            .save_disk(&private_params("gamma"), &tree("__PRIVATE_gamma__", 30), 4, raw, &Roomy)
+            .unwrap();
+        let cap = CacheLimits {
+            max_bytes: one.packed_bytes * 2 + 64,
+            compress: false,
+        };
+        db.save_disk(&private_params("delta"), &tree("__PRIVATE_delta__", 30), 5, cap, &Roomy)
+            .unwrap();
+        let after = on_disk(db.path());
+        assert!(!holds(&after, "__PRIVATE_beta_new__"), "evicted (least recently shown): no name");
+        assert!(
+            holds(&after, "__PRIVATE_delta__") && holds(&after, "__PRIVATE_gamma__"),
+            "the ones kept are there"
+        );
+    }
+
+    #[test]
+    fn the_write_connection_overwrites_freed_pages_and_the_file_gives_the_space_back() {
+        let d = tempfile::tempdir().unwrap();
+        let mut db = open_in(d.path());
+        let secure: i64 = db.conn.query_row("PRAGMA secure_delete", [], |r| r.get(0)).unwrap();
+        assert_eq!(secure, 1, "secure_delete is on");
+        let vacuum: i64 = db.conn.query_row("PRAGMA auto_vacuum", [], |r| r.get(0)).unwrap();
+        assert_eq!(vacuum, 2, "auto_vacuum is incremental, set when the file was created");
+        let raw = CacheLimits {
+            max_bytes: 1 << 30,
+            compress: false,
+        };
+        let s = db
+            .save_disk(&private_params("big"), &tree("__PRIVATE_big__", 3000), 1, raw, &Roomy)
+            .unwrap();
+        // The pages are in the file, not still in the log, before it is measured.
+        db.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
+        let grown = std::fs::metadata(db.path()).unwrap().len();
+        db.forget(s.id).unwrap();
+        let shrunk = std::fs::metadata(db.path()).unwrap().len();
+        assert!(shrunk < grown / 2, "{shrunk} bytes after forgetting against {grown} before");
+        let wal = std::fs::metadata(&files_of(db.path())[1]).map_or(0, |m| m.len());
+        assert_eq!(wal, 0, "the write-ahead log is empty after a forget");
+    }
 }
