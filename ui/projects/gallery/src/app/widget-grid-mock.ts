@@ -1,5 +1,5 @@
-import type { Arrangement, Cells, Dir, Edit, GridGesture, KindInfo, Moves, PreviewRequest, Rect } from '@decryp7/paddock-ui/widgets';
-import { type GridView, type PreviewReply, type WidgetGridBackend } from '@decryp7/paddock-ui/widgets';
+import type { Arrangement, PreviewReply, Cells, Dir, Edit, GridGesture, KindInfo, Moves, PreviewRequest, Rect } from '@decryp7/paddock-ui/widgets';
+import { type GridView, type WidgetGridBackend } from '@decryp7/paddock-ui/widgets';
 import cases from '../../../paddock-ui/widgets/generated/grid-cases.json';
 
 /** The sample widget of the grid pages: only its kind. */
@@ -22,17 +22,28 @@ export const GOLDEN_CASES = cases as unknown as readonly GoldenCase[];
 /** Six sample kinds; the golden cases use a to f. */
 export const SAMPLE_KINDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot'] as const;
 const size = { cells: { widths: { range: { min: 2, max: 12 } }, heights: { range: { min: 2, max: 14 } }, defaultW: 6, defaultH: 4 } } as const;
-const kindInfo = (k: string): KindInfo<string> => ({ kind: k, title: k[0]!.toUpperCase() + k.slice(1), summary: `${k} summary`, icon: 'pd:activity', size, maxInstances: 12, refresh: 'onChange' });
+const SUMMARIES: Record<string, string> = { alpha: 'Load and use now, with the last minute', bravo: 'Download and upload now', charlie: 'Free space per volume', delta: 'Most severe alarms first', echo: 'When backups last ran', foxtrot: 'The busiest apps by CPU' };
+const kindInfo = (k: string): KindInfo<string> => ({ kind: k, title: k[0]!.toUpperCase() + k.slice(1), summary: SUMMARIES[k] ?? 'A sample widget', icon: 'pd:activity', size, maxInstances: 12, refresh: 'onChange' });
 
 /** The sample kind of a placement id: a, b, c ... in turn. */
 export const kindOfId = (id: string): string => SAMPLE_KINDS[Math.max(0, id.charCodeAt(id.length - 1) - 97) % SAMPLE_KINDS.length] as string;
 
+/** The placement a gesture is about. */
+export const gestureId = (g: GridGesture): string => Object.values(g)[0]!.id;
 const same = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 const sameItems = (a: readonly Item[], b: readonly Item[]) => a.length === b.length && a.every((x) => b.some((y) => y.id === x.id && same(x.rect, y.rect)));
 const reading = (items: readonly Item[]): Item[] => [...items].sort((p, q) => p.rect.y - q.rect.y || p.rect.x - q.rect.x || p.id.localeCompare(q.id));
 
+/** What the engine says about the placement an arrange edit moved: its place in reading order and the neighbours. */
+function outcomeOf(ordered: readonly Item[], id: string | undefined): View['outcome'] {
+  const i = ordered.findIndex((x) => x.id === id);
+  if (i < 0) return null;
+  const r = ordered[i]!.rect;
+  return { id: id as string, position: i + 1, of: ordered.length, after: ordered[i - 1]?.id ?? null, before: ordered[i + 1]?.id ?? null, w: r.w, h: r.h, limit: null };
+}
+
 /** A view of some rectangles, as the engine would return it (a stand-in: the arrangements below the first are crude). */
-export function viewOf(items: readonly Item[], opts: { revision?: number; canUndo?: boolean; canRedo?: boolean } = {}): View {
+export function viewOf(items: readonly Item[], opts: { revision?: number; canUndo?: boolean; canRedo?: boolean; outcomeId?: string } = {}): View {
   const ordered = reading(items);
   const half = (r: Rect): Rect => ({ x: Math.floor(r.x / 2), y: r.y, w: Math.max(1, Math.ceil(r.w / 2)), h: r.h });
   let y = 0;
@@ -58,7 +69,7 @@ export function viewOf(items: readonly Item[], opts: { revision?: number; canUnd
     arrangements,
     moves,
     canRedo: opts.canRedo ?? false,
-    outcome: null,
+    outcome: outcomeOf(ordered, opts.outcomeId),
     catalogue: { surface: { id: 'dashboard', noun: 'dashboard', columns: 12, maxPlacements: 32, minPlacements: 0, maxUserPresets: 3 }, kinds: (kinds.length ? kinds : [...SAMPLE_KINDS]).map(kindInfo) },
     builtinPresets: [],
     notes: [],
@@ -87,9 +98,9 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
     return viewOf(this.items, { revision: this.revision, canUndo: this.undo.length > 0, canRedo: this.redo.length > 0 });
   }
 
-  preview(request: PreviewRequest): Promise<PreviewReply<GridSample, string, string>> {
+  preview(request: PreviewRequest): Promise<PreviewReply<View>> {
     if (request.revision !== this.revision) return Promise.reject('stale');
-    return this.compute(request.gesture).then((items) => ({ seq: request.seq, view: viewOf(items, { revision: this.revision }) }));
+    return this.compute(request.gesture).then((items) => ({ seq: request.seq, view: viewOf(items, { revision: this.revision, outcomeId: gestureId(request.gesture) }) }));
   }
 
   edit(edit: Edit<GridSample> | 'undo' | 'redo', revision: number): Promise<View> {
@@ -111,7 +122,7 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
       return this.commit([...this.items, { id, rect: { x: 0, y, w: 6, h: 4 } }]);
     }
     if ('remove' in edit) return this.commit(this.items.filter((i) => i.id !== edit.remove.id));
-    if ('arrange' in edit) return this.compute(edit.arrange.gesture).then((items) => this.commit(items));
+    if ('arrange' in edit) return this.compute(edit.arrange.gesture).then((items) => this.commit(items, gestureId(edit.arrange.gesture)));
     return Promise.reject({ invalid: 'The gallery engine does not do that.' });
   }
 
@@ -119,12 +130,12 @@ export class MockGridBackend implements WidgetGridBackend<GridSample, string, st
     return Promise.resolve(this.view());
   }
 
-  private commit(items: readonly Item[]): Promise<View> {
+  private commit(items: readonly Item[], outcomeId?: string): Promise<View> {
     this.undo.push(this.items);
     this.redo.length = 0;
     this.items = [...items];
     this.revision++;
-    return Promise.resolve(this.view());
+    return Promise.resolve(viewOf(this.items, { revision: this.revision, canUndo: true, canRedo: false, outcomeId }));
   }
 
   private compute(g: GridGesture): Promise<readonly Item[]> {

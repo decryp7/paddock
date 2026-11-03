@@ -26,7 +26,7 @@ import { PD_WIDGET_GRID_BACKEND, type GridView } from './grid-backend';
 import { PdGridGesture, reducedMotion, type GridGestureTarget } from './grid-gesture';
 import { columnLines, rowLines, sameRect, type GridGeometry } from './grid-math';
 import { PdWidgetFrame } from './frame';
-import { blockOf, blockText, cantText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText, type MoveName } from './grid-text';
+import { blockOf, blockText, cantText, errorText, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText, outcomeText, type MoveName } from './grid-text';
 import { defaultKindOf, PdWidget } from './widget';
 
 let nextId = 0;
@@ -88,6 +88,7 @@ interface Active {
         <button matButton type="button" class="pd-wg-undo" [disabled]="!view_()?.canUndo || busy()" (click)="undoRedo('undo')">Undo</button>
         <button matButton type="button" class="pd-wg-redo" [disabled]="!view_()?.canRedo || busy()" (click)="undoRedo('redo')">Redo</button>
         <button matButton="outlined" type="button" class="pd-wg-add" (click)="addWidget.emit()">Add widget</button>
+        <button matIconButton type="button" class="pd-wg-barmore" aria-label="More layout actions" [matMenuTriggerFor]="barMenu" [disabled]="busy()"><pd-glyph name="more" [size]="16" /></button>
         <button matButton="filled" type="button" class="pd-wg-done" (click)="editing.set(false)">Done</button>
       } @else if (view_(); as v) {
         <button matButton="outlined" type="button" class="pd-wg-edit" [disabled]="!canEdit()" [attr.aria-describedby]="canEdit() ? null : reasonId" (click)="editing.set(true)"><pd-glyph name="edit" [size]="16" />Edit layout</button>
@@ -96,6 +97,13 @@ interface Active {
         }
       }
     </div>
+    }
+    @if (saving() && editing()) {
+      <form class="pd-wg-save" (submit)="savePreset($event)">
+        <label class="pd-wg-savelabel">Preset name <input class="pd-wg-savename" type="text" maxlength="64" autocomplete="off" [value]="saveName()" (input)="onSaveName($event)" /></label>
+        <button matButton="outlined" type="submit" class="pd-wg-savego" [disabled]="saveName().trim() === '' || busy()">Save preset</button>
+        <button matButton type="button" class="pd-wg-savecancel" (click)="cancelSave()">Cancel</button>
+      </form>
     }
     @if (feedback(); as f) {
       <p class="pd-wg-feedback" [class.pd-wg-feedback--bad]="feedbackBad()" [attr.role]="feedbackBad() ? 'alert' : 'status'">
@@ -203,15 +211,31 @@ interface Active {
       </div>
     }
 
+    <mat-menu #barMenu="matMenu" class="pd-wg-menu">
+      @if (presets().length > 0) {
+        <span class="pd-wg-menu-label" role="presentation">Presets</span>
+        @for (p of presets(); track p.id) {
+          <button mat-menu-item type="button" class="pd-wg-preset" (click)="applyPreset(p.id, p.name)"><span class="pd-wg-lbl">{{ p.name }}</span>@if (p.builtin) {<span class="pd-wg-key">Built in</span>}</button>
+        }
+        <hr class="pd-wg-sep" />
+      }
+      <button mat-menu-item type="button" class="pd-wg-savepreset" [disabled]="!canSavePreset()" (click)="saving.set(true)"><span class="pd-wg-lbl">Save as preset…</span></button>
+      <hr class="pd-wg-sep" />
+      <button mat-menu-item type="button" class="pd-wg-reset" (click)="reset()"><span class="pd-wg-lbl">Reset to defaults</span></button>
+    </mat-menu>
     <mat-menu #menu="matMenu" class="pd-wg-menu">
       <ng-template matMenuContent let-id="id">
         @for (name of names; track name) {
-          <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)">{{ actions[name].label }}</button>
+          <button mat-menu-item type="button" [disabled]="!allowed(id, name)" (click)="runMove(id, name)"><span class="pd-wg-lbl">{{ labelOf(id, name) }}</span><span class="pd-wg-key" aria-hidden="true">{{ actions[name].key }}</span></button>
+          @if (name === 'last' || name === 'down' || name === 'shorter') {
+            <hr class="pd-wg-sep" />
+          }
         }
         @if (hasOptions()(kindOfId(id))) {
-          <button mat-menu-item type="button" class="pd-wg-options" (click)="options.emit(id)">Options…</button>
+          <button mat-menu-item type="button" class="pd-wg-options" (click)="options.emit(id)"><span class="pd-wg-lbl">Options for {{ titleOf(id) }}…</span></button>
+          <hr class="pd-wg-sep" />
         }
-        <button mat-menu-item type="button" (click)="removeById(id)">Remove</button>
+        <button mat-menu-item type="button" (click)="removeById(id)"><span class="pd-wg-lbl">Remove {{ titleOf(id) }}</span><span class="pd-wg-key" aria-hidden="true">Delete</span></button>
       </ng-template>
     </mat-menu>
   `,
@@ -245,11 +269,20 @@ interface Active {
     .pd-wg-h--e::after { top: 50%; left: 0.75px; height: 16px; width: 6.5px; transform: translateY(-50%); border-inline: 1.5px solid currentColor; }
     .pd-wg-h--s::after { left: 50%; top: 0.75px; width: 16px; height: 6.5px; transform: translateX(-50%); border-block: 1.5px solid currentColor; }
     .pd-wg-ph { z-index: 0; border-radius: var(--pd-radius-card); background: var(--pd-accent-tint); outline: 1.5px dashed var(--pd-accent); outline-offset: -1.5px; position: relative; }
+    .pd-wg-menu .mat-mdc-menu-item .mat-mdc-menu-item-text { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-4); }
+    .pd-wg-key { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-wg-menu-label { display: block; padding: var(--pd-space-1) var(--pd-space-3); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-wg-save { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-3); }
+    .pd-wg-savelabel { display: flex; align-items: center; gap: var(--pd-space-2); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-wg-savename { height: var(--pd-control-height); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
+    .pd-wg-savename:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-wg-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: var(--pd-space-1) 0; }
     .pd-wg-chipbox { z-index: 5; pointer-events: none; display: flex; justify-content: flex-end; align-items: flex-end; }
     .pd-wg-chip { margin: 0 0 calc(-1 * (var(--pd-space-2) + 24px)) 0; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); box-shadow: var(--pd-shadow-1); }
-    .pd-wg-guide { z-index: 0; pointer-events: none; }
-    .pd-wg-guide--left { border-left: 1px dashed var(--pd-snap-guide); }
-    .pd-wg-guide--right { border-right: 1px dashed var(--pd-snap-guide); }
+    .pd-wg-guide { z-index: 0; pointer-events: none; width: 1px; box-sizing: border-box; border-left: 1px dashed var(--pd-snap-guide); }
+    @media (max-resolution: 1.5dppx) { .pd-wg-guide { border-left-style: solid; } }
+    .pd-wg-guide--left { justify-self: start; }
+    .pd-wg-guide--right { justify-self: end; }
     .pd-wg-empty, .pd-wg-state { min-width: 0; overflow-wrap: anywhere; box-sizing: border-box; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--pd-space-0) var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
     .pd-wg-empty > pd-glyph, .pd-wg-state > pd-status-glyph, .pd-wg-state > pd-glyph { margin-top: var(--pd-space-0); color: var(--pd-text-muted); }
     .pd-wg-state .pd-wg-bad { color: var(--pd-danger); }
@@ -264,9 +297,11 @@ interface Active {
     @media (prefers-contrast: more) {
       :root:not([data-contrast='off']) .pd-wg-ph { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
       :root:not([data-contrast='off']) .pd-wg-grid--editing .pd-wg-cell { outline: 1px solid var(--pd-border-strong); outline-offset: -1px; }
+      :root:not([data-contrast='off']) .pd-wg-grid--editing .pd-wg-cell:focus { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     }
     :root[data-contrast='more'] .pd-wg-ph { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
     :root[data-contrast='more'] .pd-wg-grid--editing .pd-wg-cell { outline: 1px solid var(--pd-border-strong); outline-offset: -1px; }
+    :root[data-contrast='more'] .pd-wg-grid--editing .pd-wg-cell:focus { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
   `,
 })
 export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends string = string, S = unknown> {
@@ -362,6 +397,10 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     const byId = new Map(v.layout.placements.map((p) => [p.id, p] as const));
     const index = this.arrangementIndex();
     const rects = new Map((v.arrangements[index]?.placements ?? []).map((p) => [p.id, p.rect] as const));
+    // The dragged widget keeps its stored cells: its transform already carries it to the pointer (the placeholder shows the preview).
+    const dragged = this.gesture()?.id;
+    const storedRect = dragged === undefined ? undefined : this.view_()?.arrangements[index]?.placements.find((p) => p.id === dragged)?.rect;
+    if (dragged !== undefined && storedRect) rects.set(dragged, storedRect);
     // The DOM keeps the stored reading order while a preview is drawn: moving the dragged node would drop its pointer capture.
     const stored = (this.view_()?.arrangements[index]?.placements ?? []).map((p) => p.id);
     const order: { id: string; rect: Rect }[] = [];
@@ -414,7 +453,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   protected readonly placeholder = computed<Rect | null>(() => {
     const g = this.gesture();
     if (!g) return null;
-    return this.rows().find((r) => r.id === g.id)?.rect ?? g.rect;
+    return this.previewed()?.arrangements[this.arrangementIndex()]?.placements.find((p) => p.id === g.id)?.rect ?? g.rect;
   });
   protected readonly chip = computed(() => {
     const g = this.gesture();
@@ -459,8 +498,13 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     return sizeText(row.rect, row.position, row.of);
   }
 
+  /** The menu item: a verb, the widget's name and the direction ("Move Delta left", "Make Alpha wider"). */
+  protected labelOf(id: string, name: MoveName): string {
+    return MOVE_ACTIONS[name].label(this.titleOf(id));
+  }
+
   protected kindOfId(id: string): string {
-    return this.rows().find((r) => r.id === id)?.kind ?? '';
+    return (this.rows().find((r) => r.id === id) as Row<W, V, A>).kind;
   }
 
   protected allowed(id: string, name: MoveName): boolean {
@@ -522,9 +566,54 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     if (this.busy()) return;
     const next = await this.apply({ remove: { id } }, title);
     if (!next) return;
-    this.say(`${title} removed. Undo is in the bar.`, false);
     // The undo toast (the family's class, as the chooser's): Undo takes the removal back.
     this.snack.open(`${title} removed.`, 'Undo', { duration: UNDO_SECONDS * 1000, panelClass: 'pd-undo-snack' }).onAction().subscribe(() => void this.undoRedo('undo'));
+  }
+
+  /** Puts the app's default layout back (an undoable edit; the engine knows the defaults). */
+  protected async reset(): Promise<void> {
+    if (this.busy()) return;
+    const next = await this.apply('resetToDefaults', 'The layout');
+    if (next) this.say('The layout is back to its defaults.', false);
+  }
+
+  protected readonly saving = signal(false);
+  protected readonly saveName = signal('');
+  /** The built-in presets, then the person's own. */
+  protected readonly presets = computed(() => {
+    const v = this.view_();
+    return v ? [...v.builtinPresets, ...v.layout.presets] : [];
+  });
+  protected readonly canSavePreset = computed(() => {
+    const v = this.view_();
+    return !!v && v.layout.presets.length < v.catalogue.surface.maxUserPresets;
+  });
+
+  protected onSaveName(e: Event): void {
+    this.saveName.set((e.target as HTMLInputElement).value);
+  }
+
+  protected cancelSave(): void {
+    this.saving.set(false);
+    this.saveName.set('');
+  }
+
+  /** Saves the layout on screen as a preset with the typed name (an intent; the engine checks the name and the limit). */
+  protected async savePreset(e: Event): Promise<void> {
+    e.preventDefault();
+    const name = this.saveName().trim();
+    if (name === '' || this.busy()) return;
+    const next = await this.apply({ savePreset: { name } }, 'The layout');
+    if (next) {
+      this.say(`Saved the preset ${name}.`, false);
+      this.cancelSave();
+    }
+  }
+
+  protected async applyPreset(id: string, name: string): Promise<void> {
+    if (this.busy()) return;
+    const next = await this.apply({ applyPreset: { id } }, 'The layout');
+    if (next) this.say(`Applied the preset ${name}.`, false);
   }
 
   protected async undoRedo(which: 'undo' | 'redo'): Promise<void> {
@@ -643,17 +732,17 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
 
   // ---- words, focus and motion ----
 
-  private titleOf(id: string): string {
+  protected titleOf(id: string): string {
     return this.rows().find((r) => r.id === id)?.title ?? id;
   }
 
-  /** The announcement for a finished gesture, read from the new arrangement (position, the widget before it, the size). */
+  /** The announcement for a finished gesture, from the engine's `Outcome` (position, the widget before it, the size). */
   private result(next: GridView<W, K, S>, id: string, before: Rect, gesture: GridGesture): string {
-    const placed = next.arrangements[0]?.placements ?? [];
-    const index = placed.findIndex((p) => p.id === id);
-    const after = placed[index]?.rect ?? before;
-    const previous = index > 0 ? this.kindTitle(next, placed[index - 1]?.id as string) : null;
-    return changeText(this.titleOf(id), before, after, index + 1, placed.length, previous, howOf(gesture));
+    const o = next.outcome;
+    if (!o) return `${this.titleOf(id)} stays where it is.`;
+    const previous = o.after === null ? null : this.kindTitle(next, o.after);
+    const following = o.before === null ? null : this.kindTitle(next, o.before);
+    return outcomeText(this.titleOf(id), o, previous, following, gesture, before);
   }
 
   private kindTitle(v: GridView<W, K, S>, id: string): string {

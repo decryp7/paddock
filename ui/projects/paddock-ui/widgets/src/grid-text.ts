@@ -1,11 +1,13 @@
-import type { Block, Dir, GridGesture, Moves, Rect } from '../generated/widgets';
+import type { Block, Dir, GridGesture, Moves, Outcome, Rect } from '../generated/widgets';
 
 /** One of the engine's `Moves` flags, which is also one entry of a widget's ⋯ menu and one key. */
 export type MoveName = keyof Moves;
 
 export interface MoveAction {
-  /** The menu item. */
-  readonly label: string;
+  /** The menu item's verb and direction: the widget's name goes after the verb ("Move Alpha left"). */
+  readonly label: (title: string) => string;
+  /** The key that does it, shown in the menu. */
+  readonly key: string;
   /** What the engine's refusal would be, for the words when its `moves` flag says the key does nothing. */
   readonly block: Block | 'first' | 'last';
   /** The intent sent to the engine. */
@@ -17,16 +19,16 @@ const grow = (dir: Dir) => (id: string): GridGesture => ({ grow: { id, dir } });
 
 /** The ten gestures in menu order (ADR 0044 §5), each with the intent it sends. The engine decides which of them work. */
 export const MOVE_ACTIONS: Readonly<Record<MoveName, MoveAction>> = {
-  left: { label: 'Move left', block: { edge: 'left' }, gesture: nudge('left') },
-  right: { label: 'Move right', block: { edge: 'right' }, gesture: nudge('right') },
-  up: { label: 'Move up', block: { edge: 'up' }, gesture: nudge('up') },
-  down: { label: 'Move down', block: { edge: 'down' }, gesture: nudge('down') },
-  first: { label: 'Move to first', block: 'first', gesture: (id) => ({ toFirst: { id } }) },
-  last: { label: 'Move to last', block: 'last', gesture: (id) => ({ toLast: { id } }) },
-  wider: { label: 'Wider', block: 'largest', gesture: grow('right') },
-  narrower: { label: 'Narrower', block: 'smallest', gesture: grow('left') },
-  taller: { label: 'Taller', block: 'largest', gesture: grow('down') },
-  shorter: { label: 'Shorter', block: 'smallest', gesture: grow('up') },
+  left: { label: (t) => `Move ${t} left`, key: '←', block: { edge: 'left' }, gesture: nudge('left') },
+  right: { label: (t) => `Move ${t} right`, key: '→', block: { edge: 'right' }, gesture: nudge('right') },
+  up: { label: (t) => `Move ${t} up`, key: '↑', block: { edge: 'up' }, gesture: nudge('up') },
+  down: { label: (t) => `Move ${t} down`, key: '↓', block: { edge: 'down' }, gesture: nudge('down') },
+  first: { label: (t) => `Move ${t} to first place`, key: 'Home', block: 'first', gesture: (id) => ({ toFirst: { id } }) },
+  last: { label: (t) => `Move ${t} to the end`, key: 'End', block: 'last', gesture: (id) => ({ toLast: { id } }) },
+  wider: { label: (t) => `Make ${t} wider`, key: '⇧→', block: 'largest', gesture: grow('right') },
+  narrower: { label: (t) => `Make ${t} narrower`, key: '⇧←', block: 'smallest', gesture: grow('left') },
+  taller: { label: (t) => `Make ${t} taller`, key: '⇧↓', block: 'largest', gesture: grow('down') },
+  shorter: { label: (t) => `Make ${t} shorter`, key: '⇧↑', block: 'smallest', gesture: grow('up') },
 };
 /** The names in menu order. */
 export const MOVE_NAMES = Object.keys(MOVE_ACTIONS) as readonly MoveName[];
@@ -77,19 +79,24 @@ export function errorText(e: unknown, title: string): string {
 /** "6 by 6, position 5 of 15": the description a screen reader hears after the widget's name. */
 export const sizeText = (r: Rect, position: number, of: number): string => `${r.w} by ${r.h}, position ${position} of ${of}`;
 
-/** What a finished gesture announces: "Memory moved right, after CPU. Position 6 of 15." or "Memory resized to 4 by 6." */
-export function changeText(title: string, before: Rect | undefined, after: Rect, position: number, of: number, previous: string | null, how: string): string {
-  const resized = before !== undefined && (before.w !== after.w || before.h !== after.h);
-  const moved = before === undefined || before.x !== after.x || before.y !== after.y;
-  const size = `${title} resized to ${after.w} by ${after.h}.`;
+/**
+ * What a finished gesture announces, from the engine's `Outcome` (ADR 0044 §5): "Memory moved right, after CPU. Position 6 of 15."
+ * or "Memory resized to 4 by 6." `previous` and `next` are the titles of `outcome.after` and `outcome.before`; `before` is the stored size, to tell a drop that
+ * resized from one that only moved. A resize that stopped at the kind's limit says so.
+ */
+export function outcomeText(title: string, o: Outcome, previous: string | null, next: string | null, g: GridGesture, before: Rect | undefined): string {
+  const grew = 'grow' in g;
+  const resized = grew || (before !== undefined && (before.w !== o.w || before.h !== o.h));
+  const moved = !grew;
+  const size = `${title} resized to ${o.w} by ${o.h}.${o.limit ? ' ' + blockText(title, o.limit) : ''}`;
   if (resized && !moved) return size;
-  if (!moved) return `${title} stays where it is.`;
-  const where = previous === null ? ', first' : `, after ${previous}`;
-  const base = `${title} moved ${how}${where}. Position ${position} of ${of}.`;
+  // First in reading order has nothing before it: say what follows instead.
+  const where = previous !== null ? `, after ${previous}` : next !== null ? `, before ${next}` : '';
+  const base = `${title} moved ${howOf(g)}${where}. Position ${o.position} of ${o.of}.`;
   return resized ? `${base} ${size}` : base;
 }
 
-/** The word for how a gesture moved a widget, for `changeText`. */
+/** The word for how a gesture moved a widget, for `outcomeText`. */
 export function howOf(g: GridGesture): string {
   if ('nudge' in g) return g.nudge.dir;
   if ('toFirst' in g) return 'to first';

@@ -3,13 +3,23 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { MatButton } from '@angular/material/button';
-import { PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
-import { GOLDEN_CASES, kindOfId, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
+import { blockText, PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridGesture, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
+import { GOLDEN_CASES, gestureId, kindOfId, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
 
 type View = GridView<GridSample, string, string>;
 type Val = { readonly size: string };
 
 const kindName = (id: string): string => { const k = kindOfId(id); return k.charAt(0).toUpperCase() + k.slice(1); };
+/** The engine's refusal in words: the recorded Debug text names a Block ("Nothing to change: Edge(Left)."), never shown as it is. */
+function refusalText(c: { gesture: GridGesture; result: unknown }): string {
+  const raw = String((c.result as { error: string }).error);
+  const who = kindName(gestureId(c.gesture));
+  const edge = /Edge\((\w+)\)/.exec(raw)?.[1]?.toLowerCase() as 'left' | 'right' | 'up' | 'down' | undefined;
+  if (edge) return blockText(who, { edge });
+  if (/Largest/.test(raw)) return blockText(who, 'largest');
+  if (/Smallest/.test(raw)) return blockText(who, 'smallest');
+  return blockText(who, 'unchanged');
+}
 const R = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
 /** The interactive board: eight widgets of mixed sizes, with a hole beside the tall one (gravity is vertical only). */
 const BOARD = [
@@ -66,6 +76,7 @@ export class GalBigBoard {
       <div class="wgg-board" data-testid="wgg-board">
         <pd-widget-grid [view]="view()" [values]="values()" [templates]="templates()" [hasOptions]="hasOptions" (options)="optioned = $event" [(editing)]="editing" (viewChange)="view.set($event)" (addWidget)="sheet.set(true)" />
         @if (sheet()) {
+          <div class="wgg-scrim" aria-hidden="true" (click)="sheet.set(false)"></div>
           <aside class="wgg-sheet" role="dialog" aria-label="Add a widget" data-testid="wgg-sheet">
             <pd-widget-chooser mode="add" [view]="chooserView()" [widgetFor]="widgetFor" (edit)="addEdit($event)" />
             <button matButton="outlined" type="button" (click)="sheet.set(false)">Close</button>
@@ -97,9 +108,9 @@ export class GalBigBoard {
               <figure><figcaption>Before</figcaption><pd-widget-grid [view]="c.before" [bar]="false" [values]="c.values" [templates]="templates()" [width]="1000" /></figure>
               <figure><figcaption>After</figcaption>
                 @if (c.after) {
-                  <pd-widget-grid [view]="c.after" [bar]="false" [values]="c.values" [templates]="templates()" [width]="1000" />
+                  <pd-widget-grid [view]="c.after" [bar]="false" [values]="c.afterValues" [templates]="templates()" [width]="1000" />
                 } @else {
-                  <p class="wgg-refused" role="status">Refused: {{ c.error }}</p>
+                  <p class="wgg-refused" role="status">{{ c.refusal }}</p>
                 }
               </figure>
             </div>
@@ -113,7 +124,8 @@ export class GalBigBoard {
     h4 { margin: 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     .wgg-board { padding: var(--pd-space-4); background: var(--pd-surface-1); border-radius: var(--pd-radius-card); }
     .wgg-sheet { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; display: grid; align-content: start; gap: var(--pd-space-3); width: min(420px, 100vw); padding: var(--pd-space-4); overflow: auto; background: var(--pd-surface-3); box-shadow: var(--pd-shadow-3); }
-    .wgg-size { font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: var(--pd-numeric); }
+    .wgg-scrim { position: fixed; z-index: 19; inset: 0; background: color-mix(in srgb, var(--pd-bg) 55%, transparent); }
+    .wgg-size { align-self: start; font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: var(--pd-numeric); }
     .wgg-states { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--pd-space-4); }
     .wgg-fig, .wgg-pair figure { margin: 0; min-width: 0; }
     figcaption { margin-bottom: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
@@ -152,21 +164,22 @@ export class GalWidgetGrid {
     title: c.name.charAt(0).toUpperCase() + c.name.slice(1),
     gesture: c.gesture,
     values: valuesOf(c.items.map((i) => i.id), (id) => c.items.find((i) => i.id === id)?.rect),
+    afterValues: valuesOf(c.items.map((i) => i.id), (id) => ('ok' in c.result ? c.result.ok : c.items).find((i) => i.id === id)?.rect),
     before: viewOf(c.items),
     after: 'ok' in c.result ? viewOf(c.result.ok) : null,
-    error: 'error' in c.result ? c.result.error : '',
+    refusal: 'error' in c.result ? refusalText(c) : '',
   }));
 
   constructor() {
     registerPaddockIcons(inject(MatIconRegistry), inject(DomSanitizer));
   }
 
-  protected gesture(c: { gesture: { gesture: string } & Record<string, unknown> }): string {
+  protected gesture(c: { gesture: GridGesture }): string {
     const g = c.gesture;
-    const rect = g['rect'] as { x: number; y: number; w: number; h: number } | undefined;
-    const who = kindName(String(g['id']));
-    if (rect) return `${g.gesture === 'place' ? 'Place' : g.gesture} ${who} at column ${rect.x + 1}, row ${rect.y + 1}, ${rect.w} by ${rect.h}`;
-    const words: Record<string, string> = { nudge: 'Nudge', grow: 'Grow', toFirst: 'Move to first', toLast: 'Move to last' };
-    return `${words[g.gesture] ?? g.gesture} ${who}${g['dir'] ? ' ' + String(g['dir']) : ''}`;
+    const who = kindName(gestureId(g));
+    if ('place' in g) return `Place ${who} at column ${g.place.rect.x + 1}, row ${g.place.rect.y + 1}, ${g.place.rect.w} by ${g.place.rect.h}`;
+    if ('nudge' in g) return `Nudge ${who} ${g.nudge.dir}`;
+    if ('grow' in g) return `Grow ${who} ${g.grow.dir}`;
+    return 'toFirst' in g ? `Move ${who} to first place` : `Move ${who} to the end`;
   }
 }

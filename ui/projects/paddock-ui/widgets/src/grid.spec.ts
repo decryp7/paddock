@@ -5,9 +5,9 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Arrangement, Cells, Edit, KindInfo, Moves, PreviewRequest, Rect, SurfaceValues, WidgetState } from '../generated/widgets';
+import type { Arrangement, PreviewReply, Cells, Edit, KindInfo, Moves, PreviewRequest, Rect, SurfaceValues, WidgetState } from '../generated/widgets';
 import { ManualFrameScheduler, PD_FRAME_SCHEDULER } from './frame-scheduler';
-import { PD_WIDGET_GRID_BACKEND, type GridView, type PreviewReply, type WidgetGridBackend } from './grid-backend';
+import { PD_WIDGET_GRID_BACKEND, type GridView, type WidgetGridBackend } from './grid-backend';
 import { PdWidgetGrid } from './grid';
 import { PdWidget } from './widget';
 
@@ -58,13 +58,13 @@ function mkView(over: Partial<View> = {}, revision = 7): View {
 
 /** The view after `a` moved to the right of `b`: the order b, a, c. */
 function moved(revision = 8): View {
-  const v = mkView({ canUndo: true }, revision);
+  const v = mkView({ canUndo: true, outcome: { id: 'a', position: 2, of: 3, after: 'b', before: 'c', w: 6, h: 4, limit: null } }, revision);
   const rects = { b: R(0, 0, 6, 4), a: R(6, 0, 6, 4), c: R(0, 4, 12, 4) };
   return { ...v, arrangements: [{ minWidth: 840, columns: 12, placements: Object.entries(rects).map(([id, rect]) => ({ id, rect })) }, ...v.arrangements.slice(1)] };
 }
 
 class FakeBackend implements WidgetGridBackend<W, string, string> {
-  preview = vi.fn<(r: PreviewRequest) => Promise<PreviewReply<W, string, string>>>();
+  preview = vi.fn<(r: PreviewRequest) => Promise<PreviewReply<View>>>();
   edit = vi.fn<(e: Edit<W>, revision: number) => Promise<View>>();
   reload = vi.fn<() => Promise<View>>();
 }
@@ -400,7 +400,6 @@ describe('PdWidgetGrid', () => {
       key(cell('c'), 'Backspace');
       await settle(f);
       expect(backend.edit.mock.calls.map((c) => c[0])).toEqual([{ remove: { id: 'c' } }, { remove: { id: 'c' } }]);
-      expect(say).toHaveBeenCalledWith('Disk removed. Undo is in the bar.', 'polite');
     });
 
     it('a key the engine says would change nothing is not sent and says why', async () => {
@@ -489,6 +488,14 @@ describe('PdWidgetGrid', () => {
       expect(backend.edit).toHaveBeenCalledTimes(2);
     });
 
+    it('a move to first says first, from the outcome', async () => {
+      const v = moved();
+      backend.edit.mockResolvedValue({ ...v, outcome: { ...(v.outcome as NonNullable<View['outcome']>), position: 1, after: null } });
+      key(cell('b'), 'Home');
+      await settle(f);
+      expect(say).toHaveBeenCalledWith('Network moved to first, before Disk. Position 1 of 3.', 'polite');
+    });
+
     it('a resolved move that changed nothing says so, and a vanished widget is ignored', async () => {
       backend.edit.mockImplementation(() => Promise.resolve(mkView({}, 8)));
       key(cell('a'), 'ArrowDown');
@@ -543,6 +550,7 @@ describe('PdWidgetGrid', () => {
 
   describe('the menu', () => {
     const items = () => [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=menuitem]')];
+    const label = (i: HTMLElement) => i.querySelector('.pd-wg-lbl')!.textContent!.trim();
 
     it('lists the ten gestures and Remove, disables what the engine says would change nothing, and runs the chosen one', async () => {
       await create();
@@ -550,7 +558,9 @@ describe('PdWidgetGrid', () => {
       backend.edit.mockResolvedValue(moved());
       (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).toEqual(['Move left', 'Move right', 'Move up', 'Move down', 'Move to first', 'Move to last', 'Wider', 'Narrower', 'Taller', 'Shorter', 'Options…', 'Remove']);
+      expect(items().map(label)).toEqual(['Move CPU left', 'Move CPU right', 'Move CPU up', 'Move CPU down', 'Move CPU to first place', 'Move CPU to the end', 'Make CPU wider', 'Make CPU narrower', 'Make CPU taller', 'Make CPU shorter', 'Options for CPU…', 'Remove CPU']);
+      expect(items().map((i) => i.querySelector('.pd-wg-key')?.textContent ?? '')).toEqual(['←', '→', '↑', '↓', 'Home', 'End', '⇧→', '⇧←', '⇧↓', '⇧↑', '', 'Delete']);
+      expect(document.querySelectorAll('.cdk-overlay-container .pd-wg-sep')).toHaveLength(4);
       expect(items().map((i) => i.hasAttribute('disabled') || i.getAttribute('aria-disabled') === 'true')).toEqual([true, false, false, false, false, false, false, false, false, false, false, false]);
       items()[1]!.click();
       await settle(f);
@@ -575,13 +585,13 @@ describe('PdWidgetGrid', () => {
       await edit();
       (cell('a').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).toContain('Options…');
-      items().find((i) => i.textContent?.trim() === 'Options…')!.click();
+      expect(items().map(label)).toContain('Options for CPU…');
+      items().find((i) => label(i) === 'Options for CPU…')!.click();
       expect(f.componentInstance.opened).toBe('a');
       await settle(f);
       (cell('b').querySelector('.pd-wg-more') as HTMLElement).click();
       await settle(f);
-      expect(items().map((i) => i.textContent?.trim())).not.toContain('Options…');
+      expect(items().map(label)).not.toContain('Options for CPU…');
       backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
       items().at(-1)!.click();
       await settle(f);
@@ -608,7 +618,7 @@ describe('PdWidgetGrid', () => {
     const down = (id: string, x: number, y: number, on: Element = cell(id)) => on.dispatchEvent(ev('pointerdown', x, y));
     const move = (id: string, x: number, y: number) => cell(id).dispatchEvent(ev('pointermove', x, y));
     const up = (id: string) => cell(id).dispatchEvent(ev('pointerup', 0, 0));
-    const replyFor = (view: View, seq: number): PreviewReply<W, string, string> => ({ seq, view });
+    const replyFor = (view: View, seq: number): PreviewReply<View> => ({ seq, view });
 
     beforeEach(async () => {
       await create();
@@ -643,7 +653,7 @@ describe('PdWidgetGrid', () => {
     });
 
     it('drops replies that are not the latest', async () => {
-      const pending: ((v: PreviewReply<W, string, string>) => void)[] = [];
+      const pending: ((v: PreviewReply<View>) => void)[] = [];
       backend.preview.mockImplementation(() => new Promise((r) => pending.push(r)));
       down('a', 50, 50);
       move('a', 50 + 405, 50);
@@ -656,7 +666,10 @@ describe('PdWidgetGrid', () => {
       expect(cell('a').style.gridColumn).toBe('1 / span 6');
       pending[1]!(replyFor(moved(), 2));
       await settle(f);
-      expect(cell('a').style.gridColumn).toBe('7 / span 6');
+      expect(q('.pd-wg-ph')!.style.gridColumn).toBe('7 / span 6');
+      // The dragged widget keeps its stored cells (its transform carries it), the others take the preview.
+      expect(cell('a').style.gridColumn).toBe('1 / span 6');
+      expect(cell('b').style.gridColumn).toBe('1 / span 6');
     });
 
     it('a resize shows the size chip and the engine limit in words', async () => {
@@ -713,7 +726,7 @@ describe('PdWidgetGrid', () => {
     });
 
     it('a reply that arrives after the gesture ended is dropped', async () => {
-      let late: (v: PreviewReply<W, string, string>) => void = () => undefined;
+      let late: (v: PreviewReply<View>) => void = () => undefined;
       backend.preview.mockImplementation(() => new Promise((r) => (late = r)));
       down('a', 50, 50);
       move('a', 50 + 405, 50);
@@ -779,7 +792,7 @@ describe('PdWidgetGrid', () => {
   });
 
   describe('odd input and rare paths', () => {
-    type Internals = { arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
+    type Internals = { applyPreset(id: string, n: string): Promise<void>; reset(): Promise<void>; arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
     const grid = () => f.debugElement.children[0]!.componentInstance as unknown as Internals;
 
     it('never throws without a view: nothing to draw, nothing to send', async () => {
@@ -828,7 +841,7 @@ describe('PdWidgetGrid', () => {
       button('Undo').disabled = false;
       await grid().undoRedo('undo');
       expect(say).not.toHaveBeenCalledWith('Undone.', 'polite');
-      expect(say).not.toHaveBeenCalledWith('CPU removed. Undo is in the bar.', 'polite');
+      expect(document.querySelector('.pd-undo-snack')).toBeNull();
       expect(say).toHaveBeenCalledWith("Couldn't change the layout. Try again.", 'polite');
     });
 
@@ -856,6 +869,116 @@ describe('PdWidgetGrid', () => {
       key(cell('a'), 'ArrowRight');
       await settle(f);
       expect(say).toHaveBeenCalledWith('CPU moved right, after net. Position 2 of 3.', 'polite');
+    });
+
+    it('has Reset to defaults in the bar menu', async () => {
+      await create();
+      await edit();
+      backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-reset') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenCalledWith('resetToDefaults', 7);
+      expect(say).toHaveBeenCalledWith('The layout is back to its defaults.', 'polite');
+      backend.edit.mockClear();
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      let done: (v: View) => void = () => undefined;
+      backend.edit.mockImplementation(() => new Promise<View>((r) => (done = r)));
+      key(cell('a'), 'ArrowRight');
+      await grid().reset();
+      expect(backend.edit).toHaveBeenCalledTimes(1);
+      done(moved());
+    });
+
+    it('lists presets in the bar menu, applies one, and saves the layout under a name', async () => {
+      await create();
+      await edit();
+      const preset = { id: 'minimal', name: 'Minimal', builtin: true, placements: [] };
+      f.componentInstance.view.set(mkView({ builtinPresets: [preset] }));
+      await settle(f);
+      backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      expect(document.querySelector('.pd-wg-preset')!.textContent).toContain('Minimal');
+      (document.querySelector('.pd-wg-preset') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenCalledWith({ applyPreset: { id: 'minimal' } }, 7);
+      expect(say).toHaveBeenCalledWith('Applied the preset Minimal.', 'polite');
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-savepreset') as HTMLElement).click();
+      await settle(f);
+      const input = q('.pd-wg-savename') as HTMLInputElement;
+      expect((q('.pd-wg-savego') as HTMLButtonElement).disabled).toBe(true);
+      input.value = '  Work ';
+      input.dispatchEvent(new Event('input'));
+      await settle(f);
+      (q('.pd-wg-savego') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenLastCalledWith({ savePreset: { name: 'Work' } }, 8);
+      expect(q('.pd-wg-save')).toBeNull();
+      // Cancel, a blank name and a full list.
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-savepreset') as HTMLElement).click();
+      await settle(f);
+      (q('form.pd-wg-save') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }));
+      expect(backend.edit).toHaveBeenCalledTimes(2);
+      (q('.pd-wg-savecancel') as HTMLElement).click();
+      await settle(f);
+      expect(q('.pd-wg-save')).toBeNull();
+      const full = mkView({}, 9);
+      f.componentInstance.view.set({ ...full, layout: { ...full.layout, presets: [preset, preset, preset] } });
+      await settle(f);
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      expect((document.querySelector('.pd-wg-savepreset') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('says nothing of success when a reset, a save or a preset fails or the grid is busy; own presets have no Built in tag', async () => {
+      await create();
+      await edit();
+      const own = { id: 'mine', name: 'Mine', builtin: false, placements: [] };
+      f.componentInstance.view.set(mkView({ layout: { ...mkView().layout, presets: [own] } }));
+      await settle(f);
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      expect(document.querySelector('.pd-wg-preset .pd-wg-key')).toBeNull();
+      document.body.click();
+      backend.edit.mockRejectedValue(new Error('down'));
+      await grid().reset();
+      await grid().applyPreset('mine', 'Mine');
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-savepreset') as HTMLElement).click();
+      await settle(f);
+      const input = q('.pd-wg-savename') as HTMLInputElement;
+      input.value = 'Work';
+      input.dispatchEvent(new Event('input'));
+      await settle(f);
+      (q('.pd-wg-savego') as HTMLElement).click();
+      await settle(f);
+      expect(q('.pd-wg-save')).not.toBeNull();
+      expect(say).not.toHaveBeenCalledWith('Applied the preset Mine.', 'polite');
+      let done: (v: View) => void = () => undefined;
+      backend.edit.mockImplementation(() => new Promise<View>((r) => (done = r)));
+      const before = backend.edit.mock.calls.length;
+      void grid().reset();
+      await grid().applyPreset('mine', 'Mine');
+      expect(backend.edit).toHaveBeenCalledTimes(before + 1);
+      done(mkView());
+    });
+
+    it('a move to last with nothing after it names only what is before', async () => {
+      await create();
+      await edit();
+      const v = moved();
+      backend.edit.mockResolvedValue({ ...v, outcome: { ...(v.outcome as NonNullable<View['outcome']>), before: null } });
+      key(cell('a'), 'End');
+      await settle(f);
+      expect(say).toHaveBeenCalledWith('CPU moved to last, after Network. Position 2 of 3.', 'polite');
     });
 
     it('passes a widget state action up', async () => {
