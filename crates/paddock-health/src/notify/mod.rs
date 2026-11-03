@@ -331,13 +331,14 @@ impl NotificationCentre {
         removed
     }
 
-    /// Removes every message the window sees (its project's and the app's). Returns how many were removed.
-    pub fn dismiss_all(&self, window: &str) -> usize {
+    /// Removes every message the window sees (its project's and the app's) with an id at or below `up_to`, the newest
+    /// one the user saw: a message that arrived meanwhile stays. Returns how many were removed.
+    pub fn dismiss_all(&self, window: &str, up_to: NoticeId) -> usize {
         let project = lock(&self.projects)
             .get_mut(window)
-            .map_or(0, Centre::clear);
+            .map_or(0, |c| c.clear_up_to(up_to));
         let mut app = lock(&self.app);
-        let from_app = app.clear();
+        let from_app = app.clear_up_to(up_to);
         if from_app > 0 {
             self.save_app(&app);
         }

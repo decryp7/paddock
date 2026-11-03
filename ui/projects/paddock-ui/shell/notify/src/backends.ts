@@ -69,8 +69,8 @@ export abstract class NotificationsBackend {
   abstract dismiss(id: number): Promise<boolean>;
   /** Removes the listed messages (ids the window cannot see are ignored); returns how many were removed. */
   abstract dismissMany(ids: readonly number[]): Promise<number>;
-  /** Removes every message of the window; returns how many were removed. */
-  abstract dismissAll(): Promise<number>;
+  /** Removes the window's messages with an id at or below `upTo` (the newest one the user saw); returns how many were removed. */
+  abstract dismissAll(upTo: number): Promise<number>;
   /**
    * Posts a notice of this window (`SHELL_PORTS.notify`) to the engine's centre, which keys it by its own cause
    * (`ui:<kind>:<title>`) and tells every window (rule 34). Rejects when the engine refuses it (bounds) or is not there.
@@ -132,8 +132,8 @@ export class TauriNotificationsBackend extends NotificationsBackend {
     const n = await this.ipc.invoke<unknown>('notifications_dismiss_many', { ids });
     return typeof n === 'number' ? n : 0;
   }
-  async dismissAll(): Promise<number> {
-    const n = await this.ipc.invoke<unknown>('notifications_dismiss_all');
+  async dismissAll(upTo: number): Promise<number> {
+    const n = await this.ipc.invoke<unknown>('notifications_dismiss_all', { upTo });
     return typeof n === 'number' ? n : 0;
   }
   async postNotice(notice: WindowNotice): Promise<Notice> {
@@ -250,9 +250,10 @@ export class MemoryNotificationCentre extends NotificationsBackend {
     if (removed) this.emit(null);
     return Promise.resolve(removed);
   }
-  dismissAll(): Promise<number> {
-    const removed = this.notices.length;
-    this.notices = [];
+  dismissAll(upTo: number): Promise<number> {
+    const before = this.notices.length;
+    this.notices = this.notices.filter((n) => n.id > upTo);
+    const removed = before - this.notices.length;
     if (removed) this.emit(null);
     return Promise.resolve(removed);
   }

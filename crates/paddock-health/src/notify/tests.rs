@@ -290,3 +290,68 @@ fn every_change_of_any_list_raises_the_revision_and_nothing_else_does() {
     // Every window reads the same counter.
     assert_eq!(c.snapshot("w-3").revision, before + 7);
 }
+
+#[test]
+fn dismissals_survive_a_restart_and_dismiss_all_is_app_wide_for_the_window() {
+    crate::tests::capture_logs();
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("notifications.json");
+    let clock = Arc::new(FakeClock::default());
+    let c = NotificationCentre::new(Some(file.clone()), clock.clone());
+    let app_msg = |tag: &str| {
+        NewNotice::new(
+            format!("update:{tag}"),
+            "update",
+            NoticeSeverity::Info,
+            tag,
+            NoticeScope::App,
+        )
+    };
+    let a = c.post(Some("main"), app_msg("a")).notice.id;
+    let b = c.post(Some("main"), app_msg("b")).notice.id;
+    let d = c.post(Some("main"), app_msg("d")).notice.id;
+    c.post(Some("main"), alert(1));
+    let other = c.post(Some("w-2"), alert(2)).notice.id;
+    assert_eq!(c.dismiss_many("main", &[a, NoticeId(999)]), 1);
+    assert!(c.flush());
+    let again = NotificationCentre::new(Some(file.clone()), clock.clone());
+    let ids: Vec<_> = again
+        .snapshot("main")
+        .notices
+        .iter()
+        .map(|n| n.id)
+        .collect();
+    assert!(
+        !ids.contains(&a) && ids.contains(&b) && ids.contains(&d),
+        "the dismissed message stays gone"
+    );
+    // "Delete all" from one window removes the app list for every window, but not another window's project messages.
+    let seen = c
+        .snapshot("main")
+        .notices
+        .iter()
+        .map(|n| n.id)
+        .max()
+        .unwrap();
+    let rev = c.snapshot("main").revision;
+    assert_eq!(
+        c.dismiss_all("main", seen),
+        3,
+        "two app messages and main's own"
+    );
+    assert_eq!(c.snapshot("main").revision, rev + 1);
+    assert_eq!(c.dismiss_all("main", seen), 0);
+    assert_eq!(
+        c.snapshot("main").revision,
+        rev + 1,
+        "nothing removed, nothing changed"
+    );
+    assert_eq!(c.snapshot("w-2").notices.len(), 1);
+    assert_eq!(c.snapshot("w-2").notices[0].id, other);
+    assert!(c.flush());
+    let restarted = NotificationCentre::new(Some(file), clock);
+    assert!(
+        restarted.snapshot("main").notices.is_empty(),
+        "the app list stays empty after a restart"
+    );
+}

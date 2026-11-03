@@ -440,6 +440,8 @@ describe('the notification centre', () => {
 });
 
 describe('selecting and deleting notifications', () => {
+  afterEach(() => document.querySelectorAll('pd-notifications-panel').forEach((e) => e.remove()));
+
   async function panel(answer: 'answered' | 'dismissed' = 'answered') {
     const asked: unknown[] = [];
     const dialogs = { open: (_id: string, o: unknown) => (asked.push(o), { closed: Promise.resolve({ kind: answer }) }) };
@@ -449,6 +451,7 @@ describe('selecting and deleting notifications', () => {
     await settle();
     await f.whenStable();
     const el: HTMLElement = f.nativeElement;
+    document.body.appendChild(el);
     const pick = async (id: number, shiftKey = false) => {
       const input = one(el, `[data-testid=notice-select-${id}] input`);
       input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey }));
@@ -472,6 +475,58 @@ describe('selecting and deleting notifications', () => {
     await f.whenStable();
     expect(titles()).toEqual(['A']);
     expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+    // The focus moved to a message that is still there, not to the page body.
+    expect(document.activeElement).toBe(one(el, `[data-testid=notice-select-${posted[0]!.id}] input`));
+  });
+
+  it('range-selects from the keyboard with Shift+Space', async () => {
+    const { f, el, posted } = await panel();
+    const first = one(el, `[data-testid=notice-select-${posted[3]!.id}] input`);
+    const last = one(el, `[data-testid=notice-select-${posted[1]!.id}] input`);
+    first.click();
+    await settle();
+    await f.whenStable();
+    last.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', shiftKey: true, bubbles: true }));
+    last.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
+    last.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', shiftKey: true, bubbles: true }));
+    await settle();
+    await f.whenStable();
+    expect(one(el, '[data-testid=notices-delete-selected]').textContent).toContain('(3)');
+  });
+
+  it('moves the focus to the filter bar when the last message goes', async () => {
+    const { f, el, posted } = await panel();
+    for (const p of posted.slice(1)) {
+      one(el, `[data-testid=notice-dismiss-${p.id}]`).click();
+      await settle();
+      await f.whenStable();
+    }
+    one(el, `[data-testid=notice-dismiss-${posted[0]!.id}]`).click();
+    await settle();
+    await f.whenStable();
+    expect(el.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.closest('[data-testid=notices-filter-bar]')).not.toBeNull();
+  });
+
+  it('Delete all leaves a message that arrived while the question was open, and counts what was seen', async () => {
+    const asked: { message: string }[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const dialogs = { open: (_id: string, o: { inputs: { message: string } }) => (asked.push(o.inputs), { closed: gate.then(() => ({ kind: 'answered' })) }) };
+    const { centre } = notifyBed({ extra: [{ provide: DialogService, useValue: dialogs }] });
+    const f = TestBed.createComponent(PdNotificationsPanel);
+    ['A', 'B'].forEach((t) => centre.post({ cause: t, source: 's', severity: 'info', title: t }));
+    await settle();
+    await f.whenStable();
+    const el: HTMLElement = f.nativeElement;
+    one(el, '[data-testid=notices-delete-all]').click();
+    await settle();
+    centre.post({ cause: 'late', source: 's', severity: 'info', title: 'Late' });
+    release();
+    await settle();
+    await f.whenStable();
+    expect(asked[0]?.message).toContain('2 notifications');
+    expect(all(el, '.pd-notice .pd-title').map((t) => t.textContent?.trim())).toEqual(['Late']);
   });
 
   it('selects all and clears it again', async () => {

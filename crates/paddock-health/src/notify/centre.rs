@@ -460,11 +460,12 @@ impl Centre {
         before - self.notices.len()
     }
 
-    /// Removes every message; returns how many there were.
-    pub fn clear(&mut self) -> usize {
-        let n = self.notices.len();
-        self.notices.clear();
-        n
+    /// Removes every message whose id is at or below `up_to` (the newest one the user saw); returns how many went. A
+    /// message that arrived later has a higher id and stays.
+    pub fn clear_up_to(&mut self, up_to: NoticeId) -> usize {
+        let before = self.notices.len();
+        self.notices.retain(|n| n.id > up_to);
+        before - self.notices.len()
     }
 
     /// How many are unread.
@@ -518,8 +519,9 @@ mod tests {
             "unknown and repeated ids are ignored"
         );
         assert_eq!(c.notices().len(), 2);
-        assert_eq!(c.clear(), 2);
-        assert_eq!(c.clear(), 0);
+        assert_eq!(c.clear_up_to(NoticeId(2)), 1, "the newer message stays");
+        assert_eq!(c.clear_up_to(NoticeId(9)), 1);
+        assert_eq!(c.clear_up_to(NoticeId(9)), 0);
         assert!(c.notices().is_empty());
     }
 

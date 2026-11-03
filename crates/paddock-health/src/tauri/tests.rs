@@ -335,14 +335,20 @@ fn dismiss_many_and_all_remove_what_the_window_sees_and_count_it() {
     )
     .unwrap_err();
     assert_eq!(e["code"], "invalid");
-    assert_eq!(
-        invoke(&main, "notifications_dismiss_all", json!({})).unwrap(),
-        1
-    );
-    assert_eq!(
-        invoke(&main, "notifications_dismiss_all", json!({})).unwrap(),
-        0
-    );
+    let seen = b.id.0;
+    let late = post(
+        app.handle(),
+        Some("main"),
+        mk("live:late", NoticeScope::Project),
+        false,
+    )
+    .unwrap();
+    let all =
+        |up_to: u64| invoke(&main, "notifications_dismiss_all", json!({"upTo": up_to})).unwrap();
+    assert_eq!(all(seen), 1, "only what was seen");
+    assert_eq!(count(&main), 1, "the message that arrived meanwhile stays");
+    assert_eq!(all(late.id.0), 1);
+    assert_eq!(all(late.id.0), 0);
     assert_eq!(count(&main), 0);
     assert_eq!(count(&other), 1, "another window's messages stay");
     let _ = b;

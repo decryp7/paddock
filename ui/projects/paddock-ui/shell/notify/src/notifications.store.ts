@@ -188,10 +188,16 @@ export const NotificationsStore = signalStore(
         if (engine.length) await call(() => backend.dismissMany(engine));
       },
 
-      /** Removes every message of the window (engine and local) and every toast. */
-      async dismissAll(): Promise<void> {
-        patchState(store, { local: [], toasts: [] });
-        if (store.snapshot().notices.length) await call(() => backend.dismissAll());
+      /**
+       * Removes the messages `seen` names (the whole list as the user saw it when asking): one that arrived since stays. The
+       * engine takes the highest id it knows of and removes everything up to it.
+       */
+      async dismissAll(seen: readonly number[]): Promise<void> {
+        const drop = new Set(seen);
+        const gone = new Set(store.all().filter((n) => drop.has(n.id)).map((n) => n.cause));
+        patchState(store, (s) => ({ local: s.local.filter((l) => !drop.has(l.id)), toasts: s.toasts.filter((t) => !gone.has(t.cause)) }));
+        const engine = seen.filter((id) => !isLocal(id));
+        if (engine.length) await call(() => backend.dismissAll(Math.max(...engine)));
       },
 
       /** The toast of `cause` goes (dismissed, or its time ran out); the message stays in the centre. */

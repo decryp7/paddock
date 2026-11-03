@@ -385,6 +385,7 @@ export class NetworkPage implements OnInit, OnDestroy {
 
   private saveCollapsed(): void {
     try {
+      // Only the first 500 folds are kept: after a reload a Collapse all over more groups than that comes back partly open.
       localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...this.collapsed()].slice(0, 500)));
     } catch {
       // Storage may be blocked: the state is then only kept for this visit.
