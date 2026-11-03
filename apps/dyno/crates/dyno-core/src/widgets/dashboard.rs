@@ -582,9 +582,21 @@ mod tests {
                 p.place.rect.h = 4;
             }
         }
-        assert_eq!(as_defaults, defaults, "the 1.0 default arrives looking as it did, bar the memory graph's height");
-        let rows = |m: Metric| defaults.iter().find(|p| p.widget.kind == DashboardKind::Graph && p.widget.metric == m).map(|p| p.place.rect.h);
-        assert_eq!(rows(Metric::Memory), rows(Metric::DiskActivity), "Memory is as tall as Disk activity");
+        assert_eq!(
+            as_defaults, defaults,
+            "the 1.0 default arrives looking as it did, bar the memory graph's height"
+        );
+        let rows = |m: Metric| {
+            defaults
+                .iter()
+                .find(|p| p.widget.kind == DashboardKind::Graph && p.widget.metric == m)
+                .map(|p| p.place.rect.h)
+        };
+        assert_eq!(
+            rows(Metric::Memory),
+            rows(Metric::DiskActivity),
+            "Memory is as tall as Disk activity"
+        );
         assert_eq!(rows(Metric::Memory), Some(4));
         // Row 1 is 6 + 6 (Health, Why slow: 9 rows); row 2: Issues 3, CPU 6, Graph 3 (CPU/Issues: 6 rows).
         assert_eq!(defaults[0].place.rect, paddock_widgets::Rect::new(0, 0, 6, 9));
