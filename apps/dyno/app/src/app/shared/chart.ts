@@ -6,6 +6,15 @@ export function prefersReducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/**
+ * Whether a chart animates this draw: only its first one, and never with reduced motion. Options are replaced whole
+ * (`notMerge`), so an animated update replays the entry animation, about 18 canvas frames, on every poll of a live chart
+ * (the Counters chart every 2 s); later draws therefore change in one frame.
+ */
+export function animateDraw(firstDraw: boolean, reducedMotion: boolean): boolean {
+  return firstDraw && !reducedMotion;
+}
+
 /** Whether `doc` can give a canvas a 2D context, which ECharts' canvas renderer needs. */
 function hasCanvas2d(doc: Document): boolean {
   try {
@@ -48,6 +57,8 @@ export class Chart {
   private chart: EChartsType | null = null;
   protected readonly failed = signal(false);
   private readonly ready = signal(false);
+  /** Whether the chart has drawn once (only the first draw animates). */
+  private drawn = false;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -89,7 +100,8 @@ export class Chart {
       const options = this.options();
       if (!this.ready() || !this.chart || !options) return;
       try {
-        this.chart.setOption({ animation: !prefersReducedMotion(), animationDuration: 300, ...options }, { notMerge: true, lazyUpdate: true });
+        this.chart.setOption({ animation: animateDraw(!this.drawn, prefersReducedMotion()), animationDuration: 300, ...options }, { notMerge: true, lazyUpdate: true });
+        this.drawn = true;
         this.failed.set(false);
       } catch (e) {
         console.error('Chart failed', e);
