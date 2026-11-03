@@ -82,3 +82,17 @@ export {
   REBUILD_HINT,
   type BuildGuard,
 } from './build-guard.ts';
+export {
+  captureChecked,
+  expectScreenshotClean,
+  screenshotProblems,
+  readScreenshotFacts,
+  rawTextProblems,
+  statusChipProblems,
+  RAW_TEXT_RULES,
+  STATUS_CHIPS,
+  DEFAULT_IGNORE,
+  type ChipProbe,
+  type ScreenshotCheckOptions,
+  type VisibleText,
+} from './screenshot-check.ts';

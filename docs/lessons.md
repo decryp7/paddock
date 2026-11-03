@@ -1218,3 +1218,14 @@ fonts (same content height in the later fit). Found on the way: tao resizes the 
 so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
+
+## A rule that counts sites needs a baseline by text, not by count (2026-11-04, C71 and the screenshot check)
+
+C71 (tests do not settle on real time, ADR 0041) found 654 sites on `main` the day it ran: 339 Rust sleeps in test code, 181
+`setTimeout` waits, 57 `sleep`/`wait(n)` helpers, 35 `waitForTimeout`, 30 `requestAnimationFrame` waits and 12 `.count()`-then-`.nth()`
+uses. They sit in `conformance/baselines/C71.json` as file plus a hash of the whitespace-collapsed line, so moving a line keeps it
+known, editing it makes it new, and a second copy of a known line is new too (a per-file count would let a new site hide behind
+a fixed old one). The same day: `expectScreenshotClean` in `@decryp7/paddock-e2e` runs the clipping checks that already existed in
+`layout.ts` together with raw-identifier, placeholder and status-chip checks, so an app calls one function before and after a
+photograph. **Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
+what the line says, with a date, and say in the check's fix text how to waive a real case.
