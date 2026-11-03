@@ -5,7 +5,8 @@
 use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
 use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
-use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest};
+use dyno_core::helper_processes::{build_page, ProcessSweeper};
+use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest, HelperUser};
 use dyno_core::network_traffic::MAX_COUNTERS;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use dyno_core::smart::{SmartReader, ToolInstaller};
@@ -24,6 +25,8 @@ pub struct Parts {
     pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
     /// The macOS login-items reader (`sfltool dumpbtm` as the helper's account, parsed here).
     pub login_items: Box<dyn LoginItemsReader>,
+    /// The process sweep of this system.
+    pub processes: Box<dyn ProcessSweeper>,
     /// The SMART reader of this system.
     pub smart: Box<dyn SmartReader>,
     /// The pinned tool installer of this system.
@@ -48,6 +51,7 @@ pub struct Dispatcher {
     login_items: Box<dyn LoginItemsReader>,
     wakes: Box<dyn WakeScheduler>,
     wol: Box<dyn WolReader>,
+    processes: Box<dyn ProcessSweeper>,
     smart: Box<dyn SmartReader>,
     tools: Box<dyn ToolInstaller>,
     log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
@@ -60,6 +64,8 @@ pub struct Ctx {
     pub pid: Option<u32>,
     /// The caller's Unix user id (`None` for a Windows account).
     pub uid: Option<u32>,
+    /// The caller's account as the connection established it (uid or SID); `None` only for requests made inside the helper.
+    pub account: Option<HelperUser>,
     /// What the restriction table gives this caller for the request.
     pub access: Access,
     /// What this caller is told about its own standing.
@@ -72,6 +78,7 @@ impl Ctx {
         Ctx {
             pid,
             uid: None,
+            account: None,
             access: Access::Full,
             view: CallerView {
                 scope: Visibility::Own(OthersPolicy::Total),
@@ -97,6 +104,7 @@ impl Dispatcher {
             login_items: parts.login_items,
             wakes: parts.wakes,
             wol: parts.wol,
+            processes: parts.processes,
             smart: parts.smart,
             tools: parts.tools,
             log_tail: parts.log_tail,
@@ -168,6 +176,18 @@ impl Dispatcher {
                 })?;
                 self.login_items.read(uid).map(HelperReply::LoginItems).map_err(|e| remote(&e))
             }
+            HelperRequest::Processes(q) => {
+                let who = ctx.account.clone().ok_or_else(|| {
+                    RemoteError::new(
+                        codes::UNSUPPORTED,
+                        "The process list is scoped to an account; this caller has none.",
+                    )
+                })?;
+                let sweep = self.processes.sweep().map_err(|e| remote(&e))?;
+                let page = build_page(&sweep, &who, ctx.view.scope, &q);
+                log::info!(items = page.items.len(), more = page.next.is_some(); "Helper: processes answered");
+                Ok(HelperReply::Processes(page))
+            }
             HelperRequest::Smart(q) => self.smart.read(q).map(HelperReply::Smart).map_err(|e| remote(&e)),
             HelperRequest::InstallTool { tool, bytes } => {
                 let outcome = self.tools.install(tool, &bytes);
@@ -196,8 +216,7 @@ impl Dispatcher {
             }
             // The readers arrive with their work packages (ADR 0027 WP-4 to WP-10); until then the helper
             // says so, and the agent shows the reading as unavailable with this reason.
-            HelperRequest::Processes(_)
-            | HelperRequest::SocketOwners
+            HelperRequest::SocketOwners
             | HelperRequest::FileHolders { .. }
             | HelperRequest::Counters(_)
             | HelperRequest::MemoryModules
@@ -314,6 +333,7 @@ mod tests {
             clock: Box::new(|| 1_000),
             on_uninstall: Box::new(move || flag.store(true, Ordering::SeqCst)),
             login_items: Box::new(Items(Ok(items_reply()))),
+            processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             wakes,
@@ -413,6 +433,7 @@ mod tests {
             clock: Box::new(|| 5),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Ok(items_reply()))),
+            processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             wakes: Box::new(dyno_core::wake::NoWakes),
@@ -436,6 +457,7 @@ mod tests {
         let ctx = Ctx {
             pid: Some(9),
             uid: Some(501),
+            account: None,
             access: Access::Full,
             view: view.clone(),
         };
@@ -462,6 +484,7 @@ mod tests {
             clock: Box::new(|| 1),
             on_uninstall: Box::new(|| {}),
             login_items: Box::new(Items(Err(PlatformError::AccessDenied("no".into())))),
+            processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             wakes: Box::new(dyno_core::wake::NoWakes),
@@ -612,5 +635,78 @@ mod tests {
         // A system without wakes says so.
         let none = rig(HelperHost::Windows, Ok(vec![]));
         assert_eq!(none.d.handle(None, HelperRequest::ListWakes).unwrap_err().code, codes::UNSUPPORTED);
+    }
+
+    struct FakeSweep(dyno_core::helper_processes::Sweep);
+    impl ProcessSweeper for FakeSweep {
+        fn sweep(&self) -> Result<dyno_core::helper_processes::Sweep, PlatformError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn processes_are_scoped_to_the_connections_account_and_never_to_a_request_field() {
+        use dyno_core::helper_processes::{OwnerKind, ProcState, RawOwner, RawProcess, Sweep};
+        let raw = |pid: u32, uid: u32| RawProcess {
+            pid,
+            started: Some(1),
+            parent: None,
+            name: format!("p{pid}"),
+            path: None,
+            owner: RawOwner::Account {
+                id: HelperUser::Uid(uid),
+                name: Some(format!("u{uid}")),
+            },
+            state: ProcState::Running,
+            threads: None,
+            cpu_time_ms: Some(5),
+            memory_bytes: Some(7),
+            disk_read_bytes: None,
+            disk_written_bytes: None,
+        };
+        let sweep = Sweep {
+            processes: vec![raw(10, 501), raw(11, 502)],
+            homes: vec![],
+            taken_at: 9,
+        };
+        let mut r = rig(HelperHost::Macos, Ok(vec![]));
+        r.d.processes = Box::new(FakeSweep(sweep));
+        let ask = |scope: Visibility, account: Option<HelperUser>| {
+            let ctx = Ctx {
+                pid: Some(1),
+                uid: Some(501),
+                account,
+                access: Access::Full,
+                view: CallerView { scope, tools: vec![] },
+            };
+            r.d.handle_for(&ctx, HelperRequest::Processes(Default::default()))
+        };
+        let me = Some(HelperUser::Uid(501));
+        match ask(Visibility::Own(OthersPolicy::Total), me.clone()).unwrap() {
+            HelperReply::Processes(page) => {
+                assert_eq!(page.items.len(), 1);
+                assert_eq!(page.items[0].owner, OwnerKind::Caller);
+                assert_eq!(page.others.map(|o| (o.processes, o.memory_bytes)), Some((1, 7)));
+            }
+            other => panic!("{other:?}"),
+        }
+        match ask(Visibility::Full, me).unwrap() {
+            HelperReply::Processes(page) => assert_eq!(page.items.len(), 2),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(ask(Visibility::Full, None).unwrap_err().code, codes::UNSUPPORTED);
+        // A system without a reader says so, in words.
+        let none = rig(HelperHost::Windows, Ok(vec![]));
+        let e = none
+            .d
+            .handle_for(
+                &Ctx {
+                    account: Some(HelperUser::Uid(1)),
+                    ..Ctx::anonymous(None)
+                },
+                HelperRequest::Processes(Default::default()),
+            )
+            .unwrap_err();
+        assert_eq!(e.code, codes::UNSUPPORTED);
     }
 }

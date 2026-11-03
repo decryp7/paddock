@@ -78,6 +78,10 @@ impl BodyHandler<HelperMessage> for Session {
         let ctx = Ctx {
             pid,
             uid,
+            account: Some(match self.caller.account() {
+                AccountId::Uid(uid) => HelperUser::Uid(*uid),
+                AccountId::Sid(sid) => HelperUser::Sid(sid.clone()),
+            }),
             access,
             view: CallerView {
                 scope: scope(&self.caller, &self.owner, &policy),
@@ -206,6 +210,7 @@ mod tests {
                 clock: Box::new(|| 42),
                 on_uninstall: Box::new(|| {}),
                 login_items: Box::new(NoItems),
+                processes: Box::new(dyno_core::helper_processes::NoProcesses),
                 smart: Box::new(crate::tools::NotHere("none")),
                 tools: Box::new(crate::tools::NotHere("none")),
                 wakes: Box::new(dyno_core::wake::NoWakes),

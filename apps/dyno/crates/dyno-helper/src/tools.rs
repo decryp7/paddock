@@ -115,6 +115,11 @@ pub fn smart_reader(host: HelperHost, tools_dir: &std::path::Path, clock: Arc<dy
     }
 }
 
+/// The process sweep of this system: `sysinfo` plus the OS's own account list.
+pub fn process_sweeper(host: HelperHost) -> Box<dyn dyno_core::helper_processes::ProcessSweeper> {
+    Box::new(dyno_platform::helper_sweep::SystemSweeper::new(host, Box::new(SystemRunner)))
+}
+
 /// The scheduled-wake handler of this system (Dyno ADR 0032 D2): systemd timers on Linux, `pmset` on macOS; Windows schedules in the agent.
 pub fn wake_scheduler(host: HelperHost) -> Box<dyn dyno_core::wake::WakeScheduler> {
     match host {

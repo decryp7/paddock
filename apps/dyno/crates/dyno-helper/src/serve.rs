@@ -109,6 +109,7 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         audit,
         clock: Box::new(now),
         login_items: login_items_reader(),
+        processes: crate::tools::process_sweeper(paths.host),
         smart: crate::tools::smart_reader(paths.host, &paths.data_dir.join("tools"), Arc::new(SystemClock)),
         tools: crate::tools::installer(paths.host, &paths.data_dir, Arc::new(SystemClock)),
         wakes: crate::tools::wake_scheduler(paths.host),

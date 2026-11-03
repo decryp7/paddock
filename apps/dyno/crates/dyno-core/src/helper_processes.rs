@@ -5,9 +5,12 @@
 //!
 //! The scoping, redaction and paging are pure ([`build_page`]); the OS reads one [`RawProcess`] per process.
 
+use crate::helper::HelperHost;
+
 use crate::helper_policy::{OthersPolicy, Visibility};
 use crate::helper_requests::ProcessQuery;
 use crate::helper_wire::HelperUser;
+use crate::ports::PlatformError;
 use serde::{Deserialize, Serialize};
 
 /// The most processes one sweep considers.
@@ -163,9 +166,52 @@ pub struct Sweep {
 }
 
 /// The helper's reader of the machine's processes.
-pub trait ProcessSource: Send + Sync {
+pub trait ProcessSweeper: Send + Sync {
     /// Reads every process once.
-    fn sweep(&self) -> Result<Sweep, crate::ports::PlatformError>;
+    fn sweep(&self) -> Result<Sweep, PlatformError>;
+}
+
+/// What a system without a process reader says (an unsupported build).
+pub struct NoProcesses;
+
+impl ProcessSweeper for NoProcesses {
+    fn sweep(&self) -> Result<Sweep, PlatformError> {
+        Err(PlatformError::Unsupported(
+            "This system cannot list processes through the helper.".into(),
+        ))
+    }
+}
+
+/// How an account counts: the system account, a service account (named) or a person's account. Decided from the id and the name
+/// alone, so it is the same for every caller: Unix uid 0 is the system; a uid below the first person's id (500 on macOS, 1000 on
+/// Linux) is a service; Windows `S-1-5-18` is the system, other well-known `S-1-5-` ids with fewer than four sub-authorities (and
+/// `S-1-5-80-` services, `S-1-5-90-`, `S-1-5-96-` system components) are services; `S-1-5-21-` is a person.
+pub fn classify_owner(host: HelperHost, id: &HelperUser, name: Option<&str>) -> RawOwner {
+    let service = |fallback: &str| RawOwner::Service(name.filter(|n| !n.is_empty()).unwrap_or(fallback).chars().take(64).collect());
+    match id {
+        HelperUser::Uid(0) => RawOwner::System,
+        HelperUser::Uid(uid) => {
+            let first_person = if host == HelperHost::Macos { 500 } else { 1_000 };
+            if *uid < first_person || *uid == 65_534 {
+                service("system service")
+            } else {
+                RawOwner::Account {
+                    id: id.clone(),
+                    name: name.map(str::to_string),
+                }
+            }
+        }
+        HelperUser::Sid(sid) => match sid.as_str() {
+            "S-1-5-18" => RawOwner::System,
+            "S-1-5-19" => RawOwner::Service("LOCAL SERVICE".into()),
+            "S-1-5-20" => RawOwner::Service("NETWORK SERVICE".into()),
+            s if s.starts_with("S-1-5-80-") || s.starts_with("S-1-5-90-") || s.starts_with("S-1-5-96-") => service("system service"),
+            _ => RawOwner::Account {
+                id: id.clone(),
+                name: name.map(str::to_string),
+            },
+        },
+    }
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -294,13 +340,19 @@ mod tests {
     }
 
     fn user(uid: u32, name: &str) -> RawOwner {
-        RawOwner::Account { id: HelperUser::Uid(uid), name: Some(name.into()) }
+        RawOwner::Account {
+            id: HelperUser::Uid(uid),
+            name: Some(name.into()),
+        }
     }
 
     fn sweep() -> Sweep {
         Sweep {
             taken_at: 1_800_000_000,
-            homes: vec![(HelperUser::Uid(501), "/Users/ana".into()), (HelperUser::Uid(502), "/Users/ben".into())],
+            homes: vec![
+                (HelperUser::Uid(501), "/Users/ana".into()),
+                (HelperUser::Uid(502), "/Users/ben".into()),
+            ],
             processes: vec![
                 raw(1, RawOwner::System, Some("/sbin/launchd")),
                 raw(20, user(501, "ana"), Some("/Users/ana/bin/tool")),
@@ -312,7 +364,11 @@ mod tests {
     }
 
     fn query(after: Option<u32>, limit: u16) -> ProcessQuery {
-        ProcessQuery { after, limit, class: RequestClass::User }
+        ProcessQuery {
+            after,
+            limit,
+            class: RequestClass::User,
+        }
     }
 
     #[test]
@@ -323,23 +379,55 @@ mod tests {
         let ben = page.items.iter().find(|e| e.pid == 30).unwrap();
         assert_eq!((&ben.owner, ben.account.as_deref()), (&OwnerKind::OtherUser, Some("ben")));
         assert_eq!(ben.path.as_deref(), Some("app (in another account's folder)"));
-        assert_eq!(page.items.iter().find(|e| e.pid == 50).unwrap().path.as_deref(), Some("/Applications/Shared.app/x"));
+        assert_eq!(
+            page.items.iter().find(|e| e.pid == 50).unwrap().path.as_deref(),
+            Some("/Applications/Shared.app/x")
+        );
     }
 
     #[test]
     fn another_account_gets_its_own_and_the_systems_in_detail_and_the_rest_as_one_total() {
-        let page = build_page(&sweep(), &HelperUser::Uid(501), Visibility::Own(OthersPolicy::Total), &query(None, 100));
-        assert_eq!(page.items.iter().map(|e| (e.pid, e.owner.clone())).collect::<Vec<_>>(), [
-            (1, OwnerKind::System),
-            (20, OwnerKind::Caller),
-            (40, OwnerKind::Service("_mdnsresponder".into())),
-        ]);
-        assert_eq!(page.others, Some(OthersTotal { processes: 2, memory_bytes: 2_000, cpu_time_ms: 20 }));
-        assert_eq!(page.items[1].path.as_deref(), Some("/Users/ana/bin/tool"), "its own folder is not redacted from itself");
-        let detail = build_page(&sweep(), &HelperUser::Uid(501), Visibility::Own(OthersPolicy::Detail), &query(None, 100));
+        let page = build_page(
+            &sweep(),
+            &HelperUser::Uid(501),
+            Visibility::Own(OthersPolicy::Total),
+            &query(None, 100),
+        );
+        assert_eq!(
+            page.items.iter().map(|e| (e.pid, e.owner.clone())).collect::<Vec<_>>(),
+            [
+                (1, OwnerKind::System),
+                (20, OwnerKind::Caller),
+                (40, OwnerKind::Service("_mdnsresponder".into())),
+            ]
+        );
+        assert_eq!(
+            page.others,
+            Some(OthersTotal {
+                processes: 2,
+                memory_bytes: 2_000,
+                cpu_time_ms: 20
+            })
+        );
+        assert_eq!(
+            page.items[1].path.as_deref(),
+            Some("/Users/ana/bin/tool"),
+            "its own folder is not redacted from itself"
+        );
+        let detail = build_page(
+            &sweep(),
+            &HelperUser::Uid(501),
+            Visibility::Own(OthersPolicy::Detail),
+            &query(None, 100),
+        );
         assert_eq!(detail.items.len(), 5);
         assert!(detail.others.is_none());
-        let hidden = build_page(&sweep(), &HelperUser::Uid(501), Visibility::Own(OthersPolicy::Hidden), &query(None, 100));
+        let hidden = build_page(
+            &sweep(),
+            &HelperUser::Uid(501),
+            Visibility::Own(OthersPolicy::Hidden),
+            &query(None, 100),
+        );
         assert_eq!((hidden.items.len(), hidden.others), (3, None));
     }
 
@@ -349,22 +437,71 @@ mod tests {
         let who = HelperUser::Uid(501);
         let scope = Visibility::Own(OthersPolicy::Total);
         let first = build_page(&s, &who, scope, &query(None, 2));
-        assert_eq!((first.items.iter().map(|e| e.pid).collect::<Vec<_>>(), first.next), (vec![1, 20], Some(20)));
+        assert_eq!(
+            (first.items.iter().map(|e| e.pid).collect::<Vec<_>>(), first.next),
+            (vec![1, 20], Some(20))
+        );
         assert!(first.others.is_some());
         let second = build_page(&s, &who, scope, &query(first.next, 2));
-        assert_eq!((second.items.iter().map(|e| e.pid).collect::<Vec<_>>(), second.next, second.others), (vec![40], None, None));
+        assert_eq!(
+            (second.items.iter().map(|e| e.pid).collect::<Vec<_>>(), second.next, second.others),
+            (vec![40], None, None)
+        );
         let past = build_page(&s, &who, scope, &query(Some(9_999), 2));
         assert!(past.items.is_empty() && past.next.is_none());
     }
 
     #[test]
     fn windows_paths_redact_case_insensitively_and_a_folder_prefix_is_not_a_match() {
-        let homes = vec![(HelperUser::Sid("S-1-5-21-1".into()), r"C:\Users\Ana".into()), (HelperUser::Sid("S-1-5-21-2".into()), r"C:\Users\Ben".into())];
+        let homes = vec![
+            (HelperUser::Sid("S-1-5-21-1".into()), r"C:\Users\Ana".into()),
+            (HelperUser::Sid("S-1-5-21-2".into()), r"C:\Users\Ben".into()),
+        ];
         let me = HelperUser::Sid("S-1-5-21-1".into());
-        assert_eq!(redact(r"c:\users\ben\Downloads\x.exe", &me, &homes), "x.exe (in another account's folder)");
-        assert_eq!(redact(r"C:\Users\Benjamin\x.exe", &me, &homes), r"C:\Users\Benjamin\x.exe", "Ben's folder is not Benjamin's");
+        assert_eq!(
+            redact(r"c:\users\ben\Downloads\x.exe", &me, &homes),
+            "x.exe (in another account's folder)"
+        );
+        assert_eq!(
+            redact(r"C:\Users\Benjamin\x.exe", &me, &homes),
+            r"C:\Users\Benjamin\x.exe",
+            "Ben's folder is not Benjamin's"
+        );
         assert_eq!(redact(r"C:\Users\Ana\x.exe", &me, &homes), r"C:\Users\Ana\x.exe");
         assert_eq!(redact(r"C:\Program Files\x.exe", &me, &homes), r"C:\Program Files\x.exe");
+    }
+
+    #[test]
+    fn owners_are_told_apart_by_id_and_host() {
+        use HelperHost::{Linux, Macos, Windows};
+        assert_eq!(classify_owner(Linux, &HelperUser::Uid(0), Some("root")), RawOwner::System);
+        assert_eq!(
+            classify_owner(Macos, &HelperUser::Uid(241), Some("_mdnsresponder")),
+            RawOwner::Service("_mdnsresponder".into())
+        );
+        assert!(matches!(
+            classify_owner(Macos, &HelperUser::Uid(501), Some("ana")),
+            RawOwner::Account { .. }
+        ));
+        assert!(
+            matches!(classify_owner(Linux, &HelperUser::Uid(501), Some("ana")), RawOwner::Service(_)),
+            "a Linux person starts at 1000"
+        );
+        assert_eq!(
+            classify_owner(Linux, &HelperUser::Uid(65_534), None),
+            RawOwner::Service("system service".into())
+        );
+        let sid = |s: &str| HelperUser::Sid(s.into());
+        assert_eq!(classify_owner(Windows, &sid("S-1-5-18"), None), RawOwner::System);
+        assert_eq!(
+            classify_owner(Windows, &sid("S-1-5-19"), None),
+            RawOwner::Service("LOCAL SERVICE".into())
+        );
+        assert!(matches!(classify_owner(Windows, &sid("S-1-5-80-1-2-3"), Some("Spooler")), RawOwner::Service(n) if n == "Spooler"));
+        assert!(matches!(
+            classify_owner(Windows, &sid("S-1-5-21-1-2-3-1001"), Some("Ana")),
+            RawOwner::Account { .. }
+        ));
     }
 
     #[test]
@@ -373,8 +510,14 @@ mod tests {
         s.processes[0].name = "n".repeat(1_000);
         s.processes[0].path = Some(format!("/{}", "p".repeat(5_000)));
         let page = build_page(&s, &HelperUser::Uid(0), Visibility::Full, &query(None, 1));
-        assert_eq!((page.items[0].name.len(), page.items[0].path.as_ref().unwrap().len()), (MAX_NAME, MAX_PATH));
-        let many = Sweep { processes: (0..MAX_SWEEP as u32 + 5).map(|p| raw(p, RawOwner::System, None)).collect(), ..Sweep::default() };
+        assert_eq!(
+            (page.items[0].name.len(), page.items[0].path.as_ref().unwrap().len()),
+            (MAX_NAME, MAX_PATH)
+        );
+        let many = Sweep {
+            processes: (0..MAX_SWEEP as u32 + 5).map(|p| raw(p, RawOwner::System, None)).collect(),
+            ..Sweep::default()
+        };
         assert!(build_page(&many, &HelperUser::Uid(0), Visibility::Full, &query(None, 1)).truncated);
     }
 
