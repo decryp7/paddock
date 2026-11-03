@@ -26,7 +26,7 @@ import { PD_WIDGET_GRID_BACKEND, type GridView } from './grid-backend';
 import { PdGridGesture, reducedMotion, type GridGestureTarget } from './grid-gesture';
 import { columnLines, rowLines, sameRect, type GridGeometry } from './grid-math';
 import { PdWidgetFrame } from './frame';
-import { blockOf, blockText, cantText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText, type MoveName } from './grid-text';
+import { blockOf, blockText, cantText, errorText, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText, outcomeText, type MoveName } from './grid-text';
 import { defaultKindOf, PdWidget } from './widget';
 
 let nextId = 0;
@@ -468,7 +468,7 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
   }
 
   protected kindOfId(id: string): string {
-    return this.rows().find((r) => r.id === id)?.kind ?? '';
+    return (this.rows().find((r) => r.id === id) as Row<W, V, A>).kind;
   }
 
   protected allowed(id: string, name: MoveName): boolean {
@@ -655,13 +655,12 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     return this.rows().find((r) => r.id === id)?.title ?? id;
   }
 
-  /** The announcement for a finished gesture, read from the new arrangement (position, the widget before it, the size). */
+  /** The announcement for a finished gesture, from the engine's `Outcome` (position, the widget before it, the size). */
   private result(next: GridView<W, K, S>, id: string, before: Rect, gesture: GridGesture): string {
-    const placed = next.arrangements[0]?.placements ?? [];
-    const index = placed.findIndex((p) => p.id === id);
-    const after = placed[index]?.rect ?? before;
-    const previous = index > 0 ? this.kindTitle(next, placed[index - 1]?.id as string) : null;
-    return changeText(this.titleOf(id), before, after, index + 1, placed.length, previous, howOf(gesture));
+    const o = next.outcome;
+    if (!o) return `${this.titleOf(id)} stays where it is.`;
+    const previous = o.after === null ? null : this.kindTitle(next, o.after);
+    return outcomeText(this.titleOf(id), o, previous, gesture, before);
   }
 
   private kindTitle(v: GridView<W, K, S>, id: string): string {

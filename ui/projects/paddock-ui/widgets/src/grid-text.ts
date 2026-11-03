@@ -1,4 +1,4 @@
-import type { Block, Dir, GridGesture, Moves, Rect } from '../generated/widgets';
+import type { Block, Dir, GridGesture, Moves, Outcome, Rect } from '../generated/widgets';
 
 /** One of the engine's `Moves` flags, which is also one entry of a widget's ⋯ menu and one key. */
 export type MoveName = keyof Moves;
@@ -77,19 +77,23 @@ export function errorText(e: unknown, title: string): string {
 /** "6 by 6, position 5 of 15": the description a screen reader hears after the widget's name. */
 export const sizeText = (r: Rect, position: number, of: number): string => `${r.w} by ${r.h}, position ${position} of ${of}`;
 
-/** What a finished gesture announces: "Memory moved right, after CPU. Position 6 of 15." or "Memory resized to 4 by 6." */
-export function changeText(title: string, before: Rect | undefined, after: Rect, position: number, of: number, previous: string | null, how: string): string {
-  const resized = before !== undefined && (before.w !== after.w || before.h !== after.h);
-  const moved = before === undefined || before.x !== after.x || before.y !== after.y;
-  const size = `${title} resized to ${after.w} by ${after.h}.`;
+/**
+ * What a finished gesture announces, from the engine's `Outcome` (ADR 0044 §5): "Memory moved right, after CPU. Position 6 of 15."
+ * or "Memory resized to 4 by 6." `previous` is the title of `outcome.after`; `before` is the stored size, to tell a drop that
+ * resized from one that only moved. A resize that stopped at the kind's limit says so.
+ */
+export function outcomeText(title: string, o: Outcome, previous: string | null, g: GridGesture, before: Rect | undefined): string {
+  const grew = 'grow' in g;
+  const resized = grew || (before !== undefined && (before.w !== o.w || before.h !== o.h));
+  const moved = !grew;
+  const size = `${title} resized to ${o.w} by ${o.h}.${o.limit ? ' ' + blockText(title, o.limit) : ''}`;
   if (resized && !moved) return size;
-  if (!moved) return `${title} stays where it is.`;
   const where = previous === null ? ', first' : `, after ${previous}`;
-  const base = `${title} moved ${how}${where}. Position ${position} of ${of}.`;
+  const base = `${title} moved ${howOf(g)}${where}. Position ${o.position} of ${o.of}.`;
   return resized ? `${base} ${size}` : base;
 }
 
-/** The word for how a gesture moved a widget, for `changeText`. */
+/** The word for how a gesture moved a widget, for `outcomeText`. */
 export function howOf(g: GridGesture): string {
   if ('nudge' in g) return g.nudge.dir;
   if ('toFirst' in g) return 'to first';

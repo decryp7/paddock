@@ -3,17 +3,17 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { MatButton } from '@angular/material/button';
-import { blockText, PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
-import { GOLDEN_CASES, kindOfId, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
+import { blockText, PD_WIDGET_GRID_BACKEND, PdWidget, PdWidgetChooser, PdWidgetGrid, type Edit, type GridGesture, type GridView, type SurfaceValues, type WidgetState } from '@decryp7/paddock-ui/widgets';
+import { GOLDEN_CASES, gestureId, kindOfId, MockGridBackend, viewOf, type GridSample } from './widget-grid-mock';
 
 type View = GridView<GridSample, string, string>;
 type Val = { readonly size: string };
 
 const kindName = (id: string): string => { const k = kindOfId(id); return k.charAt(0).toUpperCase() + k.slice(1); };
 /** The engine's refusal in words: the recorded Debug text names a Block ("Nothing to change: Edge(Left)."), never shown as it is. */
-function refusalText(c: { gesture: { id: string }; result: unknown }): string {
+function refusalText(c: { gesture: GridGesture; result: unknown }): string {
   const raw = String((c.result as { error: string }).error);
-  const who = kindName(c.gesture.id);
+  const who = kindName(gestureId(c.gesture));
   const edge = /Edge\((\w+)\)/.exec(raw)?.[1]?.toLowerCase() as 'left' | 'right' | 'up' | 'down' | undefined;
   if (edge) return blockText(who, { edge });
   if (/Largest/.test(raw)) return blockText(who, 'largest');
@@ -172,12 +172,12 @@ export class GalWidgetGrid {
     registerPaddockIcons(inject(MatIconRegistry), inject(DomSanitizer));
   }
 
-  protected gesture(c: { gesture: { gesture: string } & Record<string, unknown> }): string {
+  protected gesture(c: { gesture: GridGesture }): string {
     const g = c.gesture;
-    const rect = g['rect'] as { x: number; y: number; w: number; h: number } | undefined;
-    const who = kindName(String(g['id']));
-    if (rect) return `${g.gesture === 'place' ? 'Place' : g.gesture} ${who} at column ${rect.x + 1}, row ${rect.y + 1}, ${rect.w} by ${rect.h}`;
-    const words: Record<string, string> = { nudge: 'Nudge', grow: 'Grow', toFirst: 'Move to first', toLast: 'Move to last' };
-    return `${words[g.gesture] ?? g.gesture} ${who}${g['dir'] ? ' ' + String(g['dir']) : ''}`;
+    const who = kindName(gestureId(g));
+    if ('place' in g) return `Place ${who} at column ${g.place.rect.x + 1}, row ${g.place.rect.y + 1}, ${g.place.rect.w} by ${g.place.rect.h}`;
+    if ('nudge' in g) return `Nudge ${who} ${g.nudge.dir}`;
+    if ('grow' in g) return `Grow ${who} ${g.grow.dir}`;
+    return 'toFirst' in g ? `Move ${who} to first place` : `Move ${who} to the end`;
   }
 }

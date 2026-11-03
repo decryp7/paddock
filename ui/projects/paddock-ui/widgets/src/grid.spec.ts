@@ -5,9 +5,9 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Arrangement, Cells, Edit, KindInfo, Moves, PreviewRequest, Rect, SurfaceValues, WidgetState } from '../generated/widgets';
+import type { Arrangement, PreviewReply, Cells, Edit, KindInfo, Moves, PreviewRequest, Rect, SurfaceValues, WidgetState } from '../generated/widgets';
 import { ManualFrameScheduler, PD_FRAME_SCHEDULER } from './frame-scheduler';
-import { PD_WIDGET_GRID_BACKEND, type GridView, type PreviewReply, type WidgetGridBackend } from './grid-backend';
+import { PD_WIDGET_GRID_BACKEND, type GridView, type WidgetGridBackend } from './grid-backend';
 import { PdWidgetGrid } from './grid';
 import { PdWidget } from './widget';
 
@@ -58,13 +58,13 @@ function mkView(over: Partial<View> = {}, revision = 7): View {
 
 /** The view after `a` moved to the right of `b`: the order b, a, c. */
 function moved(revision = 8): View {
-  const v = mkView({ canUndo: true }, revision);
+  const v = mkView({ canUndo: true, outcome: { id: 'a', position: 2, of: 3, after: 'b', before: 'c', w: 6, h: 4, limit: null } }, revision);
   const rects = { b: R(0, 0, 6, 4), a: R(6, 0, 6, 4), c: R(0, 4, 12, 4) };
   return { ...v, arrangements: [{ minWidth: 840, columns: 12, placements: Object.entries(rects).map(([id, rect]) => ({ id, rect })) }, ...v.arrangements.slice(1)] };
 }
 
 class FakeBackend implements WidgetGridBackend<W, string, string> {
-  preview = vi.fn<(r: PreviewRequest) => Promise<PreviewReply<W, string, string>>>();
+  preview = vi.fn<(r: PreviewRequest) => Promise<PreviewReply<View>>>();
   edit = vi.fn<(e: Edit<W>, revision: number) => Promise<View>>();
   reload = vi.fn<() => Promise<View>>();
 }
@@ -486,6 +486,14 @@ describe('PdWidgetGrid', () => {
       expect(backend.edit).toHaveBeenCalledTimes(2);
     });
 
+    it('a move to first says first, from the outcome', async () => {
+      const v = moved();
+      backend.edit.mockResolvedValue({ ...v, outcome: { ...(v.outcome as NonNullable<View['outcome']>), position: 1, after: null } });
+      key(cell('b'), 'Home');
+      await settle(f);
+      expect(say).toHaveBeenCalledWith('Network moved to first, first. Position 1 of 3.', 'polite');
+    });
+
     it('a resolved move that changed nothing says so, and a vanished widget is ignored', async () => {
       backend.edit.mockImplementation(() => Promise.resolve(mkView({}, 8)));
       key(cell('a'), 'ArrowDown');
@@ -597,7 +605,7 @@ describe('PdWidgetGrid', () => {
     const down = (id: string, x: number, y: number, on: Element = cell(id)) => on.dispatchEvent(ev('pointerdown', x, y));
     const move = (id: string, x: number, y: number) => cell(id).dispatchEvent(ev('pointermove', x, y));
     const up = (id: string) => cell(id).dispatchEvent(ev('pointerup', 0, 0));
-    const replyFor = (view: View, seq: number): PreviewReply<W, string, string> => ({ seq, view });
+    const replyFor = (view: View, seq: number): PreviewReply<View> => ({ seq, view });
 
     beforeEach(async () => {
       await create();
@@ -632,7 +640,7 @@ describe('PdWidgetGrid', () => {
     });
 
     it('drops replies that are not the latest', async () => {
-      const pending: ((v: PreviewReply<W, string, string>) => void)[] = [];
+      const pending: ((v: PreviewReply<View>) => void)[] = [];
       backend.preview.mockImplementation(() => new Promise((r) => pending.push(r)));
       down('a', 50, 50);
       move('a', 50 + 405, 50);
@@ -702,7 +710,7 @@ describe('PdWidgetGrid', () => {
     });
 
     it('a reply that arrives after the gesture ended is dropped', async () => {
-      let late: (v: PreviewReply<W, string, string>) => void = () => undefined;
+      let late: (v: PreviewReply<View>) => void = () => undefined;
       backend.preview.mockImplementation(() => new Promise((r) => (late = r)));
       down('a', 50, 50);
       move('a', 50 + 405, 50);

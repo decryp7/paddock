@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Rect } from '../generated/widgets';
+import type { Outcome, Rect } from '../generated/widgets';
 import { ManualFrameScheduler, PD_FRAME_SCHEDULER } from './frame-scheduler';
 import { PdGridGesture, reducedMotion, type GridGestureTarget } from './grid-gesture';
 import { columnLines, moveTarget, resizeTarget, rowLines, sameRect, type GridGeometry } from './grid-math';
-import { blockOf, blockText, cantText, changeText, errorText, howOf, isStale, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText } from './grid-text';
+import { blockOf, blockText, cantText, errorText, howOf, isStale, outcomeText, MOVE_ACTIONS, MOVE_NAMES, moveOfKey, sizeText } from './grid-text';
 
 const G: GridGeometry = { left: 100, top: 50, colWidth: 84, rowHeight: 24, gap: 16, columns: 12 };
 
@@ -96,18 +96,19 @@ describe('grid words', () => {
     expect(errorText('nothingToUndo', 'CPU')).toBe("Couldn't change the layout. Try again.");
   });
 
-  it('announces a move, a resize, both, and nothing', () => {
+  it('announces a move, a resize, both, a limit and nothing, from the engine outcome', () => {
     const a: Rect = { x: 0, y: 0, w: 4, h: 4 };
+    const o = (over: Partial<Outcome> = {}): Outcome => ({ id: 'a', position: 6, of: 15, after: 'c', before: null, w: 4, h: 4, limit: null, ...over });
     expect(sizeText(a, 5, 15)).toBe('4 by 4, position 5 of 15');
-    expect(changeText('Memory', a, { ...a, x: 4 }, 6, 15, 'CPU', 'right')).toBe('Memory moved right, after CPU. Position 6 of 15.');
-    expect(changeText('Memory', a, { ...a, y: 4 }, 1, 15, null, 'to first')).toBe('Memory moved to first, first. Position 1 of 15.');
-    expect(changeText('Memory', a, { ...a, h: 6 }, 1, 15, null, 'here')).toBe('Memory resized to 4 by 6.');
-    expect(changeText('Memory', a, { x: 2, y: 0, w: 3, h: 4 }, 2, 3, 'CPU', 'here')).toBe('Memory moved here, after CPU. Position 2 of 3. Memory resized to 3 by 4.');
-    expect(changeText('Memory', a, a, 1, 3, null, 'here')).toBe('Memory stays where it is.');
-    expect(changeText('Memory', undefined, a, 1, 3, null, 'here')).toBe('Memory moved here, first. Position 1 of 3.');
+    expect(outcomeText('Memory', o(), 'CPU', { nudge: { id: 'a', dir: 'right' } }, a)).toBe('Memory moved right, after CPU. Position 6 of 15.');
+    expect(outcomeText('Memory', o({ position: 1, after: null }), null, { toFirst: { id: 'a' } }, a)).toBe('Memory moved to first, first. Position 1 of 15.');
+    expect(outcomeText('Memory', o({ h: 6 }), null, { grow: { id: 'a', dir: 'down' } }, a)).toBe('Memory resized to 4 by 6.');
+    expect(outcomeText('Memory', o({ h: 14, limit: 'largest' }), null, { grow: { id: 'a', dir: 'down' } }, a)).toBe("Memory resized to 4 by 14. Memory can't get any larger.");
+    expect(outcomeText('Memory', o({ w: 3, position: 2 }), 'CPU', { place: { id: 'a', rect: a } }, a)).toBe('Memory moved here, after CPU. Position 2 of 15. Memory resized to 3 by 4.');
+    expect(outcomeText('Memory', o(), 'CPU', { place: { id: 'a', rect: a } }, undefined)).toBe('Memory moved here, after CPU. Position 6 of 15.');
+    expect(howOf({ toLast: { id: 'a' } })).toBe('to last');
     expect(howOf({ nudge: { id: 'a', dir: 'up' } })).toBe('up');
     expect(howOf({ toFirst: { id: 'a' } })).toBe('to first');
-    expect(howOf({ toLast: { id: 'a' } })).toBe('to last');
     expect(howOf({ place: { id: 'a', rect: a } })).toBe('here');
   });
 });
