@@ -30,14 +30,21 @@ test.describe('administrator readings', () => {
     });
   }
 
-  test('turning on runs as a job and ends with the helper On; turning off returns it to Off', async ({ page }) => {
-    await openSettings(page, '&helper=off&jobsteps=6');
+  test('turning on shows the job running while it is held at a step', async ({ page }) => {
+    // The job is held (its steps are 10 minutes apart), so the running state is not a moment the assertion can miss under load.
+    await openSettings(page, '&helper=off&jobsteps=6&jobstepms=600000');
     await card(page).getByRole('button', { name: 'Turn on administrator readings' }).click();
     await expect(card(page).locator('.running')).toContainText('Turning on administrator readings');
-    await expect(card(page).locator('.chip')).toContainText('On', { timeout: 20_000 });
+    await expect(card(page).locator('.chip')).toContainText('Off');
+  });
+
+  test('turning on ends with the helper On; turning off returns it to Off', async ({ page }) => {
+    await openSettings(page, '&helper=off');
+    await card(page).getByRole('button', { name: 'Turn on administrator readings' }).click();
+    await expect(card(page).locator('.chip')).toContainText('On');
     await expect(card(page).getByRole('button', { name: 'Turn off' })).toBeVisible();
     await card(page).getByRole('button', { name: 'Turn off' }).click();
-    await expect(card(page).locator('.chip')).toContainText('Off', { timeout: 20_000 });
+    await expect(card(page).locator('.chip')).toContainText('Off');
   });
 
   test('a declined prompt is explained and nothing changes', async ({ page }) => {

@@ -153,6 +153,8 @@ export interface MockOptions {
   widgets?: Pick<MockWidgetsOptions, 'popup' | 'agentStopped'>;
   /** How many steps each job the mock starts takes before it ends (default 1: it ends at once; `?jobsteps=6` keeps it running for screenshots). */
   jobSteps?: number;
+  /** Milliseconds between a job's steps (default 400, or 0 with `latency=0`; `?jobstepms=600000` holds a job at its first step so a test can look at it). */
+  jobStepMs?: number;
 }
 
 /**
@@ -164,6 +166,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
   const fail = q.get('fail');
   const latency = q.get('latency');
   const jobSteps = q.get('jobsteps');
+  const jobStepMs = q.get('jobstepms');
   const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
   const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
   const cpu = tokens.includes('hybrid') ? 'hybrid' : tokens.includes('uniform') ? 'uniform' : undefined;
@@ -178,6 +181,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
     ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
+    ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -276,7 +280,7 @@ export class MockBackend implements DynoBackend {
     this.intel.many = options.geoMany ?? false;
     this.jobSink = options.jobs;
     this.jobSteps = options.jobSteps ?? 1;
-    this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
+    this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
     this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, ...(options.widgets ?? {}) });
