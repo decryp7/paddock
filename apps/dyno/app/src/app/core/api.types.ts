@@ -1291,6 +1291,10 @@ export interface ConnectionRow {
   stateLabel: string;
   owner: NetOwner;
   firstSeen: Timestamp | null;
+  /** The ISO country the location database gives the remote address; null when none is loaded or it does not know it. */
+  country: string | null;
+  /** The names of your lists that flag the remote address (empty: none does). A flag is a hint, not proof. */
+  flaggedBy: string[];
 }
 
 export interface NetworkQuery {
@@ -1299,6 +1303,8 @@ export interface NetworkQuery {
   state: SocketState | null;
   exposedOnly: boolean;
   search: string;
+  /** Only connections to this country (ISO code, from the location database). */
+  country: string | null;
 }
 
 export interface NetworkSnapshot {
@@ -1935,10 +1941,15 @@ export type JobSpec =
   | 'bootAnalysis'
   | 'appUsage'
   | 'softwareInventory'
-  | { helper: { action: HelperAction } };
+  | { helper: { action: HelperAction } }
+  | { updateList: { id: string } }
+  | 'updateGeo'
+  | 'rebuildIntel'
+  | { installTool: { tool: ToolKind } };
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
+  | { intel: IntelStatus }
   | { finder: FinderResult }
   | { issues: IssuesOverview }
   | { backup: BackupReport }
@@ -1947,7 +1958,8 @@ export type JobOutput =
   | { boot: BootReport }
   | { appUsage: UsageReport }
   | { software: SoftwareInventory }
-  | { helper: HelperStatus };
+  | { helper: HelperStatus }
+  | { tool: ToolStatus };
 
 // ------------------------------------------------------------------------------------- the privileged helper (ADR 0027)
 
@@ -2050,4 +2062,196 @@ export interface BackupSettings {
   /** A backup older than this many hours is stale (1 to 2160). */
   staleAfterHours: number;
   overrides: ToolOverride[];
+}
+
+// ---------------------------------------------------------------------------------------------- IP lists, the map, the firewall
+
+/** The switches of the network features: on by default, each its own (there is no Offline mode). */
+export interface NetSwitches {
+  locationDatabases: boolean;
+  ownLocation: boolean;
+  firstRunNoteSeen: boolean;
+}
+
+/** When a subscription is refreshed. */
+export type ListSchedule = 'manual' | { automatic: { every: number } };
+
+/** Where a list comes from. */
+export type ListSource = 'manual' | { file: { name: string } } | { url: { url: string; schedule: ListSchedule } };
+
+/** What the page shows for a subscription (and the counts of a typed list). */
+export interface SubscriptionStatus {
+  lastFetchedMs: number | null;
+  lastAttemptMs: number | null;
+  entries: number;
+  duplicates: number;
+  covered: number;
+  skipped: number;
+  error: string | null;
+  note: string | null;
+}
+
+/** One list. */
+export interface ListStatus {
+  id: string;
+  name: string;
+  enabled: boolean;
+  source: ListSource;
+  counts: SubscriptionStatus;
+  /** When a subscription may be updated again (ms since the epoch), when later than now. */
+  nextAllowedMs: number | null;
+  /** The text of a typed or imported list for the editor (at most 64 KB); null for a subscription or a larger list. */
+  text: string | null;
+}
+
+/** The location features. */
+export interface GeoStatus {
+  switches: NetSwitches;
+  databaseOn: boolean;
+  dbDate: string | null;
+  country: SubscriptionStatus;
+  asn: SubscriptionStatus;
+  homeSource: string;
+  attribution: string;
+}
+
+/** Everything the lists page shows. */
+export interface IntelStatus {
+  lists: ListStatus[];
+  allow: string;
+  indexSegments: number;
+  indexRanges: number;
+  indexBytes: number;
+  indexError: string | null;
+  geo: GeoStatus;
+  firstRunNote: string;
+  termsNotice: string;
+}
+
+/** How a new list starts. */
+export type NewSource =
+  | { manual: { text: string } }
+  | { file: { fileName: string; text: string } }
+  | { url: { url: string; everyHours: number | null } };
+
+/** A change the user asks for. */
+export type IntelEdit =
+  | { addList: { name: string; source: NewSource } }
+  | { removeList: { id: string } }
+  | { renameList: { id: string; name: string } }
+  | { setEnabled: { id: string; enabled: boolean } }
+  | { setText: { id: string; text: string } }
+  | { setSchedule: { id: string; everyHours: number | null } }
+  | { dedupePreview: { id: string } }
+  | { dedupeApply: { id: string } }
+  | { setAllow: { text: string } }
+  | { setSwitches: { switches: NetSwitches } };
+
+/** What "Remove duplicates" would do. */
+export interface DedupePreview {
+  before: number;
+  after: number;
+  duplicates: number;
+  covered: number;
+  /** `[removed entry, the entry that stays and covers it]`. */
+  examples: [string, string][];
+}
+
+/** What an edit produced. */
+export type EditOutcome = 'done' | { added: { id: string } } | { preview: DedupePreview } | { removed: { id: string } };
+
+/** The class of a non-public destination. */
+export type AddressClass = 'public' | 'loopback' | 'private' | 'linkLocal' | 'cgnat' | 'multicast' | 'special' | 'reserved';
+
+/** One country on the map. */
+export interface CountryCount {
+  code: string;
+  name: string;
+  connections: number;
+  programs: number;
+  hosts: number;
+  flagged: number;
+  includesContentNetworks: boolean;
+  /** The programs with most connections to it (at most three, busiest first). */
+  topPrograms: string[];
+}
+
+/** Non-public destinations of one class. */
+export interface LocalGroup {
+  class: AddressClass;
+  connections: number;
+  programs: number;
+}
+
+/** The map's data. */
+export interface GeoSummary {
+  countries: CountryCount[];
+  local: LocalGroup[];
+  unknown: number;
+  dbDate: string | null;
+  truncated: number;
+  databaseOn: boolean;
+  homeCountry: string | null;
+  homeSource: string;
+}
+
+export type RuleDirection = 'in' | 'out' | 'any';
+export type RuleAction = 'allow' | 'block';
+export type FirewallProfile = 'domain' | 'private' | 'public' | 'all';
+export type RuleSourceKind = 'windowsFirewall' | 'applicationFirewall' | 'pf' | 'nftables';
+
+export interface FirewallRule {
+  name: string;
+  direction: RuleDirection;
+  action: RuleAction;
+  enabled: boolean;
+  program: string | null;
+  ports: string | null;
+  addresses: string | null;
+  profile: FirewallProfile;
+  source: RuleSourceKind;
+}
+
+export interface FirewallSource {
+  source: RuleSourceKind;
+  states: { profile: FirewallProfile; enabled: boolean }[];
+  switches: [('blockAll' | 'stealth'), boolean][];
+  defaultIn: RuleAction | null;
+  defaultOut: RuleAction | null;
+  ruleCount: number;
+  rules: FirewallRule[];
+  truncated: number;
+  rulesHidden: boolean;
+  note: string | null;
+}
+
+/** The firewall of this computer. */
+export interface FirewallView {
+  os: 'windows' | 'macos' | 'linux';
+  sources: FirewallSource[];
+
+// ------------------------------------------------------------------------------------- the disk-health tool (ADR 0027 section 7)
+
+/** A tool the helper can hold. */
+export type ToolKind = 'smartmontools';
+
+/** What the helper holds of one tool. */
+export interface ToolStatus {
+  tool: ToolKind;
+  installed: string | null;
+}
+
+/** Where the offer stands: downloadable, installed (the version), needs the helper first, or not offered here (what to do instead). */
+export type OfferState = 'available' | { installed: string } | { needsHelper: string } | { notHere: string };
+
+/** What the Settings card shows for the disk-health tool. */
+export interface ToolOffer {
+  tool: ToolKind;
+  name: string;
+  version: string;
+  size: number;
+  from: string;
+  licence: string;
+  sourceUrl: string;
+  state: OfferState;
 }

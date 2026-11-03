@@ -109,6 +109,10 @@ fn tag_job_spec(v: &JobSpec) -> &'static str {
         JobSpec::AppUsage => "AppUsage",
         JobSpec::SoftwareInventory => "SoftwareInventory",
         JobSpec::Helper { .. } => "Helper",
+        JobSpec::UpdateList { .. } => "UpdateList",
+        JobSpec::UpdateGeo => "UpdateGeo",
+        JobSpec::RebuildIntel => "RebuildIntel",
+        JobSpec::InstallTool { .. } => "InstallTool",
     }
 }
 
@@ -123,6 +127,8 @@ fn tag_job_output(v: &JobOutput) -> &'static str {
         JobOutput::AppUsage(_) => "AppUsage",
         JobOutput::Software(_) => "Software",
         JobOutput::Helper(_) => "Helper",
+        JobOutput::Intel(_) => "Intel",
+        JobOutput::Tool(_) => "Tool",
     }
 }
 
@@ -254,6 +260,12 @@ fn tag_request(v: &Request) -> &'static str {
         Request::ForgetSavedDiskMap { .. } => "ForgetSavedDiskMap",
         Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
         Request::HelperStatus => "HelperStatus",
+        Request::IntelStatus => "IntelStatus",
+        Request::IntelEdit { .. } => "IntelEdit",
+        Request::GeoSummary => "GeoSummary",
+        Request::Firewall => "Firewall",
+        Request::ToolOffer => "ToolOffer",
+        Request::RemoveTool => "RemoveTool",
         Request::CancelDiskScan { .. } => "CancelDiskScan",
         Request::DiskScans => "DiskScans",
         Request::DiskChildren { .. } => "DiskChildren",
@@ -335,6 +347,11 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::WidgetLayout(_) => "WidgetLayout",
         Reply::PopoverValues(_) => "PopoverValues",
         Reply::HelperStatus(_) => "HelperStatus",
+        Reply::Intel(_) => "Intel",
+        Reply::IntelEdited(_) => "IntelEdited",
+        Reply::Geo(_) => "Geo",
+        Reply::Firewall(_) => "Firewall",
+        Reply::ToolOffer(_) => "ToolOffer",
     }
 }
 
@@ -387,6 +404,10 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::AppUsage,
         JobSpec::SoftwareInventory,
         JobSpec::Helper { action: dyno_core::helper_wire::HelperAction::TurnOn },
+        JobSpec::UpdateList { id: "list-1".into() },
+        JobSpec::UpdateGeo,
+        JobSpec::RebuildIntel,
+        JobSpec::InstallTool { tool: zero() },
     ]
 }
 
@@ -401,6 +422,8 @@ fn job_output_samples() -> Vec<JobOutput> {
         JobOutput::AppUsage(zero()),
         JobOutput::Software(zero()),
         JobOutput::Helper(Box::new(zero())),
+        JobOutput::Intel(Box::default()),
+        JobOutput::Tool(Box::new(zero())),
     ]
 }
 
@@ -593,6 +616,12 @@ fn request_samples() -> Vec<Request> {
         Request::ForgetSavedDiskMap { scan: 1 },
         Request::ForgetSavedDiskMaps,
         Request::HelperStatus,
+        Request::IntelStatus,
+        Request::IntelEdit { edit: zero() },
+        Request::GeoSummary,
+        Request::Firewall,
+        Request::ToolOffer,
+        Request::RemoveTool,
         Request::CancelDiskScan { scan: 1 },
         Request::DiskScans,
         Request::DiskChildren {
@@ -766,6 +795,11 @@ fn reply_samples() -> Vec<Reply> {
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),
+        Reply::Intel(Box::default()),
+        Reply::IntelEdited(Box::new(zero())),
+        Reply::Geo(Box::default()),
+        Reply::Firewall(Box::new(zero())),
+        Reply::ToolOffer(Box::new(zero())),
     ]
 }
 

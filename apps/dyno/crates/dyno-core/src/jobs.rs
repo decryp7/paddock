@@ -79,6 +79,20 @@ pub enum JobSpec {
         /// What to do.
         action: crate::helper_wire::HelperAction,
     },
+    /// Fetches one list subscription now (a download job with phases and Cancel), then rebuilds the index.
+    UpdateList {
+        /// The list's id.
+        id: String,
+    },
+    /// Fetches the DB-IP location databases now (monthly files; at most one attempt a day).
+    UpdateGeo,
+    /// Rebuilds the match index from the user's lists (after an edit).
+    RebuildIntel,
+    /// Downloads the pinned tool (the user clicked "Download"), checks it and has the helper install it.
+    InstallTool {
+        /// Which tool.
+        tool: crate::helper_requests::ToolKind,
+    },
 }
 
 impl JobSpec {
@@ -93,7 +107,11 @@ impl JobSpec {
             JobSpec::BootAnalysis => JobKind::BootAnalysis,
             JobSpec::AppUsage => JobKind::AppUsage,
             JobSpec::SoftwareInventory => JobKind::SoftwareInventory,
+            JobSpec::InstallTool { .. } => JobKind::InstallTool,
             JobSpec::Helper { .. } => JobKind::Helper,
+            JobSpec::UpdateList { .. } => JobKind::UpdateList,
+            JobSpec::UpdateGeo => JobKind::UpdateGeo,
+            JobSpec::RebuildIntel => JobKind::RebuildIntel,
         }
     }
 }
@@ -120,6 +138,14 @@ pub enum JobKind {
     SoftwareInventory,
     /// Setting up the privileged helper.
     Helper,
+    /// Updating one list subscription.
+    UpdateList,
+    /// Updating the location databases.
+    UpdateGeo,
+    /// Rebuilding the match index of the user's lists.
+    RebuildIntel,
+    /// Downloading the pinned disk-health tool and handing it to the helper.
+    InstallTool,
 }
 
 impl JobKind {
@@ -134,7 +160,11 @@ impl JobKind {
             JobKind::BootAnalysis => "Analysing boots",
             JobKind::AppUsage => "Reading app usage",
             JobKind::SoftwareInventory => "Listing installed software",
+            JobKind::InstallTool => "Installing the disk-health tool",
             JobKind::Helper => "Setting up administrator readings",
+            JobKind::UpdateList => "Updating a list",
+            JobKind::UpdateGeo => "Updating the location databases",
+            JobKind::RebuildIntel => "Building the match index",
         }
     }
 
@@ -149,7 +179,11 @@ impl JobKind {
             JobKind::BootAnalysis => "boot-analysis",
             JobKind::AppUsage => "app-usage",
             JobKind::SoftwareInventory => "software-inventory",
+            JobKind::InstallTool => "install-tool",
             JobKind::Helper => "helper",
+            JobKind::UpdateList => "update-list",
+            JobKind::UpdateGeo => "update-geo",
+            JobKind::RebuildIntel => "rebuild-intel",
         }
     }
 
@@ -165,6 +199,10 @@ impl JobKind {
             JobKind::AppUsage,
             JobKind::SoftwareInventory,
             JobKind::Helper,
+            JobKind::UpdateList,
+            JobKind::UpdateGeo,
+            JobKind::RebuildIntel,
+            JobKind::InstallTool,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -191,8 +229,12 @@ pub enum JobOutput {
     AppUsage(Box<UsageReport>),
     /// From [`JobSpec::SoftwareInventory`].
     Software(Box<SoftwareInventory>),
+    /// From [`JobSpec::InstallTool`]: what the helper holds of the tool now.
+    Tool(Box<crate::helper_wire::ToolStatus>),
     /// From [`JobSpec::Helper`]: the helper as it is now.
     Helper(Box<crate::helper_wire::HelperStatus>),
+    /// From [`JobSpec::UpdateList`], [`JobSpec::UpdateGeo`] and [`JobSpec::RebuildIntel`]: the lists page after the job.
+    Intel(Box<crate::intel_lists::IntelStatus>),
 }
 
 #[cfg(test)]

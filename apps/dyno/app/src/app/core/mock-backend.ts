@@ -1,6 +1,7 @@
 import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
-import type { Measured } from './api.types';
+import type { EditOutcome, FirewallView, GeoSummary, IntelEdit, IntelStatus, Measured } from './api.types';
+import { MockIntel } from './mock/intel';
 import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
@@ -73,6 +74,7 @@ import type {
   GpuReport,
   InventoryFormat,
   HelperAction,
+  ToolOffer,
   MaintenanceStatus,
   SavedInventory,
   IssuesOverview,
@@ -103,6 +105,7 @@ import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
 import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
+import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
@@ -143,6 +146,8 @@ export interface MockOptions {
   savedListsAgeMs?: number;
   /** Scans wait where they are until `window.__dynoReleaseScans()` is called (e2e flows that look at a running scan; `?gate=scans`). */
   holdScans?: boolean;
+  /** A destination in every country on the map (`?geo=many`), to see the most arcs it draws. */
+  geoMany?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -157,6 +162,8 @@ export interface MockOptions {
   widgets?: Pick<MockWidgetsOptions, 'popup' | 'agentStopped'>;
   /** How many steps each job the mock starts takes before it ends (default 1: it ends at once; `?jobsteps=6` keeps it running for screenshots). */
   jobSteps?: number;
+  /** Milliseconds between a job's steps (default 400, or 0 with `latency=0`; `?jobstepms=600000` holds a job at its first step so a test can look at it). */
+  jobStepMs?: number;
 }
 
 /**
@@ -170,6 +177,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
   const fail = q.get('fail');
   const latency = q.get('latency');
   const jobSteps = q.get('jobsteps');
+  const jobStepMs = q.get('jobstepms');
   const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
   const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
   const cpu = tokens.includes('hybrid') ? 'hybrid' : tokens.includes('uniform') ? 'uniform' : undefined;
@@ -185,6 +193,8 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...savedFromUrl(q.get('saved')),
     ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
+    ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
+    ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -199,6 +209,12 @@ function savedFromUrl(days: string | null): Partial<MockOptions> {
   };
 }
 const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'missing', 'outdated', 'ready', 'silent', 'foreign'];
+/** What the real engine says when these fail: the cause and the next step. */
+const FAIL_TEXT: Readonly<Record<string, string>> = {
+  intelStatus: 'Dyno could not read your IP lists: the agent did not answer. Check that Dyno is running, then try again.',
+  geoSummary: 'Dyno could not read the current connections: the system refused the list of sockets. Try again; if it keeps failing, restart Dyno.',
+  firewall: 'The firewall could not be read: the system tool did not answer in time. Try again; if it keeps failing, restart Dyno.',
+};
 
 const copy = <T>(v: T): T => structuredClone(v);
 
@@ -265,6 +281,7 @@ export class MockBackend implements DynoBackend {
   pickedFolders = 0;
   private readonly backupVariant: MockBackupVariant;
   private helperVariant: MockHelperVariant;
+  private toolInstalled = false;
   private backupCheckedAt: number;
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
@@ -293,9 +310,10 @@ export class MockBackend implements DynoBackend {
     this.counters = new MockCounters(this.profile.os);
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
+    this.intel.many = options.geoMany ?? false;
     this.jobSink = options.jobs;
     this.jobSteps = options.jobSteps ?? 1;
-    this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
+    this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
     this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, ...(options.widgets ?? {}) });
@@ -800,6 +818,10 @@ export class MockBackend implements DynoBackend {
     return this.reply('inventory', () => mockInventory(this.profile.os));
   }
 
+  toolOffer(): Promise<ToolOffer> {
+    return this.reply('toolOffer', () => mockToolOffer(this.helperVariant, this.profile.os, this.toolInstalled));
+  }
+
   helperStatus(): Promise<HelperStatus> {
     return this.reply('helperStatus', () => mockHelperStatus(this.helperVariant, this.profile.os));
   }
@@ -848,6 +870,27 @@ export class MockBackend implements DynoBackend {
       if (addresses.length > 64) throw err('badRequest', 'Resolve at most 64 addresses at a time.');
       return addresses.map((address) => ({ address, name: mockHostName(address) }));
     });
+  }
+
+  // -------------------------------------------------------------------------------------------- IP lists, the map, the firewall
+
+  /** The mock's lists (their state lives for the life of the mock). */
+  readonly intel = new MockIntel(() => this.now());
+
+  intelStatus(): Promise<IntelStatus> {
+    return this.reply('intelStatus', () => this.intel.status());
+  }
+
+  intelEdit(edit: IntelEdit): Promise<EditOutcome> {
+    return this.reply('intelEdit', () => this.intel.edit(edit));
+  }
+
+  geoSummary(): Promise<GeoSummary> {
+    return this.reply('geoSummary', () => this.intel.geo());
+  }
+
+  firewall(): Promise<FirewallView> {
+    return this.reply('firewall', () => this.intel.firewall());
   }
 
   // -------------------------------------------------------------------------------------------- alarms
@@ -1432,6 +1475,7 @@ export class MockBackend implements DynoBackend {
       if (problem) this.change(job, { state: 'failed', message: problem });
       else {
         if (job.status.kind === 'refresh-backup') this.backupCheckedAt = this.now();
+        if (job.status.kind === 'install-tool') this.toolInstalled = true;
         if (job.status.kind === 'helper') this.helperVariant = afterHelperAction((objectOf(job.spec)['helper'] as { action: HelperAction }).action);
         this.change(job, { state: 'done' });
       }
@@ -1477,6 +1521,8 @@ export class MockBackend implements DynoBackend {
       return { software: this.takeSaved('software') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list };
     }
     if ('helper' in o) return { helper: mockHelperStatus(this.helperVariant, this.profile.os) };
+    if ('updateList' in o || 'updateGeo' in o || 'rebuildIntel' in o) return { intel: this.intel.status() };
+    if ('installTool' in o) return { tool: { tool: 'smartmontools', installed: '7.5' } };
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
@@ -1558,7 +1604,7 @@ export class MockBackend implements DynoBackend {
       const gate = this.holds.get(name);
       const run = () => {
         try {
-          if (this.fail.has(name)) throw err('internal', `The mock was asked to fail “${name}”.`);
+          if (this.fail.has(name)) throw err('internal', FAIL_TEXT[name] ?? `The mock was asked to fail “${name}”.`);
           resolve(this.localize(copy(body())));
         } catch (e) {
           reject(e);
@@ -1584,7 +1630,7 @@ interface MockJob {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'helper';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1599,6 +1645,10 @@ const JOB_TITLES: Record<JobKindSlug, string> = {
   'app-usage': 'Reading app usage',
   'software-inventory': 'Listing installed software',
   helper: 'Setting up administrator readings',
+  'update-list': 'Updating a list',
+  'update-geo': 'Updating the location databases',
+  'rebuild-intel': 'Building the match index',
+  'install-tool': 'Installing the disk-health tool',
 };
 
 const SPEC_KIND: Record<string, JobKindSlug> = {
@@ -1611,6 +1661,10 @@ const SPEC_KIND: Record<string, JobKindSlug> = {
   appUsage: 'app-usage',
   softwareInventory: 'software-inventory',
   helper: 'helper',
+  updateList: 'update-list',
+  updateGeo: 'update-geo',
+  rebuildIntel: 'rebuild-intel',
+  installTool: 'install-tool',
 };
 
 /** The variant of a job spec as an object (a unit variant is a string on the wire). */
@@ -1664,6 +1718,14 @@ function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
     case 'helper': {
       const phase = HELPER_PHASES[Math.min(HELPER_PHASES.length - 1, Math.floor(part * HELPER_PHASES.length))] as { id: string; label: string };
       return { id: phase.id, label: phase.label, unit: 'items', done: 0, total: null };
+    }
+    case 'install-tool': {
+      const phases = [
+        { id: 'download', label: 'Downloading smartmontools', unit: 'bytes' as const, done: Math.floor(part * 1_508_408), total: 1_508_408 },
+        { id: 'check', label: 'Checking the download', unit: 'items' as const, done: 0, total: 1 },
+        { id: 'install', label: 'Installing it through the helper', unit: 'items' as const, done: 0, total: 1 },
+      ];
+      return phases[Math.min(2, Math.floor(part * 3))]!;
     }
     default:
       return { id: 'read', label: JOB_TITLES[kind], unit: 'items', done: 0, total: null };

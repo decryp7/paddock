@@ -21,6 +21,10 @@ use std::sync::Arc;
 
 type Answer = Result<Reply, AgentError>;
 
+fn bad_edit(e: dyno_core::intel_lists::EditError) -> AgentError {
+    bad(e.to_string())
+}
+
 fn bad(msg: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::BadRequest, msg)
 }
@@ -172,6 +176,57 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
         Request::ResolveHosts { addresses } => shared.network.resolve(&addresses).map(Reply::HostNames),
+        Request::Firewall => shared.firewall.view().map(|v| Reply::Firewall(Box::new(v))),
+        Request::IntelStatus => Ok(Reply::Intel(Box::new(shared.intel.status()))),
+        Request::IntelEdit { edit } => {
+            let outcome = shared.intel.edit(edit.clone()).map_err(bad_edit)?;
+            if crate::intel_centre::needs_rebuild(&edit, &outcome) {
+                // A rebuild already running covers a second edit shortly after (the job reads the lists when it starts).
+                let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::RebuildIntel);
+            }
+            if let dyno_core::intel_lists::IntelEdit::AddList {
+                source: dyno_core::intel_lists::NewSource::Url { .. },
+                ..
+            } = &edit
+            {
+                if let dyno_core::intel_lists::EditOutcome::Added { id } = &outcome {
+                    // A new subscription fetches at once (the user just asked for it).
+                    let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateList { id: id.clone() });
+                }
+            }
+            Ok(Reply::IntelEdited(Box::new(outcome)))
+        }
+        Request::GeoSummary => {
+            if shared.intel.wants_geo() {
+                let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateGeo);
+            }
+            let rows = shared.network.remote_rows(shared)?;
+            let mut summary = shared.intel.geo_summary(&rows, 0);
+            let home = shared.intel.home();
+            summary.home_country = home.country;
+            summary.home_source = home.source;
+            Ok(Reply::Geo(Box::new(summary)))
+        }
+        Request::RemoveTool => match crate::tool_own_copy::remove(&shared.dirs.tools()) {
+            Ok(()) => {
+                // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away).
+                // Off the request (ER-17): the answer does not wait for smartctl.
+                let shared = Arc::clone(shared);
+                std::thread::Builder::new()
+                    .name("dyno-wear-reread".into())
+                    .spawn(move || crate::hardware::slow_cycle(&shared))
+                    .map_err(|e| AgentError::new(ErrorCode::Internal, format!("The reading could not be refreshed ({}).", e.kind())))?;
+                Ok(Reply::Ok)
+            }
+            Err(e) => Err(AgentError::new(
+                ErrorCode::Internal,
+                format!(
+                    "The tool could not be removed ({}). Close anything using it and try again.",
+                    e.kind()
+                ),
+            )),
+        },
+        Request::ToolOffer => Ok(Reply::ToolOffer(Box::new(crate::tool_download::offer(shared)))),
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {

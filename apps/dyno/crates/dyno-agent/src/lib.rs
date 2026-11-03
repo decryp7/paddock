@@ -16,6 +16,9 @@ pub mod disk;
 pub mod extras;
 pub mod filehash;
 pub mod files;
+pub mod firewall;
+pub mod geo_db;
+pub mod geo_fetch;
 pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
@@ -23,7 +26,10 @@ pub mod helper_centre;
 pub mod helper_link;
 pub mod helper_os;
 pub mod helper_peer;
+pub mod home_ip;
 pub mod instance;
+pub mod intel_centre;
+pub mod intel_fetch;
 pub mod inventory;
 pub mod issues;
 pub mod jobs;
@@ -33,11 +39,15 @@ pub mod network;
 pub mod paths;
 pub mod popover;
 pub mod recorder;
+pub mod region;
 pub mod rollup;
 pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
+pub mod tool_download;
+pub mod tool_own_copy;
+pub mod tool_pins;
 pub mod unusual;
 pub mod wire;
 
@@ -196,9 +206,15 @@ impl Running {
                 .name("dyno-network".into())
                 .spawn(move || {
                     dyno_platform::priority::lower_current_thread();
+                    // The match index of the user's lists is built once at start, as a job.
+                    let _ = s.jobs.start(&s, dyno_core::jobs::JobSpec::RebuildIntel);
                     // Slow and cheap: only so that a new listener is noticed (and logged) when nobody has the page open.
                     while !s.stopped() {
                         s.network.tick(&s);
+                        // Monthly location databases and list subscriptions that are due (each is a job; a busy one is skipped).
+                        for spec in s.intel.due() {
+                            let _ = s.jobs.start(&s, spec);
+                        }
                         let mut waited = std::time::Duration::ZERO;
                         while waited < network::BACKGROUND_EVERY && !s.stopped() {
                             std::thread::sleep(std::time::Duration::from_millis(500));

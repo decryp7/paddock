@@ -36,6 +36,9 @@ use serde::{Deserialize, Serialize};
 ///   `liveness`, `limited`; `BenchOverview` gained `disk_test_enabled`; `MetricDelta` gained the spreads and `unsteady`;
 ///   `ErrorCode::NeedsConsent` is new;
 /// - helper (ADR 0027): `Request::HelperStatus`, `Reply::HelperStatus`, `JobSpec::Helper` and `JobOutput::Helper` are new;
+/// - network features (ADR 0031): `Request::{IntelStatus, IntelEdit, GeoSummary, Firewall, ToolOffer, RemoveTool}`,
+///   `Reply::{Intel, IntelEdited, Geo, Firewall, ToolOffer}`, `JobSpec::{UpdateList, UpdateGeo, RebuildIntel, InstallTool}` and
+///   `JobOutput::{Intel, Tool}` are new;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -518,6 +521,25 @@ pub enum Request {
     /// Whether the privileged helper is off, running, outdated and so on, with the audit entries this account may read
     /// (ADR 0027). A query; answers [`Reply::HelperStatus`]. Appended (needs the protocol bump the steward makes).
     HelperStatus,
+
+    // ---- IP lists and the connections map (ADR 0031 and its amendments) ----
+    /// The user's lists with their counts and state, the allow list, the network switches and the location databases'
+    /// state (answers [`Reply::Intel`]). Appended.
+    IntelStatus,
+    /// Changes the lists, the allow list or the switches (answers [`Reply::IntelEdited`]); the agent validates, saves and
+    /// starts the index rebuild job when matching changed. A "Remove duplicates" preview changes nothing. Appended.
+    IntelEdit {
+        /// The change.
+        edit: crate::intel_lists::IntelEdit,
+    },
+    /// The map's data for the connections now, aggregated before any page cap (answers [`Reply::Geo`]). Appended.
+    GeoSummary,
+    /// The firewall of this computer, read-only (answers [`Reply::Firewall`]); sources only the helper can read say so. Appended.
+    Firewall,
+    /// What Settings offers for the disk-health tool (answers [`Reply::ToolOffer`]). Appended (the steward's protocol bump covers it).
+    ToolOffer,
+    /// Removes Dyno's own copy of the disk-health tool (macOS); answers [`Reply::Ok`]. Appended.
+    RemoveTool,
 }
 
 /// Dyno's own cost.
@@ -810,6 +832,18 @@ pub enum Reply {
     PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
     /// The helper's state. Appended.
     HelperStatus(Box<crate::helper_wire::HelperStatus>),
+
+    // ---- IP lists and the connections map ----
+    /// The lists page.
+    Intel(Box<crate::intel_lists::IntelStatus>),
+    /// What an edit produced.
+    IntelEdited(Box<crate::intel_lists::EditOutcome>),
+    /// The map's data.
+    Geo(Box<crate::geo::GeoSummary>),
+    /// The firewall view.
+    Firewall(Box<crate::firewall::FirewallView>),
+    /// The disk-health tool as offered.
+    ToolOffer(Box<crate::tool_offer::ToolOffer>),
 }
 
 /// The inventory report that was written.
@@ -890,7 +924,12 @@ impl Reply {
             Reply::JobOutput(x) => v(x),
             Reply::WidgetLayout(x) => v(x),
             Reply::PopoverValues(x) => v(x),
+            Reply::ToolOffer(x) => v(x),
             Reply::HelperStatus(x) => v(x),
+            Reply::Intel(x) => v(x),
+            Reply::IntelEdited(x) => v(x),
+            Reply::Geo(x) => v(x),
+            Reply::Firewall(x) => v(x),
         }
     }
 }
@@ -1199,6 +1238,8 @@ mod tests {
             Request::PopoverValues {
                 placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
             },
+            Request::ToolOffer,
+            Request::RemoveTool,
             Request::DiskRings {
                 scan: 1,
                 node: Some(2),
@@ -1206,6 +1247,15 @@ mod tests {
                 min_share: 0.01,
                 max_nodes: 500,
             },
+            Request::IntelStatus,
+            Request::IntelEdit {
+                edit: crate::intel_lists::IntelEdit::SetEnabled {
+                    id: "list-1".into(),
+                    enabled: false,
+                },
+            },
+            Request::GeoSummary,
+            Request::Firewall,
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));
@@ -1223,6 +1273,19 @@ mod tests {
                 crate::widgets::DynoSurface::Popover,
             ))),
             Reply::PopoverValues(crate::widgets::JsonOnLink(vec![])),
+            Reply::Intel(Box::default()),
+            Reply::IntelEdited(Box::new(crate::intel_lists::EditOutcome::Done)),
+            Reply::Geo(Box::default()),
+            Reply::Firewall(Box::new(crate::firewall::FirewallView {
+                os: crate::helper::HelperHost::Macos,
+                sources: vec![crate::firewall::FirewallSource::new(crate::firewall::RuleSource::Pf)],
+            })),
+            Reply::ToolOffer(Box::new(crate::tool_offer::smartmontools_offer(
+                crate::helper::HelperHost::Linux,
+                None,
+                false,
+                None,
+            ))),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);

@@ -369,3 +369,31 @@ item (the macOS VM run: Dyno 1.08 % CPU with 32 items), and the saving of the re
 and tooltip did not change returns its last frame without rendering (`an_item_whose_inputs_did_not_change_is_not_rendered_again`
 counts the masks: none for unchanged items). The model alone, 32 graph items all changing every tick, took 0.21 ms per tick with
 the former renderers (the entry in ADR 0028).
+## Bad-IP check: building and querying the range index (`dyno_core::intel`)
+## IP-list check: building and querying the range index (`dyno_core::intel`)
+
+User lists of addresses, CIDR ranges and host names become one in-memory sorted-segment index (ADR 0031, amendment 1). A lookup
+is one binary search; nothing is queried from a database per connection. The test `intel::tests::bench_index`
+(`cargo test -p dyno-core --release --lib -- --ignored --nocapture bench_index`) builds the index from a deterministic
+pseudo-random spread of /16 to /32 IPv4 ranges (nested now and then) in one list, then times 200,000 lookups.
+
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; rustc 1.99.1; release build; load 15 to 22 from other agents
+- **Memory** is a count from the element sizes (`IntelIndex::approx_bytes`), not an allocator reading.
+
+| Entries | Build (single thread) | Segments | Memory (counted) | Lookup p50 | Lookup p99 |
+|---|---|---|---|---|---|
+| 100,000 (first design, one `u128` index) | 19 ms | 133,085 | about 39 MB | 208 ns | 875 ns |
+| 1,000,000 (first design) | 283 ms | 1,601,926 | about 327 MB | 1,166 ns | 1,708 ns |
+| 100,000 (compact) | 7 ms | 133,085 | about 6 MB | 125 ns | 458 ns |
+| 1,000,000 (compact) | 77 ms | 1,601,926 | about 50 MB | 750 ns | 1,250 ns |
+
+The compact index (rule 51, cheaper): one sorted array per address family (`u32` for IPv4, `u128` for IPv6), segment starts only
+(a gap is a segment with no members), a 4-byte member offset per segment, members as `(slot, list bitmap)`, each distinct range
+stored once with its list bitmap; notes only for the entries that have one; entry text is never resident (shown from the range
+on demand). It is 6.5 times smaller and builds 3.7 times faster than the first design, with faster lookups (smaller arrays fit
+the cache better). The build runs as a job: `IntelIndex::build_with_progress` reports the phase and count and stops when
+cancelled.
+
+Reading: 2,000 rows per look cost about 1.5 ms at the million-entry limit, so no extra thread is needed. The start-up rebuild
+is 77 ms at 1,000,000 entries, under the 200 ms line for persisting a packed index, so none is persisted. Transient peak while
+building is the lists themselves plus a hash map of the distinct ranges (not measured separately).

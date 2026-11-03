@@ -197,6 +197,7 @@ fn subject(spec: &JobSpec) -> Option<String> {
         JobSpec::FileHash {
             source: dyno_core::weblinks::HashSource::Path(p),
         } => Some(p.clone()),
+        JobSpec::UpdateList { id } => Some(id.clone()),
         _ => None,
     }
 }
@@ -279,10 +280,24 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
         JobSpec::AppUsage => tool_step(ctx, "usage", "Reading network and energy use", || crate::extras::app_usage(shared))
             .map(|r| JobOutput::AppUsage(Box::new(r))),
         JobSpec::Helper { action } => shared.helper.run(ctx, action).map(|s| JobOutput::Helper(Box::new(s))),
+        JobSpec::InstallTool { tool } => crate::tool_download::install(shared, ctx, tool).map(|s| JobOutput::Tool(Box::new(s))),
         JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || {
             crate::extras::software_for_page(shared)
         })
         .map(|r| JobOutput::Software(Box::new(r))),
+        JobSpec::UpdateList { id } => {
+            shared.intel.update_list(ctx, &id)?;
+            Ok(JobOutput::Intel(Box::new(shared.intel.status())))
+        }
+        JobSpec::UpdateGeo => {
+            shared.intel.update_geo(ctx)?;
+            shared.intel.find_home(ctx);
+            Ok(JobOutput::Intel(Box::new(shared.intel.status())))
+        }
+        JobSpec::RebuildIntel => {
+            shared.intel.rebuild(ctx)?;
+            Ok(JobOutput::Intel(Box::new(shared.intel.status())))
+        }
     }
 }
 

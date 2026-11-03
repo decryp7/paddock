@@ -357,4 +357,21 @@ describe('SettingsPage', () => {
     expect(input.closest('.row')!.classList.contains('off')).toBe(true);
     expect(saveButton()).toBeDefined();
   });
+
+  it('has a Network ▸ Online data section: the two switches on by default, the first-run note, the credit, and no Offline mode', async () => {
+    const { f, el, mock } = await make();
+    const section = el.querySelector<HTMLElement>('section#online-data')!;
+    expect(section.getAttribute('aria-label')).toContain('Online data');
+    await vi.waitFor(() => expect(section.querySelector('[data-testid="first-run-note"]')).not.toBeNull());
+    expect(section.querySelector('[data-testid="first-run-note"]')!.textContent).toContain('Cloudflare');
+    expect(section.querySelector('[data-testid="attribution"]')!.textContent).toContain('DB-IP');
+    const databases = section.querySelector<HTMLInputElement>('[data-testid="switch-databases"] input')!;
+    const own = section.querySelector<HTMLInputElement>('[data-testid="switch-own-location"] input')!;
+    expect([databases.checked, own.checked]).toEqual([true, true]);
+    expect(section.textContent).not.toMatch(/offline mode/i);
+    own.click();
+    await vi.waitFor(() => expect(mock.intel.status().geo.switches.ownLocation).toBe(false));
+    expect(mock.intel.status().geo.switches.locationDatabases).toBe(true);
+    f.detectChanges();
+  });
 });

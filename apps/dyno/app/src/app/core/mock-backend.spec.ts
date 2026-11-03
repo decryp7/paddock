@@ -22,6 +22,12 @@ const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('proc
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('reads jobstepms as a whole number of milliseconds and ignores anything else', () => {
+    expect(mockOptionsFromUrl('?jobstepms=600000').jobStepMs).toBe(600000);
+    expect(mockOptionsFromUrl('?jobstepms=0').jobStepMs).toBe(0);
+    for (const bad of ['-1', '2.5', 'slow', '']) expect(mockOptionsFromUrl(`?jobstepms=${bad}`)).not.toHaveProperty('jobStepMs');
+  });
+
   it('reads jobsteps as a whole number from 1 to 100 and ignores anything else', () => {
     expect(mockOptionsFromUrl('?jobsteps=6').jobSteps).toBe(6);
     for (const bad of ['0', '101', '2.5', 'many', '']) expect(mockOptionsFromUrl(`?jobsteps=${bad}`)).not.toHaveProperty('jobSteps');

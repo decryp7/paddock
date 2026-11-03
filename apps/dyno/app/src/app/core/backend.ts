@@ -71,6 +71,12 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  IntelStatus,
+  IntelEdit,
+  EditOutcome,
+  GeoSummary,
+  FirewallView,
+  ToolOffer,
 } from './api.types';
 import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
@@ -148,6 +154,8 @@ export interface DynoBackend {
 
   /** Whether the privileged helper is off, running, outdated and so on (it never blocks: an absent helper is a state). */
   helperStatus(): Promise<HelperStatus>;
+  /** What Settings offers for the disk-health tool (smartmontools): the pinned download, or why not. */
+  toolOffer(): Promise<ToolOffer>;
 
   // Performance counters (observe-only): browse, search, read now, and the readings kept with the app's events.
   counterObjects(): Promise<CounterObjectList>;
@@ -168,6 +176,15 @@ export interface DynoBackend {
 
   /** Reverse DNS through the OS resolver for up to 64 addresses; cached by the agent. Only on request, never in the background. */
   resolveHosts(addresses: string[]): Promise<HostName[]>;
+
+  /** The user's IP lists, the allow list, the network switches and the location databases (ADR 0031 and its amendments). */
+  intelStatus(): Promise<IntelStatus>;
+  /** Changes the lists, the allow list or the switches; a "Remove duplicates" preview changes nothing. */
+  intelEdit(edit: IntelEdit): Promise<EditOutcome>;
+  /** The connections map's data, aggregated before any page cap. */
+  geoSummary(): Promise<GeoSummary>;
+  /** The firewall of this computer (read-only). */
+  firewall(): Promise<FirewallView>;
 
   // Alarms (ISA-18.2 style): one open alarm per condition, acknowledge, shelve, mute, notes. Each change answers the changed alarms.
   alarms(filter: AlarmFilter): Promise<Alarm[]>;

@@ -259,6 +259,10 @@ pub struct Shared {
     pub reveal: Reveal,
     /// Open ports and connections (observe-only).
     pub network: crate::network::NetCentre,
+    /// The user's IP lists, the match index, the location databases and the user's own location.
+    pub intel: crate::intel_centre::IntelCentre,
+    /// The firewall of this computer (read-only).
+    pub firewall: crate::firewall::FirewallCentre,
     /// The performance counters browser (observe-only).
     pub counters: crate::counters::CounterCentre,
     /// The OS problem logs (observe-only).
@@ -400,6 +404,7 @@ impl Shared {
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
+        let own_tools = dirs.tools();
         let Platform {
             sensors,
             processes,
@@ -415,6 +420,8 @@ impl Shared {
             hardware,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
+            firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
+            intel: crate::intel_centre::IntelCentre::new(dirs.clone(), Arc::new(paddock_jobs::time::SystemClock)),
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
             core: Mutex::new(core),
@@ -437,7 +444,15 @@ impl Shared {
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
             network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
-            hardware: crate::hardware::HardwareCentre::new(hardware.signals, hardware.wear, hardware.battery),
+            hardware: crate::hardware::HardwareCentre::new(
+                hardware.signals,
+                if own_folder {
+                    dyno_platform::hardware::disk_wear_with_own_tools(&own_tools)
+                } else {
+                    hardware.wear
+                },
+                hardware.battery,
+            ),
             baselines: crate::baselines::BaselineCentre::new(),
             cache: saved_maps.clone(),
             disk: Arc::new(crate::disk::centre::DiskCentre::new(

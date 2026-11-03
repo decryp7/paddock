@@ -62,6 +62,11 @@ impl<T: HelperTransport> HelperCentre<T> {
         self
     }
 
+    /// The system the helper serves.
+    pub fn host(&self) -> HelperHost {
+        self.host
+    }
+
     /// The helper link, for the readers.
     pub fn link(&self) -> &HelperLink<T> {
         &self.link

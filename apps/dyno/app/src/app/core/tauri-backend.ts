@@ -74,6 +74,12 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  IntelStatus,
+  IntelEdit,
+  EditOutcome,
+  GeoSummary,
+  FirewallView,
+  ToolOffer,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -339,6 +345,10 @@ export class TauriBackend implements DynoBackend {
     return this.request('helperStatus');
   }
 
+  toolOffer(): Promise<ToolOffer> {
+    return this.request('toolOffer');
+  }
+
   counterObjects(): Promise<CounterObjectList> {
     return this.request('counterObjects');
   }
@@ -381,6 +391,22 @@ export class TauriBackend implements DynoBackend {
 
   resolveHosts(addresses: string[]): Promise<HostName[]> {
     return this.request({ resolveHosts: { addresses } });
+  }
+
+  intelStatus(): Promise<IntelStatus> {
+    return this.request('intelStatus');
+  }
+
+  intelEdit(edit: IntelEdit): Promise<EditOutcome> {
+    return this.request({ intelEdit: { edit } });
+  }
+
+  geoSummary(): Promise<GeoSummary> {
+    return this.request('geoSummary');
+  }
+
+  firewall(): Promise<FirewallView> {
+    return this.request('firewall');
   }
 
   // ---------------------------------------------------------------------------------------------------- alarms

@@ -121,6 +121,14 @@ impl<T: HelperTransport> HelperLink<T> {
         status
     }
 
+    /// The tools the helper holds for this account (from its `Info` answer); empty when it does not answer.
+    pub fn tools(&self) -> Vec<ToolStatus> {
+        match self.call("info", HelperRequest::Info) {
+            Ok(HelperReply::About(_, view)) => view.tools,
+            _ => Vec::new(),
+        }
+    }
+
     /// The firewall as the helper reads it (`pf` or `nft`), reduced to what this account may have.
     pub fn firewall(&self) -> Result<FirewallSource, PlatformError> {
         match self.call("firewall", HelperRequest::Firewall).map_err(to_platform)? {

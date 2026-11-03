@@ -30,8 +30,9 @@ test.describe('administrator readings', () => {
     });
   }
 
-  test('turning on runs as a job and ends with the helper On; turning off returns it to Off', async ({ page }) => {
-    await openSettings(page, '&helper=off&jobsteps=6');
+  test('turning on shows the job running while it is held at a step', async ({ page }) => {
+    // The job is held (its steps are 10 minutes apart), so the running state is not a moment the assertion can miss under load.
+    await openSettings(page, '&helper=off&jobsteps=6&jobstepms=600000');
     await card(page).getByRole('button', { name: 'Turn on administrator readings' }).click();
     await expect(card(page).locator('pd-status-pill')).toContainText('Turning on');
     await expect(card(page).locator('pd-status-pill')).toContainText('On', { timeout: 20_000 });
