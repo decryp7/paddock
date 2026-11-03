@@ -111,8 +111,12 @@ const SHELL_PLUGIN: &str = "paddock-shell";
 /// without it still compiles and runs the ordinary tests).
 const CAPABILITY: &str = "../../apps/shell-demo/src-tauri/capabilities/dialog.json";
 
+/// Relative to this crate's folder; `PADDOCK_PROBE_CRATE_DIR` names another copy of it (a run on a machine that did not
+/// build the probe, with `../paddock-shell/permissions` and the app's capability laid out the same way beside it).
 fn manifest_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
+    let crate_dir = std::env::var("PADDOCK_PROBE_CRATE_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+    PathBuf::from(crate_dir).join(relative)
 }
 
 /// Every permission file of the shell plugin: Tauri's per-command ones and the generated sets.
@@ -231,6 +235,56 @@ fn dist() -> Result<PathBuf, String> {
     }
 }
 
+/// How the shown window's height is judged, per kind (ADR 0043 §1).
+#[derive(Clone, Copy)]
+enum Expect {
+    /// `Height { Always }`: the viewport is the measured content, at least the dialog floor.
+    Fitted,
+    /// `Height { Never }`: opens at the content, at least the viewer's preferred height.
+    Viewer,
+    /// `Manual`: the declared size; only that nothing is cut off and the window is at least the floor.
+    Tool,
+}
+
+struct Spec {
+    entry: Entry,
+    expect: Expect,
+}
+
+/// The dialog the probe opens: `PADDOCK_PROBE_DIALOG` is `rename` (a form, the default), `confirm-reset` (a decision),
+/// `about` (a viewer) or `settings` (a tool), each a dialog of the built shell-demo.
+fn spec() -> Spec {
+    let which = std::env::var("PADDOCK_PROBE_DIALOG").unwrap_or_else(|_| "rename".into());
+    match which.as_str() {
+        "confirm-reset" => Spec {
+            entry: Entry::new("sd.confirm-reset", Shape::Decision),
+            expect: Expect::Fitted,
+        },
+        "about" => Spec {
+            entry: Entry {
+                width: Some(Width::Wide),
+                height: Some(560),
+                ..Entry::new("sd.about", Shape::Viewer)
+            },
+            expect: Expect::Viewer,
+        },
+        "settings" => Spec {
+            entry: Entry {
+                height: Some(620),
+                ..Entry::new("pd.settings", Shape::Tool)
+            },
+            expect: Expect::Tool,
+        },
+        _ => Spec {
+            entry: Entry {
+                width: Some(Width::Narrow),
+                ..Entry::new("sd.rename", Shape::Form(paddock_dialogs::Modality::Modal))
+            },
+            expect: Expect::Fitted,
+        },
+    }
+}
+
 /// The dialogs' own log lines (the fit log of ADR 0043 §3) on stderr, so a run that ends "no report" shows why.
 struct StderrLog;
 
@@ -337,12 +391,7 @@ fn main() {
         .on_window_event(paddock_dialogs::tauri::on_window_event)
         .build(context)
         .unwrap_or_else(|e| die("the real-runtime app does not build", e));
-    let rename = Entry::new("sd.rename", Shape::Form(paddock_dialogs::Modality::Modal));
-    let rename = Entry {
-        width: Some(Width::Narrow),
-        ..rename
-    };
-    let contracts = Contracts::from_entries(&[rename], &[])
+    let contracts = Contracts::from_entries(&[spec().entry], &[])
         .unwrap_or_else(|e| die("the dialog contract is invalid", e));
     app.manage(Dialogs::new(std::sync::Arc::new(contracts)).with_show_deadline(DEADLINE));
     app.manage(WindowHooks::<Wry>::new());
@@ -405,6 +454,14 @@ fn main() {
                 }
                 Err(_) => 1,
             };
+            // A run that takes screenshots names a file; the window stays up until it exists (or 30 s pass).
+            if let Ok(file) = std::env::var("PADDOCK_PROBE_HOLD") {
+                let end = std::time::Instant::now() + Duration::from_secs(30);
+                while !std::path::Path::new(&file).exists() && std::time::Instant::now() < end {
+                    std::thread::yield_now();
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
             let _ = done_tx.send(());
             handle.exit(code);
         }
@@ -413,9 +470,9 @@ fn main() {
     app.run(move |app, event| {
         if let tauri::RunEvent::Ready = event {
             let request = DialogRequest {
-                dialog_id: "sd.rename".into(),
+                dialog_id: spec().entry.id.into(),
                 instance: None,
-                title: "Rename".into(),
+                title: "Probe".into(),
                 input: Some(serde_json::json!({ "current": "Shell demo" })),
                 remembered: None,
                 theme: Some(paddock_dialogs::Theme::Dark),
@@ -460,9 +517,19 @@ fn check(
     };
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole
     // footer is inside it.
-    // A frame shorter than the dialog floor (`DIALOG_MIN`) is shown at the floor: the content never needs more.
-    let expected = measured.max(paddock_dialogs::contract::DIALOG_MIN.height);
-    if (r.inner - expected).abs() >= 1.0 {
+    // ADR 0043: decision and form max(200, content), a viewer max(560, content); where the work area cannot hold that,
+    // the window is clamped to it (the most a screen allows, nothing cut off).
+    let floor = match spec().expect {
+        Expect::Viewer => paddock_dialogs::contract::VIEWER_MIN.height,
+        _ => paddock_dialogs::contract::DIALOG_MIN.height,
+    };
+    let expected = measured.max(floor);
+    let clamped = fits_work_area_exactly(app, &label);
+    let wrong = match spec().expect {
+        Expect::Tool => r.inner < floor,
+        _ => (r.inner - expected).abs() >= 1.0 && !(r.inner < expected && clamped),
+    };
+    if wrong {
         failures.push(format!(
             "the viewport is {} px for a measured frame of {measured} px (floor, then a viewport delta)",
             r.inner
@@ -485,8 +552,49 @@ fn check(
             "show_probe: ok on the {} report ({r:?}, measured {measured} px)",
             r.phase
         );
+        eprintln!("show_probe: window {}", geometry(app, &label));
     }
     failures
+}
+
+/// Whether the window fills the work area's height to within the frame's invisible borders: the sign that a size too tall for
+/// the screen was clamped to it and not given up short of it.
+fn fits_work_area_exactly(app: &tauri::AppHandle<Wry>, label: &str) -> bool {
+    let Some(w) = app.get_webview_window(label) else {
+        return false;
+    };
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let outer = f64::from(w.outer_size().unwrap_or_default().height) / scale;
+    let work = w
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map_or(0.0, |m| f64::from(m.work_area().size.height) / scale);
+    outer <= work + 16.0 && work - outer <= 16.0
+}
+
+/// The window as the OS has it (physical px, and the logical size from its scale), for the run record.
+fn geometry(app: &tauri::AppHandle<Wry>, label: &str) -> String {
+    let Some(w) = app.get_webview_window(label) else {
+        return "gone".into();
+    };
+    let scale = w.scale_factor().unwrap_or(0.0);
+    let inner = w.inner_size().unwrap_or_default();
+    let outer = w.outer_size().unwrap_or_default();
+    let at = w.outer_position().unwrap_or_default();
+    let work = w.current_monitor().ok().flatten().map(|m| *m.work_area());
+    format!(
+        "scale {scale} inner {}x{} physical = {:.1}x{:.1} logical, outer {}x{} at {},{}, work area {:?}",
+        inner.width,
+        inner.height,
+        f64::from(inner.width) / scale,
+        f64::from(inner.height) / scale,
+        outer.width,
+        outer.height,
+        at.x,
+        at.y,
+        work.map(|a| (a.position.x, a.position.y, a.size.width, a.size.height)),
+    )
 }
 
 /// The exit code for the failures found.
