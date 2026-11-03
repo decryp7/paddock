@@ -110,6 +110,8 @@ export class WidgetBoard {
   protected readonly readings = inject(MetricReadings).follow(() =>
     (this.view()?.layout.placements ?? []).map((p) => ({ key: p.id, query: { metric: p.widget.metric, thresholds: p.widget.thresholds } })),
   );
+  /** The history has been read once. A range switch empties it again, but the panel stays mounted: its own loading state shows (the control being used stays under the pointer and keeps its focus). */
+  private readonly historySeen = signal(false);
   private readonly placements = computed(() => this.view()?.layout.placements ?? []);
   private readonly feedEmpty = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), FEED_LIMIT).length === 0);
   private readonly snapshot = computed<DashboardSnapshot>(() => ({
@@ -122,7 +124,7 @@ export class WidgetBoard {
     eventsLoaded: this.activity.loaded() || this.alerts.loaded(),
     eventsError: this.activity.error() ?? this.alerts.error(),
     eventsEmpty: this.feedEmpty(),
-    historyLoaded: this.history.history() !== null,
+    historyLoaded: this.history.history() !== null || this.historySeen(),
     historyError: this.history.error(),
   }));
   /** What each frame shows: the placement and its reading, or the state of the request it waits on. */
@@ -153,6 +155,9 @@ export class WidgetBoard {
     });
     effect(() => {
       if (history()) untracked(() => void this.history.ensure());
+    });
+    effect(() => {
+      if (this.history.history() !== null) this.historySeen.set(true);
     });
     // Counters are read only while a widget shows one; the engine reads them at most every two seconds.
     let release: (() => void) | null = null;
