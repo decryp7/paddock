@@ -377,6 +377,36 @@ test.describe('counters', () => {
   });
 });
 
+test.describe('notifications', () => {
+  test('selected messages and then all of them are deleted, after a confirmation for all', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto(url('/network'));
+    const socket = page.getByRole('row', { name: /142.250.74.46/ });
+    await socket.focus();
+    await expect(socket).toBeFocused();
+    await pressMod(page, 'Mod+c');
+    await expect(page.getByRole('button', { name: '1 unread' })).toBeVisible();
+    await page.evaluate(() => {
+      location.hash = '#/why-slow';
+    });
+    await page.getByRole('button', { name: 'Copy as text' }).click();
+    await page.getByRole('button', { name: /notifications/i }).first().click();
+    const selects = page.locator('[data-testid^=notice-select-] input');
+    await expect(selects).toHaveCount(2);
+    await selects.first().check();
+    await page.getByTestId('notices-delete-selected').click();
+    await expect(selects).toHaveCount(1);
+    await page.getByTestId('notices-delete-all').click();
+    const decision = page.getByRole('alertdialog', { name: 'Delete all notifications?' });
+    await expect(decision).toBeVisible();
+    await decision.getByRole('button', { name: 'Delete all' }).click();
+    await expect(page.getByRole('button', { name: /unread/ })).toHaveCount(0);
+    await page.getByRole('button', { name: /notifications/i }).first().click();
+    await expect(page.getByTestId('notices-empty')).toBeVisible();
+    await expect(selects).toHaveCount(0);
+  });
+});
+
 test.describe('network', () => {
   test('one dense table: grouped by program with collapsible group rows, loopback hidden, Look up IP only for public peers', async ({ page }) => {
     await page.goto(url('/network'));
@@ -391,6 +421,19 @@ test.describe('network', () => {
     const flat = page.getByRole('grid', { name: 'Connections' });
     await expect(flat.getByRole('row', { name: /10\.0\.0\.8/ }).getByRole('button', { name: 'Look up IP' })).toBeDisabled();
     await expect(flat.getByRole('row', { name: /142\.250\.74\.46/ }).getByRole('button', { name: 'Look up IP' })).toBeEnabled();
+  });
+
+  test('Collapse all folds every program and Expand all opens them again', async ({ page }) => {
+    await page.goto(url('/network'));
+    const grid = page.getByRole('treegrid', { name: 'Connections' });
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse all programs' }).click();
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toHaveCount(0);
+    await expect(grid.locator('[role=row][aria-expanded=true]')).toHaveCount(0);
+    await expect(grid.locator('[role=row][aria-expanded=false]').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Expand all programs' }).click();
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toBeVisible();
+    await expect(grid.locator('[role=row][aria-expanded=false]')).toHaveCount(0);
   });
 
   test('listening tab marks exposed listeners first; loopback shows on request; Enter opens the detail panel', async ({ page }) => {

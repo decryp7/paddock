@@ -107,6 +107,20 @@ describe('dy-extras-page', () => {
     expect(rowsOf(el, 'What changed').length).toBeLessThan(before);
   });
 
+  it('What changed: Collapse all folds every day to its heading and Expand all opens them', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const days = groupsOf(el, 'What changed').length;
+    const lines = rowsOf(el, 'What changed').length;
+    el.querySelector<HTMLButtonElement>('[data-testid=tree-collapse-all]')!.click();
+    await settle(f);
+    expect(groupsOf(el, 'What changed')).toHaveLength(days);
+    expect(rowsOf(el, 'What changed')).toHaveLength(0);
+    el.querySelector<HTMLButtonElement>('[data-testid=tree-expand-all]')!.click();
+    await settle(f);
+    expect(rowsOf(el, 'What changed')).toHaveLength(lines);
+  });
+
   it('What changed: an empty period is a designed state', async () => {
     const { f, el, mock } = render();
     vi.spyOn(mock, 'changes').mockResolvedValue({ from: 0, to: NOW, changes: [], watchingSince: null });
@@ -309,6 +323,21 @@ describe('dy-extras-page', () => {
     await store.search();
     await settle(f);
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Choose a folder with a full path.');
+  });
+
+  it('Files: Collapse all and Expand all fold every group', async () => {
+    const { f, el } = render('files');
+    await settle(f);
+    btn(el, 'Choose a folder').click();
+    await settle(f);
+    const groups = groupsOf(el, 'Large and duplicate files').length;
+    el.querySelector<HTMLButtonElement>('[data-testid=tree-collapse-all]')!.click();
+    await settle(f);
+    expect(groupsOf(el, 'Large and duplicate files')).toHaveLength(groups);
+    expect(rowsOf(el, 'Large and duplicate files')).toHaveLength(0);
+    el.querySelector<HTMLButtonElement>('[data-testid=tree-expand-all]')!.click();
+    await settle(f);
+    expect(rowsOf(el, 'Large and duplicate files')).toHaveLength(13);
   });
 
   it('Files: shows the search as a job with its count and Cancel, then the stopped note with Search again', async () => {
