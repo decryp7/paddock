@@ -323,7 +323,8 @@ mod tests {
                 "readThreads": "auto",
                 "finderFiles": 500_000,
                 "finderDepth": 48,
-                "finderHashGib": 64
+                "finderHashGib": 64,
+                "savedMaps": {"enabled": true, "maxMb": 1024, "refreshOnOpen": "off"}
             })
         );
         assert_eq!(j["jobs"], serde_json::json!({"workers": "auto"}));

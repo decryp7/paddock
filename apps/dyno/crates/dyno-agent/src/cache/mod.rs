@@ -37,6 +37,15 @@ pub struct CacheSettings {
     pub max_bytes: u64,
 }
 
+impl From<dyno_core::disk::settings::SavedMapsSettings> for CacheSettings {
+    fn from(s: dyno_core::disk::settings::SavedMapsSettings) -> CacheSettings {
+        CacheSettings {
+            enabled: s.enabled,
+            max_bytes: s.max_bytes(),
+        }
+    }
+}
+
 impl Default for CacheSettings {
     fn default() -> Self {
         CacheSettings {
@@ -186,9 +195,6 @@ impl Cache {
     /// Opens the file at `path` and starts the writer thread. A busy file or an unwritable folder means no cache for this run,
     /// said once in `note`; the disk map then works as it did without one.
     pub fn start(path: PathBuf, settings: CacheSettings, deps: CacheDeps) -> Started {
-        if !settings.enabled {
-            return Started { cache: None, note: None };
-        }
         let opened = match CacheDb::open(&path) {
             Ok(o) => o,
             Err(e) => {

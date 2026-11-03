@@ -559,6 +559,50 @@ describe('DiskMapStore', () => {
       expect(store.refreshing()?.of).toBe(old.scan);
     });
 
+    it('refreshes a saved map at the first look only when the setting says so and the map is old enough', async () => {
+      const refreshing = async (when: 'off' | 'olderThanDay' | 'olderThanWeek', ageDays: number) => {
+        TestBed.resetTestingModule();
+        const { store, mock } = setup({ savedMaps: [{ target: { volume: { id: '/' } }, ageMs: ageDays * DAY, changedBytes: null }] });
+        const settings = await mock.settings();
+        await mock.saveSettings({ ...settings, disk: { ...settings.disk, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: when } } });
+        await store.loadVolumes();
+        await store.restore();
+        const started = await store.refreshOnOpen(NOW);
+        return { started, refreshing: store.refreshing() !== null };
+      };
+      expect(await refreshing('off', 30)).toEqual({ started: false, refreshing: false });
+      expect(await refreshing('olderThanDay', 0.5)).toEqual({ started: false, refreshing: false });
+      expect(await refreshing('olderThanDay', 2)).toEqual({ started: true, refreshing: true });
+      expect(await refreshing('olderThanWeek', 3)).toEqual({ started: false, refreshing: false });
+      expect(await refreshing('olderThanWeek', 8)).toEqual({ started: true, refreshing: true });
+    });
+
+    it('looks once: a second visit to the page does not refresh again, and a map of this run is never refreshed on open', async () => {
+      const { store, mock } = setup(saved());
+      const settings = await mock.settings();
+      await mock.saveSettings({ ...settings, disk: { ...settings.disk, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'olderThanDay' } } });
+      await store.loadVolumes();
+      await store.restore();
+      expect(await store.refreshOnOpen(NOW)).toBe(true);
+      await store.cancel();
+      expect(await store.refreshOnOpen(NOW)).toBe(false);
+      TestBed.resetTestingModule();
+      const fresh = setup().store;
+      await fresh.loadVolumes();
+      await fresh.scan({ volume: { id: '/' } });
+      await advance();
+      expect(await fresh.refreshOnOpen(NOW)).toBe(false);
+    });
+
+    it('refreshes nothing when the setting cannot be read', async () => {
+      const { store, mock } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      vi.spyOn(mock, 'settings').mockRejectedValueOnce({ code: 'internal', message: 'No.' });
+      expect(await store.refreshOnOpen(NOW)).toBe(false);
+      expect(store.refreshing()).toBeNull();
+    });
+
     it('forgets the saved map: the page is cleared and the engine no longer lists it', async () => {
       const { store, mock } = setup(saved());
       await store.loadVolumes();

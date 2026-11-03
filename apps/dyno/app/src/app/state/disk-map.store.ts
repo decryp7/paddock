@@ -15,6 +15,7 @@ export const FOLD_BELOW = 0.005;
 export const RINGS = 4;
 export const RING_MIN_SHARE = 0.005;
 export const RING_MAX_NODES = 1500;
+const DAY = 86_400_000;
 
 interface DiskMapState {
   volumes: Volume[];
@@ -104,6 +105,7 @@ export const DiskMapStore = signalStore(
   })),
   withMethods((store, backend = inject(BACKEND)) => {
     let token = 0;
+    let opened = false;
     const keep = (status: DiskScanStatus) =>
       patchState(store, (s) => ({ kept: [...s.kept.filter((k) => k.scan !== status.scan), status].sort((a, b) => a.scan - b.scan) }));
     /**
@@ -257,6 +259,25 @@ export const DiskMapStore = signalStore(
           // Nothing kept is shown as "not scanned"; a scan can still be started.
         } finally {
           patchState(store, { restored: true });
+        }
+      },
+      /**
+       * The opt-in refresh of a saved map (`disk.savedMaps.refreshOnOpen`): at the first look at the page, when the map on screen
+       * was read back from the cache and is older than the setting says. Never on a timer, never in the background. Once per run
+       * of the page; returns whether a Rescan was started.
+       */
+      async refreshOnOpen(now: number): Promise<boolean> {
+        if (opened) return false;
+        opened = true;
+        const s = store.status();
+        if (!s || typeof s.origin === 'string' || s.scannedAt === null || store.refreshing()) return false;
+        try {
+          const when = (await backend.settings()).disk?.savedMaps?.refreshOnOpen ?? 'off';
+          const limit = when === 'olderThanDay' ? DAY : when === 'olderThanWeek' ? 7 * DAY : null;
+          return limit !== null && now - s.scannedAt > limit ? await this.rescan() : false;
+        } catch {
+          // The setting could not be read: nothing is refreshed by itself.
+          return false;
         }
       },
       /** Makes a volume the one the page is about, showing its kept scan when there is one. */

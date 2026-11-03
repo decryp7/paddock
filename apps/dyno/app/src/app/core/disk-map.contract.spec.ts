@@ -103,7 +103,7 @@ const rings: DiskRings = {
   capped: false,
 };
 
-const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 };
+const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' } };
 
 const expected = {
   requests: {

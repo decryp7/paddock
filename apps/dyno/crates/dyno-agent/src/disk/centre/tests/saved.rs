@@ -522,3 +522,48 @@ fn a_damaged_saved_map_answers_scan_again_and_is_dropped_alone() {
     assert_eq!(cache.list().len(), 15);
     assert_eq!(r.centre.scans().len(), 15);
 }
+
+#[test]
+fn switching_the_setting_off_forgets_every_saved_map_and_on_again_saves_new_ones() {
+    use dyno_core::disk::settings::SavedMapsSettings;
+    let fs = Arc::new(FakeFs::new());
+    tree(&fs, &fs.root());
+    let d = tempfile::tempdir().unwrap();
+    let first = scanned_and_saved(&fs, d.path(), None);
+    let (r, cache) = restarted(first, &fs, d.path(), None);
+    assert_eq!(r.centre.scans().len(), 1);
+    r.centre.apply_saved_maps(SavedMapsSettings {
+        enabled: false,
+        ..SavedMapsSettings::default()
+    });
+    assert!(r.centre.scans().is_empty(), "the saved map left the list");
+    assert!(cache.list().is_empty(), "and the cache");
+    let s = r.centre.start(volume_target()).unwrap();
+    wait_final(&r, s.scan);
+    cache.flush();
+    assert!(cache.list().is_empty(), "nothing is saved while it is off");
+    r.centre.apply_saved_maps(SavedMapsSettings::default());
+    let s = r.centre.start(volume_target()).unwrap();
+    wait_final(&r, s.scan);
+    cache.flush();
+    assert_eq!(cache.list().len(), 1);
+}
+
+#[test]
+fn the_size_limit_setting_reaches_the_cache() {
+    use dyno_core::disk::settings::SavedMapsSettings;
+    let fs = Arc::new(FakeFs::new());
+    tree(&fs, &fs.root());
+    let d = tempfile::tempdir().unwrap();
+    let r = rig(fs.clone(), vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)]);
+    let cache = attach(&r, d.path(), Arc::new(Roomy), CacheSettings::default());
+    // The smallest limit the setting allows is 64 MB: a small tree fits it, the limit is the setting's, not the default's.
+    r.centre.apply_saved_maps(SavedMapsSettings {
+        max_mb: 0,
+        ..SavedMapsSettings::default()
+    });
+    let s = r.centre.start(volume_target()).unwrap();
+    wait_final(&r, s.scan);
+    cache.flush();
+    assert_eq!(cache.list().len(), 1);
+}

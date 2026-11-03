@@ -319,7 +319,7 @@ impl Shared {
         // folder cannot be written or another process holds the file; the disk map then works without it.
         let started = crate::cache::Cache::start(
             dirs.cache_db(),
-            crate::cache::CacheSettings::default(),
+            crate::cache::CacheSettings::from(settings.disk.saved_maps),
             crate::cache::CacheDeps {
                 clock: Arc::new(crate::disk::centre::SystemClock::default()),
                 free: Arc::new(crate::cache::db::OsFreeSpace),
@@ -327,6 +327,7 @@ impl Shared {
         );
         notes.extend(started.note);
         let saved_maps = started.cache;
+        let saved_maps_settings = settings.disk.saved_maps;
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let zone = platform.zone.clone();
@@ -416,6 +417,7 @@ impl Shared {
         });
         shared.disk.set_read_threads(read_threads);
         shared.disk.attach_cache(saved_maps);
+        shared.disk.apply_saved_maps(saved_maps_settings);
         Ok((shared, sensors, processes))
     }
 

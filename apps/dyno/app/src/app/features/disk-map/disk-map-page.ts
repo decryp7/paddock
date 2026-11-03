@@ -718,6 +718,7 @@ export class DiskMapPage implements OnInit {
   protected async load(): Promise<void> {
     await this.store.loadVolumes();
     await this.store.restore();
+    await this.store.refreshOnOpen(this.now());
   }
 
   protected pickerFallback(): string {

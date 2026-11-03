@@ -458,6 +458,21 @@ export interface DiskSettings {
   finderDepth?: number;
   /** The file finder stops comparing contents after reading this many GiB (1 to 4,096). */
   finderHashGib?: number;
+  /** The disk maps kept for the next time (ADR 0029). */
+  savedMaps?: SavedMapsSettings;
+}
+
+/** When a saved map is refreshed by itself: never (the default), or at the first look at the page when it is older than this. */
+export type RefreshOnOpen = 'off' | 'olderThanDay' | 'olderThanWeek';
+
+/** `Settings.disk.savedMaps`: every key optional. */
+export interface SavedMapsSettings {
+  /** Whether finished scans are kept for the next time; switching it off forgets every saved map. */
+  enabled?: boolean;
+  /** The most all saved maps may take on disk, in MB (64 to 8,192). */
+  maxMb?: number;
+  /** Whether a saved map is refreshed at the first look at the page. */
+  refreshOnOpen?: RefreshOnOpen;
 }
 
 /** A thread count setting: the engine decides (`'auto'`) or exactly this many (the engine holds it to the setting's own range). */

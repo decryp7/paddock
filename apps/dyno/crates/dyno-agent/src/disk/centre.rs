@@ -410,6 +410,8 @@ pub struct DiskCentre {
     keeper: Arc<Keeper>,
     /// A counter that orders the use of kept scans.
     tick: AtomicU64,
+    /// The Setting `disk.savedMaps.enabled` as last applied.
+    saved_on: std::sync::atomic::AtomicBool,
 }
 
 fn err(code: ErrorCode, m: impl Into<String>) -> AgentError {
@@ -448,6 +450,7 @@ impl DiskCentre {
             live: Mutex::new(HashMap::new()),
             keeper,
             tick: AtomicU64::new(0),
+            saved_on: std::sync::atomic::AtomicBool::new(true),
         }
     }
 
@@ -1131,6 +1134,19 @@ impl DiskCentre {
         }
         scans.retain(|e| e.meta.is_some());
         log::info!("All saved disk maps forgotten");
+    }
+
+    /// Follows the Settings `disk.savedMaps`: the cache's cap and switch. Switching saving off forgets every saved map (the cache
+    /// deletes its files; maps read back from it leave the list, scans of this run stay).
+    pub fn apply_saved_maps(&self, s: dyno_core::disk::settings::SavedMapsSettings) {
+        let s = s.clamped();
+        let was_on = self.saved_on.swap(s.enabled, Ordering::SeqCst);
+        if was_on && !s.enabled {
+            self.forget_all_saved();
+        }
+        if let Some(cache) = self.keeper.cache() {
+            cache.set_settings(crate::cache::CacheSettings::from(s));
+        }
     }
 
     /// The saved-maps cache, when there is one.
