@@ -14,3 +14,13 @@ Dyno 1.0.0 (2026-11-03) to reproduce the visible `dyno-agent` console window. VM
 4. Poll the log for its last line instead of sleeping a fixed time. Quote nothing on the command line: copy a `.ps1` file (`powershell -File`) rather than `-Command`.
 
 Wait on conditions, not delays. Revert to `clean-baseline` when done unless the auto-logon state is wanted: the snapshot `gui-session` keeps it.
+
+## Driving the GUI (what worked for Dyno, 2026-11-03)
+
+- Auto-logon is reset to `AutoAdminLogon=0` by Windows after a restart that ends a manual session; set it again before each restart (the `gui-session` snapshot has it on).
+- WebView2 content is not in the UI Automation tree (Chromium builds it only on request), so click by pixel: a scheduled task `powershell -WindowStyle Hidden ... click.ps1 -X -Y`
+  moves the cursor and sends `mouse_event`, then saves a screenshot; read the screenshot to find the next target. Always `-WindowStyle Hidden` (a console window covers the screen).
+- A promoted tray icon is on the taskbar: set `IsPromoted=1` (DWORD) under `HKCU:\Control Panel\NotifyIconSettings\<id>` whose `ExecutablePath` is the app, then screenshot.
+- A real restart: `shutdown /r /t 3` as `paddock-admin`; poll `query user` for the `console` session; list `Run`, processes and windows (`scripts/vm-smoke/win-gui-probe.ps1`).
+- `cargo xwin` links a Tauri app only with a `mt.exe` on `PATH` (symlink `llvm-mt` from Homebrew's llvm).
+- Revert to your own snapshot afterwards; never touch another VM.

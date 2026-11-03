@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
+
 ### Fixed
 
-- Windows: `dyno-agent` is a GUI-subsystem program, so the per-user Run entry (`dyno-agent run` at logon) no longer opens a command prompt window that stays open for as long as the agent runs (reproduced in the Windows 11 VM: a Windows Terminal window titled `dyno-agent.exe`). Run from a terminal, `dyno-agent --version` and `service install` still print (it attaches to the parent console); the `dyno` command stays a console program.
+- Windows: at logon only the agent started (in a console), with no tray icon and no window. Cause (reproduced in the Windows 11 VM with a restart): the agent's service entry and the app's own autostart entry were both the Run value `Dyno`, and the app's repair, five seconds after every start, replaced `Dyno = dyno-app.exe --hidden` with `Dyno = dyno-agent.exe run`. Now the app's own value is the only logon entry (it starts the agent itself, hidden); the agent's own entry, when someone installs it by hand, is `Dyno agent`; the app's start no longer repairs a Windows entry; and the first start after an update removes the stale `Dyno = dyno-agent.exe run` and, when Start at login is on, registers the app's entry again (when off, removing it is all).
+- Windows: `dyno-agent` is a GUI-subsystem program, so the per-user Run entry (`dyno-agent run` at logon) no longer opens a command prompt window that stays open for as long as the agent runs (reproduced in the Windows 11 VM: a Windows Terminal window titled `dyno-agent.exe`). Run from a terminal, `dyno-agent --version` and `service install` still print (it attaches to the parent console); a prompt does not wait for a GUI program, so for `--version`, `status`, `stop`, `once` and `service ...` in a terminal use `dyno agent <command>` (the console `dyno` program runs the agent's commands and returns their exit code). The release workflow reads the built `dyno-agent.exe` (PE Subsystem 2) and `dyno.exe` (3).
 - Windows: the log tells each tray icon: its static image and size, created or why not, and the first drawn image (size, or the refusal). A new icon of an app that was never pinned sits in the taskbar's overflow (the `^` at the right) on Windows 11 until the user turns it on in Settings > Personalization > Taskbar > Other system tray icons; the registry showed Dyno's icon registered there (`NotifyIconSettings`, tooltip `Dyno`).
 - Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
 

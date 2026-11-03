@@ -52,6 +52,20 @@ pub fn systemd_unit(exe: &Path) -> String {
     )
 }
 
+/// The name of the agent's own Run value on Windows. The app's autostart plugin writes `Dyno` (the product name), and the
+/// agent used `Dyno` too, so each overwrote the other: in 1.0.0 the app's `repair()` replaced `Dyno = dyno-app.exe --hidden` with
+/// `Dyno = dyno-agent.exe run` five seconds after every start, and the next logon started only the agent.
+pub const WINDOWS_AGENT_VALUE: &str = "Dyno agent";
+/// The app's own Run value (the autostart plugin's, named after the product).
+pub const WINDOWS_APP_VALUE: &str = "Dyno";
+
+/// Whether the output of `reg query ... /v Dyno` shows a value that starts the agent (the 1.0.0 entry that replaced the app's),
+/// not the app.
+pub fn is_agent_run_value(reg_query_output: &str) -> bool {
+    let text = reg_query_output.to_ascii_lowercase();
+    text.contains("dyno-agent") && !text.contains("dyno-app")
+}
+
 /// The Run value: the quoted executable and its `run` argument.
 pub fn windows_run_value(exe: &Path) -> String {
     format!("\"{}\" run", exe.to_string_lossy())
@@ -60,6 +74,13 @@ pub fn windows_run_value(exe: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_value_that_starts_the_agent_is_the_stale_entry() {
+        assert!(is_agent_run_value("    Dyno    REG_SZ    \"C:\\Users\\a\\AppData\\Local\\Dyno\\dyno-agent.exe\" run\r\n"));
+        assert!(!is_agent_run_value("    Dyno    REG_SZ    C:\\Users\\a\\AppData\\Local\\Dyno\\dyno-app.exe --hidden"));
+        assert!(!is_agent_run_value(""));
+    }
 
     #[test]
     fn plist_names_the_label_the_program_and_keeps_it_alive() {
