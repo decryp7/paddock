@@ -42,6 +42,8 @@ use tauri::{Assets, Listener, Manager, Runtime, WebviewUrl, WebviewWindowBuilder
 const DEADLINE: Duration = Duration::from_secs(300);
 /// The probe gives up (exit 2) after this: a hung webview must fail the run, not hold it.
 const GIVE_UP: Duration = Duration::from_secs(90);
+/// The same for a scenario that waits for input from outside (`user`, `dpi`), which has its own bounded waits.
+const GIVE_UP_SCENARIO: Duration = Duration::from_secs(240);
 
 /// The hidden host window's page: the dialog's parent needs none of the demo.
 const HOST: &str = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
@@ -472,9 +474,18 @@ pub fn run(config: Probe) -> ! {
     // Only a failure path: the probe is event-driven, this just stops a hung webview from holding the run.
     let watchdog_handle = handle.clone();
     std::thread::spawn(move || {
-        if done_rx.recv_timeout(GIVE_UP).is_err() {
+        let give_up = if probe()
+            .scenario
+            .as_deref()
+            .is_some_and(|s| s == "user" || s == "dpi")
+        {
+            GIVE_UP_SCENARIO
+        } else {
+            GIVE_UP
+        };
+        if done_rx.recv_timeout(give_up).is_err() {
             eprintln!(
-                "show_probe: no report within {GIVE_UP:?}: the dialog page never became ready; calls seen: {}",
+                "show_probe: no report within {give_up:?}: the dialog page never became ready; calls seen: {}",
                 watchdog_trace.seen()
             );
             watchdog_handle.exit(2);

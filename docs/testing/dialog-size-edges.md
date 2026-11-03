@@ -92,3 +92,20 @@ A note for the Windows and Linux edge probes (2026-11-04):
 - A viewer therefore opens at 560 px or its content, whichever is larger, and never shrinks (`Shrink::Never`); the ADR's
   "opens at `min(content, preferred)`" is read with that floor (the table in ADR 0043 §1 now says so).
 - A tool (`Manual`) opens at its contract's size, 960 x 680 by default.
+
+### Windows 11 (VM), second session: 150 % viewer retake, real border drag, Aero snap, live scale change
+
+Same VM and probe as above (`probe` feature, scenarios `user` and `dpi`), a scheduled task in the console session
+sending real input (`mouse_event`, `keybd_event`); screenshots in `scratch/dialog-edge-shots/win2/` (retake) and `win3/`
+(input runs). The probe now turns off DWM's fade-in on the dialog, so a shot taken when the window is shown is the final
+picture.
+
+| Item | Result |
+|---|---|
+| 150 % viewer retake (`win2/150b-about.png`) | Crisp, no fade: the viewer fills the 1024 px work area width (680x433 logical, clamped), title bar at 0,0, footer inside. |
+| Tool at 100 % | Opens at 768x508 logical, i.e. 75 % of the work area less the title bar (the cap fix `placement::place`); before it was 540. |
+| Real border drag (right edge, +80 px) | Viewer 720x560 to 730x560 and tool 768x508 to 778x508; the viewer announced `Manual`, the tool stayed quiet. (The form run did not start: the first run of a batch lost its log; not repeated.) |
+| Aero snap (Win+Left) | **Not detected as a user resize.** The form went 400x200 to 510x688 and the viewer 720x560 to 680x688 (snapped to the left half) and neither announced `Manual` (the tool, already `Manual`, is not affected). D6 says a snap counts as a user resize. Snap sends neither `WM_SIZING` nor `SC_SIZE`, so the Windows edge's signals miss it, and on Windows the state does not infer from an unexplained `Resized`. Open: infer it, but not for the resize that follows a DPI change (tao's own `SetWindowPos` after `WM_DPICHANGED`). |
+| Scale change with a dialog open | **Not run.** The live change through `DisplayConfigSetDeviceInfo` (type -4, the call Settings uses) fails on the VMware display: get returns 31 (general failure), set 122. The `dpi` scenario of the probe is ready and waits for any scale change, so it can be used with another way of changing the scale (Settings by UI automation, a monitor with another DPI). |
+
+Not covered: a second monitor.
