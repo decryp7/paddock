@@ -9,6 +9,8 @@ use crate::frame::{FrameLimit, ProtocolVersion};
 use crate::handshake::Host;
 use crate::peer::{Handler, Peer, PeerOptions};
 use crate::wire::Json;
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, Deadline};
 use paddock_proc::{KEPT_ENV, MemoryCap, Supervised};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
@@ -119,6 +121,8 @@ pub struct Child {
     process: Mutex<Supervised>,
     stdin: Mutex<Option<ChildStdin>>,
     status: Mutex<Option<ExitStatus>>,
+    /// The clock `exit_status` waits on (the spec's peer clock).
+    clock: Arc<dyn Clock>,
     pid: u32,
     peer: Peer,
     /// Kept so the private socket folder lives as long as the connection.
@@ -150,17 +154,19 @@ impl Child {
     /// How it ended: waits up to `wait` for the OS to report the exit, then returns the status (`None` while it still runs,
     /// or when its tree was already ended by [`Child::kill`] / [`Child::stop`], which reap it).
     pub fn exit_status(&self, wait: Duration) -> Option<ExitStatus> {
-        let end = Instant::now().checked_add(wait);
-        let mut process = lock(&self.process);
-        while process.is_running() && end.is_some_and(|e| Instant::now() < e) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if process.is_running() {
-            return None;
+        let deadline = Deadline::after(self.clock.clone(), wait);
+        // The process lock is held for one look at a time, never across a wait, so `kill` and `stop` are not held up.
+        while lock(&self.process).is_running() {
+            if deadline.passed() {
+                return None;
+            }
+            let _ = self
+                .clock
+                .wait(Duration::from_millis(10), &CancelToken::new());
         }
         let mut status = lock(&self.status);
         if status.is_none() {
-            *status = process.wait();
+            *status = lock(&self.process).wait();
         }
         *status
     }
@@ -289,6 +295,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         process: Mutex::new(process),
         stdin: Mutex::new(stdin),
         status: Mutex::new(None),
+        clock: spec.peer.clock.clone(),
         pid,
         peer,
         _host: host,

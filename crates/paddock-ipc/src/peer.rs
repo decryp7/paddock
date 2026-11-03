@@ -85,6 +85,9 @@ pub struct PeerOptions {
     /// Calls over [`PeerOptions::max_concurrent_calls`] that wait their turn, first come first served (0: none wait, they
     /// are refused at once). A waiting call can be cancelled and ends with the connection.
     pub call_queue: usize,
+    /// The most request bytes that wait in the call queue at once; a call that would exceed it is refused with
+    /// [`codes::BUSY`] (default 16 MiB, the default frame limit, so one connection cannot park an unbounded amount).
+    pub call_queue_bytes: usize,
     /// How long a callee has to end a call after a cancel ([`CANCEL_GRACE`]).
     pub cancel_grace: Duration,
     /// Pushes waiting for the push callback; newer ones are dropped and counted when it falls behind.
@@ -100,6 +103,7 @@ impl fmt::Debug for PeerOptions {
             .field("label", &self.label)
             .field("max_concurrent_calls", &self.max_concurrent_calls)
             .field("call_queue", &self.call_queue)
+            .field("call_queue_bytes", &self.call_queue_bytes)
             .field("cancel_grace", &self.cancel_grace)
             .field("push_queue", &self.push_queue)
             .field("on_push", &self.on_push.is_some())
@@ -114,6 +118,7 @@ impl PeerOptions {
             label: label.into(),
             max_concurrent_calls: 64,
             call_queue: 0,
+            call_queue_bytes: 16 << 20,
             cancel_grace: CANCEL_GRACE,
             push_queue: 64,
             clock: Arc::new(SystemClock),
@@ -191,6 +196,8 @@ struct Inner {
 #[derive(Default)]
 struct Gate {
     running: usize,
+    /// Request bytes waiting in `waiting`.
+    queued_bytes: usize,
     waiting: std::collections::VecDeque<(u64, Vec<u8>, Arc<Served>)>,
 }
 
@@ -574,7 +581,13 @@ impl Peer {
             if gate.running < opts.max_concurrent_calls {
                 gate.running += 1;
                 Some(call)
+            } else if gate.queued_bytes.saturating_add(body.len()) > opts.call_queue_bytes {
+                served.remove(&id);
+                drop(served);
+                drop(gate);
+                return self.refuse_call(id, "too many calls are waiting; try again");
             } else {
+                gate.queued_bytes += body.len();
                 gate.waiting.push_back((id, body.clone(), call));
                 None
             }
@@ -601,9 +614,20 @@ impl Peer {
     fn next_waiting(&self) -> Option<(u64, Vec<u8>, Arc<Served>)> {
         let mut gate = lock(&self.inner.gate);
         while let Some((id, body, served)) = gate.waiting.pop_front() {
-            if lock(&self.inner.served).contains_key(&id) {
-                return Some((id, body, served));
+            gate.queued_bytes -= body.len();
+            if !lock(&self.inner.served).contains_key(&id) {
+                continue;
             }
+            // The caller gave up while the call waited: it is answered as cancelled and never runs.
+            if lock(&served.state).cancelled {
+                lock(&self.inner.served).remove(&id);
+                let _ = self.send(&Frame::Fail {
+                    id,
+                    error: CallCtx::cancelled_error(),
+                });
+                continue;
+            }
+            return Some((id, body, served));
         }
         gate.running -= 1;
         None

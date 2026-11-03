@@ -60,8 +60,22 @@ pub enum AdminEvidence {
     /// Unix: the caller's group ids (`SO_PEERGROUPS`, or `getgrouplist` for the audit token's uid).
     Groups(Vec<u32>),
     /// Windows: membership of Administrators read from the caller's token. A UAC-filtered token of an administrator
-    /// counts (the group is present, only "deny only"), by decision D9.
-    Token(bool),
+    /// counts (the group is present, only "deny only"), by decision D9; [`TokenAdmin::Admin::elevated`] says which it was,
+    /// so a policy for filtered tokens can be built.
+    Token(TokenAdmin),
+}
+
+/// What a Windows token says about Administrators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenAdmin {
+    /// The token does not have the Administrators group.
+    NotAdmin,
+    /// The token has the Administrators group.
+    Admin {
+        /// True when the group is enabled (a full, elevated token); false when it is "deny only" (the UAC-filtered token of an
+        /// administrator, `SE_GROUP_USE_FOR_DENY_ONLY`).
+        elevated: bool,
+    },
 }
 
 /// The facts a platform read from one connection.
@@ -96,6 +110,7 @@ impl AdminRule {
 pub struct Caller {
     account: AccountId,
     is_admin: bool,
+    elevated: Option<bool>,
     audit: AuditHint,
 }
 
@@ -108,6 +123,12 @@ impl Caller {
     /// Whether the caller administers the machine (root, an administrator group, Windows Administrators).
     pub fn is_admin(&self) -> bool {
         self.is_admin
+    }
+
+    /// Windows: whether an administrator's token is elevated (`Some(false)`: UAC-filtered); `None` for a caller that is not an
+    /// administrator by token, and on Unix.
+    pub fn elevated(&self) -> Option<bool> {
+        self.elevated
     }
 
     /// The pid and program for the audit line.
@@ -158,11 +179,16 @@ pub fn identify(raw: RawPeer, rule: &AdminRule) -> Caller {
     let is_admin = match (&raw.account, &raw.admin) {
         (AccountId::Uid(0), _) => true,
         (_, AdminEvidence::Groups(groups)) => groups.iter().any(|g| rule.admin_gids.contains(g)),
-        (_, AdminEvidence::Token(member)) => *member,
+        (_, AdminEvidence::Token(token)) => matches!(token, TokenAdmin::Admin { .. }),
+    };
+    let elevated = match &raw.admin {
+        AdminEvidence::Token(TokenAdmin::Admin { elevated }) => Some(*elevated),
+        _ => None,
     };
     Caller {
         account: raw.account,
         is_admin,
+        elevated,
         audit: raw.audit,
     }
 }
@@ -221,8 +247,36 @@ mod tests {
     fn a_windows_token_decides_and_a_filtered_administrator_counts() {
         let sid = || AccountId::Sid("S-1-5-21-1-2-3-1001".into());
         let rule = AdminRule::default();
-        assert!(identify(raw(sid(), AdminEvidence::Token(true), None), &rule).is_admin());
-        assert!(!identify(raw(sid(), AdminEvidence::Token(false), None), &rule).is_admin());
+        let full = identify(
+            raw(
+                sid(),
+                AdminEvidence::Token(TokenAdmin::Admin { elevated: true }),
+                None,
+            ),
+            &rule,
+        );
+        let filtered = identify(
+            raw(
+                sid(),
+                AdminEvidence::Token(TokenAdmin::Admin { elevated: false }),
+                None,
+            ),
+            &rule,
+        );
+        let user = identify(
+            raw(sid(), AdminEvidence::Token(TokenAdmin::NotAdmin), None),
+            &rule,
+        );
+        assert!(full.is_admin() && filtered.is_admin() && !user.is_admin());
+        assert_eq!(
+            (full.elevated(), filtered.elevated(), user.elevated()),
+            (Some(true), Some(false), None)
+        );
+        let unix = identify(
+            raw(AccountId::Uid(1), AdminEvidence::Groups(vec![]), None),
+            &rule,
+        );
+        assert_eq!(unix.elevated(), None);
     }
 
     /// A fake connection that says uid 501 while its pid, in the fake's own process table, belongs to root.

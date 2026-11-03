@@ -27,7 +27,7 @@ Conventional Commits; one semver tag for the whole repo.
   anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
   no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
   checks the same folder rule on the serving side.
-- `Access::system_for_all_users()` (mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+- `Access::system_for_all_users()` (correction, review 2026-11-03: `GRGW` for `IU` included `FILE_CREATE_PIPE_INSTANCE`, now `0x12019b` in both lists; mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
   starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
   refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
   `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
