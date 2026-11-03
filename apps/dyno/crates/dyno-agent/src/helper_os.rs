@@ -172,6 +172,14 @@ fn windows_roots() -> WindowsRoots {
     }
 }
 
+/// The connection to this machine's helper (also what the VM test sends requests through).
+pub fn transport() -> PeerTransport {
+    let host = host();
+    let paths = HelperPaths::for_host(host, &windows_roots());
+    let installed_path = paths.binary.clone();
+    PeerTransport::new(paths.endpoint.clone(), move || is_installed(host, &installed_path, &SystemRunner))
+}
+
 /// The helper centre for this machine.
 pub fn centre() -> HelperCentre<PeerTransport> {
     let host = host();
@@ -180,10 +188,7 @@ pub fn centre() -> HelperCentre<PeerTransport> {
     let bundled = bundled_helper(host, &agent_exe);
     let supported = unsupported(host, &bundled, bundled.is_file(), std::env::var_os("APPIMAGE").is_some());
     let installed_path = paths.binary.clone();
-    let transport = PeerTransport::new(paths.endpoint.clone(), {
-        let p = installed_path.clone();
-        move || is_installed(host, &p, &SystemRunner)
-    });
+    let transport = transport();
     let owner = current_owner(host, &SystemRunner);
     let installer = OsInstaller {
         host,

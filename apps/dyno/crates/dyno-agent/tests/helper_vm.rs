@@ -53,3 +53,64 @@ fn the_helper_state_and_one_action_on_this_machine() {
         after.recent.len()
     );
 }
+
+/// Sends the reading requests (processes, counters, memory, sockets, extras) to the running helper and prints what came back as
+/// counts and kinds, never contents. Only for the local test VMs.
+#[test]
+#[ignore = "reads through the real helper: the test VMs only (PADDOCK_VM=1)"]
+fn the_helper_readers_on_this_machine() {
+    use dyno_agent::helper_link::HelperTransport;
+    use dyno_core::helper_requests::{CounterId, CounterQuery, ExtrasKind, ProcessQuery, RequestClass};
+    use dyno_core::helper_wire::{HelperReply, HelperRequest};
+    if std::env::var("PADDOCK_VM").as_deref() != Ok("1") {
+        eprintln!("skipped: PADDOCK_VM is not 1");
+        return;
+    }
+    let t = dyno_agent::helper_os::transport();
+    let show = |name: &str, r: Result<HelperReply, dyno_agent::helper_link::TransportError>| match r {
+        Ok(HelperReply::Processes(p)) => {
+            let mut kinds = std::collections::BTreeMap::new();
+            for e in &p.items {
+                *kinds
+                    .entry(format!("{:?}", e.owner).split('(').next().unwrap_or("").to_string())
+                    .or_insert(0u32) += 1;
+            }
+            println!(
+                "{name}: {} items, more={}, others={:?}, truncated={}, owners={kinds:?}",
+                p.items.len(),
+                p.next.is_some(),
+                p.others,
+                p.truncated
+            );
+        }
+        Ok(HelperReply::CounterValues(a)) => {
+            for x in a {
+                println!("{name}: {:?} -> {:?}", x.id, x.value);
+            }
+        }
+        Ok(HelperReply::Memory(m)) => println!("{name}: {m:?}"),
+        Ok(HelperReply::SocketOwners(a)) => println!("{name}: {} sockets, others={}, truncated={}", a.owners.len(), a.others, a.truncated),
+        Ok(HelperReply::Extras(e)) => println!("{name}: {e:?}"),
+        Ok(other) => println!("{name}: unexpected {other:?}"),
+        Err(e) => println!("{name}: error {e:?}"),
+    };
+    show(
+        "processes",
+        t.call(HelperRequest::Processes(ProcessQuery {
+            limit: 1024,
+            ..ProcessQuery::default()
+        })),
+    );
+    let ids = vec![CounterId::Thermal, CounterId::CpuEnergy, CounterId::Fans];
+    show(
+        "counters",
+        t.call(HelperRequest::Counters(CounterQuery {
+            ids,
+            class: RequestClass::User,
+        })),
+    );
+    show("memory", t.call(HelperRequest::MemoryModules));
+    show("sockets", t.call(HelperRequest::SocketOwners));
+    show("wakeRequests", t.call(HelperRequest::Extras(ExtrasKind::WakeRequests)));
+    show("backupVersions", t.call(HelperRequest::Extras(ExtrasKind::BackupVersions)));
+}
