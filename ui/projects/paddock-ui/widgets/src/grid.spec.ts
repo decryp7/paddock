@@ -781,7 +781,7 @@ describe('PdWidgetGrid', () => {
   });
 
   describe('odd input and rare paths', () => {
-    type Internals = { reset(): Promise<void>; arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
+    type Internals = { applyPreset(id: string, n: string): Promise<void>; reset(): Promise<void>; arrangementIndex(): number; rows(): unknown[]; columns(): number; allowed(id: string, m: string): boolean; undoRedo(w: string): Promise<void>; targetChanged(t: unknown): void; gestureStarted(t: unknown): void; dropped(t: unknown): Promise<void> };
     const grid = () => f.debugElement.children[0]!.componentInstance as unknown as Internals;
 
     it('never throws without a view: nothing to draw, nothing to send', async () => {
@@ -879,6 +879,51 @@ describe('PdWidgetGrid', () => {
       await grid().reset();
       expect(backend.edit).toHaveBeenCalledTimes(1);
       done(moved());
+    });
+
+    it('lists presets in the bar menu, applies one, and saves the layout under a name', async () => {
+      await create();
+      await edit();
+      const preset = { id: 'minimal', name: 'Minimal', builtin: true, placements: [] };
+      f.componentInstance.view.set(mkView({ builtinPresets: [preset] }));
+      await settle(f);
+      backend.edit.mockResolvedValue(mkView({ canUndo: true }, 8));
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      expect(document.querySelector('.pd-wg-preset')!.textContent).toContain('Minimal');
+      (document.querySelector('.pd-wg-preset') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenCalledWith({ applyPreset: { id: 'minimal' } }, 7);
+      expect(say).toHaveBeenCalledWith('Applied the preset Minimal.', 'polite');
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-savepreset') as HTMLElement).click();
+      await settle(f);
+      const input = q('.pd-wg-savename') as HTMLInputElement;
+      expect((q('.pd-wg-savego') as HTMLButtonElement).disabled).toBe(true);
+      input.value = '  Work ';
+      input.dispatchEvent(new Event('input'));
+      await settle(f);
+      (q('.pd-wg-savego') as HTMLElement).click();
+      await settle(f);
+      expect(backend.edit).toHaveBeenLastCalledWith({ savePreset: { name: 'Work' } }, 8);
+      expect(q('.pd-wg-save')).toBeNull();
+      // Cancel, a blank name and a full list.
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      (document.querySelector('.pd-wg-savepreset') as HTMLElement).click();
+      await settle(f);
+      (q('form.pd-wg-save') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }));
+      expect(backend.edit).toHaveBeenCalledTimes(2);
+      (q('.pd-wg-savecancel') as HTMLElement).click();
+      await settle(f);
+      expect(q('.pd-wg-save')).toBeNull();
+      const full = mkView({}, 9);
+      f.componentInstance.view.set({ ...full, layout: { ...full.layout, presets: [preset, preset, preset] } });
+      await settle(f);
+      (q('.pd-wg-barmore') as HTMLElement).click();
+      await settle(f);
+      expect((document.querySelector('.pd-wg-savepreset') as HTMLButtonElement).disabled).toBe(true);
     });
 
     it('passes a widget state action up', async () => {

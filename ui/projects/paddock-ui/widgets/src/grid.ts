@@ -98,6 +98,13 @@ interface Active {
       }
     </div>
     }
+    @if (saving() && editing()) {
+      <form class="pd-wg-save" (submit)="savePreset($event)">
+        <label class="pd-wg-savelabel">Preset name <input class="pd-wg-savename" type="text" maxlength="64" autocomplete="off" [value]="saveName()" (input)="onSaveName($event)" /></label>
+        <button matButton="outlined" type="submit" class="pd-wg-savego" [disabled]="saveName().trim() === '' || busy()">Save preset</button>
+        <button matButton type="button" class="pd-wg-savecancel" (click)="cancelSave()">Cancel</button>
+      </form>
+    }
     @if (feedback(); as f) {
       <p class="pd-wg-feedback" [class.pd-wg-feedback--bad]="feedbackBad()" [attr.role]="feedbackBad() ? 'alert' : 'status'">
         <pd-status-glyph [status]="feedbackBad() ? 'warning' : 'info'" [size]="16" />{{ f }}
@@ -205,6 +212,15 @@ interface Active {
     }
 
     <mat-menu #barMenu="matMenu" class="pd-wg-menu">
+      @if (presets().length > 0) {
+        <span class="pd-wg-menu-label" role="presentation">Presets</span>
+        @for (p of presets(); track p.id) {
+          <button mat-menu-item type="button" class="pd-wg-preset" (click)="applyPreset(p.id, p.name)"><span class="pd-wg-lbl">{{ p.name }}</span>@if (p.builtin) {<span class="pd-wg-key">Built in</span>}</button>
+        }
+        <hr class="pd-wg-sep" />
+      }
+      <button mat-menu-item type="button" class="pd-wg-savepreset" [disabled]="!canSavePreset()" (click)="saving.set(true)"><span class="pd-wg-lbl">Save as preset…</span></button>
+      <hr class="pd-wg-sep" />
       <button mat-menu-item type="button" class="pd-wg-reset" (click)="reset()"><span class="pd-wg-lbl">Reset to defaults</span></button>
     </mat-menu>
     <mat-menu #menu="matMenu" class="pd-wg-menu">
@@ -255,6 +271,11 @@ interface Active {
     .pd-wg-ph { z-index: 0; border-radius: var(--pd-radius-card); background: var(--pd-accent-tint); outline: 1.5px dashed var(--pd-accent); outline-offset: -1.5px; position: relative; }
     .pd-wg-menu .mat-mdc-menu-item .mat-mdc-menu-item-text { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-4); }
     .pd-wg-key { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-wg-menu-label { display: block; padding: var(--pd-space-1) var(--pd-space-3); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-wg-save { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-3); }
+    .pd-wg-savelabel { display: flex; align-items: center; gap: var(--pd-space-2); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-wg-savename { height: var(--pd-control-height); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
+    .pd-wg-savename:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-wg-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: var(--pd-space-1) 0; }
     .pd-wg-chipbox { z-index: 5; pointer-events: none; display: flex; justify-content: flex-end; align-items: flex-end; }
     .pd-wg-chip { margin: 0 0 calc(-1 * (var(--pd-space-2) + 24px)) 0; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); box-shadow: var(--pd-shadow-1); }
@@ -552,6 +573,45 @@ export class PdWidgetGrid<W = unknown, V = unknown, A = unknown, K extends strin
     if (this.busy()) return;
     const next = await this.apply('resetToDefaults', 'The layout');
     if (next) this.say('The layout is back to its defaults.', false);
+  }
+
+  protected readonly saving = signal(false);
+  protected readonly saveName = signal('');
+  /** The built-in presets, then the person's own. */
+  protected readonly presets = computed(() => {
+    const v = this.view_();
+    return v ? [...v.builtinPresets, ...v.layout.presets] : [];
+  });
+  protected readonly canSavePreset = computed(() => {
+    const v = this.view_();
+    return !!v && v.layout.presets.length < v.catalogue.surface.maxUserPresets;
+  });
+
+  protected onSaveName(e: Event): void {
+    this.saveName.set((e.target as HTMLInputElement).value);
+  }
+
+  protected cancelSave(): void {
+    this.saving.set(false);
+    this.saveName.set('');
+  }
+
+  /** Saves the layout on screen as a preset with the typed name (an intent; the engine checks the name and the limit). */
+  protected async savePreset(e: Event): Promise<void> {
+    e.preventDefault();
+    const name = this.saveName().trim();
+    if (name === '' || this.busy()) return;
+    const next = await this.apply({ savePreset: { name } }, 'The layout');
+    if (next) {
+      this.say(`Saved the preset ${name}.`, false);
+      this.cancelSave();
+    }
+  }
+
+  protected async applyPreset(id: string, name: string): Promise<void> {
+    if (this.busy()) return;
+    const next = await this.apply({ applyPreset: { id } }, 'The layout');
+    if (next) this.say(`Applied the preset ${name}.`, false);
   }
 
   protected async undoRedo(which: 'undo' | 'redo'): Promise<void> {
