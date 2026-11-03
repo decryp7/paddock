@@ -17,6 +17,7 @@ pub mod files;
 pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
+pub mod helper_link;
 pub mod instance;
 pub mod inventory;
 pub mod issues;
