@@ -12,7 +12,10 @@ use dyno_platform::runner::ToolRunner;
 pub fn region_country(runner: &dyn ToolRunner, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(o) = runner.run_tool(&tool("/usr/bin/defaults", &["read", "-g", "AppleLocale"]), std::time::Duration::from_secs(5)) {
+        if let Ok(o) = runner.run_tool(
+            &tool("/usr/bin/defaults", &["read", "-g", "AppleLocale"]),
+            std::time::Duration::from_secs(5),
+        ) {
             if o.ok {
                 if let Some(c) = country_from_locale(o.stdout.trim()) {
                     return Some(c);
@@ -22,7 +25,10 @@ pub fn region_country(runner: &dyn ToolRunner, env: &dyn Fn(&str) -> Option<Stri
     }
     #[cfg(windows)]
     {
-        if let Ok(o) = runner.run_tool(&tool("reg.exe", &["query", r"HKCU\Control Panel\International\Geo", "/v", "Name"]), std::time::Duration::from_secs(5)) {
+        if let Ok(o) = runner.run_tool(
+            &tool("reg.exe", &["query", r"HKCU\Control Panel\International\Geo", "/v", "Name"]),
+            std::time::Duration::from_secs(5),
+        ) {
             if o.ok {
                 if let Some(c) = country_from_windows_geo(&o.stdout) {
                     return Some(c);

@@ -332,13 +332,11 @@ impl crate::bench::BenchEnv for AgentBenchEnv {
     fn throttle_input(&self) -> Option<dyno_core::throttle::ThrottleInput> {
         let shared = self.0.upgrade()?;
         let core = lock(&shared.core);
-        core.recent
-            .back()
-            .map(|s| {
-                // What the OS says about its own limits is read by the hardware centre while the CPU is busy, as a run is.
-                let ctx = shared.hardware.context();
-                dyno_core::throttle::ThrottleInput::from_sample(s, ctx.power_saver, ctx.os)
-            })
+        core.recent.back().map(|s| {
+            // What the OS says about its own limits is read by the hardware centre while the CPU is busy, as a run is.
+            let ctx = shared.hardware.context();
+            dyno_core::throttle::ThrottleInput::from_sample(s, ctx.power_saver, ctx.os)
+        })
     }
 
     fn space(&self, mount: &str) -> Option<(u64, u64)> {

@@ -608,7 +608,11 @@ mod tests {
         struct One(String);
         impl ToolRunner for One {
             fn run_tool(&self, _: &crate::runner::Tool, _: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
-                Ok(crate::runner::ToolOutput { ok: true, stdout: self.0.clone(), error: String::new() })
+                Ok(crate::runner::ToolOutput {
+                    ok: true,
+                    stdout: self.0.clone(),
+                    error: String::new(),
+                })
             }
         }
         let control = Count(Default::default(), AtomicU64::new(0));

@@ -4,11 +4,11 @@
 
 use crate::parse::btm::parse_view;
 use crate::runner::{tool, ToolRunner};
-use std::time::Duration;
 use dyno_core::btm::{LoginItemsReader, LoginItemsReply, MAX_BTM_ITEMS};
 use dyno_core::ports::PlatformError;
 use paddock_jobs::time::Clock;
 use std::sync::Arc;
+use std::time::Duration;
 
 const SFLTOOL: &str = "/usr/bin/sfltool";
 /// How long `sfltool dumpbtm` may take (ADR 0027 section 5).
@@ -23,10 +23,7 @@ pub struct SfltoolReader {
 impl SfltoolReader {
     /// A reader over `runner`.
     pub fn new(runner: Box<dyn ToolRunner>, clock: Arc<dyn Clock>) -> Self {
-        SfltoolReader {
-            runner,
-            clock,
-        }
+        SfltoolReader { runner, clock }
     }
 }
 
@@ -72,8 +69,8 @@ impl LoginItemsReader for SfltoolReader {
 mod tests {
     use super::*;
     use crate::runner::{Tool, ToolOutput};
-    use std::sync::Mutex;
     use paddock_jobs::time::FakeClock;
+    use std::sync::Mutex;
     use std::time::Duration;
 
     struct Script {

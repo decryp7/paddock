@@ -47,10 +47,10 @@ use crate::contract::{Grant, Modality, Size};
 use crate::placement::{self, Bounds, Monitor, Placement, Rect, ScreenPosition};
 use crate::registry::{CloseDecision, Dialogs, OpenDialog};
 use crate::window::{
-    CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
-    DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
-    RESULT_EVENT, SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry,
-    json_len, validate, viewport_delta, window_config,
+    CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
+    DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure, RESULT_EVENT,
+    SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry, json_len, validate,
+    viewport_delta, window_config,
 };
 use ::tauri::window::Color;
 use ::tauri::{

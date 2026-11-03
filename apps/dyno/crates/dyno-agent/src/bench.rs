@@ -345,7 +345,8 @@ impl BenchLauncher for ProcessLauncher {
         }
         let mut cmd = dyno_platform::process::command(&exe);
         cmd.arg("--list");
-        let out = dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(20)).map_err(|e| format!("The graphics runner did not answer ({e})."))?;
+        let out = dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(20))
+            .map_err(|e| format!("The graphics runner did not answer ({e})."))?;
         serde_json::from_slice(&out.stdout).map_err(|e| format!("The graphics runner's list could not be read ({e})."))
     }
 

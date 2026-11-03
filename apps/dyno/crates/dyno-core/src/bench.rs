@@ -868,7 +868,10 @@ mod tests {
             volume: "/Volumes/A".into(),
             folder: "/Volumes/A/Bench".into(),
         };
-        assert_eq!(base.clone().with_folders(std::slice::from_ref(&ok)).unwrap().folders, vec![ok.clone()]);
+        assert_eq!(
+            base.clone().with_folders(std::slice::from_ref(&ok)).unwrap().folders,
+            vec![ok.clone()]
+        );
         let stray = DiskFolder {
             volume: "/Volumes/B".into(),
             ..ok.clone()

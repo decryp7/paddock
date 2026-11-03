@@ -1308,17 +1308,30 @@ mod tests {
             Request::WolReadiness,
             Request::WolRemove { id: 3 },
             Request::WolWake { id: 3, test: true },
-            Request::WolSave { device: input(SecureOnEdit::Keep) },
-            Request::WolSave { device: input(SecureOnEdit::Clear) },
-            Request::WolSave { device: input(SecureOnEdit::Set { password: "01:02:03:04".into() }) },
+            Request::WolSave {
+                device: input(SecureOnEdit::Keep),
+            },
+            Request::WolSave {
+                device: input(SecureOnEdit::Clear),
+            },
+            Request::WolSave {
+                device: input(SecureOnEdit::Set {
+                    password: "01:02:03:04".into(),
+                }),
+            },
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));
             assert_eq!(round(&m), m);
         }
         let replies = [
-            Reply::Wol(Box::new(WolView { enabled: true, devices: vec![], can_send: crate::power::Capability::Known })),
-            Reply::WolCandidates(vec![Neighbour { name: None,
+            Reply::Wol(Box::new(WolView {
+                enabled: true,
+                devices: vec![],
+                can_send: crate::power::Capability::Known,
+            })),
+            Reply::WolCandidates(vec![Neighbour {
+                name: None,
                 mac: Mac([2, 0, 0x5e, 0x10, 0, 1]),
                 ip: "192.0.2.40".into(),
                 interface: "en0".into(),
@@ -1327,7 +1340,11 @@ mod tests {
             Reply::WolReadiness(Box::default()),
             Reply::JobOutput(Box::new(crate::jobs::JobOutput::Wol(Box::new(crate::wol::WolOutcome {
                 sent: vec![],
-                answered: Some(crate::wol::Answer { how: crate::wol::AnswerHow::Ping, after_secs: 4, new_ip: None }),
+                answered: Some(crate::wol::Answer {
+                    how: crate::wol::AnswerHow::Ping,
+                    after_secs: 4,
+                    new_ip: None,
+                }),
                 tested: true,
                 elapsed_secs: 4,
                 timed_out: false,
@@ -1340,7 +1357,9 @@ mod tests {
             assert_eq!(round(&m), m);
         }
         {
-            use crate::power::schedule::{DynoJob, Repeat, RowState, WakeInput, WakeRoute, WakeRouteState, WakeRow, WakeSchedule, WakesView};
+            use crate::power::schedule::{
+                DynoJob, Repeat, RowState, WakeInput, WakeRoute, WakeRouteState, WakeRow, WakeSchedule, WakesView,
+            };
             let entry = WakeInput {
                 id: Some(1),
                 name: "Morning".into(),
@@ -1351,25 +1370,57 @@ mod tests {
                 job: Some(DynoJob::BackupCheck),
                 enabled: true,
             };
-            for r in [Request::PowerWakes, Request::PowerCancelWake { id: 2 }, Request::PowerSetWake { entry }] {
+            for r in [
+                Request::PowerWakes,
+                Request::PowerCancelWake { id: 2 },
+                Request::PowerSetWake { entry },
+            ] {
                 let m = Message::Request(Box::new(r));
                 assert_eq!(round(&m), m);
             }
-            for state in [RowState::Armed { route: WakeRoute::Helper }, RowState::Off, RowState::Paused, RowState::NeedsHelper, RowState::Failed { why: "w".into() }] {
-                let view = WakesView { rows: vec![WakeRow { entry: WakeSchedule::default(), state }], route: WakeRouteState::HelperReady };
+            for state in [
+                RowState::Armed { route: WakeRoute::Helper },
+                RowState::Off,
+                RowState::Paused,
+                RowState::NeedsHelper,
+                RowState::Failed { why: "w".into() },
+            ] {
+                let view = WakesView {
+                    rows: vec![WakeRow {
+                        entry: WakeSchedule::default(),
+                        state,
+                    }],
+                    route: WakeRouteState::HelperReady,
+                };
                 let m = Message::Reply(Box::new(Ok(Reply::PowerWakes(Box::new(view)))));
                 assert_eq!(round(&m), m);
             }
-            for route in [WakeRouteState::Agent { note: "n".into(), cant_tell: vec!["c".into()] }, WakeRouteState::NeedsHelper { reason: "r".into() }, WakeRouteState::Unavailable { reason: "r".into() }] {
+            for route in [
+                WakeRouteState::Agent {
+                    note: "n".into(),
+                    cant_tell: vec!["c".into()],
+                },
+                WakeRouteState::NeedsHelper { reason: "r".into() },
+                WakeRouteState::Unavailable { reason: "r".into() },
+            ] {
                 let m = Message::Reply(Box::new(Ok(Reply::PowerWakes(Box::new(WakesView { rows: vec![], route })))));
                 assert_eq!(round(&m), m);
             }
         }
-        let wakes = Message::WakesChanged(Box::new(crate::power::schedule::WakesView { rows: vec![], route: crate::power::schedule::WakeRouteState::HelperReady }));
+        let wakes = Message::WakesChanged(Box::new(crate::power::schedule::WakesView {
+            rows: vec![],
+            route: crate::power::schedule::WakeRouteState::HelperReady,
+        }));
         assert_eq!(round(&wakes), wakes);
-        let push = Message::WolChanged(Box::new(WolView { enabled: false, devices: vec![], can_send: crate::power::Capability::Known }));
+        let push = Message::WolChanged(Box::new(WolView {
+            enabled: false,
+            devices: vec![],
+            can_send: crate::power::Capability::Known,
+        }));
         assert_eq!(round(&push), push);
-        let job = Message::Request(Box::new(Request::StartJob { spec: crate::jobs::JobSpec::WolWake { id: 1, test: false } }));
+        let job = Message::Request(Box::new(Request::StartJob {
+            spec: crate::jobs::JobSpec::WolWake { id: 1, test: false },
+        }));
         assert_eq!(round(&job), job);
     }
 

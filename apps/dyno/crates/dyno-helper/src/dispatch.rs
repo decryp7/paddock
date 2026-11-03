@@ -301,9 +301,9 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::helper_extras::ExtrasAnswer;
     use dyno_core::btm::LoginItemsReply;
     use dyno_core::helper::HelperHost;
+    use dyno_core::helper_extras::ExtrasAnswer;
     use dyno_core::helper_requests::{ProcessQuery, SmartQuery, ToolKind};
     use dyno_core::helper_wire::MAX_AUDIT_REPLY;
     use dyno_core::network_traffic::TrafficCounter;

@@ -10,7 +10,10 @@ use dyno_platform::wakes::{pmset_date, system_offset_at, PmsetWakes};
 use std::time::Duration;
 
 fn sched() -> String {
-    SystemRunner.run_tool(&tool("/usr/bin/pmset", &["-g", "sched"]), Duration::from_secs(15)).unwrap().stdout
+    SystemRunner
+        .run_tool(&tool("/usr/bin/pmset", &["-g", "sched"]), Duration::from_secs(15))
+        .unwrap()
+        .stdout
 }
 
 #[test]
@@ -20,7 +23,10 @@ fn dynos_wake_is_the_only_one_listed_and_cancelled() {
         eprintln!("skipped: PADDOCK_VM is not 1");
         return;
     }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
     let (foreign_at, dyno_at) = (now + 6 * 3600, now + 7 * 3600);
     let offset = |t: i64| system_offset_at(t);
     // A wake that Dyno did not make.
@@ -39,9 +45,15 @@ fn dynos_wake_is_the_only_one_listed_and_cancelled() {
     let text = sched();
     println!("--- after cancel ---\n{text}");
     assert!(!text.contains("net.decryptology.dyno"), "Dyno's event is gone");
-    assert!(text.contains(&pmset_date(foreign_at, offset(foreign_at))[9..]), "the event Dyno did not make is still there");
+    assert!(
+        text.contains(&pmset_date(foreign_at, offset(foreign_at))[9..]),
+        "the event Dyno did not make is still there"
+    );
     assert!(wakes.list().unwrap().is_empty());
     // Clean up what this test made.
-    let cancel = tool("/usr/bin/pmset", &["schedule", "cancel", "wake", &pmset_date(foreign_at, offset(foreign_at))]);
+    let cancel = tool(
+        "/usr/bin/pmset",
+        &["schedule", "cancel", "wake", &pmset_date(foreign_at, offset(foreign_at))],
+    );
     let _ = SystemRunner.run_tool(&cancel, Duration::from_secs(15));
 }

@@ -52,7 +52,12 @@ pub struct WolSettings {
 
 impl Default for WolSettings {
     fn default() -> Self {
-        Self { enabled: true, discovery: true, directed_broadcast: true, test_timeout_secs: 120 }
+        Self {
+            enabled: true,
+            discovery: true,
+            directed_broadcast: true,
+            test_timeout_secs: 120,
+        }
     }
 }
 

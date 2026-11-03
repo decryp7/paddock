@@ -12,9 +12,9 @@ use dyno_core::issues::{days_from_civil, IssueSource};
 use dyno_core::time::{Timestamp, DAY, HOUR, MINUTE, SECOND};
 use std::time::Duration;
 
-pub use crate::runner::ToolRunner;
 /// The real runner (the old name of [`crate::runner::SystemRunner`]).
 pub use crate::runner::SystemRunner as OsRunner;
+pub use crate::runner::ToolRunner;
 
 /// The readers that make sense on this OS.
 pub fn os_sources() -> Vec<Box<dyn IssueSource>> {
@@ -126,8 +126,16 @@ pub(crate) mod testing {
         fn run_tool(&self, tool: &crate::runner::Tool, timeout: Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
             self.calls.lock().unwrap().push((tool.program.clone(), tool.args.clone(), timeout));
             let mut a = self.answers.lock().unwrap();
-            let next = if a.is_empty() { Err(PlatformError::Failed("no scripted answer".into())) } else { a.remove(0) };
-            next.map(|stdout| crate::runner::ToolOutput { ok: true, stdout, error: String::new() })
+            let next = if a.is_empty() {
+                Err(PlatformError::Failed("no scripted answer".into()))
+            } else {
+                a.remove(0)
+            };
+            next.map(|stdout| crate::runner::ToolOutput {
+                ok: true,
+                stdout,
+                error: String::new(),
+            })
         }
     }
 }

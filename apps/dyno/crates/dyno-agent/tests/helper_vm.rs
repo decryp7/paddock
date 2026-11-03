@@ -127,7 +127,9 @@ fn the_helper_readers_on_this_machine() {
         let Ok(held) = std::env::current_exe().and_then(std::fs::File::open) else {
             panic!("the test program cannot open itself");
         };
-        let Ok(m) = held.metadata() else { panic!("the test program cannot stat itself") };
+        let Ok(m) = held.metadata() else {
+            panic!("the test program cannot stat itself")
+        };
         println!("this process is {}", std::process::id());
         show(
             "fileHolders",

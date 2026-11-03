@@ -23,10 +23,7 @@ struct Runs {
 
 impl Runs {
     fn new(runner: Box<dyn ToolRunner>, clock: Arc<dyn Clock>) -> Self {
-        Runs {
-            runner,
-            clock,
-        }
+        Runs { runner, clock }
     }
 
     fn run(&self, program: &str, args: &[&str]) -> Result<ToolOutput, PlatformError> {
@@ -77,14 +74,8 @@ impl FirewallReader for AlfReader {
     fn read(&self) -> Result<FirewallSource, PlatformError> {
         let hint = "The Application Firewall could not be read.";
         let global = self.0.run_ok(SOCKETFILTERFW, &["--getglobalstate"], hint)?;
-        let block = self
-            .0
-            .run_ok(SOCKETFILTERFW, &["--getblockall"], hint)
-            .unwrap_or_default();
-        let stealth = self
-            .0
-            .run_ok(SOCKETFILTERFW, &["--getstealthmode"], hint)
-            .unwrap_or_default();
+        let block = self.0.run_ok(SOCKETFILTERFW, &["--getblockall"], hint).unwrap_or_default();
+        let stealth = self.0.run_ok(SOCKETFILTERFW, &["--getstealthmode"], hint).unwrap_or_default();
         let apps = self.0.run_ok(SOCKETFILTERFW, &["--listapps"], hint).unwrap_or_default();
         let v = alf_view(&global, &block, &stealth, &apps).map_err(parse_err)?;
         log_view("Application Firewall", &v);
@@ -146,9 +137,9 @@ impl FirewallReader for NftReader {
 mod tests {
     use super::*;
     use crate::runner::Tool;
-    use std::sync::Mutex;
     use dyno_core::firewall::{FirewallSwitch, RuleSource};
     use paddock_jobs::time::FakeClock;
+    use std::sync::Mutex;
 
     /// Answers by the arguments, so the test says what each command prints.
     struct Table(Vec<(&'static str, Result<ToolOutput, PlatformError>)>, Arc<Mutex<Vec<String>>>);

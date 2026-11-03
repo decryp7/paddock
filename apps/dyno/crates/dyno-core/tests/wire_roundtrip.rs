@@ -436,7 +436,9 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::BootAnalysis,
         JobSpec::AppUsage,
         JobSpec::SoftwareInventory,
-        JobSpec::Helper { action: dyno_core::helper_wire::HelperAction::TurnOn },
+        JobSpec::Helper {
+            action: dyno_core::helper_wire::HelperAction::TurnOn,
+        },
         JobSpec::UpdateList { id: "list-1".into() },
         JobSpec::UpdateGeo,
         JobSpec::WolWake { id: 1, test: true },
@@ -475,14 +477,24 @@ fn helper_request_samples() -> Vec<HelperRequest> {
         HelperRequest::Counters(zero()),
         HelperRequest::MemoryModules,
         HelperRequest::Smart(zero()),
-        HelperRequest::InstallTool { tool: zero(), bytes: vec![1, 2, 3] },
+        HelperRequest::InstallTool {
+            tool: zero(),
+            bytes: vec![1, 2, 3],
+        },
         HelperRequest::Firewall,
         HelperRequest::Extras(zero()),
         HelperRequest::LogTail(50),
-        HelperRequest::ScheduleWake { tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap(), at_utc: 1_700_000_000 },
-        HelperRequest::CancelWake { tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap() },
+        HelperRequest::ScheduleWake {
+            tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap(),
+            at_utc: 1_700_000_000,
+        },
+        HelperRequest::CancelWake {
+            tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap(),
+        },
         HelperRequest::ListWakes,
-        HelperRequest::WolState { ifname: dyno_core::wake::IfName::parse("eth0").unwrap() },
+        HelperRequest::WolState {
+            ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
+        },
     ]
 }
 

@@ -19,7 +19,6 @@ pub mod login_item;
 pub mod mcp;
 pub mod popover;
 pub mod power_menu;
-pub mod wol_menu;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -32,6 +31,7 @@ pub mod tray_model;
 pub mod tray_position;
 #[cfg(target_os = "macos")]
 pub mod tray_text;
+pub mod wol_menu;
 
 use link::{AgentLink, ProcessLauncher};
 use paddock_shell::{AppIdentity, Builder};
@@ -150,7 +150,13 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     builder = builder.mcp(move |app, emit| {
         let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
         let dirs = match &mcp_dir {
-            Some(dir) => paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &paddock_env::MapVars::new().with(&id.home_var(), dir), None, true)?,
+            Some(dir) => paddock_env::AppDirs::resolve(
+                &id,
+                paddock_env::Os::current(),
+                &paddock_env::MapVars::new().with(&id.home_var(), dir),
+                None,
+                true,
+            )?,
             None => paddock_env::AppDirs::for_app(&id)?,
         };
         let calls = Arc::new(mcp::ShellCalls(app.clone()));

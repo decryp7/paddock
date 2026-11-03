@@ -249,7 +249,14 @@ impl ToolRunner for PathRunner<'_> {
         Ok(ToolOutput {
             ok: out.status.success(),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            error: stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().chars().take(200).collect(),
+            error: stderr
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .chars()
+                .take(200)
+                .collect(),
         })
     }
 }

@@ -347,12 +347,12 @@ impl<R: Runtime> ShellOf<R> {
             logging::info("wake from the tray: the agent is not connected");
             return;
         };
-        let _ = std::thread::Builder::new()
-            .name("dyno-wol-menu".into())
-            .spawn(move || match link.call(Request::WolWake { id: device, test: false }) {
+        let _ = std::thread::Builder::new().name("dyno-wol-menu".into()).spawn(move || {
+            match link.call(Request::WolWake { id: device, test: false }) {
                 Ok(_) => logging::info(&format!("wake from the tray: device {device} started")),
                 Err(e) => logging::info(&format!("wake from the tray: device {device} failed: {}", e.message)),
-            });
+            }
+        });
     }
 
     /// A Keep awake entry of the tray menu was chosen: ask the agent (it answers with the new view, which is pushed back).

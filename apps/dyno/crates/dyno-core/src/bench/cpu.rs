@@ -264,7 +264,10 @@ mod tests {
         };
         assert!(os_critical(&t(Some(true), Some(50))));
         assert!(os_critical(&t(Some(true), Some(10))));
-        assert!(!os_critical(&t(Some(true), Some(80))), "a mild limit is for the tracker, not a stop");
+        assert!(
+            !os_critical(&t(Some(true), Some(80))),
+            "a mild limit is for the tracker, not a stop"
+        );
         assert!(!os_critical(&t(Some(false), Some(10))), "a low limit for power is not heat");
         assert!(!os_critical(&t(Some(true), None)));
         assert!(!os_critical(&OsThrottle::default()));

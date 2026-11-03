@@ -423,7 +423,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::WolRemove { id } => shared.wol.remove(shared, id).map(|v| Reply::Wol(Box::new(v))),
         Request::WolWake { id, test } => {
             shared.wol.check_wake(shared, id)?;
-            shared.jobs.start(shared, dyno_core::jobs::JobSpec::WolWake { id, test }).map(|s| Reply::Job(Box::new(s)))
+            shared
+                .jobs
+                .start(shared, dyno_core::jobs::JobSpec::WolWake { id, test })
+                .map(|s| Reply::Job(Box::new(s)))
         }
         Request::PowerWakes => shared.wakes.view(shared).map(|v| Reply::PowerWakes(Box::new(v))),
         Request::PowerSetWake { entry } => shared.wakes.set(shared, entry).map(|v| Reply::PowerWakes(Box::new(v))),
@@ -469,7 +472,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v)))
         }
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
-        Request::BenchEstimate { request } => Ok(Reply::BenchEstimate(dyno_core::bench::estimate::estimate_run(&dyno_core::bench::estimate::standard(), &request))),
+        Request::BenchEstimate { request } => Ok(Reply::BenchEstimate(dyno_core::bench::estimate::estimate_run(
+            &dyno_core::bench::estimate::standard(),
+            &request,
+        ))),
         Request::BenchGpuAdapters => shared
             .bench
             .gpu_adapters()

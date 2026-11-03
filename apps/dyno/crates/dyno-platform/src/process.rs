@@ -67,7 +67,11 @@ pub fn run_with_timeout(cmd: Command, timeout: Duration) -> Result<Output, Platf
         RunError::Wait(_, e) => PlatformError::Failed(format!("Waiting for {program} failed: {e}")),
     })?;
     match out.outcome {
-        Outcome::Exited(status) => Ok(Output { status, stdout: out.stdout, stderr: out.stderr }),
+        Outcome::Exited(status) => Ok(Output {
+            status,
+            stdout: out.stdout,
+            stderr: out.stderr,
+        }),
         Outcome::TimedOut | Outcome::OutputCap => Err(PlatformError::Timeout(format!(
             "{program} did not finish within {} s.",
             timeout.as_secs_f32().max(0.1)

@@ -65,7 +65,10 @@ pub trait ToolRunner: Send + Sync {
         if out.ok {
             Ok(out.stdout)
         } else {
-            let name = std::path::Path::new(program).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = std::path::Path::new(program)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             Err(PlatformError::Failed(format!(
                 "{name} failed: {}",
                 if out.error.is_empty() { "no message" } else { out.error.as_str() }
@@ -105,7 +108,14 @@ impl ToolRunner for SystemRunner {
         Ok(ToolOutput {
             ok: out.status.success(),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            error: stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().chars().take(200).collect(),
+            error: stderr
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .chars()
+                .take(200)
+                .collect(),
         })
     }
 
@@ -145,7 +155,11 @@ mod tests {
 
     #[test]
     fn run_turns_a_failing_exit_into_an_error_with_the_start_of_stderr() {
-        let ok = OnlyTool(ToolOutput { ok: true, stdout: "a\nb\n".into(), error: String::new() });
+        let ok = OnlyTool(ToolOutput {
+            ok: true,
+            stdout: "a\nb\n".into(),
+            error: String::new(),
+        });
         assert_eq!(ok.run("/x/tool", &[], TOOL_TIMEOUT).unwrap(), "a\nb\n");
         let mut seen = Vec::new();
         struct Never;
@@ -158,12 +172,21 @@ mod tests {
                 Box::new(())
             }
         }
-        ok.run_lines("/x/tool", &[], TOOL_TIMEOUT, &Never, &mut |l| seen.push(l.to_string())).unwrap();
+        ok.run_lines("/x/tool", &[], TOOL_TIMEOUT, &Never, &mut |l| seen.push(l.to_string()))
+            .unwrap();
         assert_eq!(seen, ["a", "b"]);
-        let bad = OnlyTool(ToolOutput { ok: false, stdout: "out".into(), error: "denied".into() });
+        let bad = OnlyTool(ToolOutput {
+            ok: false,
+            stdout: "out".into(),
+            error: "denied".into(),
+        });
         let e = bad.run("/x/tool", &[], TOOL_TIMEOUT).unwrap_err();
         assert!(matches!(&e, PlatformError::Failed(m) if m == "tool failed: denied"), "{e:?}");
-        assert_eq!(bad.run_tool(&tool("/x/tool", &[]), TOOL_TIMEOUT).unwrap().stdout, "out", "the answer of a failing run stays readable");
+        assert_eq!(
+            bad.run_tool(&tool("/x/tool", &[]), TOOL_TIMEOUT).unwrap().stdout,
+            "out",
+            "the answer of a failing run stays readable"
+        );
     }
 
     #[test]

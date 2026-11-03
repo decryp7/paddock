@@ -13,9 +13,7 @@ pub struct OsProber {
 impl OsProber {
     /// A prober over `runner`.
     pub fn new(runner: Box<dyn ToolRunner>) -> OsProber {
-        OsProber {
-            runner,
-        }
+        OsProber { runner }
     }
 }
 

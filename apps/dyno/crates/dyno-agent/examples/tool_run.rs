@@ -28,7 +28,14 @@ fn main() {
         show(step, &a);
     };
     go("offer-before", Request::ToolOffer);
-    go("start", Request::StartJob { spec: JobSpec::InstallTool { tool: ToolKind::Smartmontools } });
+    go(
+        "start",
+        Request::StartJob {
+            spec: JobSpec::InstallTool {
+                tool: ToolKind::Smartmontools,
+            },
+        },
+    );
     let t = Instant::now();
     loop {
         let jobs = ask(&peer, Request::Jobs);
