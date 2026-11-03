@@ -577,7 +577,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
         c
     };
     let notch = |cv: &mut Canvas| {
-        let k = if l.size <= 16 { 4 } else { 5 };
+        let k = 5;
         for y in 0..k {
             cv.rect(0, y, k - y, y + 1, plate);
         }

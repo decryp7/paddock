@@ -54,7 +54,7 @@ Sheets, rendered by the code that would ship (§1):
 | Network pair | 9 pt | medium | tabular | 0 |
 
 - **Baseline** of one-line text 13.5 pt below the image top (@2x 27 px, 1x 14 px): 16.5 pt below the 24 pt bar's top, the caps
-  of 13 pt text centred like the clock's. Stack baselines 7 and 16.5 pt; network 7.5 and 16.5 pt. **Verified during the VM
+  of 13 pt text centred like the clock's. Stack baselines 7 and 16.5 pt; network 7.5 and 16.5 pt. **To verify during the VM
   run** with a screenshot overlay against the real clock at 1x and @2x.
 - Tabular figures: every digit is 8.112 pt at 13 pt; a proportional "1" is 5.954 pt, so "11%" against "18%" would move 2.16 pt.
 
@@ -122,7 +122,7 @@ ones digit never moves and the width never changes. Measured with CoreText on th
   network meters at 16 and 20 px) is read by the fill against the **taskbar** (5.5 to 5.8:1) and by its length, not against
   the track. The track only marks the full scale.
 - **Alert:** from 24 px, the number on a danger plate with a 1 px margin. **Below 24 px** (16, 20 and Linux's 22) the digits
-  stay solid ink and the alert is a **corner notch** (a 4 or 5 px triangle at the top left) **plus the bar under the digits in
+  stay solid ink and the alert is a **corner notch** (a 5 px triangle at the top left) **plus the bar under the digits in
   the danger colour**: a shape and a colour. (The first round's knocked-out "93" read as "9E" at 16 px.) In dark mode the danger
   bar and Dyno's pink are near in hue; the notch carries the alert in any colour vision.
 - **Layouts** (`pixel::layout`):
