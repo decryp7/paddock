@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/table`: `pd-table` carries `data-fit-width`
+- The host has `data-fit-width`, the width in pixels its columns are fitted to (1024 until the first measurement). An e2e that measures a header waits
+  until it equals the drawn width; WebKit sometimes measured the first frame (headers "need 912px, has 634px" at a 900 px window, 4 of 12 runs, also on main).
+
 ### `@decryp7/paddock-ui/widgets`: the movable, resizable widget grid (family ADR 0044, WP-B)
 - New `PdWidgetGrid` (`pd-widget-grid`): draws the `LayoutView`'s arrangement for the container's width (design arrangement at its widest, derived ones
   below), edit mode with Done, Undo and Redo, a "⋯" actions menu, keyboard gestures (arrows, Shift, Home, End, Delete, Ctrl/Cmd Z) enabled from the
