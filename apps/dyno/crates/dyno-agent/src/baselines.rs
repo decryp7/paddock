@@ -4,7 +4,7 @@
 //! values from the store and the recent samples.
 
 use crate::agent::{lock, now, Shared};
-use crate::store::Store;
+use crate::store::{Store, FIRST_SEEN_KEY};
 use dyno_core::alarms::feed::from_baseline;
 use dyno_core::baseline::{
     judge, learn, learning_days, learning_status, ready_time, Baseline, BaselineItem, BaselineMetric, BaselineOverview, BaselineSettings,
@@ -20,8 +20,26 @@ use std::time::{Duration, Instant};
 
 /// Remembers when Dyno first saw this machine, at every agent start: the learning counts from the first start, also of an
 /// agent that no window has asked yet (the Windows `Run` entry at logon). None when the store cannot say.
+///
+/// A stored time that cannot be read starts over from now, and one more than a day after now (a clock that once ran
+/// ahead) is moved back to now, so the first sighting only ever moves earlier; both are logged.
 pub fn on_start(store: &Store, t: Timestamp) -> Option<Timestamp> {
+    if let Ok(Some(raw)) = store.meta(FIRST_SEEN_KEY) {
+        if raw.parse::<i64>().is_err() {
+            log::warn!(Raw = raw.as_str(); "Baselines: stored first-seen time unreadable; learning starts from now");
+        }
+    }
     match store.first_seen(t) {
+        Ok(f) if f.since(t) > DAY => {
+            log::warn!(FirstSeenMs = f.millis(), NowMs = t.millis(); "Baselines: first-seen time is in the future; moved back to now");
+            match store.set_meta(FIRST_SEEN_KEY, &t.millis().to_string()) {
+                Ok(()) => Some(t),
+                Err(e) => {
+                    log::warn!(ErrorChain = e.to_string().as_str(); "Baselines: could not store the corrected first-seen time");
+                    Some(t)
+                }
+            }
+        }
         Ok(f) => Some(f),
         Err(e) => {
             log::warn!(ErrorChain = e.to_string().as_str(); "Baselines: first-seen time unavailable; learning starts over");

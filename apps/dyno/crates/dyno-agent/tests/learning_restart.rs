@@ -50,9 +50,11 @@ fn an_evening_install_waits_for_the_full_hours_on_the_last_day() {
     let db = tmp.path().join("dyno.db");
     let first = local(0, 20);
     run_at(&db, first);
-    // The next Monday: seven local days are complete, but only 6 days 4 hours have passed. Still day 7, ready at 20:00.
-    assert_eq!(run_at(&db, local(7, 0)), learning(7, first));
-    assert_eq!(run_at(&db, local(7, 19)), learning(7, first));
+    // Sunday is day 7; the next Monday the seven local days are complete, but only 6 days 4 hours have passed: the eighth
+    // calendar day says so (day 8, past the period) until 20:00, so no day label lasts longer than a local day.
+    assert_eq!(run_at(&db, local(6, 12)), learning(7, first));
+    assert_eq!(run_at(&db, local(7, 0)), learning(8, first));
+    assert_eq!(run_at(&db, local(7, 19)), learning(8, first));
     assert_eq!(run_at(&db, local(7, 20)), Learning::Ready { days: 7 });
 }
 
@@ -64,7 +66,11 @@ fn a_morning_install_waits_until_the_same_morning_a_week_later() {
     assert_eq!(run_at(&db, first), learning(1, first));
     assert_eq!(run_at(&db, local(0, 23)), learning(1, first));
     assert_eq!(run_at(&db, local(6, 12)), learning(7, first));
-    assert_eq!(run_at(&db, local(7, 7)), learning(7, first), "a week minus an hour");
+    assert_eq!(
+        run_at(&db, local(7, 7)),
+        learning(8, first),
+        "a week minus an hour, on the eighth calendar day"
+    );
     assert_eq!(run_at(&db, local(7, 8)), Learning::Ready { days: 7 });
 }
 
@@ -103,14 +109,32 @@ fn a_clock_change_moves_the_ready_time_by_the_hour_it_moved() {
     assert_eq!(
         status(sat),
         Learning::Learning {
-            day: 7,
+            day: 8,
             days_needed: 7,
             since: Some(first),
             ready_at: Some(ready)
         }
     );
-    assert!(matches!(status(ready.minus(1)), Learning::Learning { day: 7, .. }));
+    assert!(matches!(status(ready.minus(1)), Learning::Learning { day: 8, .. }));
     assert_eq!(status(ready), Learning::Ready { days: 7 });
+}
+
+#[test]
+fn a_first_seen_time_in_the_future_or_unreadable_starts_from_now() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("dyno.db");
+    let t = local(3, 9);
+    let (store, _) = Store::open(&db, t).unwrap();
+    // A clock that ran days ahead once (a wrong RTC, a bad sync) must not hold the learning back for those days.
+    store.set_meta("firstSeen", &local(9, 9).millis().to_string()).unwrap();
+    assert_eq!(dyno_agent::baselines::on_start(&store, t), Some(t));
+    assert_eq!(store.first_seen(t).unwrap(), t, "rewritten, so it only ever moves earlier");
+    // Less than a day ahead is ordinary clock jitter between runs: kept.
+    store.set_meta("firstSeen", &t.plus(HOUR).millis().to_string()).unwrap();
+    assert_eq!(dyno_agent::baselines::on_start(&store, t), Some(t.plus(HOUR)));
+    store.set_meta("firstSeen", "not a time").unwrap();
+    assert_eq!(dyno_agent::baselines::on_start(&store, t), Some(t));
+    assert_eq!(store.first_seen(t).unwrap(), t);
 }
 
 #[test]

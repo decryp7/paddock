@@ -53,7 +53,9 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
   period or switch alarms on in **Settings, Hardware and baselines**. While it learns, the card says which day of the period it
   is, counted in calendar days from the day Dyno first ran on this computer ("day 2 of 7, since 2 Nov"), whether or not the
   computer was on in between. It also waits for the full hours of the period: on the last day the card says when it will be
-  ready ("day 7 of 7 · ready at 20:00").
+  ready ("day 7 of 7 · ready Mon 20:00"). The period is calendar time, not data: a computer that sleeps most of the week is
+  ready after the same week with only a few hours of history, so its first comparisons are rougher until more weeks are
+  recorded.
 
 ## Issues and new programs
 

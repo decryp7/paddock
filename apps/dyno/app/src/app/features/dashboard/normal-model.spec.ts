@@ -1,5 +1,5 @@
 import type { BaselineItem, BaselineOverview, BaselineState } from '../../core/api.types';
-import { formatClock, formatDate } from '../../shared/format';
+import { formatClock, formatDate, formatDayTime } from '../../shared/format';
 import { itemName, normalLine, unusualItems, unusualStrength } from './normal-model';
 
 const item = (subject: string, state: BaselineState, label = 'CPU'): BaselineItem => ({
@@ -45,10 +45,19 @@ describe('normal model', () => {
     expect(normalLine(overview({ learning: { day: 1, daysNeeded: 7, since: null, readyAt: null } }), 0)).toBe(
       'Learning what is normal for this computer: day 1 of 7',
     );
-    // The last calendar day is reached but not the full hours: the line says when it will be ready.
-    expect(normalLine(overview({ learning: { day: 7, daysNeeded: 7, since, readyAt } }), 0)).toBe(
-      `Learning what is normal for this computer: day 7 of 7 · ready at ${formatClock(readyAt)}`,
-    );
+  });
+  it('says when learning ends, naming the day when it is not today', () => {
+    // Installed Monday 2 November 20:00 local: ready Monday 9 November 20:00.
+    const since = new Date(2026, 10, 2, 20).getTime();
+    const readyAt = new Date(2026, 10, 9, 20).getTime();
+    const at = (day: number, hour: number) => new Date(2026, 10, day, hour).getTime();
+    const line = (day: number, now: number) => normalLine({ at: now, learning: { learning: { day, daysNeeded: 7, since, readyAt } }, items: [] }, 0);
+    // Saturday, day 6: no ready time yet.
+    expect(line(6, at(7, 12))).toBe(`Learning what is normal for this computer: day 6 of 7, since ${formatDate(since, at(7, 12))}`);
+    // Sunday, day 7: ready tomorrow evening, so the day is named.
+    expect(line(7, at(8, 12))).toBe(`Learning what is normal for this computer: day 7 of 7 · ready ${formatDayTime(readyAt)}`);
+    // Monday morning: the seven days are over, the hours are not; the line no longer says "day 7".
+    expect(line(8, at(9, 9))).toBe(`Learning what is normal for this computer: almost done · ready at ${formatClock(readyAt)}`);
     expect(normalLine(overview({ ready: { days: 9 } }), 0)).toBe('Everything looks usual for this time of the week');
     expect(normalLine(overview({ ready: { days: 9 } }), 2)).toBeNull();
     expect(normalLine(overview('off'), 0)).toBeNull();

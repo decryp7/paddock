@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// 4: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`).
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -151,7 +151,9 @@ pub enum Learning {
     /// Still collecting; nothing is highlighted yet.
     Learning {
         /// Today's number in the learning, by local calendar day: 1 on the day Dyno first saw this machine, 2 the next
-        /// day, whether or not the computer was on in between; it stays at `days_needed` until `ready_at`.
+        /// day, whether or not the computer was on in between. It is `days_needed + 1` on the calendar day after the
+        /// period when the full hours are not reached yet (until `ready_at`, under a day later), so no day number lasts
+        /// longer than a local day.
         day: u32,
         /// Days needed.
         days_needed: u32,
@@ -179,7 +181,7 @@ pub fn learning_status(settings: &BaselineSettings, first_seen: Option<Timestamp
     match ready_at {
         Some(r) if now >= r => Learning::Ready { days: done },
         _ => Learning::Learning {
-            day: done.saturating_add(1).min(needed),
+            day: done.saturating_add(1),
             days_needed: needed,
             since: first_seen,
             ready_at,
@@ -678,7 +680,8 @@ mod tests {
             learning_status(&BaselineSettings { enabled: false, ..s }, Some(first), at(30, 0), UTC),
             Learning::Off
         );
-        // A clock that moved backwards after the first run learns for the full period again, never negative.
+        // Now before the first sighting (a clock set back since): day 1, never negative, and ready a full period after the
+        // sighting. The agent moves a sighting more than a day in the future back to now at start (`baselines::on_start`).
         assert_eq!(
             learning_status(&s, Some(at(10, 0)), at(0, 0), UTC),
             Learning::Learning {
