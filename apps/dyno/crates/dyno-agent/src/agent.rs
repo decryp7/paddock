@@ -314,7 +314,23 @@ impl Shared {
         notes.extend(note);
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
-        let settings = settings.unwrap_or_default().normalised();
+        let mut settings = settings.unwrap_or_default().normalised();
+        // A dashboard read from Dyno 1.0's span layout: written at once under its new key, logged once (ADR 0044 §4, ER-27).
+        let upgraded = settings.dashboard.take_upgraded().map(|from| {
+            let dropped: u32 = settings
+                .dashboard
+                .notes()
+                .iter()
+                .map(|n| match n.code {
+                    paddock_widgets::NoteCode::Dropped { count } => count,
+                    _ => 0,
+                })
+                .sum();
+            format!(
+                "The dashboard layout was upgraded from version {from} to 2: {} placements, {dropped} dropped.",
+                settings.dashboard.layout().placements.len()
+            )
+        });
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let zone = platform.zone.clone();
@@ -337,6 +353,10 @@ impl Shared {
         };
         for n in notes {
             core.log(t, ActivityKind::System, "Dyno started with a clean slate".into(), n);
+        }
+        if let Some(detail) = upgraded {
+            core.log(t, ActivityKind::System, "Dashboard layout upgraded".into(), detail);
+            core.save_settings(&dirs);
         }
         let (bench, bench_note) = crate::bench::BenchCentre::load(
             dirs.benchmarks(),

@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Dashboard widgets sit on a grid of rectangles (shared `paddock-widgets`, ADR 0044) instead of spans; the dashboard layout is schema 2 and stored under the new settings key `dashboardGrid`. A Dyno 1.0 dashboard is upgraded on the first start (logged once in the activity list, written at once); the 1.0 value stays under the old `dashboard` key until the first dashboard edit in 1.1, so Dyno 1.0 started later still shows the person's layout.
+- Wire (the steward bumps `PROTOCOL_VERSION` to 4 with the other changes): `EditWidgetLayout` has `baseRevision`; a layout view has `revision`, `canRedo`, `arrangements` and `moves`; dashboard placements are `{ id, x, y, w, h, widget }`; `Edit` has `Arrange` and `Redo`; a surface view travels as one JSON string on the binary link; new app command `preview_widget_layout` (answered in the app, from the last view the agent sent). Undo is 20 steps for every layout.
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed

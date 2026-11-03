@@ -2,7 +2,10 @@
 
 use super::metric::Metric;
 use super::DynoSurface;
-use paddock_widgets::{assign_ids, Catalogue, KindSpec, Placement, Preset, PresetId, Refresh, Surface, Widget};
+use paddock_widgets::{
+    assign_spans, Breakpoint, Catalogue, Cells, Kind, KindSpec, Placement, Preset, PresetId, Refresh, Size, SizeRule, Steps, Surface,
+    Widget,
+};
 use serde::{Deserialize, Serialize};
 
 /// When a value turns amber and red.
@@ -219,39 +222,54 @@ impl Widget for DashboardWidget {
     }
 }
 
-/// Columns of the 12-column board: small, medium, large.
+/// Columns of the 12-column board: small, medium, large (the widths the 1.0 dashboard used; the defaults are built from them).
 pub const SMALL: u8 = 3;
 /// Medium (the default width of most widgets).
 pub const MEDIUM: u8 = 6;
 /// Large.
 pub const LARGE: u8 = 12;
 
-const SPANS: &[u8] = &[MEDIUM, SMALL, LARGE];
+/// A kind's sizes in cells: its default (`w` by `h`), the widths and heights it allows (ADR 0044 WP-C1's table).
+const fn rule(w: u8, h: u8, widths: (u8, u8), heights: (u8, u8)) -> SizeRule {
+    SizeRule {
+        widths: Steps::Range {
+            min: widths.0,
+            max: widths.1,
+        },
+        heights: Steps::Range {
+            min: heights.0,
+            max: heights.1,
+        },
+        default: Size { w, h },
+    }
+}
 
 const fn spec(
     kind: DashboardKind,
     title: &'static str,
     summary: &'static str,
     icon: &'static str,
+    size: SizeRule,
     refresh: Refresh,
-) -> KindSpec<DashboardKind> {
+) -> KindSpec<DashboardKind, SizeRule> {
     KindSpec {
         kind,
         title,
         summary,
         icon,
-        spans: SPANS,
+        size,
         max_instances: 32,
         refresh,
     }
 }
 
-const KINDS: &[KindSpec<DashboardKind>] = &[
+const KINDS: &[KindSpec<DashboardKind, SizeRule>] = &[
     spec(
         DashboardKind::Graph,
         "Graph",
         "A line over the last minutes.",
         "graph",
+        rule(3, 4, (2, 12), (4, 8)),
         Refresh::Live,
     ),
     spec(
@@ -259,15 +277,31 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "Big number",
         "One number, large.",
         "number",
+        rule(3, 3, (2, 4), (3, 4)),
         Refresh::Live,
     ),
-    spec(DashboardKind::Bars, "Bars", "A level against its limit.", "bars", Refresh::Live),
-    spec(DashboardKind::Ring, "Ring", "A percentage as a ring.", "ring", Refresh::Live),
+    spec(
+        DashboardKind::Bars,
+        "Bars",
+        "A level against its limit.",
+        "bars",
+        rule(3, 3, (2, 6), (3, 4)),
+        Refresh::Live,
+    ),
+    spec(
+        DashboardKind::Ring,
+        "Ring",
+        "A percentage as a ring.",
+        "ring",
+        rule(3, 4, (2, 4), (4, 6)),
+        Refresh::Live,
+    ),
     spec(
         DashboardKind::Heatmap,
         "Per-core heatmap",
         "One cell per core.",
         "heatmap",
+        rule(6, 3, (4, 12), (3, 5)),
         Refresh::Live,
     ),
     spec(
@@ -275,6 +309,7 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "Top processes",
         "The apps using the most.",
         "apps",
+        rule(6, 6, (3, 12), (5, 12)),
         Refresh::Live,
     ),
     spec(
@@ -282,15 +317,31 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "Issues",
         "Unusual patterns found.",
         "issue",
+        rule(3, 6, (3, 6), (4, 12)),
         Refresh::OnChange,
     ),
-    spec(DashboardKind::Health, "Health", "The health score.", "health", Refresh::Live),
-    spec(DashboardKind::Cpu, "CPU", "Load, per-core view and details.", "cpu", Refresh::Live),
+    spec(
+        DashboardKind::Health,
+        "Health",
+        "The health score.",
+        "health",
+        rule(6, 9, (3, 12), (5, 14)),
+        Refresh::Live,
+    ),
+    spec(
+        DashboardKind::Cpu,
+        "CPU",
+        "Load, per-core view and details.",
+        "cpu",
+        rule(6, 6, (4, 12), (5, 10)),
+        Refresh::Live,
+    ),
     spec(
         DashboardKind::Diagnosis,
         "Why slow",
         "What is slowing the computer, in words.",
         "diagnosis",
+        rule(6, 9, (4, 12), (6, 14)),
         Refresh::Every { secs: 10 },
     ),
     spec(
@@ -298,6 +349,7 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "Recent events",
         "Alarms and what Dyno did.",
         "events",
+        rule(6, 7, (4, 12), (4, 14)),
         Refresh::OnChange,
     ),
     spec(
@@ -305,6 +357,7 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "History",
         "A chart with events marked.",
         "history",
+        rule(12, 8, (6, 12), (5, 14)),
         Refresh::OnChange,
     ),
     spec(
@@ -312,6 +365,7 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "Biggest consumers",
         "Biggest consumers over a day.",
         "consumers",
+        rule(6, 7, (4, 12), (5, 12)),
         Refresh::Every { secs: 60 },
     ),
     spec(
@@ -319,6 +373,7 @@ const KINDS: &[KindSpec<DashboardKind>] = &[
         "Disk space trend",
         "When the disks will be full.",
         "disk",
+        rule(12, 6, (6, 12), (4, 10)),
         Refresh::Every { secs: 60 },
     ),
 ];
@@ -329,16 +384,28 @@ pub struct DashboardCatalogue;
 /// The built-in presets' ids, in display order.
 pub const PRESET_IDS: [&str; 4] = ["overview", "developer", "gaming", "battery"];
 
+/// Placements for `(width, widget)` rows as the 1.0 dashboard laid them out: left to right, a new row when the next
+/// widget does not fit, each row as tall as its tallest default. The built-in layouts are the 1.0 ones, upgraded.
+fn cells(items: impl IntoIterator<Item = (u8, DashboardWidget)>) -> Vec<Placement<DashboardWidget, Cells>> {
+    let spans = assign_spans(items);
+    let v1 = serde_json::json!({ "version": 1, "placements": serde_json::to_value(&spans).unwrap_or_default() });
+    paddock_widgets::spans_to_cells::<DashboardCatalogue>(v1)
+        .ok()
+        .and_then(|v| v.get("placements").cloned())
+        .and_then(|p| serde_json::from_value(p).ok())
+        .unwrap_or_default()
+}
+
 fn w(kind: DashboardKind, metric: Metric) -> DashboardWidget {
     DashboardWidget::new(kind, metric)
 }
 
-fn overview() -> Vec<Placement<DashboardWidget>> {
+fn overview() -> Vec<Placement<DashboardWidget, Cells>> {
     use DashboardKind as K;
     use Metric as M;
     // What the fixed dashboard used to show, as widgets: the verdict first, then the live tiles, the busiest apps,
     // what happened and the history.
-    assign_ids([
+    cells([
         (MEDIUM, w(K::Health, M::CpuTotal)),
         (MEDIUM, w(K::Diagnosis, M::CpuTotal)),
         (SMALL, w(K::Issues, M::CpuTotal)),
@@ -357,10 +424,10 @@ fn overview() -> Vec<Placement<DashboardWidget>> {
     ])
 }
 
-fn developer() -> Vec<Placement<DashboardWidget>> {
+fn developer() -> Vec<Placement<DashboardWidget, Cells>> {
     use DashboardKind as K;
     use Metric as M;
-    assign_ids([
+    cells([
         (LARGE, w(K::Heatmap, M::CpuPerCore)),
         (MEDIUM, w(K::Graph, M::CpuTotal)),
         (MEDIUM, w(K::Graph, M::Memory)),
@@ -371,10 +438,10 @@ fn developer() -> Vec<Placement<DashboardWidget>> {
     ])
 }
 
-fn gaming() -> Vec<Placement<DashboardWidget>> {
+fn gaming() -> Vec<Placement<DashboardWidget, Cells>> {
     use DashboardKind as K;
     use Metric as M;
-    assign_ids([
+    cells([
         (LARGE, w(K::Graph, M::GpuLoad)),
         (MEDIUM, w(K::Graph, M::CpuTotal)),
         (SMALL, w(K::BigNumber, M::Temperature).hot(80.0, 92.0)),
@@ -385,10 +452,10 @@ fn gaming() -> Vec<Placement<DashboardWidget>> {
     ])
 }
 
-fn battery() -> Vec<Placement<DashboardWidget>> {
+fn battery() -> Vec<Placement<DashboardWidget, Cells>> {
     use DashboardKind as K;
     use Metric as M;
-    assign_ids([
+    cells([
         (MEDIUM, w(K::Ring, M::Battery)),
         (MEDIUM, w(K::Graph, M::CpuTotal)),
         (SMALL, w(K::BigNumber, M::Temperature).hot(80.0, 92.0)),
@@ -400,10 +467,11 @@ fn battery() -> Vec<Placement<DashboardWidget>> {
 impl Catalogue for DashboardCatalogue {
     type SurfaceId = DynoSurface;
     type Widget = DashboardWidget;
+    type Place = Cells;
     const SURFACE_ID: DynoSurface = DynoSurface::Dashboard;
     const SURFACE: Surface = Surface {
         noun: "dashboard",
-        schema_version: 1,
+        schema_version: 2,
         columns: 12,
         max_placements: 32,
         // An empty dashboard shows nothing to read; the Overview is back instead.
@@ -413,15 +481,27 @@ impl Catalogue for DashboardCatalogue {
         max_bytes: super::MAX_BYTES,
     };
 
-    fn kinds() -> &'static [KindSpec<DashboardKind>] {
+    /// The dashboard's arrangements by its own width (not the window's): 12 columns from 840 px, 6 from 560, else one.
+    const BREAKPOINTS: &'static [Breakpoint] = &[
+        Breakpoint { min: 840, columns: 12 },
+        Breakpoint { min: 560, columns: 6 },
+        Breakpoint { min: 0, columns: 1 },
+    ];
+
+    fn kinds() -> &'static [Kind<Self>] {
         KINDS
     }
 
-    fn defaults() -> Vec<Placement<DashboardWidget>> {
+    /// Dyno 1.0 stored spans; they become cells as they looked (ADR 0044 §4).
+    fn upgrade(_from: u32, value: serde_json::Value) -> Result<serde_json::Value, String> {
+        paddock_widgets::spans_to_cells::<Self>(value)
+    }
+
+    fn defaults() -> Vec<Placement<DashboardWidget, Cells>> {
         overview()
     }
 
-    fn presets() -> Vec<Preset<DashboardWidget>> {
+    fn presets() -> Vec<Preset<DashboardWidget, Cells>> {
         let build = |id: &str, name: &str, placements| Preset {
             id: PresetId::new(id).unwrap_or_else(|_| unreachable!("the built-in preset ids are valid")),
             name: name.into(),
@@ -466,6 +546,30 @@ mod tests {
             assert!(ids.iter().any(|i| i == needed), "missing {needed} in {ids:?}");
         }
         assert_eq!(DashboardCatalogue::defaults().len(), 15);
+    }
+
+    #[test]
+    fn the_shipped_1_0_default_upgrades_to_the_overview_and_each_preset_is_valid_cells() {
+        // Dyno 1.0.0's default dashboard, as it was stored: spans only.
+        let spans = [6, 6, 3, 6, 3, 3, 3, 3, 3, 6, 6, 6, 6, 12, 12];
+        let defaults = DashboardCatalogue::defaults();
+        assert_eq!(defaults.len(), spans.len());
+        let stored: Vec<serde_json::Value> = defaults
+            .iter()
+            .zip(spans)
+            .map(|(p, span)| serde_json::json!({ "id": p.id, "span": span, "widget": p.widget }))
+            .collect();
+        let r = read::<DashboardCatalogue>(&serde_json::json!({ "version": 1, "placements": stored, "presets": [] }));
+        assert_eq!(r.upgraded, Some(1));
+        assert!(r.notes.is_empty(), "{:?}", r.notes);
+        assert_eq!(r.layout.placements, defaults, "the 1.0 default arrives looking as it did");
+        // Row 1 is 6 + 6 (Health, Why slow: 9 rows); row 2: Issues 3, CPU 6, Graph 3 (CPU/Issues: 6 rows).
+        assert_eq!(defaults[0].place.rect, paddock_widgets::Rect::new(0, 0, 6, 9));
+        assert_eq!(defaults[2].place.rect, paddock_widgets::Rect::new(0, 9, 3, 6));
+        assert_eq!(defaults[14].place.rect.w, 12);
+        for p in DashboardCatalogue::presets() {
+            assert!(!p.placements.is_empty(), "{}", p.id);
+        }
     }
 
     #[test]
@@ -525,7 +629,11 @@ mod tests {
         .unwrap();
         let last = s.layout().placements.last().unwrap();
         assert_eq!(last.widget.options.range_secs, 3_600);
-        assert_eq!(last.span, MEDIUM);
+        assert_eq!(
+            last.place.rect.size(),
+            Size { w: 3, h: 4 },
+            "a new graph has its kind's default size"
+        );
     }
 
     #[test]
@@ -552,11 +660,16 @@ mod tests {
 
     #[test]
     fn the_dashboard_holds_thirty_two_widgets() {
-        let layout: Layout<DashboardWidget> = Layout::new(
-            1,
-            assign_ids((0..32).map(|_| (MEDIUM, DashboardWidget::new(DashboardKind::Graph, Metric::Memory)))),
-            Vec::new(),
-        );
+        let placements = (0..32u16)
+            .map(|n| Placement {
+                id: paddock_widgets::PlacementId::new(&format!("graph-{n}")).unwrap(),
+                place: Cells {
+                    rect: paddock_widgets::Rect::new(u8::try_from(n % 4 * 3).unwrap(), n / 4 * 4, 3, 4),
+                },
+                widget: DashboardWidget::new(DashboardKind::Graph, Metric::Memory),
+            })
+            .collect();
+        let layout: Layout<DashboardWidget, Cells> = Layout::new(2, placements, Vec::new());
         let added = apply::<DashboardCatalogue>(
             &layout,
             Edit::Add {

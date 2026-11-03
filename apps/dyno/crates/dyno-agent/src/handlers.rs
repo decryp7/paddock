@@ -134,6 +134,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             // must never put an old layout back.
             let mut incoming = (*settings).normalised();
             incoming.dashboard = core.settings.dashboard.clone();
+            incoming.dashboard_v1 = core.settings.dashboard_v1.clone();
             incoming.menu_bar = core.settings.menu_bar.clone();
             incoming.popover = core.settings.popover.clone();
             core.settings = incoming;
@@ -331,7 +332,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             &lock(&shared.core).settings,
             surface,
         )))),
-        Request::EditWidgetLayout { edit } => edit_widget_layout(shared, edit),
+        Request::EditWidgetLayout { edit, base_revision } => edit_widget_layout(shared, edit, base_revision),
         Request::PopoverValues { placements } => {
             crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v)))
         }
@@ -342,10 +343,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
 
 /// Applies a layout edit, saves the settings and tells every app which surface changed. A refused edit changes nothing and
 /// answers why.
-fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit) -> Answer {
+fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit, base_revision: Option<u64>) -> Answer {
     let surface = edit.surface();
     let mut core = lock(&shared.core);
-    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit).map_err(|e| bad(e.to_string()))?;
+    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit, base_revision).map_err(|e| bad(e.to_string()))?;
     core.save_settings(&shared.dirs);
     drop(core);
     shared.broadcast(&Message::WidgetLayoutChanged(surface));

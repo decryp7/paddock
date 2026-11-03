@@ -6,7 +6,7 @@ use dyno_core::widgets::popover_values::PopoverNoticeKind;
 use dyno_core::widgets::popover_values::{PopoverValue, WidgetActionId};
 use dyno_core::widgets::VolumeChoice;
 use dyno_platform::fake::quiet_sample;
-use paddock_widgets::{assign_ids, WidgetState};
+use paddock_widgets::{assign_spans, WidgetState};
 
 const T0: Timestamp = Timestamp(10 * HOUR);
 
@@ -121,7 +121,7 @@ fn each_kind_is_asked_again_by_its_own_period_and_on_change_kinds_only_when_told
 
 #[test]
 fn a_live_kind_asked_of_the_agent_is_asked_every_few_seconds() {
-    let layout = assign_ids([(2, PopoverWidget::PinnedCounters)]);
+    let layout = assign_spans([(2, PopoverWidget::PinnedCounters)]);
     let mut m = PopoverModel::new(layout);
     m.set_visible(true);
     assert_eq!(ids(m.due(T0)), [id("pinned-counters")]);

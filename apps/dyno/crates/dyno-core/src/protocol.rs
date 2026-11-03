@@ -452,6 +452,9 @@ pub enum Request {
     EditWidgetLayout {
         /// The edit; its variant names the surface.
         edit: crate::widgets::SurfaceEdit,
+        /// The revision of the view the edit was computed on (`LayoutView.revision`). When it is not the layout's current
+        /// one the edit is refused (another window edited meanwhile) and the app reloads the view. `None`: applied as is.
+        base_revision: Option<u64>,
     },
     /// The popup's values for the widgets that are not live (alarms, disk space, backup, last issue, pinned counters),
     /// from state the agent already keeps. Placements that are not in the popup layout, or are live, are left out.
@@ -1125,6 +1128,7 @@ mod tests {
             },
             Request::EditWidgetLayout {
                 edit: crate::widgets::SurfaceEdit::Popover(paddock_widgets::Edit::ResetToDefaults),
+                base_revision: Some(3),
             },
             Request::PopoverValues {
                 placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
