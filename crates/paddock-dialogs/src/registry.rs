@@ -431,13 +431,16 @@ impl Dialogs {
         }
     }
 
-    /// A fit left the window at `size` (it asked for nothing new): the size to compare late reports with, unless a request
-    /// is still waiting.
+    /// A fit left the window at `size` (it asked for nothing new): the size to compare late reports with. Requests made at
+    /// another scale factor are dropped (a scale change answered them by resizing the window itself), so the window's
+    /// scale is the one reports are compared at; any request still waiting at this scale keeps `settled_size` as it is.
     pub fn note_current_size(&self, label: &str, size: OwnSize) {
-        if let Some(e) = self.lock().get_mut(label)
-            && e.pending_sizes.is_empty()
-        {
-            e.settled_size = Some(size);
+        if let Some(e) = self.lock().get_mut(label) {
+            e.pending_sizes
+                .retain(|p| (p.scale - size.scale).abs() < 1e-9);
+            if e.pending_sizes.is_empty() {
+                e.settled_size = Some(size);
+            }
         }
     }
 
@@ -490,6 +493,7 @@ impl Dialogs {
             e.settled_size = Some(e.pending_sizes[i]);
             e.pending_sizes.drain(..=i);
         } else if e.settled_size.as_ref().is_some_and(close) {
+            // A late report of an earlier answer: nothing changes.
         } else if !e.pending_sizes.is_empty() {
             e.pending_sizes.clear();
             e.settled_size = Some(reported);
@@ -567,6 +571,20 @@ mod tests {
         // And it stays theirs, even when the size goes back.
         assert!(d.note_resized(&l, 700, 300, 1.25));
         assert!(!d.note_resized("d-main-99", 1, 1, 1.0));
+    }
+
+    #[test]
+    fn a_scale_change_that_needs_no_resize_still_lets_a_later_drag_be_detected() {
+        let d = Dialogs::new(contracts());
+        let l = d.reserve(entry(&d, "main", "main", "ask")).unwrap();
+        d.mark_shown(&l);
+        // A request at 1.5 was never reported before the scale became 1.25; the refit there changes nothing.
+        d.note_own_size(&l, sized(560, 195, 1.5));
+        d.note_current_size(&l, sized(448, 244, 1.25));
+        assert_eq!(d.last_requested(&l), Some(sized(448, 244, 1.25)));
+        assert!(!d.note_resized(&l, 448, 244, 1.25));
+        // The user drags it at the new scale.
+        assert!(d.note_resized(&l, 448, 400, 1.25));
     }
 
     #[test]
