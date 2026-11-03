@@ -1093,9 +1093,7 @@ mod tests {
             eta_seconds: None,
             hidden_bytes: None,
             scanned_at: None,
-            origin: ScanOrigin::Saved {
-                saved_at: Timestamp(5),
-            },
+            origin: ScanOrigin::Saved { saved_at: Timestamp(5) },
             changed_bytes: Some(-7),
             replaces: Some(3),
             not_saved: Some(NotSaved::TooBig),

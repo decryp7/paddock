@@ -154,7 +154,9 @@ export interface MockOptions {
 
 /**
  * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
- * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps.
+ * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps,
+ * `saved=3` starts with a saved disk map of the startup disk scanned 3 days ago (ADR 0029) and the counter and software lists as the
+ * earlier run saved them.
  */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
@@ -173,7 +175,18 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     widgetStorage: true,
     widgets: mockWidgetOptionsFromUrl(search),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
+    ...savedFromUrl(q.get('saved')),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
+  };
+}
+
+/** `?saved=3`: a saved disk map of the startup disk, 3 days old, 12.4 GB more used than when it was scanned, and saved lists. */
+function savedFromUrl(days: string | null): Partial<MockOptions> {
+  const d = days === null || days === '' ? NaN : Number(days);
+  if (!Number.isFinite(d) || d <= 0) return {};
+  return {
+    savedMaps: [{ target: { volume: { id: '/' } }, ageMs: d * 86_400_000, changedBytes: 13_314_398_618 }],
+    savedListsAgeMs: d * 86_400_000,
   };
 }
 
