@@ -33,11 +33,16 @@ mod generated;
 mod grid;
 mod id;
 mod layout;
+mod place;
+mod previews;
 mod read;
 mod state;
+mod upgrade;
 mod view;
 
-pub use catalogue::{Catalogue, KindSpec, Refresh, Surface, Widget, check_catalogue};
+pub use catalogue::{
+    Breakpoint, Catalogue, Kind, KindSpec, Refresh, Surface, Widget, check_catalogue,
+};
 pub use edit::{Edit, apply};
 pub use error::{Counted, Note, NoteCode, WidgetError};
 pub use grid::{
@@ -45,11 +50,15 @@ pub use grid::{
     arrange, compact, derive, moves, reading_order,
 };
 pub use id::{BadId, MAX_ID, PlacementId, PresetId};
-pub use layout::{Layout, Placement, Preset, assign_ids};
+pub use layout::{Layout, Placement, Preset, UNDO_DEPTH, assign_ids, assign_spans};
+pub use place::{Cells, KindSize, Place, Span, StepsInfo};
+pub use previews::{PreviewReply, PreviewRequest, Previews};
 pub use read::{MAX_NAME, Read, Stored, read};
 pub use state::{
     PlacementState, Progress, SurfaceNotice, SurfaceValues, Tone, WidgetAction, WidgetState,
 };
+pub use upgrade::spans_to_cells;
 pub use view::{
-    CatalogueInfo, KindInfo, LayoutView, SurfaceInfo, ViewOf, builtin_presets, info, view,
+    Arrangement, CatalogueInfo, KindInfo, LayoutView, Placed, PlacementMoves, SurfaceInfo, ViewOf,
+    builtin_presets, info, view,
 };

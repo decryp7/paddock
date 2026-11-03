@@ -73,6 +73,33 @@ pub enum GridGesture {
         id: PlacementId,
     },
 }
+
+/// Why a gesture changes nothing; the UI says so instead of staying silent (ADR 0044 §5, announcements).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Block {
+    /// The placement is at the edge of the grid in this direction.
+    Edge(Dir),
+    /// The width or height is at the kind's largest size.
+    Largest,
+    /// The width or height is at the kind's smallest size.
+    Smallest,
+    /// The gesture leaves the arrangement as it is (already first, already last, dropped where it was).
+    Unchanged,
+}
+}
+
+impl GridGesture {
+    /// The placement the gesture is about.
+    pub fn id(&self) -> &PlacementId {
+        match self {
+            GridGesture::Place { id, .. }
+            | GridGesture::Nudge { id, .. }
+            | GridGesture::Grow { id, .. }
+            | GridGesture::ToFirst { id }
+            | GridGesture::ToLast { id } => id,
+        }
+    }
 }
 
 /// A width and height in cells.
@@ -150,19 +177,6 @@ pub struct Item {
     pub rect: Rect,
     /// The sizes its kind allows.
     pub rule: SizeRule,
-}
-
-/// Why a gesture changes nothing; the UI says so instead of staying silent (ADR 0044 §5, announcements).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Block {
-    /// The placement is at the edge of the grid in this direction.
-    Edge(Dir),
-    /// The width or height is at the kind's largest size.
-    Largest,
-    /// The width or height is at the kind's smallest size.
-    Smallest,
-    /// The gesture leaves the arrangement as it is (already first, already last, dropped where it was).
-    Unchanged,
 }
 
 /// Why a gesture could not be applied.

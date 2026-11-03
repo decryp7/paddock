@@ -168,6 +168,12 @@ One line each. The dated records are in the app files.
 
 Results of shared crates (rule 48: shared code records here), newest first.
 
+### 2026-11-03, paddock-widgets: grid engine, 32 placements (feat/widgets-grid)
+
+- **What:** `cargo bench -p paddock-widgets` (`crates/paddock-widgets/benches/grid.rs`): ADR 0044 §7 budgets, a 32-widget board of 3 by 4 cells.
+- **Machine and load:** Mac mini, release build, run through the plock queue (load about 4 to 20), single thread.
+- **Results:** a drop (`arrange`, Place) 4.3 us per run against the 50 us budget; a nudge 3.5 us; the derived 6- and 1-column arrangements plus `moves` for all 32 placements (320 gestures applied) 1.54 ms per run. The ADR's 200 us budget for a view with its arrangements does not hold once the moves of every placement are included (each of the 320 gestures clones the board); an edit or a preview still stays far under the 8 ms round-trip budget. Optimising `moves` (one validation, no per-gesture clone) is open.
+
 ### 2026-10-29, paddock-chromium: Browser.close exit time under load (fix/flaky-browser-close)
 
 - **Commit:** 18360f145 (origin/main) with temporary probe output in `Chromium::close_gracefully` (not committed): the

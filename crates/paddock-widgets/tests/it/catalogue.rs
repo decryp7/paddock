@@ -3,7 +3,7 @@
 
 use paddock_widgets::{
     Catalogue, KindSpec, Layout, Placement, PlacementId, Preset, PresetId, Refresh, Surface,
-    Widget, assign_ids,
+    Widget, assign_spans,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -81,7 +81,7 @@ pub static KINDS: [KindSpec<GadgetKind>; 3] = [
         title: "Clock",
         summary: "The time now",
         icon: "clock",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -90,7 +90,7 @@ pub static KINDS: [KindSpec<GadgetKind>; 3] = [
         title: "Disk space",
         summary: "Free space per volume",
         icon: "disk",
-        spans: &[2],
+        size: &[2],
         max_instances: 2,
         refresh: Refresh::Every { secs: 60 },
     },
@@ -99,7 +99,7 @@ pub static KINDS: [KindSpec<GadgetKind>; 3] = [
         title: "Active alarms",
         summary: "Open alarms",
         icon: "bell",
-        spans: &[1],
+        size: &[1],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -113,6 +113,7 @@ pub type Gadgets = Cat<0, 2>;
 impl<const MIN: u16, const PRESETS: u8> Catalogue for Cat<MIN, PRESETS> {
     type SurfaceId = TestSurface;
     type Widget = Gadget;
+    type Place = paddock_widgets::Span;
 
     const SURFACE_ID: TestSurface = TestSurface::Popover;
     const SURFACE: Surface = Surface {
@@ -131,7 +132,7 @@ impl<const MIN: u16, const PRESETS: u8> Catalogue for Cat<MIN, PRESETS> {
     }
 
     fn defaults() -> Vec<Placement<Gadget>> {
-        assign_ids([
+        assign_spans([
             (1, Gadget::Clock),
             (2, disk("all")),
             (1, Gadget::Alarms { rows: 2 }),
@@ -143,7 +144,7 @@ impl<const MIN: u16, const PRESETS: u8> Catalogue for Cat<MIN, PRESETS> {
             id: pid("compact"),
             name: "Compact".into(),
             builtin: false,
-            placements: assign_ids([(2, Gadget::Clock)]),
+            placements: assign_spans([(2, Gadget::Clock)]),
         }]
     }
 }

@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::catalogue::{Catalogue, Refresh, Widget};
 use crate::check;
 use crate::error::{Counted, Note};
+use crate::grid::{self, Item, Moves, Rect};
+use crate::id::PlacementId;
 use crate::layout::{Layout, Preset};
+use crate::place::{KindSize, Place};
 use crate::read::Stored;
 
 ts! {
@@ -39,8 +42,8 @@ pub struct KindInfo<K> {
     pub summary: String,
     /// Registered icon name.
     pub icon: String,
-    /// Allowed spans, the first is the default.
-    pub spans: Vec<u8>,
+    /// How it may be sized: spans (flow) or widths and heights (grid).
+    pub size: KindSize,
     /// How many may be placed.
     pub max_instances: u8,
     /// How it refreshes.
@@ -57,16 +60,58 @@ pub struct CatalogueInfo<S, K> {
     pub kinds: Vec<KindInfo<K>>,
 }
 
+/// A placement's rectangle in one arrangement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Placed {
+    /// The placement.
+    pub id: PlacementId,
+    /// Its cells.
+    pub rect: Rect,
+}
+
+/// The arrangement a grid surface shows from a container width on (ADR 0044 §3). The first is the design arrangement,
+/// the stored layout; narrower ones are derived and never stored. Reading order is the design's in every one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Arrangement {
+    /// The least container width, in px, for this arrangement.
+    pub min_width: u16,
+    /// Its columns.
+    pub columns: u8,
+    /// Every placement, in reading order.
+    pub placements: Vec<Placed>,
+}
+
+/// Which gestures would change the arrangement for one placement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlacementMoves {
+    /// The placement.
+    pub id: PlacementId,
+    /// Its moves.
+    pub moves: Moves,
+}
+
 /// Everything the chooser draws: the layout, its catalogue, the notes and whether Undo is offered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LayoutView<S, W, K> {
+pub struct LayoutView<S, W, P, K> {
     /// The layout.
-    pub layout: Layout<W>,
+    pub layout: Layout<W, P>,
+    /// Counts up with every applied edit and every reload; an arrange edit names the revision it was computed on.
+    #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
+    pub revision: u64,
+    /// The arrangement for each breakpoint, widest first (grid surfaces; empty on flow surfaces).
+    pub arrangements: Vec<Arrangement>,
+    /// Which gestures work for each placement (grid surfaces; empty on flow surfaces).
+    pub moves: Vec<PlacementMoves>,
+    /// True when an undone edit can be redone.
+    pub can_redo: bool,
     /// The catalogue.
     pub catalogue: CatalogueInfo<S, K>,
     /// The catalogue's own presets (the person's are in the layout).
-    pub builtin_presets: Vec<Preset<W>>,
+    pub builtin_presets: Vec<Preset<W, P>>,
     /// What was wrong when the layout was read, to show once.
     pub notes: Vec<Note>,
     /// True right after an undoable edit.
@@ -80,6 +125,7 @@ pub struct LayoutView<S, W, K> {
 pub type ViewOf<C> = LayoutView<
     <C as Catalogue>::SurfaceId,
     <C as Catalogue>::Widget,
+    <C as Catalogue>::Place,
     <<C as Catalogue>::Widget as Widget>::Kind,
 >;
 
@@ -102,7 +148,7 @@ pub fn info<C: Catalogue>() -> CatalogueInfo<C::SurfaceId, <C::Widget as Widget>
                 title: k.title.into(),
                 summary: k.summary.into(),
                 icon: k.icon.into(),
-                spans: k.spans.to_vec(),
+                size: <C::Place as Place>::size_info(&k.size),
                 max_instances: k.max_instances,
                 refresh: k.refresh,
             })
@@ -111,7 +157,7 @@ pub fn info<C: Catalogue>() -> CatalogueInfo<C::SurfaceId, <C::Widget as Widget>
 }
 
 /// The catalogue's presets, marked built-in, with invalid placements dropped.
-pub fn builtin_presets<C: Catalogue>() -> Vec<Preset<C::Widget>> {
+pub fn builtin_presets<C: Catalogue>() -> Vec<Preset<C::Widget, C::Place>> {
     C::presets()
         .into_iter()
         .map(|mut p| {
@@ -127,13 +173,84 @@ pub fn builtin_presets<C: Catalogue>() -> Vec<Preset<C::Widget>> {
         .collect()
 }
 
+/// The layout as grid items, or `None` on a flow surface.
+fn grid_items<C: Catalogue>(layout: &Layout<C::Widget, C::Place>) -> Option<Vec<Item>> {
+    layout
+        .placements
+        .iter()
+        .map(|p| {
+            let spec = crate::catalogue::spec_of::<C>(p.widget.kind())?;
+            Some(Item {
+                id: p.id.clone(),
+                rect: p.place.rect()?,
+                rule: <C::Place as Place>::size_rule(&spec.size)?,
+            })
+        })
+        .collect()
+}
+
+fn placed(items: &[Item]) -> Vec<Placed> {
+    items
+        .iter()
+        .map(|i| Placed {
+            id: i.id.clone(),
+            rect: i.rect,
+        })
+        .collect()
+}
+
+/// The arrangement of each breakpoint: the stored layout at the widest, the derived ones below.
+fn arrangements<C: Catalogue>(items: &[Item]) -> Vec<Arrangement> {
+    let design = C::SURFACE.columns;
+    let sorted = grid::reading_order(items.to_vec());
+    if C::BREAKPOINTS.is_empty() {
+        return vec![Arrangement {
+            min_width: 0,
+            columns: design,
+            placements: placed(&sorted),
+        }];
+    }
+    C::BREAKPOINTS
+        .iter()
+        .filter_map(|bp| {
+            let at = if bp.columns == design {
+                Ok(sorted.clone())
+            } else {
+                grid::derive(&sorted, design, bp.columns)
+            };
+            at.ok().map(|a| Arrangement {
+                min_width: bp.min,
+                columns: bp.columns,
+                placements: placed(&a),
+            })
+        })
+        .collect()
+}
+
 /// A stored layout with its catalogue, built-in presets and notes, for the chooser.
-pub fn view<C: Catalogue>(
-    stored: &Stored<C>,
-) -> LayoutView<C::SurfaceId, C::Widget, <C::Widget as Widget>::Kind> {
+pub fn view<C: Catalogue>(stored: &Stored<C>) -> ViewOf<C> {
+    let layout = &stored.read.layout;
+    let items = grid_items::<C>(layout);
+    let (arrangements, moves) = match &items {
+        Some(items) => (
+            arrangements::<C>(items),
+            items
+                .iter()
+                .map(|i| PlacementMoves {
+                    id: i.id.clone(),
+                    moves: grid::moves(items, C::SURFACE.columns, &i.id),
+                })
+                .collect(),
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
     LayoutView {
-        can_undo: stored.read.layout.can_undo(),
-        layout: stored.read.layout.clone(),
+        can_undo: layout.can_undo(),
+        can_redo: layout.can_redo(),
+        revision: stored.revision(),
+        arrangements,
+        moves,
+        layout: layout.clone(),
         catalogue: info::<C>(),
         builtin_presets: builtin_presets::<C>(),
         notes: stored.read.notes.clone(),

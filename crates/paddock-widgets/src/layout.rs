@@ -6,16 +6,19 @@ use crate::catalogue::{Catalogue, Widget};
 use crate::check;
 use crate::error::{Counted, WidgetError};
 use crate::id::{PlacementId, PresetId, slug, unique_id};
+use crate::place::Place;
 
 ts! {
 /// One widget on a surface.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Placement<W> {
+pub struct Placement<W, P = crate::place::Span> {
     /// Unique within its layout.
     pub id: PlacementId,
-    /// Columns it spans; one of its kind's spans.
-    pub span: u8,
+    /// Where it sits: a span on a flow surface, `x`, `y`, `w`, `h` on a grid surface.
+    #[serde(flatten)]
+    #[cfg_attr(any(test, feature = "ts"), ts(flatten))]
+    pub place: P,
     /// The widget and its options.
     pub widget: W,
 }
@@ -23,7 +26,7 @@ pub struct Placement<W> {
 /// A named layout the person can switch to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Preset<W> {
+pub struct Preset<W, P = crate::place::Span> {
     /// Unique among the built-in and saved presets of a surface.
     pub id: PresetId,
     /// The name to show, 1 to 64 characters.
@@ -31,47 +34,77 @@ pub struct Preset<W> {
     /// The app's own: rebuilt on every read, cannot be edited or deleted.
     pub builtin: bool,
     /// Its placements.
-    pub placements: Vec<Placement<W>>,
+    pub placements: Vec<Placement<W, P>>,
 }
 
 /// The stored layout of one surface. Built-in presets are not stored.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", bound(serialize = "W: Serialize", deserialize = "W: Deserialize<'de>"))]
-pub struct Layout<W> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", bound(serialize = "W: Serialize, P: Serialize", deserialize = "W: Deserialize<'de>, P: Deserialize<'de>"))]
+pub struct Layout<W, P = crate::place::Span> {
     /// The surface's `schema_version` when written.
     pub version: u32,
     /// The placements, in order.
-    pub placements: Vec<Placement<W>>,
+    pub placements: Vec<Placement<W, P>>,
     /// The person's own presets only.
-    pub presets: Vec<Preset<W>>,
-    /// One level of undo: the placements before the last remove, preset or reset. In memory only; a placement edit
-    /// clears it.
+    pub presets: Vec<Preset<W, P>>,
+    /// Up to [`UNDO_DEPTH`] earlier placement lists, the latest last. In memory only.
     #[serde(skip)]
     #[cfg_attr(any(test, feature = "ts"), ts(skip))]
-    pub(crate) previous: Option<Vec<Placement<W>>>,
+    pub(crate) undo: Vec<Vec<Placement<W, P>>>,
+    /// Placement lists undone and not yet replaced by a new edit, the next to redo last. In memory only.
+    #[serde(skip)]
+    #[cfg_attr(any(test, feature = "ts"), ts(skip))]
+    pub(crate) redo: Vec<Vec<Placement<W, P>>>,
 }
 }
 
-impl<W> Layout<W> {
+/// Layouts are equal when version, placements and presets are; the in-memory undo and redo steps are history, not content.
+impl<W: PartialEq, P: PartialEq> PartialEq for Layout<W, P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+            && self.placements == other.placements
+            && self.presets == other.presets
+    }
+}
+
+/// How many edits can be undone.
+pub const UNDO_DEPTH: usize = 20;
+
+impl<W, P> Layout<W, P> {
     /// A layout with nothing to undo. Not checked: [`Layout::validate`] does that.
-    pub fn new(version: u32, placements: Vec<Placement<W>>, presets: Vec<Preset<W>>) -> Self {
+    pub fn new(version: u32, placements: Vec<Placement<W, P>>, presets: Vec<Preset<W, P>>) -> Self {
         Layout {
             version,
             placements,
             presets,
-            previous: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
         }
     }
 
-    /// Whether an undoable edit was the last one (remove, apply preset, reset).
+    /// Whether there is an edit to undo.
     pub fn can_undo(&self) -> bool {
-        self.previous.is_some()
+        !self.undo.is_empty()
+    }
+
+    /// Whether there is an undone edit to redo.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Keeps the current placements as the next undo step (the oldest beyond [`UNDO_DEPTH`] is dropped) and clears redo.
+    pub(crate) fn push_undo(&mut self, before: Vec<Placement<W, P>>) {
+        self.undo.push(before);
+        if self.undo.len() > UNDO_DEPTH {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
     }
 }
 
-impl<W: Widget> Layout<W> {
+impl<W: Widget, P: Place> Layout<W, P> {
     /// The catalogue's defaults (invalid defaults are dropped; [`crate::check_catalogue`] reports them).
-    pub fn defaults<C: Catalogue<Widget = W>>() -> Layout<W> {
+    pub fn defaults<C: Catalogue<Widget = W, Place = P>>() -> Layout<W, P> {
         let placements = check::keep_valid::<C>(
             C::defaults(),
             C::SURFACE.max_placements as usize,
@@ -82,7 +115,7 @@ impl<W: Widget> Layout<W> {
     }
 
     /// Checks the whole layout against the catalogue and the surface's limits; the first problem is returned.
-    pub fn validate<C: Catalogue<Widget = W>>(&self) -> Result<(), WidgetError> {
+    pub fn validate<C: Catalogue<Widget = W, Place = P>>(&self) -> Result<(), WidgetError> {
         let s = &C::SURFACE;
         check::check_all::<C>(
             &self.placements,
@@ -127,19 +160,33 @@ impl<W: Widget> Layout<W> {
     }
 }
 
-/// Placements for `(span, widget)` pairs with ids derived from the kinds ("disk-space", "disk-space-2"). For a
-/// catalogue's `defaults()` and `presets()`, so the app writes no ids by hand.
-pub fn assign_ids<W: Widget>(items: impl IntoIterator<Item = (u8, W)>) -> Vec<Placement<W>> {
-    let mut out: Vec<Placement<W>> = Vec::new();
-    for (span, widget) in items {
+/// Placements for `(place, widget)` pairs with ids derived from the kinds ("disk-space", "disk-space-2"). For a
+/// catalogue's `defaults()` and `presets()`, so the app writes no ids by hand. The place is a [`crate::Span`] or a
+/// [`crate::Cells`]; for the common flow case, pass a span with `.into()` or use [`assign_spans`].
+pub fn assign_ids<W: Widget, P: Place>(
+    items: impl IntoIterator<Item = (P, W)>,
+) -> Vec<Placement<W, P>> {
+    let mut out: Vec<Placement<W, P>> = Vec::new();
+    for (place, widget) in items {
         let id = derive_id(&out, &widget);
-        out.push(Placement { id, span, widget });
+        out.push(Placement { id, place, widget });
     }
     out
 }
 
+/// [`assign_ids`] for a flow surface, from `(span, widget)` pairs.
+pub fn assign_spans<W: Widget>(
+    items: impl IntoIterator<Item = (u8, W)>,
+) -> Vec<Placement<W, crate::place::Span>> {
+    assign_ids(
+        items
+            .into_iter()
+            .map(|(span, w)| (crate::place::Span { span }, w)),
+    )
+}
+
 /// A free id for `widget` among `existing`, from its kind's wire name.
-pub(crate) fn derive_id<W: Widget>(existing: &[Placement<W>], widget: &W) -> PlacementId {
+pub(crate) fn derive_id<W: Widget, P>(existing: &[Placement<W, P>], widget: &W) -> PlacementId {
     let name = serde_json::to_value(widget.kind())
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))

@@ -1,5 +1,6 @@
 //! One test binary for paddock-widgets (a binary links once; topics are modules).
 
+mod board;
 mod broken;
 mod catalogue;
 mod edits;

@@ -131,7 +131,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `Egress::check_host`/`check_host_with` (the door for connections that are not HTTP; `PublicAccess::Deny` leaves this computer and private networks only), a slim build (`default-features = false`: address classes, `Lookup`, `check_host`, no ureq or rustls), `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
-| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with one level of undo, the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
+| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with 20-step undo and redo, grid surfaces (ADR 0044: rectangles, gravity, swap and push, key gestures, derived narrow arrangements, previews), the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `paddock-chromium` | the one Chromium driver: discovery (tests only `CHROMIUM_TEST_PATH`), one command-line builder with the start page last, `Sandbox::decide`, supervised launch with a time limit on an injected clock and a memory cap, DevTools client, pages, readiness and challenge rules, AI cue, the pinned Chrome for Testing runtime, a fake browser for tests (plan X14) | yes (Debrief, Spotter; Sighter later); built |
@@ -609,8 +609,14 @@ feature (the commands stay in the app, which owns where settings live).
   `NewerLayout`), a damaged or oversized one is replaced by the first edit; each invalid, unknown,
   duplicate or surplus entry is dropped on its own with a count (at most twice the limit is looked at). `Stored<C>` is
   the same as a `#[serde(default)]` settings field.
-- `Edit` (add, remove, move, resize, replace, apply/save/delete preset, reset, undo) and `apply::<C>(&layout, edit)`,
-  a pure `Layout -> Result<Layout, WidgetError>`; remove, apply preset and reset keep one undo level.
+- `Edit` (add, remove, move, resize, replace, arrange, apply/save/delete preset, reset, undo, redo) and
+  `apply::<C>(&layout, edit)`, a pure `Layout -> Result<Layout, WidgetError>`; every placement edit is an undo step (20).
+- Two arrangements (ADR 0044): `Catalogue::Place` is `Span` (flow: popup, menu bar) or `Cells` (grid: rectangles of
+  cells, `SizeRule` per kind, gravity, swap and push on a drop, `Edit::Arrange(GridGesture)`; `grid::arrange`, `derive`,
+  `moves`). `Stored` has a revision (`edit_at`, `preview`: `WidgetError::Stale`), `Catalogue::upgrade` and
+  `spans_to_cells` bring version 1 span layouts up (`Read::upgraded`, `Read::legacy`), and `Previews` answers the
+  webview's preview requests from the last relayed view, in the app's own process.
+- Golden cases for the UI's mock backend: `ui/projects/paddock-ui/widgets/generated/grid-cases.json`.
 - `info`, `view` -> `LayoutView` for the chooser; `WidgetState` (ready, working, empty, error), `PlacementState`,
   `SurfaceValues` for values. The `ts` feature derives `TS` for apps' own catalogue types.
 - Generated TypeScript: `ui/projects/paddock-ui/widgets/generated/widgets.ts`

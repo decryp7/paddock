@@ -1,0 +1,1010 @@
+[
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "place",
+      "id": "a",
+      "rect": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      }
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "drop on a same-size tile swaps",
+    "result": {
+      "ok": [
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 4
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "place",
+      "id": "a",
+      "rect": {
+        "h": 4,
+        "w": 6,
+        "x": 3,
+        "y": 4
+      }
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "drop across two tiles pushes them down",
+    "result": {
+      "ok": [
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 3,
+            "y": 4
+          }
+        },
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 8
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 8
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "place",
+      "id": "a",
+      "rect": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      }
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "drop below everything rises",
+    "result": {
+      "ok": [
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 4
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "place",
+      "id": "a",
+      "rect": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      }
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "resize taller pushes neighbours",
+    "result": {
+      "ok": [
+        {
+          "id": "a",
+          "rect": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        },
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 8
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "place",
+      "id": "a",
+      "rect": {
+        "h": 40,
+        "w": 40,
+        "x": 0,
+        "y": 0
+      }
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "resize is clamped to the rule",
+    "result": {
+      "ok": [
+        {
+          "id": "a",
+          "rect": {
+            "h": 14,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 14
+          }
+        },
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 14
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 18
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "dir": "right",
+      "gesture": "nudge",
+      "id": "a"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "nudge right swaps a same-size neighbour",
+    "result": {
+      "ok": [
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 4
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "dir": "down",
+      "gesture": "nudge",
+      "id": "a"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "nudge down passes the widget below",
+    "result": {
+      "ok": [
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 4
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "dir": "left",
+      "gesture": "nudge",
+      "id": "a"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "nudge at the edge is blocked",
+    "result": {
+      "error": "Nothing to change: Edge(Left)."
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "dir": "right",
+      "gesture": "grow",
+      "id": "a"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 3,
+          "w": 4,
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "name": "grow wider by one step",
+    "result": {
+      "ok": [
+        {
+          "id": "a",
+          "rect": {
+            "h": 3,
+            "w": 5,
+            "x": 0,
+            "y": 0
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "dir": "right",
+      "gesture": "grow",
+      "id": "a"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 3,
+          "w": 4,
+          "x": 8,
+          "y": 0
+        }
+      }
+    ],
+    "name": "grow at the grid edge is blocked",
+    "result": {
+      "error": "Nothing to change: Edge(Right)."
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "toFirst",
+      "id": "d"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "home moves to the first place",
+    "result": {
+      "ok": [
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 4
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  },
+  {
+    "columns": 12,
+    "gesture": {
+      "gesture": "toLast",
+      "id": "a"
+    },
+    "heights": {
+      "max": 14,
+      "min": 2
+    },
+    "items": [
+      {
+        "id": "a",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "b",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": "c",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": "d",
+        "rect": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 4
+        }
+      }
+    ],
+    "name": "end moves after the last one",
+    "result": {
+      "ok": [
+        {
+          "id": "c",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "b",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          }
+        },
+        {
+          "id": "d",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 4
+          }
+        },
+        {
+          "id": "a",
+          "rect": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 5
+          }
+        }
+      ]
+    },
+    "widths": {
+      "max": 12,
+      "min": 2
+    }
+  }
+]

@@ -22,7 +22,10 @@ fn the_catalogue_is_data() {
     let titles: Vec<&str> = info.kinds.iter().map(|k| k.title.as_str()).collect();
     assert_eq!(titles, ["Clock", "Disk space", "Active alarms"]);
     assert_eq!(info.kinds[0].kind, GadgetKind::Clock);
-    assert_eq!(info.kinds[0].spans, [1, 2]);
+    assert_eq!(
+        info.kinds[0].size,
+        paddock_widgets::KindSize::Spans { spans: vec![1, 2] }
+    );
     assert_eq!(info.kinds[1].max_instances, 2);
     assert_eq!(info.kinds[1].refresh, Refresh::Every { secs: 60 });
     assert_eq!(info.kinds[2].icon, "bell");

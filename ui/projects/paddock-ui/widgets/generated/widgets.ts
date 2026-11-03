@@ -30,7 +30,15 @@ noun: string, } } | { "spanNotAllowed": {
 /**
  * The allowed spans.
  */
-allowed: Array<number>, } } | { "tooFew": { 
+allowed: Array<number>, } } | { "sizeNotAllowed": { 
+/**
+ * Allowed widths.
+ */
+widths: StepsInfo, 
+/**
+ * Allowed heights.
+ */
+heights: StepsInfo, } } | { "blocked": Block } | "stale" | "nothingToRedo" | { "tooFew": { 
 /**
  * The surface's `min_placements`.
  */
@@ -65,6 +73,120 @@ export type Refresh = "live" | { "every": {
  * The period.
  */
 secs: number, } } | "onChange";
+
+export type Span = { 
+/**
+ * Columns it spans; one of its kind's spans.
+ */
+span: number, };
+
+export type Cells = { 
+/**
+ * Left column, 0-based.
+ */
+x: number, 
+/**
+ * Top row, 0-based.
+ */
+y: number, 
+/**
+ * Width in columns.
+ */
+w: number, 
+/**
+ * Height in rows.
+ */
+h: number, };
+
+export type StepsInfo = { "steps": "range", 
+/**
+ * Smallest.
+ */
+min: number, 
+/**
+ * Largest.
+ */
+max: number, } | { "steps": "only", 
+/**
+ * The values.
+ */
+values: Array<number>, };
+
+export type KindSize = { "arrangement": "spans", 
+/**
+ * The spans.
+ */
+spans: Array<number>, } | { "arrangement": "cells", 
+/**
+ * Allowed widths.
+ */
+widths: StepsInfo, 
+/**
+ * Allowed heights.
+ */
+heights: StepsInfo, 
+/**
+ * Default width.
+ */
+defaultW: number, 
+/**
+ * Default height.
+ */
+defaultH: number, };
+
+export type Block = { "edge": Dir } | "largest" | "smallest" | "unchanged";
+
+export type Placed = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its cells.
+ */
+rect: Rect, };
+
+export type Arrangement = { 
+/**
+ * The least container width, in px, for this arrangement.
+ */
+minWidth: number, 
+/**
+ * Its columns.
+ */
+columns: number, 
+/**
+ * Every placement, in reading order.
+ */
+placements: Array<Placed>, };
+
+export type PlacementMoves = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its moves.
+ */
+moves: Moves, };
+
+export type PreviewRequest = { 
+/**
+ * The surface, as its id serialises ("dashboard").
+ */
+surface: string, 
+/**
+ * The revision the webview's view was computed on.
+ */
+revision: number, 
+/**
+ * The gesture.
+ */
+gesture: GridGesture, 
+/**
+ * The webview's counter; replies older than the latest are dropped there.
+ */
+seq: number, };
 
 export type Rect = { 
 /**
@@ -162,21 +284,17 @@ taller: boolean,
  */
 shorter: boolean, };
 
-export type Placement<W> = { 
+export type Placement<W, P = Span> = { 
 /**
  * Unique within its layout.
  */
 id: PlacementId, 
 /**
- * Columns it spans; one of its kind's spans.
- */
-span: number, 
-/**
  * The widget and its options.
  */
-widget: W, };
+widget: W, } & P;
 
-export type Preset<W> = { 
+export type Preset<W, P = Span> = { 
 /**
  * Unique among the built-in and saved presets of a surface.
  */
@@ -192,9 +310,9 @@ builtin: boolean,
 /**
  * Its placements.
  */
-placements: Array<Placement<W>>, };
+placements: Array<Placement<W, P>>, };
 
-export type Layout<W> = { 
+export type Layout<W, P = Span> = { 
 /**
  * The surface's `schema_version` when written.
  */
@@ -202,11 +320,11 @@ version: number,
 /**
  * The placements, in order.
  */
-placements: Array<Placement<W>>, 
+placements: Array<Placement<W, P>>, 
 /**
  * The person's own presets only.
  */
-presets: Array<Preset<W>>, };
+presets: Array<Preset<W, P>>, };
 
 export type Edit<W> = { "add": { 
 /**
@@ -260,7 +378,11 @@ name: string, } } | { "deletePreset": {
 /**
  * The preset.
  */
-id: PresetId, } } | "resetToDefaults" | "undo";
+id: PresetId, } } | "resetToDefaults" | { "arrange": { 
+/**
+ * The gesture.
+ */
+gesture: GridGesture, } } | "undo" | "redo";
 
 export type SurfaceInfo<S> = { 
 /**
@@ -306,9 +428,9 @@ summary: string,
  */
 icon: string, 
 /**
- * Allowed spans, the first is the default.
+ * How it may be sized: spans (flow) or widths and heights (grid).
  */
-spans: Array<number>, 
+size: KindSize, 
 /**
  * How many may be placed.
  */
@@ -328,11 +450,27 @@ surface: SurfaceInfo<S>,
  */
 kinds: Array<KindInfo<K>>, };
 
-export type LayoutView<S, W, K> = { 
+export type LayoutView<S, W, P, K> = { 
 /**
  * The layout.
  */
-layout: Layout<W>, 
+layout: Layout<W, P>, 
+/**
+ * Counts up with every applied edit and every reload; an arrange edit names the revision it was computed on.
+ */
+revision: number, 
+/**
+ * The arrangement for each breakpoint, widest first (grid surfaces; empty on flow surfaces).
+ */
+arrangements: Array<Arrangement>, 
+/**
+ * Which gestures work for each placement (grid surfaces; empty on flow surfaces).
+ */
+moves: Array<PlacementMoves>, 
+/**
+ * True when an undone edit can be redone.
+ */
+canRedo: boolean, 
 /**
  * The catalogue.
  */
@@ -340,7 +478,7 @@ catalogue: CatalogueInfo<S, K>,
 /**
  * The catalogue's own presets (the person's are in the layout).
  */
-builtinPresets: Array<Preset<W>>, 
+builtinPresets: Array<Preset<W, P>>, 
 /**
  * What was wrong when the layout was read, to show once.
  */
