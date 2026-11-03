@@ -31,6 +31,7 @@ so the numbering is fixed.
 | [0025](0025-supervisor-state-machine.md) | The agent supervisor is a pure state machine with one owner thread: explicit phases, numbered answers, quit decided once, a bounded model check with the five historical bugs as mutants |
 | [0026](0026-macos-sockets-from-the-kernel-list.md) | macOS sockets come from the kernel's `pcblist_n` lists, never from a sweep over other programs' descriptors (Accepted) |
 | [0029](0029-saved-views-disk-map-cache.md) | Saved views: disk-map scans (and the counter catalog and software list) kept in a rebuildable `cache.db` with one writer thread, shown at once with their age, refreshed on demand and swapped when done (Accepted) |
+| [0030](0030-benchmark-tool.md) | The benchmark tool (Accepted): per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.
