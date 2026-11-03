@@ -316,6 +316,10 @@ pub fn handle_events(shared: &Arc<Shared>, events: Vec<TrackerEvent>, confidence
 /// One slow cycle: reads the hardware, stores the readings that are due and raises or returns the lifespan alarms.
 pub fn slow_cycle(shared: &Arc<Shared>) {
     let (wear, battery) = shared.hardware.read_slow();
+    match &wear {
+        Reading::Available(d) => log::info!(target: "dyno::hardware", "SSD wear read: {} drive(s)", d.len()),
+        Reading::Unavailable(why) => log::info!(target: "dyno::hardware", "SSD wear not read: {why}"),
+    }
     let t = now();
     {
         let core = lock(&shared.core);

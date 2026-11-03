@@ -206,7 +206,7 @@ pub fn offer(shared: &crate::agent::Shared) -> dyno_core::tool_offer::ToolOffer 
 }
 
 /// The job body of `InstallTool`: the pin of this system, the real door, the staging folder under the cache folder, the helper.
-pub fn install(shared: &crate::agent::Shared, ctx: &JobContext, tool: ToolKind) -> Result<ToolStatus, JobError> {
+pub fn install(shared: &Arc<crate::agent::Shared>, ctx: &JobContext, tool: ToolKind) -> Result<ToolStatus, JobError> {
     use dyno_core::helper_wire::HelperState;
     let fail = |m: &str| JobError::Failed(m.to_string());
     ctx.phase(Phase::discovering("check", "Checking what to download"));
@@ -224,7 +224,10 @@ pub fn install(shared: &crate::agent::Shared, ctx: &JobContext, tool: ToolKind) 
             shared.dirs.tools(),
             pin.version.clone(),
         );
-        return Ok(downloader.run(ctx, &pin, &shared.dirs.tool_staging(), &own)?);
+        let status = downloader.run(ctx, &pin, &shared.dirs.tool_staging(), &own)?;
+        // The SSD wear reader looks again now instead of at its next slow cycle (hours away).
+        crate::hardware::slow_cycle(shared);
+        return Ok(status);
     }
     if shared.helper.status().state != HelperState::Ready {
         return Err(fail(
