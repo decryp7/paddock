@@ -5,9 +5,10 @@
 use super::manager::{apply_feel, lock};
 use crate::feel::WebviewFeel;
 use crate::popover::{
-    BLUR_GRACE, BlurAction, CLOSING_SCRIPT, DEFAULT_HEIGHT, FADE, Material, Rect, Style, blur_action, click_closes, fit_height,
-    fit_width, init_script, is_popover, label_for, place, refit_top,
+    BlurAction, CLOSING_SCRIPT, DEFAULT_HEIGHT, FADE, GraceEnd, Material, Rect, Style, blur_action, blur_grace_for,
+    click_closes, fit_height, fit_width, grace_end, init_script, is_popover, is_shell_class, label_for, place, refit_top,
 };
+use paddock_jobs::{CancelToken, Clock, SystemClock};
 use crate::wire::{WindowError, WindowErrorCode};
 use ::tauri::utils::config::{Color, WindowEffectsConfig};
 use ::tauri::window::{Effect, EffectState};
@@ -16,8 +17,9 @@ use ::tauri::{
     WebviewWindowBuilder, WindowEvent,
 };
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// What a popover shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,21 +47,31 @@ impl PopoverSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Open {
     below: bool,
     width: f64,
-    shown: Instant,
+    /// The clock's reading when it was shown.
+    shown: Duration,
+    /// Cancelled when it closes, so a wait for the end of the blur grace ends with it.
+    cancel: CancelToken,
 }
 
+/// The class name of the window that has the foreground, when the platform can say (Windows).
+type ForegroundClass = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 /// The popovers (managed state): their specs by label, the platform style, which are open (and how they are anchored),
-/// and when each last closed.
+/// and when each last closed (on the [`Clock`], so a test moves time itself). The helper threads (the wait for the end of
+/// a blur grace, the fade before a window is destroyed) are kept so a test can join them.
 pub struct Popovers {
     style: Style,
     specs: HashMap<String, PopoverSpec>,
     open: Mutex<HashMap<String, Open>>,
-    closed_at: Mutex<HashMap<String, Instant>>,
-    blur_grace: Duration,
+    closed_at: Mutex<HashMap<String, Duration>>,
+    clock: Arc<dyn Clock>,
+    blur_grace: Option<Duration>,
+    foreground: ForegroundClass,
+    threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Default for Popovers {
@@ -76,7 +88,10 @@ impl Popovers {
             specs: HashMap::new(),
             open: Mutex::new(HashMap::new()),
             closed_at: Mutex::new(HashMap::new()),
-            blur_grace: BLUR_GRACE,
+            clock: Arc::new(SystemClock),
+            blur_grace: None,
+            foreground: Arc::new(super::native::foreground_class),
+            threads: Mutex::new(Vec::new()),
         }
     }
 
@@ -87,10 +102,48 @@ impl Popovers {
         self
     }
 
-    /// How long after showing a blur is ignored ([`BLUR_GRACE`] by default; a test that blurs at once sets zero).
-    pub fn blur_grace(mut self, grace: Duration) -> Self {
-        self.blur_grace = grace;
+    /// The time source of the blur grace, the reopen guard and the fade (the real clock by default).
+    pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
+    }
+
+    /// How long after showing a blur may be the shell taking the foreground back rather than an outside click: the
+    /// platform's ([`blur_grace_for`]: 600 ms on Windows, none elsewhere) unless set here.
+    pub fn blur_grace(mut self, grace: Duration) -> Self {
+        self.blur_grace = Some(grace);
+        self
+    }
+
+    /// Where the class of the foreground window comes from (tests; the OS by default).
+    pub fn foreground_class(mut self, f: impl Fn() -> Option<String> + Send + Sync + 'static) -> Self {
+        self.foreground = Arc::new(f);
+        self
+    }
+
+    pub(crate) fn grace(&self) -> Duration {
+        self.blur_grace.unwrap_or_else(|| blur_grace_for(self.style.os))
+    }
+
+    /// Runs `f` on a helper thread that [`Popovers::join_threads`] can wait for.
+    fn spawn(&self, name: &str, f: impl FnOnce() + Send + 'static) {
+        match std::thread::Builder::new().name(name.into()).spawn(f) {
+            Ok(h) => {
+                let mut threads = lock(&self.threads);
+                threads.retain(|t| !t.is_finished());
+                threads.push(h);
+            }
+            Err(e) => log::warn!(Thread = name, Error = e.to_string().as_str(); "Could not start a thread"),
+        }
+    }
+
+    /// Waits for every helper thread (a test moves its fake clock first).
+    #[cfg(test)]
+    pub(crate) fn join_threads(&self) {
+        let all: Vec<JoinHandle<()>> = lock(&self.threads).drain(..).collect();
+        for h in all {
+            let _ = h.join();
+        }
     }
 
     /// The popover `tray` (`item: None`, the icon's) or `tray-<item>`. An invalid item id is a bug: logged and left out.
@@ -109,12 +162,6 @@ impl Popovers {
     /// Whether the popover of `item` (`None`: the icon's) has a spec: without one a tray click has nothing to open.
     pub fn has(&self, item: Option<&str>) -> bool {
         label_for(item).is_some_and(|label| self.specs.contains_key(&label))
-    }
-
-    /// How long popover `label` has been shown, or `None` when it is not open.
-    #[cfg(test)]
-    pub(crate) fn shown_for(&self, label: &str) -> Option<Duration> {
-        lock(&self.open).get(label).map(|o| o.shown.elapsed())
     }
 
     /// Whether popover `label` is open.
@@ -191,12 +238,12 @@ pub fn toggle_popover<R: Runtime>(
         return Ok(false);
     }
     // The click that blurred it, or a click while it still fades out.
-    let since = lock(&pops.closed_at).get(&label).map(Instant::elapsed);
+    let since = lock(&pops.closed_at).get(&label).map(|at| pops.clock.monotonic().saturating_sub(*at));
     if click_closes(since) || app.get_webview_window(&label).is_some() {
         log::info!(Label = label.as_str(); "Popover show ignored: the click came right after it closed, or it is still fading out");
         return Ok(false);
     }
-    log::info!(Label = label.as_str(), GraceMs = pops.blur_grace.as_millis() as u64; "Popover show requested");
+    log::info!(Label = label.as_str(), GraceMs = pops.grace().as_millis() as u64; "Popover show requested");
     open(app, &pops, &label, &spec, icon)?;
     Ok(true)
 }
@@ -240,7 +287,8 @@ fn open<R: Runtime>(
         Open {
             below,
             width: spec.width,
-            shown: Instant::now(),
+            shown: pops.clock.monotonic(),
+            cancel: CancelToken::new(),
         },
     );
     let _ = w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
@@ -297,11 +345,9 @@ pub fn fit_popover<R: Runtime>(
         .get_webview_window(label)
         .ok_or_else(|| WindowError::new(WindowErrorCode::Closed, "the popover is closed"))?;
     let pops = popovers(app)?;
-    let open = lock(&pops.open).get(label).copied().unwrap_or(Open {
-        below: true,
-        width: crate::popover::DEFAULT_WIDTH,
-        shown: Instant::now(),
-    });
+    let (below, width) = lock(&pops.open)
+        .get(label)
+        .map_or((true, crate::popover::DEFAULT_WIDTH), |o| (o.below, o.width));
     let scale = w.scale_factor()?;
     let pos = w.outer_position()?;
     let old_h = f64::from(w.outer_size()?.height);
@@ -309,8 +355,8 @@ pub fn fit_popover<R: Runtime>(
     let logical = fit_height(asked, monitor.map_or(f64::NAN, |m| m.h / scale));
     let new_h = logical * scale;
     if (new_h - old_h).abs() >= 1.0 {
-        let top = refit_top(f64::from(pos.y), old_h, new_h, open.below, monitor);
-        let _ = w.set_size(LogicalSize::new(open.width, logical));
+        let top = refit_top(f64::from(pos.y), old_h, new_h, below, monitor);
+        let _ = w.set_size(LogicalSize::new(width, logical));
         let _ = w.set_position(PhysicalPosition::new(pos.x, top.round() as i32));
     }
     Ok(logical)
@@ -327,20 +373,27 @@ fn close_with<R: Runtime>(app: &AppHandle<R>, label: &str, reason: &str) {
     let Some(w) = app.get_webview_window(label) else {
         return;
     };
-    if let Some(p) = app.try_state::<Popovers>() {
-        lock(&p.closed_at).insert(label.to_string(), Instant::now());
-        lock(&p.open).remove(label);
+    let pops = app.try_state::<Popovers>();
+    if let Some(p) = &pops {
+        lock(&p.closed_at).insert(label.to_string(), p.clock.monotonic());
+        if let Some(open) = lock(&p.open).remove(label) {
+            open.cancel.cancel();
+        }
     }
     log::info!(Label = label, Reason = reason; "Popover hide");
     let _ = w.eval(CLOSING_SCRIPT);
-    destroy_later(w);
-}
-
-fn destroy_later<R: Runtime>(w: WebviewWindow<R>) {
-    super::manager::spawn("paddock-popover-close", move || {
-        std::thread::sleep(FADE);
-        let _ = w.destroy();
-    });
+    match pops {
+        Some(p) => {
+            let clock = p.clock.clone();
+            p.spawn("paddock-popover-close", move || {
+                clock.sleep(FADE);
+                let _ = w.destroy();
+            });
+        }
+        None => {
+            let _ = w.destroy();
+        }
+    }
 }
 
 /// The popover's window events: it closes when it loses the focus, and is forgotten when destroyed. Returns whether
@@ -357,8 +410,10 @@ pub(crate) fn on_window_event<R: Runtime>(
         WindowEvent::Focused(true) => log::info!(Label = label; "Popover focus gained"),
         WindowEvent::Focused(false) => blurred(app, label),
         WindowEvent::Destroyed => {
-            if let Some(p) = app.try_state::<Popovers>() {
-                lock(&p.open).remove(label);
+            if let Some(p) = app.try_state::<Popovers>()
+                && let Some(open) = lock(&p.open).remove(label)
+            {
+                open.cancel.cancel();
             }
         }
         _ => {}
@@ -366,45 +421,67 @@ pub(crate) fn on_window_event<R: Runtime>(
     true
 }
 
-/// The popover lost the focus: an outside click closes it, but a blur right after it was shown (the shell taking the
-/// foreground back after the tray click) does not; then the focus is asked for again once the grace has passed.
+/// The popover lost the focus: an outside click closes it, but a blur within the platform's grace after it was shown (on
+/// Windows the shell may take the foreground back after the tray click) is looked at again when the grace is over
+/// ([`grace_ended`]), on the popovers' clock.
 fn blurred<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let Some(pops) = app.try_state::<Popovers>() else {
         return;
     };
-    let shown = lock(&pops.open).get(label).map(|o| o.shown.elapsed());
-    let Some(since) = shown else {
+    let entry = lock(&pops.open).get(label).cloned();
+    let Some(open) = entry else {
         // Already closing (or never tracked): nothing to decide.
         return;
     };
-    match blur_action(since, pops.blur_grace) {
+    let grace = pops.grace();
+    let since = pops.clock.monotonic().saturating_sub(open.shown);
+    match blur_action(since, grace) {
         BlurAction::Close => {
             log::info!(Label = label, SinceShownMs = since.as_millis() as u64; "Popover focus lost");
             close_with(app, label, "blur");
         }
         BlurAction::Keep => {
-            let wait = pops.blur_grace.saturating_sub(since);
             log::info!(
-                Label = label, SinceShownMs = since.as_millis() as u64;
-                "Popover focus lost right after it was shown (the shell took the foreground back); kept open"
+                Label = label, SinceShownMs = since.as_millis() as u64, GraceMs = grace.as_millis() as u64;
+                "Popover focus lost within the grace after it was shown; looking again when it is over"
             );
-            let (app, label) = (app.clone(), label.to_string());
-            super::manager::spawn("paddock-popover-refocus", move || {
-                std::thread::sleep(wait);
-                let Some(w) = app.get_webview_window(&label) else {
-                    return;
-                };
-                let still_open = app.try_state::<Popovers>().is_some_and(|p| p.is_open(&label));
-                if !still_open || w.is_focused().unwrap_or(false) {
-                    return;
+            let wait = grace.saturating_sub(since);
+            let (app, label, clock) = (app.clone(), label.to_string(), pops.clock.clone());
+            pops.spawn("paddock-popover-grace", move || {
+                if clock.wait(wait, &open.cancel).is_ok() {
+                    grace_ended(&app, &label);
                 }
-                let focus = w.set_focus();
-                log::warn!(
-                    Label = label.as_str(), SetFocus = format!("{focus:?}").as_str(),
-                    Focused = w.is_focused().unwrap_or(false);
-                    "Popover has no focus after the grace; asked for it again, left open (the tray icon closes it)"
-                );
             });
+        }
+    }
+}
+
+/// The end of a blur grace: the popover that has the focus again stays; when the shell still has the foreground (the tray
+/// click's mouse-up went to the taskbar) the focus is asked for once more, and a refusal closes it; with any other window in
+/// front the blur was a real dismissal and it closes.
+fn grace_ended<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let (Some(w), Some(pops)) = (app.get_webview_window(label), app.try_state::<Popovers>()) else {
+        return;
+    };
+    if !pops.is_open(label) {
+        return;
+    }
+    let focused = w.is_focused().unwrap_or(false);
+    let class = (pops.foreground)();
+    let shell = class.as_deref().is_some_and(is_shell_class);
+    let foreground = class.as_deref().unwrap_or("unknown");
+    match grace_end(focused, shell) {
+        GraceEnd::Stay => log::info!(Label = label; "Popover has the focus again after the grace; stays"),
+        GraceEnd::Refocus => match w.set_focus() {
+            Ok(()) => log::info!(Label = label, Foreground = foreground; "Popover refocused after the grace (the shell had the foreground)"),
+            Err(e) => {
+                log::warn!(Label = label, Error = e.to_string().as_str(); "Popover could not take the focus back after the grace");
+                close_with(app, label, "focus refused");
+            }
+        },
+        GraceEnd::Close => {
+            log::info!(Label = label, Foreground = foreground; "Popover has no focus after the grace and another window is in front");
+            close_with(app, label, "blur after grace");
         }
     }
 }

@@ -17,6 +17,7 @@
     "node --test scripts/check-capabilities.test.mjs",
     "node --test scripts/check-wording.test.mjs",
     "node --test scripts/check-shipped.test.mjs",
+    "node --test scripts/check-pe-subsystem.test.mjs",
     "node scripts/check-capabilities.mjs"
   ],
   "ui": [

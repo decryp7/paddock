@@ -1190,6 +1190,11 @@ export class MockBackend implements DynoBackend {
     for (const l of this.navigateListeners) l(to);
   }
 
+  /** Pretends to open the taskbar settings (the mock has no OS). */
+  openTaskbarSettings(): Promise<void> {
+    return this.reply('openTaskbarSettings', () => undefined);
+  }
+
   /** Hands the waiting navigation over, once. */
   takeNavigation(): Promise<Navigate | null> {
     return this.reply('takeNavigation', () => {

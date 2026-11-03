@@ -60,6 +60,7 @@ paddock_commands::command_table! {
     /// "Export report..." on the Inventory tab.
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
+    Mutation [MAIN] => commands::open_taskbar_settings,
     Mutation [MAIN] => commands::pick_folder,
     /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035). The tray popup reads its
     /// own layout to draw its widgets.

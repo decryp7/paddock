@@ -9,6 +9,12 @@ pub fn handle_missing(handle: isize) -> bool {
     handle == 0 || handle == -1
 }
 
+/// Which of the three standard handles (input, output, error), given as `GetStdHandle` returns them, need pointing at the
+/// console.
+pub fn handles_to_reopen(handles: [isize; 3]) -> [bool; 3] {
+    handles.map(handle_missing)
+}
+
 /// Attaches to the parent process's console, when there is one, and gives the program its standard handles there where
 /// it has none (a redirected handle is kept). Does nothing when started without a console (login, a service, the app) and
 /// on other platforms. Returns whether a console was attached.
@@ -30,12 +36,14 @@ pub fn attach_parent_console() -> bool {
         }
         let conin: Vec<u16> = "CONIN$\0".encode_utf16().collect();
         let conout: Vec<u16> = "CONOUT$\0".encode_utf16().collect();
-        for (which, name, access) in [
+        let kinds = [
             (STD_INPUT_HANDLE, &conin, GENERIC_READ),
             (STD_OUTPUT_HANDLE, &conout, GENERIC_WRITE),
             (STD_ERROR_HANDLE, &conout, GENERIC_WRITE),
-        ] {
-            if handle_missing(GetStdHandle(which) as isize) {
+        ];
+        let reopen = handles_to_reopen(kinds.map(|(which, _, _)| GetStdHandle(which) as isize));
+        for ((which, name, access), reopen) in kinds.into_iter().zip(reopen) {
+            if reopen {
                 let h = CreateFileW(
                     name.as_ptr(),
                     access,
@@ -72,8 +80,15 @@ mod tests {
     }
 
     #[test]
-    fn attaching_never_panics_and_is_false_without_a_console() {
-        // Run by a test harness: there may or may not be a console; the call must simply answer.
-        let _ = attach_parent_console();
+    fn only_the_missing_standard_handles_are_reopened() {
+        // A redirected output (a valid handle) is kept; the other two have none (a GUI program started from a terminal).
+        assert_eq!(handles_to_reopen([0, 0x1c4, -1]), [true, false, true]);
+        assert_eq!(handles_to_reopen([0x10, 0x20, 0x30]), [false, false, false]);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn there_is_no_console_to_attach_to_outside_windows() {
+        assert!(!attach_parent_console());
     }
 }

@@ -10,6 +10,21 @@ Conventional Commits; one semver tag for the whole repo.
   A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
 
 ### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
+- Fixed: on Windows the popover showed and vanished at once. Measured in the Windows 11 VM (grace 0): `Focused(true)` at 83 ms after show, `Focused(false)` 1 ms later
+  (the shell's taskbar took the foreground back after the click's mouse-up), `Focused(true)` again 1 ms after the close began; `set_focus` had succeeded. A blur
+  within `BLUR_GRACE` (600 ms, **Windows only**: `popover::blur_grace_for`; macOS and Linux keep closing on every blur, grace 0) of showing is now kept; when
+  the grace is over `popover::grace_end` decides: it has the focus again, it stays; the shell (`Shell_TrayWnd`, the overflow) still has the foreground, it asks
+  for the focus once more and a refusal closes it; any other window in front, it closes (a real dismissal). The grace and the fade run on the `Popovers` clock
+  (`Popovers::clock`, a `FakeClock` in tests), the wait is cancelled when the popover closes, and `Popovers::blur_grace` / `foreground_class` set them for tests.
+  The popover path logs show requested (with the grace), shown (with the `show` and `set_focus` results and the focus), focus gained or lost with the time since
+  shown, and hide with its reason (`toggle`, `blur`, `blur after grace`, `focus refused`, `requested`).
+
+### `paddock-proc`: `console::attach_parent_console` for GUI-subsystem sidecars
+- A program built for the Windows GUI subsystem (so a Run entry, a service or the app starts it without a console window) calls it first thing: it attaches to
+  the parent terminal's console, when there is one, and points missing standard handles at `CONIN$`/`CONOUT$`, so `--version` and friends still print.
+  A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
+
+### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
 - Fixed: on Windows the popover showed and vanished at once. The shell's notification area takes the foreground back right after the tray click, so the
   popover got `Focused(false)` within milliseconds and closed on blur. A blur within `BLUR_GRACE` (600 ms) of showing is now kept (`popover::blur_action`;
   `Popovers::blur_grace` sets it, default `BLUR_GRACE`), the focus is asked for again after the grace, and an outside click after it closes as before; macOS is
