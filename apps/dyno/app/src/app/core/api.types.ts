@@ -271,7 +271,8 @@ export interface LiveUpdate {
   otherUsers: OtherUsers | null;
 }
 
-export type LiveDetail = 'summary' | 'processes';
+/** `tray` is the shell's own level with no window open (the menu bar icons); a window asks for `summary` or `processes`. */
+export type LiveDetail = 'summary' | 'processes' | 'tray';
 
 // --------------------------------------------------------------------------------------------------- why slow
 

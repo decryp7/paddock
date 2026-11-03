@@ -143,6 +143,31 @@ fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
     assert!(!s.top_cpu.is_empty());
 }
 
+// The menu bar icons alone (no window open) used to subscribe at the summary level, so the process table was read every
+// 2 s for nobody (docs/benchmarks.md 2026-11-03). A tray subscriber gets the system numbers at the user's pace and the
+// process table at the unwatched pace, and a window's summary still wins over it.
+#[test]
+fn a_tray_subscriber_keeps_the_system_pace_and_the_process_table_slows_down() {
+    let h = Harness::start();
+    let (_t, tray) = h.subscriber(LiveDetail::Tray);
+    let wanted = dyno_core::settings::Settings::default().sampling;
+    let slow = loop {
+        let l = tray.recv_timeout(Duration::from_secs(10)).expect("a tray update");
+        assert!(l.processes.is_none() && l.groups.is_none(), "the tray gets no process list");
+        if l.overhead.process_interval_ms == dyno_core::sampling::UNWATCHED_PROCESS_MS {
+            break l;
+        }
+    };
+    assert_eq!(slow.overhead.sampling_interval_ms, wanted.interval_ms);
+    let (_s, summary) = h.subscriber(LiveDetail::Summary);
+    loop {
+        let l = summary.recv_timeout(Duration::from_secs(10)).expect("a summary update");
+        if l.overhead.process_interval_ms == wanted.process_interval_ms {
+            break;
+        }
+    }
+}
+
 #[test]
 fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
     let h = Harness::start();

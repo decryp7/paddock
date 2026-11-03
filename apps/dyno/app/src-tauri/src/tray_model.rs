@@ -147,6 +147,12 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     out
 }
 
+/// Whether a menu bar item shows one app's numbers, which come from the top lists: the shell then asks for the summary
+/// level even with no window open, so the process table keeps the user's pace for that item.
+pub fn shows_apps(specs: &[ItemSpec]) -> bool {
+    specs.iter().any(|s| matches!(s.metric, Metric::Process(_)))
+}
+
 /// An icon with its tooltip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -154,6 +160,16 @@ pub struct Frame {
     pub icon: Icon,
     /// The tooltip.
     pub tooltip: String,
+}
+
+/// What changed on one item since it was last drawn. Only these parts go to the OS: each call redraws the menu bar item,
+/// and the window server's share of an idle Dyno was mostly these redraws (docs/benchmarks.md, 2026-11-03).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Paint {
+    /// New pixels, if they changed.
+    pub icon: Option<Icon>,
+    /// A new tooltip, if it changed.
+    pub tooltip: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -252,16 +268,21 @@ impl TrayItems {
         Some(Measured { scale, text })
     }
 
-    /// The pictures that changed since the last call, as `(item id, frame)`.
-    pub fn frames(&mut self, u: &LiveUpdate, dark_taskbar: bool) -> Vec<(String, Frame)> {
+    /// What changed since the last call, per item: `(item id, the changed parts)`. An item with nothing new is left out.
+    pub fn frames(&mut self, u: &LiveUpdate, dark_taskbar: bool) -> Vec<(String, Paint)> {
         let (rx, tx) = u.system.network_totals();
         self.net_peak = (self.net_peak * 0.995).max(rx).max(tx).max(NET_FLOOR);
         let mut changed = Vec::new();
         for i in 0..self.specs.len() {
             let frame = self.draw(i, u, dark_taskbar);
-            if self.state[i].last.as_ref() != Some(&frame) {
-                self.state[i].last = Some(frame.clone());
-                changed.push((self.specs[i].id.clone(), frame));
+            let last = self.state[i].last.as_ref();
+            let paint = Paint {
+                icon: (last.map(|l| &l.icon) != Some(&frame.icon)).then(|| frame.icon.clone()),
+                tooltip: (last.map(|l| &l.tooltip) != Some(&frame.tooltip)).then(|| frame.tooltip.clone()),
+            };
+            if paint.icon.is_some() || paint.tooltip.is_some() {
+                self.state[i].last = Some(frame);
+                changed.push((self.specs[i].id.clone(), paint));
             }
         }
         changed
@@ -436,7 +457,9 @@ mod tests {
         let mut m = TrayItems::new(specs, 32);
         let first = m.frames(&update(40.0), true);
         assert_eq!(first.len(), all.len());
-        assert!(first.iter().all(|(_, f)| f.icon.size == 32 && f.tooltip.starts_with("Dyno")));
+        assert!(first
+            .iter()
+            .all(|(_, p)| p.icon.as_ref().is_some_and(|i| i.size == 32) && p.tooltip.as_ref().is_some_and(|t| t.starts_with("Dyno"))));
         // Only the graph glyphs move with their history when the number stays the same.
         let again = m.frames(&update(40.0), true);
         assert!(
@@ -447,13 +470,42 @@ mod tests {
         assert!(m.frames(&update(80.0), true).len() >= 5);
     }
 
+    // Every changed item used to go to the OS whole: new pixels, the template flag (a second redraw) and the tooltip, so the
+    // window server redrew the menu bar several times a second for an idle Dyno (docs/benchmarks.md, 2026-11-03). Only the
+    // parts that changed are handed over now.
+    /// The tooltip a paint carries ("" when it did not change).
+    fn tip(p: &Paint) -> String {
+        p.tooltip.clone().unwrap_or_default()
+    }
+
+    #[test]
+    fn only_the_changed_parts_of_an_item_are_painted() {
+        let mut m = TrayItems::new(vec![item("n", Metric::CpuTotal, Glyph::Number)], 32);
+        let first = m.frames(&update(40.0), true);
+        assert!(first[0].1.icon.is_some() && first[0].1.tooltip.is_some());
+        assert!(m.frames(&update(40.0), true).is_empty(), "nothing new, nothing painted");
+        let moved = m.frames(&update(80.0), true);
+        assert_eq!(moved.len(), 1);
+        assert!(moved[0].1.icon.is_some());
+        let (prev_icon, prev_tip) = (moved[0].1.icon.clone(), moved[0].1.tooltip.clone());
+        // The same picture with another tooltip: the tooltip alone.
+        m.state[0].last = Some(Frame {
+            icon: prev_icon.unwrap(),
+            tooltip: "older text".into(),
+        });
+        let tip = m.frames(&update(80.0), true);
+        assert_eq!(tip.len(), 1);
+        assert!(tip[0].1.icon.is_none());
+        assert_eq!(tip[0].1.tooltip, prev_tip);
+    }
+
     #[test]
     fn per_core_bars_follow_the_cores_and_name_the_busiest() {
         let mut u = update(10.0);
         u.system.cpu.per_core = vec![5.0, 95.0, 10.0, 0.0];
         let mut m = TrayItems::new(vec![item("c", Metric::CpuPerCore, Glyph::CoreBars)], 32);
-        let f = m.frames(&u, true).remove(0).1;
-        assert!(f.tooltip.contains("busiest core 95%"), "{}", f.tooltip);
+        let f = tip(&m.frames(&u, true).remove(0).1);
+        assert!(f.contains("busiest core 95%"), "{f}");
     }
 
     #[test]
@@ -470,7 +522,7 @@ mod tests {
             32,
         );
         let f = m.frames(&u, true);
-        assert!(f.iter().all(|(_, fr)| fr.tooltip.contains("not available")), "{f:?}");
+        assert!(f.iter().all(|(_, fr)| tip(fr).contains("not available")), "{f:?}");
     }
 
     #[test]
@@ -489,11 +541,11 @@ mod tests {
             32,
         );
         let f = m.frames(&u, true);
-        assert_eq!(f[0].1.tooltip, "Dyno — CPU 100%");
-        assert_eq!(f[1].1.tooltip, "Dyno — Download 5.0 MB/s");
-        assert!(f[2].1.tooltip.contains("Upload 1.0 MB/s"));
-        assert!(f[3].1.tooltip.contains("Normal"));
-        assert!(f[4].1.tooltip.contains("Swap 0%"), "{}", f[4].1.tooltip);
+        assert_eq!(tip(&f[0].1), "Dyno — CPU 100%");
+        assert_eq!(tip(&f[1].1), "Dyno — Download 5.0 MB/s");
+        assert!(tip(&f[2].1).contains("Upload 1.0 MB/s"));
+        assert!(tip(&f[3].1).contains("Normal"));
+        assert!(tip(&f[4].1).contains("Swap 0%"), "{}", tip(&f[4].1));
     }
 
     #[test]
@@ -502,7 +554,7 @@ mod tests {
         spec.label = "Proc".into();
         spec.unit = "pct".into();
         let mut m = TrayItems::new(vec![spec], 32);
-        assert_eq!(m.frames(&update(42.0), true)[0].1.tooltip, "Dyno — Proc 42pct");
+        assert_eq!(tip(&m.frames(&update(42.0), true)[0].1), "Dyno — Proc 42pct");
     }
 
     #[test]
@@ -519,7 +571,16 @@ mod tests {
             partial: false,
         }];
         let mut m = TrayItems::new(vec![item("p", Metric::Process("chrome".into()), Glyph::Number)], 32);
-        assert!(m.frames(&u, true)[0].1.tooltip.contains("chrome 33%"));
+        assert!(tip(&m.frames(&u, true)[0].1).contains("chrome 33%"));
+    }
+
+    #[test]
+    fn an_item_that_shows_one_app_needs_the_top_lists() {
+        assert!(!shows_apps(&[item("c", Metric::CpuTotal, Glyph::Number)]));
+        assert!(shows_apps(&[
+            item("c", Metric::CpuTotal, Glyph::Number),
+            item("p", Metric::Process("chrome".into()), Glyph::Number)
+        ]));
     }
 
     #[test]

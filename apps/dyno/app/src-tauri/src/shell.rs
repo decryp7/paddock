@@ -10,7 +10,7 @@ use crate::popover::{Ask, PopoverModel};
 use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
-use dyno_core::protocol::{LiveUpdate, Reply, Request};
+use dyno_core::protocol::{LiveDetail, LiveUpdate, Reply, Request};
 use dyno_core::settings::Settings;
 use dyno_core::time::Timestamp;
 use dyno_core::widgets::popover_values::{Navigate, PopoverState, PopoverSurfaceValues};
@@ -59,6 +59,8 @@ fn now_millis() -> i64 {
 
 /// The icons are redrawn at most this often (and only when their picture changed).
 const TRAY_INTERVAL: Duration = Duration::from_millis(500);
+/// The menu bar's own voice in the link's live-detail votes (beside the windows').
+const MENU_BAR_VOTER: &str = "menu-bar";
 /// One line in the log per this many live updates (the log shows that data flows, without filling up).
 const LOG_EVERY: u64 = 60;
 
@@ -99,7 +101,7 @@ pub trait TrayPixels<R: Runtime>: Send + Sync {
     /// The tray items changed.
     fn sync_items(&self, app: &AppHandle<R>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String>;
     /// Draws one item's frame.
-    fn paint(&self, app: &AppHandle<R>, item: &str, frame: &crate::tray_model::Frame);
+    fn paint(&self, app: &AppHandle<R>, item: &str, paint: &crate::tray_model::Paint);
     /// Shows that the agent is not connected.
     fn show_disconnected(&self, app: &AppHandle<R>);
 }
@@ -111,8 +113,8 @@ impl TrayPixels<Wry> for NativePixels {
     fn sync_items(&self, app: &AppHandle<Wry>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
         crate::tray::sync_items(app, specs).map_err(|e| e.to_string())
     }
-    fn paint(&self, app: &AppHandle<Wry>, item: &str, frame: &crate::tray_model::Frame) {
-        crate::tray::paint(app, item, frame);
+    fn paint(&self, app: &AppHandle<Wry>, item: &str, paint: &crate::tray_model::Paint) {
+        crate::tray::paint(app, item, paint);
     }
     fn show_disconnected(&self, app: &AppHandle<Wry>) {
         crate::tray::show_disconnected(app);
@@ -126,7 +128,7 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
     fn sync_items(&self, _: &AppHandle<R>, _: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
         Ok(())
     }
-    fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Frame) {}
+    fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Paint) {}
     fn show_disconnected(&self, _: &AppHandle<R>) {}
 }
 
@@ -198,6 +200,14 @@ impl<R: Runtime> ShellOf<R> {
 
     /// The tray items changed (settings, or the development override): the icons follow.
     pub fn set_items(&self, specs: Vec<crate::tray_model::ItemSpec>) {
+        // With no window open the link asks for the tray level (no process table at the user's pace); an item that shows
+        // one app needs the top lists at that pace, so the menu bar asks for the summary while it has one.
+        if let Some(link) = lock(&self.link).clone() {
+            let wish = crate::tray_model::shows_apps(&specs).then_some(LiveDetail::Summary);
+            if let Err(e) = link.set_vote(MENU_BAR_VOTER, wish) {
+                logging::info(&format!("could not update the menu bar's live detail: {}", e.message));
+            }
+        }
         let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
         if changed {
             if let Err(e) = self.pixels.sync_items(&self.app, &specs) {
@@ -459,8 +469,8 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .frames(&update, crate::tray::dark_taskbar());
-            for (id, frame) in frames {
-                self.pixels.paint(&self.app, &id, &frame);
+            for (id, paint) in frames {
+                self.pixels.paint(&self.app, &id, &paint);
             }
         }
         *lock(&self.last_live) = Some(update.clone());

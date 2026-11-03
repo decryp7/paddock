@@ -109,11 +109,20 @@ impl VolumesSlot {
     }
 }
 
+/// The value [`Sub::detail`] holds for `detail` (0 is "not subscribed yet").
+pub fn detail_code(detail: LiveDetail) -> u8 {
+    match detail {
+        LiveDetail::Summary => 1,
+        LiveDetail::Processes => 2,
+        LiveDetail::Tray => 3,
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
     pub id: u64,
-    /// 0 = not subscribed yet, 1 = summary, 2 = processes.
+    /// 0 = not subscribed yet, otherwise [`detail_code`] of the detail.
     pub detail: Arc<AtomicU8>,
     /// Bounded: a slow app loses frames, it never slows the sampler.
     pub tx: SyncSender<Message>,
@@ -131,6 +140,7 @@ impl Sub {
         match self.detail.load(Ordering::Relaxed) {
             1 => Some(LiveDetail::Summary),
             2 => Some(LiveDetail::Processes),
+            3 => Some(LiveDetail::Tray),
             _ => None,
         }
     }
@@ -441,16 +451,7 @@ impl Shared {
 
     /// The most detailed live view anyone wants.
     pub fn watching(&self) -> Option<LiveDetail> {
-        let subs = lock(&self.subs);
-        let mut best = None;
-        for s in subs.iter() {
-            match s.wants() {
-                Some(LiveDetail::Processes) => return Some(LiveDetail::Processes),
-                Some(LiveDetail::Summary) => best = Some(LiveDetail::Summary),
-                None => {}
-            }
-        }
-        best
+        lock(&self.subs).iter().filter_map(Sub::wants).max_by_key(|d| d.rank())
     }
 
     /// Hands a scan status to every connected app: it replaces the older one of the same scan that has not been sent yet, and

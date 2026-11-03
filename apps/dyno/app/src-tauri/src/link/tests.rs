@@ -141,12 +141,20 @@ fn quitting_stops_only_an_agent_this_app_started_without_a_service() {
 #[test]
 fn the_connection_asks_for_the_most_any_window_wants() {
     let mut v = DetailVotes::default();
-    assert_eq!(v.effective(), LiveDetail::Summary, "the tray needs numbers with no window open");
+    // With no window open the app used to ask for the summary, so the agent read the process table every 2 s for the menu
+    // bar icons alone (docs/benchmarks.md 2026-11-03); the tray level keeps their numbers without the table.
+    assert_eq!(
+        v.effective(),
+        LiveDetail::Tray,
+        "the tray needs the system numbers, not the process table"
+    );
     v.set("main", LiveDetail::Processes);
     v.set("tray", LiveDetail::Summary);
     assert_eq!(v.effective(), LiveDetail::Processes);
     v.remove("main");
     assert_eq!(v.effective(), LiveDetail::Summary);
+    v.remove("tray");
+    assert_eq!(v.effective(), LiveDetail::Tray);
 }
 
 #[test]

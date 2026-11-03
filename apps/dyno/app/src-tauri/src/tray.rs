@@ -6,7 +6,7 @@
 //! Before the first update, and while the agent is away, the static template icons from `icons/tray` stand in.
 
 use crate::logging;
-use crate::tray_model::{Frame, ItemSpec};
+use crate::tray_model::{ItemSpec, Paint};
 use paddock_window::popover::Rect;
 use paddock_window::tauri::{PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{item, TrayView, QUIT_ID, SHOW_ID};
@@ -127,17 +127,21 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
     Ok(())
 }
 
-/// Draws a frame on an item: the pixels and the tooltip.
-pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
+/// Draws what changed on an item: the pixels and the tooltip, each only when it changed (every call redraws the item).
+pub fn paint(app: &AppHandle<Wry>, item: &str, paint: &Paint) {
     let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
-    // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states);
-    // Windows and Linux get Dyno's own colours.
-    let template = cfg!(target_os = "macos");
-    let drawn = if template { frame.icon.as_template() } else { frame.icon.clone() };
-    let icon = Image::new_owned(drawn.rgba, drawn.size, drawn.size);
-    let _ = tray.set_icon(Some(icon));
-    let _ = tray.set_icon_as_template(template);
-    let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
+    if let Some(pixels) = &paint.icon {
+        // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states), set
+        // together with its pixels: `set_icon` then `set_icon_as_template` drew the item twice. Windows and Linux get
+        // Dyno's own colours.
+        let template = cfg!(target_os = "macos");
+        let drawn = if template { pixels.as_template() } else { pixels.clone() };
+        let icon = Image::new_owned(drawn.rgba, drawn.size, drawn.size);
+        let _ = tray.set_icon_with_as_template(Some(icon), template);
+    }
+    if let Some(tooltip) = &paint.tooltip {
+        let _ = tray.set_tooltip(Some(tooltip.clone()));
+    }
     if let Some(state) = app.try_state::<TrayState>() {
         lock(&state.painted).insert(item.to_string(), true);
     }
