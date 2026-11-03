@@ -270,6 +270,12 @@ impl DiskIndex {
         self.nodes.len()
     }
 
+    /// Bytes the arena holds on the heap now (nodes and names, by capacity): what a map loaded from the cache is compared with a
+    /// live one of the same size by (the footprint check of the bench, rule 26).
+    pub fn heap_bytes(&self) -> usize {
+        self.nodes.capacity() * std::mem::size_of::<Node>() + self.names.capacity()
+    }
+
     /// Never empty: the root always exists.
     pub fn is_empty(&self) -> bool {
         false

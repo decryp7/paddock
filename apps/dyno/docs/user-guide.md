@@ -52,6 +52,29 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
   of the ordinary right now, in words ("CPU: higher than usual for Tuesday mornings, 71% against about 14%"). Change the learning
   period or switch alarms on in **Settings, Hardware and baselines**.
 
+## Disk map and saved maps
+
+**Disk map** shows where the space on a volume or a folder went, one folder level at a time (ring chart or table). Pick a
+volume or choose a folder and the scan runs as a job with progress and Cancel.
+
+A finished scan is **kept** on this computer, in the system cache folder (outside backups; it never leaves the computer), so
+after a restart, an update or a login the page opens on the last map at once. The line under the title says how old it is and
+that it is saved ("scanned 3 days ago (saved)"), and for a whole volume how the used space changed since: "Net change in used
+space since: +12.4 GB". It is a **net** figure: files deleted and files written add up, so equal amounts show as no change.
+Folders show their age only.
+
+- **Rescan** reads everything again. The map you were looking at **stays on screen** and stays usable while the new pass runs;
+  a strip above it shows the progress, with **Show progress** to watch the growing tree instead and **Cancel rescan**. When the
+  pass is done the page swaps to the new map. If you cancel, or the rescan fails, the earlier map is still there.
+- Dyno never rescans by itself unless you ask: in **Settings > Saved disk maps**, "Refresh when opened" can refresh a map older
+  than a day or a week, at the first time you open the page (never in the background).
+- **Forget this map** (on the page) and **Forget saved maps** (in Settings) delete them; switching **Keep disk maps** off
+  forgets them all. They share a limit (1,024 MB by default, 64 to 8,192 MB), at most 16 maps, one per volume or folder; the
+  least recently shown go first. A map too big for the limit says "Too big to keep; raise the limit in Settings".
+- If a different disk is mounted under the same name, its old map is not shown.
+- The list of performance counters and the list of installed software are kept the same way: they show at once as "Last
+  known list", with their age, while Dyno reads them again; **Refresh** loads the new one.
+
 ## Issues and new programs
 
 Open **Issues** to see what your system itself recorded going wrong: crashes, apps that stopped responding, unexpected

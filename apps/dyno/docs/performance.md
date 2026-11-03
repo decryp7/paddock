@@ -16,6 +16,7 @@ Dyno has two things called "bench":
 | `dyno-agent bench [seconds] [none\|summary\|processes]` (`crates/dyno-agent/src/cli.rs`) | The agent's own CPU (share of one core) and memory with nobody watching, a summary subscriber or a processes subscriber; JSON output | `cargo run --release -p dyno-agent -- bench 25 processes` | The live machine (read-only) | none | No. `scripts/check-bundle.sh` (`dyno-release.yml`) runs `dyno-agent once`, a smoke test with no budget | below; [architecture.md](architecture.md#dynos-own-overhead) |
 | `cargo test --release -p dyno-agent --test finder_bench -- --ignored --nocapture` (`crates/dyno-agent/tests/finder_bench.rs`) | The file finder (large and duplicate files) on a generated tree, by the number of threads reading it | the command | 400 folders, 50,000 small files and 300 files of about 1 MiB (100 files with two copies each), made in a temp folder | none (a measurement; the checks are the finder's unit tests) | no | [File finder](#file-finder-2026-10-29) |
 | `cargo test --release -p dyno-platform --test maintenance_bench -- --ignored --nocapture` (`crates/dyno-platform/tests/maintenance_bench.rs`) | The Maintenance view's status (when the windows close or open next) in the worst case, with the OS zone and a POSIX zone with summer time | the command | 14 windows, all closed now, the next opening almost a week ahead (generated in the test) | none (a measurement; `jumping_to_window_edges_finds_what_scanning_every_minute_finds` checks the answers) | no | [Maintenance status](#maintenance-status-2026-10-30) |
+| `cargo test --release -p dyno-agent --test disk_cache_bench -- --nocapture --include-ignored` (`crates/dyno-agent/tests/disk_cache_bench.rs`) | A saved disk map ([ADR 0029](adr/0029-saved-views-disk-map-cache.md)): the packed record stream raw and deflated (`flate2` level 1), saving into `cache.db`, the start-up listing, loading a first level, and the footprint of a loaded map against a live one | the command (the `--include-ignored` part adds the 5M-node tree) | A generated tree of 1M (and 5M) nodes with `Node`'s real fields (folders, files, refused and partly refused folders, loose totals), names of 8 to 40 bytes, seed fixed in the test | in release builds: start-up listing < 20 ms; first level of a 1M-node map < 300 ms from the request; saving 1M nodes < 2 s; loaded map within 10 % of a live one (debug builds run 30,000 nodes and assert only the round trip) | no | [Saved disk maps](#2026-11-03-a-saved-disk-map-of-1m-and-5m-nodes-in-cachedb-dyno-cached-views) |
 | `app/angular.json` budgets | The initial bundle | `cd app && npx ng build` | — | initial warn 900 kB / error 1.5 MB; component style warn 16 kB / error 32 kB | `ci.yml` Dyno leg | — |
 
 ## Budgets
@@ -34,6 +35,47 @@ Dyno has two things called "bench":
 - Memory is RSS, not footprint or PSS (rule 26).
 
 ## Results (newest first)
+
+### 2026-11-03, a saved disk map of 1M and 5M nodes in cache.db (feat/dyno-cached-views)
+
+- **Commit:** 74aa0c1c1 plus the bench (`disk_cache_bench.rs`) of the commit that adds this block
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, internal SSD
+- **Load:** 1-minute load 16.2 before the run and 17.3 after (other agents building); the numbers are upper bounds
+- **Build:** release (`cargo test --release`), Rust 1.99, `flate2` 1.1.10 on the `zlib-rs` back end (the one `zip` already links), `rusqlite` 0.40
+  with bundled SQLite, WAL and `synchronous = NORMAL`, `secure_delete = ON`
+- **Corpus:** the generated tree of `crates/dyno-agent/tests/disk_cache_bench.rs`: 1,000,000 nodes (117.0 MB of nodes and names
+  in memory) and 5,000,000 nodes (820.0 MB); about one node in nine a folder, 1 in 1,000 refused and 1 in 1,000 partly refused,
+  loose totals in a quarter of the folders; the record stream is 85.1 MB (1M) and 425.6 MB (5M), cut into 4 MiB chunks; synthetic
+- **Command:** `cargo test --release -p dyno-agent --test disk_cache_bench -- --nocapture --include-ignored`
+- **Runs:** single run, cold process, warm page cache (the file was just written); the machine was busy, so read these as upper bounds
+- **Numbers:**
+
+  | Measure | 1M raw | 1M deflate 1 | 5M raw | 5M deflate 1 | Budget (1M) | Verdict |
+  |---|---|---|---|---|---|---|
+  | Serialise to 4 MiB chunks | 0.011 s | 0.011 s | 0.051 s | 0.051 s | — | — |
+  | Stored size | 85.1 MB (1.00x) | 34.7 MB (2.46x) | 425.6 MB | 173.6 MB (2.45x) | — | — |
+  | Encode all chunks | 0.005 s | 0.244 s | 0.022 s | 1.225 s | — | — |
+  | Decode all chunks (inflate) | 0.001 s | 0.109 s | 0.007 s | 0.550 s | — | — |
+  | Save into `cache.db` (one transaction, off the walk and sampling threads) | 0.329 s | 0.380 s | 1.659 s | 1.845 s | < 2 s | pass |
+  | File size after the save | 85.4 MB | 34.8 MB | 426.6 MB | 174.2 MB | — | — |
+  | Start-up listing of the saved maps | 0.2 ms | 0.2 ms | 0.2 ms | 0.2 ms | < 20 ms | pass |
+  | Load the tree (read, inflate, parse, check) | 0.057 s | 0.155 s | 0.299 s | 0.780 s | — | — |
+  | Load plus the first level (a request for a level of an unloaded map) | 0.058 s | 0.156 s | 0.300 s | 0.781 s | < 300 ms | pass |
+  | Heap of the loaded map against a live one of the same size | 0.958x | 0.958x | 1.095x | 1.095x | within 10 % | pass (1M); 5M is at the edge |
+
+- **Memory measure:** heap by capacity (`DiskIndex::heap_bytes`, nodes and names), not RSS: a loaded map is 112.0 MB against 117.0 MB
+  live (1M) and 897.8 MB against 820.0 MB (5M; the load grows its arrays by doubling, as the walk does, and the 5M tree ends just
+  past a doubling). Rule 26: this is the arena, not the process footprint
+- **Decision (D3):** `flate2` level 1 stays on. The record stream shrinks 2.45x to 2.46x (the criterion was at least 2x) and inflating
+  a million nodes takes 0.109 s (under 0.15 s); the load that the user waits for is 0.155 s against 0.057 s raw, inside the
+  300 ms budget, and the file is 34.8 MB instead of 85.4 MB. Encoding costs 0.24 s per million nodes on the writer thread, which
+  nobody waits for
+- **Python against Rust:** the design measurement (ADR 0029, packed chunks 0.135 s to read and decode 1M nodes) is now 0.057 s raw
+  and 0.155 s deflated in Rust, with every bound of the parser checked
+- **Notes:** a save reads a finished snapshot (`Arc`) chunk by chunk and takes no lock on the walk's index, so queries on the same scan
+  are not held up while it runs (a centre test parks the writer inside a save and queries the scan). 5M nodes need about 1.8 s to
+  save and 0.8 s to load: bounded and off the UI thread, but the 5M budget of the ADR (none) is a measurement, not a check
+- **Verdict:** all four budgets pass at 1M nodes; no regression baseline yet (first record)
 
 ### 2026-10-30, ld-prime against rust-lld for incremental debug rebuilds (ci/build-parallelism)
 
