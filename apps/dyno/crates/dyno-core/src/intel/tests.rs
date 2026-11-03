@@ -213,7 +213,7 @@ fn limits_give_clear_messages() {
 #[test]
 fn the_whole_address_space_range_has_no_overflow() {
     let ix = build(&[list("a", "0.0.0.0/0\n::/0")], "", "");
-    assert_eq!(ix.segment_count(), 3, "::/0 cut around the IPv4 block, plus 0.0.0.0/0");
+    assert_eq!(ix.segment_count(), 2, "one segment per family");
     assert!(matches!(ix.check(&ip("255.255.255.254"), None), Verdict::Clean));
     assert!(
         matches!(ix.check(&ip("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), None), Verdict::Clean),

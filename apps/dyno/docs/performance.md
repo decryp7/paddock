@@ -219,10 +219,18 @@ pseudo-random spread of /16 to /32 IPv4 ranges (nested now and then) in one list
 
 | Entries | Build (single thread) | Segments | Memory (counted) | Lookup p50 | Lookup p99 |
 |---|---|---|---|---|---|
-| 100,000 | 19 ms | 133,085 | about 39 MB | 208 ns | 875 ns |
-| 1,000,000 | 283 ms | 1,601,926 | about 327 MB | 1,166 ns | 1,708 ns |
+| 100,000 (first design, one `u128` index) | 19 ms | 133,085 | about 39 MB | 208 ns | 875 ns |
+| 1,000,000 (first design) | 283 ms | 1,601,926 | about 327 MB | 1,166 ns | 1,708 ns |
+| 100,000 (compact) | 7 ms | 133,085 | about 6 MB | 125 ns | 458 ns |
+| 1,000,000 (compact) | 77 ms | 1,601,926 | about 50 MB | 750 ns | 1,250 ns |
 
-Reading: 2,000 rows per look cost about 2 ms at the million-entry limit, so no extra thread is needed. The start-up rebuild is
-under the 200 ms line (persisting a packed index) up to roughly 700,000 entries and over it at 1,000,000 (283 ms); the
-persisted index is therefore not built now and is the first thing to add if a list of that size is common. At the limit the
-index is large (327 MB, mostly the per-range owner vector); shrinking `Stored` is the first memory step.
+The compact index (rule 51, cheaper): one sorted array per address family (`u32` for IPv4, `u128` for IPv6), segment starts only
+(a gap is a segment with no members), a 4-byte member offset per segment, members as `(slot, list bitmap)`, each distinct range
+stored once with its list bitmap; notes only for the entries that have one; entry text is never resident (shown from the range
+on demand). It is 6.5 times smaller and builds 3.7 times faster than the first design, with faster lookups (smaller arrays fit
+the cache better). The build runs as a job: `IntelIndex::build_with_progress` reports the phase and count and stops when
+cancelled.
+
+Reading: 2,000 rows per look cost about 1.5 ms at the million-entry limit, so no extra thread is needed. The start-up rebuild
+is 77 ms at 1,000,000 entries, under the 200 ms line for persisting a packed index, so none is persisted. Transient peak while
+building is the lists themselves plus a hash map of the distinct ranges (not measured separately).

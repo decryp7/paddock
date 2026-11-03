@@ -96,23 +96,6 @@ impl IpRange {
     /// The IPv4 block of the 128-bit space, `(first, last)`.
     pub const V4_BLOCK: (u128, u128) = (V4_BASE, V4_BASE + 0xFFFF_FFFF);
 
-    /// The parts of this range that belong to its own family: an IPv6 range such as `::/0` also covers the numbers that stand
-    /// for IPv4 addresses, which it must not match, so it is cut around that block. An IPv4 range is returned as it is.
-    pub fn own_family_parts(&self) -> Vec<IpRange> {
-        let (lo, hi) = IpRange::V4_BLOCK;
-        if self.v4 || self.end < lo || self.start > hi {
-            return vec![*self];
-        }
-        let mut parts = Vec::new();
-        if self.start < lo {
-            parts.push(IpRange { end: lo - 1, ..*self });
-        }
-        if self.end > hi {
-            parts.push(IpRange { start: hi + 1, ..*self });
-        }
-        parts
-    }
-
     /// Whether `p` lies inside.
     pub fn contains(&self, p: u128) -> bool {
         self.start <= p && p <= self.end
@@ -542,11 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ipv6_range_never_covers_ipv4_and_is_cut_around_the_ipv4_block() {
-        let all6 = IpRange::cidr(&"::".parse().unwrap(), 0).unwrap();
-        let parts = all6.own_family_parts();
-        assert_eq!(parts.len(), 2);
-        assert!(parts.iter().all(|p| !p.contains(point(&"8.8.8.8".parse().unwrap()))));
+    fn an_ipv6_range_never_covers_ipv4_when_deduplicating() {
         let d = dedupe(parse_list("0.0.0.0/0\n::/0", 10).entries);
         assert_eq!(d.entries.len(), 2, "neither family covers the other");
     }

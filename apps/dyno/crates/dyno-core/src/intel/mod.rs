@@ -14,11 +14,11 @@
 //!   already holds; this module never resolves anything (no automatic reverse DNS, ADR 0031 D4).
 //! - **Bounded:** [`MAX_LISTS`] lists, [`MAX_TOTAL_ENTRIES`] entries in all.
 
-use crate::intel_text::{normalise_host, point, Entry, IpRange, Target};
-use crate::ip_lookup::is_public;
+use crate::intel_text::{normalise_host, Entry, IpRange, Target};
+use crate::ip_lookup::{is_public, unwrapped};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// Most lists the user may have.
 pub const MAX_LISTS: usize = 32;
@@ -63,6 +63,9 @@ pub enum IntelError {
     /// More than [`MAX_ALLOW`] allow entries.
     #[error("The allow list can hold at most {MAX_ALLOW} entries.")]
     TooManyAllows,
+    /// Stopped by the user while building.
+    #[error("Stopped.")]
+    Cancelled,
 }
 
 /// How a list entry matched.
@@ -116,164 +119,230 @@ pub enum Verdict {
     },
 }
 
-#[derive(Debug, Clone)]
-struct Segment {
-    start: u128,
-    end: u128,
-    /// Range into `members`.
-    from: u32,
-    to: u32,
+/// A key of one family's address space: `u32` for IPv4, `u128` for IPv6.
+trait Key: Copy + Ord + std::hash::Hash {
+    fn succ(self) -> Option<Self>;
+}
+impl Key for u32 {
+    fn succ(self) -> Option<u32> {
+        self.checked_add(1)
+    }
+}
+impl Key for u128 {
+    fn succ(self) -> Option<u128> {
+        self.checked_add(1)
+    }
+}
+
+/// A range stored **once**, whatever number of lists contain it.
+#[derive(Debug, Clone, Copy)]
+struct Slot<K> {
+    start: K,
+    end: K,
+    prefix: u8,
+    /// Which lists contain it (a bit per list).
+    mask: u32,
 }
 
 /// A range on a segment that is the most specific one of some lists.
 #[derive(Debug, Clone, Copy)]
 struct Member {
-    /// Index into `ranges`.
-    range: u32,
+    /// Index into the family's slots.
+    slot: u32,
     /// The lists for which this is the most specific range on the segment (a bit per list).
     lists: u32,
 }
 
-/// A range stored **once**, whatever number of lists contain it.
+/// The matcher of one address family, compact: segment starts, the offset of each segment's members, and the members. A gap
+/// between ranges is a segment with no members, so no segment stores an end.
 #[derive(Debug, Clone)]
-struct Stored {
-    range: IpRange,
-    /// The text to show when it differs from the range's own (a part cut out of a wider IPv6 range).
-    label: Option<Box<str>>,
-    /// Which lists contain it (a bit per list).
-    mask: u32,
-    /// Each owning list with its own note on this entry.
-    owners: Vec<(u8, Option<String>)>,
+struct Family<K> {
+    slots: Vec<Slot<K>>,
+    starts: Vec<K>,
+    /// `from[i]..from[i + 1]` are the members of segment `i`; one more entry than `starts`.
+    from: Vec<u32>,
+    members: Vec<Member>,
 }
 
-/// Stores `range` for `list`, sharing the slot of an identical range already stored.
-fn store(ranges: &mut Vec<Stored>, at: &mut HashMap<(u128, u128), u32>, range: IpRange, list: u8, note: Option<String>) {
-    let parts = range.own_family_parts();
-    let cut = parts.len() != 1 || parts[0] != range;
-    for part in parts {
-        let label = cut.then(|| range.to_string().into_boxed_str());
-        store_one(ranges, at, part, label, list, note.clone());
+impl<K> Default for Family<K> {
+    fn default() -> Self {
+        Family {
+            slots: Vec::new(),
+            starts: Vec::new(),
+            from: vec![0],
+            members: Vec::new(),
+        }
     }
 }
 
-fn store_one(
-    ranges: &mut Vec<Stored>,
-    at: &mut HashMap<(u128, u128), u32>,
-    range: IpRange,
-    label: Option<Box<str>>,
-    list: u8,
-    note: Option<String>,
-) {
-    let slot = *at.entry((range.start, range.end)).or_insert_with(|| {
-        ranges.push(Stored {
-            range,
-            label,
-            mask: 0,
-            owners: Vec::new(),
+impl<K: Key> Family<K> {
+    /// Sorts the slots into disjoint segments. `tick` is told how many slots were swept (and may cancel by returning false).
+    fn build(slots: Vec<Slot<K>>, tick: &mut dyn FnMut(u64) -> bool) -> Result<Family<K>, IntelError> {
+        let mut order: Vec<u32> = (0..slots.len() as u32).collect();
+        // Start ascending; for equal starts the widest first, so a parent sits below its children on the stack.
+        order.sort_unstable_by(|&a, &b| {
+            let (a, b) = (&slots[a as usize], &slots[b as usize]);
+            a.start.cmp(&b.start).then(b.end.cmp(&a.end))
         });
-        (ranges.len() - 1) as u32
-    });
-    let s = &mut ranges[slot as usize];
-    if s.mask & (1 << list) == 0 {
-        s.mask |= 1 << list;
-        s.owners.push((list, note));
+        let mut f = Family {
+            slots,
+            ..Family::default()
+        };
+        let mut stack: Vec<u32> = Vec::new();
+        for (n, &i) in order.iter().enumerate() {
+            if (n as u64).is_multiple_of(16_384) && !tick(n as u64) {
+                return Err(IntelError::Cancelled);
+            }
+            let start = f.slots[i as usize].start;
+            f.close_before(&mut stack, Some(start));
+            stack.push(i);
+            f.emit(&stack, start);
+        }
+        f.close_before(&mut stack, None);
+        Ok(f)
+    }
+
+    /// Pops every range that ends before `limit` (all of them when `None`); behind each one a new segment begins, holding what
+    /// is left on the stack (empty: a gap).
+    fn close_before(&mut self, stack: &mut Vec<u32>, limit: Option<K>) {
+        while let Some(&top) = stack.last() {
+            let end = self.slots[top as usize].end;
+            if limit.is_some_and(|l| end >= l) {
+                break;
+            }
+            stack.pop();
+            if let Some(next) = end.succ() {
+                self.emit(stack, next);
+            }
+        }
+    }
+
+    /// Starts a segment at `at` holding the most specific range of each list on `stack`; a segment already started at `at` is
+    /// replaced.
+    fn emit(&mut self, stack: &[u32], at: K) {
+        if self.starts.last() == Some(&at) {
+            self.starts.pop();
+            self.from.pop();
+            self.members.truncate(self.from.last().copied().unwrap_or(0) as usize);
+        }
+        self.starts.push(at);
+        let mut seen: u32 = 0;
+        for &si in stack.iter().rev() {
+            let fresh = self.slots[si as usize].mask & !seen;
+            if fresh != 0 {
+                seen |= fresh;
+                self.members.push(Member { slot: si, lists: fresh });
+            }
+        }
+        self.from.push(self.members.len() as u32);
+    }
+
+    fn find(&self, p: K) -> Option<&[Member]> {
+        let i = self.starts.partition_point(|s| *s <= p).checked_sub(1)?;
+        let (a, b) = (*self.from.get(i)? as usize, *self.from.get(i + 1)? as usize);
+        let m = self.members.get(a..b)?;
+        (!m.is_empty()).then_some(m)
+    }
+
+    fn matched_segments(&self) -> usize {
+        self.from.windows(2).filter(|w| w[1] > w[0]).count()
+    }
+
+    fn bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.slots.capacity() * size_of::<Slot<K>>()
+            + self.starts.capacity() * size_of::<K>()
+            + self.from.capacity() * 4
+            + self.members.capacity() * size_of::<Member>()
+    }
+}
+impl<K> Slot<K> {
+    fn new(start: K, end: K, prefix: u8) -> Slot<K> {
+        Slot {
+            start,
+            end,
+            prefix,
+            mask: 0,
+        }
     }
 }
 
-/// The matcher built from the user's enabled lists and allow entries.
+/// Collects ranges for one family, sharing the slot of an identical range already seen (one entry in several lists is stored
+/// once).
+struct Collect<K> {
+    slots: Vec<Slot<K>>,
+    at: HashMap<(K, u8), u32>,
+}
+
+impl<K: Key> Collect<K> {
+    fn new() -> Self {
+        Collect {
+            slots: Vec::new(),
+            at: HashMap::new(),
+        }
+    }
+
+    fn add(&mut self, start: K, end: K, prefix: u8, list: u8) {
+        let slot = *self.at.entry((start, prefix)).or_insert_with(|| {
+            self.slots.push(Slot::new(start, end, prefix));
+            (self.slots.len() - 1) as u32
+        });
+        self.slots[slot as usize].mask |= 1 << list;
+    }
+}
+
+/// What the build is doing, for a job's progress (ER-18): the phase and how far in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildPhase {
+    /// Taking the entries of the lists (counted in entries).
+    Collect,
+    /// Sorting and sweeping the IPv4 ranges (counted in ranges).
+    SweepV4,
+    /// Sorting and sweeping the IPv6 ranges (counted in ranges).
+    SweepV6,
+}
+
+/// A host name entry: its list and note.
+type HostEntry = (u8, Option<Box<str>>);
+
+/// One address family's matcher plus the addresses' notes.
+#[derive(Debug, Clone, Default)]
+struct Side {
+    v4: Family<u32>,
+    v6: Family<u128>,
+}
+
+/// The matcher built from the user's enabled lists and allow entries. Holds only compact ranges: the entries themselves (and
+/// their text) stay with the lists, not here; only notes, which are few, are kept.
 #[derive(Debug, Clone, Default)]
 pub struct IntelIndex {
     lists: Vec<(String, String)>,
-    ranges: Vec<Stored>,
-    range_at: HashMap<(u128, u128), u32>,
-    segments: Vec<Segment>,
-    members: Vec<Member>,
+    lists_side: Side,
     /// Normalised host name -> (list, note).
-    hosts: HashMap<String, Vec<(u8, Option<String>)>>,
-    allow: Vec<Stored>,
-    allow_segments: Vec<Segment>,
-    allow_members: Vec<Member>,
-    allow_hosts: HashMap<String, Option<String>>,
+    hosts: HashMap<String, Vec<HostEntry>>,
+    allow_side: Side,
+    allow_hosts: HashMap<String, Option<Box<str>>>,
+    /// Notes of address entries: `(list, start, prefix)` for lists, `(255, start, prefix)` for allows.
+    notes: HashMap<(u8, u128, u8), Box<str>>,
 }
 
-impl Stored {
-    fn shown(&self) -> String {
-        self.label.as_deref().map_or_else(|| self.range.to_string(), str::to_string)
+const ALLOW: u8 = 255;
+
+fn bx(n: &Option<String>) -> Option<Box<str>> {
+    n.as_deref().map(Box::from)
+}
+
+fn show(addr: IpAddr, prefix: u8) -> String {
+    let max = if addr.is_ipv4() { 32 } else { 128 };
+    if prefix == max {
+        addr.to_string()
+    } else {
+        format!("{addr}/{prefix}")
     }
 }
 
-type Sweep = (Vec<Segment>, Vec<Member>);
-
-/// Builds disjoint segments from nested-or-disjoint ranges: each segment names, per list, its most specific covering range.
-fn sweep(stored: &[Stored]) -> Sweep {
-    let mut order: Vec<u32> = (0..stored.len() as u32).collect();
-    // Start ascending; for equal starts the widest first, so a parent sits below its children on the stack.
-    order.sort_by(|&a, &b| {
-        let (a, b) = (&stored[a as usize].range, &stored[b as usize].range);
-        a.start.cmp(&b.start).then(b.end.cmp(&a.end))
-    });
-    let mut segments = Vec::new();
-    let mut members = Vec::new();
-    let mut stack: Vec<u32> = Vec::new();
-    // `pos` is the first address not yet covered by an emitted segment; `None` once the whole space is behind us.
-    let mut pos: Option<u128> = Some(0);
-
-    let emit = |segments: &mut Vec<Segment>, members: &mut Vec<Member>, stack: &[u32], from: u128, to: u128| {
-        if stack.is_empty() || from > to {
-            return;
-        }
-        let first = members.len() as u32;
-        let mut seen: u32 = 0;
-        for &ri in stack.iter().rev() {
-            let fresh = stored[ri as usize].mask & !seen;
-            if fresh != 0 {
-                seen |= fresh;
-                members.push(Member { range: ri, lists: fresh });
-            }
-        }
-        segments.push(Segment {
-            start: from,
-            end: to,
-            from: first,
-            to: members.len() as u32,
-        });
-    };
-
-    let pop_until =
-        |stack: &mut Vec<u32>, segments: &mut Vec<Segment>, members: &mut Vec<Member>, pos: &mut Option<u128>, limit: Option<u128>| {
-            // Pops every range that ends before `limit` (all of them when `limit` is None).
-            while let Some(&top) = stack.last() {
-                let end = stored[top as usize].range.end;
-                if limit.is_some_and(|l| end >= l) {
-                    break;
-                }
-                if let Some(p) = *pos {
-                    emit(segments, members, stack, p, end);
-                    *pos = end.checked_add(1);
-                }
-                stack.pop();
-            }
-        };
-
-    for &i in &order {
-        let r = stored[i as usize].range;
-        pop_until(&mut stack, &mut segments, &mut members, &mut pos, Some(r.start));
-        if let Some(p) = pos {
-            if p < r.start {
-                emit(&mut segments, &mut members, &stack, p, r.start - 1);
-            }
-        }
-        pos = Some(r.start);
-        stack.push(i);
-    }
-    pop_until(&mut stack, &mut segments, &mut members, &mut pos, None);
-    (segments, members)
-}
-
-fn find(segments: &[Segment], p: u128) -> Option<&Segment> {
-    let i = segments.partition_point(|s| s.start <= p);
-    let s = segments.get(i.checked_sub(1)?)?;
-    (p <= s.end).then_some(s)
+fn v4_addr(s: u32) -> IpAddr {
+    IpAddr::V4(Ipv4Addr::from(s))
 }
 
 /// Label suffixes of a normalised name, longest first: `a.b.c` gives `a.b.c`, `b.c`, `c`.
@@ -284,6 +353,16 @@ fn suffixes(name: &str) -> impl Iterator<Item = &str> {
 impl IntelIndex {
     /// Builds the index from the enabled lists and the allow entries.
     pub fn build(lists: &[ListInput], allow: &AllowInput) -> Result<IntelIndex, IntelError> {
+        IntelIndex::build_with_progress(lists, allow, &mut |_, _| true)
+    }
+
+    /// [`build`](Self::build) for a job: `progress` is told the phase and the count so far and returns `false` to cancel
+    /// ([`IntelError::Cancelled`]); nothing partial is kept. The caller swaps the finished index in whole.
+    pub fn build_with_progress(
+        lists: &[ListInput],
+        allow: &AllowInput,
+        progress: &mut dyn FnMut(BuildPhase, u64) -> bool,
+    ) -> Result<IntelIndex, IntelError> {
         if lists.len() > MAX_LISTS {
             return Err(IntelError::TooManyLists);
         }
@@ -295,7 +374,8 @@ impl IntelIndex {
             return Err(IntelError::TooManyAllows);
         }
         let mut ix = IntelIndex::default();
-        let mut allow_at = HashMap::new();
+        let (mut l4, mut l6) = (Collect::<u32>::new(), Collect::<u128>::new());
+        let mut seen = 0u64;
         for l in lists {
             let li = ix.lists.len() as u8;
             ix.lists.push((l.id.clone(), l.name.clone()));
@@ -303,50 +383,105 @@ impl IntelIndex {
                 continue;
             }
             for e in &l.entries {
+                seen += 1;
+                if seen.is_multiple_of(16_384) && !progress(BuildPhase::Collect, seen) {
+                    return Err(IntelError::Cancelled);
+                }
                 match &e.target {
-                    Target::Range(r) => store(&mut ix.ranges, &mut ix.range_at, *r, li, e.note.clone()),
-                    Target::Host(h) => ix.hosts.entry(h.clone()).or_default().push((li, e.note.clone())),
+                    Target::Range(r) if r.v4 => {
+                        let (s, en) = (r.start - IpRange::V4_BLOCK.0, r.end - IpRange::V4_BLOCK.0);
+                        l4.add(s as u32, en as u32, r.prefix, li);
+                        if let Some(n) = &e.note {
+                            ix.notes.insert((li, s, r.prefix), Box::from(n.as_str()));
+                        }
+                    }
+                    Target::Range(r) => {
+                        l6.add(r.start, r.end, r.prefix, li);
+                        if let Some(n) = &e.note {
+                            ix.notes.insert((li, r.start, r.prefix), Box::from(n.as_str()));
+                        }
+                    }
+                    Target::Host(h) => ix.hosts.entry(h.clone()).or_default().push((li, bx(&e.note))),
                 }
             }
         }
+        let (mut a4, mut a6) = (Collect::<u32>::new(), Collect::<u128>::new());
         for e in &allow.addresses {
             if let Target::Range(r) = &e.target {
-                store(&mut ix.allow, &mut allow_at, *r, 0, e.note.clone());
+                if r.v4 {
+                    let (s, en) = (r.start - IpRange::V4_BLOCK.0, r.end - IpRange::V4_BLOCK.0);
+                    a4.add(s as u32, en as u32, r.prefix, 0);
+                    if let Some(n) = &e.note {
+                        ix.notes.insert((ALLOW, s, r.prefix), Box::from(n.as_str()));
+                    }
+                } else {
+                    a6.add(r.start, r.end, r.prefix, 0);
+                    if let Some(n) = &e.note {
+                        ix.notes.insert((ALLOW, r.start, r.prefix), Box::from(n.as_str()));
+                    }
+                }
             }
         }
         for e in &allow.hosts {
             if let Target::Host(h) = &e.target {
-                ix.allow_hosts.insert(h.clone(), e.note.clone());
+                ix.allow_hosts.insert(h.clone(), bx(&e.note));
             }
         }
-        (ix.segments, ix.members) = sweep(&ix.ranges);
-        ix.range_at = HashMap::new(); // only needed while building
-        (ix.allow_segments, ix.allow_members) = sweep(&ix.allow);
+        ix.lists_side.v4 = Family::build(l4.slots, &mut |n| progress(BuildPhase::SweepV4, n))?;
+        ix.lists_side.v6 = Family::build(l6.slots, &mut |n| progress(BuildPhase::SweepV6, n))?;
+        ix.allow_side.v4 = Family::build(a4.slots, &mut |_| true)?;
+        ix.allow_side.v6 = Family::build(a6.slots, &mut |_| true)?;
         Ok(ix)
     }
 
-    /// Number of disjoint address segments (for the benchmark and the status line).
+    /// Number of disjoint address segments that hold a match (for the status line and tests).
     pub fn segment_count(&self) -> usize {
-        self.segments.len()
+        self.lists_side.v4.matched_segments() + self.lists_side.v6.matched_segments()
     }
 
     /// Number of distinct ranges stored (an identical range in several lists is stored once).
     pub fn stored_ranges(&self) -> usize {
-        self.ranges.len()
+        self.lists_side.v4.slots.len() + self.lists_side.v6.slots.len()
     }
 
-    /// The memory the address index holds, in bytes (a count from the element sizes, not an allocator reading).
+    /// The memory the index holds, in bytes (a count from the element sizes, not an allocator reading).
     pub fn approx_bytes(&self) -> usize {
-        use std::mem::size_of;
-        self.segments.capacity() * size_of::<Segment>()
-            + self.members.capacity() * size_of::<Member>()
-            + self.ranges.capacity() * size_of::<Stored>()
-            + self
-                .ranges
-                .iter()
-                .map(|s| s.owners.capacity() * size_of::<(u8, Option<String>)>())
-                .sum::<usize>()
-            + self.hosts.len() * 64
+        let fam = |s: &Side| s.v4.bytes() + s.v6.bytes();
+        fam(&self.lists_side)
+            + fam(&self.allow_side)
+            + self.hosts.iter().map(|(k, v)| k.len() + 64 + v.len() * 24).sum::<usize>()
+            + self.notes.values().map(|v| v.len() + 48).sum::<usize>()
+    }
+
+    fn matches_for(&self, ip: &IpAddr, side: &Side, allow: bool) -> Vec<(u8, String, Option<String>)> {
+        // (list, entry text, note)
+        let mut out = Vec::new();
+        let note = |list: u8, start: u128, prefix: u8| self.notes.get(&(list, start, prefix)).map(|n| n.to_string());
+        match unwrapped(ip) {
+            IpAddr::V4(a) => {
+                if let Some(ms) = side.v4.find(u32::from(a)) {
+                    for m in ms {
+                        let s = &side.v4.slots[m.slot as usize];
+                        for l in (0..32u8).filter(|l| m.lists & (1 << l) != 0) {
+                            let key = if allow { ALLOW } else { l };
+                            out.push((l, show(v4_addr(s.start), s.prefix), note(key, u128::from(s.start), s.prefix)));
+                        }
+                    }
+                }
+            }
+            IpAddr::V6(a) => {
+                if let Some(ms) = side.v6.find(u128::from(a)) {
+                    for m in ms {
+                        let s = &side.v6.slots[m.slot as usize];
+                        for l in (0..32u8).filter(|l| m.lists & (1 << l) != 0) {
+                            let key = if allow { ALLOW } else { l };
+                            out.push((l, show(IpAddr::V6(Ipv6Addr::from(s.start)), s.prefix), note(key, s.start, s.prefix)));
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// The verdict for `ip`. `reverse_name` is a reverse name Dyno **already holds** (the user asked for names on the page); it
@@ -355,33 +490,24 @@ impl IntelIndex {
         if !is_public(ip) {
             return Verdict::Clean;
         }
-        let p = point(ip);
-        if let Some(seg) = find(&self.allow_segments, p) {
-            // The narrowest allow entry that covers the address.
-            if let Some(m) = self.allow_members[seg.from as usize..seg.to as usize].first() {
-                let a = &self.allow[m.range as usize];
-                return Verdict::Allowed {
-                    entry: a.shown(),
-                    note: a.owners.first().and_then(|(_, n)| n.clone()),
-                };
-            }
+        // The narrowest allow entry that covers the address overrides every list.
+        if let Some((_, entry, note)) = self.matches_for(ip, &self.allow_side, true).into_iter().next() {
+            return Verdict::Allowed { entry, note };
         }
-        let mut found: Vec<ListMatch> = Vec::new();
-        if let Some(seg) = find(&self.segments, p) {
-            for m in &self.members[seg.from as usize..seg.to as usize] {
-                let s = &self.ranges[m.range as usize];
-                for (li, note) in s.owners.iter().filter(|(l, _)| m.lists & (1 << l) != 0) {
-                    let (id, name) = &self.lists[*li as usize];
-                    found.push(ListMatch {
-                        list_id: id.clone(),
-                        list_name: name.clone(),
-                        entry: s.shown(),
-                        note: note.clone(),
-                        by: MatchedBy::Address,
-                    });
+        let mut found: Vec<ListMatch> = self
+            .matches_for(ip, &self.lists_side, false)
+            .into_iter()
+            .map(|(l, entry, note)| {
+                let (id, name) = &self.lists[l as usize];
+                ListMatch {
+                    list_id: id.clone(),
+                    list_name: name.clone(),
+                    entry,
+                    note,
+                    by: MatchedBy::Address,
                 }
-            }
-        }
+            })
+            .collect();
         if let Some(raw) = reverse_name {
             if let Ok(name) = normalise_host(raw) {
                 // A host name allow cancels host name entries only: the address matches above are untouched.
@@ -394,7 +520,7 @@ impl IntelIndex {
                                 list_id: id.clone(),
                                 list_name: lname.clone(),
                                 entry: suffix.to_string(),
-                                note: note.clone(),
+                                note: note.as_deref().map(str::to_string),
                                 by: MatchedBy::ReverseName {
                                     name: name.clone(),
                                     label: NAME_LABEL,
