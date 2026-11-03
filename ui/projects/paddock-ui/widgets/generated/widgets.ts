@@ -98,7 +98,7 @@ w: number,
  */
 h: number, };
 
-export type StepsInfo = { "steps": "range", 
+export type StepsInfo = { "range": { 
 /**
  * Smallest.
  */
@@ -106,17 +106,17 @@ min: number,
 /**
  * Largest.
  */
-max: number, } | { "steps": "only", 
+max: number, } } | { "only": { 
 /**
  * The values.
  */
-values: Array<number>, };
+values: Array<number>, } };
 
-export type KindSize = { "arrangement": "spans", 
+export type KindSize = { "spans": { 
 /**
  * The spans.
  */
-spans: Array<number>, } | { "arrangement": "cells", 
+spans: Array<number>, } } | { "cells": { 
 /**
  * Allowed widths.
  */
@@ -132,7 +132,7 @@ defaultW: number,
 /**
  * Default height.
  */
-defaultH: number, };
+defaultH: number, } };
 
 export type Block = { "edge": Dir } | "largest" | "smallest" | "unchanged";
 
@@ -188,6 +188,50 @@ gesture: GridGesture,
  */
 seq: number, };
 
+export type PreviewReply<V> = { 
+/**
+ * The request's counter.
+ */
+seq: number, 
+/**
+ * The previewed [`crate::LayoutView`].
+ */
+view: V, };
+
+export type Outcome = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its place in reading order, counted from 1.
+ */
+position: number, 
+/**
+ * How many placements there are.
+ */
+of: number, 
+/**
+ * The placement before it in reading order, if any.
+ */
+after: PlacementId | null, 
+/**
+ * The placement after it in reading order, if any.
+ */
+before: PlacementId | null, 
+/**
+ * Its width now, in columns.
+ */
+w: number, 
+/**
+ * Its height now, in rows.
+ */
+h: number, 
+/**
+ * Set when a resize left it at the kind's largest or smallest size in that direction.
+ */
+limit: Block | null, };
+
 export type Rect = { 
 /**
  * Left column, 0-based.
@@ -208,7 +252,7 @@ h: number, };
 
 export type Dir = "left" | "right" | "up" | "down";
 
-export type GridGesture = { "gesture": "place", 
+export type GridGesture = { "place": { 
 /**
  * The placement.
  */
@@ -216,7 +260,7 @@ id: PlacementId,
 /**
  * The target.
  */
-rect: Rect, } | { "gesture": "nudge", 
+rect: Rect, } } | { "nudge": { 
 /**
  * The placement.
  */
@@ -224,7 +268,7 @@ id: PlacementId,
 /**
  * The direction.
  */
-dir: Dir, } | { "gesture": "grow", 
+dir: Dir, } } | { "grow": { 
 /**
  * The placement.
  */
@@ -232,15 +276,15 @@ id: PlacementId,
 /**
  * The direction.
  */
-dir: Dir, } | { "gesture": "toFirst", 
+dir: Dir, } } | { "toFirst": { 
 /**
  * The placement.
  */
-id: PlacementId, } | { "gesture": "toLast", 
+id: PlacementId, } } | { "toLast": { 
 /**
  * The placement.
  */
-id: PlacementId, };
+id: PlacementId, } };
 
 export type Moves = { 
 /**
@@ -471,6 +515,10 @@ moves: Array<PlacementMoves>,
  * True when an undone edit can be redone.
  */
 canRedo: boolean, 
+/**
+ * What the last arrangement edit did to its placement (also in a previewed view); `None` after any other edit.
+ */
+outcome: Outcome | null, 
 /**
  * The catalogue.
  */

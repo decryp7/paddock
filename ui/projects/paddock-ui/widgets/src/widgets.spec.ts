@@ -26,7 +26,7 @@ const kind = (k: string, title: string, spans: number[], maxInstances = 1, icon 
   title,
   summary: `${title} summary`,
   icon,
-  size: { arrangement: 'spans', spans },
+  size: { spans: { spans } },
   maxInstances,
   refresh,
 });
@@ -42,6 +42,7 @@ const view = (over: Partial<LayoutView<string, W, Span, string>> = {}, placement
   arrangements: [],
   moves: [],
   canRedo: false,
+  outcome: null,
   catalogue,
   builtinPresets: [],
   notes: [],

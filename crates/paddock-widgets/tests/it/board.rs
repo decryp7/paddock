@@ -217,8 +217,8 @@ fn the_view_describes_sizes_and_arrangements() {
     let wire = serde_json::to_value(&v).unwrap();
     assert_eq!(wire["revision"], 1);
     assert_eq!(
-        wire["catalogue"]["kinds"][1]["size"]["arrangement"],
-        "cells"
+        wire["catalogue"]["kinds"][1]["size"]["cells"]["defaultW"],
+        6
     );
 }
 
@@ -714,4 +714,76 @@ fn an_upgrade_that_returns_no_layout_is_damaged() {
     )
     .unwrap();
     assert_eq!(out["presets"], json!([5]));
+}
+
+#[test]
+fn the_outcome_names_neighbours_and_resize_limits_and_clears_after_other_edits() {
+    let mut s = Stored::<Board>::default();
+    let v = s
+        .edit(Edit::Arrange {
+            gesture: GridGesture::Grow {
+                id: id("disk-space"),
+                dir: Dir::Right,
+            },
+        })
+        .unwrap();
+    let o = v.outcome.unwrap();
+    assert_eq!(
+        (o.position, o.w, o.limit),
+        (1, 12, Some(paddock_widgets::Block::Largest))
+    );
+    assert_eq!((o.after, o.before), (None, Some(id("clock"))));
+    let v = s
+        .edit(Edit::Arrange {
+            gesture: GridGesture::Grow {
+                id: id("disk-space"),
+                dir: Dir::Down,
+            },
+        })
+        .unwrap();
+    assert_eq!(v.outcome.unwrap().limit, None, "taller still has steps");
+    let v = s
+        .edit(Edit::Arrange {
+            gesture: GridGesture::Grow {
+                id: id("disk-space"),
+                dir: Dir::Left,
+            },
+        })
+        .unwrap();
+    assert_eq!(
+        v.outcome.unwrap().limit,
+        Some(paddock_widgets::Block::Smallest),
+        "6 is this kind's narrowest width"
+    );
+    let v = s
+        .edit(Edit::Arrange {
+            gesture: GridGesture::Grow {
+                id: id("disk-space"),
+                dir: Dir::Up,
+            },
+        })
+        .unwrap();
+    assert_eq!(v.outcome.unwrap().limit, None);
+    let v = s.edit(Edit::Remove { id: id("clock") }).unwrap();
+    assert_eq!(v.outcome, None);
+    // Smallest in each direction.
+    let mut small = Stored::<Board>::default();
+    small
+        .edit(Edit::Arrange {
+            gesture: GridGesture::Place {
+                id: id("clock"),
+                rect: Rect::new(6, 0, 2, 2),
+            },
+        })
+        .unwrap();
+    let v = small.edit(Edit::Arrange {
+        gesture: GridGesture::Grow {
+            id: id("clock"),
+            dir: Dir::Left,
+        },
+    });
+    assert!(matches!(
+        v,
+        Err(WidgetError::Blocked(paddock_widgets::Block::Smallest))
+    ));
 }

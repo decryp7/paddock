@@ -12,8 +12,8 @@ export interface MoveAction {
   readonly gesture: (id: string) => GridGesture;
 }
 
-const nudge = (dir: Dir) => (id: string): GridGesture => ({ gesture: 'nudge', id, dir });
-const grow = (dir: Dir) => (id: string): GridGesture => ({ gesture: 'grow', id, dir });
+const nudge = (dir: Dir) => (id: string): GridGesture => ({ nudge: { id, dir } });
+const grow = (dir: Dir) => (id: string): GridGesture => ({ grow: { id, dir } });
 
 /** The ten gestures in menu order (ADR 0044 §5), each with the intent it sends. The engine decides which of them work. */
 export const MOVE_ACTIONS: Readonly<Record<MoveName, MoveAction>> = {
@@ -21,8 +21,8 @@ export const MOVE_ACTIONS: Readonly<Record<MoveName, MoveAction>> = {
   right: { label: 'Move right', block: { edge: 'right' }, gesture: nudge('right') },
   up: { label: 'Move up', block: { edge: 'up' }, gesture: nudge('up') },
   down: { label: 'Move down', block: { edge: 'down' }, gesture: nudge('down') },
-  first: { label: 'Move to first', block: 'first', gesture: (id) => ({ gesture: 'toFirst', id }) },
-  last: { label: 'Move to last', block: 'last', gesture: (id) => ({ gesture: 'toLast', id }) },
+  first: { label: 'Move to first', block: 'first', gesture: (id) => ({ toFirst: { id } }) },
+  last: { label: 'Move to last', block: 'last', gesture: (id) => ({ toLast: { id } }) },
   wider: { label: 'Wider', block: 'largest', gesture: grow('right') },
   narrower: { label: 'Narrower', block: 'smallest', gesture: grow('left') },
   taller: { label: 'Taller', block: 'largest', gesture: grow('down') },
@@ -91,8 +91,8 @@ export function changeText(title: string, before: Rect | undefined, after: Rect,
 
 /** The word for how a gesture moved a widget, for `changeText`. */
 export function howOf(g: GridGesture): string {
-  if (g.gesture === 'nudge') return g.dir;
-  if (g.gesture === 'toFirst') return 'to first';
-  if (g.gesture === 'toLast') return 'to last';
+  if ('nudge' in g) return g.nudge.dir;
+  if ('toFirst' in g) return 'to first';
+  if ('toLast' in g) return 'to last';
   return 'here';
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalogue::{Catalogue, Refresh, Widget};
 use crate::check;
 use crate::error::{Counted, Note};
-use crate::grid::{self, Item, Moves, Rect};
+use crate::grid::{self, Block, Dir, GridGesture, Item, Moves, Rect};
 use crate::id::PlacementId;
 use crate::layout::{Layout, Preset};
 use crate::place::{KindSize, Place};
@@ -60,6 +60,29 @@ pub struct CatalogueInfo<S, K> {
     pub kinds: Vec<KindInfo<K>>,
 }
 
+/// What an arrangement edit did to one placement, for the screen-reader announcement (ADR 0044 §5): the engine's own
+/// answer, so the UI never derives it. "Memory moved right, after CPU. Position 6 of 15."
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Outcome {
+    /// The placement.
+    pub id: PlacementId,
+    /// Its place in reading order, counted from 1.
+    pub position: u16,
+    /// How many placements there are.
+    pub of: u16,
+    /// The placement before it in reading order, if any.
+    pub after: Option<PlacementId>,
+    /// The placement after it in reading order, if any.
+    pub before: Option<PlacementId>,
+    /// Its width now, in columns.
+    pub w: u8,
+    /// Its height now, in rows.
+    pub h: u8,
+    /// Set when a resize left it at the kind's largest or smallest size in that direction.
+    pub limit: Option<Block>,
+}
+
 /// A placement's rectangle in one arrangement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,6 +131,8 @@ pub struct LayoutView<S, W, P, K> {
     pub moves: Vec<PlacementMoves>,
     /// True when an undone edit can be redone.
     pub can_redo: bool,
+    /// What the last arrangement edit did to its placement (also in a previewed view); `None` after any other edit.
+    pub outcome: Option<Outcome>,
     /// The catalogue.
     pub catalogue: CatalogueInfo<S, K>,
     /// The catalogue's own presets (the person's are in the layout).
@@ -249,6 +274,7 @@ pub fn view<C: Catalogue>(stored: &Stored<C>) -> ViewOf<C> {
         can_undo: layout.can_undo(),
         can_redo: layout.can_redo(),
         revision: stored.revision(),
+        outcome: stored.outcome.clone(),
         arrangements,
         moves,
         layout: layout.clone(),
@@ -257,4 +283,50 @@ pub fn view<C: Catalogue>(stored: &Stored<C>) -> ViewOf<C> {
         notes: stored.read.notes.clone(),
         editable: stored.editable(),
     }
+}
+
+/// What `gesture` just did to its placement in `layout` (already arranged): its position in reading order, its
+/// neighbours, its size and whether a resize ended at a limit of the kind's rule.
+pub(crate) fn outcome_of<C: Catalogue>(
+    layout: &Layout<C::Widget, C::Place>,
+    gesture: &GridGesture,
+) -> Option<Outcome> {
+    let id = gesture.id();
+    let index = layout.placements.iter().position(|p| &p.id == id)?;
+    let placed = &layout.placements[index];
+    let rect = placed.place.rect()?;
+    let limit = match gesture {
+        GridGesture::Grow { dir, .. } => {
+            let rule = <C::Place as Place>::size_rule(
+                &crate::catalogue::spec_of::<C>(placed.widget.kind())?.size,
+            )?;
+            match dir {
+                Dir::Right => rule.widths.up(rect.w).is_none().then_some(Block::Largest),
+                Dir::Down => rule.heights.up(rect.h).is_none().then_some(Block::Largest),
+                Dir::Left => rule
+                    .widths
+                    .down(rect.w)
+                    .is_none()
+                    .then_some(Block::Smallest),
+                Dir::Up => rule
+                    .heights
+                    .down(rect.h)
+                    .is_none()
+                    .then_some(Block::Smallest),
+            }
+        }
+        _ => None,
+    };
+    Some(Outcome {
+        id: id.clone(),
+        position: u16::try_from(index + 1).unwrap_or(u16::MAX),
+        of: u16::try_from(layout.placements.len()).unwrap_or(u16::MAX),
+        after: index
+            .checked_sub(1)
+            .map(|i| layout.placements[i].id.clone()),
+        before: layout.placements.get(index + 1).map(|p| p.id.clone()),
+        w: rect.w,
+        h: rect.h,
+        limit,
+    })
 }

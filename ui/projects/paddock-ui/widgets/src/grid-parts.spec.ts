@@ -54,13 +54,13 @@ describe('grid words', () => {
 
   it('builds the gesture each move sends, in menu order', () => {
     expect(MOVE_NAMES).toEqual(['left', 'right', 'up', 'down', 'first', 'last', 'wider', 'narrower', 'taller', 'shorter']);
-    expect(MOVE_ACTIONS.left.gesture('a')).toEqual({ gesture: 'nudge', id: 'a', dir: 'left' });
-    expect(MOVE_ACTIONS.wider.gesture('a')).toEqual({ gesture: 'grow', id: 'a', dir: 'right' });
-    expect(MOVE_ACTIONS.narrower.gesture('a')).toEqual({ gesture: 'grow', id: 'a', dir: 'left' });
-    expect(MOVE_ACTIONS.taller.gesture('a')).toEqual({ gesture: 'grow', id: 'a', dir: 'down' });
-    expect(MOVE_ACTIONS.shorter.gesture('a')).toEqual({ gesture: 'grow', id: 'a', dir: 'up' });
-    expect(MOVE_ACTIONS.first.gesture('a')).toEqual({ gesture: 'toFirst', id: 'a' });
-    expect(MOVE_ACTIONS.last.gesture('a')).toEqual({ gesture: 'toLast', id: 'a' });
+    expect(MOVE_ACTIONS.left.gesture('a')).toEqual({ nudge: { id: 'a', dir: 'left' } });
+    expect(MOVE_ACTIONS.wider.gesture('a')).toEqual({ grow: { id: 'a', dir: 'right' } });
+    expect(MOVE_ACTIONS.narrower.gesture('a')).toEqual({ grow: { id: 'a', dir: 'left' } });
+    expect(MOVE_ACTIONS.taller.gesture('a')).toEqual({ grow: { id: 'a', dir: 'down' } });
+    expect(MOVE_ACTIONS.shorter.gesture('a')).toEqual({ grow: { id: 'a', dir: 'up' } });
+    expect(MOVE_ACTIONS.first.gesture('a')).toEqual({ toFirst: { id: 'a' } });
+    expect(MOVE_ACTIONS.last.gesture('a')).toEqual({ toLast: { id: 'a' } });
   });
 
   it('says why a gesture was refused', () => {
@@ -105,10 +105,10 @@ describe('grid words', () => {
     expect(changeText('Memory', a, { x: 2, y: 0, w: 3, h: 4 }, 2, 3, 'CPU', 'here')).toBe('Memory moved here, after CPU. Position 2 of 3. Memory resized to 3 by 4.');
     expect(changeText('Memory', a, a, 1, 3, null, 'here')).toBe('Memory stays where it is.');
     expect(changeText('Memory', undefined, a, 1, 3, null, 'here')).toBe('Memory moved here, first. Position 1 of 3.');
-    expect(howOf({ gesture: 'nudge', id: 'a', dir: 'up' })).toBe('up');
-    expect(howOf({ gesture: 'toFirst', id: 'a' })).toBe('to first');
-    expect(howOf({ gesture: 'toLast', id: 'a' })).toBe('to last');
-    expect(howOf({ gesture: 'place', id: 'a', rect: a })).toBe('here');
+    expect(howOf({ nudge: { id: 'a', dir: 'up' } })).toBe('up');
+    expect(howOf({ toFirst: { id: 'a' } })).toBe('to first');
+    expect(howOf({ toLast: { id: 'a' } })).toBe('to last');
+    expect(howOf({ place: { id: 'a', rect: a } })).toBe('here');
   });
 });
 

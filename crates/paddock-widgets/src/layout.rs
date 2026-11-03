@@ -9,14 +9,15 @@ use crate::id::{PlacementId, PresetId, slug, unique_id};
 use crate::place::Place;
 
 ts! {
-/// One widget on a surface.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// One widget on a surface. On the wire (JSON, the settings file) it is `{ id, <place>, widget }` with the place
+/// flattened: `span` on a flow surface, `x`, `y`, `w`, `h` on a grid surface. Binary formats (postcard) write the three
+/// fields in order, because they cannot flatten.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "ts"), ts(rename_all = "camelCase"))]
 pub struct Placement<W, P = crate::place::Span> {
     /// Unique within its layout.
     pub id: PlacementId,
     /// Where it sits: a span on a flow surface, `x`, `y`, `w`, `h` on a grid surface.
-    #[serde(flatten)]
     #[cfg_attr(any(test, feature = "ts"), ts(flatten))]
     pub place: P,
     /// The widget and its options.
@@ -69,6 +70,49 @@ impl<W: PartialEq, P: PartialEq> PartialEq for Layout<W, P> {
 
 /// How many edits can be undone.
 pub const UNDO_DEPTH: usize = 20;
+
+#[derive(Serialize)]
+struct FlatRef<'a, W, P> {
+    id: &'a PlacementId,
+    #[serde(flatten)]
+    place: &'a P,
+    widget: &'a W,
+}
+
+#[derive(Deserialize)]
+struct FlatOwned<W, P> {
+    id: PlacementId,
+    #[serde(flatten)]
+    place: P,
+    widget: W,
+}
+
+impl<W: Serialize, P: Serialize> Serialize for Placement<W, P> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            FlatRef {
+                id: &self.id,
+                place: &self.place,
+                widget: &self.widget,
+            }
+            .serialize(serializer)
+        } else {
+            (&self.id, &self.place, &self.widget).serialize(serializer)
+        }
+    }
+}
+
+impl<'de, W: Deserialize<'de>, P: Deserialize<'de>> Deserialize<'de> for Placement<W, P> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (id, place, widget) = if deserializer.is_human_readable() {
+            let FlatOwned { id, place, widget } = FlatOwned::deserialize(deserializer)?;
+            (id, place, widget)
+        } else {
+            <(PlacementId, P, W)>::deserialize(deserializer)?
+        };
+        Ok(Placement { id, place, widget })
+    }
+}
 
 impl<W, P> Layout<W, P> {
     /// A layout with nothing to undo. Not checked: [`Layout::validate`] does that.

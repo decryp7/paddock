@@ -42,10 +42,10 @@ pub type DashboardView = LayoutView<DynoSurface, DashboardWidget, Cells, Dashboa
 /// The menu bar's layout as the chooser draws it.
 pub type MenuBarView = LayoutView<DynoSurface, MenuBarItem, Span, MenuBarKind>;
 
-/// One surface's layout view. A dashboard placement is flattened (`x`, `y`, `w`, `h` beside `id`), which postcard cannot
-/// write, so like [`JsonOnLink`] this travels as one JSON string on the binary link and as itself everywhere else.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS), ts(rename_all = "camelCase"))]
+/// One surface's layout view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub enum SurfaceView {
     /// The tray popup.
     Popover(PopoverView),
@@ -55,58 +55,10 @@ pub enum SurfaceView {
     MenuBar(MenuBarView),
 }
 
-#[derive(Serialize)]
+/// An edit of one surface's layout (the variant names the surface).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-enum ViewRef<'a> {
-    Popover(&'a PopoverView),
-    Dashboard(&'a DashboardView),
-    MenuBar(&'a MenuBarView),
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum ViewOwned {
-    Popover(PopoverView),
-    Dashboard(DashboardView),
-    MenuBar(MenuBarView),
-}
-
-impl Serialize for SurfaceView {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::Error as _;
-        let view = match self {
-            SurfaceView::Popover(v) => ViewRef::Popover(v),
-            SurfaceView::Dashboard(v) => ViewRef::Dashboard(v),
-            SurfaceView::MenuBar(v) => ViewRef::MenuBar(v),
-        };
-        if serializer.is_human_readable() {
-            view.serialize(serializer)
-        } else {
-            serializer.serialize_str(&serde_json::to_string(&view).map_err(S::Error::custom)?)
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for SurfaceView {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        let owned = if deserializer.is_human_readable() {
-            ViewOwned::deserialize(deserializer)?
-        } else {
-            serde_json::from_str(&String::deserialize(deserializer)?).map_err(D::Error::custom)?
-        };
-        Ok(match owned {
-            ViewOwned::Popover(v) => SurfaceView::Popover(v),
-            ViewOwned::Dashboard(v) => SurfaceView::Dashboard(v),
-            ViewOwned::MenuBar(v) => SurfaceView::MenuBar(v),
-        })
-    }
-}
-
-/// An edit of one surface's layout (the variant names the surface). A grid gesture is an internally tagged enum, which
-/// postcard cannot read, so like [`SurfaceView`] it travels as one JSON string on the binary link.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS), ts(rename_all = "camelCase"))]
 pub enum SurfaceEdit {
     /// Edit the tray popup.
     Popover(Edit<PopoverWidget>),
@@ -114,54 +66,6 @@ pub enum SurfaceEdit {
     Dashboard(Edit<DashboardWidget>),
     /// Edit the menu bar.
     MenuBar(Edit<MenuBarItem>),
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-enum EditRef<'a> {
-    Popover(&'a Edit<PopoverWidget>),
-    Dashboard(&'a Edit<DashboardWidget>),
-    MenuBar(&'a Edit<MenuBarItem>),
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum EditOwned {
-    Popover(Edit<PopoverWidget>),
-    Dashboard(Edit<DashboardWidget>),
-    MenuBar(Edit<MenuBarItem>),
-}
-
-impl Serialize for SurfaceEdit {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::Error as _;
-        let edit = match self {
-            SurfaceEdit::Popover(e) => EditRef::Popover(e),
-            SurfaceEdit::Dashboard(e) => EditRef::Dashboard(e),
-            SurfaceEdit::MenuBar(e) => EditRef::MenuBar(e),
-        };
-        if serializer.is_human_readable() {
-            edit.serialize(serializer)
-        } else {
-            serializer.serialize_str(&serde_json::to_string(&edit).map_err(S::Error::custom)?)
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for SurfaceEdit {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        let owned = if deserializer.is_human_readable() {
-            EditOwned::deserialize(deserializer)?
-        } else {
-            serde_json::from_str(&String::deserialize(deserializer)?).map_err(D::Error::custom)?
-        };
-        Ok(match owned {
-            EditOwned::Popover(e) => SurfaceEdit::Popover(e),
-            EditOwned::Dashboard(e) => SurfaceEdit::Dashboard(e),
-            EditOwned::MenuBar(e) => SurfaceEdit::MenuBar(e),
-        })
-    }
 }
 
 impl SurfaceEdit {
@@ -285,6 +189,89 @@ mod tests {
             postcard::to_stdvec(&states).is_ok()
                 && postcard::from_bytes::<Vec<PopoverState>>(&postcard::to_stdvec(&states).unwrap()).is_err()
         );
+    }
+
+    /// Every edit variant on every surface, and every surface's view, survive postcard and JSON unchanged: the wire has
+    /// no second encoding hidden in a string (externally tagged enums, placements written in field order).
+    #[test]
+    fn every_edit_and_every_view_round_trip_through_postcard_and_json() {
+        use paddock_widgets::{Dir, GridGesture, PresetId, Rect};
+        let id = PlacementId::new("cpu").unwrap();
+        let preset = PresetId::new("mine").unwrap();
+        let gestures = [
+            GridGesture::Place {
+                id: id.clone(),
+                rect: Rect::new(1, 2, 3, 4),
+            },
+            GridGesture::Nudge {
+                id: id.clone(),
+                dir: Dir::Left,
+            },
+            GridGesture::Grow {
+                id: id.clone(),
+                dir: Dir::Down,
+            },
+            GridGesture::ToFirst { id: id.clone() },
+            GridGesture::ToLast { id: id.clone() },
+        ];
+        let mut dashboard: Vec<Edit<DashboardWidget>> = vec![
+            Edit::Add {
+                widget: DashboardWidget::new(DashboardKind::Graph, crate::widgets::Metric::Memory),
+                span: None,
+                at: Some(2),
+            },
+            Edit::Remove { id: id.clone() },
+            Edit::Move { id: id.clone(), to: 1 },
+            Edit::Resize { id: id.clone(), span: 3 },
+            Edit::Replace {
+                id: id.clone(),
+                widget: DashboardWidget::new(DashboardKind::Ring, crate::widgets::Metric::Battery),
+            },
+            Edit::ApplyPreset { id: preset.clone() },
+            Edit::SavePreset { name: "Mine".into() },
+            Edit::DeletePreset { id: preset },
+            Edit::ResetToDefaults,
+            Edit::Undo,
+            Edit::Redo,
+        ];
+        dashboard.extend(gestures.into_iter().map(|gesture| Edit::Arrange { gesture }));
+        let mut edits: Vec<SurfaceEdit> = dashboard.into_iter().map(SurfaceEdit::Dashboard).collect();
+        edits.push(SurfaceEdit::Popover(Edit::Remove { id: id.clone() }));
+        edits.push(SurfaceEdit::MenuBar(Edit::Undo));
+        for e in edits {
+            assert_eq!(
+                postcard::from_bytes::<SurfaceEdit>(&postcard::to_stdvec(&e).unwrap()).unwrap(),
+                e,
+                "postcard {e:?}"
+            );
+            assert_eq!(
+                serde_json::from_value::<SurfaceEdit>(serde_json::to_value(&e).unwrap()).unwrap(),
+                e,
+                "json {e:?}"
+            );
+        }
+        let mut s = Settings::default();
+        edit_layout(
+            &mut s,
+            SurfaceEdit::Dashboard(Edit::Arrange {
+                gesture: GridGesture::ToLast { id },
+            }),
+            None,
+        )
+        .ok();
+        for surface in [DynoSurface::Popover, DynoSurface::Dashboard, DynoSurface::MenuBar] {
+            let v = layout_view(&s, surface);
+            assert_eq!(
+                postcard::from_bytes::<SurfaceView>(&postcard::to_stdvec(&v).unwrap()).unwrap(),
+                v,
+                "postcard {surface:?}"
+            );
+            assert_eq!(
+                serde_json::from_value::<SurfaceView>(serde_json::to_value(&v).unwrap()).unwrap(),
+                v,
+                "json {surface:?}"
+            );
+        }
     }
 
     #[test]

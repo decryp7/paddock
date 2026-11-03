@@ -273,3 +273,17 @@ describe('TauriBackend: push channels', () => {
     expect(l).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('TauriBackend: widget layouts on the grid', () => {
+  it('sends the revision with an edit and asks the app, not the agent, for a preview', async () => {
+    const { backend, invoke } = fake();
+    const edit = { dashboard: 'undo' } as never;
+    await backend.editWidgetLayout(edit, 7);
+    expect(invoke).toHaveBeenLastCalledWith('edit_widget_layout', { edit, baseRevision: 7 });
+    await backend.editWidgetLayout(edit);
+    expect(invoke).toHaveBeenLastCalledWith('edit_widget_layout', { edit, baseRevision: null });
+    const request = { surface: 'dashboard', revision: 7, gesture: { toFirst: { id: 'cpu' } }, seq: 3 } as never;
+    await backend.previewWidgetLayout(request);
+    expect(invoke).toHaveBeenLastCalledWith('preview_widget_layout', { request });
+  });
+});

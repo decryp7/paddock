@@ -20,18 +20,16 @@ pub struct Span {
 }
 
 /// The place of a placement on a grid surface: a rectangle of cells (on the wire `x`, `y`, `w`, `h`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cells {
     /// Where it is.
-    #[serde(flatten)]
     #[cfg_attr(any(test, feature = "ts"), ts(flatten))]
     pub rect: Rect,
 }
 
 /// Allowed widths or heights of a kind, as the chooser and the UI need them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "steps")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum StepsInfo {
     /// Every value from `min` to `max`.
     Range {
@@ -49,7 +47,7 @@ pub enum StepsInfo {
 
 /// How a kind may be sized, on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "arrangement")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum KindSize {
     /// Flow surface: allowed spans, the first is the default.
     Spans {
@@ -68,6 +66,19 @@ pub enum KindSize {
         default_h: u8,
     },
 }
+}
+
+// A rectangle on the wire is the rectangle itself (`x`, `y`, `w`, `h`), in every format.
+impl Serialize for Cells {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.rect.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Cells {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Rect::deserialize(deserializer).map(|rect| Cells { rect })
+    }
 }
 
 impl From<Steps> for StepsInfo {
