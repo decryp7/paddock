@@ -16,6 +16,8 @@ thiserror.workspace = true
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 # Widget layouts (family ADR 0035): the closed catalogues of the popup, the dashboard and the menu bar live here.
 paddock-widgets = { path = "../../../../crates/paddock-widgets", features = ["ts"] }
+# Pixels of the tray and menu-bar items (pure Rust, no system libraries).
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 # TypeScript for the catalogue types (generated into the UI's core/generated/widgets.ts).
 ts-rs = { version = "11.1", optional = true }
 
@@ -28,6 +30,16 @@ ts-rs = "11.1"
 # `testing::sync_generated`, the stale-file check of the generated TypeScript.
 paddock-commands = { path = "../../../../crates/paddock-commands" }
 proptest = "1"
+# examples/tray_sheets.rs: PNG output of the design sheets.
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+
+# examples/tray_sheets.rs: the CoreText adapter of the text port (the system font, drawn by the system).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = { version = "0.3.2", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
+objc2-core-text = { version = "0.3.2", features = ["CTLine", "CTFont", "CTStringAttributes"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSFont", "NSFontDescriptor", "objc2-core-foundation"] }
+objc2 = "0.6"
 
 [lints]
 workspace = true
