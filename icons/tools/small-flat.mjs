@@ -131,18 +131,25 @@ export const FLAT = {
     g.rect('ink', 6, 3, 10, 5.5, 0.5), g.rect('ink', 2, 5, 14, 11.5, 1.2),
     g.circle('inset', 8, 8.25, 3.05), g.circle('ink', 8, 8.25, 1.55), g.circle('inset', 7.45, 7.7, Math.max(0.5, 0.45)),
   ],
-  // The impact wrench in profile: a round motor housing (a full radius), a square anvil collar, the thin anvil and a wider socket at
-  // the tip; the grip raked back as one slanted polygon (one clean anti-aliased edge each side) with the air inlet at its foot.
+  // The impact wrench in profile, one outline (no seams between parts): a round motor housing, a collar, a short square anvil, the
+  // grip raked back 15 degrees with a closed trigger guard in front of it. Horizontal and vertical edges on whole pixels; the slants and
+  // the housing's curve anti-aliased. At 16 and 20 a profile reads as a drill or a pistol, so those sizes show the socket from the
+  // front instead: the socket's ring, its hex bore and the square anvil in it.
   pitcrew: g => {
-    const out = [
-      g.circle('ink', 4.25, 6.25, 2.75), g.rect('ink', 4.25, 3.5, 9, 9), g.rect('ink', 9, 4, 10.75, 8.5, 0.25), g.rect('ink', 10.75, 5.25, 11.5, 7.25), g.rect('ink', 11.5, 4.5, 14.75, 8, 0.4),
-      // In the tray (one tone, no trigger) the grip is half a unit slimmer, so the symbol keeps the filled-glyph coverage.
-      g.poly('ink', [3.5, 8.5], [g.tray ? 6.75 : 7.25, 8.5], [g.tray ? 5.5 : 6, 13.75], [2.25, 13.75]),
-    ];
-    // From 24 px, the trigger: a tab joined to the grip's front, below the housing.
-    if (g.n >= 24 && !g.tray) out.push(g.poly('ink', [7, 9.25], [8.5, 9.25], [8.25, 10.75], [6.6, 10.75]));
-    if (!g.tray) out.push(g.rect('ink', 2.75, 13.75, 5.25, 15, 0.3));
-    return out;
+    if (g.n <= 20) {
+      const c = Math.round(8 * g.u * 2) / 2, R = f(5.85 * g.u), hr = 4.2 * g.u, a = Math.max(2, Math.round(2.6 * g.u));
+      const hex = Array.from({ length: 6 }, (_, i) => { const t = (Math.PI / 3) * i; return `${f(c + hr * Math.cos(t))} ${f(c + hr * Math.sin(t))}`; });
+      return [{ role: 'ink', d: circlePx(c, c, R) }, { role: 'inset', d: `M${hex.join('L')}Z`, curved: true }, g.px('ink', Math.round(c - a / 2), Math.round(c - a / 2), a, a)];
+    }
+    const p = g.p, k = Math.tan((15 * Math.PI) / 180), s = g.dw;
+    const yT = p(3.75), yB = p(9.25), r = (yB - yT) / 2, cx = p(4.75), gb = p(14.25), gf = 8, gw = 3.25;
+    // The grip's front edge, raked 15 degrees: x at a height y (pixels).
+    const front = y => gf * g.u - (y - yB) * k, back = y => front(y) - gw * g.u;
+    const gy = p(12.75), gx = p(11);
+    const outline = `M${cx} ${yT}H${p(10)}V${p(4.5)}H${p(11.25)}V${p(5.25)}H${p(13.75)}V${p(7.75)}H${p(11.25)}V${p(8.5)}H${p(10)}V${yB}H${gx}V${gy}`
+      + `H${f(front(gy))}L${f(front(gb))} ${gb}H${f(back(gb))}L${f(back(yB))} ${yB}H${cx}A${r} ${r} 0 0 1 ${cx} ${yT}Z`;
+    const hole = `M${f(front(yB + s) + s * 0.5)} ${yB + s}H${gx - s}V${gy - s}H${f(front(gy - s) + s * 0.5)}Z`;
+    return [{ role: 'ink', d: outline, curved: true }, { role: 'inset', d: hole, curved: true }];
   },
   // The binoculars from the front: eyecups, barrels and the bridge, two objective rings (one stroke wide) round the tile.
   spotter: g => [
@@ -197,8 +204,10 @@ export function opticalShift(app, n, state, opts = {}) {
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const a = d[4 * (y * n + x) + 3] / 255; if (!a) continue; s += a; sx += a * (x + 0.5); sy += a * (y + 0.5); x0 = Math.min(x0, x); x1 = Math.max(x1, x + 1); y0 = Math.min(y0, y); y1 = Math.max(y1, y + 1); }
   // Half the ink centre, half the box centre: a lopsided glyph moves toward balance without its box leaving the middle.
   const cx = (sx / s + (x0 + x1) / 2) / 2, cy = (sy / s + (y0 + y1) / 2) / 2, lim = n >= 32 ? 2 : 1;
-  const clamp = v => Math.max(-lim, Math.min(lim, Math.round(v)));
-  const shift = [clamp(n / 2 - cx), clamp(n / 2 - 0.02 * n - cy)];
+  // Never move ink closer to the tile's edge than one stroke (plus the tile's inset of a sixteenth).
+  const m = Math.ceil(n / 32) + (STROKE[n] ?? 1);
+  const clamp = (v, lo, hi) => Math.max(Math.max(-lim, lo), Math.min(Math.min(lim, hi), Math.round(v)));
+  const shift = [clamp(n / 2 - cx, m - x0, n - m - x1), clamp(n / 2 - 0.02 * n - cy, m - y0, n - m - y1)];
   OPTICAL.set(key, shift);
   return shift;
 }

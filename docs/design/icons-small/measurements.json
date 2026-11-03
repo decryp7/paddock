@@ -98,7 +98,7 @@
   "pitcrew": {
     "coverage16": {
       "current": 29,
-      "mix": 30
+      "mix": 27
     },
     "contrast": {
       "isoFront": 2.7,
@@ -115,7 +115,7 @@
       },
       "smooth32": {
         "coverage": 30,
-        "partialEdge": 14
+        "partialEdge": 8
       }
     }
   },
