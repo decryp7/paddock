@@ -399,8 +399,9 @@ test.describe('counters', () => {
 });
 
 test.describe('notifications', () => {
-  test('selected messages and then all of them are deleted, after a confirmation for all', async ({ page, context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  test('selected messages and then all of them are deleted, after a confirmation for all', async ({ page, context, browserName }) => {
+    // WebKit has no clipboard permission to grant; its copy path needs none.
+    if (browserName === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.goto(url('/network'));
     const socket = page.getByRole('row', { name: /142.250.74.46/ });
     await socket.focus();
