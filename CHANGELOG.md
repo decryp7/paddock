@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
+- Fixed: on Windows the popover showed and vanished at once. The shell's notification area takes the foreground back right after the tray click, so the
+  popover got `Focused(false)` within milliseconds and closed on blur. A blur within `BLUR_GRACE` (600 ms) of showing is now kept (`popover::blur_action`;
+  `Popovers::blur_grace` sets it, default `BLUR_GRACE`), the focus is asked for again after the grace, and an outside click after it closes as before; macOS is
+  unchanged in effect. The popover path logs show requested, shown (with the `show` and `set_focus` results and the focus), focus gained or lost with the time
+  since shown, and hide with its reason (`toggle`, `blur`, `requested`).
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

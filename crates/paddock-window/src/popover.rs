@@ -37,6 +37,10 @@ pub const FADE: Duration = Duration::from_millis(120);
 pub const RADIUS_MACOS: f64 = 12.0;
 /// A click on the icon this soon after the popover closed itself does not reopen it.
 pub const REOPEN_GUARD: Duration = Duration::from_millis(400);
+/// A blur this soon after the popover was shown is not an outside click: on Windows the shell's notification area takes
+/// the foreground back right after the tray click (or the foreground lock refuses `set_focus`), so the popover is
+/// blurred before the user could have clicked elsewhere.
+pub const BLUR_GRACE: Duration = Duration::from_millis(600);
 /// Space between the icon and the popover, and the least margin to the screen edge (physical px).
 pub const GAP: f64 = 6.0;
 
@@ -157,6 +161,24 @@ pub fn click_closes(since_closed: Option<Duration>) -> bool {
     since_closed.is_some_and(|d| d < REOPEN_GUARD)
 }
 
+/// What a blur (the popover lost the focus) does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlurAction {
+    /// An outside click: close.
+    Close,
+    /// Too soon after showing (see [`BLUR_GRACE`]): stay open and ask for the focus again.
+    Keep,
+}
+
+/// What a blur `since_shown` after the popover was shown does, with the grace period `grace`.
+pub fn blur_action(since_shown: Duration, grace: Duration) -> BlurAction {
+    if since_shown < grace {
+        BlurAction::Keep
+    } else {
+        BlurAction::Close
+    }
+}
+
 /// The material the OS draws behind the transparent window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Material {
@@ -252,6 +274,18 @@ mod tests {
             w: 44.0,
             h: 44.0,
         }
+    }
+
+    #[test]
+    fn a_blur_right_after_showing_keeps_the_popover_a_later_one_closes_it() {
+        // The sequence Windows produces: shown, blurred 5 ms later (the shell took the foreground), focused again, then
+        // the user clicks elsewhere.
+        let g = BLUR_GRACE;
+        assert_eq!(blur_action(Duration::from_millis(5), g), BlurAction::Keep);
+        assert_eq!(blur_action(g - Duration::from_millis(1), g), BlurAction::Keep);
+        assert_eq!(blur_action(g, g), BlurAction::Close);
+        assert_eq!(blur_action(Duration::from_secs(30), g), BlurAction::Close);
+        assert_eq!(blur_action(Duration::ZERO, Duration::ZERO), BlurAction::Close);
     }
 
     #[test]

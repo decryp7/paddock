@@ -84,6 +84,9 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| paddock_window::tauri::menu_chosen(app, event.id().as_ref()))
         .on_tray_icon_event(move |tray, event| {
+            if let TrayIconEvent::Click { button, button_state, .. } = &event {
+                logging::info(&format!("tray click: {button:?} {button_state:?}"));
+            }
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,

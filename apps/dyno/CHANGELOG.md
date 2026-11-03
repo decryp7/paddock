@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed

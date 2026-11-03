@@ -1029,6 +1029,11 @@ fn icon() -> IconRect {
 }
 
 fn popover_app() -> App {
+    // The tests blur at once; the grace has its own test.
+    popover_app_with_grace(std::time::Duration::ZERO)
+}
+
+fn popover_app_with_grace(grace: std::time::Duration) -> App {
     let app = app_with(windows(WindowConfig::new("Dyno"), &calls()).build());
     app.manage(
         Popovers::new()
@@ -1037,6 +1042,7 @@ fn popover_app() -> App {
                 os: "macos",
                 material: Material::None,
             })
+            .blur_grace(grace)
             .popover(
                 None,
                 PopoverSpec::new("index.html#/tray", "Dyno").width(400.0),
@@ -1045,6 +1051,37 @@ fn popover_app() -> App {
             .popover(Some("BAD"), PopoverSpec::new("x", "x")),
     );
     app
+}
+
+#[test]
+fn a_blur_right_after_showing_keeps_the_popover_open_a_later_one_closes_it() {
+    // Windows: the shell takes the foreground back right after the tray click, so the popover is blurred at once.
+    let app = popover_app_with_grace(crate::popover::BLUR_GRACE);
+    let h = app.handle();
+    assert_eq!(toggle_popover(h, None, icon()), Ok(true));
+    let tray = app.get_webview_window("tray").unwrap();
+    let os = tray.as_ref().window();
+    on_window_event(&os, &WindowEvent::Focused(false));
+    assert!(app.state::<Popovers>().is_open("tray"), "an immediate blur must not close it");
+    on_window_event(&os, &WindowEvent::Focused(true));
+    assert!(app.state::<Popovers>().is_open("tray"));
+    // The icon still toggles it.
+    assert_eq!(toggle_popover(h, None, icon()), Ok(false));
+    assert!(!app.state::<Popovers>().is_open("tray"));
+}
+
+#[test]
+fn a_blur_after_the_grace_closes_the_popover() {
+    let app = popover_app_with_grace(std::time::Duration::from_millis(1));
+    let h = app.handle();
+    assert_eq!(toggle_popover(h, None, icon()), Ok(true));
+    // Wait on the condition: the grace is over once the elapsed time says so.
+    while app.state::<Popovers>().shown_for("tray").is_none_or(|d| d < std::time::Duration::from_millis(1)) {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let os = app.get_webview_window("tray").unwrap().as_ref().window();
+    on_window_event(&os, &WindowEvent::Focused(false));
+    assert!(!app.state::<Popovers>().is_open("tray"));
 }
 
 #[test]

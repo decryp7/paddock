@@ -5,7 +5,7 @@
 use super::manager::{apply_feel, lock};
 use crate::feel::WebviewFeel;
 use crate::popover::{
-    CLOSING_SCRIPT, DEFAULT_HEIGHT, FADE, Material, Rect, Style, click_closes, fit_height,
+    BLUR_GRACE, BlurAction, CLOSING_SCRIPT, DEFAULT_HEIGHT, FADE, Material, Rect, Style, blur_action, click_closes, fit_height,
     fit_width, init_script, is_popover, label_for, place, refit_top,
 };
 use crate::wire::{WindowError, WindowErrorCode};
@@ -17,7 +17,7 @@ use ::tauri::{
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// What a popover shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +49,7 @@ impl PopoverSpec {
 struct Open {
     below: bool,
     width: f64,
+    shown: Instant,
 }
 
 /// The popovers (managed state): their specs by label, the platform style, which are open (and how they are anchored),
@@ -58,6 +59,7 @@ pub struct Popovers {
     specs: HashMap<String, PopoverSpec>,
     open: Mutex<HashMap<String, Open>>,
     closed_at: Mutex<HashMap<String, Instant>>,
+    blur_grace: Duration,
 }
 
 impl Default for Popovers {
@@ -74,6 +76,7 @@ impl Popovers {
             specs: HashMap::new(),
             open: Mutex::new(HashMap::new()),
             closed_at: Mutex::new(HashMap::new()),
+            blur_grace: BLUR_GRACE,
         }
     }
 
@@ -81,6 +84,12 @@ impl Popovers {
     /// effects).
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
+        self
+    }
+
+    /// How long after showing a blur is ignored ([`BLUR_GRACE`] by default; a test that blurs at once sets zero).
+    pub fn blur_grace(mut self, grace: Duration) -> Self {
+        self.blur_grace = grace;
         self
     }
 
@@ -100,6 +109,12 @@ impl Popovers {
     /// Whether the popover of `item` (`None`: the icon's) has a spec: without one a tray click has nothing to open.
     pub fn has(&self, item: Option<&str>) -> bool {
         label_for(item).is_some_and(|label| self.specs.contains_key(&label))
+    }
+
+    /// How long popover `label` has been shown, or `None` when it is not open.
+    #[cfg(test)]
+    pub(crate) fn shown_for(&self, label: &str) -> Option<Duration> {
+        lock(&self.open).get(label).map(|o| o.shown.elapsed())
     }
 
     /// Whether popover `label` is open.
@@ -172,14 +187,16 @@ pub fn toggle_popover<R: Runtime>(
         )
     })?;
     if pops.is_open(&label) {
-        close_popover(app, &label);
+        close_with(app, &label, "toggle");
         return Ok(false);
     }
     // The click that blurred it, or a click while it still fades out.
     let since = lock(&pops.closed_at).get(&label).map(Instant::elapsed);
     if click_closes(since) || app.get_webview_window(&label).is_some() {
+        log::info!(Label = label.as_str(); "Popover show ignored: the click came right after it closed, or it is still fading out");
         return Ok(false);
     }
+    log::info!(Label = label.as_str(), GraceMs = pops.blur_grace.as_millis() as u64; "Popover show requested");
     open(app, &pops, &label, &spec, icon)?;
     Ok(true)
 }
@@ -223,13 +240,20 @@ fn open<R: Runtime>(
         Open {
             below,
             width: spec.width,
+            shown: Instant::now(),
         },
     );
     let _ = w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
     #[cfg(windows)]
     round_corners(&w);
-    let _ = w.show();
-    let _ = w.set_focus();
+    let shown = w.show();
+    let focus = w.set_focus();
+    log::info!(
+        Label = label, X = x.round() as i32, Y = y.round() as i32, Below = below,
+        Show = format!("{shown:?}").as_str(), SetFocus = format!("{focus:?}").as_str(),
+        Focused = w.is_focused().unwrap_or(false);
+        "Popover shown"
+    );
     Ok(())
 }
 
@@ -276,6 +300,7 @@ pub fn fit_popover<R: Runtime>(
     let open = lock(&pops.open).get(label).copied().unwrap_or(Open {
         below: true,
         width: crate::popover::DEFAULT_WIDTH,
+        shown: Instant::now(),
     });
     let scale = w.scale_factor()?;
     let pos = w.outer_position()?;
@@ -294,6 +319,11 @@ pub fn fit_popover<R: Runtime>(
 /// Closes popover `label` with a short fade (the page animates `data-popover-open`), then destroys the window off the
 /// calling thread, and remembers when (see [`click_closes`]).
 pub fn close_popover<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    close_with(app, label, "requested");
+}
+
+/// [`close_popover`], logging why (`toggle`, `requested` by the page or the app, `blur`).
+fn close_with<R: Runtime>(app: &AppHandle<R>, label: &str, reason: &str) {
     let Some(w) = app.get_webview_window(label) else {
         return;
     };
@@ -301,6 +331,7 @@ pub fn close_popover<R: Runtime>(app: &AppHandle<R>, label: &str) {
         lock(&p.closed_at).insert(label.to_string(), Instant::now());
         lock(&p.open).remove(label);
     }
+    log::info!(Label = label, Reason = reason; "Popover hide");
     let _ = w.eval(CLOSING_SCRIPT);
     destroy_later(w);
 }
@@ -323,7 +354,8 @@ pub(crate) fn on_window_event<R: Runtime>(
         return false;
     }
     match event {
-        WindowEvent::Focused(false) => close_popover(app, label),
+        WindowEvent::Focused(true) => log::info!(Label = label; "Popover focus gained"),
+        WindowEvent::Focused(false) => blurred(app, label),
         WindowEvent::Destroyed => {
             if let Some(p) = app.try_state::<Popovers>() {
                 lock(&p.open).remove(label);
@@ -332,4 +364,47 @@ pub(crate) fn on_window_event<R: Runtime>(
         _ => {}
     }
     true
+}
+
+/// The popover lost the focus: an outside click closes it, but a blur right after it was shown (the shell taking the
+/// foreground back after the tray click) does not; then the focus is asked for again once the grace has passed.
+fn blurred<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let Some(pops) = app.try_state::<Popovers>() else {
+        return;
+    };
+    let shown = lock(&pops.open).get(label).map(|o| o.shown.elapsed());
+    let Some(since) = shown else {
+        // Already closing (or never tracked): nothing to decide.
+        return;
+    };
+    match blur_action(since, pops.blur_grace) {
+        BlurAction::Close => {
+            log::info!(Label = label, SinceShownMs = since.as_millis() as u64; "Popover focus lost");
+            close_with(app, label, "blur");
+        }
+        BlurAction::Keep => {
+            let wait = pops.blur_grace.saturating_sub(since);
+            log::info!(
+                Label = label, SinceShownMs = since.as_millis() as u64;
+                "Popover focus lost right after it was shown (the shell took the foreground back); kept open"
+            );
+            let (app, label) = (app.clone(), label.to_string());
+            super::manager::spawn("paddock-popover-refocus", move || {
+                std::thread::sleep(wait);
+                let Some(w) = app.get_webview_window(&label) else {
+                    return;
+                };
+                let still_open = app.try_state::<Popovers>().is_some_and(|p| p.is_open(&label));
+                if !still_open || w.is_focused().unwrap_or(false) {
+                    return;
+                }
+                let focus = w.set_focus();
+                log::warn!(
+                    Label = label.as_str(), SetFocus = format!("{focus:?}").as_str(),
+                    Focused = w.is_focused().unwrap_or(false);
+                    "Popover has no focus after the grace; asked for it again, left open (the tray icon closes it)"
+                );
+            });
+        }
+    }
 }
