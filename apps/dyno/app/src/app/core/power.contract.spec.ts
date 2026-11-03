@@ -64,6 +64,7 @@ const settings: PowerSettings = {
     exceptions: { audio: true, fullScreen: true, otherStayAwake: true, cpuPct: 50, diskBytesPerS: 5_242_880, netBytesPerS: 512_000, programs: [] },
   },
   timed: { enabled: false, entries: [] },
+  wol: { enabled: true, discovery: true, directedBroadcast: true, testTimeoutSecs: 120 },
 };
 
 const idleViews: Record<string, IdleView> = {

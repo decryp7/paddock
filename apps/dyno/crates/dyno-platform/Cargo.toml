@@ -25,6 +25,8 @@ paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 sha2 = "0.10"
 # Keep awake and sleep/wake notifications (ADR 0032, D3); the fakes are what tests use.
 paddock-power = { path = "../../../../crates/paddock-power" }
+# The SecureOn password of a Wake-on-LAN device lives in the OS credential store, never in the database or the logs (ADR 0032, D6).
+paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
 
 [target.'cfg(windows)'.dependencies]
 wmi = { version = "0.18", default-features = false }
@@ -33,6 +35,7 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_WindowsFirewall",
+    "Win32_NetworkManagement_Ndis",
     "Win32_NetworkManagement_WNet",
     "Win32_Networking_WinSock",
     "Win32_Security",

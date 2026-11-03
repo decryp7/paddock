@@ -783,7 +783,7 @@ export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
 
-export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes";
+export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes" | "power";
 
 export type SettingsSection = "popupWidgets" | "general";
 

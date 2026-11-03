@@ -415,6 +415,15 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::PowerIdleCancel => Ok(Reply::Power(Box::new(shared.power.idle_cancel(shared)))),
         Request::PowerIdleSnooze { minutes } => Ok(Reply::Power(Box::new(shared.power.idle_snooze(shared, minutes)))),
         Request::PowerStopKeepAwake => Ok(Reply::Power(Box::new(shared.power.stop(shared)))),
+        Request::WolDevices => shared.wol.view(shared).map(|v| Reply::Wol(Box::new(v))),
+        Request::WolCandidates => shared.wol.candidates(shared).map(Reply::WolCandidates),
+        Request::WolSave { device } => shared.wol.save(shared, device).map(|v| Reply::Wol(Box::new(v))),
+        Request::WolRemove { id } => shared.wol.remove(shared, id).map(|v| Reply::Wol(Box::new(v))),
+        Request::WolWake { id, test } => {
+            shared.wol.check_wake(shared, id)?;
+            shared.jobs.start(shared, dyno_core::jobs::JobSpec::WolWake { id, test }).map(|s| Reply::Job(Box::new(s)))
+        }
+        Request::WolReadiness => Ok(Reply::WolReadiness(Box::new(shared.wol.readiness()))),
         Request::Shutdown => {
             log::info!("Shutdown requested by a client");
             shared.request_stop();

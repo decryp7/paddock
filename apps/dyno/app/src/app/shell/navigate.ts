@@ -15,6 +15,7 @@ export const PAGE_ROUTE: Readonly<Record<Page, string>> = {
   backups: '/backup',
   counters: '/counters',
   processes: '/processes',
+  power: '/power',
 };
 
 /** Dyno's page of the Settings window (`SETTINGS_PAGES`). */

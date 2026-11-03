@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DEFAULT_POWER } from '../power/power-model';
-import type { EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import type { WolSettings, EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -282,7 +282,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
             <section class="card" aria-label="Power" id="power">
               <h2>Power</h2>
-              <p class="sub">Dyno can keep your computer awake when you ask, from the Power page or the tray. It never changes your power settings, and it lets go when it stops.</p>
+              <p class="sub">Dyno can keep your computer awake when you ask, from the Power page or the tray. It never changes your power settings, and it lets go when it stops. It can also wake other computers on your network (Wake-on-LAN) when you click Wake.</p>
               <div class="row">
                 <div class="lbl"><strong>Allow keep awake</strong><small>Off ends a hold in progress and turns the Power page's options off. Dyno holds only after you ask.</small></div>
                 <mat-slide-toggle [checked]="power().enabled" aria-label="Allow keep awake" (change)="setPower({ enabled: $event.checked })" />
@@ -335,6 +335,22 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <div class="row" [class.off]="!energy().enabled">
                 <div class="lbl"><strong>CO₂ per kWh</strong><small>Your grid's figure. Empty: no CO₂.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="0" max="2000" [disabled]="!energy().enabled" aria-label="Grams of CO2 per kilowatt hour" [ngModel]="energy().co2GPerKwh" (ngModelChange)="setEnergy({ co2GPerKwh: num($event) })" /><span matTextSuffix>g</span></mat-form-field>
+              <h3 class="sub-h">Wake-on-LAN</h3>
+              <div class="row">
+                <div class="lbl"><strong>Allow Wake-on-LAN</strong><small>Wake packets go out only when you click Wake or Test wake (or an AI client you allowed asks to). Off hides the list and the tray's Wake menu.</small></div>
+                <mat-slide-toggle [checked]="wol().enabled" aria-label="Allow Wake-on-LAN" (change)="setWol({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!wol().enabled">
+                <div class="lbl"><strong>Add from network</strong><small>Lets Dyno read your system's list of neighbours so you can pick a computer instead of typing its address. Nothing is saved until you choose it.</small></div>
+                <mat-slide-toggle [checked]="wol().discovery" [disabled]="!wol().enabled" aria-label="Add from network" (change)="setWol({ discovery: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!wol().enabled">
+                <div class="lbl"><strong>Also send to each network's own broadcast address</strong><small>Reaches computers on a network that drops the general broadcast. Turn off if a router complains.</small></div>
+                <mat-slide-toggle [checked]="wol().directedBroadcast" [disabled]="!wol().enabled" aria-label="Also send to each network's own broadcast address" (change)="setWol({ directedBroadcast: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!wol().enabled">
+                <div class="lbl"><strong>Test wake waits up to</strong><small>How long to wait for the computer to answer (10 to 600 seconds).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10" max="600" [disabled]="!wol().enabled" aria-label="Seconds a test wake waits for an answer" [ngModel]="wol().testTimeoutSecs" (ngModelChange)="setWol({ testTimeoutSecs: +$event })" /><span matTextSuffix>seconds</span></mat-form-field>
               </div>
             </section>
           </div>
@@ -381,6 +397,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { width: 148px; }
     .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
+    .sub-h { margin-top: var(--sp-5); }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
     .checks { display: flex; gap: var(--sp-3); flex-wrap: wrap; justify-content: flex-end; }
     .check { display: inline-flex; align-items: center; gap: 6px; }
@@ -550,6 +567,10 @@ export class SettingsPage implements OnInit {
   /** A number box's value, or null when it is empty (an unset figure is not 0). */
   protected num(v: unknown): number | null {
     return v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
+  }
+  protected readonly wol = computed<WolSettings>(() => this.draft()?.power?.wol ?? DEFAULT_POWER.wol);
+  protected setWol(p: Partial<WolSettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), wol: { ...this.wol(), ...p } } } : d));
   }
   protected kb(bytes: number): number {
     return Math.round(bytes / 1024);

@@ -259,3 +259,36 @@ fn idle_says_the_rules_are_off_and_cancel_is_harmless() {
     let (code, _, err) = h.dyno("idle snooze 0");
     assert_eq!(code, 2, "{err}");
 }
+
+#[test]
+fn wake_finds_the_computer_by_name_or_address_and_says_how_it_ended_without_sending_anything_real() {
+    use dyno_agent::cli::{ask, connect};
+    use dyno_core::protocol::Request;
+    use dyno_core::wol::{SecureOnEdit, WolDeviceInput};
+    // The fake platform's sockets only record (ER-14); its fake clock makes the test wake's 120 s instant.
+    let h = Harness::start();
+    let c = connect(&h.dirs).unwrap().0;
+    ask(
+        &c,
+        Request::WolSave {
+            device: WolDeviceInput {
+                id: None,
+                name: "Media PC".into(),
+                mac: "02:00:5e:10:00:01".into(),
+                last_ip: Some("192.0.2.40".into()),
+                interface: None,
+                secure_on: SecureOnEdit::Keep,
+            },
+        },
+    )
+    .unwrap();
+    let (code, out, err) = h.dyno("wake media pc");
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("Wake packets sent."), "{out}");
+    let (code, out, _) = h.dyno("wake 02:00:5e:10:00:01 --test");
+    assert_eq!(code, 0);
+    assert!(out.starts_with("No answer in 120 s"), "{out}");
+    let (code, _, err) = h.dyno("wake Printer");
+    assert_eq!(code, 1);
+    assert!(err.contains("No saved computer is called \"Printer\""), "{err}");
+}

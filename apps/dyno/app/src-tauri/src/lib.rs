@@ -16,8 +16,10 @@ pub mod link;
 pub mod logging;
 pub mod login;
 pub mod login_item;
+pub mod mcp;
 pub mod popover;
 pub mod power_menu;
+pub mod wol_menu;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -142,6 +144,18 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     if diagnostics_wanted(&place) {
         builder = builder.diagnostics(|_app| diagnostics_setup());
     }
+    // AI access (ADR 0007, 0032 D7): Dyno's four tools, off until the user allows them in Settings > AI access. The tools ask the agent
+    // through the shell's link; a test place keeps the settings in its folder and the keys in memory (ER-14).
+    let mcp_dir = test_dir.clone();
+    builder = builder.mcp(move |app, emit| {
+        let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
+        let dirs = match &mcp_dir {
+            Some(dir) => paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &paddock_env::MapVars::new().with(&id.home_var(), dir), None, true)?,
+            None => paddock_env::AppDirs::for_app(&id)?,
+        };
+        let calls = Arc::new(mcp::ShellCalls(app.clone()));
+        Ok(mcp::control(&dirs, APP_NAME, VERSION, mcp_dir.is_none(), emit, calls))
+    });
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {
         Place::Installed => builder,
@@ -255,6 +269,7 @@ pub fn app<R: Runtime>(
             tray::tray(tray_backend).on_action(|app, id| {
                 if let Some(shell) = tauri::Manager::try_state::<Arc<shell::ShellOf<R>>>(app) {
                     shell.power_menu_chosen(id);
+                    shell.wol_menu_chosen(id);
                 }
             })
         })

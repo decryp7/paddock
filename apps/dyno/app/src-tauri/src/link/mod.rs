@@ -90,6 +90,8 @@ pub trait Sink: Send + Sync {
     fn widget_layout_changed(&self, _surface: dyno_core::widgets::DynoSurface) {}
     /// The power view changed (a hold started, ended or was ended by the OS).
     fn power_changed(&self, _view: dyno_core::power::PowerView) {}
+    /// The Wake-on-LAN list changed (a save or remove from any window, or a wake that ended).
+    fn wol_changed(&self, _view: dyno_core::wol::WolView) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.

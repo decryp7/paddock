@@ -239,6 +239,7 @@ impl Fake {
                 actions: std::sync::Arc::new(FakePowerActions::default()),
                 signals: std::sync::Arc::new(FakeIdleSignals::default()),
             },
+            wol: crate::wol::WolPorts::fake(),
         }
     }
 }

@@ -53,6 +53,7 @@ pub mod tool_own_copy;
 pub mod tool_pins;
 pub mod unusual;
 pub mod wire;
+pub mod wol;
 
 use agent::Shared;
 use std::sync::Arc;

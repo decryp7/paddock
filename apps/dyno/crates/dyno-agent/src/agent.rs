@@ -292,6 +292,8 @@ pub struct Shared {
     pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
     /// Keep awake: the OS hold and its state machine (ADR 0032).
     pub power: Arc<crate::power::PowerCentre>,
+    /// Wake-on-LAN: the saved computers and the wake job (ADR 0032).
+    pub wol: crate::wol::WolCentre,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -468,6 +470,7 @@ impl Shared {
             network,
             hardware,
             power,
+            wol,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
             firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
@@ -522,6 +525,7 @@ impl Shared {
                 power.signals,
                 power_marker,
             )),
+            wol: crate::wol::WolCentre::new(wol),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

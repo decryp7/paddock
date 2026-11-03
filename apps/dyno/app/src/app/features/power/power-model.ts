@@ -1,4 +1,4 @@
-import type { BusyNow, IdleAction, IdleView, PowerSettings, TimedAction, AwakeSpec, AwakeUntil, AwakeView, BusyCond, Capability, KeepAwakeSettings, PowerView } from '../../core/api.types';
+import type { WolSettings, BusyNow, IdleAction, IdleView, PowerSettings, TimedAction, AwakeSpec, AwakeUntil, AwakeView, BusyCond, Capability, KeepAwakeSettings, PowerView } from '../../core/api.types';
 
 /** The quick choices, in the order the page and the tray offer them. */
 export const AWAKE_PRESETS: readonly { id: string; label: string; until: AwakeUntil }[] = [
@@ -116,6 +116,9 @@ export const DEFAULT_KEEP_AWAKE: KeepAwakeSettings = {
   trayItem: false,
 };
 
+/** The Wake-on-LAN settings before the agent has answered (the same values as the engine's defaults). */
+export const DEFAULT_WOL: WolSettings = { enabled: true, discovery: true, directedBroadcast: true, testTimeoutSecs: 120 };
+
 /** The power settings before the agent has answered (the engine's defaults). */
 export const DEFAULT_POWER: PowerSettings = {
   keepAwake: DEFAULT_KEEP_AWAKE,
@@ -129,6 +132,7 @@ export const DEFAULT_POWER: PowerSettings = {
     exceptions: { audio: true, fullScreen: true, otherStayAwake: true, cpuPct: 50, diskBytesPerS: 5_242_880, netBytesPerS: 512_000, programs: [] },
   },
   timed: { enabled: false, entries: [] },
+  wol: DEFAULT_WOL,
 };
 
 /** "sleep", "hibernate", "shut down". */

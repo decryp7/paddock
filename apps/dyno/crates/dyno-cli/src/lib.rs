@@ -132,6 +132,7 @@ fn execute(agent: &dyn Agent, i: &Invocation) -> Result<String, Problem> {
         Command::CountersGet { paths } => counters_get(agent, paths, json),
         Command::Awake(cmd) => awake(agent, *cmd, json),
         Command::Idle(cmd) => idle(agent, *cmd, json),
+        Command::Wake { target, test } => wake(agent, target, *test, json),
         Command::Help | Command::Version => Ok(String::new()),
     }
 }
@@ -207,6 +208,62 @@ fn awake(agent: &dyn Agent, cmd: args::AwakeCmd, json: bool) -> Result<String, P
     match agent.call(request)? {
         Reply::Power(v) => Ok(data(json, &*v, || render::awake_text(&v))),
         _ => Err(unexpected()),
+    }
+}
+
+/// `dyno wake`: find the saved computer by name (without case) or hardware address, start the wake job and follow it to its end.
+/// There is no timeout (ER-19): a test wake ends by itself after the Settings' wait.
+fn wake(agent: &dyn Agent, target: &str, test: bool, json: bool) -> Result<String, Problem> {
+    use dyno_core::jobs::JobOutput;
+    use dyno_core::wol::Mac;
+    let Reply::Wol(view) = agent.call(Request::WolDevices)? else {
+        return Err(unexpected());
+    };
+    let mac = Mac::parse(target).ok();
+    let found: Vec<_> = view
+        .devices
+        .iter()
+        .filter(|d| Some(d.mac) == mac || d.name.eq_ignore_ascii_case(target))
+        .collect();
+    let id = match found.as_slice() {
+        [one] => one.id,
+        [] => {
+            return Err(Problem::Failed(format!(
+                "No saved computer is called \"{target}\". Save it in Dyno's Power page first (Wake devices)."
+            )))
+        }
+        _ => {
+            return Err(Problem::Failed(
+                "More than one saved computer matches; use its hardware address.".into(),
+            ))
+        }
+    };
+    let Reply::Job(job) = agent.call(Request::WolWake { id, test })? else {
+        return Err(unexpected());
+    };
+    loop {
+        let Reply::Jobs(all) = agent.call(Request::Jobs)? else {
+            return Err(unexpected());
+        };
+        match all.iter().find(|j| j.id == job.id) {
+            Some(j) if j.is_terminal() => {
+                if let paddock_jobs::wire::WireState::Failed(m) = &j.state {
+                    return Err(Problem::Failed(m.clone()));
+                }
+                break;
+            }
+            // A job the agent forgot is over; the result read below says what happened.
+            None => break,
+            Some(_) => std::thread::sleep(std::time::Duration::from_millis(300)),
+        }
+    }
+    match agent.call(Request::JobResult { id: job.id }) {
+        Ok(Reply::JobOutput(o)) => match *o {
+            JobOutput::Wol(out) => Ok(data(json, &*out, || format!("{}\n", out.message))),
+            _ => Err(unexpected()),
+        },
+        Ok(_) => Err(unexpected()),
+        Err(_) => Ok("Cancelled.\n".into()),
     }
 }
 

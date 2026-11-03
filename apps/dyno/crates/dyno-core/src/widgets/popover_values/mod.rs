@@ -73,6 +73,8 @@ pub enum Page {
     Counters,
     /// Processes.
     Processes,
+    /// Power (keep awake, Wake-on-LAN).
+    Power,
 }
 
 /// What a widget's button does: a closed set, run by the app's `run_widget_action`.

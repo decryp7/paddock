@@ -93,6 +93,13 @@ pub enum JobSpec {
         /// Which tool.
         tool: crate::helper_requests::ToolKind,
     },
+    /// Sends a Wake-on-LAN wake to a saved computer; `test` also waits for it to answer (ADR 0032).
+    WolWake {
+        /// The saved computer.
+        id: u64,
+        /// Wait for an answer and say whether it woke.
+        test: bool,
+    },
 }
 
 impl JobSpec {
@@ -112,6 +119,7 @@ impl JobSpec {
             JobSpec::UpdateList { .. } => JobKind::UpdateList,
             JobSpec::UpdateGeo => JobKind::UpdateGeo,
             JobSpec::RebuildIntel => JobKind::RebuildIntel,
+            JobSpec::WolWake { .. } => JobKind::WolWake,
         }
     }
 }
@@ -146,6 +154,8 @@ pub enum JobKind {
     RebuildIntel,
     /// Downloading the pinned disk-health tool and handing it to the helper.
     InstallTool,
+    /// Waking a computer over the network.
+    WolWake,
 }
 
 impl JobKind {
@@ -165,6 +175,7 @@ impl JobKind {
             JobKind::UpdateList => "Updating a list",
             JobKind::UpdateGeo => "Updating the location databases",
             JobKind::RebuildIntel => "Building the match index",
+            JobKind::WolWake => "Waking a computer",
         }
     }
 
@@ -184,6 +195,7 @@ impl JobKind {
             JobKind::UpdateList => "update-list",
             JobKind::UpdateGeo => "update-geo",
             JobKind::RebuildIntel => "rebuild-intel",
+            JobKind::WolWake => "wol-wake",
         }
     }
 
@@ -203,6 +215,7 @@ impl JobKind {
             JobKind::UpdateGeo,
             JobKind::RebuildIntel,
             JobKind::InstallTool,
+            JobKind::WolWake,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -235,6 +248,8 @@ pub enum JobOutput {
     Helper(Box<crate::helper_wire::HelperStatus>),
     /// From [`JobSpec::UpdateList`], [`JobSpec::UpdateGeo`] and [`JobSpec::RebuildIntel`]: the lists page after the job.
     Intel(Box<crate::intel_lists::IntelStatus>),
+    /// From [`JobSpec::WolWake`].
+    Wol(Box<crate::wol::WolOutcome>),
 }
 
 #[cfg(test)]
@@ -304,6 +319,7 @@ mod tests {
             JobSpec::BootAnalysis,
             JobSpec::AppUsage,
             JobSpec::SoftwareInventory,
+            JobSpec::WolWake { id: 1, test: false },
         ];
         for spec in specs {
             assert_eq!(JobKind::from_slug(spec.kind().slug()), Some(spec.kind()));

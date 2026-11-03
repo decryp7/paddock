@@ -17,6 +17,7 @@ import { PowerStore } from '../../state/power.store';
 import { ProcessesStore } from '../../state/processes.store';
 import { SettingsStore } from '../../state/settings.store';
 import { EnergyTab } from './energy-tab';
+import { WakeDevices } from './wake-devices';
 import { SleepTab } from './sleep-tab';
 import {
   AWAKE_PRESETS,
@@ -43,6 +44,7 @@ const SUBTITLES = [
   'Keep your computer awake when you ask. Dyno holds it for you and lets go when the time is up, the program quits or you stop it.',
   'Sleep, hibernate or shut down when you are away, with a warning and a Cancel first. Off until you turn it on.',
   'How long this computer was on and asleep, and an estimate of the energy from the numbers you give.',
+  'Wake computers on your network that are asleep or off, by sending them a Wake-on-LAN packet.',
 ];
 
 /**
@@ -52,7 +54,7 @@ const SUBTITLES = [
  */
 @Component({
   selector: 'dy-power-page',
-  imports: [AsyncState, Icon, FormsModule, MatButton, MatButtonToggleModule, MatCheckbox, MatFormFieldModule, MatInputModule, MatTabsModule, EnergyTab, SleepTab],
+  imports: [AsyncState, Icon, FormsModule, MatButton, MatButtonToggleModule, MatCheckbox, MatFormFieldModule, MatInputModule, MatTabsModule, EnergyTab, SleepTab, WakeDevices],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -199,6 +201,7 @@ const SUBTITLES = [
         </mat-tab>
         <mat-tab label="Sleep and shut down"><ng-template matTabContent><dy-sleep-tab /></ng-template></mat-tab>
         <mat-tab label="Energy"><ng-template matTabContent><dy-energy-tab /></ng-template></mat-tab>
+        <mat-tab label="Wake devices"><ng-template matTabContent><dy-wake-devices /></ng-template></mat-tab>
       </mat-tab-group>
     </div>
   `,
@@ -208,6 +211,8 @@ const SUBTITLES = [
     .page-head { margin-bottom: 0; }
     .body { padding-top: var(--sp-5); }
     dy-async { display: grid; gap: var(--sp-4); }
+    dy-wake-devices { display: block; padding-top: var(--sp-4); }
+    dy-async { padding-top: var(--sp-4); }
     section { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-4); display: grid; gap: var(--sp-3); }
     h2 { margin: 0; font-size: 18px; font-weight: var(--fw-semibold); }
     .status h2[data-state='holding'] { color: var(--ok); }

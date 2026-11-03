@@ -97,6 +97,7 @@ fn tag_message(v: &Message) -> &'static str {
         Message::Job(_) => "Job",
         Message::WidgetLayoutChanged(_) => "WidgetLayoutChanged",
         Message::PowerChanged(_) => "PowerChanged",
+        Message::WolChanged(_) => "WolChanged",
     }
 }
 
@@ -111,6 +112,7 @@ fn tag_job_spec(v: &JobSpec) -> &'static str {
         JobSpec::AppUsage => "AppUsage",
         JobSpec::SoftwareInventory => "SoftwareInventory",
         JobSpec::Helper { .. } => "Helper",
+        JobSpec::WolWake { .. } => "WolWake",
         JobSpec::UpdateList { .. } => "UpdateList",
         JobSpec::UpdateGeo => "UpdateGeo",
         JobSpec::RebuildIntel => "RebuildIntel",
@@ -129,6 +131,7 @@ fn tag_job_output(v: &JobOutput) -> &'static str {
         JobOutput::AppUsage(_) => "AppUsage",
         JobOutput::Software(_) => "Software",
         JobOutput::Helper(_) => "Helper",
+        JobOutput::Wol(_) => "Wol",
         JobOutput::Intel(_) => "Intel",
         JobOutput::Tool(_) => "Tool",
     }
@@ -263,6 +266,12 @@ fn tag_request(v: &Request) -> &'static str {
         Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
         Request::HelperStatus => "HelperStatus",
         Request::PowerState => "PowerState",
+        Request::WolDevices => "WolDevices",
+        Request::WolCandidates => "WolCandidates",
+        Request::WolSave { .. } => "WolSave",
+        Request::WolRemove { .. } => "WolRemove",
+        Request::WolWake { .. } => "WolWake",
+        Request::WolReadiness => "WolReadiness",
         Request::PowerKeepAwake { .. } => "PowerKeepAwake",
         Request::PowerStopKeepAwake => "PowerStopKeepAwake",
         Request::PowerIdleCancel => "PowerIdleCancel",
@@ -359,6 +368,9 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::PopoverValues(_) => "PopoverValues",
         Reply::HelperStatus(_) => "HelperStatus",
         Reply::Power(_) => "Power",
+        Reply::Wol(_) => "Wol",
+        Reply::WolCandidates(_) => "WolCandidates",
+        Reply::WolReadiness(_) => "WolReadiness",
         Reply::Energy(_) => "Energy",
         Reply::GpuAdapters(_) => "GpuAdapters",
         Reply::BenchEstimate(_) => "BenchEstimate",
@@ -422,6 +434,7 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::Helper { action: dyno_core::helper_wire::HelperAction::TurnOn },
         JobSpec::UpdateList { id: "list-1".into() },
         JobSpec::UpdateGeo,
+        JobSpec::WolWake { id: 1, test: true },
         JobSpec::RebuildIntel,
         JobSpec::InstallTool { tool: zero() },
     ]
@@ -438,6 +451,7 @@ fn job_output_samples() -> Vec<JobOutput> {
         JobOutput::AppUsage(zero()),
         JobOutput::Software(zero()),
         JobOutput::Helper(Box::new(zero())),
+        JobOutput::Wol(Box::new(zero())),
         JobOutput::Intel(Box::default()),
         JobOutput::Tool(Box::new(zero())),
     ]
@@ -654,6 +668,12 @@ fn request_samples() -> Vec<Request> {
         Request::ForgetSavedDiskMaps,
         Request::HelperStatus,
         Request::PowerState,
+        Request::WolDevices,
+        Request::WolCandidates,
+        Request::WolSave { device: zero() },
+        Request::WolRemove { id: 1 },
+        Request::WolWake { id: 1, test: false },
+        Request::WolReadiness,
         Request::PowerKeepAwake { spec: zero() },
         Request::PowerStopKeepAwake,
         Request::PowerIdleCancel,
@@ -840,6 +860,9 @@ fn reply_samples() -> Vec<Reply> {
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),
         Reply::Power(Box::default()),
+        Reply::Wol(Box::new(zero())),
+        Reply::WolCandidates(vec![]),
+        Reply::WolReadiness(Box::new(zero())),
         Reply::Energy(Box::new(zero())),
         Reply::GpuAdapters(vec![]),
         Reply::BenchEstimate(None),
@@ -874,6 +897,7 @@ fn message_samples() -> Vec<Message> {
         Message::Job(Box::new(wire_job())),
         Message::WidgetLayoutChanged(dyno_core::widgets::DynoSurface::Popover),
         Message::PowerChanged(Box::default()),
+        Message::WolChanged(Box::new(zero())),
     ]
 }
 

@@ -56,6 +56,7 @@ pub fn platform() -> Platform {
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
         power: crate::PowerPorts::os(),
+        wol: crate::wol::WolPorts::os(),
     }
 }
 

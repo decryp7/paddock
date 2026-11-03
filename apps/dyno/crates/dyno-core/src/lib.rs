@@ -74,4 +74,5 @@ pub mod units;
 pub mod unusual;
 pub mod wake;
 pub mod weblinks;
+pub mod wol;
 pub mod widgets;

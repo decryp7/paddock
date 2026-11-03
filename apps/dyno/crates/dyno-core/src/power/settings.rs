@@ -36,6 +36,26 @@ impl Default for KeepAwakeSettings {
     }
 }
 
+/// Wake-on-LAN settings (a network feature: on by default, sends only on a click).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WolSettings {
+    /// The feature is available; a wake is only ever sent on a click (or an allowed MCP action).
+    pub enabled: bool,
+    /// "Add from network" may read the neighbour table.
+    pub discovery: bool,
+    /// Also send to each network's directed (subnet) broadcast address, not only the limited broadcast.
+    pub directed_broadcast: bool,
+    /// How long a test wake waits for an answer, in seconds.
+    pub test_timeout_secs: u32,
+}
+
+impl Default for WolSettings {
+    fn default() -> Self {
+        Self { enabled: true, discovery: true, directed_broadcast: true, test_timeout_secs: 120 }
+    }
+}
+
 /// All power settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -48,6 +68,8 @@ pub struct PowerSettings {
     pub idle: super::idle::IdleSettings,
     /// Sleep, hibernate or shut down at a time of day (off by default).
     pub timed: super::idle::TimedSettings,
+    /// Wake-on-LAN.
+    pub wol: WolSettings,
 }
 
 impl PowerSettings {
@@ -60,6 +82,8 @@ impl PowerSettings {
         k.cpu_pct = if k.cpu_pct.is_finite() { k.cpu_pct.clamp(1.0, 100.0) } else { 50.0 };
         k.net_bytes_per_s = k.net_bytes_per_s.clamp(1024, 10 * 1024 * 1024 * 1024);
         k.disk_bytes_per_s = k.disk_bytes_per_s.clamp(1024, 10 * 1024 * 1024 * 1024);
+        let (lo, hi) = crate::wol::wake::TEST_TIMEOUT_RANGE;
+        self.wol.test_timeout_secs = self.wol.test_timeout_secs.clamp(lo, hi);
         self
     }
 }
@@ -82,6 +106,20 @@ mod tests {
         assert!(p.keep_awake.display);
         assert_eq!(p.keep_awake.grace_secs, 120);
         assert_eq!(serde_json::from_str::<PowerSettings>("{}").unwrap(), PowerSettings::default());
+    }
+
+    #[test]
+    fn wol_defaults_are_the_adrs_and_the_timeout_is_clamped() {
+        let w = WolSettings::default();
+        assert!(w.enabled && w.discovery && w.directed_broadcast);
+        assert_eq!(w.test_timeout_secs, 120);
+        let mut p = PowerSettings::default();
+        p.wol.test_timeout_secs = 1;
+        assert_eq!(p.clone().normalised().wol.test_timeout_secs, 10);
+        p.wol.test_timeout_secs = 100_000;
+        assert_eq!(p.normalised().wol.test_timeout_secs, 600);
+        let p: PowerSettings = serde_json::from_str(r#"{"wol":{"enabled":false}}"#).unwrap();
+        assert!(!p.wol.enabled && p.wol.discovery);
     }
 
     #[test]

@@ -86,7 +86,8 @@ impl JobCentre {
                     .status(id)
                     .ok_or_else(|| AgentError::new(ErrorCode::Internal, "The job vanished."));
             }
-            if spec.kind() != JobKind::FileHash && book.active.iter().any(|(_, s)| s.kind() == spec.kind()) {
+            // A file hash and a wake are per item: several may run at once (two computers woken together).
+            if !matches!(spec.kind(), JobKind::FileHash | JobKind::WolWake) && book.active.iter().any(|(_, s)| s.kind() == spec.kind()) {
                 return Err(AgentError::new(
                     ErrorCode::Busy,
                     format!("{} is already running; wait for it or cancel it.", spec.kind().title()),
@@ -94,7 +95,7 @@ impl JobCentre {
             }
             let ctx = self
                 .registry
-                .register(spec.kind().slug(), spec.kind().title(), subject(&spec).as_deref());
+                .register(spec.kind().slug(), &title_of(&spec), subject_of(shared, &spec).as_deref());
             book.active.push((ctx.id().0, spec.clone()));
             ctx
         };
@@ -190,6 +191,22 @@ fn validated(spec: JobSpec) -> Result<JobSpec, AgentError> {
     }
 }
 
+/// The title a job shows: a test wake says so.
+fn title_of(spec: &JobSpec) -> String {
+    match spec {
+        JobSpec::WolWake { test: true, .. } => "Testing a wake".into(),
+        other => other.kind().title().into(),
+    }
+}
+
+/// What a job is about: for a wake, the computer's name (the person's own word for it; never logged).
+fn subject_of(shared: &Shared, spec: &JobSpec) -> Option<String> {
+    match spec {
+        JobSpec::WolWake { id, .. } => shared.wol.name_of(shared, *id),
+        other => subject(other),
+    }
+}
+
 fn subject(spec: &JobSpec) -> Option<String> {
     match spec {
         JobSpec::FindFiles { query } => Some(query.folder.clone()),
@@ -262,6 +279,7 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             let report = crate::extras::backup_check::refresh(shared, ctx)?;
             Ok(JobOutput::Backup(Box::new(report)))
         }
+        JobSpec::WolWake { id, test } => shared.wol.run(shared, ctx, id, test).map(|o| JobOutput::Wol(Box::new(o))),
         JobSpec::FileHash { source } => {
             let path = crate::handlers_search::hash_path(shared, source).map_err(|e| JobError::Failed(e.message))?;
             shared.hasher.hash_job(ctx, &path).map(JobOutput::FileHash).map_err(|e| match e {

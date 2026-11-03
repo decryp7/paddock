@@ -32,6 +32,8 @@ pub struct TrayState {
     items: Mutex<HashMap<String, ItemSpec>>,
     /// The Keep awake entries every icon's menu carries (none: the menu is Open and Quit only).
     power: Mutex<Option<crate::power_menu::Menu>>,
+    /// The Wake submenu every icon's menu carries (none: no computers saved or Wake-on-LAN off).
+    wol: Mutex<Option<crate::wol_menu::Menu>>,
     painted: Mutex<HashMap<String, bool>>,
     /// Per item: what was last sent and how many frames were drawn (the tooltip changes rarely, a picture every second).
     drawn: Mutex<HashMap<String, Drawn>>,
@@ -121,6 +123,14 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
             menu.append(&sub)?;
         }
     }
+    let wol = app.try_state::<TrayState>().and_then(|s| lock(&s.wol).clone());
+    if let Some(wol) = wol {
+        let sub = Submenu::with_id(app, "dy.wol", "Wake device", true)?;
+        for e in &wol.entries {
+            sub.append(&MenuItem::with_id(app, &e.id, &e.text, e.enabled, None::<&str>)?)?;
+        }
+        menu.append(&sub)?;
+    }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, QUIT_ID, "Quit Dyno", true, None::<&str>)?)?;
     Ok(menu)
@@ -133,6 +143,21 @@ pub fn set_power_menu(app: &AppHandle<Wry>, menu: Option<&crate::power_menu::Men
     }
     let state = app.state::<TrayState>();
     *lock(&state.power) = menu.cloned();
+    rebuild_menus(app);
+}
+
+/// The Wake submenu changed: every icon's menu is rebuilt (`None`: the menu has none).
+pub fn set_wol_menu(app: &AppHandle<Wry>, menu: Option<&crate::wol_menu::Menu>) {
+    if app.try_state::<TrayState>().is_none() {
+        app.manage(TrayState::default());
+    }
+    let state = app.state::<TrayState>();
+    *lock(&state.wol) = menu.cloned();
+    rebuild_menus(app);
+}
+
+fn rebuild_menus(app: &AppHandle<Wry>) {
+    let state = app.state::<TrayState>();
     let ids: Vec<String> = lock(&state.items).keys().cloned().collect();
     for id in ids {
         let Some(tray) = app.tray_by_id(&tray_id(&id)) else { continue };

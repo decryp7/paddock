@@ -12,6 +12,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
+import { defineMcpKeyDialog, defineMcpRevokeDialog, defineMcpSettingsPage } from '@decryp7/paddock-ui/shell/mcp';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 import type { DynoContext } from './context';
@@ -31,6 +32,23 @@ export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
 
+/** Settings > AI access (MCP) (ADR 0007, 0032 D7): off by default; each tool, and each action by its own switch, is allowed by the user. */
+export const MCP_PAGE = defineMcpSettingsPage({
+  providers: () => import('./mcp.providers').then((m) => m.MCP_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/mcp/page').then((m) => m.PdMcpPage),
+});
+
+/** The key dialog (a modal form opened from the page): the one window that issues a client key and shows it once. */
+export const MCP_KEY_DIALOG = defineMcpKeyDialog({
+  providers: () => import('./mcp.providers').then((m) => m.MCP_KEY_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/mcp/dialog').then((m) => m.PdMcpKeyDialog),
+});
+
+/** The revoke confirmation of a key (a modal decision, one window per key). */
+export const MCP_REVOKE_DIALOG = defineMcpRevokeDialog({
+  load: () => import('@decryp7/paddock-ui/shell/mcp/dialog').then((m) => m.PdMcpRevokeDialog),
+});
+
 /** Dyno's page of the Settings window. */
 export const SETTINGS_PAGES = [
   defineSettingsPage({
@@ -40,6 +58,7 @@ export const SETTINGS_PAGES = [
     order: 100,
     load: () => import('../features/settings/settings-page').then((m) => m.SettingsPage),
   }),
+  MCP_PAGE,
 ] as const;
 
 /** "Add or edit an alert rule" (modal form). Answers true once the rule is saved. */
@@ -80,7 +99,7 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
 /** Report a problem (Help menu, command palette): shows every file with its size before saving; its window boots the diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, ALERT_RULE_DIALOG, LOCKERS_DIALOG, WEB_SEARCH_DIALOG, FILE_HASH_DIALOG, ...ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
+export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, ALERT_RULE_DIALOG, LOCKERS_DIALOG, WEB_SEARCH_DIALOG, FILE_HASH_DIALOG, MCP_KEY_DIALOG, MCP_REVOKE_DIALOG, ...ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
 
 /** Report a problem's command, Help menu item and the Logging settings page. */
 export const DIAGNOSTICS_CONTRIBUTIONS = diagnosticsContributions([]);

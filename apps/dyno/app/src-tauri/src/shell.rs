@@ -46,6 +46,8 @@ pub mod events {
     pub const NAVIGATE: &str = "dyno://navigate";
     /// `PowerView`: the keep-awake state changed.
     pub const POWER: &str = "dyno://power";
+    /// `WolView`: the Wake-on-LAN list changed.
+    pub const WOL: &str = "dyno://wol";
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -120,6 +122,8 @@ pub trait TrayPixels<R: Runtime>: Send + Sync {
     fn show_disconnected(&self, app: &AppHandle<R>, frames: &[(String, crate::tray_model::Frame)]);
     /// The tray menu's Keep awake entries follow `menu` (`None`: the menu has none).
     fn set_power_menu(&self, app: &AppHandle<R>, menu: Option<&crate::power_menu::Menu>);
+    /// The tray menu's Wake submenu follows `menu` (`None`: the menu has none).
+    fn set_wol_menu(&self, app: &AppHandle<R>, menu: Option<&crate::wol_menu::Menu>);
 }
 
 /// The tray icons of the menu bar or notification area.
@@ -143,6 +147,9 @@ impl TrayPixels<Wry> for NativePixels {
     fn set_power_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::power_menu::Menu>) {
         crate::tray::set_power_menu(app, menu);
     }
+    fn set_wol_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::wol_menu::Menu>) {
+        crate::tray::set_wol_menu(app, menu);
+    }
 }
 
 /// Draws nothing (a test: no icon reaches the desktop).
@@ -160,6 +167,7 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
     fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Frame) {}
     fn show_disconnected(&self, _: &AppHandle<R>, _: &[(String, crate::tray_model::Frame)]) {}
     fn set_power_menu(&self, _: &AppHandle<R>, _: Option<&crate::power_menu::Menu>) {}
+    fn set_wol_menu(&self, _: &AppHandle<R>, _: Option<&crate::wol_menu::Menu>) {}
 }
 
 /// The installed app's shell glue (the commands' state).
@@ -311,6 +319,38 @@ impl<R: Runtime> ShellOf<R> {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Asks the agent for an MCP tool: its answer, or the words to give the client.
+    pub fn call_agent(&self, request: Request) -> Result<Reply, String> {
+        let Some(link) = lock(&self.link).clone() else {
+            return Err("Dyno is not connected to its agent; try again in a moment.".into());
+        };
+        link.call(request).map_err(|e| e.message)
+    }
+
+    /// A Wake entry of the tray menu was chosen: wake the computer (a job the agent runs) or open the Power page.
+    pub fn wol_menu_chosen(&self, id: &str) {
+        let Some(action) = crate::wol_menu::action_of(id) else {
+            return;
+        };
+        let device = match action {
+            crate::wol_menu::Action::Manage => {
+                self.navigate(Navigate::Page(dyno_core::widgets::popover_values::Page::Power));
+                return;
+            }
+            crate::wol_menu::Action::Wake(device) => device,
+        };
+        let Some(link) = lock(&self.link).clone() else {
+            logging::info("wake from the tray: the agent is not connected");
+            return;
+        };
+        let _ = std::thread::Builder::new()
+            .name("dyno-wol-menu".into())
+            .spawn(move || match link.call(Request::WolWake { id: device, test: false }) {
+                Ok(_) => logging::info(&format!("wake from the tray: device {device} started")),
+                Err(e) => logging::info(&format!("wake from the tray: device {device} failed: {}", e.message)),
+            });
     }
 
     /// A Keep awake entry of the tray menu was chosen: ask the agent (it answers with the new view, which is pushed back).
@@ -703,6 +743,11 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.emit(events::ALARM, change);
     }
 
+    fn wol_changed(&self, view: dyno_core::wol::WolView) {
+        self.pixels.set_wol_menu(&self.app, crate::wol_menu::menu(&view).as_ref());
+        self.emit(events::WOL, view);
+    }
+
     fn power_changed(&self, view: dyno_core::power::PowerView) {
         let was_counting = lock(&self.power)
             .as_ref()
@@ -782,6 +827,11 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(Reply::Power(v)) => self.power_changed(*v),
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the power state: {}", e.message)),
+        }
+        match link.call(Request::WolDevices) {
+            Ok(Reply::Wol(v)) => self.wol_changed(*v),
+            Ok(_) => {}
+            Err(e) => logging::info(&format!("could not read the Wake-on-LAN list: {}", e.message)),
         }
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {

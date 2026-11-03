@@ -76,6 +76,11 @@ import type {
   EnergyReport,
   BackupReport,
   PowerView,
+  Neighbour,
+  ThisPcWol,
+  WolDeviceInput,
+  WolView,
+  WolOutcome,
   ChangeTimeline,
   ChangesQuery,
   FinderQuery,
@@ -116,6 +121,7 @@ import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './m
 import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { type MockIdleVariant, MockPower, type MockPowerVariant, mockEnergy } from './mock/power';
+import { MockWol, type MockWolVariant } from './mock/wol';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { MOCK_ESTIMATES, mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
@@ -169,6 +175,8 @@ export interface MockOptions {
   energyPriced?: boolean;
   /** Which idle state the mock starts in (`?idle=countdown|watching|blocked|acting|stopped|unavailable`). */
   idle?: MockIdleVariant;
+  /** Which Wake-on-LAN state the mock starts in (`?wol=empty|off|cantSend|noNeighbours|neighboursFail|readinessCantTell|timeout`; default two saved computers). */
+  wol?: MockWolVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
   /** Keep the widget layouts in `localStorage` (the browser build; unit tests keep them in memory). */
@@ -213,6 +221,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
     ...(['unavailable', 'ended', 'waiting', 'busy', 'quiet'].includes(q.get('power') ?? '') ? { power: q.get('power') as MockPowerVariant } : {}),
+    ...(['empty', 'off', 'cantSend', 'noNeighbours', 'neighboursFail', 'readinessCantTell', 'timeout'].includes(q.get('wol') ?? '') ? { wol: q.get('wol') as MockWolVariant } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
@@ -306,6 +315,8 @@ export class MockBackend implements DynoBackend {
   private backupCheckedAt: number;
   private readonly keepAwake: MockPower;
   private readonly powerListeners = new Set<(v: PowerView) => void>();
+  private readonly wolMock: MockWol;
+  private readonly wolListeners = new Set<(v: WolView) => void>();
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -362,6 +373,8 @@ export class MockBackend implements DynoBackend {
       const p = this.settingsValue.power;
       this.settingsValue = { ...this.settingsValue, power: { ...p, energy: { ...p.energy, wattsOn: 65, wattsSleep: 1.5, tariffPerKwh: 0.32, currency: 'S$', co2GPerKwh: 408 } } };
     }
+    this.wolMock = new MockWol(options.wol ?? 'normal', this.now, () => this.settingsValue.power.wol.enabled);
+    if (options.wol === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wol: { ...this.settingsValue.power.wol, enabled: false } } };
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
     this.activityLog = demoActivity(this.start);
     this.alertLog = demoAlerts(this.start);
@@ -1361,6 +1374,39 @@ export class MockBackend implements DynoBackend {
     return () => this.powerListeners.delete(listener);
   }
 
+  wolDevices(): Promise<WolView> {
+    return this.reply('wolDevices', () => this.wolMock.view());
+  }
+
+  wolCandidates(): Promise<Neighbour[]> {
+    return this.reply('wolCandidates', () => {
+      if (!this.settingsValue.power.wol.discovery) throw err('badRequest', 'Add from network is turned off in Settings.');
+      return this.wolMock.candidates();
+    });
+  }
+
+  wolSave(device: WolDeviceInput): Promise<WolView> {
+    return this.reply('wolSave', () => this.pushWol(this.wolMock.save(device)));
+  }
+
+  wolRemove(id: number): Promise<WolView> {
+    return this.reply('wolRemove', () => this.pushWol(this.wolMock.remove(id)));
+  }
+
+  wolReadiness(): Promise<ThisPcWol> {
+    return this.reply('wolReadiness', () => this.wolMock.readiness());
+  }
+
+  onWol(listener: (v: WolView) => void): Unsubscribe {
+    this.wolListeners.add(listener);
+    return () => this.wolListeners.delete(listener);
+  }
+
+  private pushWol(view: WolView): WolView {
+    for (const l of [...this.wolListeners]) l(view);
+    return view;
+  }
+
   private pushPower(view: PowerView): PowerView {
     for (const l of [...this.powerListeners]) l(view);
     return view;
@@ -1553,15 +1599,19 @@ export class MockBackend implements DynoBackend {
       const live = [...this.jobBook.values()].filter((j) => isActive(j.status));
       const same = live.find((j) => JSON.stringify(j.spec) === JSON.stringify(spec));
       if (same) return same.status.id;
-      if (kind !== 'file-hash' && live.some((j) => j.status.kind === kind)) throw err('busy', `${JOB_TITLES[kind]} is already running; wait for it or cancel it.`);
+      if (kind !== 'file-hash' && kind !== 'wol-wake' && live.some((j) => j.status.kind === kind)) throw err('busy', `${JOB_TITLES[kind]} is already running; wait for it or cancel it.`);
       const o = objectOf(spec);
+      if ('wolWake' in o) {
+        if (!this.wolMock.enabled()) throw err('badRequest', 'Wake-on-LAN is turned off in Settings.');
+        if (!this.wolMock.exists((o as { wolWake: { id: number } }).wolWake.id)) throw err('notFound', 'That computer is no longer in the list.');
+      }
       if ('findFiles' in o && !(o as { findFiles: { query: FinderQuery } }).findFiles.query.folder.trim()) throw err('badRequest', 'Choose a folder to look in.');
       const id = this.nextJobId++;
       const job: MockJob = { spec, status: this.status(id, kind, spec, 1, { state: 'queued' }), step: 0, timer: undefined };
       this.jobBook.set(id, job);
       while (this.jobBook.size > 16) this.jobBook.delete(this.jobBook.keys().next().value as number);
       this.publish(job);
-      this.change(job, { state: 'running', phase: null });
+      this.change(job, { state: 'running', phase: kind === 'wol-wake' ? mockPhase(kind, 0, this.jobSteps) : null });
       this.schedule(job);
       return id;
     });
@@ -1588,8 +1638,8 @@ export class MockBackend implements DynoBackend {
     return {
       id,
       kind,
-      title: JOB_TITLES[kind],
-      subject: jobSubject(spec),
+      title: spec_isTest(spec) ? 'Testing a wake' : JOB_TITLES[kind],
+      subject: this.wakeSubject(spec) ?? jobSubject(spec),
       seq,
       elapsedMs: 0,
       etaMs: null,
@@ -1597,6 +1647,11 @@ export class MockBackend implements DynoBackend {
       notCancellableReason: null,
       ...state,
     } as SuJobSnapshot;
+  }
+
+  private wakeSubject(spec: JobSpec): string | null {
+    const w = objectOf(spec)['wolWake'] as { id: number } | undefined;
+    return w ? this.wolMock.nameOf(w.id) : null;
   }
 
   private publish(job: MockJob): void {
@@ -1625,6 +1680,11 @@ export class MockBackend implements DynoBackend {
         if (job.status.kind === 'install-tool') this.toolInstalled = true;
         if (job.status.kind === 'helper') this.helperVariant = afterHelperAction((objectOf(job.spec)['helper'] as { action: HelperAction }).action);
         this.change(job, { state: 'done' });
+        const wake = objectOf(job.spec)['wolWake'] as { id: number; test: boolean } | undefined;
+        if (wake) {
+          job.wolOutcome = this.wolMock.outcome(wake.id, wake.test);
+          this.pushWol(this.wolMock.view());
+        }
       }
     }, this.jobStepMs);
   }
@@ -1670,6 +1730,7 @@ export class MockBackend implements DynoBackend {
     if ('helper' in o) return { helper: mockHelperStatus(this.helperVariant, this.profile.os) };
     if ('updateList' in o || 'updateGeo' in o || 'rebuildIntel' in o) return { intel: this.intel.status() };
     if ('installTool' in o) return { tool: { tool: 'smartmontools', installed: '7.5' } };
+    if ('wolWake' in o) return { wol: jobBookOutcome(this.jobBook, o) };
     return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
@@ -1770,14 +1831,22 @@ export interface MockJobSink {
   emit(job: SuJobSnapshot): void;
 }
 
+/** What the mock's finished wake produced (kept on the job when it ended). */
+function jobBookOutcome(book: Map<number, MockJob>, o: Record<string, unknown>): WolOutcome {
+  const wake = (o as { wolWake: { id: number; test: boolean } }).wolWake;
+  const job = [...book.values()].reverse().find((j) => j.wolOutcome && JSON.stringify(objectOf(j.spec)) === JSON.stringify(o));
+  return job?.wolOutcome ?? { sent: [], answered: null, tested: wake.test, elapsedSecs: 0, timedOut: false, cancelled: false, message: 'Wake packets sent.' };
+}
+
 interface MockJob {
+  wolOutcome?: WolOutcome;
   spec: JobSpec;
   status: SuJobSnapshot;
   step: number;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool' | 'wol-wake';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1796,6 +1865,7 @@ const JOB_TITLES: Record<JobKindSlug, string> = {
   'update-geo': 'Updating the location databases',
   'rebuild-intel': 'Building the match index',
   'install-tool': 'Installing the disk-health tool',
+  'wol-wake': 'Waking a computer',
 };
 
 const SPEC_KIND: Record<string, JobKindSlug> = {
@@ -1812,6 +1882,7 @@ const SPEC_KIND: Record<string, JobKindSlug> = {
   updateGeo: 'update-geo',
   rebuildIntel: 'rebuild-intel',
   installTool: 'install-tool',
+  wolWake: 'wol-wake',
 };
 
 /** The variant of a job spec as an object (a unit variant is a string on the wire). */
@@ -1832,6 +1903,11 @@ function jobSubject(spec: JobSpec): string | null {
     return 'path' in source ? source.path : null;
   }
   return null;
+}
+
+/** A test wake has its own title. */
+function spec_isTest(spec: JobSpec): boolean {
+  return (objectOf(spec)['wolWake'] as { test: boolean } | undefined)?.test === true;
 }
 
 function isActive(s: SuJobSnapshot): boolean {
@@ -1860,6 +1936,10 @@ function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
       return { id: 'source-MacLog', label: 'Reading system log', unit: 'items', done: step * 640, total: null };
     case 'refresh-backup':
       return { id: 'tools', label: 'Checking backup tools', unit: 'items', done: Math.min(2, Math.floor(part * 3)), total: 3 };
+    case 'wol-wake':
+      return step < last / 2
+        ? { id: 'sending', label: 'Sending the wake packets', unit: 'items', done: Math.min(6, step * 2), total: 6 }
+        : { id: 'waiting', label: 'Waiting for an answer', unit: 'items', done: step * 2, total: null };
     case 'file-hash':
       return { id: 'hash', label: 'Reading the file', unit: 'bytes', done: Math.floor(part * 48_231_424), total: 48_231_424 };
     case 'helper': {

@@ -176,6 +176,12 @@
     "timed": {
       "enabled": false,
       "entries": []
+    },
+    "wol": {
+      "directedBroadcast": true,
+      "discovery": true,
+      "enabled": true,
+      "testTimeoutSecs": 120
     }
   },
   "specs": [

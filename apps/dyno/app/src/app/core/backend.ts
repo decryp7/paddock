@@ -51,6 +51,10 @@ import type {
   AwakeSpec,
   EnergyReport,
   PowerView,
+  Neighbour,
+  ThisPcWol,
+  WolDeviceInput,
+  WolView,
   NetworkSnapshot,
   BenchOverview,
   StartBenchmark,
@@ -185,6 +189,15 @@ export interface DynoBackend {
   onPower(listener: (v: PowerView) => void): Unsubscribe;
   /** The energy report for the last `days` local days (1 to 366). */
   energyReport(days: number): Promise<EnergyReport>;
+
+  // Wake-on-LAN (ADR 0032): the saved computers, "Add from network", and this PC's readiness. A wake itself is a job (`startJob`).
+  wolDevices(): Promise<WolView>;
+  wolCandidates(): Promise<Neighbour[]>;
+  wolSave(device: WolDeviceInput): Promise<WolView>;
+  wolRemove(id: number): Promise<WolView>;
+  wolReadiness(): Promise<ThisPcWol>;
+  /** The list changed (a save or remove from any window, or a wake that ended). */
+  onWol(listener: (v: WolView) => void): Unsubscribe;
 
   // Open ports and connections (observe-only), and "Look up IP" (the shell opens the browser; Dyno never fetches).
   network(query: NetworkQuery): Promise<NetworkSnapshot>;

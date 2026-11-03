@@ -66,6 +66,10 @@ import type {
   EnergyReport,
   BackupReport,
   PowerView,
+  Neighbour,
+  ThisPcWol,
+  WolDeviceInput,
+  WolView,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
@@ -110,6 +114,7 @@ export const EVENTS = {
   activity: 'dyno://activity',
   agent: 'dyno://agent',
   power: 'dyno://power',
+  wol: 'dyno://wol',
   alarm: 'dyno://alarm',
   diskScan: 'dyno://disk-scan',
   diskVolumes: 'dyno://disk-volumes',
@@ -157,6 +162,7 @@ export class TauriBackend implements DynoBackend {
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
   private readonly powerChannel: EventChannel<PowerView>;
+  private readonly wolChannel: EventChannel<WolView>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
   private readonly diskScanChannel: EventChannel<DiskScanStatus>;
   private readonly diskVolumesChannel: EventChannel<Volume[]>;
@@ -177,6 +183,7 @@ export class TauriBackend implements DynoBackend {
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
     this.powerChannel = new EventChannel(listenFn, EVENTS.power);
+    this.wolChannel = new EventChannel(listenFn, EVENTS.wol);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
     this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
     this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
@@ -213,6 +220,10 @@ export class TauriBackend implements DynoBackend {
 
   onPower(listener: (v: PowerView) => void): Unsubscribe {
     return this.powerChannel.add(listener);
+  }
+
+  onWol(listener: (v: WolView) => void): Unsubscribe {
+    return this.wolChannel.add(listener);
   }
 
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe {
@@ -713,6 +724,28 @@ export class TauriBackend implements DynoBackend {
 
   powerStopKeepAwake(): Promise<PowerView> {
     return this.request('powerStopKeepAwake');
+  }
+
+  // ----------------------------------------------------------------------------------------------- wake-on-lan
+
+  wolDevices(): Promise<WolView> {
+    return this.request('wolDevices');
+  }
+
+  wolCandidates(): Promise<Neighbour[]> {
+    return this.request('wolCandidates');
+  }
+
+  wolSave(device: WolDeviceInput): Promise<WolView> {
+    return this.request({ wolSave: { device } });
+  }
+
+  wolRemove(id: number): Promise<WolView> {
+    return this.request({ wolRemove: { id } });
+  }
+
+  wolReadiness(): Promise<ThisPcWol> {
+    return this.request('wolReadiness');
   }
 
   // ------------------------------------------------------------------------------------------------------ jobs

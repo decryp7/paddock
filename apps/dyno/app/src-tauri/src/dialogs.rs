@@ -21,6 +21,12 @@ paddock_dialogs::dialogs! {
         height: Some(700),
         commands: &[
             prefix(shell::settings::ALL, "settings_"),
+            shell::dialogs::dialog_open,
+            shell::mcp::mcp_get,
+            shell::mcp::mcp_save,
+            shell::mcp::mcp_revoke_key,
+            shell::mcp::mcp_audit,
+            shell::mcp::mcp_audit_clear,
             app::dyno,
             app::widget_layout,
             app::edit_widget_layout,

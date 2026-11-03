@@ -47,6 +47,8 @@ use serde::{Deserialize, Serialize};
 ///   `StartBenchmark` also gained `disk_folders` and `gpu_adapter`;
 /// - power (ADR 0032): `Request::{PowerState, PowerKeepAwake, PowerStopKeepAwake, PowerIdleCancel, PowerIdleSnooze, EnergyReport}`,
 ///   `Reply::{Power, Energy}` and `Message::PowerChanged` are new;
+/// - Wake-on-LAN (ADR 0032): `Request::{WolDevices, WolCandidates, WolSave, WolRemove, WolWake, WolReadiness}`,
+///   `Reply::{Wol, WolCandidates, WolReadiness}`, `Message::WolChanged`, `JobSpec::WolWake` and `JobOutput::Wol` are new;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -610,6 +612,31 @@ pub enum Request {
         /// How many days.
         days: u32,
     },
+    /// The saved Wake-on-LAN computers. Answers [`Reply::Wol`].
+    WolDevices,
+    /// The neighbour-table entries not yet saved, for "Add from network" (read on demand, only when the setting allows it).
+    /// Answers [`Reply::WolCandidates`].
+    WolCandidates,
+    /// Adds a computer or changes one (a name, an address, a SecureOn password). Answers [`Reply::Wol`] or `BadRequest`
+    /// (the message says what to fix).
+    WolSave {
+        /// What the person typed or picked.
+        device: crate::wol::WolDeviceInput,
+    },
+    /// Removes a saved computer and its SecureOn password. Answers [`Reply::Wol`].
+    WolRemove {
+        /// Which.
+        id: u64,
+    },
+    /// Wakes a saved computer as a job (answers [`Reply::Job`] at once); `test` also waits for an answer.
+    WolWake {
+        /// Which.
+        id: u64,
+        /// Wait for an answer and say whether it woke.
+        test: bool,
+    },
+    /// This PC's Wake-on-LAN readiness. Answers [`Reply::WolReadiness`].
+    WolReadiness,
 }
 
 /// Dyno's own cost.
@@ -925,6 +952,12 @@ pub enum Reply {
     Power(Box<crate::power::PowerView>),
     /// The energy report. Appended.
     Energy(Box<crate::power::energy::EnergyReport>),
+    /// The Wake-on-LAN list.
+    Wol(Box<crate::wol::WolView>),
+    /// Neighbour-table entries not yet saved.
+    WolCandidates(Vec<crate::wol::Neighbour>),
+    /// This PC's Wake-on-LAN readiness.
+    WolReadiness(Box<crate::wol::ThisPcWol>),
 }
 
 /// The inventory report that was written.
@@ -1015,6 +1048,9 @@ impl Reply {
             Reply::BenchEstimate(x) => v(x),
             Reply::Power(x) => v(x),
             Reply::Energy(x) => v(x),
+            Reply::Wol(x) => v(x),
+            Reply::WolCandidates(x) => v(x),
+            Reply::WolReadiness(x) => v(x),
         }
     }
 }
@@ -1107,6 +1143,8 @@ pub enum Message {
     WidgetLayoutChanged(crate::widgets::DynoSurface),
     /// Agent -> app: the power view changed (a hold started, ended, was ended by the OS). Appended.
     PowerChanged(Box<crate::power::PowerView>),
+    /// Agent -> app: the Wake-on-LAN list changed (a save, a remove, or a wake that ended). Appended.
+    WolChanged(Box<crate::wol::WolView>),
 }
 
 #[cfg(test)]
@@ -1232,6 +1270,60 @@ mod tests {
             let m = Message::Request(Box::new(r));
             assert_eq!(round(&m), m);
         }
+    }
+
+    #[test]
+    fn wol_requests_and_replies_survive_postcard() {
+        use crate::wol::{Mac, Neighbour, NeighbourState, SecureOnEdit, WolDeviceInput, WolView};
+        let input = |secure_on| WolDeviceInput {
+            id: Some(2),
+            name: "Test box".into(),
+            mac: "02:00:5e:10:00:01".into(),
+            last_ip: Some("192.0.2.40".into()),
+            interface: Some("en0".into()),
+            secure_on,
+        };
+        let requests = [
+            Request::WolDevices,
+            Request::WolCandidates,
+            Request::WolReadiness,
+            Request::WolRemove { id: 3 },
+            Request::WolWake { id: 3, test: true },
+            Request::WolSave { device: input(SecureOnEdit::Keep) },
+            Request::WolSave { device: input(SecureOnEdit::Clear) },
+            Request::WolSave { device: input(SecureOnEdit::Set { password: "01:02:03:04".into() }) },
+        ];
+        for r in requests {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+        let replies = [
+            Reply::Wol(Box::new(WolView { enabled: true, devices: vec![], can_send: crate::power::Capability::Known })),
+            Reply::WolCandidates(vec![Neighbour { name: None,
+                mac: Mac([2, 0, 0x5e, 0x10, 0, 1]),
+                ip: "192.0.2.40".into(),
+                interface: "en0".into(),
+                state: NeighbourState::Reachable,
+            }]),
+            Reply::WolReadiness(Box::default()),
+            Reply::JobOutput(Box::new(crate::jobs::JobOutput::Wol(Box::new(crate::wol::WolOutcome {
+                sent: vec![],
+                answered: Some(crate::wol::Answer { how: crate::wol::AnswerHow::Ping, after_secs: 4, new_ip: None }),
+                tested: true,
+                elapsed_secs: 4,
+                timed_out: false,
+                cancelled: false,
+                message: "Awake after 4 s (answered ping).".into(),
+            })))),
+        ];
+        for r in replies {
+            let m = Message::Reply(Box::new(Ok(r)));
+            assert_eq!(round(&m), m);
+        }
+        let push = Message::WolChanged(Box::new(WolView { enabled: false, devices: vec![], can_send: crate::power::Capability::Known }));
+        assert_eq!(round(&push), push);
+        let job = Message::Request(Box::new(Request::StartJob { spec: crate::jobs::JobSpec::WolWake { id: 1, test: false } }));
+        assert_eq!(round(&job), job);
     }
 
     #[test]

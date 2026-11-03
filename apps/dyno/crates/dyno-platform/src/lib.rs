@@ -44,6 +44,7 @@ pub mod windows_firewall;
 #[allow(unsafe_code)]
 pub mod unix_proc;
 pub mod volumes;
+pub mod wol;
 pub mod zone;
 
 #[cfg(target_os = "linux")]
@@ -89,6 +90,8 @@ pub struct Platform {
     pub hardware: HardwareReaders,
     /// Keep awake and sleep/wake notifications (ADR 0032).
     pub power: PowerPorts,
+    /// Wake-on-LAN: the sockets, neighbour tables, echo and this PC's wake settings (ADR 0032).
+    pub wol: wol::WolPorts,
 }
 
 /// The power ports of a [`Platform`]: the OS's sleep-prevention object and its sleep and wake notifications.

@@ -49,6 +49,13 @@ pub enum Command {
     Awake(AwakeCmd),
     /// `dyno idle [status|cancel|snooze MIN]`: the sleep and shut down rules' state, and Cancel (ADR 0032).
     Idle(IdleCmd),
+    /// `dyno wake <name|address> [--test]`: wake a saved computer over the network (ADR 0032).
+    Wake {
+        /// The saved computer's name, or its hardware address.
+        target: String,
+        /// Wait for it to answer and say whether it woke.
+        test: bool,
+    },
     /// `dyno --help`.
     Help,
     /// `dyno --version`.
@@ -167,6 +174,7 @@ status [--json]                       how the computer is doing right now\n  \
 idle [status|cancel|snooze MIN]       the sleep/shut down rules: what they wait for; cancel a countdown\n  \
 awake [on|off|status] [--for 90m|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]\n  \
                                       keep the computer awake (on without --for or --until: until `awake off`)\n  \
+wake NAME|ADDRESS [--test] [--json]   wake a saved computer (Wake-on-LAN); --test waits for it to answer\n  \
 why-slow [--json]                     why it feels slow, in plain words\n  \
 top [--by cpu|memory] [-n N] [--json] the busiest apps\n  \
 alarms [--all] [--json]               alarms that need attention\n  \
@@ -177,7 +185,7 @@ counters get PATH... [--json]         read counters now (PATH looks like \\Memor
 agent COMMAND...                      the background agent's own commands (--version, status, stop, once,\n  \
                                       service install|uninstall|status|ensure); on Windows the agent program\n  \
                                       has no console, so use this to see its output and exit code\n\n\
-Dyno only looks: no command changes anything on your computer, except `awake` (power, only when you ask), `agent stop` and `agent service`.\n\
+Dyno only looks: no command changes anything on your computer, except `awake` and `wake` (power, only when you ask), `agent stop` and `agent service`.\n\
 exit codes: 0 done, 1 failed, 2 wrong usage, 3 versions differ, 4 Dyno is not running\n";
 
 /// Why a command line is not usable (the message says what to type instead).
@@ -208,12 +216,14 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     let mut display = false;
     let mut busy: Option<BusyKinds> = None;
     let mut while_pid: Option<u32> = None;
+    let mut test = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => json = true,
             "--all" => all = true,
             "--display" => display = true,
+            "--test" => test = true,
             "--for" => {
                 for_minutes = match it.next().map(|n| parse_minutes(n)) {
                     Some(Some(n)) => Some(n),
@@ -309,6 +319,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
                     return err("--for, --until, --busy, --while-pid and --display belong to: dyno awake on")
                 }
                 Some(other) => return err(format!("awake takes on, off or status, not \"{other}\". Try: dyno --help")),
+            }
+        }
+        Some("wake") => {
+            let target = w.by_ref().map(String::as_str).collect::<Vec<_>>().join(" ");
+            if target.trim().is_empty() {
+                return err("Say which computer to wake, for example: dyno wake \"Media PC\" --test");
+            }
+            Command::Wake {
+                target: target.trim().to_string(),
+                test,
             }
         }
         Some("counters") => match w.next().map(String::as_str) {
@@ -447,6 +467,26 @@ mod tests {
         ] {
             assert!(p(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn wake_takes_a_name_or_address_and_an_optional_test() {
+        assert_eq!(
+            p("wake Media PC --test").unwrap().command,
+            Command::Wake {
+                target: "Media PC".into(),
+                test: true
+            }
+        );
+        assert_eq!(
+            p("wake 02:00:5e:10:00:01").unwrap().command,
+            Command::Wake {
+                target: "02:00:5e:10:00:01".into(),
+                test: false
+            }
+        );
+        assert!(p("wake").is_err());
+        assert!(p("wake --test").is_err());
     }
 
     #[test]

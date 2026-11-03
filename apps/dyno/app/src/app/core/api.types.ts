@@ -2037,7 +2037,8 @@ export type JobSpec =
   | { updateList: { id: string } }
   | 'updateGeo'
   | 'rebuildIntel'
-  | { installTool: { tool: ToolKind } };
+  | { installTool: { tool: ToolKind } }
+  | { wolWake: { id: number; test: boolean } };
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
@@ -2051,7 +2052,8 @@ export type JobOutput =
   | { appUsage: UsageReport }
   | { software: SoftwareInventory }
   | { helper: HelperStatus }
-  | { tool: ToolStatus };
+  | { tool: ToolStatus }
+  | { wol: WolOutcome };
 
 // ------------------------------------------------------------------------------------- the privileged helper (ADR 0027)
 
@@ -2454,11 +2456,19 @@ export interface TimedSettings {
   entries: TimedAction[];
 }
 
+export interface WolSettings {
+  enabled: boolean;
+  discovery: boolean;
+  directedBroadcast: boolean;
+  testTimeoutSecs: number;
+}
+
 export interface PowerSettings {
   keepAwake: KeepAwakeSettings;
   energy: EnergySettings;
   idle: IdleSettings;
   timed: TimedSettings;
+  wol: WolSettings;
 }
 
 export type BlockerKind = 'audio' | 'fullScreen' | 'stayAwake' | 'cpu' | 'disk' | 'network' | 'program' | 'battery';
@@ -2500,4 +2510,102 @@ export interface EnergyReport {
   sleepEnergyCounted: boolean;
   currency: string | null;
   trackingSince: Timestamp | null;
+}
+
+// ------------------------------------------------------------------------------------------ Wake-on-LAN (ADR 0032 section 3)
+
+/** How the last wake of a computer ended. */
+export interface LastWake {
+  at: Timestamp;
+  ok: boolean;
+  tested: boolean;
+  summary: string;
+}
+
+/** A saved computer to wake. The SecureOn password is never here: `secureOn` only says there is one. */
+export interface WolDevice {
+  id: number;
+  name: string;
+  /** `aa:bb:cc:dd:ee:ff`. */
+  mac: string;
+  lastIp: string | null;
+  interface: string | null;
+  port: number;
+  secureOn: boolean;
+  lastWake: LastWake | null;
+}
+
+/** What the Wake devices tab shows. */
+export interface WolView {
+  enabled: boolean;
+  devices: WolDevice[];
+  canSend: Capability;
+}
+
+/** What to do with the SecureOn password when saving (externally tagged). */
+export type SecureOnEdit = 'keep' | 'clear' | { set: { password: string } };
+
+/** What the person typed or picked when adding or changing a computer. */
+export interface WolDeviceInput {
+  id: number | null;
+  name: string;
+  mac: string;
+  lastIp: string | null;
+  interface: string | null;
+  secureOn: SecureOnEdit;
+}
+
+export type NeighbourState = 'reachable' | 'stale' | 'probe' | 'permanent' | 'unknown';
+
+/** A neighbour-table entry: a computer the OS has talked to on the local network. */
+export interface Neighbour {
+  mac: string;
+  ip: string;
+  interface: string;
+  state: NeighbourState;
+  /** The host name the agent's resolver knows, when it knows one. */
+  name: string | null;
+}
+
+export interface SendResult {
+  interface: string;
+  dest: string;
+  bytes: number;
+  sent: number;
+  error: string | null;
+}
+
+export type AnswerHow = 'ping' | 'neighbour';
+
+export interface WolAnswer {
+  how: AnswerHow;
+  afterSecs: number;
+  newIp: string | null;
+}
+
+/** What a wake did; `message` is the result in words, with the next step when it did not work. */
+export interface WolOutcome {
+  sent: SendResult[];
+  answered: WolAnswer | null;
+  tested: boolean;
+  elapsedSecs: number;
+  timedOut: boolean;
+  cancelled: boolean;
+  message: string;
+}
+
+export type ReadinessKind = 'nicWake' | 'osSetting' | 'fastStartup' | 'sleepMode' | 'firmware';
+
+/** One finding: fine, a problem with its fix, or "can't tell" with the reason (externally tagged). */
+export type ReadinessState = { ok: { note: string } } | { problem: { note: string; fix: string } } | { cantTell: { reason: string } };
+
+export interface ReadinessItem {
+  kind: ReadinessKind;
+  subject: string | null;
+  state: ReadinessState;
+}
+
+/** This PC's Wake-on-LAN readiness. */
+export interface ThisPcWol {
+  items: ReadinessItem[];
 }

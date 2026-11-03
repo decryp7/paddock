@@ -37,6 +37,8 @@ paddock-download = { path = "../../../../crates/paddock-download", default-featu
 toml.workspace = true
 # The keep-awake guard over the platform's power port (ADR 0032).
 paddock-power = { path = "../../../../crates/paddock-power" }
+# A Wake-on-LAN computer's SecureOn password is kept in the credential store (ADR 0032, D6).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 log = { version = "0.4", features = ["kv"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true
