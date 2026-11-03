@@ -60,6 +60,7 @@ function preset(options) {
         'paddock/store-rules': ['error', options.storeFlagsAllowedIn ? { allowFlagsIn: options.storeFlagsAllowedIn } : {}],
         'paddock/no-raw-style-values': 'error',
         'paddock/dialog-content-footer': 'error',
+        'paddock/dialog-load-tracked': 'error',
         ...forms,
         ...(options.rules ?? {}),
       },
@@ -86,6 +87,17 @@ function preset(options) {
         ...(options.templateRules ?? {}),
       },
     },
+    ...(options.dialogStores?.length
+      ? [
+          {
+            // A store a dialog shows loads in `onInit`: that load is a pending task too (`injectTrackLoad`), or the window settles before it.
+            files: options.dialogStores,
+            ignores: ['**/*.spec.ts'],
+            plugins: { paddock: plugin },
+            rules: { 'paddock/dialog-load-tracked': ['error', { hooks: true }] },
+          },
+        ]
+      : []),
     {
       // ADR 0026 §2: a dialog content declares its actions; the frame draws the footer (inline templates of `*dialog*.ts`).
       files: ['**/*dialog*.ts/*.html', '**/*dialog*.html'],

@@ -22,11 +22,12 @@ test.describe('Dyno dialogs', () => {
     await page.addInitScript(() => ((globalThis as { __pdHoldUpdatesStatus?: boolean }).__pdHoldUpdatesStatus = true));
     await page.setViewportSize({ width: 560, height: 700 });
     await page.goto(dialogWindowUrl('pd.updates', {}, { title: 'Updates' }));
-    // The window was sized for "asking" before any status arrived; now the status comes.
-    await page.locator('html[data-fit-settled]').waitFor();
+    // The window was sized for "asking" before any status arrived (the held status is a pending task, so it is not settled yet); now the status comes.
+    await page.locator('html[data-dialog-ready]').waitFor();
     const before = Number(await page.evaluate(() => document.documentElement.dataset['fittedHeight']));
     await page.evaluate(() => (globalThis as { __pdReleaseUpdatesStatus?: () => void }).__pdReleaseUpdatesStatus?.());
     await expect(page.getByTestId('updates-current')).toBeVisible();
+    await page.locator('html[data-fit-settled]').waitFor();
     // The shell refits to the real content, and in a window of that height the body shows all of it.
     await expect.poll(() => page.evaluate(() => Number(document.documentElement.dataset['fittedHeight']))).toBeGreaterThan(before);
     const fitted = Number(await page.evaluate(() => document.documentElement.dataset['fittedHeight']));

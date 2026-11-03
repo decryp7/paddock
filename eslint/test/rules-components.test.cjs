@@ -64,3 +64,24 @@ ts().run('dialog-content-footer (ADR 0026)', rules['dialog-content-footer'], {
     { code: "@Component({ selector: 'pc-a', template: '<button>Close</button>' }) class A { private readonly ref = inject(DIALOG_REF); }", errors: [{ messageId: 'footer' }] },
   ],
 });
+
+ts().run('dialog-load-tracked (ADR 0026 section 6)', rules['dialog-load-tracked'], {
+  valid: [
+    'class A implements DialogContent { ngOnInit() { void this.trackLoad(() => this.store.load()); } }',
+    'class A implements DialogContent { notes = resource({ loader: () => this.backend.notes() }); }',
+    { code: 'const S = signalStore(withHooks((store) => ({ onInit() { void trackLoad(() => store.load()); } })));', options: [{ hooks: true }] },
+    { code: 'const S = signalStore(withHooks((store) => ({ onDestroy() { void store.stop(); } })));', options: [{ hooks: true }] },
+    'const S = signalStore(withHooks((store) => ({ onInit() { void store.load(); } })));', // app-wide stores: not checked without the option
+    'class A implements DialogContent { go() { void this.store.save(); } }', // user-initiated, not on creation
+    'class A implements DialogContent { ngOnInit() { this.name.set(this.rule().name); } }',
+    'class Page { async ngOnInit() { await this.load(); } }', // not a dialog
+  ],
+  invalid: [
+    { code: 'class A implements DialogContent { async ngOnInit() { await this.store.loadSeed(); } }', errors: [{ messageId: 'untracked' }] },
+    { code: 'class A implements DialogContent { ngOnInit() { void this.load(); } }', errors: [{ messageId: 'untracked' }] },
+    { code: 'class A implements DialogContent { constructor() { this.backend.get().then(() => 1); } }', errors: [{ messageId: 'untracked' }] },
+    { code: 'class A { readonly dialogActions = signal([]); x = this.p.then(() => 1); }', errors: [{ messageId: 'untracked' }] },
+    { code: 'const S = signalStore(withHooks((store) => ({ onInit() { void store.load(); } })));', options: [{ hooks: true }], errors: [{ messageId: 'untracked' }] },
+    { code: 'const S = signalStore(withHooks((store) => { return { onInit: () => { backend.listen().then(() => 1); } }; }));', options: [{ hooks: true }], errors: [{ messageId: 'untracked' }] },
+  ],
+});

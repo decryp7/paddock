@@ -1,4 +1,4 @@
-import { Injector, PendingTasks, computed, inject } from '@angular/core';
+import { Injector, computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, FileHashInfo, HashSource, SearchSeed } from '../core/api.types';
 import { BACKEND } from '../core/backend';
@@ -33,12 +33,10 @@ export const LookupStore = signalStore(
       return id === null ? null : progressOf(injector.get(JobsStore), id);
     }),
   })),
-  withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter), pending = inject(PendingTasks)) => {
+  withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter)) => {
     let hashing: JobRun | null = null;
     const run = async <T>(body: () => Promise<T>): Promise<T | null> => {
       patchState(store, { busy: true, error: null });
-      // In flight work is a pending task: the dialog window reports itself settled (sized to its content) only after it.
-      const finished = pending.add();
       try {
         return await body();
       } catch (e) {
@@ -46,7 +44,6 @@ export const LookupStore = signalStore(
         return null;
       } finally {
         patchState(store, { busy: false });
-        finished();
       }
     };
     return {
