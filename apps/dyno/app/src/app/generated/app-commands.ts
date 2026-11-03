@@ -5,6 +5,7 @@ export const APP_COMMANDS = {
   dyno: { kind: 'mutation', windows: ['main', 'dialog', 'tray'], limit: 262144 },
   edit_widget_layout: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   metric_readings: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
+  open_taskbar_settings: { kind: 'mutation', windows: ['main'], limit: 262144 },
   pick_folder: { kind: 'mutation', windows: ['main'], limit: 262144 },
   popover_preview: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   popover_snapshot: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },

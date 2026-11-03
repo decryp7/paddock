@@ -54,7 +54,7 @@ Licence expressions (packages):
 - anyhow 1.0.104 — MIT OR Apache-2.0 [MIT-44]
 - async-broadcast 0.7.2 — MIT OR Apache-2.0 [MIT-72]
 - async-channel 2.5.0 — Apache-2.0 OR MIT [MIT-44]
-- async-executor 1.14.0 — Apache-2.0 OR MIT [MIT-44]
+- async-executor 1.14.1 — Apache-2.0 OR MIT [MIT-44]
 - async-io 2.6.0 — Apache-2.0 OR MIT [MIT-44]
 - async-lock 3.4.2 — Apache-2.0 OR MIT [MIT-44]
 - async-process 2.5.0 — Apache-2.0 OR MIT [MIT-44]
@@ -5041,7 +5041,7 @@ Used by (1):
 ### MIT-44
 
 Used by (80):
-  adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-executor 1.14.0, async-io 2.6.0,
+  adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-executor 1.14.1, async-io 2.6.0,
   async-lock 3.4.2, async-process 2.5.0, async-recursion 1.2.0, async-signal 0.2.14,
   async-task 4.7.1, async-trait 0.1.92, atomic-waker 1.1.2, blocking 1.7.0, camino 1.2.6,
   cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, displaydoc 0.2.7,

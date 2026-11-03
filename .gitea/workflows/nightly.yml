@@ -198,6 +198,7 @@ jobs:
       # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
       # also measures once from the built app (read-only).
       bundle-check: apps/dyno/scripts/check-bundle.sh
+      windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:

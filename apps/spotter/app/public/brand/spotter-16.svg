@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Spotter 16px</title>
   <defs>
-    <linearGradient id="spotter-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD257"/><stop offset="1" stop-color="#E59600"/></linearGradient>
+    <linearGradient id="spotter-fl16-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD257"/><stop offset="1" stop-color="#E59600"/></linearGradient>
     
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#spotter-16-bg)"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#spotter-fl16-16-bg)"/>
   <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#7A4E00" stroke-opacity="0.45" stroke-width="0.5"/>
-  <path d="M4 3H5V4H4ZM11 3H12V4H11ZM3 4H6V5H3ZM10 4H13V5H10ZM3 5H6V6H3ZM10 5H13V6H10ZM3 6H13V7H3ZM3 7H6V8H3ZM10 7H13V8H10ZM2 8H3V9H2ZM6 8H7V9H6ZM9 8H10V9H9ZM13 8H14V9H13ZM2 9H3V10H2ZM6 9H7V10H6ZM9 9H10V10H9ZM13 9H14V10H13ZM2 10H3V11H2ZM6 10H7V11H6ZM9 10H10V11H9ZM13 10H14V11H13ZM3 11H6V12H3ZM10 11H13V12H10Z" fill="#3A2600"/>
+  
+<g transform="scale(1)"><defs><mask id="spotter-fl16-16-am" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#000"/><rect x="4" y="3" width="2" height="1" rx="0.4" fill="#fff"/><rect x="10" y="3" width="2" height="1" rx="0.4" fill="#fff"/><rect x="4" y="4" width="3" height="5" rx="0.8" fill="#fff"/><rect x="10" y="4" width="3" height="5" rx="0.8" fill="#fff"/><rect x="7" y="6" width="3" height="1" fill="#fff"/><path d="M2 10.5a3 3 0 1 0 6 0a3 3 0 1 0 -6 0Z" fill="#fff"/><path d="M8 10.5a3 3 0 1 0 6 0a3 3 0 1 0 -6 0Z" fill="#fff"/><path d="M3 10.5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0Z" fill="#000"/><path d="M9 10.5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0Z" fill="#000"/></mask></defs><g transform="translate(0 -1)"><rect width="16" height="16" fill="#3A2600" mask="url(#spotter-fl16-16-am)"/></g></g>
 </svg>

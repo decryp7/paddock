@@ -1277,6 +1277,24 @@
       <trans-unit id="pd.notifications.centre" datatype="html">
         <source>Notifications centre</source>
       </trans-unit>
+      <trans-unit id="pd.notifications.delete-all" datatype="html">
+        <source>Delete all</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.delete-all.confirm" datatype="html">
+        <source>Delete all</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.delete-all.heading" datatype="html">
+        <source>Delete all notifications?</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.delete-all.message" datatype="html">
+        <source><x id="count"/> notifications are removed from the centre. This cannot be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.delete-all.message-one" datatype="html">
+        <source>The notification is removed from the centre. This cannot be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.delete-selected" datatype="html">
+        <source>Delete selected (<x id="count"/>)</source>
+      </trans-unit>
       <trans-unit id="pd.notifications.details" datatype="html">
         <source>Details</source>
       </trans-unit>
@@ -1312,6 +1330,12 @@
       </trans-unit>
       <trans-unit id="pd.notifications.retry" datatype="html">
         <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.select" datatype="html">
+        <source>Select <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.select-all" datatype="html">
+        <source>Select all notifications</source>
       </trans-unit>
       <trans-unit id="pd.notifications.show" datatype="html">
         <source>Show in Notifications</source>

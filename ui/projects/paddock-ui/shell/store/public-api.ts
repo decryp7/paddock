@@ -11,3 +11,4 @@ export {
   type RequestStatus,
   type RequestStatusState,
 } from './src/request-status';
+export { injectTrackLoad, type TrackLoad } from './src/track-load';

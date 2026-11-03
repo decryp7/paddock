@@ -40814,95 +40814,109 @@
           <context context-type="linenumber">43</context>
         </context-group>
       </trans-unit>
+      <trans-unit id="tools.monitor.live.opening" datatype="html">
+        <source><x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;spinner&quot; aria-hidden=&quot;true&quot;&gt;"/><x id="CLOSE_TAG_SPAN" ctype="x-span" equiv-text="&lt;/span&gt;"/>Opening the run&apos;s output…</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
+          <context context-type="linenumber">56,57</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="tools.monitor.live.unopened" datatype="html">
+        <source>The run&apos;s output is not open in the workspace, so it is not charted. Open its folder to chart it.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
+          <context context-type="linenumber">58,59</context>
+        </context-group>
+      </trans-unit>
       <trans-unit id="tools.monitor.live.error" datatype="html">
         <source>Could not load the live charts: <x id="INTERPOLATION" equiv-text="{{ e }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">57,58</context>
+          <context context-type="linenumber">61,62</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.retry" datatype="html">
         <source>Retry</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">58,60</context>
+          <context context-type="linenumber">62,64</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.loading" datatype="html">
         <source><x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;spinner&quot; aria-hidden=&quot;true&quot;&gt;"/><x id="CLOSE_TAG_SPAN" ctype="x-span" equiv-text="&lt;/span&gt;"/>Loading live charts…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">61,62</context>
+          <context context-type="linenumber">65,66</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.empty" datatype="html">
         <source> No samples in the last <x id="INTERPOLATION" equiv-text="{{ store.windowMin() }}"/> minutes yet. They appear here as the monitor writes them. </source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">64,66</context>
+          <context context-type="linenumber">68,70</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.notRecorded" datatype="html">
         <source>Not recorded for these processes.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">77,79</context>
+          <context context-type="linenumber">81,83</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.pauseTitle" datatype="html">
         <source>Pause: keep the charts as they are</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">127</context>
+          <context context-type="linenumber">131</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.followTitle" datatype="html">
         <source>Follow new samples as they are written</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">128</context>
+          <context context-type="linenumber">132</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.following" datatype="html">
         <source>Following</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">131</context>
+          <context context-type="linenumber">135</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.paused" datatype="html">
         <source>Paused</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">131</context>
+          <context context-type="linenumber">135</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.show" datatype="html">
         <source>Show <x id="key" equiv-text="key"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">135</context>
+          <context context-type="linenumber">139</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.hide" datatype="html">
         <source>Hide <x id="key" equiv-text="key"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">135</context>
+          <context context-type="linenumber">139</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.chartUnit" datatype="html">
         <source><x id="title" equiv-text="title"/> (<x id="unit" equiv-text="unit"/>), last <x id="minutes" equiv-text="minutes"/> minutes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">143</context>
+          <context context-type="linenumber">147</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.live.chart" datatype="html">
         <source><x id="title" equiv-text="title"/>, last <x id="minutes" equiv-text="minutes"/> minutes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor-live-charts.ts</context>
-          <context context-type="linenumber">144</context>
+          <context context-type="linenumber">148</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.problem.badPid" datatype="html">
@@ -41196,35 +41210,42 @@
         <source>Checking…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor.store.ts</context>
-          <context context-type="linenumber">64</context>
+          <context context-type="linenumber">68</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.busy.starting" datatype="html">
         <source>Starting…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor.store.ts</context>
-          <context context-type="linenumber">71</context>
+          <context context-type="linenumber">78</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="tools.monitor.error.notOpened" datatype="html">
+        <source>Monitoring started, but its output could not be opened in the workspace, so it is not followed. Open the output folder to see the results.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/tools/monitor/monitor.store.ts</context>
+          <context context-type="linenumber">94</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.notice.started" datatype="html">
         <source>Monitoring started. The results appear in the workspace as they are written.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor.store.ts</context>
-          <context context-type="linenumber">77</context>
+          <context context-type="linenumber">100</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.busy.stopping" datatype="html">
         <source>Stopping…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor.store.ts</context>
-          <context context-type="linenumber">81</context>
+          <context context-type="linenumber">104</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.monitor.notice.stopped" datatype="html">
         <source>Monitoring stopped.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/tools/monitor/monitor.store.ts</context>
-          <context context-type="linenumber">83</context>
+          <context context-type="linenumber">106</context>
         </context-group>
       </trans-unit>
       <trans-unit id="tools.perfmon.problem.name" datatype="html">

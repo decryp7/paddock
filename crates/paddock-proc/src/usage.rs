@@ -1238,11 +1238,11 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert!(OsSource::default().children(me).contains(&pid));
         #[cfg(not(windows))]
         assert!(OsSource::default().children(pid).is_empty());
-        // On Windows a CREATE_NO_WINDOW child owns one conhost.exe and nothing else (CI run 6603).
+        // On Windows a CREATE_NO_WINDOW child owns conhost.exe hosts and nothing else (CI run 6603; run 7448 saw two of
+        // them at once), so what is asserted is the kind of every child, not how many there are.
         #[cfg(windows)]
         {
             let kids = OsSource::default().children(pid);
-            assert!(kids.len() <= 1, "{kids:?}");
             for kid in kids {
                 let id = Pid::from_u32(kid);
                 let mut sys = System::new();

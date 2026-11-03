@@ -545,7 +545,7 @@ export interface DiskScanStatus {
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 
 /** Why one folder could not be read: macOS privacy (Full Disk Access), missing rights, protected by macOS in another way, or another error. */
-export type UnreadableReason = 'needsFullDiskAccess' | 'needsAdmin' | 'protected' | 'other';
+export type UnreadableReason = 'needsFullDiskAccess' | 'needsAdmin' | 'protected' | 'notAnswering' | 'other';
 
 /** A node of a scan. */
 export interface DiskNode {
@@ -1457,7 +1457,7 @@ export interface LifespanOverview {
 
 export type BaselineMetric = 'cpu' | 'memory' | 'diskWrite' | 'network' | 'temperature' | 'gpu' | 'appCpu' | 'appMemory';
 
-export type Learning = 'off' | { learning: { daysDone: number; daysNeeded: number } } | { ready: { days: number } };
+export type Learning = 'off' | { learning: { day: number; daysNeeded: number; since: Timestamp | null; readyAt: Timestamp | null } } | { ready: { days: number } };
 
 export type BaselineStrength = 'notable' | 'strong';
 
@@ -1668,6 +1668,8 @@ export interface StartupOverview {
   total: number;
   osCount: number;
   signedCount: number;
+  /** What could not be read (the list is then partial). */
+  unavailable: string[];
 }
 
 export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved';

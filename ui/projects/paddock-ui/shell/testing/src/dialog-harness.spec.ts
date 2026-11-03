@@ -20,6 +20,8 @@ class OkContent {
   protected readonly ref = inject(DIALOG_REF);
   readonly dialogActions = signal<readonly DialogAction[]>([{ kind: 'answer', id: 'ok', label: 'OK', role: 'primary', answer: () => 1 }]);
   constructor() {
+    // A fixture that calls a command at start (the harness must report the refused one), untracked on purpose.
+    // eslint-disable-next-line paddock/dialog-load-tracked
     void invoke('app_status');
   }
 }

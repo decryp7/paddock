@@ -66,6 +66,8 @@ export function unreadableReasonText(reason: UnreadableReason): string {
       return reasonText('needsAdmin');
     case 'protected':
       return 'macOS protects this folder';
+    case 'notAnswering':
+      return 'This folder did not answer in time (a cloud or network folder)';
     case 'other':
       return 'The system could not read this folder';
   }
@@ -80,6 +82,8 @@ export function unreadableShort(reason: UnreadableReason | null): string {
       return 'Needs administrator rights';
     case 'protected':
       return 'Protected by macOS';
+    case 'notAnswering':
+      return 'Did not answer in time';
     default:
       return 'Could not be read';
   }

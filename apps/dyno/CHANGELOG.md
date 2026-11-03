@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
+
+### Fixed
+
+- Disk map: one folder answering "Operation timed out" (os error 60, a File Provider or network-backed folder) no longer stops the whole scan as "the link dropped". The scan root is asked again: if it answers, only that folder is marked incomplete and the scan goes on; only when the root stops answering too is the volume lost. The log tells which (`Disk scan: one folder ... the volume still answers` or `... the volume is lost`, with the raw error text).
+- macOS start-up items: login items and app-registered agents (System Settings > Login Items & Extensions) are not listed because reading them (`sfltool dumpbtm`) needs administrator rights and asks for a password; the page now says so ("Not shown: Login items ...") next to the launch agents it can read, and shows the reason instead of "No startup items" when nothing could be read. The helper in 1.1 will read them. Read failures are logged, and the read is kept between explicit refreshes. A folder that does not answer in time shows "Did not answer in time", and eight such folders in a row end the scan as a lost volume even if the root still answers.
+- About: "See all releases" opens the releases page in the browser (it failed with "state not managed ... `files_open_url`" because the shell served the command without its service; fixed in `paddock-shell`).
+- History: switching the range no longer leaves the chart empty until the view is reopened. The chart resized itself to 0 px while the panel's skeleton detached it between two answers and never recovered; it now ignores a container without a size and fits itself again after each draw.
+- Windows: at logon only the agent started (in a console), with no tray icon and no window. Cause (reproduced in the Windows 11 VM with a restart): the agent's service entry and the app's own autostart entry were both the Run value `Dyno`, and the app's repair, five seconds after every start, replaced `Dyno = dyno-app.exe --hidden` with `Dyno = dyno-agent.exe run`. Now the app's own value is the only logon entry (it starts the agent itself, hidden); the agent's own entry, when someone installs it by hand, is `Dyno agent`; the app's start no longer repairs a Windows entry; and the first start after an update removes the stale `Dyno = dyno-agent.exe run` and, when Start at login is on, registers the app's entry again (when off, removing it is all).
+- Windows: `dyno-agent` is a GUI-subsystem program, so the per-user Run entry (`dyno-agent run` at logon) no longer opens a command prompt window that stays open for as long as the agent runs (reproduced in the Windows 11 VM: a Windows Terminal window titled `dyno-agent.exe`). Run from a terminal, `dyno-agent --version` and `service install` still print (it attaches to the parent console); a prompt does not wait for a GUI program, so for `--version`, `status`, `stop`, `once` and `service ...` in a terminal use `dyno agent <command>` (the console `dyno` program runs the agent's commands and returns their exit code). The release workflow reads the built `dyno-agent.exe` (PE Subsystem 2) and `dyno.exe` (3).
+- Windows: the log tells each tray icon: its static image and size, created or why not, and the first drawn image (size, or the refusal). A new icon of an app that was never pinned sits in the taskbar's overflow (the `^` at the right) on Windows 11 until the user turns it on in Settings > Personalization > Taskbar > Other system tray icons; the registry showed Dyno's icon registered there (`NotifyIconSettings`, tooltip `Dyno`).
+- Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
+- macOS: the Network page lists every program's sockets also when Start at login is off. The agent the app starts itself was its child process, and macOS 27 shows a child of an ad-hoc signed app only its own sockets; the app now starts it as a launchd job of the user's session (`launchctl bootstrap`, label `net.decryptology.dyno.agent.ondemand`, its definition in Dyno's data folder, not in `~/Library/LaunchAgents`, so nothing starts it at login), and ends it through launchd on Quit. Linux and Windows are unchanged. The log says which way the agent was started (`Via`) and the agent logs what macOS shows it (Dyno ADR 0026).
+## Unreleased
+
+### Added
+
+- Notifications: select messages (checkboxes, Shift-click for a range) and delete the selected ones, or delete all after a confirmation. Deleted messages stay gone after a restart (shared `paddock-health` commands).
+- Expand all and Collapse all (icon buttons with tooltips) in the toolbars of Network (programs or remote hosts), Processes (Apps and Tree views), and the grouped lists of What changed (days) and Files (groups). Interaction state only; Network keeps its fold in the same saved list as a single fold.
+- Processes: the Tree view no longer searches the whole process list for every row it draws (a map lookup), so opening a tree of thousands of processes is quick.
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed

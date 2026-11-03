@@ -1,5 +1,5 @@
 import { instanceKey } from './kind';
-import { ChangeDetectionStrategy, Component, computed, ErrorHandler, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ErrorHandler, inject, Injectable, input, PendingTasks, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { fakeDialogContract, FakeDialogIo, renderFramed } from '@decryp7/paddock-ui/shell/testing';
@@ -1111,6 +1111,55 @@ describe('a dialog window', () => {
     await settle();
     expect(spy.mock.calls.some((c) => String(c[0]).includes('could not close'))).toBe(true);
     spy.mockRestore();
+  });
+
+  it('refits a size the content reached while the ready handshake was in flight (the Updates dialog on Windows)', async () => {
+    // A frame runs at once here: the refit is coalesced to one per frame.
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => (queueMicrotask(() => cb(0)), 1));
+    try {
+      const { io, root, settle } = boot(VIEWER);
+      let answer!: () => void;
+      const gate = new Promise<void>((r) => (answer = r));
+      const ready = io.ready.bind(io);
+      io.ready = (m) => (void ready(m), gate);
+      // The handshake is in flight (withheld), so the window is not stable: wait for the measure it sent, not for stability.
+      await vi.waitFor(() => expect(io.measures).toHaveLength(1));
+      // The content grew (its data arrived) while the window system had not yet answered: nothing observes it yet.
+      const content = root.querySelector('.pd-frame-content') as HTMLElement;
+      vi.spyOn(content, 'getBoundingClientRect').mockReturnValue({ height: 900, width: 700 } as DOMRect);
+      answer();
+      await settle();
+      // The window must be refitted to what the content needs now, without any further change to wait for.
+      expect(io.measures.length).toBeGreaterThan(1);
+      expect(io.fitted.at(-1)).toBeGreaterThanOrEqual(900);
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
+  it('is settled (data-fit-settled) only after the content\'s pending work is done and its last size is sent', async () => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => (queueMicrotask(() => cb(0)), 1));
+    delete document.documentElement.dataset['fitSettled'];
+    try {
+      const { io, root } = boot(VIEWER);
+      // The content has data in flight (a store registered a pending task, as a job or a request does).
+      const done = TestBed.inject(PendingTasks).add();
+      // The window is not stable while the task runs: wait for the handshake, not for stability.
+      await vi.waitFor(() => expect(io.readied).not.toBeNull());
+      for (let i = 0; i < 3; i++) await new Promise<void>((r) => setTimeout(r, 0));
+      // The handshake is through, but the content is still loading: not settled, a check must not read the size yet.
+      expect(document.documentElement.dataset['fitSettled']).toBeUndefined();
+      // The data arrives and the content grows in the same turn as the task ends (no observer has seen it yet).
+      const content = root.querySelector('.pd-frame-content') as HTMLElement;
+      vi.spyOn(content, 'getBoundingClientRect').mockReturnValue({ height: 900, width: 700 } as DOMRect);
+      done();
+      await vi.waitFor(() => expect(document.documentElement.dataset['fitSettled']).toBe('true'));
+      // Its size was sent before the marker was set.
+      expect(io.fitted.at(-1)).toBeGreaterThanOrEqual(900);
+    } finally {
+      raf.mockRestore();
+      delete document.documentElement.dataset['fitSettled'];
+    }
   });
 
   it('refits after the handshake when the content grows, once per change, and never before it', async () => {

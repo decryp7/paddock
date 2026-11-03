@@ -12,7 +12,7 @@ debrief-plugin-api = { path = "../debrief-plugin-api" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
-evtx = { version = "0.12", default-features = false }
+evtx = { version = "0.15", default-features = false }
 quick-xml.workspace = true
 chrono.workspace = true
 csv.workspace = true

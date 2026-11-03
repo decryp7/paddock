@@ -410,6 +410,47 @@ pub async fn notifications_dismiss<R: Runtime>(
     Ok(done)
 }
 
+/// The most ids one `notifications_dismiss_many` call takes (the centre's caps are far below this).
+const MAX_DISMISS_IDS: usize = 1000;
+
+/// Removes the listed messages (those the calling window cannot see are ignored); returns how many were removed. Logs
+/// counts only.
+#[::tauri::command]
+pub async fn notifications_dismiss_many<R: Runtime>(
+    app: AppHandle<R>,
+    webview: Webview<R>,
+    ids: Vec<u64>,
+) -> Result<usize, HealthError> {
+    if ids.len() > MAX_DISMISS_IDS {
+        return Err(HealthError::invalid("too many messages to remove at once"));
+    }
+    let c = centre(&app)?;
+    let ids: Vec<NoticeId> = ids.into_iter().map(NoticeId).collect();
+    let n = c.dismiss_many(resolve(webview.label()), &ids);
+    if n > 0 {
+        emit_changed(&app, &c, None, None);
+    }
+    log::info!(target: "paddock_health", Requested = ids.len(), Removed = n; "Notifications removed");
+    Ok(n)
+}
+
+/// Removes the messages of the calling window (its project's and the app's) with an id at or below `up_to`, the newest
+/// one the user saw, so one that arrived while they decided stays; returns how many were removed. Logs the count only.
+#[::tauri::command]
+pub async fn notifications_dismiss_all<R: Runtime>(
+    app: AppHandle<R>,
+    webview: Webview<R>,
+    up_to: u64,
+) -> Result<usize, HealthError> {
+    let c = centre(&app)?;
+    let n = c.dismiss_all(resolve(webview.label()), NoticeId(up_to));
+    if n > 0 {
+        emit_changed(&app, &c, None, None);
+    }
+    log::info!(target: "paddock_health", Removed = n; "All notifications removed");
+    Ok(n)
+}
+
 /// Posts a notice of the calling window (`SHELL_PORTS.notify`) to the centre: validated and bounded, keyed by the
 /// engine's cause (`ui:<kind>:<title>`), so the same notice again counts up. An app-scope notice reaches every window,
 /// a window-scope one the caller's window and its dialogs and pop-outs. Returns the message as listed.
@@ -463,6 +504,8 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => notifications_mark_read,
     Mutation [WINDOW] => notifications_mark_all_read,
     Mutation [WINDOW] => notifications_dismiss,
+    Mutation [WINDOW] => notifications_dismiss_many,
+    Mutation [WINDOW] => notifications_dismiss_all,
     Mutation [WINDOW] limit 16 * paddock_commands::KIB => notifications_post,
     Quiet [WINDOW] => notifications_record,
     Mutation [WINDOW] limit 4 * paddock_commands::MIB => notifications_restore,

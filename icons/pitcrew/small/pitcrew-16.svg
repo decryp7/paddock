@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Pitcrew 16px</title>
   <defs>
-    <linearGradient id="pitcrew-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A4C"/><stop offset="1" stop-color="#D4440D"/></linearGradient>
+    <linearGradient id="pitcrew-fl16-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A4C"/><stop offset="1" stop-color="#D4440D"/></linearGradient>
     
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pitcrew-16-bg)"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pitcrew-fl16-16-bg)"/>
   <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#8A2A04" stroke-opacity="0.35" stroke-width="0.5"/>
-  <path d="M4 4h5v1h-5ZM2 5h9v3h-9ZM4 8h5v1h-5ZM11 5h1v3h-1ZM12 6h1v2h-1ZM13 5h2v4h-2ZM4 9h4v2h-4ZM3 11h4v2h-4ZM2 13h4v1h-4ZM3 14h2v1h-2ZM9 9h1v1h-1Z" fill="#FFFFFF" shape-rendering="crispEdges"/>
+  
+<g transform="scale(1)"><defs><mask id="pitcrew-fl16-16-am" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#000"/><path d="M13.6 8L10.8 12.85L5.2 12.85L2.4 8L5.2 3.15L10.8 3.15Z" fill="#fff"/><rect x="6" y="6" width="4" height="4" fill="#000"/></mask></defs><g transform="translate(0 0)"><rect width="16" height="16" fill="#8A2A04" opacity="0.4" mask="url(#pitcrew-fl16-16-am)" transform="translate(0 0.5)"/><rect width="16" height="16" fill="#FFFFFF" mask="url(#pitcrew-fl16-16-am)"/></g></g>
 </svg>

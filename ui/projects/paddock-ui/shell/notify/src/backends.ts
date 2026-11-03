@@ -32,6 +32,8 @@ export type NotifyCommand = Extract<
   | 'notifications_mark_read'
   | 'notifications_mark_all_read'
   | 'notifications_dismiss'
+  | 'notifications_dismiss_many'
+  | 'notifications_dismiss_all'
   | 'notifications_post'
 >;
 
@@ -65,6 +67,10 @@ export abstract class NotificationsBackend {
   abstract markRead(id: number): Promise<boolean>;
   abstract markAllRead(): Promise<number>;
   abstract dismiss(id: number): Promise<boolean>;
+  /** Removes the listed messages (ids the window cannot see are ignored); returns how many were removed. */
+  abstract dismissMany(ids: readonly number[]): Promise<number>;
+  /** Removes the window's messages with an id at or below `upTo` (the newest one the user saw); returns how many were removed. */
+  abstract dismissAll(upTo: number): Promise<number>;
   /**
    * Posts a notice of this window (`SHELL_PORTS.notify`) to the engine's centre, which keys it by its own cause
    * (`ui:<kind>:<title>`) and tells every window (rule 34). Rejects when the engine refuses it (bounds) or is not there.
@@ -121,6 +127,14 @@ export class TauriNotificationsBackend extends NotificationsBackend {
   }
   async dismiss(id: number): Promise<boolean> {
     return (await this.ipc.invoke<unknown>('notifications_dismiss', { id })) === true;
+  }
+  async dismissMany(ids: readonly number[]): Promise<number> {
+    const n = await this.ipc.invoke<unknown>('notifications_dismiss_many', { ids });
+    return typeof n === 'number' ? n : 0;
+  }
+  async dismissAll(upTo: number): Promise<number> {
+    const n = await this.ipc.invoke<unknown>('notifications_dismiss_all', { upTo });
+    return typeof n === 'number' ? n : 0;
   }
   async postNotice(notice: WindowNotice): Promise<Notice> {
     return contract(parseNotice(await this.ipc.invoke<unknown>('notifications_post', { notice })), 'a notification');
@@ -227,6 +241,21 @@ export class MemoryNotificationCentre extends NotificationsBackend {
   }
   dismiss(id: number): Promise<boolean> {
     return Promise.resolve(this.change(id, () => null));
+  }
+  dismissMany(ids: readonly number[]): Promise<number> {
+    const drop = new Set(ids);
+    const before = this.notices.length;
+    this.notices = this.notices.filter((n) => !drop.has(n.id));
+    const removed = before - this.notices.length;
+    if (removed) this.emit(null);
+    return Promise.resolve(removed);
+  }
+  dismissAll(upTo: number): Promise<number> {
+    const before = this.notices.length;
+    this.notices = this.notices.filter((n) => n.id > upTo);
+    const removed = before - this.notices.length;
+    if (removed) this.emit(null);
+    return Promise.resolve(removed);
   }
   listen(handler: (e: NoticesEvent) => void): Promise<Unlisten> {
     this.listeners.add(handler);

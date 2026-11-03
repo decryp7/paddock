@@ -218,6 +218,26 @@ impl PickedFolders {
     }
 }
 
+/// The taskbar settings of Windows (`ms-settings:taskbar`), where "Other system tray icons" switches Dyno's icons on: the hint
+/// on the first start and for each new menu-bar icon links here. The target is fixed, never taken from the page; other
+/// systems have no such page and refuse.
+#[tauri::command]
+pub async fn open_taskbar_settings(app: AppHandle) -> Result<Value, CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    if !cfg!(windows) {
+        return Err(CommandError::bad("The taskbar settings page exists on Windows only."));
+    }
+    app.opener().open_url(TASKBAR_SETTINGS_URL, None::<&str>).map_err(|e| {
+        CommandError::internal(format!(
+            "The Windows taskbar settings could not be opened ({e}). Open Settings > Personalization > Taskbar."
+        ))
+    })?;
+    Ok(Value::Null)
+}
+
+/// What [`open_taskbar_settings`] opens.
+pub const TASKBAR_SETTINGS_URL: &str = "ms-settings:taskbar";
+
 /// "Choose folder..." for the file finder: the OS folder dialog; the answer is the folder (`null` when they cancel) and is
 /// the only kind of folder the finder accepts afterwards.
 #[tauri::command]

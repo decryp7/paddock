@@ -13,12 +13,14 @@ dyno-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 plist = "1"
+log = { version = "0.4", features = ["kv"] }
 starship-battery = "0.12"
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "network", "component", "user"] }
 dns-lookup = "4.0.2"
 jiff = "0.2"
 # Child processes the family's way (ER-22): a process group killed as a whole, a kill-on-close job object on Windows, lower priority.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 
 [target.'cfg(windows)'.dependencies]
 wmi = { version = "0.18", default-features = false }

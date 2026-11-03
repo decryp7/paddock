@@ -18,6 +18,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SearchField } from '../../shared/search-field';
+import { TreeActions } from '../../shared/tree-actions';
 import { MatMenuModule } from '@angular/material/menu';
 
 /** What the table spends around its rows: its header and its frame. */
@@ -26,7 +27,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton],
+  imports: [FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -37,6 +38,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
         </div>
         <pd-segmented-control label="View" [options]="modeSegs()" [value]="store.mode()" (valueChange)="pickMode($event)" />
         <dy-search-field label="Filter processes" placeholder="Filter by name, user or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
+        <dy-tree-actions what="processes" [disabled]="store.mode() === 'flat'" (expandAll)="store.expandAll()" (collapseAll)="store.collapseAll()" />
         <button type="button" matButton="outlined" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
       </header>
 

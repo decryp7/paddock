@@ -297,7 +297,12 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             lock(&shared.core).store.alarm_events(alarm_id, limit).map_err(internal)?,
         )),
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
-        Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
+        Request::StartupEntries => {
+            // The explicit request reads the OS again; the filter changes and the health report reuse the cached read.
+            let mut startup = lock(&shared.ports.startup);
+            startup.refresh();
+            Ok(Reply::Startup(startup.list()?))
+        }
         Request::Shutdown => {
             log::info!("Shutdown requested by a client");
             shared.request_stop();

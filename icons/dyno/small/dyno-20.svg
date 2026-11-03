@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16">
+  <title>Dyno 16px</title>
+  <defs>
+    <linearGradient id="dyno-fl20-20-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DE559F"/><stop offset="1" stop-color="#A0226A"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#dyno-fl20-20-bg)"/>
+  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#5E0E3C" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="dyno-fl20-20-am" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20"><rect width="20" height="20" fill="#000"/><path d="M3.69 12.71A6.1 6.1 0 1 1 12.51 4.3" transform="scale(1.25)" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.04 7.54A6.1 6.1 0 0 1 12.31 12.71" transform="scale(1.25)" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.33 10.16L12.61 5.38L10.67 10.84Z" fill="#fff"/><path d="M8.54 10.5a1.46 1.46 0 1 0 2.92 0a1.46 1.46 0 1 0 -2.92 0Z" fill="#fff"/></mask></defs><g transform="translate(1 1)"><rect width="20" height="20" fill="#5E0E3C" opacity="0.4" mask="url(#dyno-fl20-20-am)" transform="translate(0 0.63)"/><rect width="20" height="20" fill="#FFFFFF" mask="url(#dyno-fl20-20-am)"/></g></g>
+</svg>

@@ -1,5 +1,6 @@
 import {
   type AfterViewInit,
+  ApplicationRef,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
@@ -77,6 +78,7 @@ export class DialogShell implements AfterViewInit {
   private readonly cdr = inject(ChangeDetectorRef);
   /** The start is a pending task: `whenStable` (tests, the boot harness) waits for it. */
   private readonly pending = inject(PendingTasks);
+  private readonly app = inject(ApplicationRef);
   protected readonly frame = viewChild.required(DialogFrame);
   private readonly host = viewChild.required('host', { read: ViewContainerRef });
   protected readonly id = this.route?.id ?? '';
@@ -122,7 +124,9 @@ export class DialogShell implements AfterViewInit {
   ngAfterViewInit(): void {
     const started = this.pending.add();
     this.destroyRef.onDestroy(started);
-    void this.start().finally(started);
+    void this.start()
+      .finally(started)
+      .then(() => this.settle());
   }
 
   private async start(): Promise<void> {
@@ -170,9 +174,32 @@ export class DialogShell implements AfterViewInit {
     }
     this.readied = true;
     await this.io.ready(measure).catch(() => undefined);
+    // The content may have changed while the window system answered (a dialog that loads its data): that is read at the
+    // same pinned width the measure was taken at, and sent as a refit. Left to `watch`, whose baseline is read after the
+    // pin is released, it would be taken as already fitted and the window would keep its first, empty size.
+    const after = frame.measure();
+    if (after.content.height !== measure.content.height || after.minContent.height !== measure.minContent.height) {
+      console.debug(`[paddock-dialogs] dialog window ${this.id}: content changed during the ready handshake, refit ${measure.content.height} -> ${after.content.height} px`);
+      this.fit(after);
+    }
     // Shown at its size now: the window's own width rules again.
     frame.pinWidth(null);
     frame.watch();
+  }
+
+  /**
+   * The window is settled when the handshake is through and the content has nothing in flight (its stores and jobs hold
+   * a pending task while they load): the last size the content reached is then sent at once, without a frame wait, and
+   * `data-fit-settled` is set. A check that reads the window's size (the browser build's e2e) waits for it, so it never
+   * measures a content that is still loading (File hash's result arriving after the first measure).
+   */
+  private async settle(): Promise<void> {
+    if (!this.readied) return;
+    const frame = this.frame();
+    await this.app.whenStable();
+    if (this.closing) return;
+    frame.flushFit();
+    if (typeof document !== 'undefined') document.documentElement.dataset['fitSettled'] = 'true';
   }
 
   /** A refit after the ready handshake (the frame coalesces them to one per frame). */

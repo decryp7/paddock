@@ -90,6 +90,26 @@ impl Dirs {
     pub fn plugins(&self) -> PathBuf {
         self.root.join("plugins")
     }
+
+    /// Which kind of folder this is, for the logs (never the user's path): every launch path of an installed agent
+    /// (the app's child, the login item, the Windows `Run` entry) must log "user data folder".
+    pub fn kind(&self) -> &'static str {
+        let overridden = std::env::var_os("DYNO_DATA_DIR").is_some_and(|v| !v.is_empty());
+        folder_kind(&self.root, overridden, Dirs::current().root(), &std::env::temp_dir())
+    }
+}
+
+/// [`Dirs::kind`] with the environment passed in.
+fn folder_kind(root: &Path, overridden: bool, current: &Path, temp: &Path) -> &'static str {
+    if root != current {
+        "caller's folder"
+    } else if overridden {
+        "DYNO_DATA_DIR"
+    } else if root.starts_with(temp) {
+        "temp folder (no LOCALAPPDATA or HOME)"
+    } else {
+        "user data folder"
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +125,19 @@ mod tests {
         for p in [d.settings(), d.logs(), d.plugins(), d.instance_lock()] {
             assert!(p.starts_with("/x/dyno"));
         }
+    }
+
+    #[test]
+    fn the_folder_kind_names_no_path() {
+        let (cur, tmp) = (Path::new("/u/dyno"), Path::new("/tmp"));
+        assert_eq!(folder_kind(cur, false, cur, tmp), "user data folder");
+        assert_eq!(folder_kind(cur, true, cur, tmp), "DYNO_DATA_DIR");
+        assert_eq!(folder_kind(Path::new("/x"), false, cur, tmp), "caller's folder");
+        assert_eq!(
+            folder_kind(Path::new("/tmp/Dyno"), false, Path::new("/tmp/Dyno"), tmp),
+            "temp folder (no LOCALAPPDATA or HOME)"
+        );
+        assert!(!Dirs::at("/x").kind().is_empty());
     }
 
     #[test]

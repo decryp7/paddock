@@ -1,7 +1,7 @@
 import { computed, inject, InjectionToken } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, injectTrackLoad, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { Preferences, UpdateErrorDto, UpdateInfo, UpdateStatus } from '../generated/about';
 import { UpdatesBackend, type Unlisten } from './backend';
 import { toUpdateError } from './wire';
@@ -117,17 +117,22 @@ export const UpdatesStore = signalStore(
       },
     };
   }),
-  withHooks((store, backend = inject(UpdatesBackend)) => {
+  withHooks((store, backend = inject(UpdatesBackend), trackLoad = injectTrackLoad()) => {
     let off: Unlisten | undefined;
     let destroyed = false;
     return {
       onInit() {
         // Listen first, then read: an event during the read wins over the read's reply.
-        void backend
-          .listen((s) => store._receive(s))
-          .then((u) => (destroyed ? u() : (off = u)))
-          .catch((e: unknown) => console.warn(`[paddock-updates] cannot listen for update events: ${errorMessage(e, 'unknown error')}`));
-        void store.load();
+        // A pending task: the updates window is settled (sized to the status) only after the read ends.
+        void trackLoad(() =>
+          Promise.all([
+            backend
+              .listen((s) => store._receive(s))
+              .then((u) => (destroyed ? u() : (off = u)))
+              .catch((e: unknown) => console.warn(`[paddock-updates] cannot listen for update events: ${errorMessage(e, 'unknown error')}`)),
+            store.load(),
+          ]),
+        );
       },
       onDestroy() {
         destroyed = true;

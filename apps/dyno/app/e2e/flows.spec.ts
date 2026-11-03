@@ -144,6 +144,27 @@ test.describe('dashboard', () => {
     await expect(page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '7d' })).toBeChecked();
   });
 
+  test('switching the history range keeps a drawn chart (it went empty until the view was reopened)', async ({ page }) => {
+    await page.goto('/?latency=0&gates#/');
+    const history = page.getByRole('region', { name: 'History' });
+    const range = history.getByRole('radiogroup', { name: 'Range' });
+    const drawn = history.locator('dy-chart canvas').first();
+    await expect(drawn).toBeVisible();
+    for (const label of ['7d', '30d', '24h']) {
+      // Hold the answer: the panel shows its skeleton (the chart is detached) until the test lets the answer through.
+      await page.evaluate(() => (window as unknown as { __mockHold(n: string): void }).__mockHold('history'));
+      await range.getByRole('radio', { name: label }).click();
+      await expect(range.getByRole('radio', { name: label })).toBeChecked();
+      await expect(history.getByLabel('Loading history')).toBeVisible();
+      await page.evaluate(() => (window as unknown as { __mockRelease(n: string): void }).__mockRelease('history'));
+      await expect(history.getByLabel('Loading history')).toHaveCount(0);
+      await expect(history.getByText('No history yet')).toHaveCount(0);
+      await expect(drawn).toBeVisible();
+      // A chart that lost its size shows a canvas of 0 px height.
+      await expect.poll(async () => (await drawn.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+    }
+  });
+
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
     await page.goto(url('/', '&mock=desktop'));
     const battery = page.getByRole('group', { name: 'Battery', exact: true });
@@ -377,6 +398,37 @@ test.describe('counters', () => {
   });
 });
 
+test.describe('notifications', () => {
+  test('selected messages and then all of them are deleted, after a confirmation for all', async ({ page, context, browserName }) => {
+    // WebKit has no clipboard permission to grant; its copy path needs none.
+    if (browserName === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto(url('/network'));
+    const socket = page.getByRole('row', { name: /142.250.74.46/ });
+    await socket.focus();
+    await expect(socket).toBeFocused();
+    await pressMod(page, 'Mod+c');
+    await expect(page.getByRole('button', { name: '1 unread' })).toBeVisible();
+    await page.evaluate(() => {
+      location.hash = '#/why-slow';
+    });
+    await page.getByRole('button', { name: 'Copy as text' }).click();
+    await page.getByRole('button', { name: /notifications/i }).first().click();
+    const selects = page.locator('[data-testid^=notice-select-] input');
+    await expect(selects).toHaveCount(2);
+    await selects.first().check();
+    await page.getByTestId('notices-delete-selected').click();
+    await expect(selects).toHaveCount(1);
+    await page.getByTestId('notices-delete-all').click();
+    const decision = page.getByRole('alertdialog', { name: 'Delete all notifications?' });
+    await expect(decision).toBeVisible();
+    await decision.getByRole('button', { name: 'Delete all' }).click();
+    await expect(page.getByRole('button', { name: /unread/ })).toHaveCount(0);
+    await page.getByRole('button', { name: /notifications/i }).first().click();
+    await expect(page.getByTestId('notices-empty')).toBeVisible();
+    await expect(selects).toHaveCount(0);
+  });
+});
+
 test.describe('network', () => {
   test('one dense table: grouped by program with collapsible group rows, loopback hidden, Look up IP only for public peers', async ({ page }) => {
     await page.goto(url('/network'));
@@ -391,6 +443,19 @@ test.describe('network', () => {
     const flat = page.getByRole('grid', { name: 'Connections' });
     await expect(flat.getByRole('row', { name: /10\.0\.0\.8/ }).getByRole('button', { name: 'Look up IP' })).toBeDisabled();
     await expect(flat.getByRole('row', { name: /142\.250\.74\.46/ }).getByRole('button', { name: 'Look up IP' })).toBeEnabled();
+  });
+
+  test('Collapse all folds every program and Expand all opens them again', async ({ page }) => {
+    await page.goto(url('/network'));
+    const grid = page.getByRole('treegrid', { name: 'Connections' });
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse all programs' }).click();
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toHaveCount(0);
+    await expect(grid.locator('[role=row][aria-expanded=true]')).toHaveCount(0);
+    await expect(grid.locator('[role=row][aria-expanded=false]').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Expand all programs' }).click();
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toBeVisible();
+    await expect(grid.locator('[role=row][aria-expanded=false]')).toHaveCount(0);
   });
 
   test('listening tab marks exposed listeners first; loopback shows on request; Enter opens the detail panel', async ({ page }) => {

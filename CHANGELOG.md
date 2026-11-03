@@ -4,6 +4,63 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-shell`: `files_*` commands always have their service
+
+An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).
+
+### `paddock-proc`: `console::attach_parent_console` for GUI-subsystem sidecars
+- A program built for the Windows GUI subsystem (so a Run entry, a service or the app starts it without a console window) calls it first thing: it attaches to
+  the parent terminal's console, when there is one, and points missing standard handles at `CONIN$`/`CONOUT$`, so `--version` and friends still print.
+  A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
+
+### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
+- Fixed: on Windows the popover showed and vanished at once. Measured in the Windows 11 VM (grace 0): `Focused(true)` at 83 ms after show, `Focused(false)` 1 ms later
+  (the shell's taskbar took the foreground back after the click's mouse-up), `Focused(true)` again 1 ms after the close began; `set_focus` had succeeded. A blur
+  within `BLUR_GRACE` (600 ms, **Windows only**: `popover::blur_grace_for`; macOS and Linux keep closing on every blur, grace 0) of showing is now kept; when
+  the grace is over `popover::grace_end` decides: it has the focus again, it stays; the shell (`Shell_TrayWnd`, the overflow) still has the foreground, it asks
+  for the focus once more and a refusal closes it; any other window in front, it closes (a real dismissal). The grace and the fade run on the `Popovers` clock
+  (`Popovers::clock`, a `FakeClock` in tests), the wait is cancelled when the popover closes, and `Popovers::blur_grace` / `foreground_class` set them for tests.
+  The popover path logs show requested (with the grace), shown (with the `show` and `set_focus` results and the focus), focus gained or lost with the time since
+  shown, and hide with its reason (`toggle`, `blur`, `blur after grace`, `focus refused`, `requested`).
+
+### `paddock-service`: launchd's job report carries the pid and the last exit; `System::write_private`
+- `parse::JobReport` has three new fields read from the job's own keys of `launchctl print` (nested blocks skipped, as before): `pid` (`pid = <n>`,
+  only while it runs), `last_exit_code` (`last exit code = <n>`, `None` before the first exit or after a signal) and `last_signal` (`last terminating
+  signal = …`). A launcher that runs a program as a launchd job tracks it by them (Dyno ADR 0026, amendment 2).
+- `exit_config` now means exactly exit code 78, read from the parsed code; before, any line starting with `last exit code = 78` counted (780 too). The
+  copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
+- `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
+  calls `write`, so other implementations of the port are unchanged.
+### `paddock-health` and `@decryp7/paddock-ui/shell/notify`: delete selected or all notifications
+- New commands `notifications_dismiss_many` (`ids`, at most 1000; returns how many were removed) and `notifications_dismiss_all` (`upTo`: removes the messages up to the newest id the user saw, so one that arrived meanwhile stays; returns the count; no change event when nothing was removed) remove the
+  calling window's messages (its project's and the app's list; an app list is saved again, so a deleted message does not return after a restart). Ids the
+  window cannot see are ignored. The log line carries counts only. `NotificationCentre::dismiss_many` / `dismiss_all`, `Centre::dismiss_many` / `clear`.
+- `NotificationsBackend` gains the abstract `dismissMany(ids)` and `dismissAll()` (Tauri and in-memory backends), `NotificationsStore.dismissMany` / `dismissAll`.
+  `pd-notifications-panel` has a checkbox per message (Shift-click selects a range), Select all, "Delete selected (n)" and "Delete all", which asks first in the
+  shared `pd.confirm` decision dialog. `shell-commands.ts`, `health-commands.ts`, the permission files and the window-class sets are regenerated.
+
+### Follow-up: Dyno's `dy-tree-actions`
+- The Expand all / Collapse all control lives in Dyno (`apps/dyno/app/src/app/shared/tree-actions.ts`). Move it to `@decryp7/paddock-ui/table` once a second app needs it (rule 42, rule of three). Dyno's Processes folds are not persisted (they never were); Network's are, up to 500 groups.
+
+### `@decryp7/paddock-ui/table`: `PdTable.expandAllGroups()` and `collapseAllGroups()`
+- Public methods for an app's toolbar on a `groupBy` table (the table kept the fold state to itself); `groupKeys(rows, column)` is exported next to `groupItems`.
+### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: a dialog is fitted to content that arrives after the ready handshake (Dyno 1.0.1)
+- Dyno 1.0.0 showed Updates with a scrollbar beside one line (reproduced on Windows 11, below). The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has
+  answered, and sends a refit when it differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so content that
+  arrived meanwhile was taken as already fitted and the window kept the height of its first state.
+- Shown on Windows 11 (Arm VM, Dyno 1.0.0 code, 100 % and 150 %): the Updates window kept the height of its first state (inner 105 px, one line and a
+  scrollbar) because the status arrived after the first measure; with the change it ends at 195 px. The frame (16x39 px at 100 %, 22x56 at 150 %) matched
+  `AdjustWindowRectExForDpi` for the main window and the fit rounds the inner size up.
+- `paddock-dialogs`: a dialog window the user resizes by hand is no longer fitted to its content (`OpenDialog::user_sized`, `Dialogs::note_resized`): a
+  later content change, refit or scale change keeps the user's size (the minimum content still holds). The window system's own rounding and a resize that
+  comes with a scale change are not the user's (2 px tolerance, `OWN_SIZE_TOLERANCE_PX`). `Around` has a new field `user_sized`.
+- `paddock-dialogs`: the scale-change refit is scheduled instead of run inside the `ScaleFactorChanged` event. tao's `WM_DPICHANGED` handler resizes the
+  window itself after the event, so a size set inside it was overwritten (VM: asked 614.4 px wide, ended 512).
+- `dialog_ready`, `dialog_fit` and the scale-change refit log the requested inner size, the size it was, the window's decorations, the viewport delta, the
+  scale, the zoom and a `Phase` (`ready`, `fit`, `scale`). The shell sets `data-fit-settled` on `<html>` once the handshake's measures are sent.
+- `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for no Loading and `data-fit-settled`, and reports a body that scrolls in a window below the cap.
+  `MemoryUpdatesOptions.holdStatus` delays the first status (Dyno's browser build takes it from `__pdHoldUpdatesStatus`) for the late-status e2e.
+
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`

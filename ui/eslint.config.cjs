@@ -9,7 +9,7 @@ const selectorsOf = (prefix) => ({
 });
 
 module.exports = defineConfig(
-  ...preset({ prefix: 'pd', storeFlagsAllowedIn: 'request-status' }),
+  ...preset({ prefix: 'pd', storeFlagsAllowedIn: 'request-status', dialogStores: ['projects/paddock-ui/shell/about/src/updates.store.ts', 'projects/paddock-ui/shell/diagnostics/src/diagnostics.store.ts'] }),
   { files: ['projects/gallery/**/*.ts'], rules: selectorsOf('gal') },
   { files: ['projects/shell-demo/**/*.ts'], rules: selectorsOf('sd') },
   { files: ['projects/workbench-demo/**/*.ts'], rules: selectorsOf('wd') },

@@ -409,7 +409,10 @@ fn a_runner_that_exits_is_restarted_after_the_backoff() {
 fn runners_start_with_the_login_path_and_their_own_env() {
     let mut h = Harness::with_runner_toml("envy", "mode=ok\n", true, "[runners.env]\nCI_FLAG = \"yes\"\n");
     let dump = h.runner_dir.join("env.txt");
-    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    // Wait for the line that is asserted, not just for the file: the runner may still be writing it.
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| {
+        std::fs::read_to_string(&dump).is_ok_and(|t| t.contains("CI_FLAG=yes\n"))
+    });
     let text = std::fs::read_to_string(&dump).unwrap();
     assert!(text.contains("PATH=/pitcrew/test-path:/usr/bin:/bin\n"), "{text}");
     assert!(text.contains("CI_FLAG=yes\n"), "{text}");
@@ -417,7 +420,9 @@ fn runners_start_with_the_login_path_and_their_own_env() {
     // A runner's own PATH replaces the login one.
     let mut h = Harness::with_runner_toml("envy2", "mode=ok\n", true, "[runners.env]\nPATH = \"/only/this\"\n");
     let dump = h.runner_dir.join("env.txt");
-    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| {
+        std::fs::read_to_string(&dump).is_ok_and(|t| t.contains("PATH=/only/this\n"))
+    });
     assert!(std::fs::read_to_string(&dump).unwrap().contains("PATH=/only/this\n"));
     h.finish();
 }
@@ -431,10 +436,11 @@ fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
     h.until("graceful exit", Duration::from_millis(200), |h| {
         count(&h.history(), |k| matches!(k, HistoryKind::Exited { expected: true, .. })) == 1
     });
-    assert!(
-        h.log().contains("shutdown initiated"),
-        "the runner shut down by itself after the stop request"
-    );
+    // The runner's output comes through a reader thread, so its last line can reach the log after the supervisor has
+    // seen the exit: wait for the line (the real clock, no clock step), do not assume it came first.
+    h.until("the runner's shutdown line is logged", Duration::ZERO, |h| {
+        h.log().contains("shutdown initiated")
+    });
     assert!(h.log().contains("supervisor: runner stalled"));
     h.pump(Duration::from_secs(11));
     h.until("restart", Duration::from_millis(200), |h| {

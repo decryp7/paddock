@@ -182,7 +182,7 @@ impl Service {
                     "add",
                     spec::WINDOWS_RUN_KEY,
                     "/v",
-                    "Dyno",
+                    spec::WINDOWS_AGENT_VALUE,
                     "/t",
                     "REG_SZ",
                     "/d",
@@ -209,8 +209,10 @@ impl Service {
                 Ok(())
             }
             Os::Windows => {
-                let _ = self.runner.run("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", "Dyno", "/f"]);
-                Ok(())
+                let _ = self
+                    .runner
+                    .run("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE, "/f"]);
+                self.clear_stale_run_entry().map(|_| ())
             }
         }
     }
@@ -242,13 +244,40 @@ impl Service {
                     .unwrap_or(false);
                 Status::Installed { running, current }
             }
-            Os::Windows => match self.runner.run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", "Dyno"]) {
+            Os::Windows => match self
+                .runner
+                .run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE])
+            {
                 Ok((true, out)) => Status::Installed {
                     running: true,
                     current: out.contains(&*self.exe.to_string_lossy()),
                 },
                 _ => Status::NotInstalled,
             },
+        }
+    }
+
+    /// Whether the app (not this service) is what starts at logon, and starts the agent itself: on Windows the app's own `Run`
+    /// value does, hidden in the tray; an entry that started only the agent would leave no tray icon and no window.
+    pub fn app_is_logon_entry(&self) -> bool {
+        self.os == Os::Windows
+    }
+
+    /// Windows: removes the 1.0.0 entry (`Dyno` = `dyno-agent.exe run`) that replaced the app's own `Dyno` value, and says
+    /// whether it was there (the caller then registers the app again). Nothing else is touched; other systems return false.
+    pub fn clear_stale_run_entry(&mut self) -> Result<bool, String> {
+        if self.os != Os::Windows {
+            return Ok(false);
+        }
+        match self
+            .runner
+            .run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_APP_VALUE])
+        {
+            Ok((true, out)) if spec::is_agent_run_value(&out) => {
+                self.check("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_APP_VALUE, "/f"])?;
+                Ok(true)
+            }
+            _ => Ok(false),
         }
     }
 

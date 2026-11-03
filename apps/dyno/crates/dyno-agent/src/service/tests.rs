@@ -157,9 +157,9 @@ fn windows_uses_the_per_user_run_key() {
         Os::Windows,
     );
     svc.install().unwrap();
-    assert!(s.calls()[0].starts_with(r"reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Dyno"));
+    assert!(s.calls()[0].starts_with(r"reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Dyno agent"));
     assert!(s.calls()[0].contains(r#""C:\Dyno\dyno-agent.exe" run"#));
-    s.answer("reg query", true, r#"Dyno REG_SZ "C:\Dyno\dyno-agent.exe" run"#);
+    s.answer("reg query", true, r#"Dyno agent REG_SZ "C:\Dyno\dyno-agent.exe" run"#);
     assert_eq!(
         svc.status(),
         Status::Installed {
@@ -290,4 +290,53 @@ fn inside_a_mac_app_bundle_the_service_commands_are_refused_with_the_way_to_mana
     ] {
         assert!(refuse_inside_app_bundle(Os::Mac, Path::new(outside)).is_ok(), "{outside}");
     }
+}
+
+#[test]
+fn the_agents_windows_entry_never_shares_the_apps_value_name() {
+    assert_ne!(spec::WINDOWS_AGENT_VALUE, spec::WINDOWS_APP_VALUE);
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let mut svc = Service::with(
+        r"C:\Dyno\dyno-agent.exe".into(),
+        dir.path().to_path_buf(),
+        0,
+        Box::new(s.clone()),
+        Os::Windows,
+    );
+    // The app's own entry is not the agent's: `ensure` (the app's repair) finds the agent not installed and writes nothing.
+    s.answer("/v Dyno agent", false, "");
+    s.answer("/v Dyno", true, r#"Dyno REG_SZ C:\Dyno\dyno-app.exe --hidden"#);
+    assert_eq!(svc.status(), Status::NotInstalled);
+    assert!(!svc.ensure().unwrap());
+    assert_eq!(svc.clear_stale_run_entry(), Ok(false));
+    assert!(
+        s.calls().iter().all(|c| !c.contains("reg add") && !c.contains("reg delete")),
+        "{:?}",
+        s.calls()
+    );
+    assert!(svc.app_is_logon_entry());
+}
+
+#[test]
+fn the_1_0_0_entry_that_replaced_the_apps_is_removed_and_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let mut svc = Service::with(
+        r"C:\Dyno\dyno-agent.exe".into(),
+        dir.path().to_path_buf(),
+        0,
+        Box::new(s.clone()),
+        Os::Windows,
+    );
+    s.answer("/v Dyno", true, r#"Dyno REG_SZ "C:\Dyno\dyno-agent.exe" run"#);
+    assert_eq!(svc.clear_stale_run_entry(), Ok(true));
+    assert!(s
+        .calls()
+        .iter()
+        .any(|c| c.starts_with(r"reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Dyno /f")));
+    // Other systems have no such entry.
+    let mut mac = service(Os::Mac, dir.path(), &s);
+    assert_eq!(mac.clear_stale_run_entry(), Ok(false));
+    assert!(!mac.app_is_logon_entry());
 }

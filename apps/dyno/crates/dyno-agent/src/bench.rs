@@ -332,8 +332,8 @@ mod tests {
     fn a_run_measures_each_kind_saves_and_removes_the_scratch_folder() {
         let tmp = tempfile::tempdir().unwrap();
         let c = centre(tmp.path(), None, None);
-        let first = start(&c, &[BenchKind::Cpu, BenchKind::Disk]).unwrap();
-        assert!(first.running.is_some());
+        // Whether the run is still going when start returns is a race with the fake; the gated test below pins the running state.
+        start(&c, &[BenchKind::Cpu, BenchKind::Disk]).unwrap();
         let o = wait_idle(&c);
         assert_eq!(o.runs.len(), 1);
         assert_eq!(o.runs[0].results.len(), 2);

@@ -266,6 +266,8 @@ export interface DynoBackend {
   onNavigate(listener: (to: Navigate) => void): Unsubscribe;
   /** The page or Settings section a widget asked for, once: a main window that was still being created misses the event. */
   takeNavigation(): Promise<Navigate | null>;
+  /** Opens the OS taskbar settings (Windows `ms-settings:taskbar`), where the tray icons are switched on; refused on other systems. */
+  openTaskbarSettings(): Promise<void>;
   /** Readings (value, text, scale and tone against each query's thresholds) from the newest live update, in the queries' order. */
   metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]>;
   /** For each kind a chooser can add: a ready default widget and the metrics the engine accepts for it. */

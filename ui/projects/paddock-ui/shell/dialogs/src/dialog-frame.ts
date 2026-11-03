@@ -506,13 +506,18 @@ export class DialogFrame {
     if (this.watching) return;
     this.watching = true;
     let last = '';
-    const fit = oncePerFrame(() => {
+    const check = () => {
       const m = this.measure();
       const key = `${m.content.width}x${m.content.height}/${m.minContent.width}x${m.minContent.height}`;
       if (key === last) return;
       last = key;
       this.refit.emit(m);
-    });
+    };
+    const fit = oncePerFrame(check);
+    this.flushFit = () => {
+      fit.cancel();
+      check();
+    };
     last = ((m) => `${m.content.width}x${m.content.height}/${m.minContent.width}x${m.minContent.height}`)(this.measure());
     this.requestFit = fit.ask;
     const observers: { disconnect(): void }[] = [];
@@ -540,4 +545,11 @@ export class DialogFrame {
 
   /** Asks for a refit (the content changed what it shows without a resize the frame sees). A no-op before `watch`. */
   requestFit: () => void = () => undefined;
+
+  /**
+   * Reads the size now and sends it when it differs from the last one sent, without waiting for the frame that
+   * `requestFit` and the observers coalesce to (a no-op before `watch`). The shell uses it to send the size the content
+   * reached when its pending work ended, before it reports the window settled.
+   */
+  flushFit: () => void = () => undefined;
 }
