@@ -32,17 +32,15 @@ impl Theme {
             [0xb0, 0x1e, 0x6e, 0xff]
         }
     }
-    /// Tracks: the ink at 30 % (40 % on a dark taskbar, for 3:1 non-text contrast against it).
+    /// Tracks: the ink at 55 % on a light taskbar, 40 % on a dark one (3:1 non-text contrast against either).
     pub fn track(&self) -> Rgba {
         let mut c = self.ink();
-        c[3] = if self.dark { 0x66 } else { 0x4d };
+        c[3] = if self.dark { 0x66 } else { 0x8c };
         c
     }
-    /// The track of an alert bar: the danger colour at 35 % (70 % on a dark taskbar, for 3:1 against it).
+    /// The track of an alert bar: the neutral track, so the danger fill stays distinct from it.
     pub fn alert_track(&self) -> Rgba {
-        let mut c = self.alert().0;
-        c[3] = if self.dark { 0xb3 } else { 0x59 };
-        c
+        self.track()
     }
     /// The alert plate (the family's danger colour) and the ink on it.
     pub fn alert(&self) -> (Rgba, Rgba) {
@@ -931,7 +929,7 @@ mod tests {
                 let partial = i
                     .rgba
                     .chunks(4)
-                    .filter(|p| p[3] != 0 && p[3] != 0xff && p[3] != 0x4d && p[3] != 0x18)
+                    .filter(|p| p[3] != 0 && p[3] != 0xff && p[3] != 0x8c && p[3] != 0x18)
                     .count();
                 assert_eq!(partial, 0, "{k:?} at {size}");
             }
@@ -1061,17 +1059,20 @@ mod tests {
     }
 
     #[test]
-    fn dark_taskbar_tracks_have_3_to_1_contrast() {
-        // Windows 11's dark taskbar is about #202020; test a bit darker and lighter as well.
-        let t = Theme { dark: true };
-        for bgv in [0u8, 0x18, 0x20, 0x2b] {
-            let bg = [f32::from(bgv); 3];
-            let lb = lum(bg);
-            for c in [t.track(), t.alert_track()] {
-                let a = f32::from(c[3]) / 255.0;
-                let mix = [0, 1, 2].map(|k| f32::from(c[k]) * a + bg[k] * (1.0 - a));
-                let ratio = (lum(mix) + 0.05) / (lb + 0.05);
-                assert!(ratio >= 3.0, "{c:?} on #{bgv:02x}: {ratio:.2}");
+    fn tracks_have_3_to_1_contrast_on_light_and_dark_taskbars() {
+        // Windows 11's taskbars are about #f3f3f3 (light) and #202020 (dark); test lighter and darker as well.
+        for (dark, bgs) in [(false, [0xe5u8, 0xf3, 0xff]), (true, [0x00, 0x18, 0x2b])] {
+            let t = Theme { dark };
+            for bgv in bgs.into_iter().chain(if dark { Some(0x20) } else { None }) {
+                let bg = [f32::from(bgv); 3];
+                let lb = lum(bg);
+                for c in [t.track(), t.alert_track()] {
+                    let a = f32::from(c[3]) / 255.0;
+                    let mix = [0, 1, 2].map(|k| f32::from(c[k]) * a + bg[k] * (1.0 - a));
+                    let (hi, lo) = (lum(mix).max(lb), lum(mix).min(lb));
+                    let ratio = (hi + 0.05) / (lo + 0.05);
+                    assert!(ratio >= 3.0, "dark {dark}: {c:?} on #{bgv:02x}: {ratio:.2}");
+                }
             }
         }
     }
