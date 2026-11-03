@@ -32,6 +32,8 @@ pub struct TrayState {
     painted: Mutex<HashMap<String, bool>>,
     /// Per item: the tooltip last sent and how many pictures were drawn (the tooltip changes rarely, a picture every second).
     drawn: Mutex<HashMap<String, (String, u64)>>,
+    /// Per item: how many pictures in a row were refused (the log tells the first, then a count, then the recovery).
+    refused: Mutex<HashMap<String, u32>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -420,6 +422,7 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
                 lock(&state.items).remove(id);
                 lock(&state.painted).remove(id);
                 lock(&state.drawn).remove(id);
+                lock(&state.refused).remove(id);
             }
             for spec in &plan.create {
                 ops.make(spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
@@ -468,11 +471,36 @@ fn paint_one<O: IconOps>(ops: &mut O, state: &TrayState, item: &str, frame: &Fra
         if paint.tooltip { "sent" } else { "unchanged" }
     ));
     let first = lock(&state.painted).insert(item.to_string(), true).is_none();
-    // Told once per item and on every failure (a line per second per item would flood the log).
-    if let Err(e) = &set {
-        logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
-    } else if first {
-        logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
+    // A line per second per item would flood the log: the first refusal in a row is told with its cause, then every 60th with the
+    // count, and the recovery with how many were lost; the first picture of an item is told once.
+    match &set {
+        Err(e) => {
+            let n = {
+                let mut map = lock(&state.refused);
+                let n = map.entry(item.to_string()).or_default();
+                *n += 1;
+                *n
+            };
+            if n == 1 {
+                logging::info(&format!("tray icon {}: the drawn image ({w}x{h}) was refused: {e}", tray_id(item)));
+            } else if n % 60 == 0 {
+                logging::info(&format!(
+                    "tray icon {}: {n} drawn images in a row were refused (last: {e})",
+                    tray_id(item)
+                ));
+            }
+        }
+        Ok(()) => {
+            if let Some(n) = lock(&state.refused).remove(item).filter(|n| *n > 1) {
+                logging::info(&format!(
+                    "tray icon {}: drawing works again after {n} refused images",
+                    tray_id(item)
+                ));
+            }
+            if first {
+                logging::info(&format!("tray icon {}: first drawn image set, {w}x{h}", tray_id(item)));
+            }
+        }
     }
     if paint.save_position {
         ops.save_position(item);

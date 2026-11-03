@@ -334,6 +334,24 @@ mod tests {
     }
 
     #[test]
+    fn the_tray_alert_level_is_clamped_and_a_non_number_is_the_default() {
+        let level = |v: f32| {
+            AlertSettings {
+                tray_alert_percent: v,
+                ..Default::default()
+            }
+            .clamped()
+            .tray_alert_percent
+        };
+        assert_eq!(level(10.0), 50.0);
+        assert_eq!(level(500.0), 100.0);
+        assert_eq!(level(85.0), 85.0);
+        assert_eq!(level(f32::NAN), 90.0);
+        assert_eq!(level(f32::INFINITY), 90.0);
+        assert_eq!(level(f32::NEG_INFINITY), 90.0);
+    }
+
+    #[test]
     fn disabled_and_clamped() {
         let mut a = Alerts::new();
         let off = AlertSettings {

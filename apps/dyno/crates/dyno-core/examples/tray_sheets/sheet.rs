@@ -24,7 +24,7 @@ pub fn weight(w: f32) -> f32 {
 
 impl Font {
     pub fn system() -> Font {
-        Font { ct: CoreText }
+        Font { ct: CoreText::new() }
     }
     pub fn raster(&self) -> &dyn TextRaster {
         &self.ct

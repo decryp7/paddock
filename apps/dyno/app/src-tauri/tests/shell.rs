@@ -430,6 +430,7 @@ mod widget_wiring {
             Hub::default(),
             Arc::new(NoPixels),
             dyno_app_lib::shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements),
+            Arc::new(paddock_jobs::SystemClock),
         )
     }
 
