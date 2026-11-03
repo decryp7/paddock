@@ -71,8 +71,11 @@ alarms [--all] [--json]               alarms that need attention\n  \
 snapshot                              everything measured now, as JSON (nothing is stored)\n  \
 counters list [OBJECT] [--json]       the performance counters this computer offers\n  \
 counters search WORDS... [--json]     find a counter by name\n  \
-counters get PATH... [--json]         read counters now (PATH looks like \\Memory\\Free)\n\n\
-Dyno only looks: no command changes anything on your computer.\n\
+counters get PATH... [--json]         read counters now (PATH looks like \\Memory\\Free)\n  \
+agent COMMAND...                      the background agent's own commands (--version, status, stop, once,\n  \
+                                      service install|uninstall|status|ensure); on Windows the agent program\n  \
+                                      has no console, so use this to see its output and exit code\n\n\
+Dyno only looks: no command changes anything on your computer, except `agent stop` and `agent service`.\n\
 exit codes: 0 done, 1 failed, 2 wrong usage, 3 versions differ, 4 Dyno is not running\n";
 
 /// Why a command line is not usable (the message says what to type instead).

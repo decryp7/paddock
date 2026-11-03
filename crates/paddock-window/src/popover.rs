@@ -37,6 +37,9 @@ pub const FADE: Duration = Duration::from_millis(120);
 pub const RADIUS_MACOS: f64 = 12.0;
 /// A click on the icon this soon after the popover closed itself does not reopen it.
 pub const REOPEN_GUARD: Duration = Duration::from_millis(400);
+/// Windows only: a blur this soon after the popover was shown may be the shell taking the foreground back after the
+/// tray click (the click's mouse-up goes to the taskbar), not an outside click. Other platforms have no grace.
+pub const BLUR_GRACE: Duration = Duration::from_millis(600);
 /// Space between the icon and the popover, and the least margin to the screen edge (physical px).
 pub const GAP: f64 = 6.0;
 
@@ -157,6 +160,61 @@ pub fn click_closes(since_closed: Option<Duration>) -> bool {
     since_closed.is_some_and(|d| d < REOPEN_GUARD)
 }
 
+/// The blur grace of platform `os`: [`BLUR_GRACE`] on Windows, none elsewhere (macOS and Linux keep closing on every blur).
+pub fn blur_grace_for(os: &str) -> Duration {
+    if os == "windows" { BLUR_GRACE } else { Duration::ZERO }
+}
+
+/// What a blur (the popover lost the focus) does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlurAction {
+    /// An outside click: close.
+    Close,
+    /// Too soon after showing (see [`BLUR_GRACE`]): stay open until the grace is over, then [`grace_end`] decides.
+    Keep,
+}
+
+/// What a blur `since_shown` after the popover was shown does, with the grace period `grace`.
+pub fn blur_action(since_shown: Duration, grace: Duration) -> BlurAction {
+    if since_shown < grace {
+        BlurAction::Keep
+    } else {
+        BlurAction::Close
+    }
+}
+
+/// What happens when the grace of a kept blur is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraceEnd {
+    /// The popover has the focus again: nothing to do.
+    Stay,
+    /// The shell (taskbar, tray overflow) still has the foreground: ask for the focus back.
+    Refocus,
+    /// Another window has the foreground, or none: that was a real dismissal; close.
+    Close,
+}
+
+/// The decision at the end of the grace: `focused` is whether the popover has the focus, `shell_foreground` whether the
+/// foreground window is the shell's own ([`is_shell_class`]).
+pub fn grace_end(focused: bool, shell_foreground: bool) -> GraceEnd {
+    if focused {
+        GraceEnd::Stay
+    } else if shell_foreground {
+        GraceEnd::Refocus
+    } else {
+        GraceEnd::Close
+    }
+}
+
+/// Whether a window class is the Windows shell's taskbar or tray overflow (the windows that take the foreground back
+/// after a tray click).
+pub fn is_shell_class(class: &str) -> bool {
+    matches!(
+        class,
+        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "NotifyIconOverflowWindow" | "TopLevelWindowForOverflowXamlIsland"
+    )
+}
+
 /// The material the OS draws behind the transparent window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Material {
@@ -252,6 +310,33 @@ mod tests {
             w: 44.0,
             h: 44.0,
         }
+    }
+
+    #[test]
+    fn a_blur_right_after_showing_keeps_the_popover_a_later_one_closes_it() {
+        let g = BLUR_GRACE;
+        assert_eq!(blur_action(Duration::from_millis(5), g), BlurAction::Keep);
+        assert_eq!(blur_action(g - Duration::from_millis(1), g), BlurAction::Keep);
+        assert_eq!(blur_action(g, g), BlurAction::Close);
+        assert_eq!(blur_action(Duration::from_secs(30), g), BlurAction::Close);
+        assert_eq!(blur_action(Duration::ZERO, Duration::ZERO), BlurAction::Close);
+    }
+
+    #[test]
+    fn only_windows_has_a_grace() {
+        assert_eq!(blur_grace_for("windows"), BLUR_GRACE);
+        assert_eq!(blur_grace_for("macos"), Duration::ZERO);
+        assert_eq!(blur_grace_for("linux"), Duration::ZERO);
+    }
+
+    #[test]
+    fn the_end_of_the_grace_refocuses_only_for_the_shell_and_closes_for_anything_else() {
+        assert_eq!(grace_end(true, false), GraceEnd::Stay);
+        assert_eq!(grace_end(true, true), GraceEnd::Stay);
+        assert_eq!(grace_end(false, true), GraceEnd::Refocus);
+        assert_eq!(grace_end(false, false), GraceEnd::Close);
+        assert!(is_shell_class("Shell_TrayWnd") && is_shell_class("NotifyIconOverflowWindow"));
+        assert!(!is_shell_class("Chrome_WidgetWin_1") && !is_shell_class(""));
     }
 
     #[test]

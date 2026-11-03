@@ -60,6 +60,7 @@ paddock_commands::command_table! {
     /// "Export report..." on the Inventory tab.
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
+    Mutation [MAIN] => commands::open_taskbar_settings,
     Mutation [MAIN] => commands::pick_folder,
     /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035). The tray popup reads its
     /// own layout to draw its widgets.
@@ -299,10 +300,14 @@ fn agent_setup<R: Runtime>(
     // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
     // keep the old job: replace the registration once per version and whenever launchd says it is stale
     // (`service_repair`), in the background, so measuring resumes without the user's help.
+    #[cfg(not(windows))]
     let repair = link.clone();
     // The old route (`tauri-plugin-autostart`) left `~/Library/LaunchAgents/Dyno.plist`; `SMAppService.mainApp` replaces it.
     #[cfg(target_os = "macos")]
     std::thread::spawn(login::migrate_legacy_login_at_start);
+    // Windows: no repair here (it rewrote the app's logon entry in 1.0.0); the stale entry of 1.0.0 is repaired once, with the
+    // switch, when the settings first arrive (`shell::settings_changed`).
+    #[cfg(not(windows))]
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
         match login::platform_service().repair(&|| repair.connected()) {
