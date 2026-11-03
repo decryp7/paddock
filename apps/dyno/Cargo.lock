@@ -1183,6 +1183,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-download",
  "paddock-env",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",

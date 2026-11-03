@@ -22,5 +22,10 @@ export function createBackend(): DynoBackend {
   const engines = inject(BrowserEngines);
   const mock = new MockBackend({ ...mockOptionsFromUrl(OPENED_WITH), jobs: engines.jobs });
   engines.cancelJob = (id) => void mock.cancelJob(id);
+  // `?gates` lets an e2e hold and release the mock's answers (`__mockHold('history')`), so a test sees the loading state
+  // without leaning on a delay.
+  if (typeof window !== 'undefined' && new URLSearchParams(OPENED_WITH).has('gates')) {
+    Object.assign(window, { __mockHold: (name: string) => mock.hold(name), __mockRelease: (name: string) => mock.release(name) });
+  }
   return (browser = mock);
 }

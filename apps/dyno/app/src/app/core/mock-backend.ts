@@ -1463,8 +1463,25 @@ export class MockBackend implements DynoBackend {
     return walk(value) as T;
   }
 
+  /** Requests held until the test releases them (`__mockHold('history')`, `__mockRelease('history')`; mock only, for e2e gates). */
+  private readonly holds = new Map<string, { open: boolean; waiting: Array<() => void> }>();
+
+  /** Holds the answers to `name` from now on, until `release(name)`. */
+  hold(name: string): void {
+    this.holds.set(name, { open: false, waiting: [] });
+  }
+
+  /** Lets the held answers to `name` through, and later ones too. */
+  release(name: string): void {
+    const h = this.holds.get(name);
+    if (!h) return;
+    h.open = true;
+    for (const go of h.waiting.splice(0)) go();
+  }
+
   private reply<T>(name: string, body: () => T, extraMs = 0): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      const gate = this.holds.get(name);
       const run = () => {
         try {
           if (this.fail.has(name)) throw err('internal', `The mock was asked to fail “${name}”.`);
@@ -1474,7 +1491,8 @@ export class MockBackend implements DynoBackend {
         }
       };
       const delay = this.latencyMs === 0 ? 0 : this.latencyMs + extraMs;
-      if (delay === 0) queueMicrotask(run);
+      if (gate && !gate.open) gate.waiting.push(run);
+      else if (delay === 0) queueMicrotask(run);
       else setTimeout(run, delay);
     });
   }

@@ -43,8 +43,26 @@ pub fn install<R: Runtime>(app: &AppHandle<R>, files: Files) -> Arc<Files> {
     files
 }
 
-/// The managed service, if the app set it up.
+/// Marks the service as the open-a-web-address-only fallback ([`install_open_url_only`]).
+struct OpenUrlOnly;
+
+/// Manages a service that can only open web addresses (`files_open_url`, http, https and mailto): no folders, no recent lists
+/// and no picker, and [`files`] does not hand it out, so dropped files are not granted and the storage commands do not use
+/// it. For an app that did not set up user files but whose shell serves the `files_*` commands (About's releases link).
+/// A second call, or an app's own service, wins.
+pub fn install_open_url_only<R: Runtime>(app: &AppHandle<R>) {
+    if app.try_state::<Arc<Files>>().is_some() {
+        return;
+    }
+    app.manage(OpenUrlOnly);
+    install(app, Files::new(crate::recent::Recents::open(None, &[])));
+}
+
+/// The managed service, if the app set it up (not the open-a-web-address-only fallback).
 pub fn files<R: Runtime, M: Manager<R>>(manager: &M) -> Option<Arc<Files>> {
+    if manager.try_state::<OpenUrlOnly>().is_some() {
+        return None;
+    }
     manager.try_state::<Arc<Files>>().map(|f| f.inner().clone())
 }
 
