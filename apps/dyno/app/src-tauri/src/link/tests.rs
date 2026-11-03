@@ -81,53 +81,74 @@ fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
     p
 }
 
-#[cfg(unix)]
-#[test]
-fn the_process_launcher_holds_one_agent_at_a_time_and_ends_exactly_it() {
-    let dir = tempfile::tempdir().unwrap();
-    // Never writes a discovery file: an agent stuck in a slow start.
-    let exe = script(dir.path(), "slow-agent", "exec sleep 600");
-    let starts = Arc::new(AtomicUsize::new(0));
-    let counted = starts.clone();
-    let launcher = ProcessLauncher::new(move || {
-        counted.fetch_add(1, Ordering::SeqCst);
-        Ok(exe.clone())
-    });
-    assert_eq!(launcher.child(), Child::None);
-    launcher.launch().unwrap();
-    let Child::Running { pid } = launcher.child() else {
-        panic!("not running")
+/// The [`Launcher`] contract (ports.rs), the same for every launcher: nothing before a launch, one agent at a time with its pid,
+/// a quit ends it and nothing starts after `close`. `starts` counts the agents started.
+fn contract_one_agent_then_quit(l: &dyn Launcher, starts: &dyn Fn() -> usize) {
+    assert_eq!(l.child(), Child::None, "nothing before a launch");
+    l.launch().unwrap();
+    let Child::Running { pid } = l.child() else {
+        panic!("not running after a launch: {:?}", l.child())
     };
-    launcher.launch().unwrap();
-    assert_eq!(starts.load(Ordering::SeqCst), 1, "a second agent was started while the first runs");
-    assert_eq!(launcher.child(), Child::Running { pid });
-    // Quit: it does not exit by itself, so it is ended through the handle, and nothing starts afterwards.
-    launcher.close();
-    launcher.finish(Duration::from_millis(200));
-    assert!(launcher.launch().is_err(), "a closed launcher starts nothing");
-    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    l.launch().unwrap();
+    assert_eq!(starts(), 1, "a second agent was started while the first runs");
+    assert_eq!(l.child(), Child::Running { pid });
+    l.close();
+    l.finish(Duration::from_millis(200));
+    assert!(matches!(l.child(), Child::Exited { .. }), "ended by the quit: {:?}", l.child());
+    assert!(l.launch().is_err(), "a closed launcher starts nothing");
+    assert_eq!(starts(), 1);
+}
+
+/// The contract's exit: an agent that exits with a code (3: another agent holds the data folder) is reported with it, also when
+/// asked again. `exits` makes the agent exit (a script that exits by itself needs nothing).
+fn contract_exit_code_is_reported(l: &dyn Launcher, exits: &dyn Fn(i32)) {
+    let code = dyno_agent::cli::EXIT_ALREADY_RUNNING;
+    l.launch().unwrap();
+    exits(code);
+    let mut state = l.child();
+    // A real child exits on its own; its exit is what is waited on (a condition, not a time).
+    while matches!(state, Child::Running { .. } | Child::None) {
+        std::thread::sleep(Duration::from_millis(10));
+        state = l.child();
+    }
+    assert_eq!(state, Child::Exited { code: Some(code) });
+    assert_eq!(l.child(), Child::Exited { code: Some(code) }, "the exit is remembered");
 }
 
 #[cfg(unix)]
 #[test]
-fn the_process_launcher_reports_how_its_agent_exited() {
+fn the_process_launcher_keeps_the_launcher_contract() {
     let dir = tempfile::tempdir().unwrap();
+    let exe = script(dir.path(), "slow-agent", "exec sleep 600");
+    let starts = Arc::new(AtomicUsize::new(0));
+    let counted = starts.clone();
+    let l = ProcessLauncher::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Ok(exe.clone())
+    });
+    contract_one_agent_then_quit(&l, &|| starts.load(Ordering::SeqCst));
     let code = dyno_agent::cli::EXIT_ALREADY_RUNNING;
     let exe = script(dir.path(), "refused-agent", &format!("exit {code}"));
-    let launcher = ProcessLauncher::new(move || Ok(exe.clone()));
-    launcher.launch().unwrap();
-    let mut state = launcher.child();
-    // The script exits at once; its exit is what is waited on (a condition, not a time).
-    while matches!(state, Child::Running { .. }) {
-        std::thread::sleep(Duration::from_millis(10));
-        state = launcher.child();
-    }
-    assert_eq!(state, Child::Exited { code: Some(code) });
-    assert_eq!(
-        launcher.child(),
-        Child::Exited { code: Some(code) },
-        "the exit is remembered once reaped"
-    );
+    contract_exit_code_is_reported(&ProcessLauncher::new(move || Ok(exe.clone())), &|_| {});
+    assert_eq!(ProcessLauncher::new(|| Err("x".into())).via(), "child");
+}
+
+#[test]
+fn the_launchd_launcher_keeps_the_launcher_contract() {
+    let exe = std::path::PathBuf::from("/Applications/Dyno.app/Contents/MacOS/dyno-agent");
+    let fake = launchd::fake::Launchd::new();
+    contract_one_agent_then_quit(&fake.launcher(exe.clone()), &|| fake.bootstraps() as usize);
+    let fake = launchd::fake::Launchd::new();
+    contract_exit_code_is_reported(&fake.launcher(exe), &|code| fake.exit(Some(code)));
+}
+
+/// Dyno 1.0.0 on macOS 27.2: the app's fallback agent was its child and the kernel showed it only its own sockets (ADR 0026
+/// amendment). On macOS the app starts its agent through launchd; Linux and Windows keep the child process.
+#[test]
+fn macos_starts_the_apps_agent_through_launchd_and_the_others_as_a_child() {
+    assert_eq!(launch_route("macos"), LaunchRoute::Launchd);
+    assert_eq!(launch_route("linux"), LaunchRoute::Child);
+    assert_eq!(launch_route("windows"), LaunchRoute::Child);
 }
 
 #[test]

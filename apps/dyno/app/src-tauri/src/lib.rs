@@ -258,6 +258,33 @@ impl link::Launcher for NoAgent {
     fn finish(&self, _: std::time::Duration) {}
 }
 
+/// The launcher of the app's own agent ([`link::launch_route`]): a launchd job on macOS, the app's child elsewhere.
+fn app_launcher(dirs: &dyno_agent::paths::Dirs) -> Box<dyn link::Launcher> {
+    let route = link::launch_route(std::env::consts::OS);
+    logging::info(&format!(
+        "the app starts its own agent {}",
+        match route {
+            link::LaunchRoute::Launchd => "as a launchd job",
+            link::LaunchRoute::Child => "as its child process",
+        }
+    ));
+    match route {
+        #[cfg(target_os = "macos")]
+        link::LaunchRoute::Launchd => Box::new(link::LaunchdLauncher::new(
+            login::agent_program,
+            dirs.root().join(link::launchd::PLIST_FILE),
+            paddock_service::native::current_uid(),
+            link::driver::END_GRACE,
+            link::launchd::agent_env(|k| std::env::var(k).ok()),
+            Box::new(paddock_service::system::RealSystem::new().with_timeout(std::time::Duration::from_secs(5))),
+        )),
+        _ => {
+            let _ = dirs;
+            Box::new(ProcessLauncher::new(login::agent_program))
+        }
+    }
+}
+
 /// Dyno's own log, the shell glue and the agent link in `dirs`; the installed app also starts the agent process, keeps
 /// late windows told about it and repairs its service registration.
 fn agent_setup<R: Runtime>(
@@ -274,11 +301,7 @@ fn agent_setup<R: Runtime>(
         logging::uptime_ms()
     ));
     let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels);
-    let launcher: Box<dyn link::Launcher> = if installed {
-        Box::new(ProcessLauncher::new(login::agent_program))
-    } else {
-        Box::new(NoAgent)
-    };
+    let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {
         // Asked before the link starts an agent of its own: none beside one the login service supervises.

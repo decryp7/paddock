@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- macOS: the Network page lists every program's sockets also when Start at login is off. The agent the app starts itself was its child process, and macOS 27 shows a child of an ad-hoc signed app only its own sockets; the app now starts it as a launchd job of the user's session (`launchctl bootstrap`, label `net.decryptology.dyno.agent.ondemand`, its definition in Dyno's data folder, not in `~/Library/LaunchAgents`, so nothing starts it at login), and ends it through launchd on Quit. Linux and Windows are unchanged. The log says which way the agent was started (`Via`) and the agent logs what macOS shows it (Dyno ADR 0026).
+
 ## [1.0.0] - 2026-10-29
 
 ### Fixed
