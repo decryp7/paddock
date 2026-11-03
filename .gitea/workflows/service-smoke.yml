@@ -62,8 +62,7 @@ jobs:
           bundle "$out/n"
           for toml in $tomls; do sed -i '' "s/^version = \"$v_old\"/version = \"$v_new\"/" "$toml"; done
           bundle "$out/n1"
-          [ "$("$out"/n1/*.app/Contents/MacOS/shell-demo-agent --self-test | awk '{print $2}')" = "$v_new" ] \
-            || { echo "::error::build N+1's agent does not report $v_new"; exit 1; }
+          bash scripts/demo/check-agent-version.sh "$(echo "$out"/n1/*.app)/Contents/MacOS/shell-demo-agent" "$v_new"
           git checkout -- $tomls apps/shell-demo/src-tauri/Cargo.lock 2>/dev/null || true
 
       - name: Run the smoke in a fresh VM (always deleted)
