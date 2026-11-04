@@ -1,0 +1,125 @@
+Raw output of the 2026-11-04 rerun after review (ingest-bench graph2 and kv, three interleaved rounds), as printed.
+Machine: Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; nice -n 19 through the machine's semaphore; 'uptime' lines show the load.
+Command: run-r2.sh = graph2 1000000 5000000 <scratch>/g 10, then three rounds of: for each store, KV_MODE=manifest KV_READER=1,
+KV_MODE=factkeys KV_READER=0, KV_MODE=factkeys KV_READER=1 (sqlite-full: the last only), each 'kv <store> 1000000 <scratch>/kvr'.
+
+ 8:59  up 1 day,  2:19, 1 user, load averages: 11.64 17.88 17.63
+graph 1000000 nodes 5000000 edges: both CSR directions from an in-memory edge list 161 ms, 45.8 MiB; footprint 86 MiB
+CSR warm: callers direct: 0.004 ms/query, reached avg 6, 0.685 us per node reached, 200 queries
+CSR warm: callers 3 levels: 0.005 ms/query, reached avg 201, 0.023 us per node reached, 200 queries
+CSR warm: callers unlimited: 20.388 ms/query, reached avg 496497, 0.041 us per node reached, 10 queries
+CSR warm: callees direct: 0.000 ms/query, reached avg 4, 0.079 us per node reached, 200 queries
+CSR warm: callees 3 levels: 0.004 ms/query, reached avg 146, 0.029 us per node reached, 200 queries
+CSR warm: callees unlimited: 28.331 ms/query, reached avg 588448, 0.048 us per node reached, 10 queries
+CSR warm: path A->B bidirectional: 0.032 ms/query, 125/200 connected, visited avg 1282, 0.025 us per node visited
+CSR mapped, first pass (cold): callers direct: 0.518 ms/query, reached avg 6, 84.374 us per node reached, 200 queries
+CSR mapped, first pass (cold): callers 3 levels: 0.760 ms/query, reached avg 201, 3.765 us per node reached, 200 queries
+CSR mapped, first pass (cold): callers unlimited: 23.180 ms/query, reached avg 496497, 0.047 us per node reached, 10 queries
+CSR mapped, first pass (cold): callees direct: 0.704 ms/query, reached avg 4, 149.788 us per node reached, 200 queries
+CSR mapped, first pass (cold): callees 3 levels: 0.511 ms/query, reached avg 146, 3.485 us per node reached, 200 queries
+CSR mapped, first pass (cold): callees unlimited: 29.866 ms/query, reached avg 588448, 0.051 us per node reached, 10 queries
+CSR mapped, first pass (cold): path A->B bidirectional: 0.030 ms/query, 125/200 connected, visited avg 1282, 0.024 us per node visited
+CSR mapped, second pass: callers direct: 0.000 ms/query, reached avg 6, 0.028 us per node reached, 200 queries
+CSR mapped, second pass: callers 3 levels: 0.004 ms/query, reached avg 201, 0.018 us per node reached, 200 queries
+CSR mapped, second pass: callers unlimited: 21.035 ms/query, reached avg 496497, 0.042 us per node reached, 10 queries
+CSR mapped, second pass: callees direct: 0.000 ms/query, reached avg 4, 0.078 us per node reached, 200 queries
+CSR mapped, second pass: callees 3 levels: 0.004 ms/query, reached avg 146, 0.027 us per node reached, 200 queries
+CSR mapped, second pass: callees unlimited: 35.049 ms/query, reached avg 588448, 0.060 us per node reached, 10 queries
+CSR mapped, second pass: path A->B bidirectional: 0.030 ms/query, 125/200 connected, visited avg 1282, 0.023 us per node visited
+footprint before mapping queries 102 MiB, after 103 MiB (clean mapped pages are not footprint)
+SQLite: insert 1.79 s, indexes 6.26 s, file 222.0 MiB, cache_size 512 MiB
+SQLite (BFS in Rust over indexed lookups): callers direct: 0.002 ms/query, reached avg 6, 0.397 us per node reached, 200 queries
+SQLite (BFS in Rust over indexed lookups): callers 3 levels: 0.075 ms/query, reached avg 201, 0.373 us per node reached, 200 queries
+SQLite (BFS in Rust over indexed lookups): callers unlimited: 882.395 ms/query, reached avg 496497, 1.777 us per node reached, 10 queries
+SQLite (BFS in Rust over indexed lookups): callees direct: 0.002 ms/query, reached avg 4, 0.520 us per node reached, 200 queries
+SQLite (BFS in Rust over indexed lookups): callees 3 levels: 0.053 ms/query, reached avg 146, 0.360 us per node reached, 200 queries
+SQLite (BFS in Rust over indexed lookups): callees unlimited: 1042.936 ms/query, reached avg 588448, 1.772 us per node reached, 10 queries
+SQLite (BFS in Rust over indexed lookups): path A->B bidirectional: 0.474 ms/query, 125/200 connected, visited avg 1282, 0.370 us per node visited
+SQLite recursive CTE (UNION on the node): callers unlimited: 1322.7 ms/query, reached avg 496497, 2.664 us per node reached
+SQLite recursive CTE (UNION on the node): callees unlimited: 1493.8 ms/query, reached avg 588448, 2.539 us per node reached
+footprint now 340 MiB, lifetime peak 696 MiB; peak RSS 698 MiB
+ 9:00  up 1 day,  2:20, 1 user, load averages: 19.80 18.99 18.05
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 3.11 s (322 k rows/s); reads during load 297 k/s (worst 22.2 ms); point lookup 2.49 us; 100-row commit 20.71 ms; disk 123 MiB; footprint 9 MiB, lifetime peak 9 MiB
+peak RSS 11 MiB
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 46.65 s (21 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 2.02 us; 100-row commit 18.05 ms; disk 81 MiB; footprint 5 MiB, lifetime peak 5 MiB
+peak RSS 8 MiB
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 40.29 s (25 k rows/s); reads during load 93 k/s (worst 34.9 ms); point lookup 2.00 us; 100-row commit 16.17 ms; disk 81 MiB; footprint 8 MiB, lifetime peak 8 MiB
+peak RSS 10 MiB
+redb 2 (fsync per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 6.38 s (157 k rows/s); reads during load 1036 k/s (worst 6.0 ms); point lookup 1.12 us; 100-row commit 95.02 ms; disk 258 MiB; footprint 186 MiB, lifetime peak 186 MiB
+peak RSS 313 MiB
+redb 2 (fsync per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 60.43 s (17 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 1.08 us; 100-row commit 53.29 ms; disk 129 MiB; footprint 185 MiB, lifetime peak 185 MiB
+peak RSS 188 MiB
+redb 2 (fsync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 43.83 s (23 k rows/s); reads during load 971 k/s (worst 5.3 ms); point lookup 1.11 us; 100-row commit 39.02 ms; disk 129 MiB; footprint 211 MiB, lifetime peak 211 MiB
+peak RSS 214 MiB
+LMDB heed 0.22 (sync per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 2.26 s (442 k rows/s); reads during load 1102 k/s (worst 0.1 ms); point lookup 1.05 us; 100-row commit 46.96 ms; disk 108 MiB; footprint 5 MiB, lifetime peak 5 MiB
+peak RSS 114 MiB
+LMDB heed 0.22 (sync per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 32.16 s (31 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 1.00 us; 100-row commit 50.22 ms; disk 185 MiB; footprint 63 MiB, lifetime peak 63 MiB
+peak RSS 249 MiB
+LMDB heed 0.22 (sync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 42.01 s (24 k rows/s); reads during load 1086 k/s (worst 0.1 ms); point lookup 1.04 us; 100-row commit 40.83 ms; disk 185 MiB; footprint 64 MiB, lifetime peak 64 MiB
+peak RSS 249 MiB
+fjall 2 (persist SyncAll per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 4.99 s (201 k rows/s); reads during load 600 k/s (worst 63.4 ms); point lookup 4.83 us; 100-row commit 17.83 ms; disk 45 MiB; footprint 85 MiB, lifetime peak 85 MiB
+peak RSS 123 MiB
+fjall 2 (persist SyncAll per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 3.96 s (253 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 2.46 us; 100-row commit 15.25 ms; disk 62 MiB; footprint 103 MiB, lifetime peak 103 MiB
+peak RSS 149 MiB
+fjall 2 (persist SyncAll per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 3.05 s (328 k rows/s); reads during load 782 k/s (worst 47.3 ms); point lookup 2.39 us; 100-row commit 13.15 ms; disk 62 MiB; footprint 104 MiB, lifetime peak 122 MiB
+peak RSS 151 MiB
+SQLite WAL, synchronous=FULL (fsync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 46.89 s (21 k rows/s); reads during load 163 k/s (worst 1344.3 ms); point lookup 2.14 us; 100-row commit 16.64 ms; disk 81 MiB; footprint 8 MiB, lifetime peak 8 MiB
+peak RSS 10 MiB
+round 1 done
+ 9:07  up 1 day,  2:26, 1 user, load averages: 7.27 9.72 13.61
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 3.54 s (282 k rows/s); reads during load 306 k/s (worst 36.1 ms); point lookup 2.60 us; 100-row commit 20.52 ms; disk 126 MiB; footprint 9 MiB, lifetime peak 9 MiB
+peak RSS 11 MiB
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 46.64 s (21 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 2.13 us; 100-row commit 17.04 ms; disk 81 MiB; footprint 5 MiB, lifetime peak 5 MiB
+peak RSS 8 MiB
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 46.35 s (22 k rows/s); reads during load 91 k/s (worst 616.8 ms); point lookup 2.17 us; 100-row commit 17.11 ms; disk 104 MiB; footprint 8 MiB, lifetime peak 8 MiB
+peak RSS 10 MiB
+redb 2 (fsync per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 6.35 s (157 k rows/s); reads during load 972 k/s (worst 5.6 ms); point lookup 1.10 us; 100-row commit 68.61 ms; disk 258 MiB; footprint 186 MiB, lifetime peak 186 MiB
+peak RSS 313 MiB
+redb 2 (fsync per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 54.76 s (18 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 1.10 us; 100-row commit 57.97 ms; disk 129 MiB; footprint 186 MiB, lifetime peak 186 MiB
+peak RSS 189 MiB
+redb 2 (fsync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 49.49 s (20 k rows/s); reads during load 956 k/s (worst 3.7 ms); point lookup 1.14 us; 100-row commit 54.83 ms; disk 129 MiB; footprint 191 MiB, lifetime peak 191 MiB
+peak RSS 214 MiB
+LMDB heed 0.22 (sync per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 4.03 s (248 k rows/s); reads during load 1144 k/s (worst 0.0 ms); point lookup 1.07 us; 100-row commit 66.94 ms; disk 108 MiB; footprint 5 MiB, lifetime peak 5 MiB
+peak RSS 114 MiB
+LMDB heed 0.22 (sync per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 41.98 s (24 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 1.02 us; 100-row commit 48.99 ms; disk 185 MiB; footprint 63 MiB, lifetime peak 63 MiB
+peak RSS 249 MiB
+LMDB heed 0.22 (sync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 36.70 s (27 k rows/s); reads during load 1108 k/s (worst 3.3 ms); point lookup 1.07 us; 100-row commit 70.92 ms; disk 185 MiB; footprint 63 MiB, lifetime peak 63 MiB
+peak RSS 249 MiB
+fjall 2 (persist SyncAll per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 6.00 s (167 k rows/s); reads during load 563 k/s (worst 191.4 ms); point lookup 4.79 us; 100-row commit 21.26 ms; disk 45 MiB; footprint 90 MiB, lifetime peak 90 MiB
+peak RSS 128 MiB
+fjall 2 (persist SyncAll per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 4.06 s (246 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 2.42 us; 100-row commit 15.94 ms; disk 62 MiB; footprint 101 MiB, lifetime peak 101 MiB
+peak RSS 146 MiB
+fjall 2 (persist SyncAll per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 3.19 s (314 k rows/s); reads during load 732 k/s (worst 56.4 ms); point lookup 2.38 us; 100-row commit 13.71 ms; disk 62 MiB; footprint 105 MiB, lifetime peak 123 MiB
+peak RSS 149 MiB
+SQLite WAL, synchronous=FULL (fsync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 46.24 s (22 k rows/s); reads during load 179 k/s (worst 43.2 ms); point lookup 2.09 us; 100-row commit 18.15 ms; disk 81 MiB; footprint 8 MiB, lifetime peak 9 MiB
+peak RSS 11 MiB
+round 2 done
+ 9:13  up 1 day,  2:33, 1 user, load averages: 4.87 7.52 11.11
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 3.26 s (307 k rows/s); reads during load 266 k/s (worst 21.8 ms); point lookup 2.56 us; 100-row commit 19.06 ms; disk 125 MiB; footprint 8 MiB, lifetime peak 8 MiB
+peak RSS 11 MiB
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 37.48 s (27 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 2.22 us; 100-row commit 9.53 ms; disk 81 MiB; footprint 5 MiB, lifetime peak 5 MiB
+peak RSS 8 MiB
+SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 38.91 s (26 k rows/s); reads during load 95 k/s (worst 142.7 ms); point lookup 2.34 us; 100-row commit 18.72 ms; disk 193 MiB; footprint 9 MiB, lifetime peak 9 MiB
+peak RSS 12 MiB
+redb 2 (fsync per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 5.96 s (168 k rows/s); reads during load 970 k/s (worst 5.7 ms); point lookup 1.09 us; 100-row commit 63.14 ms; disk 258 MiB; footprint 153 MiB, lifetime peak 179 MiB
+peak RSS 281 MiB
+redb 2 (fsync per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 50.53 s (20 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 1.12 us; 100-row commit 52.10 ms; disk 129 MiB; footprint 180 MiB, lifetime peak 180 MiB
+peak RSS 184 MiB
+redb 2 (fsync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 65.32 s (15 k rows/s); reads during load 807 k/s (worst 31.6 ms); point lookup 1.21 us; 100-row commit 40.06 ms; disk 129 MiB; footprint 179 MiB, lifetime peak 188 MiB
+peak RSS 216 MiB
+LMDB heed 0.22 (sync per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 2.62 s (382 k rows/s); reads during load 837 k/s (worst 23.3 ms); point lookup 1.02 us; 100-row commit 48.35 ms; disk 108 MiB; footprint 6 MiB, lifetime peak 6 MiB
+peak RSS 115 MiB
+LMDB heed 0.22 (sync per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 34.40 s (29 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 0.91 us; 100-row commit 42.96 ms; disk 185 MiB; footprint 64 MiB, lifetime peak 64 MiB
+peak RSS 250 MiB
+LMDB heed 0.22 (sync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 41.81 s (24 k rows/s); reads during load 1150 k/s (worst 9.8 ms); point lookup 1.03 us; 100-row commit 48.67 ms; disk 185 MiB; footprint 63 MiB, lifetime peak 63 MiB
+peak RSS 249 MiB
+fjall 2 (persist SyncAll per commit) [manifest: sorted path keys]: load 1000000 rows in commits of 10000: 5.87 s (170 k rows/s); reads during load 580 k/s (worst 73.4 ms); point lookup 5.04 us; 100-row commit 21.14 ms; disk 45 MiB; footprint 101 MiB, lifetime peak 101 MiB
+peak RSS 137 MiB
+fjall 2 (persist SyncAll per commit) [fact_keys: random 32-byte keys, no reader]: load 1000000 rows in commits of 10000: 4.55 s (220 k rows/s); reads during load 0 k/s (worst 0.0 ms); point lookup 2.59 us; 100-row commit 19.66 ms; disk 62 MiB; footprint 105 MiB, lifetime peak 105 MiB
+peak RSS 148 MiB
+fjall 2 (persist SyncAll per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 4.49 s (223 k rows/s); reads during load 759 k/s (worst 101.8 ms); point lookup 2.31 us; 100-row commit 23.41 ms; disk 62 MiB; footprint 104 MiB, lifetime peak 122 MiB
+peak RSS 149 MiB
+SQLite WAL, synchronous=FULL (fsync per commit) [fact_keys: random 32-byte keys]: load 1000000 rows in commits of 10000: 55.26 s (18 k rows/s); reads during load 176 k/s (worst 70.6 ms); point lookup 2.12 us; 100-row commit 21.83 ms; disk 81 MiB; footprint 8 MiB, lifetime peak 8 MiB
+peak RSS 11 MiB
+round 3 done
+ 9:20  up 1 day,  2:40, 1 user, load averages: 8.47 9.87 11.04

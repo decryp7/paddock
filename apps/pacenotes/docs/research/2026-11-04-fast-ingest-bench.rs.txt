@@ -1,10 +1,10 @@
-// Throw-away harness behind docs/research/2026-11-04-fast-ingest.md (rule 48). Not built by any workspace.
-// To run: in a scratch crate outside the repository, put the Cargo.toml below, the first file as src/main.rs and
-// the second as src/kv.rs, then CARGO_BUILD_JOBS=2 cargo build --release, and:
-//   ingest-bench parse <folder> 2 4                              # parse, tags query, hashes, incremental re-parse
-//   [REACH=1] ingest-bench graph 1000000 5000000 <scratch>/graph.db   # invented call graph: CSR against SQLite;
-//                                                                    # REACH adds unlimited depth and paths A to B
-//   [KV_SORTED=1] ingest-bench kv <redb|fjall|lmdb|sqlite|sqlite-full> 1000000 <scratch>/kv   # metadata stores
+// Throw-away harness behind docs/research/2026-11-04-fast-ingest.md and ADR 0012 (rule 48). Not built by any workspace.
+// To run: in a scratch crate outside the repository, put the Cargo.toml below and the three files as src/main.rs, src/graph.rs
+// and src/kv.rs, then CARGO_BUILD_JOBS=2 cargo build --release, and:
+//   ingest-bench parse <folder> 2 4                        # parse, tags query, hashes, incremental re-parse
+//   ingest-bench graph2 1000000 5000000 <scratch>/g 10     # one query set: CSR warm, cold mapped, SQLite; footprint
+//   [REACH=1] ingest-bench graph 1000000 5000000 <db>     # the first run's graph comparison (kept for history)
+//   KV_MODE=<manifest|factkeys> KV_READER=<1|0> ingest-bench kv <redb|fjall|lmdb|sqlite|sqlite-full> 1000000 <scratch>/kv
 //
 // [package]
 // name = "ingest-bench"
@@ -35,6 +35,7 @@
 // ===== src/main.rs =====
 //! Throw-away ingest measurements for the Pacenotes fast-ingest research note (rule 48). Invented graph data; source corpus is
 //! Paddock's own code.
+mod graph;
 mod kv;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -43,7 +44,17 @@ use rayon::prelude::*;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor};
 
-fn peak_rss_mb() -> f64 {
+/// Physical footprint (rule 26), current and lifetime peak, in MiB (macOS `proc_pid_rusage` V4).
+pub fn footprint_mb() -> (f64, f64) {
+    let mut ri: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::proc_pid_rusage(std::process::id() as i32, libc::RUSAGE_INFO_V4, &mut ri as *mut _ as *mut libc::rusage_info_t) };
+    if rc != 0 {
+        return (f64::NAN, f64::NAN);
+    }
+    (ri.ri_phys_footprint as f64 / 1048576.0, ri.ri_lifetime_max_phys_footprint as f64 / 1048576.0)
+}
+
+pub fn peak_rss_mb() -> f64 {
     let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
     ru.ru_maxrss as f64 / (1024.0 * 1024.0) // bytes on macOS
@@ -482,6 +493,7 @@ fn main() {
             let threads: Vec<usize> = a[3..].iter().map(|s| s.parse().unwrap()).collect();
             cmd_parse(Path::new(&a[2]), &threads)
         }
+        Some("graph2") => graph::cmd(a[2].parse().unwrap(), a[3].parse().unwrap(), Path::new(&a[4]), a[5].parse().unwrap()),
         Some("graph") => cmd_graph(a[2].parse().unwrap(), a[3].parse().unwrap(), Path::new(&a[4])),
         Some("kv") => {
             let n: u64 = a[3].parse().unwrap();
@@ -504,6 +516,315 @@ fn main() {
     }
 }
 
+// ===== src/graph.rs =====
+//! Graph queries on one invented graph, the same query sets on both backends: CSR (in memory, and a cold mapped file) and SQLite
+//! (indexed edges, page cache sized to the data). Every traversal is the same BFS with a visited stamp; only the neighbour lookup
+//! differs. A recursive CTE is also timed for reference, deduplicating on the node only (no re-expansion).
+use std::io::Write;
+use std::path::Path;
+use std::time::Instant;
+
+use crate::footprint_mb;
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+    fn skewed(&mut self, n: u64) -> u64 {
+        let u = (self.next() % 1_000_000) as f64 / 1_000_000.0;
+        ((u * u * u) * n as f64) as u64 % n
+    }
+}
+
+/// Neighbours of a node, in one direction.
+trait Adj {
+    fn each(&mut self, n: u32, f: &mut dyn FnMut(u32));
+}
+struct Csr<'a> {
+    off: &'a [u32],
+    adj: &'a [u32],
+}
+impl Adj for Csr<'_> {
+    fn each(&mut self, n: u32, f: &mut dyn FnMut(u32)) {
+        for &m in &self.adj[self.off[n as usize] as usize..self.off[n as usize + 1] as usize] {
+            f(m)
+        }
+    }
+}
+struct Sql<'a> {
+    st: rusqlite::CachedStatement<'a>,
+}
+impl Adj for Sql<'_> {
+    fn each(&mut self, n: u32, f: &mut dyn FnMut(u32)) {
+        let mut rows = self.st.query([n]).unwrap();
+        while let Some(r) = rows.next().unwrap() {
+            f(r.get::<_, u32>(0).unwrap())
+        }
+    }
+}
+
+struct Visited {
+    seen: Vec<u32>,
+    stamp: u32,
+}
+impl Visited {
+    fn next(&mut self) -> u32 {
+        self.stamp += 1;
+        self.stamp
+    }
+}
+
+/// BFS up to `depth` levels (u32::MAX = unlimited); returns nodes reached (start excluded).
+fn bfs(a: &mut dyn Adj, v: &mut Visited, start: u32, depth: u32) -> usize {
+    let st = v.next();
+    v.seen[start as usize] = st;
+    let mut frontier = vec![start];
+    let mut reached = 0;
+    let mut d = 0;
+    while !frontier.is_empty() && d < depth {
+        let mut next = Vec::new();
+        for &n in &frontier {
+            a.each(n, &mut |m| {
+                if v.seen[m as usize] != st {
+                    v.seen[m as usize] = st;
+                    next.push(m);
+                }
+            });
+        }
+        reached += next.len();
+        frontier = next;
+        d += 1;
+    }
+    reached
+}
+
+/// Bidirectional BFS a -> b: expands the smaller frontier; returns (found, nodes visited).
+fn path(fwd: &mut dyn Adj, rev: &mut dyn Adj, va: &mut Visited, vb: &mut Visited, a: u32, b: u32) -> (bool, usize) {
+    let (sa, sb) = (va.next(), vb.next());
+    va.seen[a as usize] = sa;
+    vb.seen[b as usize] = sb;
+    if a == b {
+        return (true, 1);
+    }
+    let (mut fa, mut fb) = (vec![a], vec![b]);
+    let mut visited = 2;
+    while !fa.is_empty() && !fb.is_empty() {
+        let forward = fa.len() <= fb.len();
+        let mut next = Vec::new();
+        let mut hit = false;
+        if forward {
+            for &n in &fa {
+                fwd.each(n, &mut |m| {
+                    if vb.seen[m as usize] == sb {
+                        hit = true;
+                    } else if va.seen[m as usize] != sa {
+                        va.seen[m as usize] = sa;
+                        next.push(m);
+                    }
+                });
+                if hit {
+                    break;
+                }
+            }
+            visited += next.len();
+            fa = next;
+        } else {
+            for &n in &fb {
+                rev.each(n, &mut |m| {
+                    if va.seen[m as usize] == sa {
+                        hit = true;
+                    } else if vb.seen[m as usize] != sb {
+                        vb.seen[m as usize] = sb;
+                        next.push(m);
+                    }
+                });
+                if hit {
+                    break;
+                }
+            }
+            visited += next.len();
+            fb = next;
+        }
+        if hit {
+            return (true, visited);
+        }
+    }
+    (false, visited)
+}
+
+fn csr(nodes: u32, e: &mut [(u32, u32)], by_dst: bool) -> (Vec<u32>, Vec<u32>) {
+    if by_dst {
+        e.sort_unstable_by_key(|&(s, d)| (d, s));
+    } else {
+        e.sort_unstable();
+    }
+    let mut off = vec![0u32; nodes as usize + 1];
+    for &(s, d) in e.iter() {
+        off[if by_dst { d } else { s } as usize + 1] += 1;
+    }
+    for i in 0..nodes as usize {
+        off[i + 1] += off[i];
+    }
+    let adj = e.iter().map(|&(s, d)| if by_dst { s } else { d }).collect();
+    (off, adj)
+}
+
+struct Sets {
+    q3: Vec<u32>,
+    qu: Vec<u32>,
+    pairs: Vec<(u32, u32)>,
+}
+
+fn run_queries(name: &str, fwd: &mut dyn Adj, rev: &mut dyn Adj, nodes: u32, s: &Sets) {
+    let mut v = Visited { seen: vec![0; nodes as usize], stamp: 0 };
+    let mut vb = Visited { seen: vec![0; nodes as usize], stamp: 0 };
+    for dir in ["callers", "callees"] {
+        let a: &mut dyn Adj = if dir == "callers" { &mut *rev } else { &mut *fwd };
+        for (label, depth, qs) in [("direct", 1u32, &s.q3), ("3 levels", 3, &s.q3), ("unlimited", u32::MAX, &s.qu)] {
+            let t = Instant::now();
+            let mut reached = 0usize;
+            for &q in qs.iter() {
+                reached += bfs(a, &mut v, q, depth);
+            }
+            let secs = t.elapsed().as_secs_f64();
+            println!(
+                "{name}: {dir} {label}: {:.3} ms/query, reached avg {}, {:.3} us per node reached, {} queries",
+                secs * 1e3 / qs.len() as f64,
+                reached / qs.len(),
+                if reached > 0 { secs * 1e6 / reached as f64 } else { 0.0 },
+                qs.len()
+            );
+        }
+    }
+    let t = Instant::now();
+    let (mut found, mut vis) = (0, 0);
+    for &(a, b) in &s.pairs {
+        let (f, n) = path(fwd, rev, &mut v, &mut vb, a, b);
+        found += f as usize;
+        vis += n;
+    }
+    let secs = t.elapsed().as_secs_f64();
+    println!(
+        "{name}: path A->B bidirectional: {:.3} ms/query, {found}/{} connected, visited avg {}, {:.3} us per node visited",
+        secs * 1e3 / s.pairs.len() as f64,
+        s.pairs.len(),
+        vis / s.pairs.len(),
+        secs * 1e6 / vis as f64
+    );
+}
+
+fn write_nocache(path: &Path, parts: &[&[u32]]) {
+    use std::os::unix::io::AsRawFd;
+    let _ = std::fs::remove_file(path);
+    let mut f = std::fs::File::create(path).unwrap();
+    unsafe { libc::fcntl(f.as_raw_fd(), libc::F_NOCACHE, 1) };
+    for p in parts {
+        let bytes = unsafe { std::slice::from_raw_parts(p.as_ptr() as *const u8, p.len() * 4) };
+        f.write_all(bytes).unwrap();
+    }
+    f.sync_all().unwrap();
+}
+
+pub fn cmd(nodes: u32, edges: usize, dir: &Path, sqlite_queries: usize) {
+    std::fs::create_dir_all(dir).unwrap();
+    let mut rng = Rng(42);
+    let mut e: Vec<(u32, u32)> = (0..edges).map(|_| ((rng.next() % nodes as u64) as u32, rng.skewed(nodes as u64) as u32)).collect();
+    let t = Instant::now();
+    let (roff, rsrc) = csr(nodes, &mut e, true);
+    let (foff, fdst) = csr(nodes, &mut e, false);
+    println!(
+        "graph {nodes} nodes {edges} edges: both CSR directions from an in-memory edge list {:.0} ms, {:.1} MiB; footprint {:.0} MiB",
+        t.elapsed().as_secs_f64() * 1e3,
+        ((roff.len() + rsrc.len() + foff.len() + fdst.len()) * 4) as f64 / 1048576.0,
+        footprint_mb().0
+    );
+    let mut rq = Rng(77);
+    let sets = Sets {
+        q3: (0..200).map(|_| (rq.next() % nodes as u64) as u32).collect(),
+        qu: (0..sqlite_queries).map(|_| (rq.next() % nodes as u64) as u32).collect(),
+        pairs: (0..200).map(|_| ((rq.next() % nodes as u64) as u32, (rq.next() % nodes as u64) as u32)).collect(),
+    };
+    // CSR, warm, in memory
+    run_queries("CSR warm", &mut Csr { off: &foff, adj: &fdst }, &mut Csr { off: &roff, adj: &rsrc }, nodes, &sets);
+    // CSR, cold mapped file: written with F_NOCACHE so its pages are not in the cache, then mapped; first pass, then a second
+    let file = dir.join("graph.csr");
+    write_nocache(&file, &[&roff, &rsrc, &foff, &fdst]);
+    let f = std::fs::File::open(&file).unwrap();
+    let len = f.metadata().unwrap().len() as usize;
+    let p = unsafe {
+        use std::os::unix::io::AsRawFd;
+        libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, f.as_raw_fd(), 0)
+    };
+    let all = unsafe { std::slice::from_raw_parts(p as *const u32, len / 4) };
+    let (a, rest) = all.split_at(roff.len());
+    let (b, rest) = rest.split_at(rsrc.len());
+    let (c, d) = rest.split_at(foff.len());
+    let fp_before = footprint_mb().0;
+    for pass in ["CSR mapped, first pass (cold)", "CSR mapped, second pass"] {
+        run_queries(pass, &mut Csr { off: c, adj: d }, &mut Csr { off: a, adj: b }, nodes, &sets);
+    }
+    println!("footprint before mapping queries {:.0} MiB, after {:.0} MiB (clean mapped pages are not footprint)", fp_before, footprint_mb().0);
+    unsafe { libc::munmap(p, len) };
+    drop((roff, rsrc, foff, fdst));
+    // SQLite, cache sized to the data
+    let db = dir.join("graph.db");
+    for x in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{x}", db.display()));
+    }
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-524288; CREATE TABLE edges(src INTEGER NOT NULL, dst INTEGER NOT NULL);").unwrap();
+    let t = Instant::now();
+    {
+        let tx = conn.unchecked_transaction().unwrap();
+        {
+            let mut st = tx.prepare_cached("INSERT INTO edges(src,dst) VALUES (?1,?2)").unwrap();
+            for &(s, d) in &e {
+                st.execute([s, d]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+    let ins = t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    conn.execute_batch("CREATE INDEX edges_dst ON edges(dst, src); CREATE INDEX edges_src ON edges(src, dst); PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    println!(
+        "SQLite: insert {:.2} s, indexes {:.2} s, file {:.1} MiB, cache_size 512 MiB",
+        ins,
+        t.elapsed().as_secs_f64(),
+        std::fs::metadata(&db).unwrap().len() as f64 / 1048576.0
+    );
+    // warm the cache once over both indexes
+    conn.query_row("SELECT sum(src) FROM edges INDEXED BY edges_dst", [], |_| Ok(())).unwrap();
+    conn.query_row("SELECT sum(dst) FROM edges INDEXED BY edges_src", [], |_| Ok(())).unwrap();
+    {
+        let mut fwd = Sql { st: conn.prepare_cached("SELECT dst FROM edges WHERE src = ?1").unwrap() };
+        let mut rev = Sql { st: conn.prepare_cached("SELECT src FROM edges WHERE dst = ?1").unwrap() };
+        run_queries("SQLite (BFS in Rust over indexed lookups)", &mut fwd, &mut rev, nodes, &sets);
+    }
+    for (dir, sql) in [
+        ("callers", "WITH RECURSIVE r(n) AS (SELECT ?1 UNION SELECT e.src FROM edges e JOIN r ON e.dst = r.n) SELECT count(*) - 1 FROM r"),
+        ("callees", "WITH RECURSIVE r(n) AS (SELECT ?1 UNION SELECT e.dst FROM edges e JOIN r ON e.src = r.n) SELECT count(*) - 1 FROM r"),
+    ] {
+        let mut st = conn.prepare_cached(sql).unwrap();
+        let t = Instant::now();
+        let mut reached = 0i64;
+        for &q in &sets.qu {
+            reached += st.query_row([q], |r| r.get::<_, i64>(0)).unwrap();
+        }
+        let secs = t.elapsed().as_secs_f64();
+        println!(
+            "SQLite recursive CTE (UNION on the node): {dir} unlimited: {:.1} ms/query, reached avg {}, {:.3} us per node reached",
+            secs * 1e3 / sets.qu.len() as f64,
+            reached / sets.qu.len() as i64,
+            if reached > 0 { secs * 1e6 / reached as f64 } else { 0.0 }
+        );
+    }
+    let (now, peak) = footprint_mb();
+    println!("footprint now {now:.0} MiB, lifetime peak {peak:.0} MiB; peak RSS {:.0} MiB", crate::peak_rss_mb());
+}
+
 // ===== src/kv.rs =====
 //! Metadata-store micro-benchmark: a file manifest (path key, 64-byte value), invented paths.
 use std::path::Path;
@@ -513,18 +834,22 @@ use std::time::Instant;
 
 pub trait Kv: Send + Sync + 'static {
     fn name(&self) -> &'static str;
-    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]);
+    fn put_batch(&self, items: &[(Vec<u8>, Vec<u8>)]);
     fn get(&self, k: &[u8]) -> bool;
 }
 
-fn key(i: u64) -> Vec<u8> {
-    if std::env::var_os("KV_SORTED").is_some() {
-        return format!("src/module_{:05}/file_{:09}.rs", i / 256, i).into_bytes();
-    }
-    format!("src/module_{:05}/sub_{:03}/file_{:07}.rs", i % 4096, (i / 7) % 512, i).into_bytes()
+fn factkeys() -> bool {
+    std::env::var("KV_MODE").map(|m| m == "factkeys").unwrap_or(false)
 }
-fn val(i: u64) -> [u8; 64] {
-    let mut v = [0u8; 64];
+/// manifest: a path in walk order (sorted), 64-byte value; factkeys: a uniform random 32-byte hash, 8-byte value (a rowid).
+fn key(i: u64) -> Vec<u8> {
+    if factkeys() {
+        return blake3::hash(&i.to_le_bytes()).as_bytes().to_vec();
+    }
+    format!("src/module_{:05}/file_{:09}.rs", i / 256, i).into_bytes()
+}
+fn val(i: u64) -> Vec<u8> {
+    let mut v = vec![0u8; if factkeys() { 8 } else { 64 }];
     v[..8].copy_from_slice(&i.to_le_bytes());
     v
 }
@@ -554,10 +879,11 @@ pub fn run(store: Arc<dyn Kv>, dir: &Path, n: u64) {
     let stop = Arc::new(AtomicBool::new(false));
     let reads = Arc::new(AtomicU64::new(0));
     let (s2, w2, st2, r2) = (store.clone(), written.clone(), stop.clone(), reads.clone());
+    let with_reader = std::env::var("KV_READER").map(|v| v != "0").unwrap_or(true);
     let reader = std::thread::spawn(move || {
         let mut rng = Rng(7);
         let mut worst = 0f64;
-        while !st2.load(Ordering::Relaxed) {
+        while with_reader && !st2.load(Ordering::Relaxed) {
             let w = w2.load(Ordering::Acquire);
             if w == 0 {
                 std::thread::yield_now();
@@ -597,11 +923,13 @@ pub fn run(store: Arc<dyn Kv>, dir: &Path, n: u64) {
         store.put_batch(&items);
     }
     let small = t.elapsed().as_secs_f64() / 100.0;
+    let (fp, fpeak) = crate::footprint_mb();
     println!(
-        "{}{}: bulk load {} rows in batches of {batch}: {:.2} s ({:.0} k rows/s); reads during load {:.0} k/s (worst {:.1} ms); \
-point lookup {:.2} us; 100-row commit {:.2} ms; disk {:.0} MiB",
+        "{} [{}{}]: load {} rows in commits of {batch}: {:.2} s ({:.0} k rows/s); reads during load {:.0} k/s (worst {:.1} ms); \
+point lookup {:.2} us; 100-row commit {:.2} ms; disk {:.0} MiB; footprint {:.0} MiB, lifetime peak {:.0} MiB",
         store.name(),
-        if std::env::var_os("KV_SORTED").is_some() { " (keys in insertion order)" } else { " (keys in random order)" },
+        if factkeys() { "fact_keys: random 32-byte keys" } else { "manifest: sorted path keys" },
+        if with_reader { "" } else { ", no reader" },
         n,
         load,
         n as f64 / load / 1e3,
@@ -609,7 +937,9 @@ point lookup {:.2} us; 100-row commit {:.2} ms; disk {:.0} MiB",
         worst * 1e3,
         look * 1e6 / q as f64,
         small * 1e3,
-        dir_size(dir) as f64 / 1048576.0
+        dir_size(dir) as f64 / 1048576.0,
+        fp,
+        fpeak
     );
 }
 
@@ -622,8 +952,8 @@ impl Redb {
     }
 }
 impl Kv for Redb {
-    fn name(&self) -> &'static str { "redb 2" }
-    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+    fn name(&self) -> &'static str { "redb 2 (fsync per commit)" }
+    fn put_batch(&self, items: &[(Vec<u8>, Vec<u8>)]) {
         let w = self.0.begin_write().unwrap();
         {
             let mut t = w.open_table(T).unwrap();
@@ -650,8 +980,8 @@ impl Fjall {
     }
 }
 impl Kv for Fjall {
-    fn name(&self) -> &'static str { "fjall 2" }
-    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+    fn name(&self) -> &'static str { "fjall 2 (persist SyncAll per commit)" }
+    fn put_batch(&self, items: &[(Vec<u8>, Vec<u8>)]) {
         let mut b = self.0.batch();
         for (k, v) in items {
             b.insert(&self.1, k.as_slice(), v.as_slice());
@@ -676,8 +1006,8 @@ impl Heed {
     }
 }
 impl Kv for Heed {
-    fn name(&self) -> &'static str { "LMDB (heed 0.22)" }
-    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+    fn name(&self) -> &'static str { "LMDB heed 0.22 (sync per commit)" }
+    fn put_batch(&self, items: &[(Vec<u8>, Vec<u8>)]) {
         let mut w = self.0.write_txn().unwrap();
         for (k, v) in items {
             self.1.put(&mut w, k, v).unwrap();
@@ -714,8 +1044,8 @@ impl Sqlite {
     }
 }
 impl Kv for Sqlite {
-    fn name(&self) -> &'static str { if self.1 == "FULL" { "SQLite WAL, synchronous=FULL" } else { "SQLite WAL, synchronous=NORMAL" } }
-    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+    fn name(&self) -> &'static str { if self.1 == "FULL" { "SQLite WAL, synchronous=FULL (fsync per commit)" } else { "SQLite WAL, synchronous=NORMAL (no fsync per commit; at checkpoint)" } }
+    fn put_batch(&self, items: &[(Vec<u8>, Vec<u8>)]) {
         self.with(|c| {
             let tx = c.unchecked_transaction().unwrap();
             {
@@ -734,3 +1064,4 @@ impl Kv for Sqlite {
         })
     }
 }
+

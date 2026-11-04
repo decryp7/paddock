@@ -128,7 +128,7 @@ crash isolation of the grammars, deterministic ordering, "build new, then swap",
 | the same on 2 and 4 threads (in process, one parser per thread) | 17.8 and 36.5 MiB/s | measured |
 | incremental re-parse after a one-line edit (20 largest files) | 39x faster than a full re-parse (2.2 against 87.7 ms) | measured |
 | tree-sitter, other grammars | about 5 to 12 MB/s per core | secondary benchmarks, unverified ([example](https://docs.rs/crate/weavatrix-parse/0.1.0/source/docs/comparison.md)) |
-| content hash, 1 core: SHA-256 / BLAKE3 / xxh3-64 | 526 / 1,675 / 31,986 MiB/s | measured |
+| content hash, 1 core: SHA-256 / BLAKE3 / xxh3-64 | 526 / 1,675 / 31,986 MiB/s (SHA-256 is sha2 0.10.9's software rounds: on aarch64 its hardware path needs the `asm` feature, which Pacenotes does not enable; sha2 0.11 detects the instructions at run time) | measured; source of `sha2` 0.10.9 `src/sha256.rs` |
 | stage 1 parse pass end to end | 6,550 files in 20.6 s (1 worker), 9.8 s (4 workers) | [performance.md, 2026-10-30](../performance.md#2026-10-30-index-run-parser-pool-size-and-mtime-shortcut-gitignore-walk-and-a-per-file-wait-found-by-measuring) |
 | stage 1 no-change re-run | 20,596 files in 0.26 to 0.29 s | same |
 | Model2Vec potion-code-16M-v2 embedding | 6,365 chunks/s on 1 thread, 55,499 on 13; about 8 s per 1M lines | [performance.md, 2026-10-25](../performance.md#2026-10-25-amended-2026-10-28-embedding-engines) |
@@ -288,32 +288,44 @@ switch of thousands of files turns into blob-id cache hits rather than reads. Ev
 
 ### 5.1 The metadata store (manifest, content key to fact blob, versions)
 
-Workload: 1,000,000 manifest rows (key a 40-byte path, value 64 bytes), loaded in commits of 10,000 while a second thread does
-point lookups (UI queries during ingest), then 200,000 point lookups, then 100 commits of 100 upserts (watcher runs). Each commit is
-durable (fsync) unless the row says otherwise. Invented paths; one run each at `nice -n 19`; [record](../performance.md#2026-11-04-fast-ingest-research-parse-hash-and-graph-micro-benchmarks).
+Workloads, from the [rerun after review](../performance.md#2026-11-04-fast-ingest-rerun-after-review-one-query-set-physical-footprint)
+(three interleaved rounds, median and range, physical footprint; the raw output is linked there). Both use 1,000,000 rows:
 
-| Store (version measured) | Bulk load, keys in path order | Bulk load, keys in random order (like hash content keys) | Reads/s by a second thread during the load (worst read) | Point lookup | 100-row durable commit | Disk after load (sorted / random) | Peak RSS (sorted / random) |
+- *manifest*: 40-byte path keys in walk order, 64-byte values, loaded in commits of 10,000 while a second thread does point lookups;
+- *fact_keys*: uniform random 32-byte hash keys with 8-byte values, the shape of ADR 0012's key index, with and without the reader
+  thread as a control.
+
+After the load come 200,000 point lookups and 100 commits of 100 upserts. Durability is each store's default here: redb, fjall and LMDB
+sync every commit. SQLite WAL `NORMAL` does **not** fsync on commit, only at checkpoints; `FULL` does.
+
+| Store | Manifest load | fact_keys load (no reader) | Reads during load (worst) | Look-up | 100-row commit | Disk (manifest / fact_keys) | Footprint peak |
 |---|---|---|---|---|---|---|---|
-| SQLite WAL `synchronous=NORMAL` (rusqlite 0.40.2, bundled) | **359k rows/s** (2.8 s) | 9k rows/s (111 s); 12k with a 64 MB page cache (86 s, RSS 175 MiB) | 305k/s (21 ms) / 120k/s (51 ms) | 2.6 µs | 21 ms | 122 / 264 MiB with the WAL (129 MiB after checkpoint) | **11 / 11 MiB** |
-| SQLite WAL `synchronous=FULL` | not run | 9k rows/s (116 s) | 195k/s (45 ms) | 2.8 µs | 15 ms | 243 MiB | 12 MiB |
-| redb 2.6.4 (latest 4.4.0) | 122k rows/s (8.2 s) | 7k rows/s (141 s) | 1.13M/s (6 ms) / 1.0M/s (9 ms) | 1.1 µs | 63 to 89 ms | 258 / 258 MiB | 312 / 381 MiB |
-| LMDB, heed 0.22.1 (latest 0.23.1) | 345k rows/s (2.9 s) | 15k rows/s (65 s) | 1.19M/s (0.7 ms) / 1.03M/s (3.6 ms) | 1.1 µs | 69 to 89 ms | 108 / 323 MiB | 114 / 428 MiB (mapped pages counted) |
-| fjall 2.11.2 (latest 3.1.13), `persist(SyncAll)` per commit | 206k rows/s (4.9 s) | **195k rows/s** (5.1 s) | 461k/s (98 ms) / 379k/s (99 ms) | 5.0 to 6.0 µs | 18 to 40 ms | **45 / 53 MiB** | 122 / 149 MiB |
+| SQLite WAL `NORMAL` (rusqlite 0.40.2) | 307k/s | 25k/s (21k/s) | 297k/s (22 ms) | 2.2 to 2.6 µs | 17 to 21 ms | 125 / 81 MiB | **5 to 9 MiB** |
+| SQLite WAL `FULL` | | 21k/s | 176k/s (71 ms; once 1.3 s) | 2.1 µs | 18 ms | / 81 MiB | 8 MiB |
+| redb 2.6.4 | 157k/s | 20k/s (18k/s) | 956k to 972k/s (6 ms) | 1.1 µs | 40 to 69 ms | 258 / 129 MiB | 185 to 191 MiB |
+| LMDB, heed 0.22.1 | 382k/s | 24k/s (29k/s) | 1.1M/s (under 4 ms) | 1.0 µs | 48 ms | 108 / 185 MiB | 5 to 63 MiB |
+| fjall 2.11.2 | 170k/s | **314k/s** (246k/s) | 580k to 759k/s (56 to 73 ms) | 2.4 to 4.8 µs | 14 to 21 ms | 45 / 62 MiB | 90 to 122 MiB |
 
-Reading it. (1) **Key order decides B-tree ingest speed.** Every B-tree store (SQLite, redb, LMDB) loads path-ordered keys 15 to 40x
-faster than random ones, because random 10,000-row commits dirty most leaf pages and rewrite them (write amplification; LMDB's file
-triples, SQLite's WAL doubles). The manifest is written in walk order (sorted), so it is the fast case; a table keyed by a content
-hash is the random case. fjall (an LSM tree) does not care about order and stores the least. (2) **Durable small commits cost 15 to
-90 ms on this Mac** whatever the store (fsync to the SSD; Rust's `sync_all` on macOS uses `F_FULLFSYNC`, from memory, unverified), so a
-watcher run should be one commit. (3) **SQLite has the smallest memory by far** (11 MiB peak with its default 2 MB page cache),
-while the mmap stores (LMDB) and redb's cache show 300 to 430 MiB of RSS for a 100 MB data set; part of that is clean mapped pages the
-OS can drop, which is why the plan measures footprint, not RSS. (4) Point lookups are 1 to 6 µs everywhere: none is the bottleneck.
-(5) One run each at load 4 to 14; the random-order run used keys spread across 4,096 folders; the last random SQLite run was relabelled
-by a rebuilt binary but ran the same code.
+What the table shows:
+
+1. **Key order decides B-tree ingest speed.** Every B-tree store (SQLite, redb, LMDB) loads walk-ordered keys 6 to 15x faster than
+   uniform random hash keys. The no-reader control barely changes that, so it is the stores' own cost: random commits dirty most leaf
+   pages. The manifest is the fast case. A table keyed by a hash is the slow one, which is why ADR 0012 appends blobs in insertion
+   order and keeps the hash in a narrow index. fjall, an LSM tree, does not care about key order.
+2. **A 100-row commit costs 14 to 69 ms** whatever the store, even SQLite `NORMAL` without an fsync, because random upserts into a
+   million-row tree read pages from disk. A watcher run should therefore be one commit.
+3. **Physical footprint separates the stores:**
+   - SQLite stays at 5 to 9 MiB with its default page cache.
+   - LMDB's mapped pages are mostly clean, so its footprint is 5 MiB for the manifest and 63 MiB for the hash keys.
+   - fjall holds 90 to 122 MiB and redb 185 to 191 MiB.
+4. **Point look-ups take 1 to 5 µs everywhere**, so none of the stores is the bottleneck for look-ups.
+
+The first run's RSS figures, measured with path keys in random order, are kept in the older block of performance.md as history. They
+are not rule-26 evidence.
 
 | Store | Crash safety | Readers during a write | Several processes on one store | Windows and macOS | Licence | Build |
 |---|---|---|---|---|---|---|
-| **SQLite** WAL (rusqlite, bundled) | ACID; WAL; `synchronous=NORMAL` loses at most the last commits on power loss, never consistency | yes, readers see the last commit (WAL) | **yes**: readers and one writer across processes on a local disk; not on network file systems | same on both; the family's most used store | public domain; rusqlite MIT | C compile of the amalgamation, already in the family's builds (Dyno, Pitwall, Spotter, Pacenotes) |
+| **SQLite** WAL (rusqlite, bundled) | ACID; WAL; `synchronous=NORMAL` does not fsync on commit (only at checkpoints), so a power loss can lose the last commits, never consistency; `FULL` fsyncs each commit | yes, readers see the last commit (WAL) | **yes**: readers and one writer across processes on a local disk; not on network file systems | same on both; the family's most used store | public domain; rusqlite MIT | C compile of the amalgamation, already in the family's builds (Dyno, Pitwall, Spotter, Pacenotes) |
 | **redb** | ACID, copy-on-write B-tree, 1PC+C (one fsync) by default ([design](https://github.com/cberner/redb/blob/master/docs/design.md)) | yes (MVCC, one writer) | modes for one exclusive writer, single writer plus read-only processes, or several writers, through file range locks (design doc) | pure Rust | MIT or Apache-2.0; 4.4.0 (2026-10-13) | pure Rust, about 5 s here |
 | **fjall** | LSM with a journal; a commit is durable only after `persist(SyncAll)` (README) | yes | **no**: "must not be opened from separate processes" (README) | pure Rust | MIT or Apache-2.0; 3.1.13 (2026-10-25) | pure Rust, about 5 s here (with `lsm-tree`) |
 | **LMDB** (heed) | ACID, copy-on-write B-tree, mmap | yes, readers never block | yes (mmap and a lock file) | the map size is fixed up front; on Windows the file is grown to it (unverified) | OpenLDAP licence (permissive); heed MIT; 0.23.1 (2026-10-26) | small C library, about 2 s here |
@@ -332,16 +344,16 @@ figure over Quack is 1,038 transactions/s on one thread (same note). Against 2.6
 
 **Recommendation: SQLite (WAL, rusqlite bundled).** It already is the family's metadata store (ER-22: Dyno, Pitwall, Spotter and
 Pacenotes use rusqlite 0.40 bundled; Paddock has no shared key-value crate, `paddock-storage` is about clearing app folders, not a
-store), it is the only candidate that is fast enough (359k rows/s loaded in path order, 2.6 µs point lookups, 11 MiB peak RSS) **and** lets the MCP server process (`pacenotes serve
---stdio`, proposal 14) read while the app writes, it is crash-safe, and its default page cache is about 2 MB per connection (SQLite's
+store), it is fast enough for the manifest (about 300k rows/s loaded in walk order, 2 to 3 µs point lookups) **and** it is the only candidate that lets the MCP server process (`pacenotes serve
+--stdio`, proposal 14) read while the app writes, it is crash-safe, its physical footprint stayed at 5 to 9 MiB, and its default page cache is about 2 MB per connection (SQLite's
 default `cache_size` of -2000 KiB; from the SQLite docs, not re-read today). redb is the fallback if a measurement ever shows SQLite as
-the bottleneck for metadata: pure Rust, ACID, multi-process modes, 1.1 µs lookups and the best reads during a write, but 312 to 381 MiB of RSS and slow random-order loads.
+the bottleneck for metadata: pure Rust, ACID, multi-process modes, 1.1 µs lookups and the best reads during a write, but 185 to 191 MiB of physical footprint and slow random-order loads.
 
-**The one weak spot is a table keyed by a content hash** (random order): 9k to 12k rows/s at a million rows, in every B-tree store.
+**The one weak spot is a table keyed by a content hash** (uniform random keys): 18k to 29k rows/s at a million rows, in every B-tree store.
 So the fact blobs are not stored keyed by their hash. They go into an append-ordered table (`facts(rowid INTEGER PRIMARY KEY, blob)`,
 written in insertion order, the fast case) with a narrow index `fact_keys(fact_key BLOB PRIMARY KEY, rowid) WITHOUT ROWID` (40-byte
-rows, many to a page, so its random inserts touch far fewer pages); or into append-only segment files with the same narrow index (the
-contender in B9). If the narrow index is still the bottleneck at Linux scale, fjall (195k random rows/s, 53 MiB) can hold just that
+rows, many to a page; measured as the fact_keys workload above, 21k to 27k rows/s in SQLite); or into append-only segment files with the same narrow index (the
+contender in B9). If the narrow index is still the bottleneck at Linux scale, fjall (246k to 314k random rows/s, 62 MiB on disk, about 100 to 120 MiB footprint) can hold just that
 index, owned by the indexer process (fjall cannot be shared between processes, and nothing but the indexer needs it).
 
 ### 5.2 Bulk facts, graph and search: the candidates
@@ -353,8 +365,8 @@ Versions and dates from crates.io and the repositories, checked 2026-11-04.
 
 | Candidate | State (checked 2026-11-04) | Licence | refs | callers 3 | in file | path | One file changed | Memory | Share with other apps |
 |---|---|---|---|---|---|---|---|---|---|
-| **Custom: mmap'd CSR snapshot + Arrow IPC or postcard arrays** (baseline) | our code | ours | **under 1 µs** (an offset pair; measured 0.006 µs for the count) | **7.9 µs** (measured, BFS with a visited stamp) | a range in a per-file array (sub-µs, estimate) | bidirectional BFS: **26.6 µs** (measured, random pairs) | rebuild: **83 ms** for 5M edges (sort included, measured), or a delta overlay | **22.9 MiB** for 5M edges in one direction (measured; both directions about 46 MiB); mmap, so resident only what is touched | answers over MCP; the format is private |
-| **SQLite, normalised tables** (interned names, integer ids, two edge indexes) | 3.5x; family store | public domain | **4.1 µs** (measured) | **87 µs** recursive CTE (measured) | indexed, µs | 2,742 ms (forward reach then a test, measured) | delete and insert the file's rows; one transaction | file **222 MiB** for the same edges (measured: table plus two indexes); page cache bounded by `cache_size` | the family's store; a second process can read it |
+| **Custom: mmap'd CSR snapshot + Arrow IPC or postcard arrays** (baseline) | our code | ours | **4 µs** for direct callers in memory (0.5 ms on a cold mapped file) | **5 µs** (BFS with a visited stamp, 0.023 µs a node) | a range in a per-file array (sub-µs, estimate) | bidirectional BFS: **32 µs** (1,282 nodes visited on average) | rebuild or a delta overlay (B4 measures the real link; both CSR directions build from an in-memory edge list in 161 ms) | **45.8 MiB** for 5M edges, both directions; mmap, so resident only what is touched | answers over MCP; the format is private |
+| **SQLite, normalised tables** (interned names, integer ids, two edge indexes) | 3.5x; family store | public domain | **2 µs** (cache sized to the data) | **75 µs** (the same BFS over indexed look-ups, 0.373 µs a node) | indexed, µs | **474 µs** (the same bidirectional BFS over look-ups) | delete and insert the file's rows; one transaction | file **222 MiB** for the same edges (measured: table plus two indexes); page cache bounded by `cache_size` | the family's store; a second process can read it |
 | **DuckLake** (DuckDB extension; catalog in SQLite, PostgreSQL, MySQL or DuckDB; data as Parquet) | **1.0, 2026-04-13**, "production-ready" with guaranteed backward compatibility ([ducklake.select](https://ducklake.select/)) | MIT | a Parquet scan with zone maps: milliseconds (Debrief: 13 ms for a 500-row page over Parquet) | recursive CTE over Parquet, milliseconds to seconds (estimate) | partition prune, ms | recursive CTE | **each insert writes new Parquet files** unless data inlining is used; small files need `ducklake_merge_adjacent_files` ([compaction](https://ducklake.select/docs/stable/duckdb/maintenance/merge_adjacent_files)) | DuckDB's buffer manager: `memory_limit` default 80% of RAM, must be capped; grows past it (Debrief) | Debrief's trial is queued (memory note); multi-process writes need a PostgreSQL catalog or Quack |
 | **Lance** (lancedb format, Rust) | `lance` 14.0.2 (2026-10-29); very active; stable storage versions are a compatibility contract (README) | Apache-2.0 | random access by row id is its strength ("100x faster than Parquet", vendor claim); by key needs a scalar index (unverified for our shape) | not native: application BFS over row reads (estimate: tens of µs per hop) | scan with filter | not native | versioned appends and deletes (fragments, deletion files); compaction needed | Arrow and DataFusion runtime; caps not documented in the pages read (unverified) | could hold both facts and vectors; heavy dependency set; Windows not stated in the README |
 | **Delta Lake** (delta-rs) | `deltalake` 1.1.2 (2026-10-17) | Apache-2.0 | scan of Parquet via DataFusion, ms | not native | scan | not native | a new Parquet file and a log entry per commit; small-file compaction | DataFusion | built for data lakes and object stores; **overkill locally** |
@@ -369,16 +381,16 @@ Versions and dates from crates.io and the repositories, checked 2026-11-04.
 
 **Depth is unlimited by design.** "Callers 3 levels" above is one sample depth, not a limit. Callers, callees and paths are a BFS
 with a visited set: every node is touched at most once, so cycles (recursion, mutual calls) end the walk and the cost is bounded by
-the reachable part of the graph. Measured on the same 1M-node, 5M-edge graph ([record](../performance.md#2026-11-04-fast-ingest-research-parse-hash-and-graph-micro-benchmarks)):
+the reachable part of the graph. Measured on the same 1M-node, 5M-edge graph ([rerun](../performance.md#2026-11-04-fast-ingest-rerun-after-review-one-query-set-physical-footprint)):
 
-| Query | CSR | SQLite, normalised (recursive CTE, `UNION` as the visited set) |
-|---|---|---|
-| all callers, unlimited depth (avg 595,796 nodes reached; bimodal: 0 or the ~993,000-node giant component) | **24.7 ms** | **3,638 ms** |
-| all callees, unlimited depth (avg 582,564 reached) | 21.2 ms | not run |
-| path A to B (bidirectional BFS; 592 of 1,000 random pairs connected, length 8.9 on average, 1,277 nodes visited on average, 6,692 at most) | **26.6 µs** | 2,742 ms (SQL has no early exit or two-sided search, so it is a full forward reach and a test) |
+| Query (rerun on one query set; time per node in brackets) | CSR | SQLite, BFS over indexed look-ups | SQLite, recursive CTE (`UNION` on the node) |
+|---|---|---|---|
+| all callers, unlimited depth (10 queries, avg 496,497 reached) | **20.4 ms** (0.041 µs) | 882 ms (1.78 µs) | 1,323 ms (2.66 µs) |
+| all callees, unlimited depth (avg 588,448 reached) | **28.3 ms** (0.048 µs) | 1,043 ms (1.77 µs) | 1,494 ms (2.54 µs) |
+| path A to B, bidirectional BFS (200 pairs, 125 connected, 1,282 visited on average) | **32 µs** | 474 µs | no early exit or two-sided search in SQL |
 
 So unlimited depth is affordable on CSR (tens of ms for the whole reachable graph, and a two-sided path search touches about a
-thousand nodes) and impractical in SQL (seconds). A real call graph is sparser than this random one, so the reach is likely smaller;
+thousand nodes) and about 40x slower per node in SQLite (about a second for the whole reachable graph). A real call graph is sparser than this random one, so the reach is likely smaller;
 IG-B3 measures it on Linux. **UI guidance:** the view shows levels progressively (one, two, three, more on "Show next level"), with
 counts of what is hidden, and "All callers" (or callees) is an explicit action that runs as a cancellable query with a live count of
 nodes reached, because its answer can be most of the repository.
@@ -392,9 +404,10 @@ nodes reached, because its answer can be most of the repository.
   keeping time travel (docs above).
 - *"Index as of commit X".* A DuckLake snapshot is a catalog transaction, not a git commit. Mapping commit X to snapshot n is a row in a
   table of ours; the snapshot only exists if commit X was ingested. The content-addressed fact cache gives the same thing more cheaply:
-  the index for commit X is the set of content keys at X (`tree_keys`, 0.12 s for 27k paths), and only unseen blobs are parsed.
+  the index for commit X is the set of content keys of the files at X (read at that revision through `History`, ADR 0004), and only
+  content the repository's cache has not seen is parsed.
 - *Latency.* Point queries are DuckDB queries over Parquet: milliseconds (Debrief measured 13 ms warm for a 500-row page), against
-  4.1 µs (SQLite, indexed) and under 1 µs to 7.9 µs (CSR) for refs and callers 3 in the measurements here. Three orders of magnitude
+  2 µs (SQLite, indexed) and 4 to 5 µs (CSR, direct and three levels) in the rerun here. Three orders of magnitude
   for an MCP tool that walks a graph hop by hop.
 - *Fit for Pacenotes' writes.* The ingest is many small per-file results, rewritten by the watcher every few seconds. That is the
   small-file pattern DuckLake has to inline or compact; Debrief's import (millions of rows in big batches, rarely rewritten) is the
@@ -414,7 +427,7 @@ enough to extract one.
 
 | Mechanism | Where | Effect |
 |---|---|---|
-| Streaming parse: one tree per worker, dropped after extraction | parse worker | a worker holds one file's tree; measured peak RSS of an in-process parse of 6,419 files with all 51 MiB of source in RAM: 96 MiB, so the parse state itself is small |
+| Streaming parse: one tree per worker, dropped after extraction | parse worker | a worker holds one file's tree; measured peak RSS (not footprint) of an in-process parse of 6,419 files with all 51 MiB of source in RAM: 96 MiB, so the parse state itself is small |
 | Bounded channels with backpressure, bounded **by bytes** not by count | read pool to workers to writer | in-flight source at most a budget (default 64 MiB, estimate) whatever the file sizes |
 | Write blobs as they arrive, swap only the small `files` map | writer | replaces stage 1's whole-run `Batch` (O(repository)) with O(one batch) |
 | Interned strings and `u32` ids | blob string table, snapshot arena | names stored once per file and once per snapshot |
@@ -447,7 +460,7 @@ measured at start-up by the worker's self-test on a reference file and refreshed
 | Engine | Default | Cap |
 |---|---|---|
 | SQLite | page cache about 2 MB per connection (`cache_size` -2000 KiB; docs, not re-read today); `mmap_size` 0 | `PRAGMA cache_size`, `PRAGMA mmap_size` |
-| redb, fjall, LMDB | measured peak RSS in the 1M-row run: redb 312 to 381 MiB, LMDB 114 to 428 MiB (mapped), fjall 122 to 149 MiB, against SQLite's 11 MiB | redb and fjall have cache-size settings in their builders (unverified defaults); LMDB uses the page cache through mmap |
+| redb, fjall, LMDB | measured peak physical footprint at 1M rows: redb 185 to 191 MiB, fjall 90 to 122 MiB, LMDB 5 to 63 MiB, SQLite 5 to 9 MiB | redb and fjall have cache-size settings in their builders (unverified defaults); LMDB uses the page cache through mmap |
 | DuckDB (and DuckLake) | `memory_limit` 80% of RAM, `threads` = cores ([configuration](https://duckdb.org/docs/2.0/configuration/overview.html)) | `SET memory_limit`, `SET threads`, `temp_directory`; the process still grows past the limit (Debrief) |
 | Lance | not documented in the pages read (unverified) | index and metadata cache sizes in its dataset options (unverified) |
 | tree-sitter workers | one tree per worker | ADR 0006 memory cap, default 1 GiB |
@@ -465,9 +478,9 @@ pages first, so this is the right side of the trade.
 
 | Layer | Store | Why |
 |---|---|---|
-| **Catalog and metadata** (manifest, generations, content key to fact blob, quarantine, versions, user state) | **SQLite** (WAL, rusqlite bundled) | family store; multi-process readers for MCP; crash-safe; 359k rows/s loaded in path order, 2.6 µs point lookups, 11 MiB peak RSS; 2 MB default cache |
+| **Catalog and metadata** (manifest, generations, content key to fact blob, quarantine, versions, user state) | **SQLite** (WAL, rusqlite bundled) | family store; multi-process readers for MCP; crash-safe; about 300k rows/s in walk order, 2 to 3 µs look-ups, 5 to 9 MiB footprint; 2 MB default cache |
 | **Bulk facts** (per-file parse results) | **content-addressed fact blobs** (postcard, optional zstd) in the same SQLite file, appended in insertion order with a narrow content-key index (section 5.1); **top-2 contender**: append-only segment files (Arrow IPC or postcard packs) per ingest batch with the same index in SQLite | one row per file instead of dozens; shared across worktrees and branches; writes early, swaps only the map; avoids the random-key B-tree cost measured in 5.1 |
-| **Graph and search** (refs, callers, in file, path, names, text) | **derived mmap snapshot**: string arena, name FST, symbol and occurrence arrays, CSR forward and reverse; text by grep-searcher first, a document trigram index only if B6 asks | 4.1 µs to under 1 µs for refs and 87 µs to 7.9 µs for callers 3 against normalised SQLite; 22.9 against 222 MiB for 5M edges; near-instant re-open; private memory small |
+| **Graph and search** (refs, callers, in file, path, names, text) | **derived mmap snapshot**: string arena, name FST, symbol and occurrence arrays, CSR forward and reverse; text by grep-searcher first, a document trigram index only if B6 asks | on one query set: callers three levels 5 against 75 µs, unlimited depth 20 against 882 ms, paths 32 against 474 µs, CSR against SQLite with its cache sized to the data; 45.8 against 222 MiB for 5M edges both ways; near-instant re-open; private memory small |
 | **Embeddings** | as decided: the `VectorIndex` port with its spike (hannoy, libSQL, usearch, proposal 21.3), vectors cached by chunk text hash and model id (ADR 0001); Lance stays behind LanceDB as the fallback named there | no new decision needed; Lance would bring Arrow and DataFusion for one layer |
 | **Analytics** (optional, later) | Parquet export of the snapshot for DuckDB, in a DuckLake catalog if Debrief adopts it | shares Debrief's tooling without DuckDB on the interactive path |
 
@@ -533,7 +546,7 @@ serve     -> queries read the snapshot (and one blob for detail); SQLite for use
 1. **Recommended:** SQLite catalog + SQLite fact blobs + mmap snapshot + no text index first.
 2. **Contender (decided by B9):** SQLite catalog + Arrow IPC segment files for the facts + the same snapshot.
 3. **Fallback:** SQLite only, normalised (interned names, integer ids, edge indexes, prepared statements, streaming commits), with the
-   same content-addressed blobs. One file; traversals in recursive CTEs (87 µs for callers 3 here).
+   same content-addressed blobs. One file; traversals as BFS over indexed look-ups (75 µs for callers 3, 882 ms for all callers, in the rerun).
 4. Not recommended: DuckDB or DuckLake on the interactive path (milliseconds per point query, small-file writes, memory defaults),
    Lance (one more engine for one layer), Delta and Iceberg (built for object-store data lakes), Kùzu (archived), CozoDB (no release
    since 2023), Oxigraph (RDF adds nothing), a Glean-style store over RocksDB (C++ build, second engine), sled (beta, format changes),

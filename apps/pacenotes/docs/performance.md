@@ -10,7 +10,7 @@ Pacenotes has no code in the tree yet. Its measurements come from the embedding 
 | Benchmark | Measures | Corpus | Budget | CI |
 |---|---|---|---|---|
 | Embedding comparison ([ADR 0001](adr/0001-embeddings.md)) | Model load, chunks/s on 1 and 13 threads, peak RSS, binary size, retrieval quality (recall@5, hit@5) | 19,462 function chunks from 25 Paddock crates (10.9 MB, median 320 characters); 332 labelled queries (300 doc, 32 concept) | Quality bar: concept hit@5 ≥ 0.75 and doc recall@5 +25% over BM25 | No |
-| Fast-ingest micro-benchmarks ([research note](research/2026-11-04-fast-ingest.md)) | tree-sitter parse and tags MiB/s on 1, 2, 4 threads; incremental re-parse; content hashes; CSR vs SQLite for references and callers 3 levels | a Paddock worktree's Rust and TypeScript (6,419 files, 50.9 MiB); an invented call graph | none yet (benchmarks B1 to B8 of the note set them) | No |
+| Fast-ingest micro-benchmarks ([research note](research/2026-11-04-fast-ingest.md), [ADR 0012](adr/0012-fast-ingest.md)) | tree-sitter parse and tags throughput on 1, 2 and 4 threads; incremental re-parse; content hashes; graph queries (direct, three levels, unlimited depth, path A to B) on CSR (warm, cold mapped) and SQLite; metadata stores (manifest and fact-key loads, reads during writes, lookups, small commits, physical footprint); git change detection | a Paddock worktree's Rust and TypeScript (6,419 files, 50.9 MiB); an invented 1M-node, 5M-edge call graph; 1M invented manifest rows and hash keys | none yet (ADR 0012's IG-B packages set them) | No |
 
 ## Budgets
 
@@ -25,6 +25,74 @@ on a 64 GB machine.
 
 ## Results (newest first)
 
+### 2026-11-04, fast-ingest rerun after review: one query set, physical footprint
+
+Quoted by [ADR 0012](adr/0012-fast-ingest.md) and the [research note](research/2026-11-04-fast-ingest.md). It replaces the first
+run's graph comparison and every memory figure of that run (which were RSS). Indications for design choices, not budgets.
+
+- **Commit:** branch `docs/pacenotes-fast-ingest`; harness [research/2026-11-04-fast-ingest-bench.rs.txt](research/2026-11-04-fast-ingest-bench.rs.txt)
+  (`graph2` and `kv` subcommands, reworked after the review)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with other agents (a Dyno release was running)
+- **Load (1-minute):** 11.6 to 19.8 during the graph run; 7.3, 4.9 and 8.5 at the ends of the three kv rounds. Everything at
+  `nice -n 19` through the machine's semaphore
+- **Build:** release, `lto = "thin"`, system allocator; rustc 1.99.1; rusqlite 0.40.2 bundled, redb 2.6.4, fjall 2.11.2, heed 0.22.1,
+  blake3 1.8.7
+- **Corpus:** invented. The graph has 1,000,000 nodes and 5,000,000 call edges from a seeded generator, with callees skewed so a few
+  hubs have many callers. The stores get 1,000,000 rows of two kinds:
+  - *manifest*: 40-byte path keys in walk order, 64-byte values;
+  - *fact_keys*: uniform random 32-byte BLAKE3 keys, 8-byte values (a rowid), the shape of ADR 0012's `fact_keys` index.
+- **Command:** `run-r2.sh` (in the raw output file): `graph2 1000000 5000000 <scratch>/g 10`, then three interleaved rounds over
+  the stores of `KV_MODE=<manifest|factkeys> KV_READER=<1|0> kv <store> 1000000 <scratch>/kvr`
+- **Runs:** graph once; stores three interleaved rounds, reported as median (range)
+- **Memory measure:** physical footprint (`proc_pid_rusage`, `ri_phys_footprint` and `ri_lifetime_max_phys_footprint`, rule 26)
+- **Raw output:** [research/2026-11-04-fast-ingest-raw-rerun.txt](research/2026-11-04-fast-ingest-raw-rerun.txt)
+- **Graph queries.** One query set for both backends:
+  - 200 random start nodes for "direct" and "3 levels";
+  - 10 for unlimited depth;
+  - 200 random pairs for paths.
+
+  Every traversal is the same BFS with a visited stamp; only the neighbour lookup differs. SQLite has indexes on `(dst, src)` and
+  `(src, dst)`, `cache_size` 512 MiB (larger than its 222 MiB file) and a warmed cache. "Cold mapped" is a file written with
+  `F_NOCACHE`, mapped, and queried for the first time. Time per query (time per node reached):
+
+  | Query | CSR in memory | CSR mapped, first pass | CSR mapped, second pass | SQLite, BFS over indexed look-ups | SQLite recursive CTE (`UNION` on the node) |
+  |---|---|---|---|---|---|
+  | callers, direct (avg 6) | 0.004 ms | 0.518 ms (84 µs a node: page faults) | 0.000 ms | 0.002 ms (0.40 µs) | |
+  | callers, 3 levels (avg 201) | 0.005 ms (0.023 µs) | 0.760 ms (3.8 µs) | 0.004 ms (0.018 µs) | 0.075 ms (0.373 µs) | |
+  | callers, unlimited (avg 496,497) | 20.4 ms (0.041 µs) | 23.2 ms (0.047 µs) | 21.0 ms (0.042 µs) | 882 ms (1.78 µs) | 1,323 ms (2.66 µs) |
+  | callees, direct (avg 4) | 0.000 ms | 0.704 ms | 0.000 ms | 0.002 ms (0.52 µs) | |
+  | callees, 3 levels (avg 146) | 0.004 ms (0.029 µs) | 0.511 ms (3.5 µs) | 0.004 ms (0.027 µs) | 0.053 ms (0.360 µs) | |
+  | callees, unlimited (avg 588,448) | 28.3 ms (0.048 µs) | 29.9 ms (0.051 µs) | 35.0 ms (0.060 µs) | 1,043 ms (1.77 µs) | 1,494 ms (2.54 µs) |
+  | path A to B, bidirectional (125 of 200 connected, 1,282 visited avg) | 0.032 ms (0.025 µs) | 0.030 ms | 0.030 ms | 0.474 ms (0.370 µs) | |
+
+  - **Builds and sizes:** both CSR directions built from the in-memory edge list in 161 ms, 45.8 MiB. SQLite: insert 1.79 s,
+    indexes 6.26 s, file 222 MiB.
+  - **Footprint:** 86 MiB after building the CSR (edge list and both directions in memory), and 102 to 103 MiB before and after
+    the mapped-file queries, so mapping added about 1 MiB (clean pages). The process peak was 696 MiB, mostly SQLite's 512 MiB cache.
+- **Metadata stores** (median of three, range in brackets; durability as each store runs by default in this harness: redb fsync per
+  commit, fjall `persist(SyncAll)` per commit, LMDB sync per commit, SQLite WAL `NORMAL` **without** an fsync per commit, only at
+  checkpoints, and SQLite WAL `FULL` with one):
+
+  | Store | Rows | Load, k rows/s | Reads during load, k/s (worst) | Look-up | 100-row commit | Disk | Footprint peak |
+  |---|---|---|---|---|---|---|---|
+  | SQLite `NORMAL` | manifest | 307 (282–322) | 297 (22 ms) | 2.56 µs | 20.5 ms | 125 MiB | **9 MiB** |
+  | SQLite `NORMAL` | fact_keys | 25 (22–26) | 93 (143 ms; 617 ms once) | 2.17 µs | 17.1 ms | 81–193 MiB (WAL) | 8 MiB |
+  | SQLite `NORMAL` | fact_keys, no reader | 21 (21–27) | | 2.13 µs | 17.0 ms | 81 MiB | 5 MiB |
+  | SQLite `FULL` | fact_keys | 21 (18–22) | 176 (71 ms; 1,344 ms once) | 2.12 µs | 18.1 ms | 81 MiB | 8 MiB |
+  | redb | manifest | 157 (157–168) | 972 (5.7 ms) | 1.10 µs | 68.6 ms | 258 MiB | 186 MiB |
+  | redb | fact_keys | 20 (15–23) | 956 (5.3 ms) | 1.14 µs | 40.1 ms | 129 MiB | 191 MiB |
+  | redb | fact_keys, no reader | 18 (17–20) | | 1.10 µs | 53.3 ms | 129 MiB | 185 MiB |
+  | LMDB | manifest | 382 (248–442) | 1,102 (0.1 ms) | 1.05 µs | 48.4 ms | 108 MiB | **5 MiB** |
+  | LMDB | fact_keys | 24 (24–27) | 1,108 (3.3 ms) | 1.04 µs | 48.7 ms | 185 MiB | 63 MiB |
+  | LMDB | fact_keys, no reader | 29 (24–31) | | 1.00 µs | 49.0 ms | 185 MiB | 63 MiB |
+  | fjall | manifest | 170 (167–201) | 580 (73 ms) | 4.83 µs | 21.1 ms | 45 MiB | 90 MiB |
+  | fjall | fact_keys | **314** (223–328) | 759 (56 ms) | 2.38 µs | 13.7 ms | 62 MiB | 122 MiB |
+  | fjall | fact_keys, no reader | 246 (220–253) | | 2.46 µs | 15.9 ms | 62 MiB | 103 MiB |
+
+  The no-reader control changes little, so the slow random-key loads are the B-tree stores' own cost, not reader contention.
+- **Notes:** one machine, under load; the stores were run at their versions of the first run (redb 4.4, fjall 3.1 and heed 0.23 are
+  newer). The graph is random apart from the skew, so real call graphs are likely sparser; IG-B3 measures the Linux tier-2 graph.
+
 ### 2026-11-04, fast-ingest research: parse, hash and graph micro-benchmarks
 
 Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.md). Indications for a design choice, not budgets.
@@ -33,8 +101,13 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   [research/2026-11-04-fast-ingest-bench.rs.txt](research/2026-11-04-fast-ingest-bench.rs.txt) (a scratch crate outside the
   repository; no workspace builds it)
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with other agents (a Dyno release was running)
-- **Load:** parse run: 1-minute load 7.6 at the start and 6.4 at the end (5-minute 17 to 12); graph run: 21.9 at the start and 13.5 at the end; metadata-store runs: 13.6 to 3.9 (random keys), 7.4 to 13.3 (sorted keys); git runs: about 6 to 14, not through the semaphore (read-only, `nice -n 19`). Both
-  through the machine's semaphore at `nice -n 19`
+- **Load (1-minute):**
+  - parse run: 7.6 at the start, 6.4 at the end;
+  - graph run: 21.9 at the start, 13.5 at the end;
+  - metadata-store runs: 13.6 down to 3.9 (random keys) and 7.4 to 13.3 (sorted keys);
+  - git runs: about 6 to 14.
+
+  All runs were at `nice -n 19`. Everything except the read-only git commands went through the machine's semaphore.
 - **Build:** release, `lto = "thin"`, system allocator; rustc 1.99.1; tree-sitter 0.27.1, tree-sitter-rust 0.24.2,
   tree-sitter-typescript 0.23.2 (the versions `pacenotes-parse` pins), sha2 0.10.9 (default features), blake3 1.8.7, twox-hash
   2.1.5, rayon 1.12.0, rusqlite 0.40.2 bundled
@@ -57,7 +130,7 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   | parse plus the grammar's `TAGS_QUERY`, 1 thread | 4.93 s, 10.3 MiB/s, 262k lines/s, 917,172 captures |
   | parse plus tags, 2 / 4 threads (one parser per thread, in process) | 17.8 / 36.5 MiB/s (1.7x / 3.5x) |
   | re-parse after inserting one line in the middle, 20 largest files (1,457 KiB) | full 87.7 ms, incremental with the edited old tree 2.2 ms (39x) |
-  | SHA-256 / BLAKE3 / xxh3-64, 1 thread | 526 / 1,675 / 31,986 MiB/s |
+  | SHA-256 / BLAKE3 / xxh3-64, 1 thread | 526 / 1,675 / 31,986 MiB/s (SHA-256: sha2 0.10.9 software rounds; its aarch64 hardware path needs the `asm` feature) |
   | peak RSS of the parse run | 96 MiB |
 
 - **Numbers, graph** (1,000 queries on CSR, 200 for the recursive CTE; the samples differ, so the "reached" averages are not
@@ -117,7 +190,8 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   | `diff --name-status`, 2,000 commits apart (11,086 paths) | 0.05 s (rename detection skipped by `renameLimit`), 0.02 s `--no-renames` | |
   | shadow repository: `add -A` / `status` / `status` after `touch` / `gc` | 34.3 s / 0.06 to 0.07 s / 0.07 s / 15.7 s; 11,158 loose objects, 398 MB, 371 MB after `gc` (486 MiB of tracked files, images included) | |
 
-- **Memory measure:** RSS (`getrusage`), labelled as such; not footprint
+- **Memory measure:** RSS (`getrusage`), **not rule-26 evidence**. Superseded for memory by the rerun above, which measures physical
+  footprint
 - **Notes:** the parse numbers exclude the worker process, IPC, extraction into facts and SQLite, which the index pays (see
   2026-10-30 below); C and C++ grammars are not measured. The SQLite numbers use one prepared statement and one transaction, unlike
   stage 1's per-row `execute`. Raw output was kept in the session's scratch area only.
