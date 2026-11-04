@@ -8,8 +8,10 @@
 - Licence: `MIT OR Apache-2.0` (kept: `LICENSE-MIT`, `LICENSE-APACHE`, `LICENSE.spdx`, and `license` in its `Cargo.toml`).
   cargo-deny sees it as a path dependency with that licence; the notices generator reads it from `cargo metadata` like any
   other package.
-- Two patches on the copy, nothing else: [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch) (Windows, below) and
-  [`tray-icon-image-reps.patch`](tray-icon-image-reps.patch) (macOS, below). The GUID patch: `src/lib.rs`: `set_guid_provider` and its
+- Four patches on the copy, nothing else: [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch) (Windows, below),
+  [`tray-icon-image-reps.patch`](tray-icon-image-reps.patch) (macOS, below), [`tray-icon-autosave-name.patch`](tray-icon-autosave-name.patch)
+  (macOS autosave name and the Windows `TaskbarCreated` read-out, below; made with `git diff` of `vendor/tray-icon/src` against the copy before it) and the
+  Windows tooltip fix below (its change is in `src/platform_impl/windows/mod.rs`; it has no patch file, so re-make it from its description after a Tauri bump). The GUID patch: `src/lib.rs`: `set_guid_provider` and its
   use in `TrayIcon::with_id`, and `GuidStatus` with `TrayIcon::guid_status`. `src/platform_impl/windows/mod.rs`: when the shell
   refuses a GUID (`NIM_ADD` fails), delete the GUID's registration (`NIM_DELETE` by GUID) and add again; if that fails too, add
   the icon without a GUID (and the window forgets the GUID); the outcome is `guid_status`, which Dyno logs. `Cargo.lock` is dropped from the copy. Nothing else differs from the `.crate`.
@@ -54,6 +56,9 @@
 - Removal: when upstream tray-icon sets the tip by GUID and caps it at 127 units, delete this patch.
 
 ### tray-icon-autosave-name.patch (macOS, and a Windows read-out)
+
+Apply with `patch -p1 -d vendor/tray-icon < vendor/tray-icon-autosave-name.patch` on a fresh copy (after the GUID and image patches).
+
 
 - `src/lib.rs`: `set_autosave_name_provider` and its type `AutosaveNameProvider`, like the GUID provider. `src/platform_impl/macos/mod.rs`,
   `TrayIcon::create`: the status item gets its `autosaveName` from the provider right after `statusItemWithLength` and before the image,

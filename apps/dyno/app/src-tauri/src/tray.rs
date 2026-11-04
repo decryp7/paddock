@@ -352,8 +352,8 @@ impl NativeIcon {
 
     /// Whether the OS holds this icon: Windows, the shell accepted the add (Explorer's notification area was ready); macOS, the status
     /// item's button sits in a visible window of the menu bar; elsewhere the call that made it is all there is to know.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     fn shown(&self, id: &str) -> Shown {
-        let _ = id;
         #[cfg(windows)]
         {
             match self.icon.with_inner_tray_icon(|t| t.is_added()) {
@@ -367,12 +367,14 @@ impl NativeIcon {
             use crate::tray_shown::{judge, Verdict};
             // The real test: an on-screen Control Center window named after the item's autosave name.
             let name = tray_identity::autosave_name(id);
+            let Some(cc) = crate::tray_platform::control_center_pid() else {
+                return Shown::No("ControlCenter is not running".to_string());
+            };
             match crate::tray_platform::on_screen_windows() {
-                Ok(windows) => match judge(&windows, &name) {
+                Ok(windows) => match judge(&windows, cc, &name) {
                     Verdict::Shown => Shown::Yes,
                     Verdict::NotShown { control_center_windows } => Shown::No(format!(
-                        "no on-screen Control Center window is named {name} ({control_center_windows} Control Center window(s) of {} on screen; owners: {})",
-                        windows.len(),
+                        "no on-screen Control Center window is named {name} ({control_center_windows} Control Center window(s); {} on screen)",
                         crate::tray_shown::owners_summary(&windows)
                     )),
                     Verdict::NamesUnreadable => self.own_window_shown(),
@@ -431,9 +433,10 @@ impl NativeIcon {
                 Shown::No(why) => format!("its own window: {why}"),
             };
             let name = tray_identity::autosave_name(id);
+            let cc = crate::tray_platform::control_center_pid().unwrap_or(-1);
             let named = crate::tray_platform::on_screen_windows().map_or_else(
                 |e| format!("window list unreadable ({e})"),
-                |w| match crate::tray_shown::judge(&w, &name) {
+                |w| match crate::tray_shown::judge(&w, cc, &name) {
                     crate::tray_shown::Verdict::Shown => "on-screen Control Center window named after it: yes".to_string(),
                     crate::tray_shown::Verdict::NotShown { control_center_windows } => {
                         format!("on-screen Control Center window named after it: no ({control_center_windows} Control Center windows)")
@@ -1025,7 +1028,11 @@ pub fn activate_at_start(app: &AppHandle<Wry>, hidden: bool) {
     let spawned = std::thread::Builder::new().name("tray-activation".into()).spawn(move || {
         let state = state_of(&handle);
         let icons = !lock(&state.items).is_empty();
-        let mut port = crate::tray_platform::NativeFocus { app: handle.clone() };
+        let names: Vec<String> = lock(&state.items).keys().map(|id| tray_identity::autosave_name(id)).collect();
+        let mut port = crate::tray_platform::NativeFocus {
+            app: handle.clone(),
+            names,
+        };
         let outcome = crate::tray_focus::activate_once(&mut port, &state.focus, hidden, icons);
         logging::info(&format!("tray activation: {outcome:?}"));
     });
@@ -1373,13 +1380,46 @@ mod tests {
     /// Stands in for AppKit's activation: records the calls in order.
     struct FakeFocus {
         front: Option<crate::tray_focus::Front>,
+        /// The person switches to this app when the forced rung is tried (while the first rungs were refused).
+        switch_on_forced: Option<crate::tray_focus::Front>,
         active: bool,
         /// How many activation calls are ignored before one works (the cooperative one is refused while another app is active).
         ignored: usize,
+        os_major: u64,
+        /// What the window list says of the items, per look.
+        shown: Option<bool>,
+        window_open: bool,
+        give_back_fails: bool,
         calls: Vec<String>,
     }
 
+    impl FakeFocus {
+        fn new(front: Option<crate::tray_focus::Front>) -> FakeFocus {
+            FakeFocus {
+                front,
+                switch_on_forced: None,
+                active: false,
+                ignored: 0,
+                os_major: 26,
+                shown: Some(false),
+                window_open: false,
+                give_back_fails: false,
+                calls: Vec::new(),
+            }
+        }
+    }
+
     impl crate::tray_focus::FocusPort for FakeFocus {
+        fn os_major(&mut self) -> u64 {
+            self.os_major
+        }
+        fn items_shown(&mut self) -> Option<bool> {
+            self.calls.push("items_shown".into());
+            self.shown
+        }
+        fn dyno_window_open(&mut self) -> bool {
+            self.window_open
+        }
         fn frontmost(&mut self) -> Option<crate::tray_focus::Front> {
             self.calls.push("frontmost".into());
             self.front.clone()
@@ -1389,6 +1429,11 @@ mod tests {
         }
         fn activate(&mut self, how: crate::tray_focus::Method) -> Result<(), String> {
             self.calls.push(how.name().into());
+            if how == crate::tray_focus::Method::Forced {
+                if let Some(next) = self.switch_on_forced.take() {
+                    self.front = Some(next);
+                }
+            }
             if self.ignored > 0 {
                 self.ignored -= 1;
             } else {
@@ -1397,7 +1442,10 @@ mod tests {
             Ok(())
         }
         fn give_back(&mut self, to: &crate::tray_focus::Front) -> Result<(), String> {
-            self.calls.push(format!("give_back {}", to.name));
+            self.calls.push(format!("give_back {}", to.pid));
+            if self.give_back_fails {
+                return Err("that app has quit".into());
+            }
             self.active = false;
             Ok(())
         }
@@ -1407,7 +1455,16 @@ mod tests {
     fn finder() -> crate::tray_focus::Front {
         crate::tray_focus::Front {
             pid: 101,
-            name: "Finder".into(),
+            launch_ms: Some(1),
+            bundle_id: Some("com.apple.finder".into()),
+        }
+    }
+
+    fn mail() -> crate::tray_focus::Front {
+        crate::tray_focus::Front {
+            pid: 202,
+            launch_ms: Some(2),
+            bundle_id: Some("com.apple.mail".into()),
         }
     }
 
@@ -1416,12 +1473,7 @@ mod tests {
         use crate::tray_focus::{activate_once, Outcome};
         let state = TrayState::default();
         let mut ops = FakeOps::new();
-        let mut port = FakeFocus {
-            front: Some(finder()),
-            active: false,
-            ignored: 0,
-            calls: Vec::new(),
-        };
+        let mut port = FakeFocus::new(Some(finder()));
         // No icons yet: nothing is activated and the one activation is not used up.
         let early = activate_once(&mut port, &state.focus, true, !lock(&state.items).is_empty());
         assert!(matches!(early, Outcome::Skipped(_)), "{early:?}");
@@ -1440,40 +1492,167 @@ mod tests {
                 returned: Some(finder())
             }
         );
-        assert_eq!(port.calls, ["frontmost", "activate", "give_back Finder"]);
+        assert!(
+            port.calls.iter().any(|c| c == "activate") && port.calls.last().unwrap() == "give_back 101",
+            "{:?}",
+            port.calls
+        );
         // Never again (user focus is not stolen later).
+        let n = port.calls.len();
         assert!(matches!(activate_once(&mut port, &state.focus, true, icons), Outcome::Skipped(_)));
-        assert_eq!(port.calls.len(), 3);
+        assert_eq!(port.calls.len(), n);
+    }
+
+    #[test]
+    fn the_sequence_runs_only_on_the_macos_it_was_measured_on() {
+        use crate::tray_focus::{activate_once, os_supported, Outcome, StartFocus};
+        assert!(!os_supported(13) && !os_supported(14) && !os_supported(25) && os_supported(26) && os_supported(27));
+        let mut port = FakeFocus::new(Some(finder()));
+        port.os_major = 13;
+        let done = activate_once(&mut port, &StartFocus::default(), true, true);
+        assert!(matches!(done, Outcome::Skipped(_)), "{done:?}");
+        assert!(port.calls.is_empty(), "no AppKit call on an older macOS: {:?}", port.calls);
+    }
+
+    #[test]
+    fn nothing_is_activated_when_the_items_are_already_shown() {
+        use crate::tray_focus::{activate_once, Outcome, StartFocus};
+        let mut port = FakeFocus::new(Some(finder()));
+        port.shown = Some(true);
+        let done = activate_once(&mut port, &StartFocus::default(), true, true);
+        assert!(matches!(done, Outcome::Skipped(_)), "{done:?}");
+        assert!(
+            !port.calls.iter().any(|c| c == "activate" || c.starts_with("give_back")),
+            "{:?}",
+            port.calls
+        );
+    }
+
+    #[test]
+    fn the_app_in_front_is_read_again_before_the_apple_event_and_that_one_gets_the_focus_back() {
+        use crate::tray_focus::{activate_once, Outcome, StartFocus};
+        let mut port = FakeFocus::new(Some(finder()));
+        port.ignored = 2;
+        // The person switches to Mail while the first rungs are refused.
+        port.switch_on_forced = Some(mail());
+        let done = activate_once(&mut port, &StartFocus::default(), true, true);
+        assert!(
+            matches!(done, Outcome::Activated { returned: Some(ref f), .. } if f.pid == 202),
+            "{done:?}"
+        );
+        assert_eq!(port.calls.last().unwrap(), "give_back 202");
+    }
+
+    #[test]
+    fn focus_is_not_given_back_when_the_person_took_it_or_a_dyno_window_is_open() {
+        use crate::tray_focus::{activate_once, Outcome, StartFocus};
+        for (stolen, window) in [(true, false), (false, true)] {
+            let mut port = FakeFocus::new(Some(finder()));
+            port.window_open = window;
+            // `stolen` is applied after the activation took: Dyno is no longer active when the hold ends.
+            let done = if stolen {
+                struct Steal(FakeFocus);
+                impl crate::tray_focus::FocusPort for Steal {
+                    fn os_major(&mut self) -> u64 {
+                        self.0.os_major()
+                    }
+                    fn items_shown(&mut self) -> Option<bool> {
+                        self.0.items_shown()
+                    }
+                    fn dyno_window_open(&mut self) -> bool {
+                        self.0.dyno_window_open()
+                    }
+                    fn frontmost(&mut self) -> Option<crate::tray_focus::Front> {
+                        self.0.frontmost()
+                    }
+                    fn is_active(&mut self) -> bool {
+                        self.0.is_active()
+                    }
+                    fn activate(&mut self, h: crate::tray_focus::Method) -> Result<(), String> {
+                        self.0.activate(h)
+                    }
+                    fn give_back(&mut self, t: &crate::tray_focus::Front) -> Result<(), String> {
+                        self.0.give_back(t)
+                    }
+                    fn wait(&mut self, ms: u64) {
+                        // The hold: the person clicks another app.
+                        if ms == 300 {
+                            self.0.active = false;
+                        }
+                    }
+                }
+                let mut steal = Steal(port);
+                let d = activate_once(&mut steal, &StartFocus::default(), true, true);
+                port = steal.0;
+                d
+            } else {
+                activate_once(&mut port, &StartFocus::default(), true, true)
+            };
+            assert!(
+                matches!(done, Outcome::Activated { returned: None, .. }),
+                "stolen {stolen} window {window}: {done:?}"
+            );
+            assert!(!port.calls.iter().any(|c| c.starts_with("give_back")), "{:?}", port.calls);
+        }
+    }
+
+    #[test]
+    fn activate_once_reports_already_active_refused_nobody_in_front_and_a_failed_give_back() {
+        use crate::tray_focus::{activate_once, Outcome, StartFocus};
+        let mut port = FakeFocus::new(Some(finder()));
+        port.active = true;
+        assert_eq!(activate_once(&mut port, &StartFocus::default(), true, true), Outcome::AlreadyActive);
+        assert!(!port.calls.iter().any(|c| c == "activate"));
+
+        let mut port = FakeFocus::new(Some(finder()));
+        port.ignored = 3;
+        assert_eq!(activate_once(&mut port, &StartFocus::default(), true, true), Outcome::Refused);
+        assert!(!port.calls.iter().any(|c| c.starts_with("give_back")));
+
+        let mut port = FakeFocus::new(None);
+        let done = activate_once(&mut port, &StartFocus::default(), true, true);
+        assert_eq!(
+            done,
+            Outcome::Activated {
+                how: "activate",
+                returned: None
+            }
+        );
+
+        let mut port = FakeFocus::new(Some(finder()));
+        port.give_back_fails = true;
+        let done = activate_once(&mut port, &StartFocus::default(), true, true);
+        assert!(matches!(done, Outcome::Activated { returned: Some(_), .. }), "{done:?}");
+        assert_eq!(port.calls.last().unwrap(), "give_back 101");
+    }
+
+    #[test]
+    fn the_logs_name_no_app_and_the_bundle_id_is_the_configured_identifier() {
+        let front = finder();
+        assert_eq!(format!("{front:?}"), "pid 101");
+        assert_eq!(crate::tray_focus::describe(Some(&front)), "another app (pid 101)");
+        assert_eq!(crate::tray_focus::describe(None), "none");
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], crate::tray_identity::BUNDLE_ID);
     }
 
     #[test]
     fn a_refused_activation_goes_down_the_ladder_to_the_apple_event() {
         use crate::tray_focus::{activate_once, Outcome};
         let state = TrayState::default();
-        let mut port = FakeFocus {
-            front: Some(finder()),
-            active: false,
-            ignored: 2,
-            calls: Vec::new(),
-        };
+        let mut port = FakeFocus::new(Some(finder()));
+        port.ignored = 2;
         let done = activate_once(&mut port, &state.focus, true, true);
         assert!(matches!(done, Outcome::Activated { how: "apple_event", .. }), "{done:?}");
-        assert_eq!(
-            port.calls,
-            ["frontmost", "activate", "activate_forced", "apple_event", "give_back Finder"]
-        );
+        assert_eq!(port.calls.last().unwrap(), "give_back 101");
     }
 
     #[test]
     fn a_refused_cooperative_activation_falls_back_to_the_forced_one() {
         use crate::tray_focus::{activate_once, Outcome};
         let state = TrayState::default();
-        let mut port = FakeFocus {
-            front: Some(finder()),
-            active: false,
-            ignored: 1,
-            calls: Vec::new(),
-        };
+        let mut port = FakeFocus::new(Some(finder()));
+        port.ignored = 1;
         let done = activate_once(&mut port, &state.focus, true, true);
         assert!(
             matches!(
@@ -1485,7 +1664,6 @@ mod tests {
             ),
             "{done:?}"
         );
-        assert_eq!(port.calls, ["frontmost", "activate", "activate_forced", "give_back Finder"]);
     }
 
     #[test]

@@ -1,13 +1,15 @@
 //! The real "shown" test of a macOS 26 menu-bar item: ControlCenter draws every app's status items, and an item is on screen
-//! when an on-screen window owned by Control Center carries the item's autosave name and has a size. A status item that
-//! exists in the app but that ControlCenter parks off screen has no such window. Pure: the windows are read elsewhere
-//! (`tray_platform`), so the judgement is testable on any OS.
+//! when an on-screen window owned by the Control Center process carries the item's autosave name and has a size. A status item
+//! that exists in the app but that ControlCenter parks off screen has no such window. The owner is matched by process id (the
+//! owner's name is localized). Reading a window's name needs the system's window-name access; when the names are not readable
+//! ([`Verdict::NamesUnreadable`]) the test cannot say and the caller falls back to the status item's own window (visible, not
+//! occluded, sized). Pure: the windows are read elsewhere (`tray_platform`), so the judgement is testable on any OS.
 
 /// One on-screen window as the window server lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
-    /// The owning process's name.
-    pub owner: String,
+    /// The owning process's id.
+    pub owner_pid: i32,
     /// The window's name (the autosave name for a status item); `None` when the window server does not tell it.
     pub name: Option<String>,
     /// Width in points.
@@ -15,9 +17,6 @@ pub struct Window {
     /// Height in points.
     pub height: f64,
 }
-
-/// The owner name of the window server's status-item windows.
-pub const CONTROL_CENTER: &str = "Control Center";
 
 /// What the list says about one autosave name.
 #[derive(Debug, Clone, PartialEq)]
@@ -34,8 +33,8 @@ pub enum Verdict {
 }
 
 /// Judges the item `autosave_name` against the on-screen `windows`.
-pub fn judge(windows: &[Window], autosave_name: &str) -> Verdict {
-    let cc: Vec<&Window> = windows.iter().filter(|w| w.owner == CONTROL_CENTER).collect();
+pub fn judge(windows: &[Window], control_center_pid: i32, autosave_name: &str) -> Verdict {
+    let cc: Vec<&Window> = windows.iter().filter(|w| w.owner_pid == control_center_pid).collect();
     if cc
         .iter()
         .any(|w| w.name.as_deref() == Some(autosave_name) && w.width > 0.0 && w.height > 0.0)
@@ -50,31 +49,22 @@ pub fn judge(windows: &[Window], autosave_name: &str) -> Verdict {
     }
 }
 
-/// The owners of the listed windows with their counts, most first, for the log (at most 8): it shows whether the list is complete.
+/// How many windows are listed and how many different owners they have, for the log (no process names).
 pub fn owners_summary(windows: &[Window]) -> String {
-    let mut counts: Vec<(&str, usize)> = Vec::new();
-    for w in windows {
-        match counts.iter_mut().find(|(o, _)| *o == w.owner) {
-            Some((_, n)) => *n += 1,
-            None => counts.push((&w.owner, 1)),
-        }
-    }
-    counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    counts
-        .iter()
-        .take(8)
-        .map(|(o, n)| format!("{o} {n}"))
-        .collect::<Vec<_>>()
-        .join(", ")
+    let owners: std::collections::BTreeSet<i32> = windows.iter().map(|w| w.owner_pid).collect();
+    format!("{} window(s) of {} process(es)", windows.len(), owners.len())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn win(owner: &str, name: Option<&str>, w: f64) -> Window {
+    const CC: i32 = 449;
+    const NAME: &str = "net.decryptology.dyno.menubar.cpu-0";
+
+    fn win(pid: i32, name: Option<&str>, w: f64) -> Window {
         Window {
-            owner: owner.into(),
+            owner_pid: pid,
             name: name.map(str::to_string),
             width: w,
             height: 24.0,
@@ -82,40 +72,34 @@ mod tests {
     }
 
     #[test]
-    fn a_control_center_window_named_after_the_item_is_shown() {
-        let list = [
-            win("Control Center", Some("net.decryptology.dyno.menubar.cpu-0"), 40.0),
-            win("Dock", None, 9.0),
-        ];
-        assert_eq!(judge(&list, "net.decryptology.dyno.menubar.cpu-0"), Verdict::Shown);
+    fn a_control_center_window_named_after_the_item_is_shown_whatever_language_the_owner_name_is() {
+        // Only the pid identifies the owner: there is no owner name in the model at all.
+        let list = [win(CC, Some(NAME), 40.0), win(7, None, 9.0)];
+        assert_eq!(judge(&list, CC, NAME), Verdict::Shown);
     }
 
     #[test]
     fn an_item_without_such_a_window_is_not_shown_and_the_count_is_told() {
-        let list = [win("Control Center", Some("com.apple.menuextra.clock"), 60.0)];
-        assert_eq!(
-            judge(&list, "net.decryptology.dyno.menubar.cpu-0"),
-            Verdict::NotShown { control_center_windows: 1 }
-        );
+        let list = [win(CC, Some("com.apple.menuextra.clock"), 60.0)];
+        assert_eq!(judge(&list, CC, NAME), Verdict::NotShown { control_center_windows: 1 });
     }
 
     #[test]
-    fn a_window_of_another_owner_or_without_size_does_not_count() {
-        let name = "net.decryptology.dyno.menubar.cpu-0";
-        assert_ne!(judge(&[win("Dyno", Some(name), 40.0)], name), Verdict::Shown);
-        assert_ne!(judge(&[win("Control Center", Some(name), 0.0)], name), Verdict::Shown);
+    fn a_window_of_another_process_or_without_size_does_not_count() {
+        assert_ne!(judge(&[win(7, Some(NAME), 40.0)], CC, NAME), Verdict::Shown);
+        assert_ne!(judge(&[win(CC, Some(NAME), 0.0)], CC, NAME), Verdict::Shown);
     }
 
     #[test]
-    fn the_owners_are_counted_most_first() {
-        let list = [win("Dock", None, 1.0), win("Control Center", None, 1.0), win("Dock", None, 1.0)];
-        assert_eq!(owners_summary(&list), "Dock 2, Control Center 1");
-        assert_eq!(owners_summary(&[]), "");
+    fn the_listing_is_counted_without_names() {
+        let list = [win(1, None, 1.0), win(CC, None, 1.0), win(1, None, 1.0)];
+        assert_eq!(owners_summary(&list), "3 window(s) of 2 process(es)");
+        assert_eq!(owners_summary(&[]), "0 window(s) of 0 process(es)");
     }
 
     #[test]
     fn unnamed_control_center_windows_cannot_say() {
-        assert_eq!(judge(&[win("Control Center", None, 40.0)], "x"), Verdict::NamesUnreadable);
-        assert_eq!(judge(&[], "x"), Verdict::NotShown { control_center_windows: 0 });
+        assert_eq!(judge(&[win(CC, None, 40.0)], CC, "x"), Verdict::NamesUnreadable);
+        assert_eq!(judge(&[], CC, "x"), Verdict::NotShown { control_center_windows: 0 });
     }
 }

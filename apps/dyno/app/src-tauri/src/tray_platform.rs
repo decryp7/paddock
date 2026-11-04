@@ -4,7 +4,9 @@
 #![allow(unsafe_code)]
 
 #[cfg(target_os = "macos")]
-pub use mac::{context, on_screen_windows, NativeFocus};
+pub use mac::context;
+#[cfg(target_os = "macos")]
+pub use mac::{control_center_pid, on_screen_windows, NativeFocus};
 #[cfg(windows)]
 pub use win::context;
 
@@ -20,11 +22,12 @@ mod mac {
     use crate::tray_focus::{FocusPort, Front, Method};
     use crate::tray_shown::Window;
     use objc2::rc::Retained;
+    use objc2::runtime::NSObjectProtocol;
     use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
     use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
-    use objc2_foundation::{MainThreadMarker, NSArray, NSDictionary, NSNumber, NSString};
+    use objc2_foundation::{MainThreadMarker, NSArray, NSDictionary, NSNumber, NSProcessInfo, NSString};
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tauri::{AppHandle, Wry};
+    use tauri::{AppHandle, Manager, Wry};
 
     /// When process `pid` started (seconds since the epoch), from the kernel (`proc_pidinfo`) (`launchDate` is empty for
     /// ControlCenter, which is not a registered GUI app).
@@ -75,7 +78,14 @@ mod mac {
         v.downcast::<NSNumber>().ok().map(|n| n.doubleValue())
     }
 
-    /// The window server's list of on-screen windows: owner, name (when readable) and size.
+    /// ControlCenter's process id (it draws every app's status items).
+    pub fn control_center_pid() -> Option<i32> {
+        NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str("com.apple.controlcenter"))
+            .firstObject()
+            .map(|c| c.processIdentifier())
+    }
+
+    /// The window server's list of on-screen windows: owner pid, name (when readable) and size.
     pub fn on_screen_windows() -> Result<Vec<Window>, String> {
         let list = CGWindowListCopyWindowInfo(CGWindowListOption::OptionOnScreenOnly, 0).ok_or("the window list is empty or refused")?;
         let raw = objc2_core_foundation::CFRetained::into_raw(list)
@@ -86,7 +96,7 @@ mod mac {
         let mut out = Vec::new();
         for i in 0..array.count() {
             let dict = array.objectAtIndex(i);
-            let Some(owner) = string_of(&dict, "kCGWindowOwnerName") else {
+            let Some(owner_pid) = number_of(&dict, "kCGWindowOwnerPID") else {
                 continue;
             };
             let bounds = dict
@@ -96,7 +106,7 @@ mod mac {
                 (number_of(&b, "Width").unwrap_or(0.0), number_of(&b, "Height").unwrap_or(0.0))
             });
             out.push(Window {
-                owner,
+                owner_pid: owner_pid as i32,
                 name: string_of(&dict, "kCGWindowName"),
                 width,
                 height,
@@ -124,6 +134,16 @@ mod mac {
     pub struct NativeFocus {
         /// The app.
         pub app: AppHandle<Wry>,
+        /// The autosave names of Dyno's items (what the window list is asked for).
+        pub names: Vec<String>,
+    }
+
+    fn identity_of(app: &NSRunningApplication) -> Front {
+        Front {
+            pid: app.processIdentifier(),
+            launch_ms: app.launchDate().map(|d| (d.timeIntervalSince1970() * 1000.0) as i64),
+            bundle_id: app.bundleIdentifier().map(|b| b.to_string()),
+        }
     }
 
     impl NativeFocus {
@@ -135,14 +155,33 @@ mod mac {
     }
 
     impl FocusPort for NativeFocus {
+        fn os_major(&mut self) -> u64 {
+            NSProcessInfo::processInfo().operatingSystemVersion().majorVersion as u64
+        }
+
+        fn items_shown(&mut self) -> Option<bool> {
+            use crate::tray_shown::{judge, Verdict};
+            let cc = control_center_pid()?;
+            let windows = on_screen_windows().ok()?;
+            let mut all = true;
+            for name in &self.names {
+                match judge(&windows, cc, name) {
+                    Verdict::Shown => {}
+                    Verdict::NotShown { .. } => all = false,
+                    Verdict::NamesUnreadable => return None,
+                }
+            }
+            Some(all && !self.names.is_empty())
+        }
+
+        fn dyno_window_open(&mut self) -> bool {
+            self.app.webview_windows().values().any(|w| w.is_visible().unwrap_or(false))
+        }
+
         fn frontmost(&mut self) -> Option<Front> {
             self.main(|_| {
                 let front = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-                let pid = front.processIdentifier();
-                (pid != std::process::id() as i32).then(|| Front {
-                    pid,
-                    name: front.localizedName().map_or_else(|| "unnamed".to_string(), |n| n.to_string()),
-                })
+                (front.processIdentifier() != std::process::id() as i32).then(|| identity_of(&front))
             })
             .ok()
             .flatten()
@@ -154,7 +193,16 @@ mod mac {
 
         fn activate(&mut self, how: Method) -> Result<(), String> {
             match how {
-                Method::Cooperative => self.main(|mtm| NSApplication::sharedApplication(mtm).activate()),
+                Method::Cooperative => self.main(|mtm| {
+                    let app = NSApplication::sharedApplication(mtm);
+                    // macOS 14+ only: an older system raises an unrecognized-selector exception.
+                    if app.respondsToSelector(objc2::sel!(activate)) {
+                        app.activate();
+                        Ok(())
+                    } else {
+                        Err("activate is not available on this macOS".to_string())
+                    }
+                })?,
                 Method::Forced =>
                 {
                     #[allow(deprecated)]
@@ -165,11 +213,18 @@ mod mac {
         }
 
         fn give_back(&mut self, to: &Front) -> Result<(), String> {
-            let pid = to.pid;
+            let want = to.clone();
             self.main(move |mtm| {
-                let other = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).ok_or("that app has quit")?;
+                let other = NSRunningApplication::runningApplicationWithProcessIdentifier(want.pid).ok_or("that app has quit")?;
+                // Rule 53: the pid may belong to another process by now; the launch time and bundle id must still match.
+                if identity_of(&other) != want {
+                    return Err("the pid now belongs to another process".to_string());
+                }
+                let app = NSApplication::sharedApplication(mtm);
                 // macOS 14+: Dyno yields its activation to the other app, which then activates (the cooperative way back).
-                NSApplication::sharedApplication(mtm).yieldActivationToApplication(&other);
+                if app.respondsToSelector(objc2::sel!(yieldActivationToApplication:)) {
+                    app.yieldActivationToApplication(&other);
+                }
                 if other.activateWithOptions(NSApplicationActivationOptions::empty()) {
                     Ok(())
                 } else {

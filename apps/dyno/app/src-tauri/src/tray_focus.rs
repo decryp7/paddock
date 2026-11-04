@@ -7,13 +7,36 @@ use crate::logging;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-/// The app that was in front before Dyno activated itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The app that was in front before Dyno activated itself. Its identity (pid, launch time, bundle id) is kept so the port can
+/// check it is still the same process before acting (rule 53: a pid is reusable). No name: logs never carry app names (rule 56).
+#[derive(Clone, PartialEq, Eq)]
 pub struct Front {
     /// Its process id.
     pub pid: i32,
-    /// Its name, for the log.
-    pub name: String,
+    /// When it launched (milliseconds since the epoch), if known.
+    pub launch_ms: Option<i64>,
+    /// Its bundle identifier, if it has one.
+    pub bundle_id: Option<String>,
+}
+
+impl std::fmt::Debug for Front {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "pid {}", self.pid)
+    }
+}
+
+/// How the log names the app that was in front: its pid, never its name.
+pub fn describe(front: Option<&Front>) -> String {
+    front.map_or_else(|| "none".to_string(), |f| format!("another app (pid {})", f.pid))
+}
+
+/// The first macOS major version the activation gate was measured on (26.6.2). Older systems are left alone: `activate()` and
+/// `yieldActivationToApplication` exist from macOS 14 only, and nothing is known of the gate before 26.
+pub const FIRST_OS_MAJOR: u64 = 26;
+
+/// Whether the activation sequence runs on this macOS major version.
+pub fn os_supported(major: u64) -> bool {
+    major >= FIRST_OS_MAJOR
 }
 
 /// The ways to ask for the activation, in the order they are tried. macOS 14 made the first two cooperative (a background
@@ -52,13 +75,19 @@ impl Method {
 
 /// What the activation needs from the OS.
 pub trait FocusPort {
+    /// The macOS major version.
+    fn os_major(&mut self) -> u64;
+    /// Whether every one of Dyno's items is on screen now (`None`: the window list cannot say).
+    fn items_shown(&mut self) -> Option<bool>;
+    /// Whether any Dyno window is open (a window the person opened is theirs: focus is not taken back from it).
+    fn dyno_window_open(&mut self) -> bool;
     /// The frontmost app, unless it is Dyno itself.
     fn frontmost(&mut self) -> Option<Front>;
     /// Whether Dyno is the active app now.
     fn is_active(&mut self) -> bool;
     /// Asks the OS to activate Dyno by `how`.
     fn activate(&mut self, how: Method) -> Result<(), String>;
-    /// Makes `to` the active app again.
+    /// Makes `to` the active app again, after checking on the main thread that it is still the same process (pid, launch time, bundle id).
     fn give_back(&mut self, to: &Front) -> Result<(), String>;
     /// Waits `ms` milliseconds (a fake does not wait).
     fn wait(&mut self, ms: u64);
@@ -71,7 +100,7 @@ pub enum Outcome {
     Skipped(String),
     /// Dyno was already the active app.
     AlreadyActive,
-    /// Dyno became active (`how`) and focus went back to `returned`.
+    /// Dyno became active (`how`); focus went back to `returned` unless the person had moved on or a Dyno window was open.
     Activated {
         /// Which call worked.
         how: &'static str,
@@ -93,6 +122,9 @@ pub struct StartFocus {
 const POLL_MS: u64 = 100;
 /// How long Dyno stays active before focus goes back (the menu bar must see the activation).
 const HOLD_MS: u64 = 300;
+/// How often, and how far apart, the items are looked at before deciding to activate (about 2 s in all).
+const LOOKS: u32 = 8;
+const LOOK_MS: u64 = 250;
 
 fn became_active<P: FocusPort>(port: &mut P, polls: u32) -> bool {
     for _ in 0..polls {
@@ -116,11 +148,37 @@ pub fn activate_once<P: FocusPort>(port: &mut P, focus: &StartFocus, hidden: boo
     if focus.done.swap(true, Ordering::SeqCst) {
         return Outcome::Skipped("already done in this process".to_string());
     }
+    let major = port.os_major();
+    if !os_supported(major) {
+        logging::info(&format!(
+            "tray activation: macOS {major} is older than {FIRST_OS_MAJOR}, the only version the gate was measured on; no activation"
+        ));
+        return Outcome::Skipped(format!("macOS {major} is not {FIRST_OS_MAJOR} or later"));
+    }
+    // Items that ControlCenter adopted at its own start are shown within moments; only parked ones need the activation.
+    let looked = Instant::now();
+    for look in 0..LOOKS {
+        match port.items_shown() {
+            Some(true) => {
+                logging::info(&format!(
+                    "tray activation: the items are already on screen after {} ms; no activation, focus untouched",
+                    looked.elapsed().as_millis()
+                ));
+                return Outcome::Skipped("the items are already shown".to_string());
+            }
+            Some(false) => {}
+            None => {
+                logging::info("tray activation: the window list cannot say whether the items are shown; activating to be safe");
+                break;
+            }
+        }
+        if look + 1 < LOOKS {
+            port.wait(LOOK_MS);
+        }
+    }
     let started = Instant::now();
-    let before = port.frontmost();
-    let front = before
-        .as_ref()
-        .map_or_else(|| "none".to_string(), |f| format!("{} (pid {})", f.name, f.pid));
+    let mut before = port.frontmost();
+    let front = describe(before.as_ref());
     if port.is_active() {
         logging::info(&format!(
             "tray activation: Dyno is already active (frontmost was {front}); nothing to do"
@@ -133,6 +191,12 @@ pub fn activate_once<P: FocusPort>(port: &mut P, focus: &StartFocus, hidden: boo
     let mut how = None;
     for method in Method::LADDER {
         let name = method.name();
+        if method == Method::AppleEvent {
+            // The person may have switched apps while the first rungs were refused: the one in front now is the one to return to.
+            if let Some(now) = port.frontmost() {
+                before = Some(now);
+            }
+        }
         let t = Instant::now();
         let called = port.activate(method);
         let took = became_active(port, method.polls());
@@ -151,16 +215,20 @@ pub fn activate_once<P: FocusPort>(port: &mut P, focus: &StartFocus, hidden: boo
         return Outcome::Refused;
     };
     port.wait(HOLD_MS);
-    let returned = before;
-    if let Some(to) = &returned {
-        let r = port.give_back(to);
+    let mut returned = None;
+    if !port.is_active() {
+        logging::info("tray activation: Dyno is no longer active (the person switched apps); focus is left where it is");
+    } else if port.dyno_window_open() {
+        logging::info("tray activation: a Dyno window is open; focus stays with Dyno");
+    } else if let Some(to) = before {
+        let r = port.give_back(&to);
         logging::info(&format!(
-            "tray activation: focus given back to {} (pid {}): {}; Dyno was in front {} ms",
-            to.name,
-            to.pid,
+            "tray activation: focus given back to {}: {}; Dyno was in front {} ms",
+            describe(Some(&to)),
             r.as_ref().map_or_else(|e| format!("failed ({e})"), |()| "ok".to_string()),
             started.elapsed().as_millis()
         ));
+        returned = Some(to);
     } else {
         logging::info(&format!(
             "tray activation: no other app was in front; Dyno stays active ({} ms)",
