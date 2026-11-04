@@ -7,6 +7,7 @@ import { Actor } from './win-act.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
 import { snapCheck } from './win-snap.mjs';
 import { domTour } from './win-dom-tour.mjs';
+import { trayCountdownStep, trayMenuStep } from './win-tray.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
@@ -65,6 +66,8 @@ export async function runUiPhase({ log = console.error, extra = [] } = {}) {
     steps.push(result('Windows: Aero snap announces Manual (form and viewer dialog, Win+Left)', snaps.map((s) => ({ ok: s.ok, detail: `${s.label}: ${s.detail}` })), [], 'both dialogs announced Manual after Win+Left'));
     const tour = await domTour(browser, { shotDir: process.env.PADDOCK_WIN_SHOTS ?? null, log });
     steps.push(result('Windows: shared screenshot check on every page and dialog of the real WebView2 DOM', tour.checks, tour.evidence, `${tour.checks.length} pages and dialogs clean`));
+    steps.push(await trayMenuStep(actor).catch((e) => result('Windows: tray right-click menu', [{ ok: false, detail: e.message }])));
+    steps.push(await trayCountdownStep(actor).catch((e) => result('Windows: tray menu during an idle countdown', [{ ok: false, detail: e.message }])));
     // Extension point: one function per wired helper reading (each `async ({ browser, actor }) => step`), run before Quit.
     for (const fn of extra) steps.push(await fn({ browser, actor }));
     steps.push(await quitViaMenu(browser));

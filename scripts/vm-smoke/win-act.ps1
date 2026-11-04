@@ -5,7 +5,7 @@
 param([string]$Dir = 'C:\paddock-test\vmcheck\act', [int]$MaxMin = 40)
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Dir | Out-Null
-Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
 Add-Type -Namespace W -Name A -MemberDefinition '
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -45,6 +45,9 @@ while ((Get-Date) -lt $end) {
   try {
     switch ($a[0]) {
       'key' { $keys = $a[1].Split('+') | ForEach-Object { [byte]$vk[$_.ToUpper()] }; foreach ($k in $keys) { [W.A]::keybd_event($k, 0, 0, [UIntPtr]::Zero) }; [array]::Reverse($keys); foreach ($k in $keys) { [W.A]::keybd_event($k, 0, 2, [UIntPtr]::Zero) } }
+      'rclick' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 250; [W.A]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero); [W.A]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero) }
+      'tray' { $root = [Windows.Automation.AutomationElement]::RootElement; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))); $rows = @(); foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($e.Current.Name -match $a[1] -and $r.Width -gt 0) { $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))" } }; $out = $rows -join "`n" }
+      'menu' { $root = [Windows.Automation.AutomationElement]::RootElement; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::MenuItem))); $rows = @(); foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($r.Width -gt 0 -and $e.Current.Name) { $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))" } }; $out = $rows -join "`n" }
       'move' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]) }
       'click' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 200; [W.A]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [W.A]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
       'fg' { $h = (Windows-List | Where-Object { ($_ -split "`t")[2] -match $a[1] } | Select-Object -First 1); if ($h) { $hh = [IntPtr][int64](($h -split "`t")[0]); [void][W.A]::ShowWindow($hh, 9); [void][W.A]::SetForegroundWindow($hh); $out = "fg $(($h -split "`t")[2])" } else { $out = 'no such window' } }

@@ -10,7 +10,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Page-level checks beyond screenshotProblems: each is `async (page) => string[]` (problems). Add the shared layout checks here when they land. */
-export const EXTRA_CHECKS = [];
+export const EXTRA_CHECKS = [
+  // A dialog must fit its window: no scrolling of the page itself and the window inside the screen (the check that matters at 150 % scale).
+  async (page) => {
+    if (!page.url().includes('dialog?id=')) return [];
+    const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, sh: document.documentElement.scrollHeight, ch: document.documentElement.clientHeight, dpr: window.devicePixelRatio, ow: window.outerWidth, oh: window.outerHeight, aw: screen.availWidth, ah: screen.availHeight }));
+    const out = [];
+    if (m.sw > m.cw + 1) out.push(`cut off sideways: content ${m.sw}px wide in a ${m.cw}px window (scale ${m.dpr})`);
+    if (m.sh > m.ch + 1) out.push(`cut off at the bottom: content ${m.sh}px high in a ${m.ch}px window (scale ${m.dpr})`);
+    if (m.ow > m.aw + 1 || m.oh > m.ah + 1) out.push(`the window (${m.ow}x${m.oh}) is larger than the screen (${m.aw}x${m.ah}) at scale ${m.dpr}`);
+    return out;
+  },
+];
 
 const slug = (s) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40);
 
@@ -60,6 +71,11 @@ export async function domTour(browser, { shotDir = null, log = () => {} } = {}) 
     for (const name of [...new Set(sections)].slice(0, 12)) { await settings.getByRole('button', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).first().click().catch(() => {}); await record(settings, `Settings > ${name}`); }
     if (!sections.length) await record(settings, 'Settings');
   } else checks.push({ ok: false, detail: 'Settings did not open' });
+  // The file hash dialog opens from a process row; look for its entry point on the Processes page.
+  await main.evaluate(() => { location.hash = '#/processes'; }); await sleep(3000);
+  const hashEntry = await main.evaluate(() => { const c = [...document.querySelectorAll('button, [role=menuitem], a')].find((e) => /hash|VirusTotal/i.test((e.getAttribute('aria-label') || '') + ' ' + e.textContent)); if (c) { c.click(); return true; } return false; });
+  if (hashEntry) { await sleep(2500); const hp = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes('dy.file-hash')); if (hp) await record(hp, 'dialog file hash'); else checks.push({ ok: false, detail: 'the file hash entry was clicked but no dialog opened' }); }
+  else checks.push({ ok: true, detail: 'file hash dialog: no entry point found on the Processes page without selecting a row (not checked)' });
   for (const item of ['About', 'What', 'Report']) {
     const label = { About: 'About', What: 'What’s new', Report: 'Report a problem' }[item];
     const p = await openDialog(browser, 'Help', label);
