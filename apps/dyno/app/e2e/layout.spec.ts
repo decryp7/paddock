@@ -217,3 +217,27 @@ for (const width of WIDTHS) {
     await expectNoButtonLabelWraps(page, `settings at ${width}`);
   });
 }
+
+/** Rule: a select shows its whole chosen text. "Refresh when opened" has the longest choice, "Never (only when I press Rescan)"; it ran past the window edge. */
+for (const width of WIDTHS) {
+  test(`the Refresh when opened select shows its whole text inside the window at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/?latency=0#/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible({ timeout: 45_000 });
+    await pressMod(page, 'Mod+Comma');
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Dyno', exact: true }).dispatchEvent('click');
+    const select = dialog.getByRole('combobox', { name: 'Refresh when opened' });
+    await select.scrollIntoViewIfNeeded();
+    await expect(select).toContainText('Never (only when I press Rescan)');
+    await page.evaluate(() => document.fonts.ready);
+    const m = await select.evaluate((el) => {
+      const value = el.querySelector<HTMLElement>('.mat-mdc-select-value-text, .mat-mdc-select-min-line') ?? el;
+      const text = el.querySelector<HTMLElement>('.mat-mdc-select-min-line') ?? value;
+      const r = text.getBoundingClientRect();
+      return { right: r.right, vw: document.documentElement.clientWidth, needs: text.scrollWidth, has: text.clientWidth };
+    });
+    expect(m.right, 'the select text ends inside the window').toBeLessThanOrEqual(m.vw);
+    expect(m.needs, 'the select text is not cut').toBeLessThanOrEqual(m.has + 1);
+  });
+}

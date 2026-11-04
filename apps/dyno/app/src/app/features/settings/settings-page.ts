@@ -406,6 +406,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { width: 148px; }
+    /* A select shows its whole choice (the longest, "Never (only when I press Rescan)"), never past the window's edge. */
+    .row pd-select { flex: 0 0 auto; width: min(22rem, 100%); }
     .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
     .sub-h { margin-top: var(--sp-5); }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }

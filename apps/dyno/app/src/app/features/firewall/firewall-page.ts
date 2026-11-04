@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/cor
 import { MatButton } from '@angular/material/button';
 import type { FirewallProfile, FirewallSource, RuleAction, RuleSourceKind } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { ReadingSource } from '../../core/reading-source';
 import { FirewallStore } from '../../state/firewall.store';
@@ -30,7 +31,7 @@ export function rulesLine(s: FirewallSource): string {
  */
 @Component({
   selector: 'dy-firewall-page',
-  imports: [AsyncState, Icon, MatButton, ReadingSource],
+  imports: [AsyncState, FullTextTip, Icon, MatButton, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -76,7 +77,7 @@ export function rulesLine(s: FirewallSource): string {
                           <td>{{ r.direction === 'in' ? 'Incoming' : r.direction === 'out' ? 'Outgoing' : 'Both' }}</td>
                           <td [class.block]="r.action === 'block'">{{ r.action === 'allow' ? 'Allow' : 'Block' }}</td>
                           <td>{{ r.enabled ? 'Yes' : 'No' }}</td>
-                          <td class="trunc">{{ r.program ?? '—' }}</td><td>{{ r.ports ?? '—' }}</td><td class="trunc">{{ r.addresses ?? '—' }}</td><td>{{ profile(r.profile) }}</td>
+                          <td class="trunc" [dyFullText]="r.program">{{ r.program ?? '—' }}</td><td>{{ r.ports ?? '—' }}</td><td class="trunc" [dyFullText]="r.addresses">{{ r.addresses ?? '—' }}</td><td>{{ profile(r.profile) }}</td>
                         </tr>
                       }
                     </tbody>
@@ -106,7 +107,7 @@ export function rulesLine(s: FirewallSource): string {
     .faint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
     table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-xs); }
     .grid th, .grid td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-    .grid .trunc { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .grid .trunc { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .grid .block { color: var(--warn); font-weight: var(--fw-semibold); }
     .empty { margin: 0; color: var(--text-2); }
   `,

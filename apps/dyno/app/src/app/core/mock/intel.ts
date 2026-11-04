@@ -298,8 +298,9 @@ export class MockIntel {
           ],
           defaultIn: null,
           defaultOut: null,
-          ruleCount: 2,
+          ruleCount: 3,
           rules: [
+            { name: 'Example Sync helper (all networks)', direction: 'out', action: 'allow', enabled: true, program: 'C:\\Program Files\\WindowsApps\\ExampleVendor.ExampleSync_12.4.2026.0_x64__8wekyb3d8bbwe\\Helper\\ExampleSyncBackgroundService.exe', ports: '443', addresses: '192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, fe80::/10, 2001:db8:1234:5678::/64, 2001:db8:abcd::/48', profile: 'all', source: 'applicationFirewall' },
             { name: 'Safari', direction: 'in', action: 'allow', enabled: true, program: '/Applications/Safari.app', ports: null, addresses: null, profile: 'all', source: 'applicationFirewall' },
             { name: 'Example Sync', direction: 'in', action: 'block', enabled: true, program: '/Applications/Example Sync.app', ports: null, addresses: null, profile: 'all', source: 'applicationFirewall' },
           ],
