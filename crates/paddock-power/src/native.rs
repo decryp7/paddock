@@ -540,11 +540,19 @@ mod imp {
 
     impl Drop for Watch {
         fn drop(&mut self) {
-            // Closing the connection ends the signal stream, which ends the thread.
+            // Closing the connection ends the signal stream, which ends the thread. D-Bus decides when that happens (on the
+            // Ubuntu test machine the shutdown never returned, and with it the agent's stop, which then took the 10 s grace and
+            // ended with 143), so it runs on a thread of its own and dropping the subscription never waits for it.
             let c = self.connection.inner().clone();
-            zbus::block_on(c.graceful_shutdown());
-            if let Some(t) = self.thread.take() {
-                let _ = t.join();
+            let thread = self.thread.take();
+            let closing = std::thread::Builder::new().name("paddock-power-close".into()).spawn(move || {
+                zbus::block_on(c.graceful_shutdown());
+                if let Some(t) = thread {
+                    let _ = t.join();
+                }
+            });
+            if let Err(e) = closing {
+                log::warn!("the power subscription could not be closed on its own thread: {e}");
             }
         }
     }
