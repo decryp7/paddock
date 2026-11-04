@@ -2,13 +2,50 @@
 //! backends of each OS on the recording fake (`launchctl`, `sc`, `systemctl` are never run).
 
 use super::*;
-use crate::backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration};
+use crate::backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, UnregisterError};
 use crate::port::{Output, RegisterError, RunError};
 use crate::privileged::layout::tests::helper_spec;
 use crate::testing::{FakeFiles, FakeSystem};
 use paddock_env::Os;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+#[test]
+fn a_service_removing_itself_confirms_the_registration_is_gone_and_says_so_when_it_is_not() {
+    // ADR 0054 RC-2: the unregister call reported success but the OS still holds the registration (the Linux packaged unit
+    // stayed enabled). The removal must not end as done.
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.registration_override = Some(Registration::Registered);
+    });
+    let layout = layout_for(Os::Linux);
+    let (mut f, mut b, mut s) = (FakeFiles::new(), backend.clone(), FakeSystem::new());
+    let err = Installer::new(&layout, &mut f, &mut b, &mut s)
+        .uninstall_self()
+        .unwrap_err();
+    assert!(
+        matches!(err, InstallError::Failed { phase: Step::ConfirmGone, .. }),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_service_removing_itself_may_still_be_running_because_this_process_is_the_job() {
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+        s.job_override = Some(Job::Running);
+    });
+    let layout = layout_for(Os::Linux);
+    let (mut f, mut b, mut s) = (FakeFiles::new(), backend.clone(), FakeSystem::new());
+    Installer::new(&layout, &mut f, &mut b, &mut s)
+        .with_waits(Waits {
+            gone: Duration::from_secs(1),
+            ..Waits::default()
+        })
+        .uninstall_self()
+        .unwrap();
+}
 
 const MAC_PROGRAM: &str = "/Library/PrivilegedHelperTools/net.decryptology.dyno.helper";
 const SOURCE: &str = "/Applications/Dyno.app/Contents/MacOS/dyno-helper";
@@ -106,14 +143,14 @@ impl Backend for Scripted {
         s.polls_since_register = 0;
         Ok(())
     }
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         let mut s = self.0.lock().unwrap();
         s.log.push("unregister".into());
         if let Some(e) = s.unregister_error.clone() {
-            return Err(e);
+            return Err(UnregisterError::Failed(e));
         }
         s.registered = false;
-        Ok(())
+        Ok(Inspection::absent())
     }
     fn evict(&mut self) -> Result<(), String> {
         let mut s = self.0.lock().unwrap();
@@ -441,6 +478,20 @@ fn a_refused_registration_leaves_nothing_registered() {
         let log = backend.log();
         assert_eq!(&log[log.len() - 2..], ["evict", "unregister"]);
     }
+}
+
+#[test]
+fn a_clean_up_that_fails_after_a_refused_registration_is_logged_and_the_install_error_stays() {
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| {
+        s.register_error = Some(RegisterError::Other("busy".into()));
+        s.evict_error = Some("no such job".into());
+        s.unregister_error = Some("plist locked".into());
+    });
+    let err = run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE).unwrap_err();
+    assert!(matches!(err, InstallError::Failed { phase: Step::Register, .. }), "{err:?}");
+    let log = backend.log();
+    assert_eq!(&log[log.len() - 2..], ["evict", "unregister"], "both clean-up steps were tried");
 }
 
 #[test]
@@ -976,9 +1027,12 @@ fn a_service_removing_itself_deletes_its_files_first_and_stops_last() {
     use Step::*;
     assert_eq!(
         plan_uninstall_self(&layout_for(Os::MacOs)),
-        [RemoveProgram, RemoveFolder, StopExisting]
+        [RemoveProgram, RemoveFolder, StopExisting, ConfirmGone]
     );
-    assert_eq!(plan_uninstall_self(&layout_for(Os::Linux)), [StopExisting]);
+    assert_eq!(
+        plan_uninstall_self(&layout_for(Os::Linux)),
+        [StopExisting, ConfirmGone]
+    );
     let files = mac_disk();
     files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
     let backend = Scripted::with(|s| {
@@ -990,7 +1044,10 @@ fn a_service_removing_itself_deletes_its_files_first_and_stops_last() {
     let report = Installer::new(&layout, &mut f, &mut b, &mut s)
         .uninstall_self()
         .unwrap();
-    assert_eq!(phases(&report), [RemoveProgram, RemoveFolder, StopExisting]);
+    assert_eq!(
+        phases(&report),
+        [RemoveProgram, RemoveFolder, StopExisting, ConfirmGone]
+    );
     assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
     assert_eq!(
         backend

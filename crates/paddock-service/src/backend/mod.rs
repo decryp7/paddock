@@ -9,6 +9,14 @@
 //! | `HKCU\…\Run` value | [`WindowsRun`] | per-user agents on Windows (Dyno) |
 //! | Service Control Manager | [`WindowsService`] | inside the elevated `<program> install` |
 //! | the same through Windows' prompt | [`ElevatedWindowsService`] | the app's Install and Repair buttons |
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 mod launchd;
 mod systemd;
@@ -107,6 +115,15 @@ pub struct Inspection {
 }
 
 impl Inspection {
+    /// The registration is gone or switched off and the OS no longer runs the job: what a removal has to leave. A packaged
+    /// unit stays on disk, so "switched off" counts; a job that is still running or that the OS keeps refusing does not.
+    pub fn withdrawn(&self) -> bool {
+        matches!(
+            self.registration,
+            Registration::Absent | Registration::SwitchedOff
+        ) && !matches!(self.job, Job::Running | Job::Refused)
+    }
+
     /// An inspection of nothing.
     pub fn absent() -> Inspection {
         Inspection {
@@ -124,6 +141,35 @@ impl Inspection {
         !matches!(self.registration, Registration::Absent) || !matches!(self.job, Job::Absent)
     }
 }
+
+/// Why removing a registration failed (ADR 0054 section 1.1). A removal whose read-back disagrees is never `Ok`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnregisterError {
+    /// Administrator rights are needed.
+    NeedsElevation,
+    /// It cannot be reached from here (no systemd manager); the text says what to do.
+    Unavailable(String),
+    /// The tool or the file operation failed; the text is the tool's own words.
+    Failed(String),
+    /// The call reported success, but looking again shows the registration or the job is still there.
+    StillPresent(Inspection),
+}
+
+impl std::fmt::Display for UnregisterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnregisterError::NeedsElevation => f.write_str("administrator rights are needed"),
+            UnregisterError::Unavailable(why) | UnregisterError::Failed(why) => f.write_str(why),
+            UnregisterError::StillPresent(look) => write!(
+                f,
+                "the OS still holds the registration or the job after it was removed (registration {:?}, job {:?})",
+                look.registration, look.job
+            ),
+        }
+    }
+}
+
+impl std::error::Error for UnregisterError {}
 
 /// What a backend allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,8 +194,11 @@ pub trait Backend: Send {
     fn inspect(&mut self) -> Inspection;
     /// Registers (and starts) it.
     fn register(&mut self) -> Result<(), RegisterError>;
-    /// Removes the registration.
-    fn unregister(&mut self) -> Result<(), String>;
+    /// Removes the registration and returns what the OS holds afterwards (the post-inspection).
+    ///
+    /// # Errors
+    /// [`UnregisterError`]; a removal whose read-back disagrees is [`UnregisterError::StillPresent`], never `Ok`.
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError>;
     /// Removes the live job (`launchctl bootout`, `systemctl stop`, `sc stop`, the agent's `stop`).
     fn evict(&mut self) -> Result<(), String>;
     /// Whether the OS no longer holds the job.

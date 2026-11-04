@@ -1,8 +1,16 @@
 //! macOS: the launch agent inside the app bundle registered through `SMAppService` ([`LaunchdBundled`]), and a plist
 //! file loaded with `launchctl bootstrap` ([`LaunchdFile`], development builds and launch daemons). Both read launchd's
 //! own report (`launchctl print`, `print-disabled`) to see a stale registration (R03) and the user's switch.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError};
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
@@ -104,8 +112,9 @@ impl Backend for LaunchdBundled {
         self.app.register()
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
-        self.app.unregister()
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
+        self.app.unregister().map_err(UnregisterError::Failed)?;
+        Ok(self.inspect())
     }
 
     fn evict(&mut self) -> Result<(), String> {
@@ -266,15 +275,18 @@ impl Backend for LaunchdFile {
         }
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         match self.sys.remove(&self.plist) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!(
-                "{} could not be removed: {e}",
-                self.plist.display()
-            )),
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(UnregisterError::Failed(format!(
+                    "{} could not be removed: {e}",
+                    self.plist.display()
+                )));
+            }
         }
+        Ok(self.inspect())
     }
 
     fn evict(&mut self) -> Result<(), String> {

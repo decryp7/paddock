@@ -306,12 +306,14 @@ mod tests {
             self.failed_last = r.is_err();
             r
         }
-        fn unregister(&mut self) -> Result<(), String> {
+        fn unregister(&mut self) -> Result<Inspection, crate::backend::UnregisterError> {
             self.calls.push("unregister");
             if self.unregister_fails {
-                Err("not registered".into())
+                Err(crate::backend::UnregisterError::Failed(
+                    "not registered".into(),
+                ))
             } else {
-                Ok(())
+                Ok(Inspection::absent())
             }
         }
         fn evict(&mut self) -> Result<(), String> {

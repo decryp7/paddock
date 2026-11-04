@@ -68,13 +68,14 @@ pub fn plan_uninstall(layout: &Layout) -> Vec<Step> {
 }
 
 /// The removal of the service by the service itself (its own `Uninstall` request): the files go first, the stop and the
-/// unregistering last, because stopping the job ends the process that is running these steps.
+/// unregistering last, because stopping the job ends the process that is running these steps. If this process is still
+/// alive afterwards, [`Step::ConfirmGone`] says whether the OS really dropped the registration (ADR 0054 RC-2).
 pub fn plan_uninstall_self(layout: &Layout) -> Vec<Step> {
     let mut steps = Vec::new();
     if layout.copy.is_some() {
         steps.extend([Step::RemoveProgram, Step::RemoveFolder]);
     }
-    steps.push(Step::StopExisting);
+    steps.extend([Step::StopExisting, Step::ConfirmGone]);
     steps
 }
 
@@ -216,8 +217,12 @@ impl<'a> Installer<'a> {
                 log::error!(step:? = step, error:% = e; "install failed");
                 if matches!(step, Step::Register | Step::Confirm) {
                     // Never leave a registration that does not work: the next start would fail again and again.
-                    let _ = self.backend.evict();
-                    let _ = self.backend.unregister();
+                    if let Err(why) = self.backend.evict() {
+                        log::warn!(step:? = step, error:% = why; "install clean-up: the job could not be stopped");
+                    }
+                    if let Err(why) = self.backend.unregister() {
+                        log::warn!(step:? = step, error:% = why; "install clean-up: the registration could not be removed");
+                    }
                 }
             })?;
         }
@@ -326,9 +331,11 @@ impl<'a> Installer<'a> {
         let running = self.backend.job_process();
         if self.running_here {
             // The stop ends the process that is running these steps: take the registration away first.
-            self.backend
+            let after = self
+                .backend
                 .unregister()
                 .map_err(|e| failed(Step::StopExisting, e))?;
+            log::info!(registration:? = after.registration, job:? = after.job; "stop: unregistered, read back");
             if let Err(e) = self.backend.evict() {
                 notes.push(format!("stop: {e}"));
             }
@@ -336,9 +343,11 @@ impl<'a> Installer<'a> {
             if let Err(e) = self.backend.evict() {
                 notes.push(format!("stop: {e}"));
             }
-            self.backend
+            let after = self
+                .backend
                 .unregister()
                 .map_err(|e| failed(Step::StopExisting, e))?;
+            log::info!(registration:? = after.registration, job:? = after.job; "stop: unregistered, read back");
         }
         let mut waited = Duration::ZERO;
         while !self.backend.job_gone() {
@@ -548,16 +557,24 @@ impl<'a> Installer<'a> {
 
     fn confirm_gone(&mut self) -> Result<String, InstallError> {
         let look = self.backend.inspect();
-        // A packaged unit stays on disk, switched off; anything registered or running is not gone.
-        let registered = !matches!(
-            look.registration,
-            Registration::Absent | Registration::SwitchedOff
-        );
-        let running = matches!(look.job, Job::Running | Job::Refused);
-        if registered || running {
+        log::info!(registration:? = look.registration, job:? = look.job; "confirm gone: read back");
+        // A packaged unit stays on disk, switched off; anything registered or running is not gone. A service removing
+        // itself is still the job, whose stop is in flight: only its registration is judged.
+        let gone = if self.running_here {
+            matches!(
+                look.registration,
+                Registration::Absent | Registration::SwitchedOff
+            )
+        } else {
+            look.withdrawn()
+        };
+        if !gone {
             return Err(failed(
                 Step::ConfirmGone,
-                "the OS still holds the registration or the job",
+                format!(
+                    "the OS still holds the registration or the job (registration {:?}, job {:?})",
+                    look.registration, look.job
+                ),
             ));
         }
         Ok("gone".into())

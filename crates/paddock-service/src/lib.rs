@@ -108,7 +108,7 @@ mod golden;
 #[cfg(test)]
 mod scenarios;
 
-pub use backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+pub use backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError};
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
 pub use manager::{Manager, Started};
