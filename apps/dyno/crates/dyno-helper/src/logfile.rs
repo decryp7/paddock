@@ -109,13 +109,16 @@ pub struct HelperLog {
     state: Arc<GateState>,
     max_bytes: u64,
     now: fn() -> i64,
-    /// Hears every line written before the file is first armed (the Windows Event Log: the only place those lines can go that
-    /// is not the unverified data folder, and a service has no console).
+    /// Hears every line written before the file is first armed (the OS log: the only place those lines can go that is not the
+    /// unverified data folder, and a service has no console), and says once when the file cannot be written.
     early: Option<EarlySink>,
+    /// The failure to write the file has been reported to the sink.
+    write_failure_reported: AtomicBool,
 }
 
-/// Where the lines of a start go before the data folder is verified (besides standard error): the level and the line.
-pub type EarlySink = Arc<dyn Fn(Level, &str) + Send + Sync>;
+/// Where the lines of a start go before the data folder is verified (besides standard error): the level and the line. The
+/// service's OS log (`paddock_service::service_main::Context::early_sink`).
+pub type EarlySink = paddock_service::service_main::EarlySink;
 
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
@@ -147,6 +150,7 @@ impl HelperLog {
             max_bytes: MAX_LOG_BYTES,
             now: unix_now,
             early: None,
+            write_failure_reported: AtomicBool::new(false),
         }
     }
 
@@ -184,9 +188,28 @@ impl HelperLog {
         let gate = LogGate(self.state.clone());
         if log::set_boxed_logger(Box::new(self)).is_ok() {
             log::set_max_level(log::LevelFilter::Info);
-            let _ = INSTALLED.set(gate.clone());
+            if INSTALLED.set(gate.clone()).is_err() {
+                log::warn!("Helper: the log gate was already registered; the first one stays");
+            }
         }
         gate
+    }
+
+    fn report_failure(&self, what: &str, error: &std::io::Error) {
+        if self.write_failure_reported.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(sink) = &self.early {
+            sink(
+                Level::Warn,
+                &format!(
+                    "{} {what} ({error}); lines the file cannot take go to standard error.",
+                    self.path
+                        .file_name()
+                        .map_or_else(|| "the log file".into(), |n| n.to_string_lossy().into_owned())
+                ),
+            );
+        }
     }
 
     fn append(&self, line: &str) -> std::io::Result<()> {
@@ -198,7 +221,10 @@ impl HelperLog {
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() >= self.max_bytes) {
             let mut old = self.path.clone().into_os_string();
             old.push(".1");
-            let _ = std::fs::rename(&self.path, old);
+            // Rotation is housekeeping: a failure is told once and the line is still appended.
+            if let Err(e) = std::fs::rename(&self.path, old) {
+                self.report_failure("could not be rotated", &e);
+            }
         }
         let mut file = open_append_no_follow(&self.path)?;
         writeln!(file, "{line}")
@@ -215,7 +241,9 @@ impl Log for HelperLog {
             return;
         }
         let mut pairs = Pairs(String::new());
-        let _ = record.key_values().visit(&mut pairs);
+        if record.key_values().visit(&mut pairs).is_err() {
+            pairs.0.push_str(" (some fields could not be read)");
+        }
         let line = format_line((self.now)(), record.level(), &record.args().to_string(), &pairs.0);
         if !self.state.armed.load(Ordering::SeqCst) {
             eprintln!("{line}");
@@ -224,8 +252,12 @@ impl Log for HelperLog {
             }
             return;
         }
-        // A log that cannot be written must not take the daemon down.
-        let _ = self.append(&line);
+        // A log that cannot be written must not take the daemon down: the line goes to standard error and the first failure
+        // is told to the OS log, so the reason the file is empty can be found.
+        if let Err(e) = self.append(&line) {
+            eprintln!("{line}");
+            self.report_failure("could not be written", &e);
+        }
     }
 
     fn flush(&self) {}
@@ -275,6 +307,28 @@ mod tests {
         assert!(std::fs::read_to_string(&path).unwrap().contains("armed again"));
         // No logger installed in a test run: nothing to stop, nothing breaks.
         quiesce_installed();
+    }
+
+    #[test]
+    fn a_log_file_that_cannot_be_written_is_reported_once_to_the_os_log_and_the_line_goes_to_standard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // The folder of the log does not exist: every append fails.
+        let path = dir.path().join("missing").join("helper.log");
+        let heard = Arc::new(Mutex::new(Vec::<(Level, String)>::new()));
+        let h = heard.clone();
+        let log = HelperLog::new(path)
+            .with(1000, || 7)
+            .with_early_sink(Arc::new(move |level, line| h.lock().unwrap().push((level, line.to_string()))));
+        let write = |text: &str| log.log(&Record::builder().args(format_args!("{text}")).level(Level::Info).build());
+        write("first");
+        write("second");
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.len(), 1, "once, not per line: {heard:?}");
+        assert_eq!(heard[0].0, Level::Warn);
+        assert!(
+            heard[0].1.contains("helper.log could not be written") && heard[0].1.contains("standard error"),
+            "{heard:?}"
+        );
     }
 
     #[test]

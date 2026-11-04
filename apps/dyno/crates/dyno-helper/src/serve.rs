@@ -71,29 +71,32 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), StartErro
     serve_with(paths, stop, None)
 }
 
-/// [`serve`] that also hands the lines written before the data folder is verified to `early` (the service passes the Windows
-/// Event Log: it has no console, and the folder's file cannot be used yet).
+/// [`serve`] that also hands the lines written before the data folder is verified to `early` (the service passes its OS log,
+/// see `paddock_service::service_main`: it has no console, and the folder's file cannot be used yet).
 ///
 /// # Errors
 /// Why the helper will not start, with the kind of refusal. The cause is logged before it is returned.
 pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<EarlySink>) -> Result<(), StartError> {
     // Until the data folder is verified the log goes to standard error and no file in the folder is touched.
     let mut log = HelperLog::new(paths.log.clone()).deferred();
-    if let Some(sink) = early {
-        crate::refusal::set_event_sink(sink.clone());
+    if let Some(sink) = early.clone() {
         log = log.with_early_sink(sink);
     }
     let log_gate = log.install();
-    crate::refusal::install_panic_hook();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
-    let result = start(paths, stop, &log_gate);
+    let result = start(paths, stop, &log_gate, early);
     if let Err(e) = &result {
         log::error!(exit_code = e.exit_code(), reason = e.message.as_str(); "Helper: will not start");
     }
     result
 }
 
-fn start(paths: &HelperPaths, stop: Arc<AtomicBool>, log_gate: &crate::logfile::LogGate) -> Result<(), StartError> {
+fn start(
+    paths: &HelperPaths,
+    stop: Arc<AtomicBool>,
+    log_gate: &crate::logfile::LogGate,
+    os_log: Option<EarlySink>,
+) -> Result<(), StartError> {
     let mut files = RealFiles;
     let trust = Arc::new(crate::protect::TrustGuard::system(paths.host, &paths.data_dir));
     lock_folders(&trust, paths).map_err(|m| StartError::new(StartFailure::NotProtected, m))?;
@@ -150,8 +153,8 @@ fn start(paths: &HelperPaths, stop: Arc<AtomicBool>, log_gate: &crate::logfile::
         )
     })?;
     log::info!(endpoint = paths.endpoint.as_str(), owner = config.owner.to_arg().as_str(), version = crate::VERSION; "Helper: serving");
-    let remove = removal(paths.clone(), stop.clone(), "an Uninstall request from the app");
-    let orphan_remove = removal(paths.clone(), stop.clone(), "the app it serves has been gone for an hour");
+    let remove = removal(paths.clone(), stop.clone(), "an Uninstall request from the app", os_log.clone());
+    let orphan_remove = removal(paths.clone(), stop.clone(), "the app it serves has been gone for an hour", os_log);
     let _orphan = start_orphan_watch(config.app.clone(), orphan_remove);
     let log_path = paths.log.clone();
     let dispatcher = Arc::new(Dispatcher::new(Parts {
@@ -212,14 +215,16 @@ fn lock_folders(trust: &crate::protect::TrustGuard, paths: &HelperPaths) -> Resu
 
 /// Removes the helper after a moment (the caller of `Uninstall` gets its answer first; the removal ends with the stop of this
 /// very job).
-fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str) -> Arc<dyn Fn() + Send + Sync> {
+fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str, os_log: Option<EarlySink>) -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(move || {
-        // The log is stopped before the data folder is removed, so the reason is said first, to the log and to the event sink.
+        // The log is stopped before the data folder is removed, so the reason is said first, to the log and to the OS log.
         log::warn!(why = why; "Helper: removing itself: {why}");
-        crate::refusal::event(
-            log::Level::Warn,
-            &format!("The Dyno helper is removing itself and its service: {why}."),
-        );
+        if let Some(sink) = &os_log {
+            sink(
+                log::Level::Warn,
+                &format!("The Dyno helper is removing itself and its service: {why}."),
+            );
+        }
         let (paths, stop) = (paths.clone(), stop.clone());
         let spawned = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));

@@ -72,11 +72,10 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     write_config(&paths, &config, &mut files)?;
     let roots = windows_roots(&ProcessVars);
     let report = install_in_place(os_of(host), &roots, &source, &mut files, &system).map_err(|e| e.to_string())?;
-    register_event_source(os_of(host), system().as_mut());
     Ok(report)
 }
 
-/// Says in the log and the Event Log that an elevated `install` or `uninstall` is running, and from which program: a service
+/// Says in the log and the OS log that an elevated `install` or `uninstall` is running, and from which program: a service
 /// that vanishes after a restart is only explained by knowing who asked for its removal or replacement (ER-27).
 fn audit_run(verb: &str, what: &str) {
     let exe = std::env::current_exe().map_or_else(|_| "?".into(), |p| p.display().to_string());
@@ -85,36 +84,11 @@ fn audit_run(verb: &str, what: &str) {
         std::process::id()
     );
     log::warn!("{text}");
-    #[cfg(windows)]
-    crate::eventlog::report(log::Level::Info, &text);
-}
-
-/// Windows: registers the Event Log source "Dyno helper", where the service writes why it did not start (ER-27). A failure
-/// is logged and ignored: the entries then show with Windows' "description cannot be found" wrapper around the same text.
-pub fn register_event_source(os: Os, sys: &mut dyn System) {
-    if os != Os::Windows {
-        return;
-    }
-    for args in crate::refusal::register_source_commands() {
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        match sys.run("reg", &args) {
-            Ok(o) if o.success() => log::info!(value = args.get(3).copied().unwrap_or(""); "install: Event Log source registered"),
-            Ok(o) => log::warn!(why = o.reason().as_str(); "install: the Event Log source could not be registered"),
-            Err(e) => log::warn!(why = e.to_string().as_str(); "install: the Event Log source could not be registered"),
-        }
-    }
-}
-
-/// Windows: removes the Event Log source at uninstall (best effort).
-pub fn unregister_event_source(os: Os, sys: &mut dyn System) {
-    if os != Os::Windows {
-        return;
-    }
-    let args = crate::refusal::unregister_source_command();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    if let Err(e) = sys.run("reg", &args) {
-        log::warn!(why = e.to_string().as_str(); "uninstall: the Event Log source could not be removed");
-    }
+    paddock_service::OsLog::write(
+        paddock_service::os_log::open(&dyno_helper_service::spec()).as_ref(),
+        log::Level::Info,
+        &text,
+    );
 }
 
 /// The elevated removal (the daemon could not be asked).
@@ -138,7 +112,6 @@ pub fn uninstall() -> Result<Report, String> {
     if let Err(why) = remove_endpoint(&helper_paths()) {
         log::warn!(why = why.as_str(); "uninstall: the endpoint was kept");
     }
-    unregister_event_source(os_of(this_host()), system().as_mut());
     Ok(report)
 }
 
@@ -313,30 +286,6 @@ mod tests {
         }
         assert!(install(HelperUser::Uid(1)).unwrap_err().contains("administrator"));
         assert!(uninstall().unwrap_err().contains("administrator"));
-    }
-
-    #[test]
-    fn the_event_log_source_is_registered_and_removed_on_windows_only() {
-        use paddock_service::testing::FakeSystem;
-        let sys = FakeSystem::new();
-        let mut boxed = sys.clone();
-        register_event_source(Os::Windows, &mut boxed);
-        unregister_event_source(Os::Windows, &mut boxed);
-        let cmds = sys.commands();
-        assert_eq!(cmds.len(), 3, "{cmds:?}");
-        assert!(
-            cmds[0].starts_with("reg add HKLM") && cmds[0].contains("EventCreate.exe"),
-            "{cmds:?}"
-        );
-        assert!(
-            cmds[2].starts_with("reg delete HKLM") && cmds[2].contains("Dyno helper"),
-            "{cmds:?}"
-        );
-        let other = FakeSystem::new();
-        let mut o = other.clone();
-        register_event_source(Os::Linux, &mut o);
-        unregister_event_source(Os::MacOs, &mut o);
-        assert!(other.commands().is_empty(), "no registry on other systems");
     }
 
     #[test]
