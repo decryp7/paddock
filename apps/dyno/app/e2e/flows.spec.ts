@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { bodyIndentProblems, checkboxLayoutProblems, pressMod, rowPinProblems } from '@decryp7/paddock-e2e';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
@@ -441,6 +441,21 @@ test.describe('notifications', () => {
     await page.getByRole('button', { name: /notifications/i }).first().click();
     await expect(page.getByTestId('notices-empty')).toBeVisible();
     await expect(selects).toHaveCount(0);
+  });
+});
+
+test.describe('network alarm notices', () => {
+  test('the centre shows the body of each alarm under its title, laid out cleanly, and no toast', async ({ page }) => {
+    await page.goto(url('/', '&seed=network-alarms'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    await expect(page.getByTestId('notification-dismiss')).toHaveCount(0);
+    await page.getByTestId('notifications-status').click();
+    const panel = page.locator('pd-notifications-panel');
+    await expect(panel.getByText('Address 203.0.113.17:443')).toBeVisible();
+    await expect(panel.getByText('TCP, on every network interface (reachable from the network).')).toBeVisible();
+    expect(await checkboxLayoutProblems(panel)).toEqual([]);
+    expect(await bodyIndentProblems(panel)).toEqual([]);
+    expect((await rowPinProblems(panel)).problems).toEqual([]);
   });
 });
 
