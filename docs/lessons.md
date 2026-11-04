@@ -1329,3 +1329,10 @@ Proof, honestly (Linux, OrbStack `paddock-gate-arm`, 6 cores, 12 busy loops star
   (the CI runner needed 5.25 s), but the old test costs four times the work, which is what the 5 s limit trips on; the cause is the cost that grows with the item count.
 - Shift+F10: old and fixed both passed 50 of 50 (15.4 s and 15.7 s); the failure was **not reproduced and the lost-key cause is from reading the code and the CI log, not proven**.
   The resend is harmless to keep, but if this spec fails again the cause is something else: record the row's `disabled` state and the actions at the moment of the key before guessing again.
+## A CDK virtual viewport measures its height once; a body that grows later is blank (2026-11-04, paddock-ui `pd-table`, Dyno 1.1.0 RC)
+Dyno's Processes page (458 rows) showed blank space under the last drawn row. `CdkVirtualScrollViewport` measures its own
+height at start and on a window resize only; `pd-table`'s body height follows its frame (`maxHeight`) and its rows, so a body
+that grew after the first measure drew only the rows its old height plus the buffer cover. Confirmed: a gallery spec grows
+the body to 1600 px and found an 800 px gap before the fix and none after. **Rule:** whatever sizes a CDK viewport from
+outside re-measures it when it resizes (`pd-table` calls `checkViewportSize()` from its body ResizeObserver); a virtual
+list spec asserts the last drawn row meets the body's bottom edge after the body changed height.

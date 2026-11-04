@@ -639,7 +639,13 @@ export class PdTable<T> {
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
     // The header keeps the width of the body's scrollbar: measured when the body resizes (a scrollbar appearing changes its
     // content box), not on every render of the app.
-    const bodyObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.measureGutter());
+    // The CDK viewport measures its own height at start and on a window resize only: a body that changes height later (a frame
+    // that resizes, rows arriving after a skeleton) must be measured again, or only the rows its old height covers are drawn
+    // and the rest of the body stays blank.
+    const bodyObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+      this.measureGutter();
+      this.viewport().checkViewportSize();
+    });
     afterNextRender(() => {
       const body = this.host.querySelector<HTMLElement>('.pd-body');
       if (body) bodyObserver?.observe(body);
