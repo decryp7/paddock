@@ -63,7 +63,7 @@ describe('bench model', () => {
   it('words a stored failure in the past, with its date, and never as a current error', () => {
     const unavailable = { state: 'unavailable', reason: 'The benchmark runner was missing from the Dyno 1.0 installation.' } as const;
     const text = pastNote(unavailable, 'Mon 08:25');
-    expect(text).toBe('This run on Mon 08:25 could not measure. The benchmark runner was missing from the Dyno 1.0 installation.');
+    expect(text).toBe('This run on Mon 08:25 could not measure: the benchmark runner was missing from the Dyno 1.0 installation.');
     expect(text).not.toMatch(/reinstall/i);
     expect(pastNote({ state: 'done', metrics: [] }, 'Mon 08:25')).toBe('');
     expect(pastNote({ state: 'failed', reason: 'z' }, 'Mon 08:25')).toBe('z');

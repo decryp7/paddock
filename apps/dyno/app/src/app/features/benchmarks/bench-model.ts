@@ -50,7 +50,7 @@ export function statusNote(s: BenchStatus): string {
 export function pastNote(s: BenchStatus, day: string): string {
   switch (s.state) {
     case 'unavailable':
-      return `This run on ${day} could not measure. ${s.reason}`;
+      return `This run on ${day} could not measure: ${s.reason.charAt(0).toLowerCase()}${s.reason.slice(1)}`;
     default:
       return statusNote(s);
   }
