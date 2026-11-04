@@ -171,7 +171,19 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> R
             }
             Ok("removed".into())
         }
-        Err(_) => Ok(format!("left in place: {} holds something the helper did not write", dir.display())),
+        Err(e) => Ok(left_in_place_note(dir, &e, std::fs::read_dir(dir).map(Iterator::count))),
+    }
+}
+
+/// What the log says when the data folder could not be removed: the real error, and whether the folder holds items (someone
+/// else's), is empty (a service sandbox with a read-only parent: the unit has the service manager remove it after the stop), or
+/// could not be listed (then nothing is claimed about its content).
+fn left_in_place_note(dir: &Path, err: &std::io::Error, remaining: std::io::Result<usize>) -> String {
+    let dir = dir.display();
+    match remaining {
+        Ok(0) => format!("left in place: {dir} is empty but could not be removed from here ({err}); systemd removes it after the stop"),
+        Ok(n) => format!("left in place: {dir} holds {n} item(s) the helper did not write ({err})"),
+        Err(list) => format!("left in place: {dir} could not be removed ({err}) and could not be listed ({list})"),
     }
 }
 
@@ -339,6 +351,46 @@ mod tests {
             assert_eq!(note, "removed", "round {round}");
             assert!(!paths.data_dir.exists(), "round {round}: the folder is gone");
         }
+    }
+
+    /// VM check 7538: the folder was empty but could not be removed (the service's `/var/lib` is read-only), and the log said it
+    /// "holds something the helper did not write": the error was swallowed and the cause hidden.
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_folder_that_cannot_be_removed_says_the_real_error_not_that_it_holds_something() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        // The parent refuses the removal of an entry (as the service's read-only `/var/lib` does).
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::create_dir(dir.path().join("probe")).is_ok() {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // running as root: a read-only parent does not stop it
+        }
+        let note = remove_data_folder_with(&paths, &|| {});
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let note = note.unwrap();
+        assert!(note.contains("left in place"), "{note}");
+        assert!(!note.contains("holds something"), "the folder is empty: {note}");
+        assert!(
+            note.contains("empty") && note.contains("os error"),
+            "the real error is named: {note}"
+        );
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_listed_is_not_called_empty_and_an_empty_one_names_systemd() {
+        let dir = Path::new("/var/lib/dyno-helper");
+        let err = std::io::Error::from_raw_os_error(30);
+        let unlisted = left_in_place_note(dir, &err, Err(std::io::Error::from_raw_os_error(13)));
+        assert!(
+            unlisted.contains("could not be listed") && !unlisted.contains("empty"),
+            "{unlisted}"
+        );
+        let empty = left_in_place_note(dir, &err, Ok(0));
+        assert!(empty.contains("systemd removes it after the stop"), "{empty}");
+        assert!(left_in_place_note(dir, &err, Ok(2)).contains("holds 2 item(s)"));
     }
 
     #[test]
