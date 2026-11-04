@@ -1,0 +1,10 @@
+#! recorded 2026-11-04 on OrbStack paddock-gate-arm (Ubuntu 24.04, systemd 255.4-1ubuntu8.18, kernel 7.2.12-orbstack)
+#! command: systemctl show -p FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode,ActiveState paddock-fixture
+#! state: after systemctl stop of a unit that does not catch SIGTERM (sleep); CollectMode=inactive-or-failed
+Result=success
+NRestarts=0
+ExecMainCode=0
+ExecMainStatus=0
+ActiveState=inactive
+FragmentPath=/etc/systemd/system/paddock-fixture.service
+UnitFileState=static

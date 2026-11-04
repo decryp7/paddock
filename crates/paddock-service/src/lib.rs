@@ -111,6 +111,8 @@ mod golden;
 #[cfg(test)]
 mod readback_tests;
 #[cfg(test)]
+mod recorded_tests;
+#[cfg(test)]
 mod scenarios;
 
 pub use backend::{
