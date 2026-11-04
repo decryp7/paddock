@@ -405,6 +405,33 @@ mod tests {
         );
     }
 
+    #[derive(Debug)]
+    struct Plain;
+
+    impl std::fmt::Display for Plain {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("plain failure")
+        }
+    }
+
+    impl std::error::Error for Plain {}
+
+    impl ServiceExit for Plain {
+        fn exit_code(&self) -> u32 {
+            9
+        }
+    }
+
+    #[test]
+    fn an_error_without_a_next_step_logs_only_what_and_why() {
+        let log = RecordingOsLog::default();
+        assert_eq!(run_body("T", &log, context(&log), |_| Err(Plain)).code, 9);
+        assert_eq!(
+            log.lines().pop().unwrap().1,
+            "T did not run (exit code 9): plain failure"
+        );
+    }
+
     #[test]
     fn a_failure_never_exits_with_zero() {
         let log = RecordingOsLog::default();

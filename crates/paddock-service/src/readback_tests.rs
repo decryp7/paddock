@@ -695,3 +695,37 @@ fn an_event_source_that_cannot_be_registered_does_not_stop_the_service_from_bein
     sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
     assert_eq!(b.register().unwrap().job, Job::Running);
 }
+
+#[test]
+fn an_event_source_that_cannot_be_registered_or_removed_because_reg_hangs_is_only_logged() {
+    use crate::port::RunError;
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.on("reg ", |_, _| Err(RunError::TimedOut("reg".into())));
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    assert_eq!(b.register().unwrap().job, Job::Running);
+    sys.answer("sc query", Output::code(1060));
+    b.unregister().unwrap();
+    // A refusal on removal (not "no such key") is logged and does not fail the removal either.
+    sys.on("reg ", |_, _| Ok(Output::code(5)));
+    b.unregister().unwrap();
+}
+
+#[test]
+fn a_systemd_manager_that_hangs_on_show_leaves_the_new_fields_empty() {
+    use crate::port::RunError;
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.on("systemctl show", |_, _| {
+        Err(RunError::TimedOut("systemctl".into()))
+    });
+    let look = b.inspect();
+    assert_eq!(
+        (look.job, look.last_exit, look.restarts, look.unit),
+        (Job::Running, None, None, None)
+    );
+}

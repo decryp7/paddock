@@ -360,48 +360,103 @@ fn foreground(os_log: Arc<dyn OsLog>, slot: Slot) -> Result<u32, ServiceMainErro
 mod signals {
     use crate::scm_host::Control;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
     use std::sync::mpsc::Sender;
 
-    /// Blocks SIGTERM and SIGINT in the calling thread (and so in every thread started after it) and starts the thread that
-    /// waits for them with `sigwait`.
+    /// The write end of the pipe the handler writes to (-1: not installed).
+    static WAKE_FD: AtomicI32 = AtomicI32::new(-1);
+
+    /// Where this thread keeps `errno` (null when this Unix is not known: the handler then does not restore it).
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+    fn errno_location() -> *mut libc::c_int {
+        // SAFETY: returns the calling thread's errno cell.
+        unsafe { libc::__error() }
+    }
+
+    /// See above.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn errno_location() -> *mut libc::c_int {
+        // SAFETY: returns the calling thread's errno cell.
+        unsafe { libc::__errno_location() }
+    }
+
+    /// See above.
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "linux",
+        target_os = "android"
+    )))]
+    fn errno_location() -> *mut libc::c_int {
+        std::ptr::null_mut()
+    }
+
+    /// The handler: async-signal-safe, it only writes one byte to the pipe (and keeps `errno`).
+    extern "C" fn on_signal(_signal: libc::c_int) {
+        let fd = WAKE_FD.load(Ordering::Relaxed);
+        if fd >= 0 {
+            // SAFETY: write(2) is async-signal-safe; the byte lives on this stack frame.
+            unsafe {
+                let errno = errno_location();
+                let saved = if errno.is_null() { 0 } else { *errno };
+                let byte = 1u8;
+                // A full pipe already holds a wake-up; nothing is lost by not writing again.
+                let _written = libc::write(fd, std::ptr::from_ref(&byte).cast(), 1);
+                if !errno.is_null() {
+                    *errno = saved;
+                }
+            }
+        }
+    }
+
+    /// Handles SIGTERM and SIGINT process-wide (whatever thread they arrive on) and starts the thread that waits on the
+    /// handler's pipe: a stop is an event, not a poll.
     pub(super) fn stop_on_signals(
         stop: Arc<AtomicBool>,
         tx: Sender<Control>,
     ) -> Result<(), String> {
-        // SAFETY: `set` is initialised by sigemptyset before use; the calls only read it.
-        let set = unsafe {
-            let mut set: libc::sigset_t = std::mem::zeroed();
-            if libc::sigemptyset(&mut set) != 0
-                || libc::sigaddset(&mut set, libc::SIGTERM) != 0
-                || libc::sigaddset(&mut set, libc::SIGINT) != 0
-            {
-                return Err("the signal set could not be built".to_string());
-            }
-            let rc = libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+        let mut fds = [0 as libc::c_int; 2];
+        // SAFETY: `fds` has room for the two descriptors pipe(2) returns.
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+            return Err(format!("pipe failed: {}", std::io::Error::last_os_error()));
+        }
+        let (read_fd, write_fd) = (fds[0], fds[1]);
+        WAKE_FD.store(write_fd, Ordering::Relaxed);
+        for signal in [libc::SIGTERM, libc::SIGINT] {
+            // SAFETY: `action` is fully initialised; the handler is async-signal-safe.
+            let rc = unsafe {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                action.sa_sigaction = on_signal as extern "C" fn(libc::c_int) as usize;
+                action.sa_flags = libc::SA_RESTART;
+                libc::sigemptyset(&mut action.sa_mask);
+                libc::sigaction(signal, &action, std::ptr::null_mut())
+            };
             if rc != 0 {
-                return Err(format!("pthread_sigmask failed with {rc}"));
+                return Err(format!(
+                    "sigaction({signal}) failed: {}",
+                    std::io::Error::last_os_error()
+                ));
             }
-            set
-        };
+        }
         std::thread::Builder::new()
             .name("signal-wait".into())
             .spawn(move || {
+                let mut byte = 0u8;
                 loop {
-                    let mut signal = 0;
-                    // SAFETY: `set` and `signal` are valid for the call.
-                    match unsafe { libc::sigwait(&set, &mut signal) } {
-                        0 => {
-                            log::info!(signal = signal; "service: stop requested by a signal");
-                            crate::service_main::signal_stop(&stop, &tx);
-                            return;
-                        }
-                        libc::EINTR => {}
-                        rc => {
-                            log::error!(rc = rc; "service: sigwait failed; signals no longer stop the service");
-                            return;
-                        }
+                    // SAFETY: reads one byte into a valid buffer from the pipe this module owns.
+                    let n = unsafe { libc::read(read_fd, std::ptr::from_mut(&mut byte).cast(), 1) };
+                    if n == 1 {
+                        log::info!("service: stop requested by a signal");
+                        crate::service_main::signal_stop(&stop, &tx);
+                        return;
                     }
+                    let error = std::io::Error::last_os_error();
+                    if n < 0 && error.kind() == std::io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    log::error!(error:% = error; "service: the signal pipe failed; signals no longer stop the service");
+                    return;
                 }
             })
             .map(drop)
