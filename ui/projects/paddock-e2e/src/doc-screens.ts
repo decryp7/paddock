@@ -5,6 +5,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { THEMES, type Theme } from './axe.ts';
 import { DOC_SCREEN_VIEWPORT, isOn } from './config.ts';
 import { waitForStableFrame } from './screenshot.ts';
+import { expectScreenshotClean, type ScreenshotCheckOptions } from './screenshot-check.ts';
 
 /**
  * The documentation screenshot runner (plan X39): a table of screens × both themes, at 1440 x 900 (the project sets
@@ -31,6 +32,8 @@ export interface DocScreen {
   readonly clip?: (page: Page, theme: Theme) => Promise<{ x: number; y: number; width: number; height: number } | undefined>;
   /** Themes this screen is taken in (default: all). */
   readonly themes?: readonly Theme[];
+  /** This screen's screenshot check: its own options, or `false` to skip it (a screen that shows a defect on purpose). */
+  readonly check?: ScreenshotCheckOptions | false;
 }
 
 /** What {@link captureDocScreens} needs. */
@@ -58,6 +61,8 @@ export interface DocScreensOptions {
   readonly warmupMs?: number;
   /** A selector that must be visible before `ready` runs (the shell element). */
   readonly appSelector?: string;
+  /** Check every screen with {@link expectScreenshotClean} before and after the picture (off unless given; a screen may override it). */
+  readonly check?: ScreenshotCheckOptions;
   /** The environment (default `process.env`). */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -150,9 +155,12 @@ export function captureDocScreens(options: DocScreensOptions): void {
           await page.setViewportSize({ width, height: Math.min(Math.max(height, full), FRAME_MAX_HEIGHT) });
         }
         await waitForStableFrame(page);
+        const check = screen.check === false ? undefined : (screen.check ?? options.check);
+        if (check) await expectScreenshotClean(page, `${screen.name} (${theme}), before`, check);
         const clip = await screen.clip?.(page, theme);
         const element = screen.element?.(page, theme);
         const bytes = element ? await element.screenshot() : await page.screenshot(clip ? { clip } : {});
+        if (check) await expectScreenshotClean(page, `${screen.name} (${theme}), after`, check);
         const path = join(out, file);
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, bytes);

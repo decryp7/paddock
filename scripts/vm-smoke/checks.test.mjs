@@ -13,7 +13,7 @@ const B = '/Applications/Dyno.app';
 
 /** A small fake guest: a process table, an agent.json, and the few commands the check issues. `bug` picks a seeded fault. */
 function fakeGuest({ bug = null } = {}) {
-  let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false;
+  let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false, job = null;
   const spawn = (name, ppid, args = '') => { const p = { pid: ++pid, ppid, born: clock, command: `${B}/Contents/MacOS/${name}${args}` }; procs.push(p); return p; };
   const startApp = () => {
     if (procs.some((p) => p.command.includes('dyno-app'))) { // single instance
@@ -25,7 +25,12 @@ function fakeGuest({ bug = null } = {}) {
       return;
     }
     const app = spawn('dyno-app', 1);
-    const agent = spawn('dyno-agent', loginOn ? 1 : app.pid, ' run');
+    // Dyno 1.1 (ADR 0026): the app starts the agent as its own launchd job, so launchd is the parent. 'ondemand-no-job' is the same
+    // parent with no job loaded (a stray agent re-parented to launchd): it must still fail.
+    const underLaunchd = bug === 'ondemand' || bug === 'ondemand-no-job' || bug === 'job-stays' || bug === 'ondemand-other-pid';
+    const agent = spawn('dyno-agent', loginOn || underLaunchd ? 1 : app.pid, ' run');
+    if (bug === 'ondemand' || bug === 'job-stays') job = agent.pid;
+    if (bug === 'ondemand-other-pid') job = agent.pid + 500;
     agentJson = JSON.stringify({ pid: agent.pid });
     if (bug === 'second-agent') setTimeout_(10, () => spawn('dyno-agent', app.pid, ' run'));
     // A duplicate that is gone before the app is ready, so no snapshot after ready shows two.
@@ -46,7 +51,12 @@ function fakeGuest({ bug = null } = {}) {
     if (cmd.includes('agent.json') && cmd.startsWith('cat')) return agentJson ? ok(agentJson) : { code: 1, stdout: '', stderr: '' };
     if (cmd.startsWith('rm -f') && cmd.includes('agent.json')) { agentJson = null; return ok(); }
     if (cmd.startsWith('open -a')) { if (bug !== 'no-start') startApp(); return ok(); }
+    if (cmd.includes('agent.ondemand') && cmd.includes('launchctl print')) {
+      if (cmd.includes('echo $?')) return ok(job === null ? '113\n' : '0\n');
+      return job === null ? ok('Could not find service "net.decryptology.dyno.agent.ondemand"') : ok(`\tstate = running\n\tpid = ${job}\n`);
+    }
     if (cmd.startsWith('osascript')) {
+      if (bug !== 'job-stays') job = null;
       const app = procs.find((p) => p.command.includes('dyno-app'));
       // Quit ends the app; the agent ends with it, unless the seeded fault leaves it behind, re-parented to launchd.
       procs = procs.filter((p) => !p.command.includes('dyno-app') && (bug === 'orphan-agent' || !p.command.includes('dyno-agent')));
@@ -187,4 +197,24 @@ test('arguments: one app, exactly one installer source, macOS only', () => {
   assert.throws(() => parseArgs(['--app', 'dyno', '--run', '1', '--installer', 'x']), /exactly one/);
   assert.throws(() => parseArgs(['--app', '../x', '--run', '1']), /not an app id/);
   assert.throws(() => parseArgs(['--app', 'dyno', '--run', '1', '--guest', 'windows']), /only macos/);
+});
+
+test('the agent as the app\'s launchd job (ADR 0026): launchd is a legal parent only while launchd reports that job with the same pid', async () => {
+  const run = async (bug) => {
+    const check = new Check(fakeGuest({ bug }).guest, config, { intervalMs: 1000 });
+    const start = await check.startAndJudge({ title: 'start' });
+    return { start, quit: await check.quit('quit') };
+  };
+  const good = await run('ondemand');
+  assert.equal(good.start.status, 'pass', good.start.summary);
+  assert.equal(good.quit.status, 'pass', good.quit.summary);
+  assert.ok(good.quit.checks.some((c) => /launchd job .* gone after Quit/.test(c.detail)));
+  // Seeded faults: parent 1 with no job loaded, a job with another pid, and a job still loaded after Quit.
+  const strayAgent = await run('ondemand-no-job');
+  assert.equal(strayAgent.start.status, 'fail');
+  assert.match(strayAgent.start.summary, /does not report job net\.decryptology\.dyno\.agent\.ondemand/);
+  assert.equal((await run('ondemand-other-pid')).start.status, 'fail');
+  const stays = await run('job-stays');
+  assert.equal(stays.quit.status, 'fail');
+  assert.match(stays.quit.summary, /STILL LOADED after Quit/);
 });

@@ -1397,3 +1397,13 @@ ends in `ConfirmGone`, and the next lifecycle run (ADR 0054 L7) shows which it w
 judged by what the OS says afterwards, never by the call's exit status or by a reply sent before the work; C93 (ADR 0054) lists the edge modules
 (`crates/wiring.toml`, `apps/dyno/wiring.toml`) and the `// silent:` hatches that remain are counted. The helper-log race (`68889a16e`, a log thread
 recreating `helper.log` between the unlink and the folder's removal) is on this line and its test passes.
+## A rule that counts sites needs a baseline by text, not by count (2026-11-04, C71 and the screenshot check)
+
+C71 (tests do not settle on real time, ADR 0041) found 654 sites on `main` the day it ran: 339 Rust sleeps in test code, 181
+`setTimeout` waits, 57 `sleep`/`wait(n)` helpers, 35 `waitForTimeout`, 30 `requestAnimationFrame` waits and 12 `.count()`-then-`.nth()`
+uses. They sit in `conformance/baselines/C71.json` as file plus a hash of the whitespace-collapsed line, so moving a line keeps it
+known, editing it makes it new, and a second copy of a known line is new too (a per-file count would let a new site hide behind
+a fixed old one). The same day: `expectScreenshotClean` in `@decryp7/paddock-e2e` runs the clipping checks that already existed in
+`layout.ts` together with raw-identifier, placeholder and status-chip checks, so an app calls one function before and after a
+photograph. **Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
+what the line says, with a date, and say in the check's fix text how to waive a real case.

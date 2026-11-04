@@ -7,10 +7,16 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync, cpSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
 import { renderResult } from './judge.mjs';
+import { PowerChecks, runPowerSuite } from './power-checks.mjs';
+import { MacGui } from './mac-gui.mjs';
+import { MacIdleChecks } from './mac-idle.mjs';
+import { macDriver, readingSteps } from './helper-readings.mjs';
+import { macRebootCheck } from './mac-reboot.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -24,7 +30,7 @@ const MANUAL = [
 ];
 
 export function parseArgs(argv) {
-  const o = { guest: 'macos', out: null, base: null, keep: false, maxLoad: Number(process.env.PADDOCK_VM_MAX_LOAD ?? 16) };
+  const o = { guest: 'macos', suite: 'start', out: null, base: null, keep: false, maxLoad: Number(process.env.PADDOCK_VM_MAX_LOAD ?? 16) };
   const take = (i, name) => { if (i + 1 >= argv.length) throw new Error(`${name} needs a value`); return argv[i + 1]; };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -35,9 +41,12 @@ export function parseArgs(argv) {
     else if (a === '--out') o.out = take(i++, a);
     else if (a === '--base') o.base = take(i++, a);
     else if (a === '--guest') o.guest = take(i++, a);
+    else if (a === '--suite') o.suite = take(i++, a);
+    else if (a === '--reboot-check') o.reboot = true;
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
+  if (!['start', 'power', 'helper'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default), power or helper`);
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
   if (!o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
@@ -61,6 +70,7 @@ function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}) {
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => { stderr += String(e); if (!done) { done = true; clearTimeout(timer); res({ code: 127, stdout, stderr }); } });
     child.on('close', (code, sig) => { children.delete(child); if (!done) { done = true; clearTimeout(timer); res({ code: code ?? (sig ? 143 : 1), stdout, stderr }); } });
+    child.stdin.on('error', () => {}); // a child that exits before reading its stdin (EPIPE) is not an error of ours
     child.stdin.end(input ?? '');
   });
 }
@@ -147,6 +157,20 @@ async function main(argv) {
     const stage = join(scratch, 'stage');
     mkdirSync(stage);
     cpSync(dmg, join(stage, 'installer.dmg'));
+    if (o.suite === 'power' || o.suite === 'helper') {
+      // The GUI driver (guest/axdrive.swift) is compiled on the host, never run there, and cached by the hash of its source; the image's own
+      // copy predates `drag`. The guest installs it from the read-only share.
+      const src = join(HERE, 'guest', 'axdrive.swift');
+      const hash = createHash('sha256').update(readFileSync(src)).digest('hex').slice(0, 16);
+      mkdirSync(join(tartHome, '.paddock-vm-gui'), { recursive: true });
+      const bin = join(tartHome, '.paddock-vm-gui', `axdrive-${hash}`);
+      if (!existsSync(bin)) {
+        log('compiling axdrive (once)');
+        const c = await hostRun('swiftc', ['-O', '-o', bin, src], { timeoutMs: 600_000 });
+        if (c.code !== 0) throw new Error(`swiftc failed for axdrive: ${c.stderr.trim().slice(0, 300)}`);
+      }
+      cpSync(bin, join(stage, 'axdrive'));
+    }
 
     // A VM slot, host-wide, the same one tools/macos-vm-smoke.sh takes (`./dev ci slot`, an OS lock the kernel frees with its holder).
     mkdirSync(tartHome, { recursive: true });
@@ -182,7 +206,11 @@ async function main(argv) {
     if (c.code !== 0) throw new Error(`tart clone failed: ${c.stderr.trim().slice(0, 300)}`);
 
     log('booting headless');
-    runChild = spawn(tartBin, ['run', '--no-graphics', `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: 'ignore' });
+    // The power suite also needs the VM's own VNC server (real pointer drags); it listens on 127.0.0.1 only and the URL stays in memory.
+    const vnc = o.suite === 'power' || o.suite === 'helper';
+    runChild = spawn(tartBin, ['run', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+    let vncUrl = null;
+    runChild.stdout.on('data', (d) => { vncUrl ??= /vnc:\/\/\S+/.exec(String(d))?.[0] ?? null; });
     const exec = async (cmd, opts = {}) => {
       const r = await tart(['exec', vm, 'env', 'PADDOCK_DISPOSABLE_VM=1', 'bash', '-c', cmd], { timeoutMs: opts.timeoutMs ?? 120_000 });
       return r;
@@ -197,12 +225,40 @@ async function main(argv) {
     log(`VM up after ${Math.round((Date.now() - t0) / 1000)} s`);
 
     const guest = { exec, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
+    if (o.suite === 'power' || o.suite === 'helper') {
+      const i = await exec(`sudo cp '${SHARE}/axdrive' /usr/local/bin/axdrive && sudo chmod 755 /usr/local/bin/axdrive && /usr/local/bin/axdrive trusted; echo trusted=$?`);
+      log(`axdrive installed in the guest (${i.stdout.trim().split('\n').at(-1)})`);
+    }
     const check = new Check(guest, config, { log });
     const started = new Date().toISOString();
-    const { steps, version } = await runAll(check, { stagedDmg: `${SHARE}/installer.dmg`, manual: MANUAL });
+    const staged = `${SHARE}/installer.dmg`;
+    const { steps, version } = o.suite === 'power' || o.suite === 'helper'
+      ? await (async () => {
+        const evDir = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}-power-evidence`);
+        mkdirSync(evDir, { recursive: true });
+        // A guest file to the host as a file next to the result (PNG through base64: tart exec output is text).
+        const fetch = async (path) => {
+          const r = await tart(['exec', vm, 'base64', '-i', path], { timeoutMs: 60_000 });
+          if (r.code !== 0) return null;
+          const dest = join(evDir, basename(path));
+          writeFileSync(dest, Buffer.from(r.stdout.replace(/\s+/g, ''), 'base64'));
+          return dest;
+        };
+        const power = new PowerChecks(guest, 'macos', { bundle: `/Applications/${config.bundle}`, log });
+        const pw = process.env.PADDOCK_VM_PASSWORD ?? 'admin'; // the pinned image's admin account; never printed
+        const gui = new MacGui(guest, { password: pw, fetch, log });
+        power.ui = gui;
+        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
+        const { loadRules, MacTour } = await import('./mac-tour.mjs');
+        const tour = new MacTour(guest, gui, await loadRules(), { log, check });
+        const waitReady = async () => { for (let i = 0; i < 75; i++) { if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0 && (await guest.exec('/usr/local/bin/axdrive windows | grep -c Dock')).stdout.trim() !== '0') return true; await sleepMs(4000); } return false; };
+        const readings = o.reboot ? [macRebootCheck({ waitReady })] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
+        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: readings, helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+      })()
+      : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
     const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
-    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}.md`);
+    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}${o.suite === 'power' ? '-power' : o.suite === 'helper' ? '-helper' : ''}.md`);
     writeFileSync(file, md);
     log(`result: ${file}`);
     console.log(file);

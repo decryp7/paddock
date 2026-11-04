@@ -74,6 +74,57 @@ are not counted). `stateFiles[]`: a discovery file (`path`, `helper`, `jsonPidFi
 `loginService`, `quit.appleScriptName`, `updateHost`, `readyTimeoutSec`, `settleSec`, `logs`. Adding a helper to an app means
 adding it here; `scripts/vm-smoke/judge.test.mjs` checks the shape.
 
+## Power checks (`--suite power`, Dyno 1.1.0, macOS guest)
+
+`scripts/vm-smoke/vm-smoke.sh --app dyno --suite power --run <id>` installs the same installer, cold-starts Dyno and runs the release
+checks of [ADR 0032](../../apps/dyno/docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) (`apps/dyno/docs/releasing.md` step
+3b) in the real window. The window is driven through the Accessibility API with `axdrive` (`guest/axdrive.swift`, compiled on the host once,
+installed into the clone from the read-only share; the web content of Dyno's window is in the AX tree), the system's password sheet the same
+way, and the dashboard drag as real pointer events through the HID event tap. The verdict is always the OS's own state (`power-probes.mjs`)
+or the app's own text, never a screenshot.
+
+| Step | Driven by | Judged by |
+|---|---|---|
+| Admin helper on | Dyno menu > Settings > Dyno > Turn on administrator readings; the SecurityAgent password sheet is filled (`PADDOCK_VM_PASSWORD`, default the image's `admin`; never printed) | `launchctl print system/net.decryptology.dyno.helper`, `/Library/PrivilegedHelperTools/...`, the card reads "On" |
+| Keep awake | Power > Keep awake for 1 hour, Stop keeping awake | `pmset -g assertions`: a Dyno hold appears, then is gone (Windows `powercfg /requests`, Linux `systemd-inhibit --list` adapters exist) |
+| Scheduled wake | Power > Schedule > Turn on scheduled wake, Add schedule (5 min ahead, Once); cancelled with `dyno wake-schedule cancel` (the row's Change form has no delete button) | `pmset -g sched`: owner `net.decryptology.dyno.*`, 3 to 7 min ahead; gone after cancel |
+| Wake-on-LAN | Wake devices > Add by hand (`vm-peer`, `02:aa:bb:cc:dd:ee`), Wake vm-peer | `tcpdump -xx` in the guest: UDP port 9 or 7, payload 6 x FF then the address 16 times |
+| GUI tour | menu-bar items (windows `net.decryptology.dyno.menubar.*`), dashboard Edit layout, drag, Done, Quit, relaunch (the order is kept), a CPU + Disk (256 MB) benchmark, Connections map, IP lists, Settings and About | the shared raw-text rules of `paddock-e2e`'s screenshot check (`ui/projects/paddock-e2e/src/screenshot-check.ts`, loaded with node's type stripping; needs the repo's `node_modules`) over the texts the window really shows. Clipped-text and status-chip rules need a DOM and are not claimed |
+| Admin helper off | Turn off administrator readings | launchd job and file gone, card "Off" |
+| Idle action | a one-minute rule seeded in `settings.json`; the Power page's "Cancel sleep" and "Snooze 30 minutes"; a long `say` file played for the audio wait; a HID event re-arms the rule | `dyno idle`: "Counting down", "Snoozed", "Waiting because audio is playing" (coreaudiod's assertion); the VM is never slept, the OS call is recorded (`/usr/bin/pmset sleepnow`) with the agent's log lines |
+
+The start check also accepts launchd as the agent's parent when launchd itself reports the job `net.decryptology.dyno.agent.ondemand` with that
+pid (`parentJob` in `apps/dyno/vm-smoke.json`, Dyno ADR 0026), and requires the job to be gone after Quit.
+
+The macOS "Allow dyno-agent to find devices on local networks?" prompt (UserNotificationCenter) appears after the first Wake-on-LAN; the suite
+answers Allow and screenshots it. Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/*.test.mjs`).
+
+## Windows guest (`run-win.mjs`, Dyno 1.1.0)
+
+`node scripts/vm-smoke/run-win.mjs --app dyno --ui (--run <id> | --installer <setup.exe>)` reverts the Windows 11 Arm test VM
+(`paddock-win11-test`, snapshot `gui-session-tools`; the driver is `vm-win.sh`) , starts it, stages the x64 NSIS installer and runs, in the
+interactive session of `paddock-test` (a scheduled task, as `docs/testing/windows-gui-session.md` describes), `win-suite.ps1`, then the UI
+phase, writes the result in the same format, and stops and reverts the VM (also after a failure; `--keep` leaves it up). Standard-user rights
+throughout; `powercfg` needs an administrator, so the suite asks the host through request files and the host answers with the `paddock-admin`
+key (only `powercfg /requests`, `/waketimers` and `/a` are ever run).
+
+| Step | Judged by |
+|---|---|
+| Install (per-user, silent, no UAC) | files under `%LOCALAPPDATA%\Dyno`, product version |
+| Cold start, second launch | `Win32_Process`: one `dyno-app`, one `dyno-agent run` whose parent is the app, `agent.json` names it, no new process on a second launch |
+| Keep awake | `dyno awake on/off`; `powercfg /requests` lists then drops the Dyno request |
+| Scheduled wake | `dyno wake-schedule add/list/cancel` (the wake setting is seeded; `settings.json` is written without a BOM, serde_json rejects one); `powercfg /waketimers` only where `powercfg /a` shows a sleep state, else SKIP with the evidence (this VM has none) |
+| Idle action | a one-minute rule in `settings.json`; `dyno idle` shows the countdown, Cancel, Snooze; input is `mouse_event` (a cursor set is not input). No sleep is made; the audio wait is not run (no sound device in this VM) |
+| Aero snap (`win-snap.mjs`) | a form dialog (Report a problem) and a viewer dialog (About) are opened through the app's File/Help menu over the WebView2 DevTools port (`--remote-debugging-port`, an SSH tunnel, Playwright `connectOverCDP`), Win+Left is sent by the in-session actor (`win-act.ps1`), and `data-size-mode` on `<html>` must read `manual` |
+| Screenshot check on the real DOM (`win-ui.mjs`) | paddock-e2e's `screenshotProblems` over every Dyno window: clipped text, raw identifiers, mock text, colour-only chips |
+| Quit | File > Exit: no `dyno-app` or `dyno-agent` left |
+
+**Not built yet (manual):** the Windows admin helper (the UAC consent is on the secure desktop: it needs the VM's VNC enabled in the `.vmx`
+after the snapshot revert, and `vncdo` typing the administrator credentials, because the test account is a standard user), the tray
+right-click menu with the Keep awake and Wake device submenus, dialogs at 150 % (the live display-scale change fails on the VMware display),
+Wake-on-LAN on the wire, the "Audio is playing" wait (needs a virtual sound card in the `.vmx`), and everything on Linux (an amd64 `.deb` in a
+Rosetta GNOME VM with the polkit prompt).
+
 ## Not covered here
 
 - **Windows guests** (VMware Fusion, Windows 11 Arm): `scripts/vm-win.sh` on `origin/tools/win-test-vm` drives it (`revert`,

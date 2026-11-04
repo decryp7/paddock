@@ -83,10 +83,14 @@ export function judgeSnapshot(procs, config, bundleDir, want) {
     for (const p of found) {
       const viaApp = (spec.parents ?? ['app']).includes('app') && appPids.has(p.ppid);
       const viaLaunchd = (spec.parents ?? []).includes('launchd') && want.loginService === true && p.ppid === 1;
+      // The app's own launchd job (Dyno ADR 0026: `net.decryptology.dyno.agent.ondemand`, bootstrapped even with Start at login off):
+      // launchd is a legal parent only when launchd itself reports that job with this very pid (identity, never "ppid is 1").
+      const jobPid = spec.parentJob ? procs.jobs?.[spec.parentJob]?.pid ?? null : null;
+      const viaJob = Boolean(spec.parentJob) && p.ppid === 1 && jobPid === p.pid;
       checks.push({
         id: `parent:${spec.name}:${p.pid}`,
-        ok: viaApp || viaLaunchd,
-        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + ')'}`,
+        ok: viaApp || viaLaunchd || viaJob,
+        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : viaJob ? `launchd, as the job ${spec.parentJob} (launchd reports pid ${jobPid})` : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + (spec.parentJob && p.ppid === 1 ? `; launchd does not report job ${spec.parentJob} with pid ${p.pid}` : '') + ')'}`,
       });
     }
   }
