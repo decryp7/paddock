@@ -14,7 +14,7 @@ import { renderResult } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
 import { helperSteps } from './win-helper.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
-import { copyFileSync } from 'node:fs';
+import { stripVnc, withVnc, fixDiskName } from './vmx-edit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -73,13 +73,13 @@ async function main(argv) {
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-win-'));
   let started = false;
-  let vmxBackup = null;
+  let vnc = false;
   const cleanup = () => {
     if (started && o.keep) log('--keep: the VM is left running with Dyno up (CDP port 9222 in the guest); revert it with: vm-win.sh stop; vm-win.sh revert gui-session-tools');
     else if (started) {
       log(`reverting the VM to ${SNAPSHOT}`);
       vm(['stop'], 200_000);
-      if (vmxBackup && existsSync(vmxBackup)) { copyFileSync(vmxBackup, VMX); log('vmx restored from its backup'); }
+      if (vnc) { writeFileSync(VMX, fixDiskName(stripVnc(readFileSync(VMX, 'utf8')), readdirSync(dirname(VMX)))); log('vmx: VNC lines removed from the current file (no old copy is ever restored)'); }
       vm(['revert', SNAPSHOT], 300_000);
     }
     rmSync(scratch, { recursive: true, force: true });
@@ -92,16 +92,13 @@ async function main(argv) {
     // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
     if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
     started = true;
+    { const cur = readFileSync(VMX, 'utf8'); const fixed = fixDiskName(cur, readdirSync(dirname(VMX))); if (fixed !== cur) { writeFileSync(VMX, fixed); log('vmx named a missing redo log: pointed at the newest existing one'); } }
     log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
     if (o.vnc) {
-      // VNC for the UAC consent (secure desktop). Only between revert and start; the vmx is backed up first and restored after every run.
-      const keepDir = '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-checks/vmx-backup';
-      mkdirSync(keepDir, { recursive: true });
-      vmxBackup = join(keepDir, 'paddock-win11-test.vmx.orig'); // outside the scratch folder, so --keep cannot lose it
-      if (!existsSync(vmxBackup)) copyFileSync(VMX, vmxBackup); // the first copy is the original and is never overwritten
+      // VNC for the UAC consent (secure desktop). Only between revert and start, on the CURRENT vmx: only the RemoteDisplay.vnc.* lines are added and removed.
+      vnc = true;
       vm(['stop'], 200_000);
-      const text = readFileSync(VMX, 'utf8').split('\n').filter((l) => !/^RemoteDisplay\.vnc\./.test(l)).join('\n');
-      writeFileSync(VMX, `${text.trimEnd()}\nRemoteDisplay.vnc.enabled = "TRUE"\nRemoteDisplay.vnc.port = "${VNC_PORT}"\nRemoteDisplay.vnc.password = "${VNC_PW}"\n`);
+      writeFileSync(VMX, withVnc(fixDiskName(readFileSync(VMX, 'utf8'), readdirSync(dirname(VMX))), VNC_PORT, VNC_PW));
       log(`vmx: VNC on port ${VNC_PORT} for this run (backup kept until the end)`);
     }
     log('start (bounded 10 min)'); if (vm(['start'], 600_000).code !== 0) throw new Error('the VM did not start or SSH did not answer');
