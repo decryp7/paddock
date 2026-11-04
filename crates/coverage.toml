@@ -9,7 +9,8 @@
 #   the `job` that covers it. The `--ignore-filename-regex` of the coverage step is generated from these entries
 #   (`node ../scripts/coverage-gate.mjs regex coverage.toml`).
 #
-# Figures were measured on Linux with CI's command (paddock-gate-arm, 2026-11-04); the first CI run's `suggest` output confirms them.
+# Provisional figures: measured on Linux with CI's command (paddock-gate-arm, 2026-11-04). The landed file is the `suggest` output
+# of two CI runs of the landing tree (identical), with the run ids in the landing commit message.
 
 [[crate]]
 name = "paddock-dialogs"
@@ -20,7 +21,7 @@ review = "2027-02-04"
 [[crate]]
 name = "paddock-env"
 minimum = 98.75
-reason = "what a test cannot provoke on one OS or as root: the Windows-only arm that opens a folder as a file, the macOS and Windows arms of Os::current, a formatter error path, and the write and rename failures of the backup restore and of keeping a damaged file aside, which need an unwritable folder (chmod does not stop root, which CI runs as)."
+reason = "what a test cannot provoke on one OS or as root: the Windows-only arm that opens a folder as a file (versioned.rs, \"it is not a file\"), the macOS and Windows arms of Os::current (dirs.rs), and the write and rename failures of the backup restore and of keeping a damaged file aside (versioned.rs), which need an unwritable folder: chmod does not stop root, which CI runs as, and the number of a kept copy skips an obstacle placed at its name."
 review = "2027-02-04"
 
 [[crate]]
@@ -32,7 +33,7 @@ review = "2027-02-04"
 [[crate]]
 name = "paddock-proc"
 minimum = 97.92
-reason = "OS arms that need foreign processes or OS state: the raw kill and priority calls in sys.rs, process-tree walking arms in tree.rs, the login-shell probe's fallbacks in login.rs, and the error arms of run.rs and instance.rs."
+reason = "sys.rs: the raw `kill` in `signal_pid` and the `setpriority` lowering with its Linux per-thread loop (they act on a foreign process); tree.rs: the `Gone`, `Refused` and `NotOurs` answers of the pidfd signal and the identity-checked `ask_checked` and `kill_pid` fallbacks (they need a process that changes identity mid-call); login.rs: the login-shell probe's non-exit and unparsable-answer fallbacks and the real `login_path`; run.rs: the unreadable-start-time warning and the lost-status arm of the waiter; instance.rs: the folder-creation failure and the retry helper of the lock tests."
 review = "2027-02-04"
 
 [[crate]]

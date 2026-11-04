@@ -79,6 +79,15 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
         run: node scripts/affected.mjs --ci
 
+      # The coverage register only ratchets up (ADR 0050): compared with the base's here, where the history is. No base on a
+      # pull request or a push to main is a warning; an unknown base or any git error fails.
+      - name: Coverage ratchet (crates/coverage.toml against the base)
+        env:
+          BASE: ${{ steps.plan.outputs.base }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -n "$BASE" ]; then node scripts/coverage-gate.mjs ratchet crates/coverage.toml --base "$BASE"; else node scripts/coverage-gate.mjs ratchet crates/coverage.toml; fi
+
   ui:
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' }}
@@ -346,10 +355,7 @@ jobs:
       # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
       PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
-      # The whole history: the coverage ratchet compares the register with the base's and reads the change's commit trailers.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
 
       # The checks below are independent: each runs unless the job was cancelled, so one failure never hides another, and the
@@ -394,19 +400,15 @@ jobs:
 
       # The gate (scripts/coverage-gate.mjs) judges the lcov file per crate and leaves out the `#[tauri::command]` attribute lines:
       # llvm-cov charges every region of the macro's generated wrapper to that line, which no test can all reach. It prints one
-      # ::error:: per failing crate and the per-crate table in the job summary. The ratchet compares the register with the base's;
-      # a run without a base (tag, nightly, dispatch) skips it, said in the summary. `suggest` prints the measured blocks.
+      # ::error:: per failing crate and the per-crate table in the job summary.
+      # `suggest` prints the whole register the measured figures give. The ratchet against the base register runs in the plan
+      # job, which has the history.
       - name: Coverage gate (per crate, crates/coverage.toml)
         id: gate
         if: ${{ !cancelled() && steps.cov.outcome == 'success' }}
-        env:
-          BASE: ${{ needs.plan.outputs.base }}
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          ARGS=()
-          [ -n "$BASE" ] && ARGS+=(--base "$BASE")
-          node ../scripts/coverage-gate.mjs check lcov.info coverage.toml --root . "${ARGS[@]}" || {
-            echo "--- measured [[crate]] blocks (node scripts/coverage-gate.mjs suggest): ---"
+          node ../scripts/coverage-gate.mjs check lcov.info coverage.toml --root . || {
+            echo "--- the register these figures give (node scripts/coverage-gate.mjs suggest): ---"
             node ../scripts/coverage-gate.mjs suggest lcov.info coverage.toml --root .
             exit 1
           }

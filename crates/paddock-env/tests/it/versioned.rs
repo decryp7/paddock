@@ -549,3 +549,40 @@ fn a_migration_that_cannot_be_written_back_still_loads_and_is_retried_by_the_nex
         "the old file is untouched: {on_disk}"
     );
 }
+
+/// A formatter target that accepts `left` writes and then fails, to reach every `?` of a Display impl.
+struct FailAfter {
+    left: usize,
+}
+
+impl std::fmt::Write for FailAfter {
+    fn write_str(&mut self, _: &str) -> std::fmt::Result {
+        if self.left == 0 {
+            return Err(std::fmt::Error);
+        }
+        self.left -= 1;
+        Ok(())
+    }
+}
+
+#[test]
+fn a_problem_that_cannot_be_written_stops_at_the_failing_write_without_panicking() {
+    use std::fmt::Write as _;
+    for recovered_from_backup in [true, false] {
+        let problem = Problem::Damaged {
+            reason: "not JSON".into(),
+            kept_as: Some(std::path::PathBuf::from("state.json.corrupt-1000")),
+            recovered_from_backup,
+        };
+        let full = problem.to_string();
+        let mut failed = 0;
+        for left in 0..16 {
+            let mut w = FailAfter { left };
+            if write!(w, "{problem}").is_err() {
+                failed += 1;
+            }
+        }
+        assert!(failed >= 3, "each write of the message can fail on its own: {failed} ({full})");
+        assert!(write!(FailAfter { left: 1000 }, "{problem}").is_ok());
+    }
+}

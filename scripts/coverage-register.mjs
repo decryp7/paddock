@@ -83,6 +83,7 @@ export function validateRegister({ crates, excludes, problems = [] }, root, now 
     else if (c.minimum < HARD_FLOOR) errors.push(`${at}: crate ${c.name} minimum ${c.minimum} is under the hard floor of ${HARD_FLOOR} % (no reason allows less)`);
     else if (c.minimum >= DEFAULT_MINIMUM) errors.push(`${at}: crate ${c.name} minimum ${c.minimum} is not under ${DEFAULT_MINIMUM} % (remove the entry)`);
     if (blank(c.reason)) errors.push(`${at}: crate ${c.name} below ${DEFAULT_MINIMUM} % needs a reason`);
+    else if (/^TODO\b/.test(c.reason.trim())) errors.push(`${at}: crate ${c.name} has a placeholder reason ("${c.reason.slice(0, 30)}"); write why these lines cannot be covered`);
     if (blank(c.review) || !DATE.test(c.review)) errors.push(`${at}: crate ${c.name} needs review = "YYYY-MM-DD"`);
     else if (new Date(`${c.review}T23:59:59Z`) < now) {
       warnings.push(`crate ${c.name}: review date ${c.review} has passed (${at}); review the reason and set a new date`);
@@ -98,6 +99,7 @@ export function validateRegister({ crates, excludes, problems = [] }, root, now 
     if (paths.has(e.path)) errors.push(`${at}: ${e.path} is listed twice`);
     paths.add(e.path);
     if (blank(e.reason)) errors.push(`${at}: excluded file ${e.path} needs a reason`);
+    else if (/^TODO\b/.test(e.reason.trim())) errors.push(`${at}: excluded file ${e.path} has a placeholder reason; write why it cannot run in unit tests`);
     if (!exists(join(root, e.path))) errors.push(`${at}: excluded file ${e.path} does not exist under ${root} (remove the entry or fix the path)`);
     if (e.job !== undefined && blank(e.job)) errors.push(`${at}: excluded file ${e.path} has an empty job`);
   }
@@ -127,34 +129,42 @@ export function workspaceMembers(cargoToml) {
   return [...m[1].replace(/#.*$/gm, '').matchAll(/"([^"]+)"/g)].map((x) => x[1]);
 }
 
-/** Subjects (a crate name or an excluded path) that a commit message of the change lowers or adds, with the user's approval. */
-export function loweredTrailers(messages) {
+/**
+ * Subjects (a crate name or an excluded path) that the commits of the change add with the user's approval. `trailerLines` are
+ * the lines of each commit's trailer block (`git interpret-trailers --parse`); the key is matched case-sensitively. The marker
+ * is an honour-system one that review must check (ADR 0050); it never exempts a lowered minimum.
+ */
+export function addedTrailers(trailerLines) {
   const out = new Set();
-  for (const m of messages) {
-    for (const t of m.matchAll(/^Coverage-lowered:\s+(\S+)\s+(.+?)\s+approved:\s*user\s*$/gim)) out.add(t[1]);
+  for (const line of trailerLines) {
+    const m = /^Coverage-lowered:\s+(\S+)\s+(.+?)\s+approved:\s*user\s*$/.exec(line);
+    if (m) out.add(m[1]);
   }
   return out;
 }
 
 /**
- * The ratchet against the register of the base: a lowered minimum, a new [[crate]] entry and a new [[exclude]] entry are
- * errors unless a commit of the change carries `Coverage-lowered: <crate|path> <reason> approved: user`. `base` is a parsed
- * register, or null when the base has none (the initial seed: nothing to compare).
+ * The ratchet against the register of the base. Minimums only go up: a lowered minimum of an existing [[crate]] entry always
+ * fails. A new [[crate]] entry and a new [[exclude]] entry fail too, unless a commit of the change carries
+ * `Coverage-lowered: <crate|path> <reason> approved: user`. `base` is a parsed register, or null when the base has none (the
+ * initial seed: nothing to compare).
  */
 export function ratchetErrors(base, current, approved) {
   if (base === null) return [];
-  const next = (subject) => `Next step: if the user approved it, add a trailer \`Coverage-lowered: ${subject} <reason> approved: user\` to a commit of this change; otherwise add tests or remove the entry.`;
   const errors = [];
   const before = new Map(base.crates.map((c) => [c.name, c]));
+  const trailer = (subject) => `Next step: if the user approved it, add a trailer \`Coverage-lowered: ${subject} <reason> approved: user\` to a commit of this change; otherwise add tests or remove the entry.`;
   for (const c of current.crates) {
-    if (approved.has(c.name)) continue;
     const old = before.get(c.name);
-    if (!old) errors.push(`crate ${c.name}: a new [[crate]] entry in coverage.toml lowers its crate's bar to ${c.minimum} %. ${next(c.name)}`);
-    else if (typeof c.minimum === 'number' && c.minimum < old.minimum) errors.push(`crate ${c.name}: minimum lowered from ${old.minimum} % to ${c.minimum} % in coverage.toml. ${next(c.name)}`);
+    if (!old) {
+      if (!approved.has(c.name)) errors.push(`crate ${c.name}: a new [[crate]] entry in coverage.toml lowers its crate's bar to ${c.minimum} %. ${trailer(c.name)}`);
+    } else if (typeof c.minimum === 'number' && c.minimum < old.minimum) {
+      errors.push(`crate ${c.name}: minimum lowered from ${old.minimum} % to ${c.minimum} % in coverage.toml. Next step: minimums only go up and no trailer allows a lower one; add tests, or restore ${old.minimum}.`);
+    }
   }
   const paths = new Set(base.excludes.map((e) => e.path));
   for (const e of current.excludes) {
-    if (!paths.has(e.path) && !approved.has(e.path)) errors.push(`file ${e.path}: a new [[exclude]] entry in coverage.toml leaves the file out of coverage. ${next(e.path)}`);
+    if (!paths.has(e.path) && !approved.has(e.path)) errors.push(`file ${e.path}: a new [[exclude]] entry in coverage.toml leaves the file out of coverage. ${trailer(e.path)}`);
   }
   return errors;
 }

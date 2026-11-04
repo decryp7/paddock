@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { check, crateOf, floor2, measure, measureByCrate, suggest } from './coverage-gate.mjs';
-import { ignoreRegex, loweredTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
+import { ignoreRegex, addedTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
 
 const sources = {
   'a.rs': ['fn a() {}', '#[::tauri::command]', 'pub async fn cmd() {', '    body();', '}'].join('\n'),
@@ -102,9 +102,9 @@ test('a crate under the 90 % floor fails even with a reason and a minimum under 
 
 test('a figure more than 0.05 above its minimum is an error (raise it); a crate at 99 % only warns to drop its entry', () => {
   const root = tree(['a', 'b', 'c']);
-  const r = run(root, { a: [96, 100], b: [99, 100], c: [9503, 10000] }, entry('a', 95) + entry('b', 95) + entry('c', 95));
+  const r = run(root, { a: [98, 100], b: [99, 100], c: [9503, 10000] }, entry('a', 95) + entry('b', 95) + entry('c', 95));
   assert.equal(r.exit, 1);
-  assert.ok(r.out.some((l) => l.startsWith('::error::crate a: 96.00 %') && /raise the minimum to 96\.00/.test(l)));
+  assert.ok(r.out.some((l) => l.startsWith('::error::crate a: 98.00 %') && /raise the minimum to 98\.00/.test(l)));
   assert.ok(r.out.some((l) => l.startsWith('::warning::crate b') && /remove its \[\[crate\]\] entry/.test(l)));
   assert.ok(!r.out.some((l) => l.startsWith('::error::crate c')), 'within 0.05 above the minimum passes');
   rmSync(root, { recursive: true });
@@ -189,51 +189,77 @@ test('ratchet: a lowered minimum, a new crate entry and a new exclude each fail 
   assert.deepEqual(ratchetErrors(reg(base), reg(entry('a', 99.5).replace('99.5', '96')), none), [], 'a raise is fine');
 });
 
-test('ratchet: a Coverage-lowered trailer approved by the user clears exactly its subject; no base register is the initial seed', () => {
-  const approved = loweredTrailers(['feat: x\n\nCoverage-lowered: b because the adapter needs a desktop approved: user\n', 'fix: y\n\nCoverage-lowered: c reason approved: agent\n']);
-  assert.deepEqual([...approved], ['b']);
+test('ratchet: a trailer allows only a new crate or a new exclude, never a lower minimum; no base register is the seed', () => {
+  const approved = addedTrailers([
+    'Coverage-lowered: b because the adapter needs a desktop approved: user',
+    'coverage-lowered: x lower-case key approved: user',
+    'Coverage-lowered: c reason approved: agent',
+    'Coverage-lowered: a reason approved: user',
+  ]);
+  assert.deepEqual([...approved].sort(), ['a', 'b']);
   assert.deepEqual(ratchetErrors(reg(base), reg(base + entry('b', 96)), approved), []);
   assert.equal(ratchetErrors(reg(base), reg(base + entry('c', 96)), approved).length, 1);
+  const lowered = ratchetErrors(reg(base), reg(entry('a', 94) + '[[exclude]]\npath = "a/src/n.rs"\nreason = "r"\n'), approved);
+  assert.match(lowered[0], /minimum lowered from 95 % to 94 %.*no trailer allows a lower one/, 'the trailer for a does not exempt a lowered minimum');
   assert.deepEqual(ratchetErrors(null, reg(base), new Set()), []);
 });
 
-test('check applies the ratchet with the base register and the change\'s commit messages', () => {
-  const root = tree(['a', 'b']);
-  const lowered = entry('a', 94);
-  const fail = run(root, { a: [94, 100], b: [100, 100] }, lowered, { baseRegisterText: entry('a', 95), commitMessages: ['ci: x'] });
-  assert.equal(fail.exit, 1);
-  assert.ok(fail.out.some((l) => l.startsWith('::error::crate a: minimum lowered')));
-  const ok = run(root, { a: [94, 100], b: [100, 100] }, lowered, { baseRegisterText: entry('a', 95), commitMessages: ['ci: x\n\nCoverage-lowered: a the adapter moved approved: user\n'] });
-  assert.equal(ok.exit, 0);
-  rmSync(root, { recursive: true });
-});
-
-test('suggest prints the measured [[crate]] blocks, keeping reasons and review dates', () => {
-  const root = tree(['a', 'b', 'c']);
-  const m = measureByCrate(lcovFor(root, { a: [9503, 10000], b: [100, 100], c: [80, 100] }), () => null, root);
-  const text = suggest(m, parseRegister(entry('a', 90, 'reason = "kept"\nreview = "2027-02-01"')));
-  assert.match(text, /name = "a"\nminimum = 95\.03\nreason = "kept"\nreview = "2027-02-01"/);
-  assert.match(text, /name = "c"\nminimum = 80\.00\nreason = "TODO/);
-  assert.ok(!text.includes('name = "b"'));
-  rmSync(root, { recursive: true });
-});
-
-test('the CLI reads the base register and the trailers from git', () => {
+test('a TODO reason fails validation', () => {
   const root = tree(['a']);
+  assert.match(run(root, { a: [95, 100] }, entry('a', 95, 'reason = "TODO: why these lines cannot be covered"\nreview = "2027-02-01"')).out.join('\n'), /placeholder reason/);
+  rmSync(root, { recursive: true });
+});
+
+test('the raise check allows max(0.05 %, 2 lines): a crate of 100 lines may be 2 lines above its minimum, one of 100000 only 0.05 %', () => {
+  const root = tree(['a', 'b']);
+  assert.equal(run(root, { a: [97, 100] }, entry('a', 95)).exit, 0);
+  const r = run(root, { a: [98, 100], b: [96000, 100000] }, entry('a', 95) + entry('b', 95));
+  assert.ok(r.out.some((l) => l.startsWith('::error::crate a: 98.00 %')));
+  assert.ok(r.out.some((l) => l.startsWith('::error::crate b: 96.00 %')));
+  assert.equal(run(root, { a: [95, 100], b: [95040, 100000] }, entry('a', 95) + entry('b', 95)).exit, 0);
+  assert.equal(run(root, { a: [94, 100] }, entry('a', 95)).exit, 1, 'under the minimum stays exact');
+  rmSync(root, { recursive: true });
+});
+
+test('suggest prints the whole register, measured, and is stable on its own output', () => {
+  const root = tree(['a', 'b', 'c']);
+  const text = `# header\n\n${entry('a', 90, 'reason = "kept"\nreview = "2027-02-01"')}\n[[exclude]]\npath = "a/src/n.rs"\nreason = "r"\n`;
+  const m = measureByCrate(lcovFor(root, { a: [9503, 10000], b: [100, 100], c: [80, 100] }), () => null, root);
+  const out = suggest(m, text);
+  assert.match(out, /^# header\n\n\[\[crate\]\]\nname = "a"\nminimum = 95\.03\nreason = "kept"\nreview = "2027-02-01"\n\n\[\[crate\]\]\nname = "c"\nminimum = 80\.00\nreason = "TODO/);
+  assert.match(out, /\[\[exclude\]\]\npath = "a\/src\/n\.rs"\nreason = "r"\n$/);
+  assert.ok(!out.includes('name = "b"'));
+  assert.equal(suggest(m, out), out);
+  rmSync(root, { recursive: true });
+});
+
+test('the ratchet CLI reads the base register and the trailer block from git, and fails closed', () => {
+  const root = tree(['a', 'b']);
   const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: root, encoding: 'utf8' });
   git('init', '-q');
+  writeFileSync(join(root, 'x.txt'), '');
+  git('add', '.');
+  git('commit', '-q', '-m', 'chore: seed');
+  const seed = git('rev-parse', 'HEAD').trim();
   writeFileSync(join(root, 'coverage.toml'), entry('a', 95));
   git('add', '.');
-  git('commit', '-q', '-m', 'chore: base');
-  const lcov = join(root, 'lcov.info');
-  writeFileSync(lcov, lcovFor(root, { a: [94, 100] }));
-  writeFileSync(join(root, 'coverage.toml'), entry('a', 94));
+  git('commit', '-q', '-m', 'ci: register');
   const gate = fileURLToPath(new URL('./coverage-gate.mjs', import.meta.url));
-  const cli = (...extra) => spawnSync('node', [gate, 'check', lcov, join(root, 'coverage.toml'), '--root', root, '--summary', join(root, 's.md'), ...extra], { encoding: 'utf8' });
-  assert.match(cli('--base', 'HEAD').stdout, /::error::crate a: minimum lowered from 95 % to 94 %/);
-  assert.equal(cli('--base', 'HEAD').status, 1);
-  git('commit', '-q', '-a', '-m', 'ci: lower\n\nCoverage-lowered: a moved approved: user');
-  assert.equal(cli('--base', 'HEAD~1').status, 0);
-  assert.match(cli('--base', 'nonexistent').stdout, /::error::the base nonexistent is not in this checkout/);
+  const env = { ...process.env, GITHUB_EVENT_NAME: '', GITHUB_REF: '' };
+  const cli = (...extra) => spawnSync('node', [gate, 'ratchet', join(root, 'coverage.toml'), ...extra], { encoding: 'utf8', env });
+  assert.match(cli('--base', seed).stdout, /initial seed/, 'a base whose tree has no register is the seed');
+  assert.equal(cli('--base', seed).status, 0);
+  const registered = git('rev-parse', 'HEAD').trim();
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 94) + entry('b', 96));
+  git('commit', '-q', '-a', '-m', 'ci: lower\n\nCoverage-lowered: a moved approved: user\nCoverage-lowered: b new approved: user');
+  const lowered = cli('--base', registered);
+  assert.equal(lowered.status, 1);
+  assert.match(lowered.stdout, /::error::crate a: minimum lowered from 95 % to 94 %/);
+  assert.ok(!/crate b/.test(lowered.stdout), 'the trailer in the trailer block allows the new crate b');
+  assert.match(cli('--base', 'nonexistent').stdout, /::error::git cat-file -e failed/);
+  assert.equal(cli('--base', 'nonexistent').status, 1);
+  assert.match(cli().stdout, /::notice::coverage ratchet not checked: no base/);
+  const strict = spawnSync('node', [gate, 'ratchet', join(root, 'coverage.toml')], { encoding: 'utf8', env: { ...env, GITHUB_EVENT_NAME: 'pull_request' } });
+  assert.match(strict.stdout, /::warning::coverage ratchet not checked: no base revision on a pull request/);
   rmSync(root, { recursive: true });
 });
