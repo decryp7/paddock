@@ -288,7 +288,7 @@ impl NativeIcon {
     }
 
     /// Builds the icon of one item (static image first; the item's final picture and identity follow).
-    fn build(main: &MainToken, app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<NativeIcon> {
+    fn build(main: &MainToken, app: &AppHandle<Wry>, spec: &ItemSpec, tooltip: &str) -> tauri::Result<NativeIcon> {
         main.assert_main();
         let menu = build_menu(app)?;
         let image = Image::from_bytes(static_icon_bytes(dark_taskbar()))
@@ -303,7 +303,7 @@ impl NativeIcon {
         #[cfg(target_os = "macos")]
         crate::tray_position::restore(&tray_identity::autosave_name(&spec.id));
         let icon = TrayIconBuilder::with_id(tray_id(&spec.id))
-            .tooltip("Dyno")
+            .tooltip(tooltip)
             .icon(image)
             .icon_as_template(cfg!(target_os = "macos"))
             .menu(&menu)
@@ -446,8 +446,9 @@ pub enum TrayCommand {
 
 /// The native operations [`apply`] needs: [`NativeOps`] over real icons, a fake in the tests.
 pub trait IconOps {
-    /// Makes the icon of `spec`, starting with `initial`.
-    fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String>;
+    /// Makes the icon of `spec`, starting with `initial`; `tooltip` is the text the OS registers with the icon (never a generic
+    /// app name, or the OS records it as the icon's initial tooltip).
+    fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>, tooltip: &str) -> Result<(), String>;
     /// Removes the icon of item `id`.
     fn remove(&mut self, id: &str);
     /// Sets the picture of item `id` when `picture`, and its tooltip when `tooltip` (never called with neither).
@@ -463,8 +464,8 @@ pub struct NativeOps<'a> {
 }
 
 impl IconOps for NativeOps<'_> {
-    fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String> {
-        let icon = NativeIcon::build(self.main, self.app, spec).map_err(|e| e.to_string())?;
+    fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>, tooltip: &str) -> Result<(), String> {
+        let icon = NativeIcon::build(self.main, self.app, spec, tooltip).map_err(|e| e.to_string())?;
         // Start at the item's final width, as unavailable, so nothing resizes when the first live picture arrives.
         if let Some(frame) = initial {
             if let Err(e) = icon.set_picture(self.main, &frame.look) {
@@ -530,7 +531,9 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
                 lock(&state.refused).remove(id);
             }
             for spec in &plan.create {
-                ops.make(spec, initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f))?;
+                let first = initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f);
+                let tooltip = first_tooltip(spec, first);
+                ops.make(spec, first, &tooltip)?;
                 lock(&state.items).insert(spec.id.clone(), spec.clone());
             }
             Ok(())
@@ -548,6 +551,11 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
             Ok(())
         }
     }
+}
+
+/// The tooltip a new icon is registered with: the first frame's, or the metric's name when there is none yet.
+fn first_tooltip(spec: &ItemSpec, initial: Option<&Frame>) -> String {
+    initial.map_or_else(|| crate::tray_model::metric_name(&spec.metric), |f| f.tooltip.clone())
 }
 
 fn paint_one<O: IconOps>(ops: &mut O, state: &TrayState, item: &str, frame: &Frame) {
@@ -769,11 +777,10 @@ mod tests {
     }
 
     impl IconOps for FakeOps {
-        fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String> {
+        fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>, tooltip: &str) -> Result<(), String> {
             self.here();
             assert!(initial.is_some(), "every new icon starts with its unavailable frame");
-            self.tips
-                .push((spec.id.clone(), initial.map(|f| f.tooltip.clone()).unwrap_or_default()));
+            self.tips.push((spec.id.clone(), tooltip.to_string()));
             assert!(self.live.insert(spec.id.clone()), "{} made twice", spec.id);
             self.made += 1;
             Ok(())
@@ -813,6 +820,38 @@ mod tests {
             text: std::sync::Arc::new(dyno_core::tray::text::BoxText),
         };
         TrayItems::new(specs.to_vec(), env).unavailable_frames(true)
+    }
+
+    #[test]
+    fn an_icon_is_created_with_its_metric_tooltip_never_the_app_name() {
+        let state = TrayState::default();
+        let specs = items(2);
+        let initial = frames(&specs);
+        let mut ops = FakeOps {
+            owner: std::thread::current().id(),
+            live: BTreeSet::new(),
+            made: 0,
+            removed: 0,
+            drawn: 0,
+            pictures: 0,
+            saved: 0,
+            tips: Vec::new(),
+        };
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Sync {
+                specs,
+                initial: initial.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(ops.tips.len(), 2);
+        for ((id, tip), (fid, frame)) in ops.tips.iter().zip(&initial) {
+            assert_eq!(id, fid);
+            assert_eq!(tip, &frame.tooltip, "{id}: registered with the first frame's tooltip");
+            assert!(tip.starts_with("CPU") && tip != "Dyno", "{id}: {tip}");
+        }
     }
 
     #[test]

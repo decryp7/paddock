@@ -13,6 +13,7 @@ use paddock_ipc::endpoint::Listener;
 use paddock_ipc::{
     caller_of, AccountId, AccountLimits, AdminRule, BodyHandler, BodyOptions, BodyPeer, Caller, Connection, FrameLimit, RemoteError,
 };
+use paddock_jobs::time::{Clock, SystemClock};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -59,6 +60,43 @@ impl ServedCounts {
             .map(|k| format!("{k:?}={}", self.get(*k)))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+}
+
+/// How often the helper logs its served counts while it runs (only when they changed).
+pub const SERVED_LOG_EVERY: Duration = Duration::from_secs(600);
+
+/// Decides when the periodic `served:` line is due: every [`SERVED_LOG_EVERY`] on the injected clock, and only when the counts
+/// differ from the last line. Pure apart from the clock reading it is given, so a test drives it with a fake clock.
+#[derive(Debug)]
+pub struct ServedLine {
+    every: Duration,
+    last_at: Duration,
+    last_summary: String,
+}
+
+impl ServedLine {
+    /// Starts at `now` (the loop's start) with the counts as `summary`, so a quiet helper logs nothing.
+    pub fn new(every: Duration, now: Duration, summary: String) -> Self {
+        ServedLine {
+            every,
+            last_at: now,
+            last_summary: summary,
+        }
+    }
+
+    /// The summary to log at `now`, or `None` when the interval has not passed or the counts did not change.
+    pub fn due(&mut self, now: Duration, served: &ServedCounts) -> Option<String> {
+        if now.saturating_sub(self.last_at) < self.every {
+            return None;
+        }
+        self.last_at = now;
+        let summary = served.summary();
+        if summary == self.last_summary {
+            return None;
+        }
+        self.last_summary.clone_from(&summary);
+        Some(summary)
     }
 }
 
@@ -151,16 +189,29 @@ impl Daemon {
     ///
     /// # Errors
     /// The accept failures, in words.
-    pub fn run_counted(mut self, served: Arc<ServedCounts>) -> Result<(), String> {
-        let result = self.serve(&served);
+    pub fn run_counted(self, served: Arc<ServedCounts>) -> Result<(), String> {
+        self.run_counted_on(served, Arc::new(SystemClock))
+    }
+
+    /// [`Daemon::run_counted`] on the given clock, which times the periodic `served:` line (every [`SERVED_LOG_EVERY`], when the
+    /// counts changed).
+    ///
+    /// # Errors
+    /// The accept failures, in words.
+    pub fn run_counted_on(mut self, served: Arc<ServedCounts>, clock: Arc<dyn Clock>) -> Result<(), String> {
+        let result = self.serve(&served, clock.as_ref());
         log::info!(outcome = if result.is_ok() { "stopped" } else { "failed" }; "Helper: served: {}", served.summary());
         result
     }
 
-    fn serve(&mut self, served: &Arc<ServedCounts>) -> Result<(), String> {
+    fn serve(&mut self, served: &Arc<ServedCounts>, clock: &dyn Clock) -> Result<(), String> {
         let active = Arc::new(AtomicUsize::new(0));
         let mut failures = 0u32;
+        let mut line = ServedLine::new(SERVED_LOG_EVERY, clock.monotonic(), served.summary());
         while !self.stop.load(Ordering::SeqCst) {
+            if let Some(summary) = line.due(clock.monotonic(), served) {
+                log::info!("Helper: served so far: {summary}");
+            }
             match self.listener.accept(Duration::from_millis(500)) {
                 Ok((stream, _pid)) => {
                     failures = 0;
@@ -230,7 +281,23 @@ mod tests {
     use dyno_core::ports::{PlatformError, ProcessTraffic};
     use paddock_ipc::endpoint::Stream;
     use paddock_ipc::IpcError;
-    use paddock_jobs::time::SystemClock;
+    use paddock_jobs::time::FakeClock;
+
+    #[test]
+    fn the_served_line_is_due_every_interval_and_only_when_the_counts_changed() {
+        let clock = FakeClock::default();
+        let served = ServedCounts::default();
+        let mut line = ServedLine::new(SERVED_LOG_EVERY, clock.monotonic(), served.summary());
+        clock.advance(SERVED_LOG_EVERY);
+        assert_eq!(line.due(clock.monotonic(), &served), None, "nothing was served");
+        served.record(RequestKind::ALL[0]);
+        clock.advance(SERVED_LOG_EVERY - Duration::from_secs(1));
+        assert_eq!(line.due(clock.monotonic(), &served), None, "the interval has not passed");
+        clock.advance(Duration::from_secs(1));
+        assert_eq!(line.due(clock.monotonic(), &served), Some(served.summary()));
+        clock.advance(SERVED_LOG_EVERY);
+        assert_eq!(line.due(clock.monotonic(), &served), None, "unchanged since the last line");
+    }
 
     struct NoTraffic;
     impl ProcessTraffic for NoTraffic {
