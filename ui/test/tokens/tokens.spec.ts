@@ -372,10 +372,10 @@ describe('widget frame (ADR 0035)', () => {
 // neighbouring countries are often neighbouring steps. Lightness carries the order (it survives every colour-vision deficiency):
 // neighbours are CIEDE2000 >= 10 apart and at least 1.3:1 in luminance (1.4:1 for the last pair, the darkest or lightest end) in
 // normal vision and under protanopia, deuteranopia and tritanopia, and L* >= 10 apart, rising with the count in dark and falling
-// in light, with the dark end at L* >= 12 so it never reads as text. Step 1 is 3:1 on the page in normal vision (WCAG 1.4.11), and
+// in light, with the dark end at L* >= 12 so it never reads as text. Step 1 is 3:1 on the page in normal vision only (WCAG 1.4.11), and
 // every step stays clear of the warning colour of the hatched "flagged" marker (the hatch and the flag glyph carry it too). The
-// map's markers are the text colour with a page-colour halo: outside the ramp (CIEDE2000 >= 15 from every step in normal vision),
-// and the fill or the halo is 3:1 against every step in every vision.
+// map's markers are the text colour with a page-colour halo, outside the ramp: CIEDE2000 >= 15 in normal vision; fill or halo 3:1
+// in every vision.
 const COUNT_MIN_DE00 = 10;
 const COUNT_MIN_DL = 10;
 const COUNT_MIN_RATIO = 1.3;
