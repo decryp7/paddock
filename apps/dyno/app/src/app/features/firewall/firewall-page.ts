@@ -122,10 +122,12 @@ export class FirewallPage implements OnInit {
     { key: 'program', header: 'Program', value: (r) => r.program ?? '', width: 'minmax(0, 2fr)', foldBelow: 760 },
     { key: 'ports', header: 'Ports', value: (r) => r.ports, text: (r) => r.ports ?? '—', width: '64px', hideBelow: 760 },
     { key: 'addresses', header: 'Addresses', value: (r) => r.addresses, text: (r) => r.addresses ?? '—', width: 'minmax(6rem, 0.7fr)', hideBelow: 760 },
-    { key: 'profile', header: 'Network', value: (r) => r.profile, text: (r) => PROFILE[r.profile], width: '120px', hideBelow: 720 },
+    { key: 'profile', header: 'Network', value: (r) => r.profile, text: (r) => PROFILE[r.profile], width: '120px', hideBelow: 760 },
   ];
-  /** Where the window is too narrow for the Ports and Addresses columns, they sit under the program. */
-  protected more = (r: FirewallRule): string => [r.ports && `Ports ${r.ports}`, r.addresses && `Addresses ${r.addresses}`].filter(Boolean).join(' · ');
+  /** Where the window is too narrow for the Direction, Network, Ports and Addresses columns, they sit under the program. */
+  protected more = (r: FirewallRule): string =>
+    [this.direction(r), PROFILE[r.profile], r.ports && `Ports ${r.ports}`, r.addresses && `Addresses ${r.addresses}`].filter(Boolean).join(' · ');
+  private direction = (r: FirewallRule): string => (r.direction === 'in' ? 'Incoming' : r.direction === 'out' ? 'Outgoing' : 'Both');
   protected name = sourceName;
   protected line = rulesLine;
   protected countsLine = (s: FirewallSource): string =>

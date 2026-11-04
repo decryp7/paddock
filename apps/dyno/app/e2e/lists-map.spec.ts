@@ -105,9 +105,32 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
     await expect(path, 'a cut path is a keyboard stop').toHaveAttribute('tabindex', '0');
     await path.hover();
     const tip = page.locator('.mat-mdc-tooltip');
-    await expect(tip, 'the tooltip is exactly the rule\'s program').toHaveText(PROGRAM);
+    await expect(tip).toBeVisible();
+    // The tooltip's text is the program, with a zero-width break hint after each separator.
+    expect((await tip.textContent())?.replaceAll('\u200b', '').trim(), 'the tooltip is exactly the rule\'s program').toBe(PROGRAM);
     const cut = await tip.locator('.mdc-tooltip__surface').evaluate((s) => s.scrollHeight - s.clientHeight);
     expect(cut, 'the tooltip shows the whole path (the end is not cut by its height)').toBeLessThanOrEqual(1);
+  });
+
+  test('the full path shows when the cut path is reached by the keyboard', async ({ page }) => {
+    await page.goto('/?latency=0&mock=windows#/firewall');
+    const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
+    await expect(path).toBeVisible();
+    for (let i = 0; i < 60; i++) {
+      if (await path.evaluate((el) => el === document.activeElement)) break;
+      await page.keyboard.press('Tab');
+    }
+    await expect(path, 'Tab reaches the cut path').toBeFocused();
+    await expect(page.locator('.mat-mdc-tooltip')).toBeVisible();
+    expect((await page.locator('.mat-mdc-tooltip').textContent())?.replaceAll('\u200b', '').trim()).toBe(PROGRAM);
+  });
+
+  test('the direction and the network are readable at 900 px (under the program, as the columns drop out)', async ({ page }) => {
+    await page.goto('/?latency=0&mock=windows#/firewall');
+    const rows = page.locator('[data-source="applicationFirewall"] pd-table');
+    await expect(rows.getByText('Direction', { exact: true }), 'the Direction column is not drawn at 900 px').toHaveCount(0);
+    await expect(rows).toContainText('Outgoing');
+    await expect(rows).toContainText('All networks');
   });
 
   test('the rule name wraps to at most two lines', async ({ page }) => {

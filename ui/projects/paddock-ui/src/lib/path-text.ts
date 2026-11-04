@@ -16,7 +16,7 @@ import { copyText } from './clipboard';
   selector: 'pd-path-text',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph, MatTooltip],
-  template: `<span #box class="pd-text" [class.pd-plain]="plain()" [matTooltip]="whole()" matTooltipPosition="above" matTooltipClass="pd-path-tip" [matTooltipDisabled]="!clipped()" [attr.tabindex]="clipped() ? 0 : null" [attr.data-full]="whole()" data-testid="path-text"><span class="pd-size" aria-hidden="true" [attr.data-full]="value()"></span><span class="pd-shown">{{ shown() }}</span></span>
+  template: `<span #box class="pd-text" [class.pd-plain]="plain()" #tip="matTooltip" [matTooltip]="tipText()" matTooltipPosition="above" matTooltipClass="pd-path-tip" (focus)="tip.show()" (blur)="tip.hide()" [matTooltipDisabled]="!clipped()" [attr.tabindex]="clipped() ? 0 : null" [attr.data-full]="whole()" data-testid="path-text"><span class="pd-size" aria-hidden="true" [attr.data-full]="value()"></span><span class="pd-shown">{{ shown() }}</span></span>
     @if (copy()) {
       <button class="pd-copy" type="button" [attr.aria-label]="copied() ? copiedLabel : copyLabel" [matTooltip]="copied() ? copiedLabel : copyLabel" (click)="doCopy($event)">
         <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="14" />
@@ -65,6 +65,8 @@ export class PdPathText {
     return this.clip() === 'end' ? fitEnd(value, width, measure) : fitPath(value, width, measure, this.keepTail());
   });
   protected readonly whole = computed(() => this.full() ?? this.value());
+  /** The tooltip text: the whole value with a zero-width break after each separator, so a long path wraps at a folder, not mid-name. */
+  protected readonly tipText = computed(() => this.whole().replace(/([\\/])/g, '$1\u200b'));
   /** What is drawn is less than the whole value (cut to fit, or a short name for a full path): only then is the tooltip worth showing. */
   protected readonly clipped = computed(() => this.shown() !== this.whole());
   protected readonly copied = signal(false);

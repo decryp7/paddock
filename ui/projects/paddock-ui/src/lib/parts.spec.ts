@@ -117,7 +117,7 @@ describe('PdPathText', () => {
     const el = f.nativeElement as HTMLElement;
     const text = el.querySelector('.pd-text')!;
     text.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.replaceAll('\u200b', '').trim()).toBe('/var/log/app/system.log'));
     text.dispatchEvent(new MouseEvent('mouseleave'));
     const button = el.querySelector<HTMLButtonElement>('.pd-copy')!;
     expect(button.getAttribute('aria-label')).toBe('Copy the full path');
@@ -171,7 +171,7 @@ describe('PdPathText', () => {
       expect(shown).toContain('…');
       expect(shown.length).toBeLessThan('/var/log/app/system.log'.length);
       el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
-      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.replaceAll('\u200b', '').trim()).toBe('/var/log/app/system.log'));
     });
 
     it('shortens the end of a title when asked to', async () => {

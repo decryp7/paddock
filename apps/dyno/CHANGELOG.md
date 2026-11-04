@@ -11,9 +11,9 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - Benchmarks: a processor, memory and disk test that you start yourself. Each run warms up and repeats, shows the middle result with its spread, and marks a result as unsteady when the repeats differ a lot. A change counts as better or worse only when it is larger than the noise. The disk test measures the drive itself, not the memory cache, and writes at most 14.5 GiB per drive, which it deletes at once. Every run shows in the Jobs view with its phase and can be cancelled, and on battery it asks first. Runs measured by 1.0 are kept and marked "Measured the old way".
 - Network: choose lists of addresses to download and Dyno marks the connections that match. You can also see your connections on a world map and read your firewall rules, which Dyno never changes. Dyno can download the disk-health tool when you ask. Each network feature is on by default and has its own switch.
 - Keep awake: hold the computer awake for 30 minutes to 7 days, until a time of day, until you stop it, while a program runs, or while the computer is busy. It is on the Power page, in the tray menu and in the command "dyno awake". The hold ends if Dyno restarts, and the page says so.
-- Wake-on-LAN: save your other computers and wake them from the Power page or the tray menu, or test whether one wakes. This computer's readiness lists what Dyno can read and what you need to change. The password for a computer is kept safely by your system, never in Dyno's own files.
+- Wake-on-LAN: save your other computers and wake them from the Power page or the tray menu, or test whether one wakes. A check of this computer tells you whether it can be woken over the network and what you need to change. The password for a computer is kept safely by your system, never in Dyno's own files.
 - Scheduled wake: wake the computer at a time you choose, keep it awake for a while, wake chosen computers and run one fixed task, such as checking the backups. It is off until you turn it on in Settings. A wake that was missed is shown as missed and never run late. Nothing can wake a computer that is shut down.
-- Every metric can be its own menu-bar or tray item, up to 32. macOS or Windows remembers where you put each one. The items have a new look: stacked label and value, a dash when a value is missing, and an alert when the level is held for 3 seconds. The default set is CPU, memory, network and temperature, and Settings has a menu-bar alert level.
+- Every metric can be its own menu-bar or tray item, up to 32. macOS or Windows remembers where you put each one. The items have a new look: stacked label and value, a dash when a value is missing, and an alert when a value stays above its limit for 3 seconds. The default set is CPU, memory, network and temperature, and Settings has a menu-bar alert level.
 - Windows: a one-time notice on the first start, and when a new icon is added, tells you to drag Dyno's icons from the arrow to the taskbar, with a button that opens the taskbar settings.
 - The dashboard is a free-size grid of widgets. A Dyno 1.0 dashboard is upgraded on the first start.
 - Notifications: select messages and delete them, or delete all after a confirmation. Deleted messages stay gone after a restart.
@@ -32,8 +32,8 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - Windows: at logon the tray icon and window now start, not only the agent, and no command prompt window stays open for the agent.
 - Windows: the small window that opens from the tray icon no longer closes at once after you click the icon.
 - macOS: the Network page lists every program's connections, also when Start at login is off.
-- "Is this normal?" counts local calendar days correctly and says when it will be ready.
-- macOS: the menu-bar icons no longer risk flickering.
+- "Is this normal?" now counts days by your own calendar and tells you when it will be ready.
+- macOS: the menu-bar icons no longer flash on and off.
 
 ### Changed
 
