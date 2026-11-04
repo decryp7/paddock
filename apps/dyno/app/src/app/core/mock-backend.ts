@@ -481,6 +481,7 @@ export class MockBackend implements DynoBackend {
       processes: detail === 'processes' ? samples : null,
       groups: detail === 'processes' ? groups : null,
       otherUsers: null,
+      via: { processes: 'local', others: 'local', temperatures: 'local' },
     };
   }
 
@@ -657,7 +658,7 @@ export class MockBackend implements DynoBackend {
       const lower = path.toLowerCase();
       const pick = (name: string, kind: string | null) => {
         const p = this.processes.find((x) => x.name === name);
-        return p ? [{ process: { pid: p.pid, started: p.started }, name: p.name, kind }] : [];
+        return p ? [{ process: { pid: p.pid, started: p.started }, name: p.name, kind, via: 'local' as const }] : [];
       };
       if (lower.includes('target')) return [...pick(this.profile.names.rustc, 'Writes build output'), ...pick(this.profile.names.code, 'rust-analyzer watches it'), ...pick(this.profile.names.indexer, 'Indexing')];
       if (lower.includes('chrome')) return pick(this.profile.names.chrome, 'Browser profile');

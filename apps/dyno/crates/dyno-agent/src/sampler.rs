@@ -232,6 +232,8 @@ impl Sampler {
             processes: Some(listed),
             groups: Some(listed_groups),
             other_users,
+            // The process list and temperatures are read here today; WP-PROC and WP-CNT set where they came from.
+            via: dyno_core::read_via::LiveVia::default(),
         };
         core.latest.live = Some(live.clone());
         drop_pressure_unused(pressure);

@@ -100,6 +100,7 @@ impl FileLocks for LinuxLocks {
                 },
                 name: name.unwrap_or_else(|| format!("Process {pid}")),
                 kind: Some(kind(&f)),
+                via: Default::default(),
             });
         }
         if out.is_empty() && timed_out {

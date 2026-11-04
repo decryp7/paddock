@@ -446,6 +446,7 @@ mod widget_wiring {
             processes: None,
             groups: None,
             other_users: None,
+            via: Default::default(),
         }
     }
 

@@ -39,6 +39,7 @@ const disk = (name: string, gb: number) => ({ name, totalBytes: gb * GB, removab
 function appleSilicon(): SystemInventory {
   return {
     os: 'macOS 15',
+    memoryVia: 'local',
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
     memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
@@ -50,6 +51,7 @@ function appleSilicon(): SystemInventory {
 function solderedLaptop(): SystemInventory {
   return {
     os: 'Windows 11',
+    memoryVia: 'local',
     hostName: 'ULTRABOOK',
     cpu: { name: 'Intel Core Ultra 7 155H', physicalCores: 16, logicalCores: 22, frequencyMhz: 3800 },
     memory: { unified: { total: 32 * GB, kind: 'lpddr5', manufacturer: 'Samsung', upgradeable: false } },
@@ -62,6 +64,7 @@ function ddr5Desktop(): SystemInventory {
   const part = 'KF560C40-32';
   return {
     os: 'Windows 11',
+    memoryVia: 'local',
     hostName: 'STUDIO-PC',
     cpu: { name: 'Intel Core i9-13900K', physicalCores: 24, logicalCores: 32, frequencyMhz: 3000 },
     memory: {
@@ -94,6 +97,7 @@ function sodimmLaptop(dual: boolean): SystemInventory {
       ];
   return {
     os: 'Linux 6.8',
+    memoryVia: 'local',
     hostName: 'dev-laptop',
     cpu: { name: 'AMD Ryzen 9 7940HS', physicalCores: 8, logicalCores: 16, frequencyMhz: 4000 },
     memory: { slots: { slots: 2, maxCapacityBytes: 64 * GB, modules } },
@@ -107,6 +111,7 @@ function genericBoard(): SystemInventory {
   const m: MemoryModule = { slot: 'Memory slot', bank: null, capacityBytes: 8 * GB, speedMts: null, configuredSpeedMts: null, kind: 'unknown', formFactor: 'unknown', manufacturer: null, partNumber: null };
   return {
     os: 'Windows 10',
+    memoryVia: 'local',
     hostName: null,
     cpu: { name: 'Unknown processor', physicalCores: 4, logicalCores: 4, frequencyMhz: 2400 },
     memory: { slots: { slots: 0, maxCapacityBytes: null, modules: [m] } },
@@ -124,6 +129,7 @@ function ddr4Desktop(): SystemInventory {
   ];
   return {
     os: 'Windows 11',
+    memoryVia: 'local',
     hostName: 'DEV-DESKTOP',
     cpu: { name: 'AMD Ryzen 7 5800X', physicalCores: 8, logicalCores: 16, frequencyMhz: 3800 },
     memory: {

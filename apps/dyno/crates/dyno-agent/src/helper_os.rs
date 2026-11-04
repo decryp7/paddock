@@ -2,7 +2,7 @@
 //! decides something is a pure function with its test; the adapters only run fixed programs (ER-14: tests never run them).
 
 use crate::helper_centre::{HelperCentre, HelperInstaller};
-use crate::helper_link::HelperLink;
+use crate::helper_link::{HelperLink, HelperTransport};
 use crate::helper_peer::PeerTransport;
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_paths::{HelperPaths, WindowsRoots};
@@ -181,7 +181,7 @@ pub fn transport() -> PeerTransport {
 }
 
 /// The helper centre for this machine.
-pub fn centre() -> HelperCentre<PeerTransport> {
+pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
     let host = host();
     let paths = HelperPaths::for_host(host, &windows_roots());
     let agent_exe = std::env::current_exe().unwrap_or_default();
@@ -197,7 +197,7 @@ pub fn centre() -> HelperCentre<PeerTransport> {
         owner,
     };
     HelperCentre::new(
-        HelperLink::new(transport, Arc::new(SystemClock)),
+        HelperLink::new(Box::new(transport) as Box<dyn HelperTransport>, Arc::new(SystemClock)),
         host,
         supported,
         env!("CARGO_PKG_VERSION"),

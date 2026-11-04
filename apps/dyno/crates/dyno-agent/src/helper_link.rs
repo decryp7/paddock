@@ -6,14 +6,22 @@
 use dyno_core::btm::{LoginItemsLink, LoginItemsReply};
 use dyno_core::firewall::{FirewallReader, FirewallSource};
 use dyno_core::helper::HelperHost;
-use dyno_core::helper_requests::{SmartQuery, ToolKind};
+use dyno_core::helper_counters::CounterAnswer;
+use dyno_core::helper_extras::ExtrasAnswer;
+use dyno_core::helper_holders::{FileHolders, SocketOwners};
+use dyno_core::helper_processes::ProcessPage;
+use dyno_core::helper_requests::{CounterQuery, ExtrasKind, ProcessQuery, SmartQuery, ToolKind};
 use dyno_core::helper_wire::{
     assess, platform_error, HelperReply, HelperRequest, HelperState, HelperStatus, Probe, ToolStatus, HELPER_MISSING,
 };
+use dyno_core::inventory::MemoryLayout;
+use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::PlatformError;
+use dyno_core::read_via::ReadVia;
 use dyno_core::smart::SmartReply;
 use paddock_jobs::time::Clock;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// How many audit entries the status asks for.
 const STATUS_AUDIT: u32 = 20;
@@ -40,12 +48,77 @@ pub enum TransportError {
 pub trait HelperTransport: Send + Sync {
     /// Sends `request` and waits for the answer.
     fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError>;
+
+    /// [`HelperTransport::call`] that gives up after `max` when one is given: a live reading must not wait out the long
+    /// default of a request kind. The default ignores `max` (fakes that cannot hang).
+    fn call_within(&self, request: HelperRequest, max: Option<Duration>) -> Result<HelperReply, TransportError> {
+        let _ = max;
+        self.call(request)
+    }
+}
+
+/// Why a typed call failed: the agent's error, and whether the helper could not be reached at all (silent, absent, foreign) as
+/// opposed to answering with a refusal. Only the first is a reason to leave a reading alone for a while.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallError {
+    /// What went wrong, in words.
+    pub error: PlatformError,
+    /// The helper was not reached (a refusal is a answer, and is not this).
+    pub unreachable: bool,
+}
+
+impl From<PlatformError> for CallError {
+    fn from(error: PlatformError) -> Self {
+        CallError { error, unreachable: false }
+    }
+}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+/// How long a call may take: the transport's own default, or the short deadline of a live reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wait {
+    /// The kind's own wait (30 s for an ordinary request, minutes for a slow one).
+    Default,
+    /// [`LIVE_WAIT`].
+    Live,
+}
+
+/// The deadline of a live call: something a person looks at, refreshed every few seconds. A helper that does not answer in this
+/// time is treated as not there for a while (the readiness backoff, [`crate::helper_first::ReadyGate`]).
+pub const LIVE_WAIT: Duration = Duration::from_secs(2);
+
+impl Wait {
+    fn max(self) -> Option<Duration> {
+        match self {
+            Wait::Default => None,
+            Wait::Live => Some(LIVE_WAIT),
+        }
+    }
+}
+
+/// A boxed transport is a transport: the agent's `Shared.helper` is over `Box<dyn HelperTransport>`, so real-engine tests can
+/// serve a real helper dispatcher (`tests/common/helper_rig.rs`) where the real agent has the system connection.
+impl HelperTransport for Box<dyn HelperTransport> {
+    fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
+        (**self).call(request)
+    }
+    fn call_within(&self, request: HelperRequest, max: Option<Duration>) -> Result<HelperReply, TransportError> {
+        (**self).call_within(request, max)
+    }
 }
 
 /// The helper as the agent uses it.
 pub struct HelperLink<T: HelperTransport> {
     transport: T,
     clock: Arc<dyn Clock>,
+    /// How many calls found the helper unreachable (absent, silent or foreign). The readiness cache drops its answer when
+    /// this moves ([`crate::helper_first::ReadyGate`]).
+    faults: std::sync::atomic::AtomicU64,
     /// The state last logged at info, so a poll that finds the same state logs at debug (one line per change, not per poll).
     last_state: std::sync::Mutex<Option<HelperState>>,
 }
@@ -74,31 +147,63 @@ impl<T: HelperTransport> HelperLink<T> {
         HelperLink {
             transport,
             clock,
+            faults: std::sync::atomic::AtomicU64::new(0),
             last_state: std::sync::Mutex::new(None),
         }
     }
 
     fn call(&self, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
+        self.call_in(Wait::Default, kind, request)
+    }
+
+    /// [`HelperLink::call_in`] with the failure typed.
+    fn ask(&self, wait: Wait, kind: &str, request: HelperRequest) -> Result<HelperReply, CallError> {
+        self.call_in(wait, kind, request).map_err(|e| CallError {
+            unreachable: !matches!(e, TransportError::Remote { .. }),
+            error: to_platform(e),
+        })
+    }
+
+    fn call_in(&self, wait: Wait, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
         let started = self.clock.monotonic();
-        let out = self.transport.call(request);
+        let out = match wait.max() {
+            None => self.transport.call(request),
+            max => self.transport.call_within(request, max),
+        };
         let ms = self.clock.monotonic().saturating_sub(started).as_millis() as u64;
         match &out {
             Ok(_) => log::debug!(Request = kind, Ms = ms; "Helper call answered"),
             Err(TransportError::Remote { code, .. }) => log::warn!(Request = kind, Ms = ms, Code = code.as_str(); "Helper call refused"),
             Err(e) => {
+                self.faults.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 log::warn!(Request = kind, Ms = ms, State = format!("{e:?}").split(['(', ' ']).next().unwrap_or(""); "Helper not reachable")
             }
         }
         out
     }
 
+    /// How many calls so far found the helper unreachable.
+    pub fn faults(&self) -> u64 {
+        self.faults.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The clock that times the calls (the readiness cache uses the same one).
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.clock.clone()
+    }
+
     /// What Settings shows: `Info`, then the audit entries when it answered. `supported` is `Err(reason)` where the helper
     /// cannot exist (an AppImage, no polkit).
     pub fn status(&self, host: HelperHost, supported: Result<(), String>, our_version: &str) -> HelperStatus {
-        let probe = match self.call("info", HelperRequest::Info) {
+        self.status_in(Wait::Default, host, supported, our_version)
+    }
+
+    /// [`HelperLink::status`] whose calls wait as `wait` says (the readiness probe of the readers is live).
+    pub fn status_in(&self, wait: Wait, host: HelperHost, supported: Result<(), String>, our_version: &str) -> HelperStatus {
+        let probe = match self.call_in(wait, "info", HelperRequest::Info) {
             Ok(HelperReply::About(info, _)) => {
                 // The audit log is for the owner and administrators; a refusal just means an empty list.
-                let recent = match self.call("audit", HelperRequest::Audit(STATUS_AUDIT)) {
+                let recent = match self.call_in(wait, "audit", HelperRequest::Audit(STATUS_AUDIT)) {
                     Ok(HelperReply::Entries(e)) => e,
                     _ => Vec::new(),
                 };
@@ -162,16 +267,126 @@ impl<T: HelperTransport> HelperLink<T> {
     /// The firewall as the helper reads it (`pf` or `nft`), reduced to what this account may have.
     pub fn firewall(&self) -> Result<FirewallSource, PlatformError> {
         match self.call("firewall", HelperRequest::Firewall).map_err(to_platform)? {
-            HelperReply::Firewall(f) => Ok(f),
+            // The helper wrote `via` too (it is part of its wire type); the agent decides who read it.
+            HelperReply::Firewall(f) => Ok(f.with_via(ReadVia::Helper)),
             _ => Err(unexpected("Firewall")),
+        }
+    }
+
+    /// One page of the process list, scoped to the caller by the helper.
+    pub fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, PlatformError> {
+        self.processes_in(query, Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::processes`] that waits as `wait` says.
+    pub fn processes_in(&self, query: ProcessQuery, wait: Wait) -> Result<ProcessPage, CallError> {
+        match self.ask(wait, "processes", HelperRequest::Processes(query))? {
+            HelperReply::Processes(p) => Ok(p),
+            _ => Err(unexpected("Processes").into()),
+        }
+    }
+
+    /// Per-program traffic counters (Windows), scoped to the caller.
+    pub fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+        self.traffic_in(Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::traffic`] that waits as `wait` says.
+    pub fn traffic_in(&self, wait: Wait) -> Result<Vec<TrafficCounter>, CallError> {
+        match self.ask(wait, "traffic", HelperRequest::Traffic)? {
+            HelperReply::Counters(c) => Ok(c),
+            _ => Err(unexpected("Traffic").into()),
+        }
+    }
+
+    /// Socket inode to owning program (Linux), scoped to the caller.
+    pub fn socket_owners(&self) -> Result<SocketOwners, PlatformError> {
+        self.socket_owners_in(Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::socket_owners`] that waits as `wait` says.
+    pub fn socket_owners_in(&self, wait: Wait) -> Result<SocketOwners, CallError> {
+        match self.ask(wait, "socketOwners", HelperRequest::SocketOwners)? {
+            HelperReply::SocketOwners(o) => Ok(o),
+            _ => Err(unexpected("SocketOwners").into()),
+        }
+    }
+
+    /// The programs holding the file with this device and inode (Linux). The helper never opens the file.
+    pub fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, PlatformError> {
+        self.file_holders_in(dev, ino, Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::file_holders`] that waits as `wait` says.
+    pub fn file_holders_in(&self, dev: u64, ino: u64, wait: Wait) -> Result<FileHolders, CallError> {
+        match self.ask(wait, "fileHolders", HelperRequest::FileHolders { dev, ino })? {
+            HelperReply::FileHolders(h) => Ok(h),
+            _ => Err(unexpected("FileHolders").into()),
+        }
+    }
+
+    /// Thermal, energy and fan readings.
+    pub fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, PlatformError> {
+        self.counters_in(query, Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::counters`] that waits as `wait` says.
+    pub fn counters_in(&self, query: CounterQuery, wait: Wait) -> Result<Vec<CounterAnswer>, CallError> {
+        match self.ask(wait, "counters", HelperRequest::Counters(query))? {
+            HelperReply::CounterValues(v) => Ok(v),
+            _ => Err(unexpected("Counters").into()),
+        }
+    }
+
+    /// Memory modules from the DMI table (Linux).
+    pub fn memory(&self) -> Result<MemoryLayout, PlatformError> {
+        self.memory_in(Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::memory`] that waits as `wait` says.
+    pub fn memory_in(&self, wait: Wait) -> Result<MemoryLayout, CallError> {
+        match self.ask(wait, "memory", HelperRequest::MemoryModules)? {
+            HelperReply::Memory(m) => Ok(m),
+            _ => Err(unexpected("MemoryModules").into()),
+        }
+    }
+
+    /// Wake requests or Windows Backup versions.
+    pub fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError> {
+        self.extras_in(kind, Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::extras`] that waits as `wait` says.
+    pub fn extras_in(&self, kind: ExtrasKind, wait: Wait) -> Result<ExtrasAnswer, CallError> {
+        match self.ask(wait, "extras", HelperRequest::Extras(kind))? {
+            HelperReply::Extras(e) => Ok(e),
+            _ => Err(unexpected("Extras").into()),
+        }
+    }
+
+    /// The login items of the caller's account plus system-wide ones (macOS).
+    pub fn login_items_now(&self) -> Result<LoginItemsReply, PlatformError> {
+        self.login_items_now_in(Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::login_items_now`] that waits as `wait` says.
+    pub fn login_items_now_in(&self, wait: Wait) -> Result<LoginItemsReply, CallError> {
+        match self.ask(wait, "loginItems", HelperRequest::LoginItems)? {
+            HelperReply::LoginItems(r) => Ok(r),
+            _ => Err(unexpected("LoginItems").into()),
         }
     }
 
     /// SMART health of the disks the helper's own scan finds.
     pub fn smart(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
-        match self.call("smart", HelperRequest::Smart(query)).map_err(to_platform)? {
+        self.smart_in(query, Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::smart`] that waits as `wait` says.
+    pub fn smart_in(&self, query: SmartQuery, wait: Wait) -> Result<SmartReply, CallError> {
+        match self.ask(wait, "smart", HelperRequest::Smart(query))? {
             HelperReply::Smart(s) => Ok(s),
-            _ => Err(unexpected("Smart")),
+            _ => Err(unexpected("Smart").into()),
         }
     }
 
@@ -213,10 +428,7 @@ where
     T: 'static,
 {
     fn login_items(&mut self) -> Result<LoginItemsReply, PlatformError> {
-        match self.call("loginItems", HelperRequest::LoginItems).map_err(to_platform)? {
-            HelperReply::LoginItems(r) => Ok(r),
-            _ => Err(unexpected("LoginItems")),
-        }
+        self.login_items_now()
     }
 }
 
@@ -232,6 +444,7 @@ mod tests {
     use dyno_core::firewall::RuleSource;
     use dyno_core::helper_policy::Visibility;
     use dyno_core::helper_wire::{codes, CallerView, HelperInfo, HELPER_API, MIN_HELPER_VERSION};
+    use dyno_core::read_via::ReadVia;
     use paddock_jobs::time::FakeClock;
     use std::sync::Mutex;
 
@@ -239,10 +452,15 @@ mod tests {
     struct Script {
         answers: Mutex<Vec<Result<HelperReply, TransportError>>>,
         seen: Mutex<Vec<HelperRequest>>,
+        waits: Mutex<Vec<Option<std::time::Duration>>>,
     }
     impl HelperTransport for Script {
         fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
+            self.call_within(request, None)
+        }
+        fn call_within(&self, request: HelperRequest, max: Option<std::time::Duration>) -> Result<HelperReply, TransportError> {
             self.seen.lock().unwrap().push(request);
+            self.waits.lock().unwrap().push(max);
             self.answers.lock().unwrap().remove(0)
         }
     }
@@ -252,6 +470,7 @@ mod tests {
             Script {
                 answers: Mutex::new(answers),
                 seen: Mutex::new(Vec::new()),
+                waits: Mutex::new(Vec::new()),
             },
             Arc::new(FakeClock::new()),
         )
@@ -363,7 +582,7 @@ mod tests {
             })),
             Ok(HelperReply::Bye),
         ]);
-        assert_eq!(l.firewall().unwrap(), src);
+        assert_eq!(l.firewall().unwrap(), src.clone().with_via(ReadVia::Helper));
         assert_eq!(
             l.install_tool(ToolKind::Smartmontools, vec![9, 9]).unwrap().installed.as_deref(),
             Some("7.5")
@@ -381,6 +600,24 @@ mod tests {
                 HelperRequest::Uninstall
             ]
         );
+    }
+
+    #[test]
+    fn whatever_the_helper_wrote_in_via_the_agent_says_helper() {
+        // `FirewallSource.via` travels on the helper wire (HELPER_API 5), so the helper could send anything; the agent decides.
+        let lie = FirewallSource::new(RuleSource::Pf).with_via(ReadVia::unavailable("made up"));
+        let l = link(vec![Ok(HelperReply::Firewall(lie))]);
+        assert_eq!(l.firewall().unwrap().via, ReadVia::Helper);
+    }
+
+    #[test]
+    fn a_wait_is_passed_to_the_transport_and_a_plain_call_has_none() {
+        let l = link(vec![Ok(HelperReply::Memory(dyno_core::inventory::MemoryLayout::TotalOnly {
+            total: 1,
+            reason: dyno_core::inventory::Unavailable::failed("x"),
+        }))]);
+        l.memory_in(Wait::Live).unwrap();
+        assert_eq!(*l.transport.waits.lock().unwrap(), [Some(LIVE_WAIT)]);
     }
 
     #[test]

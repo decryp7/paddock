@@ -215,6 +215,8 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         checked_at: Some(t),
         checking: false,
         login_path_used: resolver.login_path_used(),
+        // The Windows Backup versions come from the helper when WP-EXT wires them; today every tool is read here.
+        via: dyno_core::read_via::ReadVia::Local,
     };
     slot.checking = false;
     x.backup_done.notify_all();

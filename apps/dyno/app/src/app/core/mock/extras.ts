@@ -66,6 +66,7 @@ export function mockSleep(): SleepReport {
     ],
     blockersUnavailable: null,
     wakesUnavailable: null,
+    blockersVia: 'local',
   };
 }
 

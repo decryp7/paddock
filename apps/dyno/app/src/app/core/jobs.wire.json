@@ -12,7 +12,8 @@
         "checkedAt": null,
         "checking": false,
         "loginPathUsed": false,
-        "statuses": []
+        "statuses": [],
+        "via": "local"
       }
     },
     true

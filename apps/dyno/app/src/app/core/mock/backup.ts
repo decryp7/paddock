@@ -38,7 +38,7 @@ export function mockBackupReport(variant: MockBackupVariant, now: number, checke
             nextStep: 'The repository is locked or its passphrase is not available to Dyno. Check it in a terminal with "borg list" and try again.',
           },
         ];
-  return { statuses, checkedAt, checking: false, loginPathUsed: true };
+  return { statuses, checkedAt, checking: false, loginPathUsed: true, via: 'local' };
 }
 
 /** The engine's check of the backup settings (`BackupSettings::validate`), with its sentences. */

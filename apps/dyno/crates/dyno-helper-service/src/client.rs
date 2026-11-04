@@ -43,7 +43,15 @@ impl std::error::Error for ConnectError {}
 /// # Errors
 /// [`ConnectError`].
 pub fn connect(endpoint: &str) -> Result<BodyPeer<HelperMessage>, ConnectError> {
-    connect_with(endpoint, &Stream::connect_system)
+    connect_for(endpoint, CONNECT_TIMEOUT)
+}
+
+/// [`connect`] that waits at most `timeout` for the endpoint (a live reading has less than [`CONNECT_TIMEOUT`] left).
+///
+/// # Errors
+/// [`ConnectError`].
+pub fn connect_for(endpoint: &str, timeout: Duration) -> Result<BodyPeer<HelperMessage>, ConnectError> {
+    connect_with(endpoint, &|e, _| Stream::connect_system(e, timeout))
 }
 
 /// [`connect`] over another way to open the stream (tests).

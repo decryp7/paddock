@@ -26,6 +26,7 @@ fn update(at: Timestamp, cpu: f32) -> LiveUpdate {
         processes: None,
         groups: None,
         other_users: None,
+        via: Default::default(),
     }
 }
 

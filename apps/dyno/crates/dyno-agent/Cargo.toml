@@ -58,6 +58,9 @@ maxminddb = "0.27"
 libc = "0.2"
 
 [dev-dependencies]
+# The helper rig serves a real dispatcher to the agent (tests/common/helper_rig.rs); no cycle: the helper does not depend on the agent.
+dyno-helper = { path = "../dyno-helper" }
+postcard.workspace = true
 plist = "1"
 tempfile.workspace = true
 proptest = "1"

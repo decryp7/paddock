@@ -25,9 +25,11 @@ pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
 pub mod helper_centre;
+pub mod helper_first;
 pub mod helper_link;
 pub mod helper_os;
 pub mod helper_peer;
+pub mod helper_readers;
 pub mod helper_wear;
 pub mod home_ip;
 pub mod instance;
@@ -140,6 +142,18 @@ impl Running {
         Running::start_with_lock(dirs, platform, details, reveal, disk_ports, lock)
     }
 
+    /// [`Running::start`] with the helper served from `wiring` (the real-engine rig; see [`agent::HelperWiring`]).
+    pub fn start_with_helper(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+        wiring: agent::HelperWiring,
+    ) -> Result<Running, StartError> {
+        let lock = instance::InstanceLock::acquire(&dirs);
+        Running::start_inner(dirs, platform, details, reveal, disk::DiskPorts::none(), lock, Some(wiring))
+    }
+
     /// [`Running::start_with`] with the result of taking the data folder's lock given (tests pass a failed one). A held
     /// lock refuses the start; a folder that cannot lock at all (locking unsupported, for example on some network
     /// shares) starts the agent without the guard against a second one, and says so in the agent's log and activity.
@@ -150,6 +164,18 @@ impl Running {
         reveal: agent::Reveal,
         disk_ports: disk::DiskPorts,
         lock: Result<instance::InstanceLock, instance::LockError>,
+    ) -> Result<Running, StartError> {
+        Running::start_inner(dirs, platform, details, reveal, disk_ports, lock, None)
+    }
+
+    fn start_inner(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+        disk_ports: disk::DiskPorts,
+        lock: Result<instance::InstanceLock, instance::LockError>,
+        wiring: Option<agent::HelperWiring>,
     ) -> Result<Running, StartError> {
         let mut unguarded = None;
         let instance = match lock {
@@ -178,7 +204,7 @@ impl Running {
                 None
             }
         };
-        let (shared, sensors, processes) = Shared::build_with(dirs, platform, details, reveal, disk_ports)?;
+        let (shared, sensors, processes) = Shared::build_with_helper(dirs, platform, details, reveal, disk_ports, wiring)?;
         log::info!(ElapsedMs = logging::elapsed_ms(); "Agent store open");
         if let Some(why) = unguarded {
             agent::lock(&shared.core).log(

@@ -58,6 +58,9 @@ pub struct SleepReport {
     pub blockers_unavailable: Option<String>,
     /// Why the wakes could not be read.
     pub wakes_unavailable: Option<String>,
+    /// Who read the blockers.
+    #[serde(default)]
+    pub blockers_via: crate::read_via::ReadVia,
 }
 
 fn prevents_from(kind: &str) -> Prevents {

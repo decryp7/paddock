@@ -55,6 +55,7 @@ pub mod ports;
 pub mod power;
 pub mod process;
 pub mod protocol;
+pub mod read_via;
 pub mod recorder;
 pub mod region;
 pub mod report;

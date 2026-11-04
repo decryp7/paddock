@@ -306,6 +306,7 @@ export class MockIntel {
           truncated: 0,
           rulesHidden: false,
           note: null,
+          via: 'local',
         },
         {
           source: 'pf',
@@ -318,6 +319,7 @@ export class MockIntel {
           truncated: 0,
           rulesHidden: true,
           note: 'These rules need the helper. Turn it on in Settings to see them.',
+          via: { needsHelper: { reason: 'The pf rules are readable only by an administrator.', next: { openSettings: 'helper' } } },
         },
       ],
     };
