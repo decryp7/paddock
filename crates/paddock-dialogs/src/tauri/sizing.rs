@@ -18,6 +18,7 @@ pub(super) enum Phase {
     Ready,
     Resized,
     UserResize,
+    #[cfg(windows)]
     Snapped,
     Moved,
     Scale,
@@ -31,6 +32,7 @@ impl Phase {
             Phase::Ready => "ready",
             Phase::Resized => "resized",
             Phase::UserResize => "user-resize",
+            #[cfg(windows)]
             Phase::Snapped => "snapped",
             Phase::Moved => "moved",
             Phase::Scale => "scale",
