@@ -234,6 +234,9 @@ pub(crate) mod fakes {
                     owner_sid: None,
                 })
             }
+            fn protection(&self, _: &crate::checkdir::DirInspect) -> Result<(), String> {
+                Ok(())
+            }
         }
         crate::checkdir::check(&F, "x").expect("proof")
     }

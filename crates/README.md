@@ -1612,17 +1612,21 @@ The installer's work for per-machine Windows installs. A library (pure core, tes
 resource `PADDOCK_SETUP_PRODUCT` and `PADDOCK_SETUP_VERSION`: `FileDescription` becomes "<App> update").
 
 - **Commands** (`paddock-setup <command> [--option value]`, exit codes in `exit::Exit`): `guard` (per-user copy guard),
-  `check-dir`, `same-folder`, `stop-all` (over `paddock_proc::installed::stop_all`, feature `proc-stop`), `clean-run`,
-  `clean-staging`, `apply-update` (the elevated hand-off, trust model of ADR section 4.2), `hold-installing` (the installer
+  `check-dir`, `same-folder`, `stop-all` (over `paddock_proc::installed::stop_all_here`), `clean-run`,
+  `clean-staging`, `apply-update --file <local drive-letter path> --signature <base64 text, at most 1 KiB> --version <v> [--size <n>] --restart` (the elevated hand-off, trust model of ADR section 4.2; a path that is not a plain local drive-letter path is exit 4 before anything is opened), `hold-installing` (the installer
   include's `Global\<identifier>.setup` mutex with its explicit descriptor), `self-test` (the ADR 0039 gate reads it).
 - **Pure core:** `args` (typed command line), `guard` (`decide` over `InstallFacts`, `per_user_copy` for the app's own start),
   `checkdir` (the install-folder and `updates\` rules), `samefolder`, `runvalues`, `staging`, `apply` (the sequence over
-  `UpdatePort`, `Refusal` with exit codes and sentences, `Layout`), `handoff` (the mutex name, its descriptor and the
-  60-second grace for the app: `still_installing`), `log` (`setup.log`, 1 MiB, one rotation, openable only with a
+  `UpdatePort`, `Refusal` with exit codes and sentences, `Layout`), `handoff` (the mutex name, its descriptor, the owner rule against squatting
+  and `still_installing`), `localpath` (the only kind of path the elevated process opens), `log` (`setup.log`, 1 MiB, one rotation, openable only with a
   `CheckedDir`), `stop`, `selftest`, `versionres` (a `.res` writer, no resource compiler needed).
 - **Native glue:** `src/native/` (Windows only, left out of the coverage job), tested on the Windows test VM by
-  `tests/it/windows.rs`.
-- **Features:** `proc-stop` (stop-all over `paddock-proc`; off until plan S1 lands).
+  `tests/vm/windows.rs`.
+- **No features.** `stop-all` calls `paddock_proc::installed` when that module is in the tree (build.rs sets the cfg
+  `has_proc_installed`), so `--workspace --all-features` builds before and after plan S1 merges.
+- **Windows tests** (`tests/vm`): every test is `#[ignore]` and refuses to run without `PADDOCK_SETUP_VM=1`; they create folders
+  under Program Files and HKLM values and run only on the Windows test VM (ER-14), never in CI.
+- **App side:** `paddock_setup::installer_probe` / `wait_for_installer` (Windows) and `handoff::still_installing`.
 - **Used by:** the apps' installer hooks (S4) and `paddock-updater`'s `ElevatedHandoff` (S5); the app also calls
   `guard::per_user_copy`.
 

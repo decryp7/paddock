@@ -25,6 +25,9 @@ pub trait DirFacts {
     fn program_files(&self) -> Vec<String>;
     /// Looks at `dir`; `Err` carries a short reason (no paths).
     fn inspect(&self, dir: &str) -> Result<DirInspect, String>;
+    /// The protection rule of `paddock_service::privileged::trust` (rule 55) over the folder, or over its parent when it does
+    /// not exist yet: nobody but SYSTEM, Administrators and TrustedInstaller may be able to change it or anything above it.
+    fn protection(&self, inspected: &DirInspect) -> Result<(), String>;
 }
 
 /// Why the folder is refused.
@@ -44,6 +47,9 @@ pub enum DirRefusal {
     /// It could not be looked at.
     #[error("the folder could not be checked: {0}")]
     Unreadable(String),
+    /// Someone other than SYSTEM, Administrators or TrustedInstaller can change it or a folder above it.
+    #[error("the folder is not protected: {0}")]
+    Protection(String),
 }
 
 impl DirRefusal {
@@ -85,6 +91,7 @@ pub fn check(facts: &dyn DirFacts, dir: &str) -> Result<CheckedDir, DirRefusal> 
     if found.exists && !found.owner_sid.as_deref().is_some_and(is_trusted_sid) {
         return Err(DirRefusal::Owner);
     }
+    facts.protection(&found).map_err(DirRefusal::Protection)?;
     Ok(CheckedDir {
         canonical: found.canonical,
     })
@@ -106,9 +113,17 @@ pub fn is_within(path: &str, root: &str) -> bool {
     !r.is_empty() && p.len() >= r.len() && same_components(&p[..r.len()], &r)
 }
 
-/// The explicit descriptor of `updates\` and `updates\tmp\` (section 2.5): owner and group Administrators, protected (no
-/// inheritance from `$INSTDIR`), SYSTEM and Administrators full, Users read and execute; inheritable to the files inside.
-pub const UPDATES_SDDL: &str = "O:BAG:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FRFX;;;BU)";
+/// The descriptor of `updates\` (section 2.5): the family's protected-folder descriptor, one definition (rule 55): owner
+/// Administrators, protected (no inheritance from `$INSTDIR`), SYSTEM and Administrators full, Users read and execute (the
+/// log is readable by users), inheritable by what the folder holds.
+pub use paddock_service::privileged::windows_acl::PROTECTED_FOLDER_SDDL as UPDATES_SDDL;
+
+/// The descriptor of a run folder and its `tmp\`: Administrators and SYSTEM only. Users never read an update that has not
+/// passed its signature check (the staged copy inherits this, see [`STAGED_FILE_SDDL`]).
+pub const RUN_FOLDER_SDDL: &str = "O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+/// The descriptor of the staged copy itself: Administrators and SYSTEM only, no inheritance.
+pub const STAGED_FILE_SDDL: &str = "O:BAD:PAI(A;;FA;;;SY)(A;;FA;;;BA)";
 
 /// What the glue found at `$INSTDIR\updates`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +136,23 @@ pub struct UpdatesInspect {
     pub reparse: bool,
     /// The owner's SID.
     pub owner_sid: Option<String>,
+}
+
+/// Every folder from the drive root down to `full_path` itself (`C:\`, `C:\Program Files`, `C:\Program Files\Dyno`): the
+/// glue opens each one without following it and refuses a reparse point, so a link in the middle of the path is found by its
+/// attribute and not by comparing names (an 8.3 name such as `C:\PROGRA~1` is not a link).
+pub fn prefixes(full_path: &str) -> Vec<String> {
+    let parts = components(full_path);
+    let Some((drive, rest)) = parts.split_first() else {
+        return Vec::new();
+    };
+    let mut out = vec![format!("{drive}\\")];
+    let mut current = drive.clone();
+    for p in rest {
+        current = format!("{current}\\{p}");
+        out.push(current.clone());
+    }
+    out
 }
 
 /// What to do about `$INSTDIR\updates`.
@@ -175,6 +207,7 @@ mod tests {
     struct Fake {
         roots: Vec<&'static str>,
         found: Result<DirInspect, String>,
+        protection: Option<String>,
     }
     impl DirFacts for Fake {
         fn program_files(&self) -> Vec<String> {
@@ -183,9 +216,13 @@ mod tests {
         fn inspect(&self, _dir: &str) -> Result<DirInspect, String> {
             self.found.clone()
         }
+        fn protection(&self, _inspected: &DirInspect) -> Result<(), String> {
+            self.protection.clone().map_or(Ok(()), Err)
+        }
     }
     fn fake(canonical: &str, exists: bool, reparse: bool, owner: Option<&str>) -> Fake {
         Fake {
+            protection: None,
             roots: vec![r"C:\Program Files"],
             found: Ok(DirInspect {
                 canonical: canonical.into(),
@@ -268,8 +305,38 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_someone_else_can_change_is_refused_with_the_reason() {
+        let mut f = fake(r"C:\Program Files\Dyno", true, false, Some(ADMINS));
+        f.protection = Some("Users hold WRITE_DAC".into());
+        assert_eq!(
+            check(&f, "x").unwrap_err(),
+            DirRefusal::Protection("Users hold WRITE_DAC".into())
+        );
+        assert!(
+            DirRefusal::Protection("x".into())
+                .to_string()
+                .contains("not protected")
+        );
+    }
+
+    #[test]
+    fn prefixes_walk_from_the_drive_root_down() {
+        assert_eq!(
+            prefixes(r"C:\Program Files\Dyno"),
+            [r"C:\", r"C:\Program Files", r"C:\Program Files\Dyno"]
+        );
+        assert_eq!(
+            prefixes(r"\\?\C:\PROGRA~1\Dyno\"),
+            [r"C:\", r"C:\PROGRA~1", r"C:\PROGRA~1\Dyno"]
+        );
+        assert_eq!(prefixes(r"C:\"), [r"C:\"]);
+        assert!(prefixes("").is_empty());
+    }
+
+    #[test]
     fn unreadable_is_refused_with_the_reason() {
         let f = Fake {
+            protection: None,
             roots: vec![r"C:\Program Files"],
             found: Err("access denied".into()),
         };
@@ -356,17 +423,36 @@ mod tests {
     }
 
     #[test]
-    fn updates_descriptor_gives_users_read_only() {
+    fn updates_descriptor_is_the_familys_protected_folder_descriptor() {
+        assert_eq!(
+            UPDATES_SDDL,
+            paddock_service::privileged::windows_acl::PROTECTED_FOLDER_SDDL
+        );
         assert!(
-            UPDATES_SDDL.starts_with("O:BAG:BAD:P"),
+            UPDATES_SDDL.starts_with("O:BAD:P"),
             "owner Administrators, protected"
         );
-        let users: Vec<&str> = UPDATES_SDDL
-            .split('(')
-            .filter(|a| a.ends_with(";BU)"))
-            .collect();
-        assert_eq!(users, ["A;OICI;FRFX;;;BU)"]);
-        assert!(!UPDATES_SDDL.contains(";WD)") && !UPDATES_SDDL.contains(";AU)"));
+    }
+
+    #[test]
+    fn run_folder_and_staged_file_are_administrators_and_system_only() {
+        for sddl in [RUN_FOLDER_SDDL, STAGED_FILE_SDDL] {
+            assert!(
+                sddl.starts_with("O:BAD:PAI"),
+                "owner Administrators, protected: {sddl}"
+            );
+            let who: Vec<&str> = sddl
+                .split('(')
+                .skip(1)
+                .map(|a| a.trim_end_matches(')').rsplit(';').next().unwrap())
+                .collect();
+            assert_eq!(who, ["SY", "BA"], "{sddl}");
+            assert!(sddl.contains(";FA;"), "full control for those two");
+        }
+        assert!(
+            !STAGED_FILE_SDDL.contains("OICI"),
+            "the file itself, not inherited further"
+        );
     }
 
     #[test]

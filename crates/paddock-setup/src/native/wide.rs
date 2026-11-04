@@ -18,3 +18,23 @@ pub fn from_wide(buf: &[u16]) -> String {
         .to_string_lossy()
         .into_owned()
 }
+
+/// `CompareStringOrdinal` with `ignoreCase`: the system's own case table decides whether two names are the same.
+pub fn compare_ordinal_ignore_case(a: &str, b: &str) -> bool {
+    use windows_sys::Win32::Globalization::CompareStringOrdinal;
+    const CSTR_EQUAL: i32 = 2;
+    let (a16, b16): (Vec<u16>, Vec<u16>) = (
+        std::ffi::OsStr::new(a).encode_wide().collect(),
+        std::ffi::OsStr::new(b).encode_wide().collect(),
+    );
+    // SAFETY: the pointers and lengths describe the two live vectors.
+    unsafe {
+        CompareStringOrdinal(
+            a16.as_ptr(),
+            a16.len() as i32,
+            b16.as_ptr(),
+            b16.len() as i32,
+            1,
+        ) == CSTR_EQUAL
+    }
+}

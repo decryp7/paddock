@@ -10,6 +10,8 @@
 //! - When the blocking hit is the desktop user's own key and the installer had `/UPDATE` and `/R`, the per-user copy is
 //!   started again (unelevated, as the desktop user): [`Decision::Blocked::restart`] names the program.
 
+use crate::exit::Exit;
+use crate::localpath::LocalPath;
 use crate::log::Sink;
 
 /// Tauri's per-user install puts the program in `<Local AppData>\<product>\<main>`.
@@ -232,6 +234,16 @@ pub fn blocked_output(message: &str, restart: Option<&str>) -> Vec<String> {
     lines
 }
 
+/// How the command ends for a decision: the exit code and the stdout lines the include reads.
+pub fn outcome(decision: &Decision) -> (Exit, Vec<String>) {
+    match decision {
+        Decision::NotFresh | Decision::Proceed => (Exit::Ok, Vec::new()),
+        Decision::Blocked { message, restart } => {
+            (Exit::Blocked, blocked_output(message, restart.as_deref()))
+        }
+    }
+}
+
 /// One account, for the app's own start-up probe.
 pub trait AccountProbe {
     /// The uninstall key in this account's `HKCU`.
@@ -261,9 +273,13 @@ pub enum PerUserCopy {
 /// The probe of section 6.2 (the same one the guard uses per account).
 pub fn per_user_copy(probe: &dyn AccountProbe, product: &str, main: &str) -> PerUserCopy {
     let entry = probe.uninstall_key();
+    // Everything below is read from a user's hive, which that user controls: only a plain local drive-letter path is ever
+    // probed (a share or device path would make the elevated installer talk to a server of the user's choosing).
     let file_dir = probe
         .local_app_data()
-        .map(|l| format!(r"{}\{product}", l.trim_end_matches('\\')));
+        .filter(|l| LocalPath::parse(l).is_ok())
+        .map(|l| format!(r"{}\{product}", l.trim_end_matches('\\')))
+        .filter(|d| LocalPath::parse(&format!(r"{d}\{main}")).is_ok());
     let file = file_dir
         .as_ref()
         .is_some_and(|d| probe.file_exists(&format!(r"{d}\{main}")));
@@ -274,6 +290,7 @@ pub fn per_user_copy(probe: &dyn AccountProbe, product: &str, main: &str) -> Per
     let dir = entry
         .and_then(|e| e.uninstall_string)
         .and_then(|s| install_dir_of(&s))
+        .filter(|d| LocalPath::parse(d).is_ok())
         .or(file.then_some(file_dir).flatten());
     PerUserCopy::Present { key, file, dir }
 }
@@ -651,6 +668,103 @@ mod tests {
                 r"RESTART:C:\Users\x\AppData\Local\Dyno\dyno.exe"
             ]
         );
+    }
+
+    #[test]
+    fn outcome_maps_the_decisions_to_exit_and_stdout() {
+        assert_eq!(outcome(&Decision::Proceed), (Exit::Ok, vec![]));
+        assert_eq!(outcome(&Decision::NotFresh), (Exit::Ok, vec![]));
+        let blocked = Decision::Blocked {
+            message: "m \u{203a} n".into(),
+            restart: Some(r"C:\a\b.exe".into()),
+        };
+        assert_eq!(
+            outcome(&blocked),
+            (
+                Exit::Blocked,
+                vec!["m > n".to_string(), r"RESTART:C:\a\b.exe".to_string()]
+            )
+        );
+    }
+
+    /// A probe that records every path it is asked about.
+    struct Recording {
+        key: Option<UninstallEntry>,
+        lad: Option<String>,
+        probed: std::cell::RefCell<Vec<String>>,
+    }
+    impl AccountProbe for Recording {
+        fn uninstall_key(&self) -> Option<UninstallEntry> {
+            self.key.clone()
+        }
+        fn local_app_data(&self) -> Option<String> {
+            self.lad.clone()
+        }
+        fn file_exists(&self, path: &str) -> bool {
+            self.probed.borrow_mut().push(path.to_string());
+            true
+        }
+    }
+
+    #[test]
+    fn a_hive_that_points_at_a_share_or_a_device_is_never_probed() {
+        for lad in [
+            r"\\evil\share\Local",
+            r"\\?\UNC\evil\share",
+            r"\\.\pipe\x",
+            r"C:\a\..\b",
+            "relative",
+            r"C:\a:stream",
+        ] {
+            let p = Recording {
+                key: None,
+                lad: Some(lad.into()),
+                probed: Default::default(),
+            };
+            assert_eq!(
+                per_user_copy(&p, "Dyno", "dyno.exe"),
+                PerUserCopy::None,
+                "{lad}"
+            );
+            assert!(
+                p.probed.borrow().is_empty(),
+                "{lad} was probed: {:?}",
+                p.probed.borrow()
+            );
+        }
+        let ok = Recording {
+            key: None,
+            lad: Some(r"C:\Users\a\AppData\Local".into()),
+            probed: Default::default(),
+        };
+        assert!(matches!(
+            per_user_copy(&ok, "Dyno", "dyno.exe"),
+            PerUserCopy::Present { file: true, .. }
+        ));
+        assert_eq!(
+            *ok.probed.borrow(),
+            [r"C:\Users\a\AppData\Local\Dyno\dyno.exe"]
+        );
+    }
+
+    #[test]
+    fn an_uninstall_string_that_points_at_a_share_gives_no_restart_folder() {
+        let p = Recording {
+            key: Some(UninstallEntry {
+                uninstall_string: Some(r#""\\evil\share\Dyno\uninstall.exe""#.into()),
+            }),
+            lad: None,
+            probed: Default::default(),
+        };
+        assert_eq!(
+            per_user_copy(&p, "Dyno", "dyno.exe"),
+            PerUserCopy::Present {
+                key: true,
+                file: false,
+                dir: None
+            }
+        );
+        assert!(p.probed.borrow().is_empty());
     }
 
     struct Probe {

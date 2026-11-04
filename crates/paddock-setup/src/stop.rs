@@ -41,7 +41,12 @@ pub fn image_list(images: &[String]) -> Vec<String> {
 }
 
 /// Runs the stop and returns the exit.
-pub fn run(port: &mut dyn StopPort, dir: &str, images: &[String], log: &mut dyn Sink) -> Exit {
+pub fn run(
+    port: &mut dyn StopPort,
+    dir: &str,
+    images: &[String],
+    log: &mut dyn Sink,
+) -> (Exit, Vec<String>) {
     let list = image_list(images);
     log.line(
         "stop-all",
@@ -53,7 +58,7 @@ pub fn run(port: &mut dyn StopPort, dir: &str, images: &[String], log: &mut dyn 
     match port.stop_all(dir, &list) {
         Err(reason) => {
             log.line("stop-all", &format!("failed: {reason}"));
-            Exit::Failed
+            (Exit::Failed, Vec::new())
         }
         Ok(report) => {
             for note in &report.notes {
@@ -67,13 +72,13 @@ pub fn run(port: &mut dyn StopPort, dir: &str, images: &[String], log: &mut dyn 
                     "stop-all",
                     "done: nothing listed runs from the install folder",
                 );
-                Exit::Ok
+                (Exit::Ok, Vec::new())
             } else {
                 log.line(
                     "stop-all",
                     &format!("still running: {}", report.still_running.join(", ")),
                 );
-                Exit::StillRunning
+                (Exit::StillRunning, report.still_running)
             }
         }
     }
@@ -133,7 +138,7 @@ mod tests {
                 &s(&["dyno.exe"]),
                 &mut log
             ),
-            Exit::Ok
+            (Exit::Ok, vec![])
         );
         assert_eq!(
             port.1,
@@ -162,8 +167,13 @@ mod tests {
         };
         let mut port = Fake(Ok(report), vec![]);
         let mut log = Lines::default();
-        let exit = run(&mut port, "D", &s(&["dyno.exe"]), &mut log);
+        let (exit, names) = run(&mut port, "D", &s(&["dyno.exe"]), &mut log);
         assert_eq!(exit, Exit::StillRunning);
+        assert_eq!(
+            names,
+            s(&["dyno.exe"]),
+            "the names for the installer's message"
+        );
         assert_eq!(exit.code(), 11);
         assert!(
             log.0
@@ -181,7 +191,7 @@ mod tests {
     fn a_port_error_is_a_failure_with_its_reason_logged() {
         let mut port = Fake(Err("restart manager session failed".into()), vec![]);
         let mut log = Lines::default();
-        assert_eq!(run(&mut port, "D", &[], &mut log), Exit::Failed);
+        assert_eq!(run(&mut port, "D", &[], &mut log), (Exit::Failed, vec![]));
         assert!(
             log.0
                 .iter()

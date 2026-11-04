@@ -19,8 +19,9 @@ fn the_include_can_call_every_command() {
         "clean-run --dir D --scope machine",
         "clean-run --dir D --scope all",
         "clean-staging --dir D",
-        "apply-update --file F --signature S --version 1.2.3 --size 10 --restart",
+        r"apply-update --file C:\t\u.exe --signature c2ln --version 1.2.3 --size 10 --restart",
         "hold-installing",
+        "hold-installing --dir D",
         "self-test",
     ] {
         assert!(parse(&words(line)).is_ok(), "{line}");
@@ -30,7 +31,7 @@ fn the_include_can_call_every_command() {
 #[test]
 fn the_apply_update_command_keeps_its_version_as_a_semver() {
     let Ok(Command::ApplyUpdate { version, .. }) = parse(&words(
-        "apply-update --file F --signature S --version 1.2.3-beta.1 --restart",
+        r"apply-update --file C:\t\u.exe --signature c2ln --version 1.2.3-beta.1 --restart",
     )) else {
         panic!("not parsed");
     };
@@ -65,6 +66,8 @@ fn documented_codes_never_change() {
         (Exit::Refused(Refusal::SignatureInvalid), 26),
         (Exit::Refused(Refusal::NotNewer), 27),
         (Exit::Refused(Refusal::StartFailed), 28),
+        (Exit::Refused(Refusal::WrongProduct), 29),
+        (Exit::Refused(Refusal::Squatted), 30),
     ];
     for (exit, code) in table {
         assert_eq!(exit.code(), code, "{exit:?}");

@@ -1,30 +1,38 @@
 //! `apply-update` on Windows (native glue): the calls behind [`crate::apply::UpdatePort`]. No decisions here.
 
 use super::facts::RealDirs;
-use super::folders;
 use super::handle::{self, Descriptor, Owned};
+use super::mutex::{self, CreateError};
+use super::staging_fs::UpdatesFolder;
 use super::wide::to_wide;
-use crate::apply::{INSTALLER_ARGS, Layout, MAX_SIGNATURE_BYTES, Refusal, SourceFacts, UpdatePort};
-use crate::handoff::{MUTEX_SDDL, mutex_name};
+use super::{Shared, folders};
+use crate::apply::{
+    Handover, INSTALLER_ARGS, Layout, Refusal, RunPaths, SourceFacts, UpdatePort, volume_root,
+};
+use crate::checkdir::{RUN_FOLDER_SDDL, STAGED_FILE_SDDL};
+use crate::handoff::WaitOutcome;
+use crate::localpath::LocalPath;
 use crate::log::Sink;
-use paddock_updater::signature::{UpdateKey, VerifyError, verify_file};
+use paddock_updater::signature::{UpdateKey, VerifyError, trusted_comment, verify_file};
 use semver::Version;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{FromRawHandle, RawHandle};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
 use std::path::{Path, PathBuf};
-use windows_sys::Win32::Foundation::GENERIC_READ;
-use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, WAIT_ABANDONED, WAIT_OBJECT_0};
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_STANDARD_INFO, FILE_TYPE_DISK,
-    FileBasicInfo, FileStandardInfo, GetDriveTypeW, GetFileInformationByHandleEx, GetFileType,
-    GetFileVersionInfoSizeW, GetFileVersionInfoW, OPEN_EXISTING, SECURITY_IDENTIFICATION,
-    SECURITY_SQOS_PRESENT, VS_FIXEDFILEINFO, VerQueryValueW,
+use windows_sys::Win32::Foundation::{
+    GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
 };
-use windows_sys::Win32::Storage::FileSystem::{GetFinalPathNameByHandleW, VOLUME_NAME_DOS};
-use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
+use windows_sys::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_STANDARD_INFO, FILE_TYPE_DISK,
+    FileBasicInfo, FileStandardInfo, GetDriveTypeW, GetFileInformationByHandle,
+    GetFileInformationByHandleEx, GetFileType, GetFileVersionInfoSizeW, GetFileVersionInfoW,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    VOLUME_NAME_DOS, VS_FIXEDFILEINFO, VerQueryValueW,
+};
+use windows_sys::Win32::System::Threading::{INFINITE, ReleaseMutex, WaitForMultipleObjects};
 
 const FILE_SHARE_READ_ONLY: u32 = FILE_SHARE_READ;
 /// `GetDriveTypeW` answer for a local fixed disk.
@@ -36,10 +44,13 @@ pub struct Real<'a> {
     pub main: String,
     pub identifier: String,
     pub key: Option<UpdateKey>,
-    pub log: super::Shared<'a>,
+    pub log: Shared<'a>,
     source: Option<File>,
     held: Option<File>,
     mutex: Option<Owned>,
+    mutex_owned: bool,
+    event: Option<Owned>,
+    child: Option<std::process::Child>,
 }
 
 impl<'a> Real<'a> {
@@ -49,7 +60,7 @@ impl<'a> Real<'a> {
         main: String,
         identifier: String,
         key: Option<UpdateKey>,
-        log: super::Shared<'a>,
+        log: Shared<'a>,
     ) -> Self {
         Real {
             layout,
@@ -60,13 +71,29 @@ impl<'a> Real<'a> {
             source: None,
             held: None,
             mutex: None,
+            mutex_owned: false,
+            event: None,
+            child: None,
         }
     }
 }
 
-fn io(log: &mut dyn crate::log::Sink, what: &str, e: impl std::fmt::Display) -> Refusal {
+fn io(log: &mut dyn Sink, what: &str, e: impl std::fmt::Display) -> Refusal {
     log.line("apply-update", &format!("{what} failed: {e}"));
     Refusal::Io
+}
+
+fn squat(log: &mut dyn Sink, what: &str, e: CreateError) -> Refusal {
+    match e {
+        CreateError::Squatted => {
+            log.line(
+                "apply-update",
+                &format!("the {what} name is taken by an object no administrator made"),
+            );
+            Refusal::Squatted
+        }
+        CreateError::Os(code) => io(log, what, code),
+    }
 }
 
 impl UpdatePort for Real<'_> {
@@ -74,71 +101,61 @@ impl UpdatePort for Real<'_> {
         self.key.is_some()
     }
 
-    fn prepare_folders(&mut self) -> Result<(), Refusal> {
-        // The running program's folder is $INSTDIR (the caller checked); it must pass the same rule as the installer's.
-        if crate::checkdir::check(&RealDirs, &self.layout.instdir).is_err() {
+    fn prepare_folders(&mut self, run: &RunPaths) -> Result<(), Refusal> {
+        // The running program's folder is $INSTDIR; it must pass the same rule as the installer's.
+        if let Err(refusal) = crate::checkdir::check(&RealDirs, &self.layout.instdir) {
+            self.log.line(
+                "apply-update",
+                &format!("install folder refused: {refusal}"),
+            );
             return Err(Refusal::InstallDir);
         }
-        for dir in [&self.layout.updates, &self.layout.tmp] {
-            folders::ensure(dir).map_err(|e| {
-                self.log
-                    .line("apply-update", &format!("folder not usable: {e}"));
-                Refusal::InstallDir
-            })?;
-        }
-        Ok(())
+        let made = folders::ensure_updates(&self.layout.updates)
+            .and_then(|_| folders::create_new(&run.dir, RUN_FOLDER_SDDL))
+            .and_then(|_| folders::create_new(&run.tmp, RUN_FOLDER_SDDL));
+        made.map_err(|e| {
+            self.log
+                .line("apply-update", &format!("folder not usable: {e}"));
+            Refusal::InstallDir
+        })
     }
 
     fn acquire_mutex(&mut self) -> Result<(), Refusal> {
-        let sd = Descriptor::from_sddl(MUTEX_SDDL)
-            .map_err(|e| io(&mut self.log, "mutex descriptor", e))?;
-        let attrs = sd.attributes();
-        let name = to_wide(&mutex_name(&self.identifier));
-        // SAFETY: NUL-terminated name; live attributes.
-        let h = unsafe { CreateMutexW(&attrs, 0, name.as_ptr()) };
-        let err = handle::last_error();
-        if h.is_null() {
-            return Err(io(&mut self.log, "create mutex", err));
+        let (m, _existed) =
+            mutex::create_mutex(&self.identifier).map_err(|e| squat(&mut self.log, "mutex", e))?;
+        // The name may exist because the app holds a handle to wait on it, or a hand-over is in progress: only an owner counts.
+        match mutex::wait(&m, Some(std::time::Duration::ZERO)) {
+            WaitOutcome::Released | WaitOutcome::Abandoned => {}
+            WaitOutcome::TimedOut => return Err(Refusal::Busy),
+            WaitOutcome::Failed => {
+                return Err(io(
+                    &mut self.log,
+                    "wait for the mutex",
+                    handle::last_error(),
+                ));
+            }
         }
-        let owned = Owned(h);
-        // The name may exist because the app holds a handle to wait on it; only an owner counts as "an installer runs".
-        // SAFETY: valid mutex handle.
-        let wait = unsafe { WaitForSingleObject(owned.0, 0) };
-        if wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED {
-            return Err(Refusal::Busy);
-        }
-        self.mutex = Some(owned);
+        self.mutex = Some(m);
+        self.mutex_owned = true;
+        let event = mutex::create_event(&self.identifier)
+            .map_err(|e| squat(&mut self.log, "hand-over event", e))?;
+        self.event = Some(event);
         Ok(())
     }
 
-    fn clean_previous(&mut self) {
-        let entries: Vec<crate::staging::Entry> = std::fs::read_dir(&self.layout.updates)
-            .map(|d| {
-                d.filter_map(|e| e.ok())
-                    .map(|e| crate::staging::Entry {
-                        name: e.file_name().to_string_lossy().into_owned(),
-                        is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        for name in crate::staging::removals(&entries) {
-            let p = Path::new(&self.layout.updates).join(&name);
-            let is_dir = entries.iter().any(|e| e.name == name && e.is_dir);
-            let r = if is_dir {
-                std::fs::remove_dir_all(&p)
-            } else {
-                std::fs::remove_file(&p)
-            };
-            if let Err(e) = r {
-                self.log.line(
-                    "apply-update",
-                    &format!("old staging entry not removed: {e}"),
-                );
-            }
+    fn clean_previous(&mut self, keep: &RunPaths) {
+        let skip = Path::new(&keep.dir)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
+        let mut fs = UpdatesFolder {
+            dir: PathBuf::from(&self.layout.updates),
+            skip,
+        };
+        let mut log = self.log;
+        if let Err(e) = crate::staging::clean(&mut fs, &mut log) {
+            self.log
+                .line("apply-update", &format!("old staging not listed: {e}"));
         }
-        // `tmp` is part of the layout and must exist for the installer's TEMP.
-        let _ = folders::ensure(&self.layout.tmp);
     }
 
     fn installed_version(&mut self) -> Result<Version, Refusal> {
@@ -172,28 +189,16 @@ impl UpdatePort for Real<'_> {
         // SAFETY: checked length; read unaligned.
         let fixed = unsafe { std::ptr::read_unaligned(ptr.cast::<VS_FIXEDFILEINFO>()) };
         Ok(Version::new(
-            (fixed.dwFileVersionMS >> 16) as u64,
-            (fixed.dwFileVersionMS & 0xFFFF) as u64,
-            (fixed.dwFileVersionLS >> 16) as u64,
+            u64::from(fixed.dwFileVersionMS >> 16),
+            u64::from(fixed.dwFileVersionMS & 0xFFFF),
+            u64::from(fixed.dwFileVersionLS >> 16),
         ))
     }
 
-    fn read_signature(&mut self, path: &str) -> Result<String, Refusal> {
-        let f = File::open(path).map_err(|e| io(&mut self.log, "read signature", e))?;
-        let mut text = String::new();
-        f.take(MAX_SIGNATURE_BYTES + 1)
-            .read_to_string(&mut text)
-            .map_err(|e| io(&mut self.log, "read signature", e))?;
-        if text.len() as u64 > MAX_SIGNATURE_BYTES {
-            return Err(Refusal::SignatureInvalid);
-        }
-        Ok(text)
-    }
-
-    fn open_source(&mut self, path: &str) -> Result<SourceFacts, Refusal> {
-        let wide = to_wide(path);
-        // SAFETY: NUL-terminated path. Identification level: a named-pipe server behind the path can identify the elevated
-        // caller, never impersonate it. Reparse points are opened, not followed, and then refused.
+    fn open_source(&mut self, path: &LocalPath) -> Result<SourceFacts, Refusal> {
+        let wide = to_wide(path.as_str());
+        // SAFETY: NUL-terminated path (already parsed as a plain local path). Identification level: a named-pipe server behind
+        // the path can identify the elevated caller, never impersonate it. Reparse points are opened, not followed, and refused.
         let h = unsafe {
             CreateFileW(
                 wide.as_ptr(),
@@ -215,8 +220,9 @@ impl UpdatePort for Real<'_> {
         let is_disk_file = unsafe { GetFileType(h) } == FILE_TYPE_DISK;
         let mut basic = std::mem::MaybeUninit::<FILE_BASIC_INFO>::zeroed();
         let mut std_info = std::mem::MaybeUninit::<FILE_STANDARD_INFO>::zeroed();
+        let mut by_handle = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
         // SAFETY: the buffers are the stated structures.
-        let (b_ok, s_ok) = unsafe {
+        let (b_ok, s_ok, h_ok) = unsafe {
             (
                 GetFileInformationByHandleEx(
                     h,
@@ -230,17 +236,24 @@ impl UpdatePort for Real<'_> {
                     std_info.as_mut_ptr().cast(),
                     std::mem::size_of::<FILE_STANDARD_INFO>() as u32,
                 ),
+                GetFileInformationByHandle(h, by_handle.as_mut_ptr()),
             )
         };
-        if b_ok == 0 || s_ok == 0 {
+        if b_ok == 0 || s_ok == 0 || h_ok == 0 {
             return Err(io(
                 &mut self.log,
                 "query the download",
                 handle::last_error(),
             ));
         }
-        // SAFETY: both calls succeeded.
-        let (basic, std_info) = unsafe { (basic.assume_init(), std_info.assume_init()) };
+        // SAFETY: all three calls succeeded.
+        let (basic, std_info, by_handle) = unsafe {
+            (
+                basic.assume_init(),
+                std_info.assume_init(),
+                by_handle.assume_init(),
+            )
+        };
         let mut buf = vec![0u16; 1024];
         // SAFETY: valid buffer.
         let n = unsafe {
@@ -265,18 +278,39 @@ impl UpdatePort for Real<'_> {
             final_path,
             volume_fixed,
             size: std_info.EndOfFile.max(0) as u64,
+            links: by_handle.nNumberOfLinks,
         })
     }
 
     fn copy_source(&mut self, dest: &str, limit: u64) -> Result<u64, Refusal> {
         let mut src = self.source.take().ok_or(Refusal::Io)?;
-        // Create-new, no sharing while writing; the folder's descriptor is inherited (administrators write, users read).
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .share_mode(0)
-            .open(dest)
-            .map_err(|e| io(&mut self.log, "create the staged copy", e))?;
+        // Create-new, no sharing while writing, and an explicit descriptor: Administrators and SYSTEM only, so a user never
+        // reads (or races) an update that has not passed its signature check.
+        let sd = Descriptor::from_sddl(STAGED_FILE_SDDL)
+            .map_err(|e| io(&mut self.log, "staged copy descriptor", e))?;
+        let attrs = sd.attributes();
+        let wide = to_wide(dest);
+        // SAFETY: NUL-terminated path; live attributes.
+        let h = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                &attrs,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL,
+                std::ptr::null_mut(),
+            )
+        };
+        if h == INVALID_HANDLE_VALUE {
+            return Err(io(
+                &mut self.log,
+                "create the staged copy",
+                handle::last_error(),
+            ));
+        }
+        // SAFETY: a valid owned handle.
+        let mut out = unsafe { File::from_raw_handle(h as RawHandle) };
         let mut copied = 0u64;
         let mut buf = vec![0u8; 1 << 20];
         let result = loop {
@@ -316,13 +350,18 @@ impl UpdatePort for Real<'_> {
         Ok(())
     }
 
-    fn verify(&mut self, dest: &str, signature: &str, announced: &Version) -> Result<(), Refusal> {
+    fn verify(
+        &mut self,
+        dest: &str,
+        signature: &str,
+        announced: &Version,
+    ) -> Result<String, Refusal> {
         let Some(key) = &self.key else {
             return Err(Refusal::NoKey);
         };
         // The held handle denies every writer and deleter, so reading the copy by its path reads the bytes that will run.
         match verify_file(key, Path::new(dest), signature, announced, None) {
-            Ok(()) => Ok(()),
+            Ok(()) => trusted_comment(signature).ok_or(Refusal::SignatureInvalid),
             Err(VerifyError::Io(e)) => Err(io(&mut self.log, "verify the staged copy", e)),
             Err(other) => {
                 self.log.line(
@@ -334,16 +373,18 @@ impl UpdatePort for Real<'_> {
         }
     }
 
-    fn start(&mut self, dest: &str) -> Result<(), Refusal> {
-        let tmp = &self.layout.tmp;
+    fn start(&mut self, dest: &str, run: &RunPaths) -> Result<(), Refusal> {
         let child = std::process::Command::new(dest)
             .args(INSTALLER_ARGS)
-            .env("TEMP", tmp)
-            .env("TMP", tmp)
-            .current_dir(tmp)
+            .env("TEMP", &run.tmp)
+            .env("TMP", &run.tmp)
+            .current_dir(&run.tmp)
             .spawn();
         match child {
-            Ok(_) => Ok(()),
+            Ok(c) => {
+                self.child = Some(c);
+                Ok(())
+            }
             Err(e) => {
                 self.log.line("apply-update", &format!("start failed: {e}"));
                 Err(Refusal::StartFailed)
@@ -351,20 +392,51 @@ impl UpdatePort for Real<'_> {
         }
     }
 
+    fn handover(&mut self) -> Handover {
+        // Release the mutex but keep the handle, so the name stays; the installer's hold-installing takes it and sets the event.
+        if let Some(m) = &self.mutex
+            && self.mutex_owned
+        {
+            // SAFETY: this thread owns the mutex (taken in acquire_mutex).
+            unsafe { ReleaseMutex(m.0) };
+            self.mutex_owned = false;
+        }
+        let (Some(event), Some(child)) = (&self.event, &self.child) else {
+            return Handover::InstallerEnded;
+        };
+        let handles = [event.0, child.as_raw_handle()];
+        // A wait on two handles, not a poll: it ends when the installer holds the lock or its process has ended.
+        // SAFETY: both handles are valid for the length of the call.
+        let r = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) };
+        if r == WAIT_OBJECT_0 {
+            Handover::InstallerHoldsIt
+        } else {
+            Handover::InstallerEnded
+        }
+    }
+
+    fn discard(&mut self, run: &RunPaths) {
+        self.held = None;
+        self.source = None;
+        self.child = None;
+        if let Err(e) = std::fs::remove_dir_all(&run.dir) {
+            self.log.line(
+                "apply-update",
+                &format!("the run folder could not be removed: {e}"),
+            );
+        }
+    }
+
     fn release(&mut self) {
         self.held = None;
         self.source = None;
-        if let Some(m) = self.mutex.take() {
-            // SAFETY: this thread owns the mutex (taken in acquire_mutex).
+        if let Some(m) = self.mutex.take()
+            && self.mutex_owned
+        {
+            // SAFETY: this thread owns the mutex.
             unsafe { ReleaseMutex(m.0) };
+            self.mutex_owned = false;
         }
+        self.event = None;
     }
-}
-
-/// `C:\` of `\\?\C:\dir\file`, `None` for anything that is not a drive-letter path.
-fn volume_root(final_path: &str) -> Option<String> {
-    let p = final_path.strip_prefix(r"\\?\").unwrap_or(final_path);
-    let mut chars = p.chars();
-    let (d, colon, slash) = (chars.next()?, chars.next()?, chars.next()?);
-    (d.is_ascii_alphabetic() && colon == ':' && slash == '\\').then(|| format!("{d}:\\"))
 }

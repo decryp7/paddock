@@ -26,6 +26,7 @@ pub mod checkdir;
 pub mod exit;
 pub mod guard;
 pub mod handoff;
+pub mod localpath;
 pub mod log;
 pub mod runvalues;
 pub mod samefolder;
@@ -36,6 +37,11 @@ pub mod versionres;
 
 #[cfg(windows)]
 pub mod native;
+
+/// The app's side of the installer lock (`paddock-updater` calls these at start, ADR 0053 section 4.1 step 4): is an
+/// administrator's installer running, and wait until it is not. A mutex made by anyone else is ignored (see [`handoff`]).
+#[cfg(windows)]
+pub use native::{installer_probe, wait_for_installer};
 
 /// The names baked in by the per-app build (`PADDOCK_SETUP_*` environment variables at compile time).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

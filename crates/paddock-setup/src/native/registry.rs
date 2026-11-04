@@ -164,7 +164,14 @@ impl Key {
                 break;
             }
             if kind == REG_SZ || kind == REG_EXPAND_SZ {
-                out.push((from_wide(&name[..name_len as usize]), from_wide(&data)));
+                let text = from_wide(&data);
+                // A REG_EXPAND_SZ command (`%ProgramFiles%\\App\\app.exe`) is compared as Windows would run it.
+                let text = if kind == REG_EXPAND_SZ {
+                    expand(&text)
+                } else {
+                    text
+                };
+                out.push((from_wide(&name[..name_len as usize]), text));
             }
         }
         out
@@ -181,4 +188,19 @@ impl Key {
 /// Whether the key exists.
 pub fn exists(root: Root, path: &str, view: View) -> bool {
     open(root, path, view, KEY_QUERY_VALUE).is_some()
+}
+
+/// `ExpandEnvironmentStringsW` (the text unchanged when it cannot be expanded).
+fn expand(text: &str) -> String {
+    use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
+    let wide = to_wide(text);
+    let mut buf = vec![0u16; 4096];
+    // SAFETY: NUL-terminated input and a buffer of the stated length.
+    let n = unsafe { ExpandEnvironmentStringsW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) }
+        as usize;
+    if n == 0 || n > buf.len() {
+        text.to_string()
+    } else {
+        from_wide(&buf[..n])
+    }
 }

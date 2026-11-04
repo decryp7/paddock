@@ -1,6 +1,8 @@
 //! The command line, parsed once into a typed [`Command`] (parse, do not validate: nothing downstream sees a string that
 //! was never checked). Every option is `--name value` or a bare `--flag`; unknown, repeated or missing options are errors.
 
+use crate::apply::MAX_SIGNATURE_TEXT;
+use crate::localpath::LocalPath;
 use semver::Version;
 
 /// The longest argument accepted (a path is at most 32 767 UTF-16 units; this is a generous byte bound).
@@ -20,14 +22,16 @@ pub enum RunScope {
 /// One command of `paddock-setup`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// `guard --product <name> --main <exe> [--dir <install folder>] [--update] [--restart]`.
+    /// `guard [--product <name> --main <exe>] [--dir <install folder>] [--update] [--restart]`. The product and main binary
+    /// names come from the constants compiled into the program; the options are only the fallback of a build without them
+    /// (tests), and a build that has both ignores them.
     Guard {
         /// `$INSTDIR`; when given and `check-dir` passes for it, the guard logs to `setup.log`.
         dir: Option<String>,
-        /// The product name (the uninstall key's name).
-        product: String,
-        /// The main binary's file name.
-        main: String,
+        /// The product name (the uninstall key's name), only used when none is compiled in.
+        product: Option<String>,
+        /// The main binary's file name, only used when none is compiled in.
+        main: Option<String>,
         /// The installer was started with `/UPDATE`.
         update: bool,
         /// The installer was started with `/R`.
@@ -64,19 +68,24 @@ pub enum Command {
         /// `$INSTDIR`.
         dir: String,
     },
-    /// `apply-update --file <download> --signature <signature file> --version <v> [--size <bytes>] --restart`.
+    /// `apply-update --file <download> --signature <base64 signature text> --version <v> [--size <bytes>] --restart`.
     ApplyUpdate {
-        /// The download (untrusted).
-        file: String,
-        /// The file with the base64 minisign signature (untrusted; read once, bounded).
+        /// The download (untrusted), a plain local drive-letter path.
+        file: LocalPath,
+        /// The base64 text of the minisign signature file (untrusted, at most 1 KiB): the text itself, not a path, so no
+        /// second file is opened by the elevated process.
         signature: String,
         /// The version the release information announced.
         version: Version,
         /// The size it announced; the copy never exceeds it (and never 1 GiB).
         size: Option<u64>,
     },
-    /// `hold-installing`: creates and holds `Global\<identifier>.setup` until its parent (the installer) exits.
-    HoldInstalling,
+    /// `hold-installing [--dir <install folder>]`: creates and holds `Global\<identifier>.setup` until its parent (the
+    /// installer) exits. With `--dir` (after `check-dir` passed) it logs to `setup.log`.
+    HoldInstalling {
+        /// `$INSTDIR`, for the log.
+        dir: Option<String>,
+    },
     /// `self-test`: prints the baked identifier, product and the update key's fingerprint (the ADR 0039 gate).
     SelfTest,
 }
@@ -186,8 +195,8 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
     let mut o = Options::collect(rest)?;
     let command = match name.as_str() {
         "guard" => Command::Guard {
-            product: o.required("--product")?,
-            main: o.required("--main")?,
+            product: o.optional("--product")?,
+            main: o.optional("--main")?,
             dir: o.optional("--dir")?,
             update: o.flag("--update"),
             restart: o.flag("--restart"),
@@ -243,8 +252,31 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
             dir: o.required("--dir")?,
         },
         "apply-update" => {
-            let file = o.required("--file")?;
+            let file =
+                LocalPath::parse(&o.required("--file")?).map_err(|e| UsageError::Invalid {
+                    option: "--file",
+                    reason: match e {
+                        crate::localpath::PathError::Namespace => {
+                            "a network, device or namespace path is not accepted"
+                        }
+                        crate::localpath::PathError::NotAbsolute => {
+                            "an absolute drive-letter path is required"
+                        }
+                        crate::localpath::PathError::Device => "a device name is not accepted",
+                        _ => "not a plain local path",
+                    },
+                })?;
             let signature = o.required("--signature")?;
+            if signature.len() > MAX_SIGNATURE_TEXT
+                || !signature
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+            {
+                return Err(UsageError::Invalid {
+                    option: "--signature",
+                    reason: "expected the base64 text of the signature (at most 1 KiB), not a path",
+                });
+            }
             let version =
                 Version::parse(&o.required("--version")?).map_err(|_| UsageError::Invalid {
                     option: "--version",
@@ -267,7 +299,9 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
                 size,
             }
         }
-        "hold-installing" => Command::HoldInstalling,
+        "hold-installing" => Command::HoldInstalling {
+            dir: o.optional("--dir")?,
+        },
         "self-test" => Command::SelfTest,
         other => return Err(UsageError::UnknownCommand(other.to_string())),
     };
@@ -294,8 +328,8 @@ mod tests {
             p("guard|--product|Dyno|--main|dyno.exe|--update|--restart"),
             Ok(Command::Guard {
                 dir: None,
-                product: "Dyno".into(),
-                main: "dyno.exe".into(),
+                product: Some("Dyno".into()),
+                main: Some("dyno.exe".into()),
                 update: true,
                 restart: true
             })
@@ -304,8 +338,8 @@ mod tests {
             p("guard|--product|Dyno|--main|dyno.exe"),
             Ok(Command::Guard {
                 dir: None,
-                product: "Dyno".into(),
-                main: "dyno.exe".into(),
+                product: Some("Dyno".into()),
+                main: Some("dyno.exe".into()),
                 update: false,
                 restart: false
             })
@@ -314,8 +348,8 @@ mod tests {
             p("guard|--product|Dyno|--main|dyno.exe|--dir|D"),
             Ok(Command::Guard {
                 dir: Some("D".into()),
-                product: "Dyno".into(),
-                main: "dyno.exe".into(),
+                product: Some("Dyno".into()),
+                main: Some("dyno.exe".into()),
                 update: false,
                 restart: false
             })
@@ -341,7 +375,16 @@ mod tests {
             p("clean-staging|--dir|D"),
             Ok(Command::CleanStaging { dir: "D".into() })
         );
-        assert_eq!(p("hold-installing"), Ok(Command::HoldInstalling));
+        assert_eq!(
+            p("hold-installing"),
+            Ok(Command::HoldInstalling { dir: None })
+        );
+        assert_eq!(
+            p("hold-installing|--dir|D"),
+            Ok(Command::HoldInstalling {
+                dir: Some("D".into())
+            })
+        );
         assert_eq!(p("self-test"), Ok(Command::SelfTest));
         assert_eq!(
             p("clean-run|--dir|D|--scope|all"),
@@ -394,30 +437,29 @@ mod tests {
 
     #[test]
     fn apply_update_parses_a_version_and_size() {
-        let c =
-            p("apply-update|--file|F|--signature|S|--version|1.2.3|--size|99|--restart").unwrap();
+        let c = p(r"apply-update|--file|C:\t\u.exe|--signature|c2ln+/=|--version|1.2.3|--size|99|--restart").unwrap();
         assert_eq!(
             c,
             Command::ApplyUpdate {
-                file: "F".into(),
-                signature: "S".into(),
+                file: LocalPath::parse(r"C:\t\u.exe").unwrap(),
+                signature: "c2ln+/=".into(),
                 version: Version::new(1, 2, 3),
                 size: Some(99)
             }
         );
         assert!(matches!(
-            p("apply-update|--file|F|--signature|S|--version|nonsense|--restart"),
+            p(r"apply-update|--file|C:\t\u.exe|--signature|S|--version|nonsense|--restart"),
             Err(UsageError::Invalid {
                 option: "--version",
                 ..
             })
         ));
         assert!(matches!(
-            p("apply-update|--file|F|--signature|S|--restart"),
+            p(r"apply-update|--file|C:\t\u.exe|--signature|S|--restart"),
             Err(UsageError::Missing("--version"))
         ));
         assert!(matches!(
-            p("apply-update|--file|F|--signature|S|--version|1.0.0|--size|x|--restart"),
+            p(r"apply-update|--file|C:\t\u.exe|--signature|S|--version|1.0.0|--size|x|--restart"),
             Err(UsageError::Invalid {
                 option: "--size",
                 ..
@@ -426,9 +468,68 @@ mod tests {
     }
 
     #[test]
+    fn apply_update_refuses_paths_that_are_not_plain_local_files_before_anything_is_opened() {
+        for file in [
+            r"\\.\pipe\evil",
+            r"\\server\share\u.exe",
+            r"\\?\C:\u.exe",
+            r"\??\C:\u.exe",
+            r"C:\u.exe:stream",
+            r"u.exe",
+            r"C:\NUL",
+            r"C:\a\..\u.exe",
+        ] {
+            let line =
+                format!("apply-update|--file|{file}|--signature|S|--version|1.0.0|--restart");
+            assert!(
+                matches!(
+                    p(&line),
+                    Err(UsageError::Invalid {
+                        option: "--file",
+                        ..
+                    })
+                ),
+                "{file}"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_update_takes_the_signature_as_text_not_as_a_path() {
+        for sig in [
+            r"C:\t\sig.txt",
+            r"\\.\pipe\sig",
+            "a b",
+            "a\\b",
+            &"A".repeat(MAX_SIGNATURE_TEXT + 1),
+        ] {
+            let line = format!(
+                r"apply-update|--file|C:\t\u.exe|--signature|{sig}|--version|1.0.0|--restart"
+            );
+            assert!(
+                matches!(
+                    p(&line),
+                    Err(UsageError::Invalid {
+                        option: "--signature",
+                        ..
+                    })
+                ),
+                "{sig}"
+            );
+        }
+        let at_limit = "A".repeat(MAX_SIGNATURE_TEXT);
+        assert!(
+            p(&format!(
+                r"apply-update|--file|C:\t\u.exe|--signature|{at_limit}|--version|1.0.0|--restart"
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn apply_update_requires_the_restart_marker() {
         assert!(matches!(
-            p("apply-update|--file|F|--signature|S|--version|1.0.0"),
+            p(r"apply-update|--file|C:\t\u.exe|--signature|S|--version|1.0.0"),
             Err(UsageError::Missing("--restart"))
         ));
     }

@@ -3,7 +3,7 @@
 use super::handle::{self, Owned};
 use super::registry::{self, Root, View};
 use super::wide::to_wide;
-use crate::checkdir::{DirFacts, DirInspect, UpdatesInspect, components};
+use crate::checkdir::{self, DirFacts, DirInspect, UpdatesInspect, components};
 use crate::guard::{InstallFacts, UninstallEntry, expand_local_app_data};
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, HANDLE};
 use windows_sys::Win32::Security::TOKEN_QUERY;
@@ -109,7 +109,8 @@ impl InstallFacts for Machine {
     }
 }
 
-/// The `Program Files` folders of this machine, from the registry (administrators write it; the environment is not trusted).
+/// The `Program Files` folders of this machine, from the registry (administrators write it; the environment is not
+/// trusted). `ProgramFilesDir (x86)` only counts for a 32-bit build of this program.
 fn program_files_roots() -> Vec<String> {
     let Some(key) = registry::open_read(
         Root::Machine,
@@ -118,8 +119,13 @@ fn program_files_roots() -> Vec<String> {
     ) else {
         return Vec::new();
     };
-    ["ProgramFilesDir", "ProgramFilesDir (x86)"]
-        .into_iter()
+    let names: &[&str] = if cfg!(target_pointer_width = "32") {
+        &["ProgramFilesDir", "ProgramFilesDir (x86)"]
+    } else {
+        &["ProgramFilesDir"]
+    };
+    names
+        .iter()
         .filter_map(|n| key.string(n))
         .filter_map(|p| {
             handle::open_for_query(&p)
@@ -167,6 +173,21 @@ fn attributes(h: &Owned) -> Option<u32> {
 /// The real folder rules of `check-dir`.
 pub struct RealDirs;
 
+/// Whether any folder from the drive root down to `path` (each opened without following it) is a reparse point. A short
+/// 8.3 name is not one; a junction or symlink in the middle is.
+fn any_prefix_is_reparse(path: &str) -> Result<bool, String> {
+    for prefix in checkdir::prefixes(path) {
+        let h = handle::open_for_query(&prefix)
+            .map_err(|e| format!("a folder of the path cannot be opened (error {e})"))?;
+        let attrs =
+            attributes(&h).ok_or("the attributes of a folder of the path could not be read")?;
+        if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 impl DirFacts for RealDirs {
     fn program_files(&self) -> Vec<String> {
         program_files_roots()
@@ -183,13 +204,10 @@ impl DirFacts for RealDirs {
                 let canonical = strip_prefix(
                     &handle::final_path(&h).ok_or("the final path could not be read")?,
                 );
-                let attrs = attributes(&h).ok_or("the attributes could not be read")?;
-                let reparse = attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0
-                    || !crate::samefolder::same(Some(&requested), Some(&canonical));
                 Ok(DirInspect {
+                    reparse_component: any_prefix_is_reparse(&requested)?,
                     canonical,
                     exists: true,
-                    reparse_component: reparse,
                     owner_sid: handle::owner_sid(&h),
                 })
             }
@@ -202,18 +220,28 @@ impl DirFacts for RealDirs {
                 let parent_final = strip_prefix(
                     &handle::final_path(&h).ok_or("the final path could not be read")?,
                 );
-                let attrs = attributes(&h).ok_or("the attributes could not be read")?;
-                let reparse = attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0
-                    || !crate::samefolder::same(Some(&parent), Some(&parent_final));
                 Ok(DirInspect {
                     canonical: format!("{}\\{}", parent_final.trim_end_matches('\\'), leaf),
                     exists: false,
-                    reparse_component: reparse,
+                    reparse_component: any_prefix_is_reparse(&parent)?,
                     owner_sid: None,
                 })
             }
             Err(e) => Err(format!("the folder cannot be opened (error {e})")),
         }
+    }
+
+    fn protection(&self, inspected: &DirInspect) -> Result<(), String> {
+        use paddock_service::privileged::trust::verify_container;
+        use paddock_service::privileged::trust_real::RealTrust;
+        // The folder itself when it exists; a folder that is still to be made is judged by the one it will be made in.
+        let target = if inspected.exists {
+            inspected.canonical.clone()
+        } else {
+            let parts = components(&inspected.canonical);
+            parts[..parts.len().saturating_sub(1)].join("\\") + "\\"
+        };
+        verify_container(&mut RealTrust, &target).map_err(|e| e.to_string())
     }
 }
 

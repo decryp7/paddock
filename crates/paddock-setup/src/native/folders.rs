@@ -1,4 +1,5 @@
-//! `$INSTDIR\updates\` on disk (native glue; the decisions are `checkdir::plan_updates_dir` and `aside_name`).
+//! `$INSTDIR\updates\` and the run folders on disk (native glue; the decisions are `checkdir::plan_updates_dir` and
+//! `aside_name`).
 
 use super::facts::inspect_updates;
 use super::handle::Descriptor;
@@ -7,9 +8,9 @@ use crate::checkdir::{UPDATES_SDDL, UpdatesAction, aside_name, plan_updates_dir}
 use std::path::Path;
 use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
 
-/// Creates `path` with the explicit descriptor of section 2.5.
-fn create_with_descriptor(path: &str) -> Result<(), String> {
-    let sd = Descriptor::from_sddl(UPDATES_SDDL)
+/// Creates `path` (it must not exist) with the explicit descriptor `sddl`.
+pub fn create_new(path: &str, sddl: &str) -> Result<(), String> {
+    let sd = Descriptor::from_sddl(sddl)
         .map_err(|e| format!("the folder descriptor could not be built (error {e})"))?;
     let attrs = sd.attributes();
     let wide = to_wide(path);
@@ -23,14 +24,13 @@ fn create_with_descriptor(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes or checks `path`; a wrong owner, a reparse point or a non-folder is renamed aside (a link is renamed, never
-/// followed) and a new one made. Returns the action taken.
-pub fn ensure(path: &str) -> Result<UpdatesAction, String> {
-    let found = inspect_updates(path);
-    let action = plan_updates_dir(&found);
+/// Makes or checks `$INSTDIR\updates`; a wrong owner, a reparse point or a non-folder is renamed aside (a link is renamed,
+/// never followed) and a new one made. Returns the action taken.
+pub fn ensure_updates(path: &str) -> Result<UpdatesAction, String> {
+    let action = plan_updates_dir(&inspect_updates(path));
     match action {
         UpdatesAction::Use => {}
-        UpdatesAction::Create => create_with_descriptor(path)?,
+        UpdatesAction::Create => create_new(path, UPDATES_SDDL)?,
         UpdatesAction::RenameAsideAndCreate => {
             let parent = Path::new(path).parent().ok_or("the folder has no parent")?;
             let taken: Vec<String> = std::fs::read_dir(parent)
@@ -43,7 +43,7 @@ pub fn ensure(path: &str) -> Result<UpdatesAction, String> {
             let aside = parent.join(aside_name(&taken));
             std::fs::rename(path, &aside)
                 .map_err(|e| format!("the folder could not be renamed aside ({e})"))?;
-            create_with_descriptor(path)?;
+            create_new(path, UPDATES_SDDL)?;
         }
     }
     Ok(action)

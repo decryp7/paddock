@@ -2,5 +2,3 @@
 //! real program against real Win32 objects.
 
 mod contract;
-#[cfg(windows)]
-mod windows;

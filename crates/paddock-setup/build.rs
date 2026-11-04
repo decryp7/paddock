@@ -10,6 +10,15 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PADDOCK_SETUP_PRODUCT");
     println!("cargo:rerun-if-env-changed=PADDOCK_SETUP_VERSION");
     println!("cargo:rerun-if-changed=src/versionres.rs");
+    // `stop-all` calls `paddock_proc::installed` (plan S1). It is compiled in when that module is in the tree and left out
+    // otherwise, so the crate builds with `--workspace --all-features` before and after S1 merges (no feature to forget).
+    println!("cargo:rustc-check-cfg=cfg(has_proc_installed)");
+    let installed = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default())
+        .join("../paddock-proc/src/installed.rs");
+    println!("cargo:rerun-if-changed=../paddock-proc/src/installed.rs");
+    if installed.exists() {
+        println!("cargo:rustc-cfg=has_proc_installed");
+    }
     for name in ["IDENTIFIER", "PRODUCT", "MAIN", "UPDATE_KEY"] {
         println!("cargo:rerun-if-env-changed=PADDOCK_SETUP_{name}");
     }
