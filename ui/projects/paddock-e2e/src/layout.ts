@@ -220,7 +220,9 @@ export async function checkboxLayoutProblems(root: Locator, tolerance = 3): Prom
         const hit = document.elementFromPoint(x, y);
         if (hit && !host?.contains(hit)) bad.push(`${name}: covered at ${Math.round(x)},${Math.round(y)} by ${hit.tagName.toLowerCase()}.${hit.className}`);
       }
-      const text = host?.parentElement?.querySelector('.pd-title, label, strong');
+      // The title first: a `label` inside the checkbox's own host comes first in document order and is empty (the pane's box has no label).
+      const scope = host?.parentElement;
+      const text = scope?.querySelector('.pd-title') ?? scope?.querySelector('label, strong');
       if (text) {
         const range = document.createRange();
         range.selectNodeContents(text);
@@ -246,5 +248,38 @@ export async function bodyIndentProblems(root: Locator, tolerance = 1): Promise<
       if (dx > tol) bad.push(`${item.getAttribute('data-testid')}: body starts ${dx.toFixed(1)} px from the title`);
     }
     return bad;
+  }, tolerance);
+}
+
+/**
+ * Fails when a notice row's dot or time is not on the centre line of the title's FIRST line (a wrapped title must not pull them
+ * between its lines), or when the title is wrapped and the first line is not the first thing measured. Reports how many titles
+ * wrapped through `wrapped`, so a test can insist that the wrapped case was really present.
+ */
+export async function rowPinProblems(root: Locator, tolerance = 3): Promise<{ problems: string[]; wrapped: number }> {
+  return root.evaluate((rootEl, tol) => {
+    const problems: string[] = [];
+    let wrapped = 0;
+    const firstLine = (e: Element): DOMRect => {
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      return range.getClientRects()[0] ?? e.getBoundingClientRect();
+    };
+    const centre = (r: DOMRect): number => r.top + r.height / 2;
+    for (const item of Array.from(rootEl.querySelectorAll('.pd-notice'))) {
+      const id = item.getAttribute('data-testid');
+      const title = item.querySelector('.pd-title');
+      if (!title) continue;
+      const lines = new Set(Array.from((() => { const r = document.createRange(); r.selectNodeContents(title); return r.getClientRects(); })()).map((r) => Math.round(r.top)));
+      if (lines.size > 1) wrapped += 1;
+      const line = centre(firstLine(title));
+      for (const [what, el] of [['dot', item.querySelector('.pd-dot')], ['time', item.querySelector('.pd-time')], ['checkbox', item.querySelector('.mdc-checkbox__background')]] as const) {
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const c = what === 'time' ? centre(firstLine(el)) : centre(r);
+        if (Math.abs(c - line) > tol) problems.push(`${id}: ${what} centre is ${(c - line).toFixed(1)} px from the title's first line`);
+      }
+    }
+    return { problems, wrapped };
   }, tolerance);
 }
