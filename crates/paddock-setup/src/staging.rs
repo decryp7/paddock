@@ -17,6 +17,9 @@ pub struct Entry {
 
 /// The files kept: the log and its one rotation.
 pub const KEPT: [&str; 2] = ["setup.log", "setup.log.1"];
+/// The prefix of a run folder that could not be removed at once and was renamed for the next clean-up (it is an ordinary
+/// entry, so `clean` removes it).
+pub const TRASH_PREFIX: &str = "trash-";
 
 /// The entry of `updates_dir` that contains `keep` (the running installer's own folder, `$EXEDIR`), if any. That entry is
 /// never touched: a rename is no test for "in use" (Windows renames a folder with a running image in it), so what is in use is
@@ -77,8 +80,16 @@ pub fn clean(
     keep: Option<&str>,
     log: &mut dyn Sink,
 ) -> Result<Cleaned, String> {
-    let entries: Vec<Entry> = fs
-        .list()?
+    let all = fs.list()?;
+    if let Some(k) = keep
+        && let Some(kept) = all.iter().find(|e| e.name.eq_ignore_ascii_case(k))
+    {
+        log.line(
+            "clean-staging",
+            &format!("kept {} (the running installer's folder)", kept.name),
+        );
+    }
+    let entries: Vec<Entry> = all
         .into_iter()
         .filter(|e| keep.is_none_or(|k| !e.name.eq_ignore_ascii_case(k)))
         .collect();
@@ -242,8 +253,16 @@ mod tests {
     #[test]
     fn the_kept_entry_is_never_listed_for_removal() {
         let mut f = fake();
-        let done = clean(&mut f, Some("RUN-2-B"), &mut Lines::default()).unwrap();
+        let mut log = Lines::default();
+        let done = clean(&mut f, Some("RUN-2-B"), &mut log).unwrap();
         assert_eq!(done.removed, 2);
+        assert!(
+            log.0
+                .iter()
+                .any(|l| l == "clean-staging: kept run-2-b (the running installer's folder)"),
+            "{:?}",
+            log.0
+        );
         assert_eq!(f.removed, ["run-1-a", "stray.exe"]);
     }
 

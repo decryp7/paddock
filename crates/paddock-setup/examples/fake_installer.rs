@@ -24,8 +24,15 @@ fn main() {
         let _ = std::fs::rename(&tmp, temp.join("fake-installer.txt"));
     }
     if let Some(holder) = std::env::var_os("PADDOCK_FAKE_HOLD") {
-        let _ = std::process::Command::new(holder)
+        // `--dir` makes hold-installing log into the install folder's setup.log, as the real include's call does.
+        let dir = std::path::Path::new(&holder)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        let _ = std::process::Command::new(&holder)
             .arg("hold-installing")
+            .arg("--dir")
+            .arg(dir)
             .spawn();
         let seconds = std::env::var("PADDOCK_FAKE_SECONDS")
             .ok()

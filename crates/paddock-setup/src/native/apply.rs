@@ -509,10 +509,32 @@ impl UpdatePort for Real<'_> {
         self.held = None;
         self.source = None;
         self.child = None;
-        if let Err(e) = std::fs::remove_dir_all(&run.dir) {
+        // A program that just ended (or a scanner reading the new file) can hold it for a moment: a bounded number of
+        // tries, then the folder is renamed to `trash-` so the next `clean-staging` removes it.
+        for attempt in 0..10 {
+            match std::fs::remove_dir_all(&run.dir) {
+                Ok(()) => return,
+                Err(e) if attempt == 9 => self.log.line(
+                    "apply-update",
+                    &format!("the run folder could not be removed: {e}"),
+                ),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(250)),
+            }
+        }
+        let dir = Path::new(&run.dir);
+        if let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) {
+            let trash = parent.join(format!(
+                "{}{}",
+                crate::staging::TRASH_PREFIX,
+                name.to_string_lossy()
+            ));
+            let ok = std::fs::rename(dir, trash).is_ok();
             self.log.line(
                 "apply-update",
-                &format!("the run folder could not be removed: {e}"),
+                &format!(
+                    "the run folder was renamed for the next clean-up: {}",
+                    if ok { "ok" } else { "failed" }
+                ),
             );
         }
     }

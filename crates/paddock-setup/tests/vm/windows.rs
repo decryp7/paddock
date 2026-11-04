@@ -1025,7 +1025,8 @@ fn clean_staging_keeps_what_is_in_use_and_removes_the_rest() {
         site.log()
     );
     assert!(
-        site.log().contains("kept run-1-a (in use)"),
+        site.log()
+            .contains("kept run-1-a (the running installer's folder)"),
         "{}",
         site.log()
     );
