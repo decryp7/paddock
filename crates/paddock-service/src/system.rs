@@ -45,7 +45,8 @@ impl RealSystem {
 
 impl System for RealSystem {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError> {
-        let mut cmd = paddock_proc::command(program);
+        let resolved = crate::privileged::windows_acl::system_tool(program);
+        let mut cmd = paddock_proc::command(&resolved);
         cmd.args(args);
         let out =
             paddock_proc::run_bounded(cmd, Limits::new(self.timeout).max_output(MAX_HELPER_OUTPUT))

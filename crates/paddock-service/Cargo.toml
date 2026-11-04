@@ -43,6 +43,7 @@ objc2-service-management = { version = "0.3", default-features = false, features
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
     "Win32_System_Environment",
     "Win32_System_RemoteDesktop",

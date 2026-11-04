@@ -86,7 +86,11 @@ pub trait InstallPorts: Send {
     /// Deletes the staging folder's contents.
     fn clear_staging(&mut self);
     /// Deletes the install folder `path` (and what is in it), so a file an earlier install left cannot pass for this one.
-    fn remove_dir(&mut self, path: &str);
+    ///
+    /// # Errors
+    /// The folder is there and could not be removed: the install stops, because a file an earlier install left (or a user
+    /// planted) could otherwise pass for the new one.
+    fn remove_dir(&mut self, path: &str) -> std::io::Result<()>;
 }
 
 /// Why an install did not happen. Each says what to do next.
@@ -201,7 +205,13 @@ fn stage_and_run(
     let dest = install_folder(Path::new(&roots.tools), pin.version).to_string_lossy().into_owned();
     let setup = format!("{}\\{}", roots.staging, pin.file);
     let cmd = windows_command(&setup, &dest, &roots.staging);
-    ports.remove_dir(&dest);
+    ports.remove_dir(&dest).map_err(|e| {
+        log::warn!(Dest = dest.as_str(), Error = e.to_string().as_str(); "InstallTool: the older install folder could not be removed");
+        InstallError::Installer(format!(
+            "The older install folder could not be removed ({}). Nothing was installed; close the programs using it and try again.",
+            e.kind()
+        ))
+    })?;
     let run = clock.monotonic();
     let out = ports
         .run(&cmd, INSTALL_TIMEOUT)
@@ -249,6 +259,8 @@ mod tests {
         stage_fails: bool,
         /// A `smartctl.exe` an earlier install left, which goes when its folder is removed.
         stale: bool,
+        /// The older install folder cannot be removed (something holds it).
+        remove_fails: bool,
     }
     struct Sink(Arc<Mutex<Log>>, String);
     impl Write for Sink {
@@ -284,10 +296,15 @@ mod tests {
         fn clear_staging(&mut self) {
             self.log.lock().unwrap().cleared += 1;
         }
-        fn remove_dir(&mut self, path: &str) {
+        fn remove_dir(&mut self, path: &str) -> std::io::Result<()> {
             let mut l = self.log.lock().unwrap();
+            if self.remove_fails {
+                l.events.push("remove-failed");
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
             l.removed.push(path.to_string());
             l.events.push("remove");
+            Ok(())
         }
     }
 
@@ -300,6 +317,7 @@ mod tests {
                 installed,
                 stage_fails: false,
                 stale: false,
+                remove_fails: false,
             },
             log,
         )
@@ -449,6 +467,27 @@ mod tests {
         let l = log.lock().unwrap();
         assert_eq!(l.events, ["remove", "run"], "the old folder goes before the installer runs");
         assert!(l.removed[0].ends_with("smartmontools-7.5"), "{:?}", l.removed);
+    }
+
+    #[test]
+    fn an_older_install_folder_that_cannot_be_removed_stops_the_install_before_the_installer_runs() {
+        let bytes = vec![1u8; 1000];
+        let sha: &'static str = Box::leak(hex(&Sha256::digest(&bytes)).into_boxed_str());
+        let pin = Pin {
+            size: 1000,
+            sha256: sha,
+            file: "standin-setup.exe",
+            ..PINS[0]
+        };
+        // A smartctl.exe the old folder still holds would pass for the new install if the installer ran over it.
+        let (mut f, log) = rig(good(), true);
+        f.remove_fails = true;
+        let got = stage_and_run(&mut f, &clock(), &pin, &bytes, &roots());
+        assert!(
+            matches!(&got, Err(InstallError::Installer(m)) if m.contains("could not be removed")),
+            "{got:?}"
+        );
+        assert_eq!(log.lock().unwrap().events, ["remove-failed"], "the installer never ran");
     }
 
     #[test]
