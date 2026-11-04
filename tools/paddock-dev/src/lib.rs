@@ -6,6 +6,7 @@
 //! - `self hash`: the content address of the binary ([`input_hash`]);
 //! - `ci slot acquire|release|status`: job-isolation slots over kernel file locks ([`slots`], backed by `paddock-slots`);
 //! - `wait`: one bounded wait for a plock job, a process, a log line or a CI run ([`wait`]);
+//! - `vm lease|start|stop|revert|...`: the VM broker, the only thing that starts or reverts a VM (ADR 0054 §1.5, [`vm`]);
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`]). It is
 //!   the oracle-tested port of `scripts/affected.mjs`'s core; `affected.mjs` stays CI's planner until R4.
 
@@ -16,6 +17,7 @@ mod fds;
 pub mod input_hash;
 pub mod plan;
 pub mod slots;
+pub mod vm;
 pub mod wait;
 
 pub use cli::run;

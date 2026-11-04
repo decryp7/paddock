@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots, wait};
+use crate::{input_hash, plan, slots, vm, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -30,6 +30,8 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
+    /// The VM broker: leases, preflight, headless start, revert and stop of the test VMs (ADR 0054 section 1.5).
+    Vm(vm::VmArgs),
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -115,11 +117,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             return finish(format, Err(CliError::usage(first).with_hint(hint)), out, err).code();
         }
     };
-    let result = dispatch(cli.command);
+    let result = dispatch(cli.command, err);
     finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
 }
 
-fn dispatch(command: Command) -> Result<Report, CliError> {
+fn dispatch(command: Command, err: &mut dyn Write) -> Result<Report, CliError> {
     match command {
         Command::SelfCmd {
             command: SelfCommand::Hash,
@@ -134,6 +136,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Hold(a) => slots::hold(&a),
         },
         Command::Wait(a) => wait::command(&a),
+        Command::Vm(a) => vm::command(&a, err),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {
