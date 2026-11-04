@@ -20,12 +20,12 @@ export function macRebootCheck({ waitReady }) {
     const find = async () => (await gui.texts()).find((t) => /Start Dyno at login/i.test(t.text) && ['AXCheckBox', 'AXSwitch', 'AXButton', 'AXRadioButton', 'AXToggle'].includes(t.role));
     let ctl = nav.ok ? await find() : null;
     let loginOn = false;
-    const rolesSeen = (await gui.texts()).filter((t) => /Start Dyno at login/i.test(t.text)).map((t) => `${t.role}:${t.text}`);
+    const rolesSeen = (await gui.texts()).filter((t) => /Start Dyno at login/i.test(t.text)).map((t) => `${t.role}:${t.raw}`);
     if (ctl) {
-      if (!/value=1/.test(ctl.text)) await gui.press(gui.app, 'Start Dyno at login', ctl.role);
+      if (ctl.value !== '1') await gui.press(gui.app, 'Start Dyno at login', ctl.role);
       await sleep(3000);
       ctl = await find();
-      loginOn = Boolean(ctl && /value=1/.test(ctl.text));
+      loginOn = Boolean(ctl && ctl.value === '1');
     }
     const pre = await helperState(g);
     const loginItem = (await g.exec('sfltool dumpbtm 2>/dev/null | grep -i -B1 -A4 dyno | head -14; launchctl print gui/$(id -u) 2>/dev/null | grep -i dyno | head -4')).stdout.trim().split('\n');
@@ -58,7 +58,19 @@ export function macRebootCheck({ waitReady }) {
     let win = [];
     for (let i = 0; i < 30 && !win.length; i++) { win = (await g.exec('/usr/local/bin/axdrive windows')).stdout.split('\n').filter((l) => /net\.decryptology\.dyno\.menubar/.test(l)); if (!win.length) await sleep(3000); }
     const took = Math.round((Date.now() - startedAt) / 1000);
-    steps.push(result('Restart check: menu-bar icons after the restart', [{ ok: win.length > 0, detail: win.length ? `${win.length} Dyno menu-bar item(s) after the restart (appeared ${took} s after the check began, about 1 min after the autostart)` : 'no Dyno menu-bar item 90 s after the autostart' }], win, 'menu-bar items present'));
+    let diag = [];
+    if (!win.length) {
+      // Which is it: no status items at all, items under another owner, or an app that is not running its tray? Collect the facts, then ask the app for its window.
+      const owners = (await g.exec('/usr/local/bin/axdrive windows | cut -f1,4 | sort | uniq -c | sort -rn | head -25')).stdout.trim();
+      const lsapp = (await g.exec('lsappinfo list 2>&1 | grep -i -B1 -A10 "dyno" | head -40')).stdout.trim();
+      const ccItems = (await g.exec('/usr/local/bin/axdrive tree ControlCenter 6 2>&1 | grep -i -E "dyno|menu bar item|AXMenuBarItem|AXStatusItem" | head -20; echo --- SystemUIServer; /usr/local/bin/axdrive tree SystemUIServer 6 2>&1 | grep -i -E "dyno|AXMenuBarItem" | head -10')).stdout.trim();
+      const log = (await g.exec('grep -h -i -E "tray|tooltip|status item|menubar" "$HOME/Library/Application Support/Dyno/logs/"*.log 2>/dev/null | tail -15; ls -la "$HOME/Library/Application Support/Dyno/logs/" 2>&1 | tail -4')).stdout.trim();
+      await g.exec('open -a /Applications/Dyno.app'); await sleep(25_000);
+      const after = (await g.exec('/usr/local/bin/axdrive windows')).stdout.split('\n').filter((l) => /dyno/i.test(l));
+      const items2 = after.filter((l) => /menubar/.test(l));
+      diag = ['--- window owners (count, owner, title)', ...owners.split('\n'), '--- lsappinfo', ...lsapp.split('\n'), '--- Control Center / SystemUIServer items', ...ccItems.split('\n'), '--- app log tray lines', ...log.split('\n'), `--- after "open -a Dyno" (25 s): ${after.length} Dyno window(s), ${items2.length} menu-bar item(s)`, ...after];
+    }
+    steps.push(result('Restart check: menu-bar icons after the restart', [{ ok: win.length > 0, detail: win.length ? `${win.length} Dyno menu-bar item(s) after the restart (appeared ${took} s after the check began, about 1 min after the autostart)` : 'no Dyno menu-bar item 90 s after the autostart' }], [...win, ...diag], 'menu-bar items present'));
     // An autostarted Dyno may be hidden in the tray: bring its window up the way a click on the Dock or the menu bar does.
     await g.exec('open -a /Applications/Dyno.app'); await sleep(20_000);
     await gui.closeSettings();

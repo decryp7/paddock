@@ -5,8 +5,9 @@ export function parseTree(out) {
   for (const line of String(out).split('\n')) {
     const m = /^(\s*)(AX\w+)\s+(.*)$/.exec(line);
     if (!m) continue;
-    const text = m[3].replace(/\s*\|\s*_NS:\d+/g, '').split(' | ')[0].trim();
-    rows.push({ role: m[2], text, depth: m[1].length });
+    const raw = m[3].replace(/\s*\|\s*_NS:\d+/g, '');
+    const text = raw.split(' | ')[0].trim();
+    rows.push({ role: m[2], text, raw, value: (/value=(\S+)/.exec(raw) ?? [])[1] ?? null, depth: m[1].length });
   }
   return rows;
 }

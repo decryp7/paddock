@@ -67,7 +67,7 @@ export async function domTour(browser, { shotDir = null, log = () => {} } = {}) 
   // Dialogs: Settings with each of its sections, then the Help dialogs.
   const settings = await openDialog(browser, 'File', 'Settings');
   if (settings) {
-    const sections = await settings.evaluate(() => [...document.querySelectorAll('nav button, [role=tablist] button, aside button')].map((b) => b.textContent.trim()).filter(Boolean));
+    const sections = await settings.evaluate(() => [...document.querySelectorAll('[aria-label="Settings pages"] button, [aria-label="Settings pages"] a')].map((b) => b.textContent.trim()).filter(Boolean));
     for (const name of [...new Set(sections)].slice(0, 12)) { await settings.getByRole('button', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).first().click().catch(() => {}); await record(settings, `Settings > ${name}`); }
     if (!sections.length) await record(settings, 'Settings');
   } else checks.push({ ok: false, detail: 'Settings did not open' });
