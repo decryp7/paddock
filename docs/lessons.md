@@ -1222,3 +1222,15 @@ Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell 
 ## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
 
 I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.
+
+## TCC blocked self-responsible processes on the external work volume (2026-11-04, Mac runner)
+
+With the runner's work folder on the USB volume `/Volumes/d7sst7`, Pitcrew's disclaim and supervision tests failed with
+`getcwd: ... Operation not permitted` and Dyno's `check-bundle.sh` saw empty `launchctl submit` output files, which it blamed on
+the code-signing identifier. The unified log showed the cause: macOS TCC (Removable Volumes) lets the runner read the job's temp
+folder (`<workdir>/<hash>/tmp`, which `job-tmpdir.sh` used as `TMPDIR`) but denies any process that is its own responsible
+process: shells spawned with responsibility disclaim, and `launchctl submit` jobs (xpcproxy cannot open the `-o`/`-e` files).
+Full Disk Access for the runner does not help, because the denied process is not the runner. **Lesson (class: a permission
+belongs to the responsible process, not the parent):** keep the work folder and caches on the external disk if wanted, but put
+each job's `TMPDIR` on the internal disk (`job-tmpdir.sh` now does so on macOS when `diskutil info -plist` says Internal=false),
+and a check that finds empty output from a launchd job prints `launchctl print` and the exit state before it guesses a cause.
