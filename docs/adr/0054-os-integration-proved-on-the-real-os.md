@@ -1,8 +1,12 @@
 # 54. OS integration proved on the real OS: read-back registrations, a lifecycle suite, no discarded errors at the edges, fakes under contract, recorded red runs and layout matrices
 
-- Status: Proposed (2026-11-04), revision 3. Written on the user's go-ahead of 2026-11-04 (ER-21 / rule 40 redesign after
+- Status: Proposed (2026-11-04), revision 4. Written on the user's go-ahead of 2026-11-04 (ER-21 / rule 40 redesign after
   the Dyno 1.1.0 work of that day). Docs only: nothing here is built yet. Patterns 1 and 2 go into Dyno 1.1.0, **the full
   set** (the user's choice of D5, 2026-11-04); patterns 3 to 5 apply family-wide after that release.
+- Revision 4 (2026-11-04): the user approved folding a **VM broker** into the lifecycle gate (§1.5, packages V-1 to
+  V-3 in the Dyno 1.1.0 set, check C97), another ER-21 pattern of the same day. The user also **froze Dyno 1.1.0's scope**
+  (2026-11-04): only bug fixes for what is already in scope; new ideas go to 1.1.1 or 1.2. The broker is in the set
+  because it is part of the gate this ADR already put in scope.
 - Revision 3 (2026-11-04) answers the re-review of `707a1c1ec`, which approves the design with one P1 in the text:
   - P1: option (a). L-1b depends only on ADR 0053's S5 (the `login.rs` API, mostly already in `91d703d81`), not on Dyno's
     whole 0053 adoption. Only Dyno's `apps/dyno/app/src-tauri/src/login.rs` is sequenced between 0053's package D and
@@ -47,7 +51,7 @@
   `git fetch`, 2026-11-04):
   - **ADR 0054.** `origin/main` has up to 0049; 0052 is on `origin/docs/adr-wiring-outcomes-ui`, 0053 on
     `origin/docs/dyno-adr-0027-per-machine`; no branch has 0054.
-  - **Checks C92 to C96.** The highest check named on any branch is C91 (ADR 0053).
+  - **Checks C92 to C97.** The highest check named on any branch is C91 (ADR 0053).
   - **Rules 68 to 70.** Rules 56 to 59 are on branches; 60, 61 and 65 are proposed by ADRs 0041, 0042 and 0049; 64 by the
     0045 draft; 66 is on `origin/docs/rules-2026-11-04`; 67 is ADR 0052's. ADR 0052 notes that the drafts 0046 and 0048
     still name rules 65 and 66 provisionally: **they take 71 and up** when written out.
@@ -86,6 +90,19 @@ What the existing pattern misses:
 - The UI shows switch values, not inspections.
 
 ADR 0052 §1.4 requires a VM step per platform feature; it does not say what such a step must cover.
+
+### Pattern 1b: the VM gate's own runs were not trustworthy (revision 4)
+
+| Instance | Source | How checked |
+|---|---|---|
+| Two Windows VM runs collided: two agents started or reverted the same VMware Fusion guest at once | the coordinator's account, 2026-11-04 | reported |
+| An old `.vmx` was restored over the current one, so later reverts went to the wrong snapshot set | the coordinator's account; the runners edit the `.vmx` through `scripts/vm-smoke/vmx-edit.mjs` (`origin/test/dyno-release-vm-checks-v2`, `9dd03e16e`) | reported; the file exists |
+| A stale-lock dialog from VMware Fusion appeared on the user's desktop: a run started the GUI over a guest whose `.lck` folders were left behind (ER-14) | the coordinator's account | reported |
+| Many step "failures" were bugs in the checks, not the product: a label's text matched too strictly, the Settings window was read as the page, the page handle was lost across a reboot, and a positive control itself failed | the coordinator's account; the runners `scripts/vm-smoke/run-win.mjs` and `run-linux.mjs` (`9dd03e16e`) and `scripts/vm-win.sh` (`origin/tools/win-test-vm`) | reported |
+| Each runner starts, reverts and stops VMs itself (`vmrun`, `tart`), and the only guard is an ad hoc `plock` lock named `vm-lock`, which a runner can skip | the same files | reported; the files exist |
+
+A gate whose VM can collide, revert to the wrong state or report its own bugs as product failures cannot gate a release:
+its FAILs are not believed and its PASSes are not proof.
 
 ### Pattern 2: errors swallowed at OS edges
 
@@ -291,6 +308,41 @@ Each step writes the probe's raw output and the app's inspection into the result
   tagged head on each OS its registrations list. `./dev release tag` (ADR 0039's gate) reads the result files. A row that
   cannot run in a VM (macOS Login Items approval) is MANUAL with a dated waiver (§8).
 
+**1.5 The VM broker (revision 4).** A single broker, `./dev vm` (in `tools/paddock-dev`, ADR 0022), is the **only** thing
+that starts, reverts or stops a VM for this suite, for ADR 0053's PM cases and for ADR 0040's GUI session.
+- **One lease per VM.** `./dev vm lease <vm> --for <purpose>` returns a lease held by the caller (a process handle and
+  start time, rule 53), bounded by ADR 0031's patience and released on exit. It replaces the ad hoc `plock` `vm-lock`. A
+  second caller waits or is refused with the holder's purpose and age; it never shares the VM.
+- **Preflight before every start or revert:** the `.vmx` (or the Tart config) parses; every disk it names exists; leftover
+  `.lck` folders are reported with their age and owner, and a run does not start over them; no other process runs the
+  VM (`vmrun list`, `tart list`). A failed preflight is a "could not run" result with the reason, never a FAIL.
+- **Headless only.** The broker starts guests with `nogui` (VMware Fusion) or `--no-graphics` (Tart), so no dialog can
+  appear on the user's desktop (ER-14). ADR 0040's interactive Windows session runs inside the guest and is reached over
+  its own channel, not through a host window.
+- **The `.vmx` is edited only by the broker,** with one validated function (a parsed edit, written to a temporary file
+  and renamed), and a backup `.vmx` is **never** restored. A broken `.vmx` is a preflight failure for a person to fix.
+- **Results carry the lease.** Each result file records the lease id, the VM, the snapshot and the runner's command.
+  `./dev release tag` (rule 54 (d)) accepts only results stamped by a broker lease.
+- **Runs outside the broker are detected and refused.** The broker refuses to lease a VM that is running without a lease
+  and names the process. C97 (below) refuses scripts that call the VM tools directly.
+
+**Every lifecycle check proves it can pass (positive control).** Each check of L1 to L8 declares a positive control: the
+same probe and judge run against a state known to pass, before or beside the real step. Examples: the `Run`-value probe on
+a value the runner wrote itself; the page reader on a known label; the page handle re-acquired after a reboot of a guest
+whose app is known to be up. A step whose positive control fails is reported as **check broken**, never as a product
+FAIL, and the gate does not pass on it.
+
+**Every failing step classifies itself** as `product` or `check`, with the evidence for the choice:
+- `check`: the positive control failed, the probe could not run, or the reader found no element of the expected kind;
+- `product`: the positive control passed and the probe read a state that differs from the declaration.
+
+The result file shows the class, the evidence (the probe's raw output and the control's result) and, for `check`, which
+check to fix. Only `product` FAILs and `check` errors that hide a step both block a tag, and they are reported apart.
+
+**C97 (VMs only through the broker),** a source check in `./dev check` over `scripts/` and `tools/`, fails on any call to
+`vmrun`, `tart` (`run`, `clone`, `delete`, `stop`, `set`), `prlctl` or `VBoxManage`, or any write to a `*.vmx`, outside
+`tools/paddock-dev/src/vm/`. It ships with a fixture of today's `run-win.mjs` call.
+
 ### 2. Errors at OS edges are never discarded (pattern 2; rule 67 (b) and ER-27 amended)
 
 **2.1 OS-edge modules.** An OS-edge module is a Rust module that holds a `Backend` or another adapter of §1.1, calls an OS API
@@ -488,7 +540,9 @@ Failing-first: none (<reason: docs-only, build-only, revert, test-only>)
 > registration, including those made by an installer or package, is declared in `apps/<app>/wiring.toml` and has a row in
 > the `vm-smoke` lifecycle suite for each OS it supports: install, first run, restart, second user, update from the last
 > release, turn off, uninstall, with no crash or restart counted by the OS over the run. A tag needs that suite without
-> FAIL for the tagged head (rule 54 (d)). Checked by C92 and the lifecycle suite. *Why:* on 2026-11-04 Dyno 1.1.0's helper
+> FAIL for the tagged head (rule 54 (d)). The suite's VMs are started, reverted and stopped only by the `./dev vm` broker
+> (one lease per VM, preflight, headless, no restored backups), every check has a positive control, and every failure says
+> whether the product or the check failed, with evidence. Checked by C92, C97 and the lifecycle suite. *Why:* on 2026-11-04 Dyno 1.1.0's helper
 > service crashed 21 s after install and was gone after a restart, start at login registered nothing on Windows or Linux
 > while the switch said on, a Linux turn-off left the service running because its error was dropped, and a tray modify was
 > refused, all with every test green against fakes.
@@ -551,6 +605,7 @@ For the engineering rules (coordinator-owned sync, as for ER-33):
 | `register`/`unregister` return the post-inspection; typed `Inspection`; the UI binds it | type plus the existing shared port | the Linux turn-off (`StillPresent`); a switch that is on with no `Run` value |
 | C92: declared registrations, including packaged ones, each with a lifecycle row | source and packaging check | every Dyno registration today, none of which is declared; the packaged unit |
 | Lifecycle suite L1 to L8 with crash counters; rule 54 (d) | real-OS release gate, local VM | the 21 s crash (L3: 7034); the service gone after a restart (L4); login (L4); the turn-off (L7) and its restart counter (L3) |
+| `./dev vm` broker (lease, preflight, headless, no restored `.vmx`); positive controls; failure classes; C97 | one mechanism, release-gate rule, source check | the two Windows VM collisions, the restored `.vmx`, the stale-lock dialog, and check bugs reported as product failures |
 | C93 over app and shared-crate edges, with caps; `service_main` | source check without baseline; one mechanism | `winsvc.rs:22`; `native.rs:392`, `:402`, `:403` (main); `systemd.rs:188`; `tray-icon/.../windows/mod.rs:84` |
 | ESLint `no-floating-promises`, `paddock/no-silent-catch` | lint | an adapter that drops an `invoke` failure |
 | `contract_tests!` with `TestRoot`; recordings for scripted doubles; C94 and C95 | shared kit plus enumerating checks | the fake rooted at `/`; the rig's copy of auth; canned `systemctl` output |
@@ -629,20 +684,26 @@ that rules each out, and fixes with a failing test first. All three land before 
 | E-3 | C93 over app and shared-crate edges, the caps, the inner `deny` attribute; `crates/wiring.toml` with `[edges]`, and `[caps] silent` set from its first report run after E-4 | `tools/paddock-dev/src/checks/c93_edges.rs`, fixtures, `crates/wiring.toml` | A1-s | 1.5–2 |
 | E-4 | Fix every C93 finding: in `paddock-service` (65 `let _ =`, 1 `.ok();` as upper bounds), `paddock-proc` (26, 3), `paddock-ipc` (27, 1), and in Dyno's edge modules (upper bounds 79, 17, 44, 128 in its four Rust folders; most of `dyno-agent`'s are expected outside the edges) | the edge modules C93 lists | E-3, E-1 (so `native.rs` is fixed once) | 3–5 |
 | E-5 | ESLint `no-floating-promises`, `no-misused-promises`, `paddock/no-silent-catch` for Dyno's backend adapters and the shell adapters | `eslint/src/rules/no-silent-catch.mjs`, the preset's adapter globs, findings in `apps/dyno/app/src/app/core/` | – | 0.5–1 |
-| **Dyno 1.1.0 total** | (with RC-2 and RC-3) | | | **26.5–36** |
+| V-1 | The `./dev vm` broker: leases (replacing the `plock` `vm-lock`), preflight, headless start, revert and stop for VMware Fusion and Tart, the one `.vmx` edit, refusal of unleased running VMs, lease ids in results; C97 with its fixture | `tools/paddock-dev/src/vm/{mod,lease,preflight,fusion,tart,vmx}.rs`, `tools/paddock-dev/src/checks/c97_vm_broker.rs` (+ the command and check list lines) | – | 1.5–2 |
+| V-2 | Positive controls for every lifecycle check and the `product`/`check` classification with evidence in the judge and the result file | `scripts/vm-smoke/{judge.mjs,checks.mjs,lifecycle.mjs}` and their tests | V-1; with L-4 | 1–1.5 |
+| V-3 | Migration onto the broker: `scripts/vm-smoke/run-win.mjs`, `run-linux.mjs`, `vmx-edit.mjs` (removed), `vm-smoke.sh`, `scripts/vm-win.sh` (on `origin/tools/win-test-vm`), and ADR 0053 S0's spike scripts; README | those files; `scripts/vm-smoke/README.md` | V-1 | 0.5–1.5 |
+| **Dyno 1.1.0 total** | (with RC-2, RC-3 and V-1 to V-3) | | | **29.5–41** |
 
-**The new 1.1.0 estimate.** Revision 1 said 19 to 25 days. The 26.5 to 36 here adds:
+**The 1.1.0 estimate.** Revision 1 said 19 to 25 days; revision 3 said 26.5 to 36. The 29.5 to 41 here adds:
 - A1-s;
 - RC-2 and RC-3;
 - L-1b, now its own package after ADR 0053's S5;
 - the shared crates in C93 and E-4 (118 `let _ =` and 5 `.ok();` more to judge);
 - E-1's second entry point;
-- the crash counters, the recordings and L6's start from the released tag in L-4.
+- the crash counters, the recordings and L6's start from the released tag in L-4;
+- the VM broker, positive controls and the runners' migration (V-1 to V-3, 3 to 5 days; revision 4).
 
 It does not include RC-1, whose estimate is tracked on `fix/dyno-helper-after-restart`.
 
 **The order and the critical path.**
-- Start in parallel: RC-2 with L-1a, E-1, A1-s, L-2 and L-4.
+- Start in parallel: RC-2 with L-1a, E-1, A1-s, L-2, L-4 and V-1.
+- V-2 with L-4; V-3 after V-1. The broker is ready by about day 2 and the runners moved by about day 4, before the first
+  lifecycle run, so V-1 to V-3 are off the critical path.
 - Then E-3 and L-5 (after A1-s); E-4 (after E-3 and E-1); L-1b (after ADR 0053's S5 and L-1a); L-3 with RC-3 (after
   L-1b and package D's `login.rs` commit); E-2 (after RC-1); then L-6.
 - The critical path is L-1a (3–4) → L-1b (1.5–2) → L-3 with RC-3 (4–5.5) → the lifecycle runs on three OS (1.5–2.5): about
@@ -699,7 +760,7 @@ C93 over the shared crates on Dyno's release path has no waiver: E-4 fixes them 
   (rule 48).
 - **The lifecycle suite** is the expensive part: it reboots each VM and signs in a second user. It runs once per release
   per OS, locally, and never in CI.
-  - More parallelism: the three OS's VMs can run at once within `./dev ci slot`'s VM slots and the load cap (rule 41); L4
+  - More parallelism: the three OS's VMs can run at once, one broker lease each, within `./dev ci slot`'s VM slots and the load cap (rule 41); a lease never shares a VM; L4
     and L5 are serial within one VM.
   - Cheaper: one install per OS for L1 to L8; L3's counters are read rather than waited for; L6 reuses the released
     installer from the release feed.
@@ -756,7 +817,7 @@ C93 over the shared crates on Dyno's release path has no waiver: E-4 fixes them 
 | D2 | The escape hatch for a deliberate drop | **Coordinator default (the reviewer's recommendation), user may revise:** ADR 0052's `// silent: <why>`, one counter with C87 |
 | D3 | Where red-run logs live | **Coordinator default (the reviewer's recommendation), user may revise:** git notes under `refs/notes/failing-first`, rewritten on rebase and amend, with CI run references also allowed |
 | D4 | Pattern 4 as a new rule or an amendment | **Coordinator default (the reviewer's recommendation), user may revise:** amend rule 5 and ER-11 |
-| D5 | Dyno 1.1.0 scope | **Decided: the full set** (the user, 2026-11-04): 26.5 to 36 days of packages in §7.3, critical path about 10 to 14 working days with four agents |
+| D5 | Dyno 1.1.0 scope | **Decided: the full set** (the user, 2026-11-04), with the VM broker (revision 4): 29.5 to 41 days of packages in §7.3, critical path about 10 to 14 working days with four agents. **The scope is frozen** (the user, 2026-11-04): only bug fixes for what is already in scope; new ideas go to 1.1.1 or 1.2 |
 | D6 | Spotter 1.0 under the lifecycle gate | **Coordinator default (the reviewer's recommendation), user may revise:** yes, the lifecycle run gates `spotter-v1.0.0`; C92 and C93 are not enforced for Spotter before that tag (§8) |
 | D7 | Where registrations are declared | **Coordinator default (the reviewer's recommendation), user may revise:** `wiring.toml`, through the WP-A1 slice A1-s pulled into 1.1.0 |
 | D8 | Real-adapter contract runs for registration ports | **Coordinator default (the reviewer's recommendation), user may revise:** in the lifecycle VM only (ER-14) |

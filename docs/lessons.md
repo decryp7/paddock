@@ -1283,3 +1283,13 @@ measured the whole chooser, so with a preview column the rows used the wide layo
 platform capability, a width and a variant):** the platform difference reaches the component as a capability value, and a
 declared matrix of every capability, width and variant runs the shared layout checks on every change (ADR 0054 §5, proposed
 rule 70).
+
+## The VM gate's own runs collided and reported their bugs as product failures (2026-11-04, Dyno 1.1.0; ADR 0054)
+
+Two agents started or reverted the same Windows VM at once, twice; an old `.vmx` was restored and later reverts went to the
+wrong state; VMware Fusion showed a stale-lock dialog on the user's desktop; and many step failures were bugs in the checks (a
+label matched too strictly, the Settings window read as the page, the page handle lost across a reboot, a positive control that
+itself failed). Each runner (`run-win.mjs`, `run-linux.mjs`, `vm-win.sh`) drove `vmrun` and `tart` itself behind an optional
+`plock` lock. **Lesson (class: a gate is only as good as its harness):** one broker (`./dev vm`) owns every VM start, revert and
+stop with one lease per VM, a preflight, headless guests and no restored backups; every check proves with a positive control
+that it can see a pass; and every failure says whether the product or the check failed, with evidence (ADR 0054 §1.5).
