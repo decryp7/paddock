@@ -66,6 +66,7 @@ pub mod native;
 pub mod os_log;
 pub mod parse;
 pub mod paths;
+pub mod per_machine;
 pub mod plan;
 pub mod port;
 pub mod privileged;

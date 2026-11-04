@@ -4183,6 +4183,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tauri",
+ "thiserror 2.0.21",
  "windows",
  "windows-service",
 ]
