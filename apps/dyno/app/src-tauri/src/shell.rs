@@ -419,6 +419,12 @@ impl<R: Runtime> ShellOf<R> {
                 {
                     let mut service = login::platform_service();
                     let mut autostart = login::platform_autostart(&self.app);
+                    match login::ensure_app_entry(wanted, autostart.as_mut()) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            log::warn!(target: "dyno", Error = e.as_str(); "Start at login is on but the app's logon entry could not be written. Turn Start at login off and on in Settings.")
+                        }
+                    }
                     match login::repair_stale_agent_entry(wanted, service.as_mut(), autostart.as_mut()) {
                         Ok(true) => logging::info(&format!(
                             "removed the stale agent logon entry that Dyno 1.0.0 wrote; the app's own entry is {}",
@@ -433,6 +439,35 @@ impl<R: Runtime> ShellOf<R> {
                             log::warn!(target: "dyno", Error = e.as_str(); "The stale agent logon entry of Dyno 1.0.0 could not be repaired; start at login may start only the agent. Turn Start at login off and on in Settings.")
                         }
                     }
+                }
+                // Start at login is on by default: the first run registers it once, without Settings being opened.
+                match self.app.path().app_data_dir() {
+                    Ok(dir) => {
+                        let mut service = login::platform_service();
+                        let mut autostart = login::platform_autostart(&self.app);
+                        let marker = paddock_service::login::FirstRunMarker::new(dir.join(login::FIRST_RUN_MARKER));
+                        let mut sys = paddock_service::RealSystem::new();
+                        match login::apply_first_run(
+                            &marker,
+                            &mut sys,
+                            wanted,
+                            login::current_location(),
+                            service.as_mut(),
+                            autostart.as_mut(),
+                        ) {
+                            Ok(login::FirstRun::Applied) => {
+                                link.set_service_installed(service.installed());
+                                link.refresh_service();
+                                logging::info("first run: start at login (the default) was registered");
+                            }
+                            Ok(login::FirstRun::Skipped) => {}
+                            Err(e) => {
+                                log::warn!(target: "dyno", Error = e.as_str(); "First run: start at login (the default) could not be registered; it is tried again at the next start, or turn it off and on in Settings.");
+                                return Err(e);
+                            }
+                        }
+                    }
+                    Err(e) => logging::info(&format!("first run: no data folder, start at login not applied: {e}")),
                 }
                 Ok(())
             }

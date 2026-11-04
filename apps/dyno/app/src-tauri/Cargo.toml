@@ -70,9 +70,6 @@ tauri-plugin-dialog = "2.7.3"
 # The installer behind the shell's updater (`PluginInstaller`): verifies the package signature again and installs it.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-tauri-plugin-autostart = "2"
-
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting (tray icon), read only.
 winreg = "0.56"

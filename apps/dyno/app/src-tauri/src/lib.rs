@@ -441,12 +441,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
-    // Linux and Windows register the app itself with the autostart plugin; macOS uses `SMAppService.mainApp` (login.rs).
-    #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_autostart::init(
-        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-        Some(vec![paddock_window::launch::HIDDEN_FLAG]),
-    ));
     // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
     let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
