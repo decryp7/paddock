@@ -36,7 +36,7 @@ pub fn observation(event: &NetEvent, rules: NetworkAlerts) -> Option<Observation
                 Severity::Info
             },
             title: format!("{program} started listening on port {port}"),
-            detail: event.describe(),
+            detail: event.alarm_detail(),
             value: None,
             metric: None,
             active: true,
@@ -48,7 +48,7 @@ pub fn observation(event: &NetEvent, rules: NetworkAlerts) -> Option<Observation
             subject: format!("{program}:{host}"),
             severity: Severity::Info,
             title: format!("{program} connected to a new host"),
-            detail: event.describe(),
+            detail: event.alarm_detail(),
             value: None,
             metric: None,
             active: true,
@@ -116,5 +116,20 @@ mod tests {
         let json = serde_json::to_string(&ON).unwrap();
         assert_eq!(json, r#"{"newExposedListener":true,"newRemoteHost":true}"#);
         assert_eq!(serde_json::from_str::<NetworkAlerts>("{}").unwrap(), NetworkAlerts::default());
+    }
+
+    #[test]
+    fn the_detail_adds_to_the_title_and_never_repeats_it() {
+        for e in [listener(Exposure::AllInterfaces), listener(Exposure::Interface), host()] {
+            let o = observation(&e, ON).unwrap();
+            assert!(
+                !o.detail.contains(&o.title),
+                "detail repeats its title: {:?} / {:?}",
+                o.title,
+                o.detail
+            );
+            assert!(!o.detail.is_empty());
+        }
+        assert_eq!(observation(&host(), ON).unwrap().detail, "93.184.216.34:443");
     }
 }
