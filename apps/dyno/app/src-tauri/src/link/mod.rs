@@ -150,6 +150,9 @@ pub struct ServiceState {
     pub supervises: bool,
 }
 
+/// Work that must be done before the link decides anything about an agent.
+pub type FirstLaunchHook = Box<dyn FnOnce() + Send>;
+
 /// Asks the OS about the service (it may be slow: only the link's own thread and background threads call it).
 pub type ServiceProbe = Arc<dyn Fn() -> ServiceState + Send + Sync>;
 
@@ -251,6 +254,8 @@ pub struct AgentLink {
     /// The last failed request's name and code, so a repeat is not told again.
     fail_gate: Mutex<steps::KeyedGate>,
     probe: Mutex<Option<ServiceProbe>>,
+    /// Runs once on a worker before the first look at the world (see [`AgentLink::before_first_launch`]).
+    before_first: Mutex<Option<FirstLaunchHook>>,
     events: Sender<Event>,
     inbox: Mutex<Option<Receiver<Event>>>,
     transitions: Transitions<Snapshot>,
@@ -294,6 +299,7 @@ impl AgentLink {
             syncing: Mutex::new(()),
             fail_gate: Mutex::new(steps::KeyedGate::default()),
             probe: Mutex::new(None),
+            before_first: Mutex::new(None),
             events,
             inbox: Mutex::new(Some(inbox)),
             transitions: Transitions::new(Supervisor::new().snapshot_now()),
@@ -327,7 +333,24 @@ impl AgentLink {
                 None => {}
             },
         )?;
-        driver::deliver(&self.events, Event::Begin);
+        match lock(&self.before_first).take() {
+            None => driver::deliver(&self.events, Event::Begin),
+            Some(hook) => {
+                // On a worker, never the caller's thread or the owner's: the hook may open System Settings or wait on
+                // systemctl (ER-17). The link looks at the world only after it; a panicking hook still lets it begin.
+                let events = self.events.clone();
+                let worker = std::thread::Builder::new().name("dyno-before-first".into()).spawn(move || {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(hook)).is_err() {
+                        log::error!("The work before the agent link's first look panicked; the link starts without it");
+                    }
+                    driver::deliver(&events, Event::Begin);
+                });
+                if let Err(e) = worker {
+                    log::error!(Error:% = e; "The work before the agent link's first look could not start; the link starts without it");
+                    driver::deliver(&self.events, Event::Begin);
+                }
+            }
+        }
         spawn_ticker(
             "dyno-pace",
             self.pace,
@@ -336,6 +359,13 @@ impl AgentLink {
             self.transitions.clone(),
         )?;
         Ok(owner)
+    }
+
+    /// Work to do on a worker thread before the link's first look at the world and so before its first launch: the first run's
+    /// registration of the login service goes here, so the link finds a supervising service and starts no agent beside it.
+    /// Set before [`AgentLink::spawn`]; the link begins when the hook returns.
+    pub fn before_first_launch(&self, hook: FirstLaunchHook) {
+        *lock(&self.before_first) = Some(hook);
     }
 
     /// What the supervisor published.

@@ -329,37 +329,6 @@ fn app_launcher(dirs: &dyno_agent::paths::Dirs) -> Box<dyn link::Launcher> {
     }
 }
 
-/// Start at login is on by default: the first run registers it here, before the link starts any agent, so the link finds the
-/// service supervising and starts none of its own (an agent started first would be ended and replaced by the service's: bug
-/// 7538-1). A failure is logged and tried again at the next start (and by the first sight of the settings).
-fn first_run_before_the_link_starts<R: Runtime>(app: &tauri::AppHandle<R>, dirs: &dyno_agent::paths::Dirs, link: &AgentLink) {
-    let Ok(data) = app.path().app_data_dir() else {
-        logging::info("first run: no data folder, start at login not applied before the agent starts");
-        return;
-    };
-    let mut service = login::platform_service();
-    let mut autostart = login::platform_autostart(app);
-    let marker = paddock_service::login::FirstRunMarker::new(data.join(login::FIRST_RUN_MARKER));
-    let mut sys = paddock_service::RealSystem::new();
-    match login::apply_first_run_at_start(
-        &dirs.settings(),
-        &marker,
-        &mut sys,
-        login::current_location(),
-        service.as_mut(),
-        autostart.as_mut(),
-    ) {
-        Ok(login::FirstRun::Applied) => {
-            link.set_service_installed(service.installed());
-            logging::info("first run: start at login (the default) was registered before the agent started");
-        }
-        Ok(login::FirstRun::Skipped) => {}
-        Err(e) => {
-            log::warn!(target: "dyno", Error = e.as_str(); "First run: start at login (the default) could not be registered before the agent started; it is tried again at the next start, or turn it off and on in Settings.")
-        }
-    }
-}
-
 /// Dyno's own log, the shell glue and the agent link in `dirs`; the installed app also starts the agent process, keeps
 /// late windows told about it and repairs its service registration.
 fn agent_setup<R: Runtime>(
@@ -383,10 +352,12 @@ fn agent_setup<R: Runtime>(
         Arc::new(paddock_jobs::SystemClock),
     );
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
-    let dirs_for_first_run = dirs.clone();
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {
-        first_run_before_the_link_starts(app, &dirs_for_first_run, &link);
+        // The first run's registration comes first, on a worker the link waits for (it may open System Settings or wait on
+        // systemctl: ER-17), so the link finds a supervising service and starts no agent of its own.
+        let (first_app, first_link) = (app.clone(), link.clone());
+        link.before_first_launch(Box::new(move || login::run_first_run(&first_app, &first_link, false)));
         // Asked before the link starts an agent of its own: none beside one the login service supervises.
         link.set_service_probe(login::service_probe());
     }

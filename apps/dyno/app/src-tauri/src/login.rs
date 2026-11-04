@@ -107,8 +107,90 @@ pub fn apply_first_run(
 /// Whether the first run registers start at login, read from the settings file the app already has before any agent runs: a
 /// missing file is a fresh install (the default, on); a file that says `false` is the user's choice (an upgrade from 1.0.0).
 pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
-    let (settings, _) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    let (settings, warning) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    if let Some(w) = warning {
+        // ER-27: a damaged settings file decides this by its defaults; the log says so.
+        log::warn!(Warning = w.as_str(); "First run: the settings file was not read cleanly; start at login follows what could be read");
+    }
     settings.unwrap_or_default().launch_at_login
+}
+
+/// Whether the first-run registration has been tried in this process. A failed attempt is not repeated in the same run
+/// (each try may open System Settings or wait on `systemctl`); the missing marker makes the next start try again.
+pub struct FirstRunAttempt(std::sync::atomic::AtomicBool);
+
+impl FirstRunAttempt {
+    /// Nothing tried yet.
+    pub const fn new() -> FirstRunAttempt {
+        FirstRunAttempt(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// True once, for the first caller.
+    pub fn claim(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Default for FirstRunAttempt {
+    fn default() -> Self {
+        FirstRunAttempt::new()
+    }
+}
+
+/// This process's attempt.
+pub static FIRST_RUN_ATTEMPT: FirstRunAttempt = FirstRunAttempt::new();
+
+/// [`apply_first_run_at_start`], at most once per `attempt`: later calls do nothing and say [`FirstRun::Skipped`].
+pub fn apply_first_run_once(
+    attempt: &FirstRunAttempt,
+    settings_file: &std::path::Path,
+    marker: &paddock_service::login::FirstRunMarker,
+    sys: &mut dyn paddock_service::System,
+    location: Result<(), String>,
+    service: &mut dyn AgentService,
+    autostart: &mut dyn Autostart,
+) -> Result<FirstRun, String> {
+    if !attempt.claim() {
+        return Ok(FirstRun::Skipped);
+    }
+    apply_first_run_at_start(settings_file, marker, sys, location, service, autostart)
+}
+
+/// The first run for the installed app, the one place both callers use (the link's start, and the first sight of the settings
+/// for an app that registered nothing yet): the real service, login item and marker, once per process. `handover` is true when
+/// an agent of the app may already run, so the link is told to look at the service again.
+pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate::link::AgentLink, handover: bool) {
+    use tauri::Manager;
+    let Ok(data) = app.path().app_data_dir() else {
+        crate::logging::info("first run: no data folder, start at login not applied");
+        return;
+    };
+    let mut service = platform_service();
+    let mut autostart = platform_autostart(app);
+    let marker = paddock_service::login::FirstRunMarker::new(data.join(FIRST_RUN_MARKER));
+    let mut sys = paddock_service::RealSystem::new();
+    let began = std::time::Instant::now();
+    match apply_first_run_once(
+        &FIRST_RUN_ATTEMPT,
+        &link.dirs.settings(),
+        &marker,
+        &mut sys,
+        current_location(),
+        service.as_mut(),
+        autostart.as_mut(),
+    ) {
+        Ok(FirstRun::Applied) => {
+            link.set_service_installed(service.installed());
+            if handover {
+                link.refresh_service();
+            }
+            log::info!(Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX), HandOver = handover; "First run: start at login (the default) was registered");
+        }
+        Ok(FirstRun::Skipped) => {}
+        Err(e) => {
+            log::warn!(target: "dyno", Error = e.as_str(), Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "First run: start at login (the default) could not be registered; it is tried again at the next start, or turn it off and on in Settings.")
+        }
+    }
 }
 
 /// The first run, decided before the link starts any agent (bug 7538-1): registering the agent service after the app has
@@ -776,6 +858,35 @@ mod tests {
         assert_eq!(r, Ok(FirstRun::Skipped));
         assert!(log.is_empty(), "nothing registered: {log:?}");
         assert!(set, "recorded, so the later first sight of the settings is not a first run");
+    }
+
+    /// A failed start-time attempt is not repeated by the first sight of the settings in the same run (bug 7538-1, review P2-2):
+    /// each repeat opens Login Items on macOS, and a later success would hand the running agent over again.
+    #[test]
+    fn a_failed_first_run_is_not_tried_again_in_the_same_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        let sys = paddock_service::testing::FakeSystem::new();
+        let m = marker();
+        let attempt = FirstRunAttempt::new();
+        let calls = Calls::default();
+        let try_once = |autostart_fails: bool| {
+            let mut s = FakeService {
+                calls: calls.0.clone(),
+                fail: false,
+            };
+            let mut a = FakeAutostart {
+                calls: calls.0.clone(),
+                fail: autostart_fails,
+            };
+            apply_first_run_once(&attempt, &file, &m, &mut sys.clone(), Ok(()), &mut s, &mut a)
+        };
+        assert!(try_once(true).is_err(), "the start-time attempt fails");
+        let before = calls.0.lock().unwrap().len();
+        assert_eq!(try_once(false), Ok(FirstRun::Skipped), "the second caller of this run does nothing");
+        assert_eq!(calls.0.lock().unwrap().len(), before, "no second registration in the same run");
+        assert!(!m.is_set(&mut sys.clone()), "no marker, so the next start tries again");
+        assert!(FirstRunAttempt::new().claim(), "a new process (attempt) tries");
     }
 
     #[test]
