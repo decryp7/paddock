@@ -14,22 +14,32 @@ export function macRebootCheck({ waitReady }) {
   return async ({ gui, check }) => {
     const g = gui.g;
     const steps = [];
-    // Launch at login on (Settings > Dyno).
+    // Launch at login on (Settings > Dyno): find the control whatever its role is.
     const nav = await gui.openSettingsSection('^Dyno$');
-    const toggle = nav.ok && (await gui.waitFor(async () => (await gui.texts()).find((t) => t.role === 'AXCheckBox' && /Start Dyno at login/i.test(t.text)), 15_000));
+    await sleep(2000);
+    const find = async () => (await gui.texts()).find((t) => /Start Dyno at login/i.test(t.text) && ['AXCheckBox', 'AXSwitch', 'AXButton', 'AXRadioButton', 'AXToggle'].includes(t.role));
+    let ctl = nav.ok ? await find() : null;
     let loginOn = false;
-    if (toggle?.ok) { const cur = toggle.value; if (!/value=1/.test(cur.text)) await gui.press(gui.app, 'Start Dyno at login', 'AXCheckBox'); await sleep(3000); loginOn = (await gui.texts()).some((t) => t.role === 'AXCheckBox' && /Start Dyno at login/i.test(t.text) && /value=1/.test(t.text)); }
+    const rolesSeen = (await gui.texts()).filter((t) => /Start Dyno at login/i.test(t.text)).map((t) => `${t.role}:${t.text}`);
+    if (ctl) {
+      if (!/value=1/.test(ctl.text)) await gui.press(gui.app, 'Start Dyno at login', ctl.role);
+      await sleep(3000);
+      ctl = await find();
+      loginOn = Boolean(ctl && /value=1/.test(ctl.text));
+    }
     const pre = await helperState(g);
     const loginItem = (await g.exec('sfltool dumpbtm 2>/dev/null | grep -i -B1 -A4 dyno | head -14; launchctl print gui/$(id -u) 2>/dev/null | grep -i dyno | head -4')).stdout.trim().split('\n');
     steps.push(result('Restart check: before the restart (helper on, Launch at login on)', [
-      { ok: loginOn, detail: loginOn ? 'switched "Start Dyno at login" on' : 'could not switch "Start Dyno at login" on' },
+      { ok: loginOn, detail: loginOn ? 'switched "Start Dyno at login" on' : `could not switch "Start Dyno at login" on (found: ${rolesSeen.join(' | ') || 'nothing'})` },
       { ok: /state = running/.test(pre.join('\n')), detail: `helper before the restart: ${pre.find((l) => /state =/.test(l))?.trim() ?? 'not loaded'}` },
       { ok: /RunAtLoad|run at load|KeepAlive|keepalive/i.test(pre.join('\n')), detail: 'the helper job is declared to start at boot and be kept alive (RunAtLoad / KeepAlive in the plist or job)' },
     ], [...pre, '--- login item', ...loginItem], 'helper running with RunAtLoad and KeepAlive'));
     // The restart.
-    await g.exec('sudo shutdown -r now >/dev/null 2>&1 &', { timeoutMs: 30_000 });
+    const boot0 = (await g.exec('sysctl -n kern.boottime')).stdout.trim();
+    await g.exec('(sleep 2; sudo /sbin/reboot) >/dev/null 2>&1 &', { timeoutMs: 30_000 });
     await sleep(40_000);
-    const up = await waitReady(); // tart exec answers again and the Aqua session is up
+    let up = false;
+    for (let i = 0; i < 80 && !up; i++) { up = (await waitReady()) && (await g.exec('sysctl -n kern.boottime')).stdout.trim() !== boot0; if (!up) await sleep(4000); }
     if (!up) { steps.push(result('Restart check: the guest did not come back', [{ ok: false, detail: 'no guest agent after the restart (5 min)' }])); return steps; }
     await sleep(25_000);
     const t0 = Date.now();
@@ -37,7 +47,9 @@ export function macRebootCheck({ waitReady }) {
     const procs = (await g.exec('ps -axo pid=,etime=,lstart=,command= | grep -E "Dyno.app/Contents/MacOS/(dyno-app|dyno-agent)" | grep -v grep')).stdout.trim();
     const login = (await g.exec('last -1 admin 2>&1 | head -2; who | head -3; sysctl -n kern.boottime')).stdout.trim();
     const autostart = /dyno-app/.test(procs);
+    const boot1 = (await g.exec('sysctl -n kern.boottime')).stdout.trim();
     steps.push(result('Restart check: Dyno and the helper after the restart, no Repair', [
+      { ok: boot1 !== boot0, detail: boot1 !== boot0 ? `the guest really restarted (boot time ${boot0.replace(/\s+/g, ' ')} -> ${boot1.replace(/\s+/g, ' ')})` : 'the guest did NOT restart (boot time unchanged), so nothing below proves anything' },
       { ok: /state = running/.test(post.join('\n')), detail: `helper after the restart: ${post.find((l) => /state =/.test(l))?.trim() ?? 'not loaded'}` },
       { ok: autostart, detail: autostart ? 'Dyno started by itself after login (SMAppService login item)' : 'Dyno did not start by itself after login' },
     ], ['--- Dyno processes (pid etime lstart)', ...procs.split('\n'), '--- login/boot', ...login.split('\n'), '--- helper', ...post], 'helper running, Dyno autostarted'));
