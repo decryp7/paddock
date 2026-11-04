@@ -102,6 +102,13 @@ pub trait StartupItems: Send {
     fn unavailable(&self) -> Vec<String> {
         Vec::new()
     }
+    /// Gives the list the administrator helper's login items (macOS reads them only through it); other systems ignore it. The
+    /// agent calls it once it exists, because the platform is built before it.
+    fn use_login_items(&mut self, _link: Box<dyn crate::btm::LoginItemsLink>) {}
+    /// Who read the login items and background tasks of the last [`StartupItems::list`] (macOS); everything else needs no helper.
+    fn btm_via(&self) -> crate::read_via::ReadVia {
+        crate::read_via::ReadVia::Local
+    }
 }
 
 /// Slow-changing facts (disk health, pending updates, power plan…). Called every few minutes off the sampling path.

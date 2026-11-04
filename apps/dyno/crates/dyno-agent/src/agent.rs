@@ -584,6 +584,12 @@ impl Shared {
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
+        // macOS reads login items and background tasks only through the helper; other systems' startup lists ignore the link.
+        if helper_first {
+            lock(&shared.ports.startup).use_login_items(Box::new(crate::helper_readers::login_items::HelperLoginItems::new(port(
+                &Arc::downgrade(&shared),
+            ))));
+        }
         shared.disk.set_read_threads(read_threads);
         shared.disk.attach_cache(saved_maps.clone());
         shared.counters.attach_cache(saved_maps);

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject } from '@angular/core';
+import { ReadingSource } from '../../core/reading-source';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { ImpactRating, StartupEntry } from '../../core/api.types';
 import { FullTextTip } from '../../shared/full-text-tip';
@@ -20,7 +21,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
 /** Health: the score and its reasons, and what starts at sign-in. Dyno only shows these; it changes nothing. */
 @Component({
   selector: 'dy-health-page',
-  imports: [FullTextTip, MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell],
+  imports: [FullTextTip, MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -53,8 +54,9 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
               <ng-template pdCell="impact" let-e><span class="impact" [matTooltip]="impactFull(e)"><span class="dot" [attr.data-tone]="tone(e)" aria-hidden="true"></span><span class="lbl">{{ impact(e) }}</span>@if (e.impact.rating !== 'notMeasured') { <small class="faint num ell">{{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</span></ng-template>
             </pd-table>
           </div>
+          <dy-reading-source [via]="store.startupBtmVia()" [canRetry]="true" (retry)="reload()" />
           @for (u of store.startupUnavailable(); track u) {
-            <p class="shown" role="status">Not shown: {{ u }}</p>
+            @if (u !== btmReason()) { <p class="shown" role="status">Not shown: {{ u }}</p> }
           }
           <p class="shown">Showing {{ store.startup().length }} of {{ store.startupCounts().total }} entries@if (hidden() > 0) {, {{ hidden() }} hidden by the filter}.</p>
         </dy-async>
@@ -94,6 +96,12 @@ export class HealthPage implements OnInit {
   protected readonly emptyText = computed(() =>
     this.hidden() > 0 ? 'Turn a filter off above to see the entries it hides.' : 'Nothing is set to start when you sign in.',
   );
+  /** The reason the reading source already gives for the login items, so the list's own note does not say it twice. */
+  protected readonly btmReason = computed((): string | null => {
+    const v = this.store.startupBtmVia();
+    if (typeof v !== 'object') return null;
+    return 'needsHelper' in v ? v.needsHelper.reason : v.unavailable.reason;
+  });
   protected readonly bytes = formatBytes;
   protected readonly secs = formatSeconds;
   protected readonly state = (e: StartupEntry) => startupStateText(e.state);
