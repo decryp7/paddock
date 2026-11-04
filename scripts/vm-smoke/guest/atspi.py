@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """The Linux guest's accessibility driver (AT-SPI, the counterpart of axdrive.swift): drives the real Dyno window and the desktop's own dialogs.
-  atspi.py tree <app regex> [depth]      the tree of every matching application: "<indent>role  name"
+  atspi.py tree <app regex> [depth] [text]  the tree of every matching application: "<indent>role  name"; with `text` a node with no
+                                         name (a paragraph, a chip, a table cell: WebKit gives their words only through the Text
+                                         interface) prints its text instead
   atspi.py has <app regex> <name regex> [role]    exit 0 if such an element exists
   atspi.py press <app regex> <name regex> [role]  do the first action (click/press/activate) of the first such element
   atspi.py text <app regex> <name regex> <value>  set the text of a text field (read from the argument)
@@ -38,6 +40,16 @@ def name(e):
     try: return e.get_name() or ""
     except Exception: return ""
 
+def words(e):
+    """The name, or, for a node with none, its text (Atspi.Text): what the screen shows in a paragraph, a chip or a cell."""
+    n = name(e)
+    if n: return n
+    try:
+        t = Atspi.Text.get_text(e, 0, min(Atspi.Text.get_character_count(e), 400))
+        return (t or "").replace("\n", " ").strip()
+    except Exception:
+        return ""
+
 def matching(app_re):
     return [a for a in apps() if a is not None and re.search(app_re, name(a) or "", re.I)]
 
@@ -51,9 +63,10 @@ def find(app_re, name_re, role_re=None):
 cmd = sys.argv[1]
 if cmd == "tree":
     maxd = int(sys.argv[3]) if len(sys.argv) > 3 else 12
+    with_text = len(sys.argv) > 4 and sys.argv[4] == "text"
     for a in matching(sys.argv[2]):
         for e, d in walk(a, 0, maxd):
-            print("  " * d + role(e) + "  " + name(e))
+            print("  " * d + role(e) + "  " + (words(e) if with_text else name(e)))
 elif cmd == "apps":
     for a in apps(): print(name(a))
 elif cmd in ("has", "press"):
