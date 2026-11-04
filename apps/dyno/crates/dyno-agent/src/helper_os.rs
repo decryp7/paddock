@@ -178,6 +178,53 @@ pub fn transport() -> PeerTransport {
     let paths = HelperPaths::for_host(host, &windows_roots());
     let installed_path = paths.binary.clone();
     PeerTransport::new(paths.endpoint.clone(), move || is_installed(host, &installed_path, &SystemRunner))
+        .with_revive(Box::new(ServiceReviver::new(os_of(host), Arc::new(SystemClock))))
+}
+
+/// Starts the helper's stopped service through the Service Control Manager with the user's own token (no prompt: the service's
+/// security descriptor lets interactive users start it). Other systems have no such start and report that.
+pub struct ServiceReviver {
+    os: Os,
+    clock: Arc<dyn paddock_jobs::time::Clock>,
+}
+
+impl ServiceReviver {
+    /// A reviver for `os` timed by `clock`.
+    pub fn new(os: Os, clock: Arc<dyn paddock_jobs::time::Clock>) -> Self {
+        ServiceReviver { os, clock }
+    }
+}
+
+struct ClockPace {
+    clock: Arc<dyn paddock_jobs::time::Clock>,
+    began: Duration,
+}
+
+impl paddock_service::start::Pace for ClockPace {
+    fn elapsed(&mut self) -> Duration {
+        self.clock.monotonic().saturating_sub(self.began)
+    }
+    fn pause(&mut self, how_long: Duration) {
+        self.clock.sleep(how_long);
+    }
+}
+
+impl crate::helper_peer::Revive for ServiceReviver {
+    fn revive(&self, budget: Duration, ready: &mut dyn FnMut() -> bool) -> paddock_service::start::Revival {
+        let mut pace = ClockPace {
+            clock: self.clock.clone(),
+            began: self.clock.monotonic(),
+        };
+        paddock_service::start::revive(
+            &mut RealSystem::new(),
+            self.os,
+            dyno_helper_service::SERVICE_NAME,
+            budget,
+            &mut pace,
+            &dyno_core::helper_wire::start_exit_words,
+            ready,
+        )
+    }
 }
 
 /// The helper centre for this machine.

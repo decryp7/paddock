@@ -9,6 +9,7 @@ use dyno_core::helper_wire::{HelperMessage, HelperReply, HelperRequest};
 use dyno_helper_service::client::{connect_for, ConnectError, CONNECT_TIMEOUT};
 use paddock_ipc::{BodyPeer, IpcError};
 use paddock_jobs::time::{Clock, SystemClock};
+use paddock_service::start::{Revival, DEFAULT_BUDGET};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,6 +22,14 @@ const SLOW: Duration = Duration::from_secs(12 * 60);
 /// It is given the endpoint and the longest it may wait to connect.
 pub type Opener = Box<dyn Fn(&str, Duration) -> Result<BodyPeer<HelperMessage>, ConnectError> + Send + Sync>;
 
+/// Brings the helper's stopped service up without elevation (the SCM lets interactive users start it) and waits for the endpoint.
+/// The real one is `helper_os::ServiceReviver`; a test's is a fake service.
+pub trait Revive: Send + Sync {
+    /// Starts the service if it is stopped cleanly (waits if it is starting) and waits up to `budget` for `ready` to say the
+    /// endpoint answers.
+    fn revive(&self, budget: Duration, ready: &mut dyn FnMut() -> bool) -> Revival;
+}
+
 /// Calls the helper at its system endpoint.
 pub struct PeerTransport {
     endpoint: String,
@@ -30,6 +39,8 @@ pub struct PeerTransport {
     kept: Mutex<Option<BodyPeer<HelperMessage>>>,
     /// Times a live deadline across the connect and the retry.
     clock: Arc<dyn Clock>,
+    /// What brings a stopped service up when the program is installed and nothing listens (none: report it silent).
+    revive: Option<Box<dyn Revive>>,
 }
 
 impl PeerTransport {
@@ -42,7 +53,14 @@ impl PeerTransport {
             open: Box::new(connect_for),
             kept: Mutex::new(None),
             clock: Arc::new(SystemClock),
+            revive: None,
         }
+    }
+
+    /// The same transport starting a stopped helper service itself, through `revive`, before it reports the helper silent.
+    pub fn with_revive(mut self, revive: Box<dyn Revive>) -> Self {
+        self.revive = Some(revive);
+        self
     }
 
     /// The same transport timing its deadlines on `clock` (tests).
@@ -76,16 +94,50 @@ fn wait_for(request: &HelperRequest) -> Duration {
 }
 
 impl PeerTransport {
-    fn connect(&self, timeout: Duration) -> Result<BodyPeer<HelperMessage>, TransportError> {
-        (self.open)(&self.endpoint, timeout).map_err(|e| match e {
-            ConnectError::NotRunning(why) if !(self.installed)() => {
+    /// Opens a connection within `timeout`. When nothing listens but the program is installed, the helper's service is
+    /// brought up first (it may be stopped, or still starting after a boot) and waited for up to `budget`.
+    fn connect(&self, timeout: Duration, budget: Duration) -> Result<BodyPeer<HelperMessage>, TransportError> {
+        let began = self.clock.monotonic();
+        let why = match (self.open)(&self.endpoint, timeout) {
+            Ok(peer) => return Ok(peer),
+            Err(ConnectError::NotRunning(why)) if !(self.installed)() => {
                 log::debug!(why = why.as_str(); "the helper is not installed");
-                TransportError::Absent
+                return Err(TransportError::Absent);
             }
-            ConnectError::NotRunning(why) => TransportError::Silent(why),
-            ConnectError::Untrusted(owner) => TransportError::Foreign(owner),
-            ConnectError::Peer(e) => TransportError::Silent(e.to_string()),
-        })
+            Err(ConnectError::NotRunning(why)) => why,
+            Err(ConnectError::Untrusted(owner)) => return Err(TransportError::Foreign(owner)),
+            Err(ConnectError::Peer(e)) => return Err(TransportError::Silent(e.to_string())),
+        };
+        let Some(revive) = &self.revive else {
+            return Err(TransportError::Silent(why));
+        };
+        // The peer that answers while waiting is the one used: no second connect.
+        let mut found: Option<BodyPeer<HelperMessage>> = None;
+        let outcome = revive.revive(budget, &mut || match (self.open)(&self.endpoint, timeout) {
+            Ok(peer) => {
+                found = Some(peer);
+                true
+            }
+            Err(_) => false,
+        });
+        let ms = self.clock.monotonic().saturating_sub(began).as_millis() as u64;
+        match (outcome, found) {
+            (Revival::Up, Some(peer)) => {
+                log::info!(Ms = ms; "The helper service was not answering and is up now");
+                Ok(peer)
+            }
+            (Revival::Up, None) => Err(TransportError::Silent(why)),
+            (Revival::Waiting(reason), _) => {
+                log::info!(Ms = ms, Reason = reason.as_str(); "The helper service is starting");
+                Err(TransportError::Starting(reason))
+            }
+            (Revival::Down(reason), _) => {
+                log::warn!(Ms = ms, Reason = reason.as_str(); "The helper service is down");
+                Err(TransportError::Silent(format!("{reason} ({why})")))
+            }
+            (Revival::NotInstalled, _) => Err(TransportError::Silent(format!("the helper service is not registered ({why})"))),
+            (Revival::NotSupported, _) => Err(TransportError::Silent(why)),
+        }
     }
 
     fn take(&self) -> Option<BodyPeer<HelperMessage>> {
@@ -125,7 +177,7 @@ impl HelperTransport for PeerTransport {
                 None => {
                     reused = false;
                     // The connect waits no longer than what is left of the deadline.
-                    self.connect(left().map_or(CONNECT_TIMEOUT, |l| l.min(CONNECT_TIMEOUT)))?
+                    self.connect(left().map_or(CONNECT_TIMEOUT, |l| l.min(CONNECT_TIMEOUT)), left().map_or(DEFAULT_BUDGET, |l| l.min(DEFAULT_BUDGET)))?
                 }
             };
             // The connect may have taken the whole deadline.
@@ -372,6 +424,121 @@ mod tests {
             dyno_helper_service::client::CONNECT_TIMEOUT,
             "an ordinary call keeps the usual connect time"
         );
+    }
+
+    // The helper service after a restart: the program is installed, nothing listens, and the service is down, starting or failed.
+    use paddock_jobs::time::FakeClock;
+    use paddock_service::start::{revive, Pace};
+    use paddock_service::testing::FakeSystem;
+    use paddock_env::Os;
+    use paddock_service::Output;
+
+    /// Time on a fake clock: waiting advances it.
+    struct Advance(FakeClock);
+    impl Pace for Advance {
+        fn elapsed(&mut self) -> Duration {
+            self.0.monotonic()
+        }
+        fn pause(&mut self, how_long: Duration) {
+            self.0.advance(how_long);
+        }
+    }
+
+    /// The real start logic over a fake service whose `sc query` answers follow `script` (the last repeats).
+    struct FakeService {
+        sys: FakeSystem,
+        clock: FakeClock,
+    }
+    impl Revive for FakeService {
+        fn revive(&self, budget: Duration, ready: &mut dyn FnMut() -> bool) -> Revival {
+            let mut sys = self.sys.clone();
+            let mut pace = Advance(self.clock.clone());
+            revive(&mut sys, Os::Windows, "DynoHelper", budget, &mut pace, &dyno_core::helper_wire::start_exit_words, ready)
+        }
+    }
+
+    fn query(state: &str, win32: u32, specific: u32) -> Output {
+        Output::ok(&format!(
+            "SERVICE_NAME: DynoHelper\r\n        STATE              : {state}\r\n        WIN32_EXIT_CODE    : {win32}  (0x0)\r\n        SERVICE_EXIT_CODE  : {specific}  (0x0)\r\n"
+        ))
+    }
+
+    /// A transport whose pipe opens `up_at` after the clock's start; the service answers `script` to `sc query`.
+    fn after_restart(script: Vec<Output>, up_at: Duration) -> (PeerTransport, FakeSystem, FakeClock, Arc<AtomicUsize>) {
+        let clock = FakeClock::new();
+        let sys = FakeSystem::new();
+        let at = Arc::new(AtomicUsize::new(0));
+        sys.on("sc query", move |_, _| Ok(script[at.fetch_add(1, Ordering::SeqCst).min(script.len() - 1)].clone()));
+        let starts = Arc::new(AtomicUsize::new(0));
+        let n = starts.clone();
+        sys.on("sc start", move |_, _| {
+            n.fetch_add(1, Ordering::SeqCst);
+            Ok(Output::ok("STATE : 2  START_PENDING"))
+        });
+        let now = clock.clone();
+        let t = PeerTransport::new("x", || true)
+            .with_clock(Arc::new(clock.clone()))
+            .with_revive(Box::new(FakeService { sys: sys.clone(), clock: clock.clone() }))
+            .with_opener(Box::new(move |_, _| {
+                if now.monotonic() < up_at {
+                    return Err(ConnectError::NotRunning("no such pipe".into()));
+                }
+                let (ours, theirs) = pair().expect("a stream pair");
+                let server = BodyPeer::<HelperMessage>::start(
+                    Connection::raw(theirs, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)),
+                    BodyOptions::new("test helper").serve(Server(Ok(HelperMessage::Reply(HelperReply::Bye)))),
+                )
+                .expect("the test server starts");
+                std::mem::forget(server);
+                BodyPeer::start(Connection::raw(ours, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)), BodyOptions::new("the helper"))
+                    .map_err(ConnectError::Peer)
+            }));
+        (t, sys, clock, starts)
+    }
+
+    #[test]
+    fn a_stopped_helper_service_is_started_once_without_a_prompt_and_the_call_answers() {
+        let (t, _sys, _clock, starts) = after_restart(
+            vec![query("1  STOPPED", 0, 0), query("2  START_PENDING", 0, 0), query("4  RUNNING", 0, 0)],
+            Duration::from_secs(2),
+        );
+        assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "one start, no Repair");
+    }
+
+    #[test]
+    fn a_helper_service_that_is_still_starting_after_the_boot_is_waited_for_not_started_again() {
+        let (t, _sys, _clock, starts) = after_restart(vec![query("2  START_PENDING", 0, 0)], Duration::from_secs(9));
+        assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_helper_service_stopped_with_an_error_is_silent_with_the_services_own_reason_and_not_started() {
+        let (t, _sys, _clock, starts) = after_restart(vec![query("1  STOPPED", 1066, 3)], Duration::from_secs(2));
+        match t.call(HelperRequest::Info) {
+            Err(TransportError::Silent(why)) => {
+                assert!(why.contains("exit code 3") && why.contains("not protected") && why.contains("no such pipe"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(starts.load(Ordering::SeqCst), 0, "a service that fails is repaired, not started in a loop");
+    }
+
+    #[test]
+    fn a_live_reading_does_not_wait_out_a_slow_start_and_is_told_it_is_starting() {
+        let (t, _sys, clock, _starts) = after_restart(vec![query("2  START_PENDING", 0, 0)], Duration::from_secs(60));
+        let out = t.call_within(HelperRequest::Info, Some(Duration::from_secs(2)));
+        assert!(matches!(out, Err(TransportError::Starting(_))), "{out:?}");
+        assert!(clock.monotonic() <= Duration::from_secs(4), "waited {:?}, not the whole start", clock.monotonic());
+    }
+
+    #[test]
+    fn a_helper_that_is_not_installed_is_absent_and_the_service_is_never_asked() {
+        let (t, sys, _clock, _starts) = after_restart(vec![query("1  STOPPED", 0, 0)], Duration::from_secs(60));
+        let t = PeerTransport { installed: Box::new(|| false), ..t };
+        assert_eq!(t.call(HelperRequest::Info), Err(TransportError::Absent));
+        assert!(sys.commands().is_empty(), "{:?}", sys.commands());
     }
 
     #[test]

@@ -351,6 +351,9 @@ pub enum Probe {
     Answered(HelperInfo, Vec<AuditEntry>),
     /// The endpoint exists but nobody answered, with the reason.
     Silent(String),
+    /// The helper's service is starting (just after Windows started, or just started by the agent) and does not answer yet:
+    /// not a fault, and Dyno looks again by itself.
+    Starting(String),
     /// Something that is not Dyno's helper owns the endpoint (pipe squatting): the owner's account id (or uid).
     Foreign(String),
 }
@@ -506,6 +509,13 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             vec![],
             Some(why),
         ),
+        Probe::Starting(why) => status(
+            HelperState::NotRunning,
+            "The helper is starting. This takes a moment after Windows starts; Dyno looks again by itself.".into(),
+            None,
+            vec![],
+            Some(why),
+        ),
         Probe::Foreign(owner) => status(
             HelperState::Foreign,
             "Another program is answering where Dyno's helper should be. Dyno does not trust it and sends it nothing. Repair the helper to take its place back.".into(),
@@ -528,6 +538,55 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             Some(format!("Helper version {}, Dyno {our_version}.", info.version)),
         ),
     }
+}
+
+/// Why the helper service stopped at its own start, as the service-specific exit code the Service Control Manager keeps (`sc
+/// query`: `SERVICE_EXIT_CODE`). The service writes the code when it refuses to start, the agent reads it back and says
+/// why the helper is down (ER-27), so the two agree on one table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartFailure {
+    /// Anything not listed below.
+    Other,
+    /// A protected-location check failed: the program, the data folder or something in it is not protected.
+    NotProtected,
+    /// The configuration is missing, damaged or not protected.
+    BadConfig,
+    /// The endpoint (pipe or socket) could not be opened.
+    Endpoint,
+}
+
+impl StartFailure {
+    /// The service-specific exit code (never 0, which means a clean stop).
+    pub fn code(self) -> u32 {
+        match self {
+            StartFailure::Other => 1,
+            StartFailure::NotProtected => 3,
+            StartFailure::BadConfig => 4,
+            StartFailure::Endpoint => 5,
+        }
+    }
+
+    /// The failure a service-specific exit code means; `None` for a code this table does not know.
+    pub fn from_code(code: u32) -> Option<StartFailure> {
+        [StartFailure::Other, StartFailure::NotProtected, StartFailure::BadConfig, StartFailure::Endpoint]
+            .into_iter()
+            .find(|f| f.code() == code)
+    }
+
+    /// Plain words with the next step.
+    pub fn words(self) -> &'static str {
+        match self {
+            StartFailure::Other => "the helper could not start (see the Dyno helper entry in the Windows Event Log)",
+            StartFailure::NotProtected => "a folder or file of the helper is not protected; Repair puts it right",
+            StartFailure::BadConfig => "the helper's configuration is missing or damaged; Repair writes it again",
+            StartFailure::Endpoint => "the helper could not open its endpoint; another program may hold it, Repair takes it back",
+        }
+    }
+}
+
+/// [`StartFailure::words`] for a service-specific exit code the agent read from the Service Control Manager.
+pub fn start_exit_words(code: u32) -> Option<&'static str> {
+    StartFailure::from_code(code).map(StartFailure::words)
 }
 
 /// The codes a refused or failed helper call carries (`RemoteError::code`).
@@ -914,5 +973,30 @@ mod tests {
         assert_eq!(parse_audit_line(&format!("{line}\n")), Some(e));
         assert_eq!(parse_audit_line("{not json"), None);
         assert_eq!(parse_audit_line(""), None);
+    }
+
+    #[test]
+    fn a_helper_that_is_still_starting_is_not_told_to_repair() {
+        let s = assess(HelperHost::Windows, Ok(()), Probe::Starting("the service is StartPending".into()), "1.1.0");
+        assert_eq!(s.state, HelperState::NotRunning);
+        assert!(s.message.contains("starting") && !s.message.contains("Repair"), "{}", s.message);
+        assert_eq!(s.detail.as_deref(), Some("the service is StartPending"));
+        let silent = assess(HelperHost::Windows, Ok(()), Probe::Silent("x".into()), "1.1.0");
+        assert!(silent.message.contains("Repair"), "a stopped service with an error still says Repair");
+    }
+
+    #[test]
+    fn start_failures_have_distinct_nonzero_exit_codes_that_read_back_into_words() {
+        let all = [StartFailure::Other, StartFailure::NotProtected, StartFailure::BadConfig, StartFailure::Endpoint];
+        let mut seen = std::collections::HashSet::new();
+        for f in all {
+            assert_ne!(f.code(), 0, "0 is a clean stop");
+            assert!(seen.insert(f.code()), "{f:?} shares a code");
+            assert_eq!(StartFailure::from_code(f.code()), Some(f));
+            assert_eq!(start_exit_words(f.code()), Some(f.words()));
+            assert!(f.words().len() > 20);
+        }
+        assert_eq!(start_exit_words(0), None);
+        assert_eq!(start_exit_words(999), None);
     }
 }
