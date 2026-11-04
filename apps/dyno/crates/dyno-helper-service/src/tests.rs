@@ -216,7 +216,7 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
         Path::new("/usr/bin/dyno-helper"),
         &mut files,
         &mut paddock_service::privileged::trust_fake::windows_machine(|_| paddock_service::privileged::trust_fake::locked()),
-        &FamilyKey::from_text(None),
+        &FamilyKey::new(None, SIGNED_NAME),
         &make_system(&sys),
     )
     .unwrap();
@@ -246,9 +246,10 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
     assert!(sys.commands().contains(&"systemctl disable --now dyno-helper.service".to_string()));
 }
 
-const KEY: &str = include_str!("../../../../../crates/paddock-updater/tests/fixtures/key.pub");
-const SIGNED: &[u8] = include_bytes!("../../../../../crates/paddock-updater/tests/fixtures/update.bin");
-const SIGNATURE: &[u8] = include_bytes!("../../../../../crates/paddock-updater/tests/fixtures/update.bin.sig");
+const SIGNED_NAME: &str = "dyno-helper-9.9.9-aarch64-apple-darwin";
+const KEY: &str = include_str!("../tests/fixtures/throwaway.pub");
+const SIGNED: &[u8] = include_bytes!("../tests/fixtures/helper.bin");
+const SIGNATURE: &[u8] = include_bytes!("../tests/fixtures/helper-9.9.9.sig");
 const MAC_SOURCE: &str = "/Applications/Dyno.app/Contents/MacOS/dyno-helper";
 const MAC_SIGNATURE: &str = "/Applications/Dyno.app/Contents/Resources/dyno-helper.minisig";
 
@@ -259,7 +260,7 @@ fn mac_install(files: &mut FakeFiles, sys: &FakeSystem) -> Result<Report, Instal
         Path::new(MAC_SOURCE),
         files,
         &mut paddock_service::privileged::trust_fake::windows_machine(|_| paddock_service::privileged::trust_fake::locked()),
-        &FamilyKey::from_text(Some(KEY)),
+        &FamilyKey::new(Some(KEY), SIGNED_NAME),
         &make_system(sys),
     )
 }
@@ -319,12 +320,12 @@ fn a_macos_helper_is_copied_only_with_a_valid_signature_of_the_family_key() {
 #[test]
 fn a_build_without_the_family_key_refuses_every_helper() {
     use paddock_service::privileged::SourceVerifier;
-    let none = FamilyKey::from_text(None);
+    let none = FamilyKey::new(None, SIGNED_NAME);
     let err = none.verify(SIGNED, SIGNATURE).unwrap_err();
     assert!(err.contains("no update key") && err.contains("official download"), "{err}");
-    assert!(FamilyKey::from_text(Some("   ")).verify(SIGNED, SIGNATURE).is_err());
-    assert!(FamilyKey::from_text(Some("not a key")).verify(SIGNED, SIGNATURE).is_err());
-    let key = FamilyKey::from_text(Some(KEY));
+    assert!(FamilyKey::new(Some("   "), "n").verify(SIGNED, SIGNATURE).is_err());
+    assert!(FamilyKey::new(Some("not a key"), "n").verify(SIGNED, SIGNATURE).is_err());
+    let key = FamilyKey::new(Some(KEY), SIGNED_NAME);
     assert!(key.verify(SIGNED, SIGNATURE).unwrap().starts_with("valid"));
 }
 
@@ -465,4 +466,29 @@ fn the_windows_uninstaller_asks_for_one_prompt_to_remove_the_service_with_the_bu
         "the bundled copy removes the installed one (a running program cannot delete itself)"
     );
     assert_eq!(pre_uninstall.matches("runas").count(), 1, "one prompt");
+}
+
+const FX_KEY: &str = KEY;
+const FX_BIN: &[u8] = SIGNED;
+const FX_SIG_999: &[u8] = SIGNATURE;
+const FX_SIG_100: &[u8] = include_bytes!("../tests/fixtures/helper-1.0.0.sig");
+
+#[test]
+fn a_signature_is_good_only_for_the_file_name_it_was_made_for_so_an_older_helper_never_passes() {
+    use paddock_service::privileged::SourceVerifier;
+    let current = FamilyKey::new(Some(FX_KEY), "dyno-helper-9.9.9-aarch64-apple-darwin");
+    assert!(current.verify(FX_BIN, FX_SIG_999).unwrap().contains("dyno-helper-9.9.9-aarch64-apple-darwin"));
+    // The same bytes with the signature of an older version (a validly family-signed older helper): refused.
+    let err = current.verify(FX_BIN, FX_SIG_100).unwrap_err();
+    assert!(err.contains("not made for this version") && err.contains("official download"), "{err}");
+    // Another architecture is refused the same way.
+    let other = FamilyKey::new(Some(FX_KEY), "dyno-helper-9.9.9-x86_64-apple-darwin");
+    assert!(other.verify(FX_BIN, FX_SIG_999).is_err());
+}
+
+#[test]
+fn the_name_this_build_expects_carries_its_version_and_architecture() {
+    let name = crate::source_check::expected_signed_name();
+    assert!(name.starts_with(&format!("dyno-helper-{}-", env!("CARGO_PKG_VERSION"))), "{name}");
+    assert!(name.ends_with("-apple-darwin") || name.ends_with("-unknown"), "{name}");
 }

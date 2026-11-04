@@ -27,43 +27,69 @@ pub fn signature_locations(source: &Path) -> Vec<PathBuf> {
     places
 }
 
-/// Checks a helper against the family update key (Tauri's key format, [`UpdateKey`]).
-pub struct FamilyKey(Result<UpdateKey, String>);
+/// The file name the release signs the helper under, and so the `file:` field of the signature's trusted comment:
+/// `dyno-helper-<version>-<target triple>`. The signature therefore holds only for this version on this architecture; an older
+/// family-signed helper, or another architecture's, never passes (the trusted comment is covered by the signature).
+pub fn expected_signed_name() -> String {
+    let triple = match std::env::consts::ARCH {
+        "aarch64" if cfg!(target_os = "macos") => "aarch64-apple-darwin",
+        "x86_64" if cfg!(target_os = "macos") => "x86_64-apple-darwin",
+        _ => "unknown",
+    };
+    format!("dyno-helper-{}-{triple}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Checks a helper against the family update key (Tauri's key format, [`UpdateKey`]) and the name it must have been signed as.
+pub struct FamilyKey {
+    key: Result<UpdateKey, String>,
+    signed_name: String,
+}
 
 impl FamilyKey {
-    /// The key this build was made with (`TAURI_UPDATER_PUBKEY` at build time, as the app's updater has it). A build without
-    /// one cannot tell a genuine helper from a replaced one and refuses every install.
+    /// The key this build was made with (`TAURI_UPDATER_PUBKEY` at build time, as the app's updater has it), expecting this
+    /// version's and architecture's signed name. A build without a key cannot tell a genuine helper from a replaced one and
+    /// refuses every install.
     pub fn compiled_in() -> Self {
-        Self::from_text(option_env!("TAURI_UPDATER_PUBKEY"))
+        Self::new(option_env!("TAURI_UPDATER_PUBKEY"), &expected_signed_name())
     }
 
-    /// A key from its text (tests use a key of their own).
-    pub fn from_text(text: Option<&str>) -> Self {
-        Self(match UpdateKey::resolve([text]) {
-            Some(key) => Ok(key),
-            None => Err(
-                "this build of Dyno carries no update key, so its helper cannot be checked; install Dyno from the official download".into(),
-            ),
-        })
+    /// A key from its text and the signed name to require (tests use a key and names of their own).
+    pub fn new(text: Option<&str>, signed_name: &str) -> Self {
+        Self {
+            key: match UpdateKey::resolve([text]) {
+                Some(key) => Ok(key),
+                None => Err(
+                    "this build of Dyno carries no update key, so its helper cannot be checked; install Dyno from the official download".into(),
+                ),
+            },
+            signed_name: signed_name.to_string(),
+        }
     }
 }
 
 impl SourceVerifier for FamilyKey {
     fn verify(&self, program: &[u8], signature: &[u8]) -> Result<String, String> {
-        let key = self.0.as_ref().map_err(Clone::clone)?;
+        let key = self.key.as_ref().map_err(Clone::clone)?;
         let text = std::str::from_utf8(signature)
             .map_err(|_| "the helper's signature file is not text; reinstall Dyno from the official download".to_string())?;
-        verify_bytes(key, program, text)
-            .map(|comment| format!("valid ({})", comment.chars().take(80).collect::<String>()))
-            .map_err(|e| {
-                let detail = match e {
-                    VerifyError::Invalid(why) => why.to_string(),
-                    VerifyError::Io(why) => why,
-                    VerifyError::Cancelled => "cancelled".into(),
-                };
-                format!(
-                    "the helper does not match its signature ({detail}), so it may have been replaced; reinstall Dyno from the official download and turn the helper on again"
-                )
-            })
+        let comment = verify_bytes(key, program, text).map_err(|e| {
+            let detail = match e {
+                VerifyError::Invalid(why) => why.to_string(),
+                VerifyError::Io(why) => why,
+                VerifyError::Cancelled => "cancelled".into(),
+            };
+            format!(
+                "the helper does not match its signature ({detail}), so it may have been replaced; reinstall Dyno from the official download and turn the helper on again"
+            )
+        })?;
+        let signed_as = comment.split('\t').find_map(|f| f.strip_prefix("file:")).unwrap_or("");
+        if signed_as != self.signed_name {
+            return Err(format!(
+                "the helper's signature was not made for this version of Dyno (it names '{}', this build needs '{}'), so an older or other helper may have been put in its place; reinstall Dyno from the official download and turn the helper on again",
+                signed_as.chars().take(60).collect::<String>(),
+                self.signed_name
+            ));
+        }
+        Ok(format!("valid ({})", comment.chars().take(100).collect::<String>()))
     }
 }

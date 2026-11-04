@@ -2,7 +2,8 @@
 // app/src-tauri/binaries/<name>-<target triple>[.exe]. Run by `beforeBuildCommand` / `beforeDevCommand`
 // (tauri.conf.json); `--dev` builds the debug profile. Honours CARGO_TARGET_DIR, a build.target-dir in the cargo configuration (CI's .cargo/ci.toml) and TAURI_ENV_TARGET_TRIPLE.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,8 +48,13 @@ if (triple.includes('apple-darwin')) {
   const hashFile = join(root, 'app', 'src-tauri', 'binaries', 'dyno-helper.sha256');
   if (process.env.TAURI_SIGNING_PRIVATE_KEY) {
     execFileSync('codesign', ['--force', '-s', '-', helper], { stdio: 'inherit' });
-    execFileSync('npx', ['tauri', 'signer', 'sign', helper], { cwd: join(root, 'app'), stdio: 'inherit' });
-    copyFileSync(`${helper}.sig`, sig);
+    // The signature's trusted comment carries the signed file's name, so the helper is signed under `dyno-helper-<version>-<triple>`:
+    // the elevated install requires exactly its own version and architecture, and no older family-signed helper passes.
+    const version = JSON.parse(readFileSync(join(root, 'app', 'src-tauri', 'tauri.conf.json'), 'utf8')).version;
+    const named = join(mkdtempSync(join(tmpdir(), 'dyno-helper-sign-')), `dyno-helper-${version}-${triple}`);
+    copyFileSync(helper, named);
+    execFileSync('npx', ['tauri', 'signer', 'sign', named], { cwd: join(root, 'app'), stdio: 'inherit' });
+    copyFileSync(`${named}.sig`, sig);
     writeFileSync(hashFile, createHash('sha256').update(readFileSync(helper)).digest('hex') + '\n');
     console.log(`helper signature: ${sig} covers sha256 ${readFileSync(hashFile, 'utf8').trim()}`);
   } else {

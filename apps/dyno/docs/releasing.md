@@ -133,3 +133,26 @@ fails (in the bundle job, before the three builds) if the section is missing, st
 ## First launch note
 
 Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+## The helper's signature (macOS) and how to test it locally
+
+The macOS helper that the one password prompt copies into `/Library/PrivilegedHelperTools` is verified by the elevated install
+against a minisign signature made with the family update key (security review of the helper install; ADR 0027 amendment).
+
+- `app/src-tauri/scripts/sidecar.mjs` signs the final, ad-hoc sealed helper under the file name `dyno-helper-<version>-<target
+  triple>`; the signature's trusted comment carries that name, and the helper accepts only its own version and architecture. The
+  signature is bundled as `Contents/Resources/dyno-helper.minisig`; the hash it covers goes to `binaries/dyno-helper.sha256`.
+- `scripts/check-bundle.sh` fails the build when the helper in the .app is not the file that was signed, and fails a tag build (or
+  a build with `TAURI_UPDATER_PUBKEY` set) whose helper is unsigned. Pull-request and dev builds only warn.
+
+Testing without the family key: make a throwaway pair and build with it.
+
+```sh
+cargo tauri signer generate -w /tmp/throwaway.key -p ""           # prints the public key; keep both out of the repository
+export TAURI_SIGNING_PRIVATE_KEY="$(cat /tmp/throwaway.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+export TAURI_UPDATER_PUBKEY="$(cat /tmp/throwaway.key.pub)"        # compiled into the helper by the same build
+node apps/dyno/app/src-tauri/scripts/sidecar.mjs && (cd apps/dyno/app && npx tauri build -- --profile dist)
+```
+
+The key must be the same for the signature and for the build that compiles `TAURI_UPDATER_PUBKEY` in, or the install says the
+helper does not match its signature. Unit tests use the fixtures in `crates/dyno-helper-service/tests/fixtures/` (a throwaway key).

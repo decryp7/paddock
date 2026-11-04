@@ -109,7 +109,16 @@ case "$(uname -s)" in
       [[ "$actual" == "$signed_hash" ]] || err "the bundled dyno-helper ($actual) is not the file the release signed ($signed_hash): Tauri changed it after signing, so its install would be refused"
       [[ -s "$sig_file" ]] || err "the .app has no dyno-helper.minisig in Contents/Resources"
     else
-      echo "::warning::the bundled dyno-helper is not signed (no signing key in this build): turning the helper on will be refused"
+      # A release (a tag) or a build made with the updater key is meant to be installed by users: an unsigned helper there is a broken
+      # release, so it fails. Pull-request and dev builds have no key and only warn.
+      release=0
+      case "${GITHUB_REF:-}${GITEA_REF:-}" in refs/tags/*) release=1 ;; esac
+      [[ "${GITHUB_REF_TYPE:-}${GITEA_REF_TYPE:-}" == tag ]] && release=1
+      if (( release )) || [[ -n "${TAURI_UPDATER_PUBKEY:-}" ]]; then
+        err "the bundled dyno-helper is not signed (TAURI_SIGNING_PRIVATE_KEY was not available to sidecar.mjs, release=$release, updater key set=$([[ -n "${TAURI_UPDATER_PUBKEY:-}" ]] && echo yes || echo no)): turning the helper on would be refused. Next step: give the release job the signing key and rebuild"
+      else
+        echo "::warning::the bundled dyno-helper is not signed (no signing key in this build): turning the helper on will be refused"
+      fi
     fi
     if [[ -x "$app/Contents/MacOS/dyno-helper" ]]; then "$app/Contents/MacOS/dyno-helper" --self-test || err "the bundled dyno-helper --self-test failed"; fi
     agent="$app/Contents/MacOS/dyno-agent"
