@@ -66,6 +66,8 @@ struct TrayUserData {
     menu_on_left_click: bool,
     menu_on_right_click: bool,
     visible: bool,
+    /// Paddock patch: whether the shell accepted the last add (false when Explorer's notification area was not ready).
+    added: bool,
 }
 
 impl TrayUserData {
@@ -124,6 +126,7 @@ impl TrayIcon {
                 menu_on_left_click: attrs.menu_on_left_click,
                 menu_on_right_click: attrs.menu_on_right_click,
                 visible: true,
+                added: false,
             };
 
             let hwnd = CreateWindowExW(
@@ -162,11 +165,12 @@ impl TrayIcon {
             let mut guid = guid;
             let guid_status =
                 register_with_guid_recovery(hwnd, internal_id, &mut guid, &hicon, &attrs.tooltip, true);
-            if guid.is_none() && attrs.guid.is_some() {
-                let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
-                if !userdata.is_null() {
+            let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
+            if !userdata.is_null() {
+                if guid.is_none() && attrs.guid.is_some() {
                     (*userdata).guid = None;
                 }
+                (*userdata).added = guid_status != crate::GuidStatus::NotAdded;
             }
 
             if let Some(menu) = &attrs.menu {
@@ -185,6 +189,15 @@ impl TrayIcon {
 
     pub fn guid_status(&self) -> crate::GuidStatus {
         self.guid_status
+    }
+
+    /// Paddock patch: whether the shell holds this icon now: the last add (the first, or the re-add after `TaskbarCreated`)
+    /// was accepted. False while Explorer's notification area was not ready, which nothing else reports.
+    pub fn is_added(&self) -> bool {
+        unsafe {
+            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
+            !userdata.is_null() && (*userdata).added
+        }
     }
 
     pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
@@ -372,7 +385,7 @@ unsafe extern "system" fn tray_proc(
         _ if msg == *S_U_TASKBAR_RESTART => {
             remove_tray_icon(userdata.hwnd, userdata.internal_id, userdata.guid);
             // Paddock patch: the same GUID recovery as the first add (a first add that failed because Explorer was not up gets here).
-            register_with_guid_recovery(
+            let status = register_with_guid_recovery(
                 userdata.hwnd,
                 userdata.internal_id,
                 &mut userdata.guid,
@@ -380,6 +393,7 @@ unsafe extern "system" fn tray_proc(
                 &userdata.tooltip,
                 userdata.visible,
             );
+            userdata.added = status != crate::GuidStatus::NotAdded;
         }
         WM_USER_SHOW_MENU_ON_LEFT_CLICK => {
             userdata.menu_on_left_click = wparam != 0;

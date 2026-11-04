@@ -445,6 +445,19 @@ impl TrayIcon {
         }
     }
 
+    /// Paddock patch: whether the OS holds this icon now. Windows: the shell accepted the last add (it refuses while Explorer's
+    /// notification area is not ready, and the icon is added again on `TaskbarCreated`). Elsewhere always true.
+    pub fn is_added(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.tray.borrow().is_added()
+        }
+        #[cfg(not(windows))]
+        {
+            true
+        }
+    }
+
     /// Returns the id associated with this tray icon.
     pub fn id(&self) -> &TrayIconId {
         &self.id
