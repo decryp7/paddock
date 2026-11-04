@@ -1,5 +1,4 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, signal, untracked } from '@angular/core';
-import { MatButton } from '@angular/material/button';
 import { MatCheckbox } from '@angular/material/checkbox';
 import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
@@ -28,7 +27,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
 @Component({
   selector: 'pd-notifications-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, SuSegmentedControl, MatCheckbox, MatButton],
+  imports: [SuEmptyState, SuSegmentedControl, MatCheckbox],
   template: `
     <div class="pd-bar" data-testid="notices-filter-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
@@ -40,7 +39,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
         <button type="button" class="pd-btn" data-testid="notices-delete-selected" (click)="deleteSelected()">{{ deleteSelectedLabel() }}</button>
       }
       @if (store.all().length) {
-        <button type="button" matButton="outlined" class="pd-danger" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
+        <button type="button" class="pd-btn pd-ghost pd-quiet" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
       }
       <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
     </div>
@@ -107,15 +106,19 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     .pd-notice[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
     .pd-notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
     .pd-notice.pd-focus { outline: 2px solid var(--pd-focus-ring); }
-    .pd-row { display: flex; align-items: flex-start; gap: var(--pd-space-1); min-width: 0; }
-    .pd-pick { flex: none; margin-block: -10px; margin-inline-start: -10px; }
-    .pd-dot { width: 7px; height: 7px; margin-top: 0.5lh; translate: 0 -50%; border-radius: 50%; flex: none; }
+    :host { --pd-pick-size: 24px; --pd-dot-size: 7px; }
+    .pd-row { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; }
+    /* A 24 px touch target (no margin of its own: the shared rule in _material.scss already pulls the box back by half the overhang, so it
+       sits inside the item's padding and clear of the accent bar). */
+    .pd-pick { --mat-checkbox-state-layer-size: var(--pd-pick-size); flex: none; }
+    .pd-dot { width: var(--pd-dot-size); height: var(--pd-dot-size); border-radius: 50%; flex: none; }
     .pd-unread .pd-dot { background: var(--pd-accent); }
     /* Wraps (two lines, then an ellipsis with the full text in the tooltip): a one-line ellipsis cut titles with room to spare. */
     .pd-title { flex: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: var(--pd-weight-medium); }
     .pd-notice:not(.pd-unread) .pd-title { font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
     .pd-time { white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
-    .pd-body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+    /* Under the title: past the checkbox (its host is narrower by the shared rule's pull), the dot and the two gaps. */
+    .pd-body { margin: 0; padding-inline-start: calc(var(--pd-pick-size) - (var(--pd-pick-size) - 18px) / 2 + var(--pd-dot-size) + 2 * var(--pd-space-1)); color: var(--pd-text-muted); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
     .pd-actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
     .pd-row-actions { position: absolute; inset-block-start: 2px; inset-inline-end: var(--pd-space-1); display: flex; gap: 2px; padding-inline-start: var(--pd-space-2); background: var(--pd-surface-3); border-radius: var(--pd-radius-control); opacity: 0; }
     /* Shown by hover or by focus on one of its own buttons, never by focus on a body action (that would cover the time). */
@@ -123,7 +126,9 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     /* The buttons sit over the time, so it gives way whole while they show (not cut in half). */
     .pd-notice:hover .pd-time, .pd-row:has(.pd-row-actions:focus-within) .pd-time { visibility: hidden; }
     @media (hover: none) { .pd-row-actions { position: static; opacity: 1; padding-inline-start: 0; } .pd-notice:hover .pd-time { visibility: visible; } }
-    .pd-danger { --mat-button-outlined-label-text-color: var(--pd-danger); --mat-button-outlined-outline-color: var(--pd-danger); min-height: 26px; }
+    /* Delete all is no louder than Mark all read: the confirmation carries the danger, and Delete selected is the one that follows a choice. */
+    .pd-btn.pd-quiet { color: var(--pd-text-muted); }
+    .pd-btn.pd-quiet:hover:not(:disabled) { color: var(--pd-danger); }
     .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
     .pd-btn:disabled { color: var(--pd-text-subtle); cursor: default; }

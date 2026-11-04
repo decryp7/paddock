@@ -542,6 +542,13 @@ describe('selecting and deleting notifications', () => {
     expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
   });
 
+  it('Delete all is a quiet text button like Mark all read, not a filled or outlined danger button', async () => {
+    const { el } = await panel();
+    const del = one(el, '[data-testid=notices-delete-all]');
+    expect(del.classList.contains('pd-ghost')).toBe(true);
+    expect(del.hasAttribute('matbutton') || del.classList.contains('mat-mdc-outlined-button') || del.classList.contains('pd-danger')).toBe(false);
+  });
+
   it('deletes everything only after the decision dialog is answered', async () => {
     const no = await panel('dismissed');
     one(no.el, '[data-testid=notices-delete-all]').click();
