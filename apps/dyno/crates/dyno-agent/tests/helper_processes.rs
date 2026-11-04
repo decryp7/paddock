@@ -114,9 +114,14 @@ fn another_standard_user_gets_a_total_and_no_names() {
         table.iter().all(|p| p.pid != 3),
         "the other account's process is not listed to a non-owner"
     );
+    assert!(
+        table.iter().all(|p| p.pid != 2),
+        "the owner's process is another account's to this caller too"
+    );
     let prov = src.provenance();
     let o = prov.others_total.expect("the helper's total");
-    assert_eq!((o.count, prov.others), (1, ReadVia::Helper));
+    // The caller is its own account (uid 503): the owner's process (2) and sam's (3) are both another account's, the system's (1) is listed.
+    assert_eq!((o.count, prov.others), (2, ReadVia::Helper));
 }
 
 /// Rule 48: what one real sweep and its pages cost on this machine. A measurement, not a test (it reads this computer's own process

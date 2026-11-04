@@ -6,7 +6,6 @@ import { Router } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto, ReadVia } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatRate, formatRelative } from '../../shared/format';
-import { ReadingSource } from '../../core/reading-source';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
