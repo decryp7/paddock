@@ -26,7 +26,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Linux suite');
@@ -130,6 +130,41 @@ async function main(argv) {
     checks.push({ ok: !/^0$/m.test(w.split('\n').at(-1)), detail: 'a standard user cannot create files in the helper data folder' });
     push(result('Admin helper Turn on (polkit) and its folders', checks, stat.split('\n'), 'polkit answered, service active, folders root-only'));
 
+    if (o.reboot) {
+      // The restart check (user's real PC): helper on + Launch at login on, record start-at-boot, reboot the guest, log in, and without Repair
+      // record the helper, the card, whether Dyno started itself (XDG autostart) and how long after login, the tray, and one reading.
+      const boot = () => g('echo "is-enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; echo "is-active: $(systemctl is-active dyno-helper.service)"; systemctl cat dyno-helper.service 2>&1 | grep -E "^(WantedBy|Restart|RestartSec|ExecStart|\\[)" ; ls -l ~/.config/autostart/ /etc/xdg/autostart/ 2>&1 | grep -i dyno').stdout.trim().split('\n');
+      press('^Dyno$');
+      const toggled = atspi('press dyno "Start Dyno at login" "check box|toggle button|switch"').code === 0;
+      await sleep(3000);
+      const preBoot = boot();
+      steps.push(result('Restart check: before the reboot (helper on, Launch at login on)', [{ ok: toggled, detail: toggled ? 'switched "Start Dyno at login" on' : 'no "Start Dyno at login" control found' }, { ok: /is-enabled: enabled/.test(preBoot.join('\n')), detail: `start-at-boot: ${preBoot[0]}; ${preBoot[1]}` }], preBoot, 'enabled at boot'));
+      log('rebooting the guest');
+      g('sudo systemctl reboot', 30_000);
+      await sleep(40_000);
+      for (let i = 0; i < 75 && g('true', 20_000).code !== 0; i++) await sleep(4000);
+      let up = false; for (let i = 0; i < 60 && !up; i++) { up = /gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); if (!up) await sleep(3000); }
+      const t0 = Date.now();
+      await sleep(30_000);
+      const postBoot = boot();
+      const procs = g('ps -eo pid=,etimes=,args= | grep -E "dyno-(app|agent)" | grep -v grep').stdout.trim();
+      const sess = g('loginctl show-session $(loginctl list-sessions --no-legend | awk \'$3=="admin"{print $1; exit}\') -p Timestamp -p State 2>&1').stdout.trim();
+      const up2 = g('uptime -s; date "+%F %T"').stdout.trim();
+      const autostarted = /dyno-app/.test(procs);
+      steps.push(result('Restart check: Dyno after the reboot, no Repair (helper, autostart, tray)', [
+        { ok: /is-active: active/.test(postBoot.join('\n')), detail: `helper after reboot: ${postBoot[0]}; ${postBoot[1]}` },
+        { ok: autostarted, detail: autostarted ? 'Dyno started by itself after login (XDG autostart)' : 'Dyno did not start by itself after login' },
+      ], [`session: ${sess.replace(/\n/g, ' ')}`, `boot/now: ${up2.replace(/\n/g, ' / ')}`, '--- Dyno processes (pid etimes args)', ...procs.split('\n'), '--- start-at-boot', ...postBoot], 'helper active, Dyno autostarted'));
+      const ext = g('gnome-extensions list --enabled 2>&1 | grep -i -E "appindicator|tray" || echo "no appindicator extension enabled"').stdout.trim();
+      const bar = atspi('tree gnome-shell 14 2>&1 | grep -i dyno | head -6').stdout.trim();
+      steps.push(result('Restart check: tray icons on GNOME after the reboot', [{ ok: true, detail: `indicator support: ${ext}` }, { ok: /dyno/i.test(bar), detail: /dyno/i.test(bar) ? 'a Dyno indicator exists in the GNOME top bar' : 'no Dyno indicator in the GNOME top bar (GNOME shows tray icons only with an AppIndicator extension)' }], [ext, bar], 'recorded'));
+      if (!autostarted) { ses('systemd-run --user --collect --unit=dyno-gui2 -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1'); await sleep(30_000); }
+      const cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim();
+      press('^Processes$', 'link'); await sleep(4000);
+      const procPage = atspi('tree dyno 80').stdout;
+      steps.push(result('Restart check: card and a helper reading after the reboot', [{ ok: /Turn off administrator readings/.test(cardTxt) || !/Turn on administrator readings/.test(cardTxt), detail: `card: ${cardTxt.split('\n').slice(0, 3).join(' | ') || '(window not up)'}` }, { ok: /Read by the administrator helper/i.test(procPage), detail: /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
+      void t0;
+    }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.
     const labels = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
     const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60', 60_000).stdout.split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); } };
