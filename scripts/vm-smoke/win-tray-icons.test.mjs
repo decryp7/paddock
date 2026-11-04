@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { dynoTrayIcons, metricsFromLog, trayLogLines } from './win-tray-icons.mjs';
+import { dynoTrayIcons, metricsFromLog, notificationAreaButtons, trayLogLines } from './win-tray-icons.mjs';
 
 const log = [
   '{"@m":"Dyno 1.1.0 starting (OS Windows 11, x86_64)","@t":"2026-01-01T00:00:00Z"}',
@@ -49,4 +49,11 @@ test('the tray log lines keep the start and every icon, not live updates', () =>
   const l = trayLogLines(log);
   assert.equal(l.length, 4);
   assert.ok(l.every((x) => !/live update/.test(x)));
+});
+
+test('the notification-area buttons are listed as evidence, without the buttons of other windows', () => {
+  const b = notificationAreaButtons(rows);
+  assert.ok(b.some((x) => x.startsWith('CPU 4%\t')));
+  assert.ok(b.some((x) => x.startsWith('Show Hidden Icons\t')));
+  assert.ok(!b.some((x) => /Start Dyno at login|Memory 61%/.test(x)));
 });

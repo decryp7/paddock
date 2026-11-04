@@ -46,5 +46,17 @@ export function trayLogLines(appLog) {
     .filter((m) => /starting \(OS|start signal|started hidden|Started in the tray|tray sync|tray icon dyno-|tray check #|TaskbarCreated|taskbar|notification area|GUID|Main window built/i.test(m));
 }
 
-/** The PowerShell that prints Dyno's log for today (the newest dyno.*.log under the app's folders), for `ssh`. */
-export const APP_LOG_PS = `$f = Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | Sort-Object LastWriteTime | Select-Object -Last 1; if ($f) { "@@ $($f.FullName)"; Get-Content $f.FullName -ErrorAction SilentlyContinue } else { '@@ (no dyno.*.log found)' }`;
+/**
+ * The PowerShell that prints Dyno's logs, oldest first: the last three dyno.*.log files by name (the name carries the date; a VM snapshot
+ * leaves older ones and the guest clock can move, so LastWriteTime is not used), each after a "@@ <path>" line, for `ssh`.
+ */
+export const APP_LOG_PS = `$fs = Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | Sort-Object Name | Select-Object -Last 3; if ($fs) { foreach ($f in $fs) { "@@ $($f.FullName)"; Get-Content $f.FullName -ErrorAction SilentlyContinue } } else { '@@ (no dyno.*.log found)' }`;
+
+/** Every notification-area button the actor saw (explorer-owned, in the taskbar or the overflow), as evidence for a count of 0. */
+export function notificationAreaButtons(rows) {
+  return rows
+    .split('\n')
+    .map((l) => l.split('\t'))
+    .filter((c) => c.length >= 5 && /^explorer$/i.test(c[4].trim()) && (TASKBAR.has(c[3].trim()) || OVERFLOW.has(c[3].trim())))
+    .map((c) => `${c[0].trim()}\t${c[2].trim()}\t${c[3].trim()}`);
+}

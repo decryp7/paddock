@@ -6,7 +6,7 @@ import { cardText, helperOn, openSettings, ssh } from './win-helper.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
 import { Actor } from './win-act.mjs';
 import { retryOnClosed } from './reconnect.mjs';
-import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, trayLogLines } from './win-tray-icons.mjs';
+import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, notificationAreaButtons, trayLogLines } from './win-tray-icons.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -49,19 +49,23 @@ export async function trayRecord(actor) {
   const log = ssh(APP_LOG_PS);
   const metrics = metricsFromLog(log);
   const read = async () => (await actor.send(TRAY_ICONS_CMD).catch(() => ''));
-  const first = dynoTrayIcons(await read(), metrics);
+  const rows1 = await read();
+  const first = dynoTrayIcons(rows1, metrics);
   const visible = first.filter((i) => i.where === 'taskbar').map((i) => i.name);
   // the overflow: open the "Show hidden icons" chevron (an explorer button) and read again
   const chevron = (await actor.send('tray ^(Show Hidden Icons|Hidden icons|Show hidden)').catch(() => '')).split('\n')[0]?.split('\t')[1];
   let overflow = [];
+  let rows2 = '';
   if (chevron) {
     await actor.send(`click ${chevron.replace(',', ' ')}`).catch(() => {});
     await sleep(1500);
-    overflow = dynoTrayIcons(await read(), metrics).filter((i) => i.where === 'overflow' && !visible.includes(i.name)).map((i) => i.name);
+    rows2 = await read();
+    overflow = dynoTrayIcons(rows2, metrics).filter((i) => i.where === 'overflow' && !visible.includes(i.name)).map((i) => i.name);
     await actor.send('key ESC').catch(() => {});
   }
   const lines = trayLogLines(log);
-  return { promoted, visible, overflow, metrics, logFile: (/^@@ (.*)$/m.exec(log) ?? [])[1] ?? '(none)', lines };
+  const buttons = [...new Set([...notificationAreaButtons(rows1), ...notificationAreaButtons(rows2)])];
+  return { promoted, visible, overflow, metrics, logFile: [...log.matchAll(/^@@ (.*)$/gm)].map((m) => m[1]).join(', ') || '(none)', lines, buttons };
 }
 
 /** The new crash and removal logging: Application log entries of source "Dyno helper", and the System service events for it. */
@@ -98,7 +102,7 @@ async function restartGuest(ctx) {
   return ok;
 }
 
-const fmtTray = (r) => [`visible taskbar area (UI Automation, explorer buttons named after a Dyno metric): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `metrics the app log says it created icons for: ${r.metrics.join(', ') || '(none logged)'}`, `NotifyIconSettings (dyno-app.exe): ${r.promoted.join(' ; ') || '-'}`, `app log ${r.logFile}: ${r.lines.length} tray line(s)`, ...r.lines.slice(-60).map((l) => `  ${l.slice(0, 220)}`)];
+const fmtTray = (r) => [`visible taskbar area (UI Automation, explorer buttons named after a Dyno metric): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `metrics the app log says it created icons for: ${r.metrics.join(', ') || '(none logged)'}`, `NotifyIconSettings (dyno-app.exe): ${r.promoted.join(' ; ') || '-'}`, `app log ${r.logFile}: ${r.lines.length} tray line(s)`, ...r.lines.slice(-60).map((l) => `  ${l.slice(0, 220)}`), `notification-area buttons seen (name, class, top-level class): ${r.buttons.length}`, ...r.buttons.slice(0, 60).map((b) => `  ${b.slice(0, 200)}`)];
 
 /** After a restart, before Dyno is started by hand: what (if anything) started it, by which mechanism, how long after logon; and the tray. */
 async function afterRestartRecord(actor, label) {
