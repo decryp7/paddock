@@ -3,14 +3,15 @@
 
 use crate::audit::AuditLog;
 use crate::dispatch::{Dispatcher, Parts};
-use crate::logfile::{self, HelperLog};
+use crate::logfile::{self, EarlySink, HelperLog};
 use crate::paths::HelperPaths;
 use crate::policy::{self, HelperPolicy};
+use crate::refusal::StartError;
 use crate::server::Daemon;
 use crate::{orphan, startup};
 use dyno_core::btm::LoginItemsReader;
 use dyno_core::helper::HelperHost;
-use dyno_core::helper_wire::{HelperInfo, HELPER_API};
+use dyno_core::helper_wire::{HelperInfo, StartFailure, HELPER_API};
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use paddock_env::Os;
@@ -61,13 +62,37 @@ pub fn os_of(host: HelperHost) -> Os {
 /// same before they send anything.
 ///
 /// # Errors
-/// Why the helper will not start.
-pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
+/// Why the helper will not start, with the kind of refusal (the service's exit code).
+pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), StartError> {
+    serve_with(paths, stop, None)
+}
+
+/// [`serve`] that also hands the lines written before the data folder is verified to `early` (the service passes the Windows
+/// Event Log: it has no console, and the folder's file cannot be used yet).
+///
+/// # Errors
+/// Why the helper will not start, with the kind of refusal. The cause is logged before it is returned.
+pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<EarlySink>) -> Result<(), StartError> {
     // Until the data folder is verified the log goes to standard error and no file in the folder is touched.
-    let log_gate = HelperLog::new(paths.log.clone()).deferred().install();
+    let mut log = HelperLog::new(paths.log.clone()).deferred();
+    if let Some(sink) = early {
+        crate::refusal::set_event_sink(sink.clone());
+        log = log.with_early_sink(sink);
+    }
+    let log_gate = log.install();
+    crate::refusal::install_panic_hook();
+    log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
+    let result = start(paths, stop, &log_gate);
+    if let Err(e) = &result {
+        log::error!(exit_code = e.exit_code(), reason = e.message.as_str(); "Helper: will not start");
+    }
+    result
+}
+
+fn start(paths: &HelperPaths, stop: Arc<AtomicBool>, log_gate: &crate::logfile::LogGate) -> Result<(), StartError> {
     let mut files = RealFiles;
     let trust = Arc::new(crate::protect::TrustGuard::system(paths.host, &paths.data_dir));
-    lock_folders(&trust, paths)?;
+    lock_folders(&trust, paths).map_err(|m| StartError::new(StartFailure::NotProtected, m))?;
     let program = std::env::current_exe().unwrap_or_else(|_| paths.binary.clone());
     let pending = paths.config.with_extension("json.new");
     let checks = startup::verdicts(
@@ -85,10 +110,10 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
     for v in &checks {
         log::info!(what = v.what, protected = v.result.is_ok(), detail = v.result.as_ref().err().map_or("", String::as_str); "Helper: protected-location check");
     }
-    startup::require_all(&checks)?;
+    startup::require_all(&checks).map_err(|m| StartError::new(StartFailure::NotProtected, m))?;
     // The data folder and what is in it are verified: the log may open its file there now.
     log_gate.arm();
-    let config = startup::load_config(&mut files, &paths.config)?;
+    let config = startup::load_config(&mut files, &paths.config).map_err(|m| StartError::new(StartFailure::BadConfig, m))?;
     let loaded = policy::load(&mut files, &paths.policy);
     let audit = AuditLog::new(paths.audit.clone());
     // Stopped with the log before the data folder is removed, so no audited request writes after that.
@@ -109,13 +134,19 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
     let _policy_watch = watch_policy(paths, policy_in_force.clone());
     if let Some(dir) = &paths.endpoint_dir {
         // systemd creates it (RuntimeDirectory); elsewhere the daemon does, root's and closed to others.
-        create_endpoint_dir(dir).map_err(|e| format!("The helper cannot create {}: {e}", dir.display()))?;
+        create_endpoint_dir(dir)
+            .map_err(|e| StartError::new(StartFailure::Endpoint, format!("The helper cannot create {}: {e}", dir.display())))?;
     }
-    let listener = Listener::bind_system(&paths.endpoint, &Access::system_for_all_users())
-        .map_err(|e| format!("The helper cannot open its endpoint {}: {e}", paths.endpoint))?;
+    let listener = Listener::bind_system(&paths.endpoint, &Access::system_for_all_users()).map_err(|e| {
+        StartError::new(
+            StartFailure::Endpoint,
+            format!("The helper cannot open its endpoint {}: {e}", paths.endpoint),
+        )
+    })?;
     log::info!(endpoint = paths.endpoint.as_str(), owner = config.owner.to_arg().as_str(), version = crate::VERSION; "Helper: serving");
-    let remove = removal(paths.clone(), stop.clone());
-    let _orphan = start_orphan_watch(config.app.clone(), remove.clone());
+    let remove = removal(paths.clone(), stop.clone(), "an Uninstall request from the app");
+    let orphan_remove = removal(paths.clone(), stop.clone(), "the app it serves has been gone for an hour");
+    let _orphan = start_orphan_watch(config.app.clone(), orphan_remove);
     let log_path = paths.log.clone();
     let dispatcher = Arc::new(Dispatcher::new(Parts {
         info: HelperInfo {
@@ -151,6 +182,7 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
         stop,
     }
     .run()
+    .map_err(|m| StartError::new(StartFailure::Other, m))
 }
 
 /// Windows: the data root (which holds `config.json`) must be protected before it is read, or the helper does not start (a
@@ -174,8 +206,14 @@ fn lock_folders(trust: &crate::protect::TrustGuard, paths: &HelperPaths) -> Resu
 
 /// Removes the helper after a moment (the caller of `Uninstall` gets its answer first; the removal ends with the stop of this
 /// very job).
-fn removal(paths: HelperPaths, stop: Arc<AtomicBool>) -> Arc<dyn Fn() + Send + Sync> {
+fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str) -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(move || {
+        // The log is stopped before the data folder is removed, so the reason is said first, to the log and to the event sink.
+        log::warn!(why = why; "Helper: removing itself: {why}");
+        crate::refusal::event(
+            log::Level::Warn,
+            &format!("The Dyno helper is removing itself and its service: {why}."),
+        );
         let (paths, stop) = (paths.clone(), stop.clone());
         let _ = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));

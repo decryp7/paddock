@@ -11,7 +11,7 @@
 //! - [`nsis_hooks`]: `src-tauri/windows/installer-hooks.nsh` (replaces the three hand-written copies).
 
 use crate::hardening::{SDDL_USERS_MAY_START, Sandbox};
-use crate::spec::{Kind, Restart, ServiceSpec};
+use crate::spec::{Kind, Restart, ServiceSpec, WindowsStart};
 use crate::verbs::Verb;
 use std::fmt::Write as _;
 use std::time::Duration;
@@ -322,6 +322,8 @@ pub struct ScmConfig {
     pub privileges: Vec<String>,
     /// The service DACL as SDDL (`None`: the SCM default).
     pub sddl: Option<String>,
+    /// When the SCM starts it after boot.
+    pub start: WindowsStart,
 }
 
 /// The Windows service for `spec` running `exe` (the SCM always starts it with `--service`, see [`Verb::WindowsService`]).
@@ -345,6 +347,7 @@ pub fn scm_config(spec: &ServiceSpec, exe: &str) -> ScmConfig {
             .hardening()
             .filter(|h| h.users_start())
             .map(|_| SDDL_USERS_MAY_START.to_string()),
+        start: spec.windows_start(),
     }
 }
 
@@ -358,7 +361,7 @@ pub fn sc_commands(c: &ScmConfig) -> Vec<Vec<String>> {
         s("binPath="),
         c.command_line.clone(),
         s("start="),
-        s("delayed-auto"),
+        s(c.start.sc_word()),
         s("DisplayName="),
         c.display_name.clone(),
     ]];
@@ -596,6 +599,39 @@ mod tests {
         assert_eq!(calls[1][5], "restart/10000/restart/60000/restart/300000");
         assert!(
             c.restart_delays.windows(2).all(|w| w[0] < w[1]) && c.reset_after > c.restart_delays[2]
+        );
+    }
+
+    #[test]
+    fn a_spec_can_ask_for_a_plain_automatic_start_and_keeps_the_recovery_actions() {
+        let build = |start: Option<WindowsStart>| {
+            let mut b =
+                ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                    .kind(Kind::SystemService);
+            if let Some(s) = start {
+                b = b.windows_start(s);
+            }
+            sc_commands(&scm_config(&b.build().unwrap(), "C:\\x\\dyno-helper.exe"))
+        };
+        let start_type = |calls: &[Vec<String>]| {
+            let create = &calls[0];
+            create[create.iter().position(|a| a == "start=").unwrap() + 1].clone()
+        };
+        assert_eq!(
+            start_type(&build(None)),
+            "delayed-auto",
+            "other users keep their own setting"
+        );
+        let auto = build(Some(WindowsStart::Auto));
+        assert_eq!(
+            start_type(&auto),
+            "auto",
+            "the boot gap is seconds, not a delayed minute or two"
+        );
+        assert!(
+            auto.iter().any(|c| c[0] == "failure"
+                && c.contains(&"restart/10000/restart/60000/restart/300000".to_string())),
+            "the failure actions stay: {auto:?}"
         );
     }
 }

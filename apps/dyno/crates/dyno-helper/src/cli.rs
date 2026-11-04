@@ -85,6 +85,7 @@ fn serve() -> Result<(), String> {
         &crate::elevate::helper_paths(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     )
+    .map_err(String::from)
 }
 
 /// Runs `command` and returns the process exit code (0 done, 1 failed, 2 usage).

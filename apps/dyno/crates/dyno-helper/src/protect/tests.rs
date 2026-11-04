@@ -492,6 +492,54 @@ fn a_user_owned_entry_deep_in_a_locked_tools_folder_makes_the_folder_untrusted()
     assert!(calls(&machine).contains(&format!("remove_tree {TOOLS}")));
 }
 
+/// The locked Helper folder as the installer's `icacls` leaves it (protected, owner Administrators), and what the SYSTEM
+/// service creates in it afterwards: every entry inherits the locked folder's entries (`ID`), owner SYSTEM or Administrators.
+const SDDL_HELPER_LOCKED: &str = "O:BAG:S-1-5-21-1-2-513D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+const SDDL_MADE_FILE: &str = "O:SYG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1200a9;;;BU)";
+const SDDL_MADE_FILE_BA: &str = "O:BAG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1200a9;;;BU)";
+const SDDL_MADE_DIR: &str = "O:SYG:SYD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;BU)";
+
+/// The installed Helper tree after the SYSTEM service has run once: its log, the audit log and an installed tool, all created
+/// by SYSTEM with inherited ACEs, plus `config.json` written by the elevated installer.
+fn helper_after_a_run(file_sddl: &str) -> FakePort {
+    use paddock_service::privileged::files::FileKind;
+    let mut m = windows_machine(|_| locked());
+    m.put(DATA, from_sddl(FileKind::Dir, SDDL_HELPER_LOCKED));
+    for name in ["helper.log", "audit.jsonl", "config.json", "policy.json"] {
+        m.put(&format!("{DATA}\\{name}"), from_sddl(FileKind::File, file_sddl));
+    }
+    let tools = format!("{DATA}\\tools");
+    for dir in [
+        tools.clone(),
+        format!("{tools}\\smartmontools-7.5"),
+        format!("{tools}\\smartmontools-7.5\\bin"),
+    ] {
+        m.put(&dir, from_sddl(FileKind::Dir, SDDL_MADE_DIR));
+    }
+    m.put(SMARTCTL, from_sddl(FileKind::File, file_sddl));
+    m.put(&format!("{DATA}\\staging"), from_sddl(FileKind::Dir, SDDL_MADE_DIR));
+    m
+}
+
+#[test]
+fn the_helper_tree_the_system_service_made_passes_the_strict_check_at_the_next_start() {
+    // B: after the first run the service stopped for good at its next start in Refuse mode. Everything in the folder was made
+    // by SYSTEM and only inherits the locked folder's entries; that is the helper's own and must be accepted.
+    for file_sddl in [SDDL_MADE_FILE, SDDL_MADE_FILE_BA] {
+        let (g, machine) = guard(helper_after_a_run(file_sddl), HelperHost::Windows, None);
+        g.ensure_root(Path::new(DATA), OnUntrusted::Refuse)
+            .unwrap_or_else(|e| panic!("the service would refuse to start ({file_sddl}): {e}"));
+        g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+        assert!(
+            calls(&machine)
+                .iter()
+                .all(|x| !x.starts_with("remove_tree") && !x.starts_with("rename_aside")),
+            "nothing of the helper's own is moved or removed: {:?}",
+            calls(&machine)
+        );
+    }
+}
+
 fn unix_machine(owner: u32, mode: u32) -> FakePort {
     use paddock_service::privileged::files::FileKind;
     use paddock_service::privileged::trust::Node;

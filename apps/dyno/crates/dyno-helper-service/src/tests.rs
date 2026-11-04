@@ -21,6 +21,11 @@ fn the_spec_is_valid_and_carries_the_adrs_hardening() {
     let h = s.hardening().unwrap();
     assert_eq!(h.privileges(), ["SeChangeNotifyPrivilege"]);
     assert!(h.users_start());
+    assert_eq!(
+        s.windows_start(),
+        paddock_service::WindowsStart::Auto,
+        "the helper starts with the boot, not a delayed minute or two later"
+    );
     let unit = paddock_service::render::systemd_unit(&s, "/usr/bin/dyno-helper", None);
     for key in [
         "ProtectSystem=strict",

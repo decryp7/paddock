@@ -22,12 +22,12 @@ fn service_main(_arguments: Vec<OsString>) {
     let _ = serve_until_stopped();
 }
 
-fn status(state: ServiceState, accept: ServiceControlAccept, code: u32) -> ServiceStatus {
+fn status(state: ServiceState, accept: ServiceControlAccept, exit_code: ServiceExitCode) -> ServiceStatus {
     ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: state,
         controls_accepted: accept,
-        exit_code: ServiceExitCode::Win32(code),
+        exit_code,
         checkpoint: 0,
         wait_hint: Duration::default(),
         process_id: None,
@@ -48,10 +48,20 @@ fn serve_until_stopped() -> Result<(), windows_service::Error> {
     handle.set_service_status(status(
         ServiceState::Running,
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
-        0,
+        ServiceExitCode::Win32(0),
     ))?;
-    let result = crate::serve::serve(&crate::elevate::helper_paths(), stop);
-    let code = u32::from(result.is_err());
-    handle.set_service_status(status(ServiceState::Stopped, ServiceControlAccept::empty(), code))?;
+    // Until the data folder is verified the early lines go to the Event Log (no console, no file in the unverified folder).
+    let early: crate::logfile::EarlySink = std::sync::Arc::new(crate::eventlog::report);
+    let result = crate::serve::serve_with(&crate::elevate::helper_paths(), stop, Some(early));
+    // A refusal is reported in full to the Event Log and by its own exit code (`sc query`: SERVICE_EXIT_CODE), so a stopped
+    // service says why instead of waiting silently for Repair.
+    if let Some(text) = crate::refusal::stop_event(&result) {
+        crate::eventlog::report(log::Level::Error, &text);
+    }
+    let exit = match crate::refusal::exit_code_of(&result) {
+        0 => ServiceExitCode::Win32(0),
+        code => ServiceExitCode::ServiceSpecific(code),
+    };
+    handle.set_service_status(status(ServiceState::Stopped, ServiceControlAccept::empty(), exit))?;
     Ok(())
 }

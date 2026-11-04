@@ -46,6 +46,8 @@ pub(crate) fn open_append_no_follow(path: &Path) -> std::io::Result<std::fs::Fil
 pub(crate) struct GateState {
     /// Until armed (and again once quiesced) the log writes to standard error and touches no file.
     pub(crate) armed: AtomicBool,
+    /// Whether the file has been armed at least once: the early sink only hears the lines of the start, before that.
+    pub(crate) ever_armed: AtomicBool,
     pub(crate) lock: Mutex<()>,
 }
 
@@ -53,6 +55,7 @@ impl GateState {
     pub(crate) fn open() -> Arc<GateState> {
         Arc::new(GateState {
             armed: AtomicBool::new(true),
+            ever_armed: AtomicBool::new(true),
             lock: Mutex::new(()),
         })
     }
@@ -65,6 +68,7 @@ pub struct LogGate(pub(crate) Arc<GateState>);
 impl LogGate {
     /// From now on the log is written to its file.
     pub fn arm(&self) {
+        self.0.ever_armed.store(true, Ordering::SeqCst);
         self.0.armed.store(true, Ordering::SeqCst);
     }
 
@@ -105,7 +109,13 @@ pub struct HelperLog {
     state: Arc<GateState>,
     max_bytes: u64,
     now: fn() -> i64,
+    /// Hears every line written before the file is first armed (the Windows Event Log: the only place those lines can go that
+    /// is not the unverified data folder, and a service has no console).
+    early: Option<EarlySink>,
 }
+
+/// Where the lines of a start go before the data folder is verified (besides standard error): the level and the line.
+pub type EarlySink = Arc<dyn Fn(Level, &str) + Send + Sync>;
 
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
@@ -136,6 +146,7 @@ impl HelperLog {
             state: GateState::open(),
             max_bytes: MAX_LOG_BYTES,
             now: unix_now,
+            early: None,
         }
     }
 
@@ -152,6 +163,14 @@ impl HelperLog {
     #[must_use]
     pub fn deferred(self) -> Self {
         self.state.armed.store(false, Ordering::SeqCst);
+        self.state.ever_armed.store(false, Ordering::SeqCst);
+        self
+    }
+
+    /// Also hands every line written before the file is first armed to `sink` (never a file in the unverified folder).
+    #[must_use]
+    pub fn with_early_sink(mut self, sink: EarlySink) -> Self {
+        self.early = Some(sink);
         self
     }
 
@@ -200,6 +219,9 @@ impl Log for HelperLog {
         let line = format_line((self.now)(), record.level(), &record.args().to_string(), &pairs.0);
         if !self.state.armed.load(Ordering::SeqCst) {
             eprintln!("{line}");
+            if let Some(sink) = self.early.as_ref().filter(|_| !self.state.ever_armed.load(Ordering::SeqCst)) {
+                sink(record.level(), &line);
+            }
             return;
         }
         // A log that cannot be written must not take the daemon down.
@@ -282,6 +304,39 @@ mod tests {
             write(&l2, "must not land in the target");
             assert_eq!(std::fs::read(&target).unwrap(), b"keep");
         }
+    }
+
+    #[test]
+    fn the_early_sink_hears_the_lines_of_the_start_and_no_file_is_touched_until_the_gate_arms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.log");
+        let heard = Arc::new(Mutex::new(Vec::<(Level, String)>::new()));
+        let h = heard.clone();
+        let log = HelperLog::new(path.clone())
+            .with(1000, || 7)
+            .deferred()
+            .with_early_sink(Arc::new(move |level, line| h.lock().unwrap().push((level, line.to_string()))));
+        let gate = log.gate();
+        let write = |level, text: &str| log.log(&Record::builder().args(format_args!("{text}")).level(level).build());
+        write(Level::Info, "phase one");
+        write(Level::Error, "refused");
+        assert!(!path.exists(), "the unverified folder is not written");
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [
+                (Level::Info, "7 INFO phase one".to_string()),
+                (Level::Error, "7 ERROR refused".to_string())
+            ]
+        );
+        gate.arm();
+        write(Level::Info, "serving");
+        gate.quiesce();
+        write(Level::Info, "removing");
+        assert_eq!(
+            heard.lock().unwrap().len(),
+            2,
+            "after the folder is verified the file takes the lines, not the sink"
+        );
     }
 
     #[test]

@@ -34,6 +34,8 @@ pub enum TransportError {
     Absent,
     /// The endpoint exists but nothing answered (the reason).
     Silent(String),
+    /// The helper's service is starting and the endpoint is not open yet (the reason): try again in a moment.
+    Starting(String),
     /// Something that is not Dyno's helper owns the endpoint (the owner's account id): never trusted.
     Foreign(String),
     /// The helper answered with an error.
@@ -128,6 +130,7 @@ fn to_platform(e: TransportError) -> PlatformError {
     match e {
         TransportError::Absent => PlatformError::AccessDenied(HELPER_MISSING.into()),
         TransportError::Silent(why) => PlatformError::Failed(format!("The helper did not answer ({why}). Start it from Settings.")),
+        TransportError::Starting(why) => PlatformError::Failed(format!("The helper is still starting ({why}). Try again in a moment.")),
         TransportError::Foreign(_) => PlatformError::AccessDenied(
             "Something other than Dyno's helper answered on its endpoint, so Dyno did not trust it. Repair the helper from Settings."
                 .into(),
@@ -214,6 +217,7 @@ impl<T: HelperTransport> HelperLink<T> {
             Err(TransportError::Absent) => Probe::Absent,
             Err(TransportError::Foreign(owner)) => Probe::Foreign(owner),
             Err(TransportError::Silent(why)) => Probe::Silent(why),
+            Err(TransportError::Starting(why)) => Probe::Starting(why),
             Err(TransportError::Remote { code, message }) => Probe::Silent(format!("{code}: {message}")),
         };
         let status = assess(host, supported, probe, our_version);
