@@ -33,17 +33,20 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     <div class="pd-bar" data-testid="notices-filter-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
       <span class="pd-spacer"></span>
-      @if (store.notices().length) {
-        <mat-checkbox [checked]="allSelected()" [indeterminate]="someSelected()" [aria-label]="t.selectAll" data-testid="notices-select-all" (change)="toggleAll()" />
-      }
-      @if (selectedIds().length) {
-        <button type="button" class="pd-btn" data-testid="notices-delete-selected" (click)="deleteSelected()">{{ deleteSelectedLabel() }}</button>
-      }
       @if (store.all().length) {
-        <button type="button" matButton="outlined" class="pd-danger" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
+        <button type="button" matButton="text" class="pd-quiet pd-nowrap" data-testid="notices-delete-all" (click)="deleteAll()">{{ t.deleteAll }}</button>
       }
-      <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
+      <button type="button" matButton="text" class="pd-quiet pd-nowrap" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
     </div>
+    @if (store.notices().length) {
+      <div class="pd-select-bar">
+        <mat-checkbox class="pd-pick" [checked]="allSelected()" [indeterminate]="someSelected()" data-testid="notices-select-all" (change)="toggleAll()">{{ t.selectAll }}</mat-checkbox>
+        <span class="pd-spacer"></span>
+        @if (selectedIds().length) {
+          <button type="button" matButton="outlined" class="pd-nowrap" data-testid="notices-delete-selected" (click)="deleteSelected()">{{ deleteSelectedLabel() }}</button>
+        }
+      </div>
+    }
     @if (store.requestError(); as e) {
       <div class="pd-err" role="alert">
         <span class="pd-grow">{{ e }}</span>
@@ -61,25 +64,23 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
       <ul [attr.aria-labelledby]="headingId(g.source)">
         @for (n of g.notices; track n.id) {
           <li class="pd-notice" [class.pd-unread]="!n.read" [class.pd-focus]="store.focus() === n.id" [attr.data-severity]="n.severity" [attr.data-testid]="'notice-' + n.id" [attr.data-cause]="n.cause">
-            <div class="pd-row">
-              <mat-checkbox class="pd-pick" [checked]="isSelected(n.id)" [aria-label]="selectLabel(n.title)" [attr.data-testid]="'notice-select-' + n.id" (change)="pick(n.id)" />
-              <span class="pd-dot" aria-hidden="true"></span>
-              <strong class="pd-title" [attr.title]="titleWithCount(n)">{{ titleWithCount(n) }}</strong>
+            <mat-checkbox class="pd-pick" [checked]="isSelected(n.id)" [aria-label]="selectLabel(n.title)" [attr.data-testid]="'notice-select-' + n.id" (change)="pick(n.id)" />
+            <span class="pd-dot" aria-hidden="true"></span>
+            <strong class="pd-title" [attr.title]="titleWithCount(n)">{{ titleWithCount(n) }}</strong>
+            @if (!n.read) {
+              <span class="pd-sr-only">{{ t.unreadMark }}</span>
+            }
+            <span class="pd-time">{{ time(n.at) }}</span>
+            <span class="pd-row-actions">
               @if (!n.read) {
-                <span class="pd-sr-only">{{ t.unreadMark }}</span>
-              }
-              <span class="pd-time">{{ time(n.at) }}</span>
-              <span class="pd-row-actions">
-                @if (!n.read) {
-                  <button type="button" class="pd-icon-btn" [attr.aria-label]="markReadLabel(n.title)" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
-                    <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 7.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                  </button>
-                }
-                <button type="button" class="pd-icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="dismissOne(n.id)">
-                  <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+                <button type="button" class="pd-icon-btn" [attr.aria-label]="markReadLabel(n.title)" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
+                  <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 7.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                 </button>
-              </span>
-            </div>
+              }
+              <button type="button" class="pd-icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="dismissOne(n.id)">
+                <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+              </button>
+            </span>
             @if (n.body) {
               <p class="pd-body">{{ n.body }}</p>
             }
@@ -98,34 +99,42 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
   styles: `
     :host { position: relative; display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; font-size: var(--pd-text-body); }
     .pd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-1); }
+    .pd-nowrap { white-space: nowrap; }
+    /* The select-all row: its box sits in the items' checkbox column (past the item's border and padding). */
+    .pd-select-bar { display: flex; align-items: center; gap: var(--pd-space-1); padding-inline-start: var(--pd-notice-inset); }
     .pd-spacer, .pd-grow { flex: 1; }
     .pd-err { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-danger); margin: 0; }
     h3 { margin: var(--pd-space-2) 0 0; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
     ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--pd-space-1); }
-    .pd-notice { position: relative; border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: flex; flex-direction: column; gap: var(--pd-space-1); }
+    .pd-notice { position: relative; border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: grid; grid-template-columns: var(--pd-pick-size) var(--pd-dot-size) minmax(0, 1fr) auto; align-items: start; column-gap: var(--pd-space-1); row-gap: var(--pd-space-1); }
     .pd-notice[data-severity='error'], .pd-notice[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
     .pd-notice[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
     .pd-notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
     .pd-notice.pd-focus { outline: 2px solid var(--pd-focus-ring); }
-    .pd-row { display: flex; align-items: flex-start; gap: var(--pd-space-1); min-width: 0; }
-    .pd-pick { flex: none; margin-block: -10px; margin-inline-start: -10px; }
-    .pd-dot { width: 7px; height: 7px; margin-top: 0.5lh; translate: 0 -50%; border-radius: 50%; flex: none; }
+    /* One grid: [pick][dot][title][time], the body and buttons under the title (column 3 to the end). The pick column is the touch target
+       (density-aware); the shared rule in _material.scss pulls the box to the cell's left edge. The first line's height is one value, so the
+       box, the dot and the time pin to it however many lines the title wraps to. */
+    :host { --pd-pick-size: var(--pd-control-height); --pd-dot-size: 7px; --pd-notice-line: calc(var(--pd-text-body) * 1.4); --pd-notice-inset: calc(3px + var(--pd-space-2)); }
+    .pd-pick { --mat-checkbox-state-layer-size: var(--pd-pick-size); grid-column: 1; margin-block: calc((var(--pd-notice-line) - var(--pd-pick-size)) / 2); }
+    .pd-select-bar .pd-pick { margin-block: 0; }
+    .pd-dot { grid-column: 2; width: var(--pd-dot-size); height: var(--pd-dot-size); margin-block: calc((var(--pd-notice-line) - var(--pd-dot-size)) / 2); border-radius: 50%; }
     .pd-unread .pd-dot { background: var(--pd-accent); }
     /* Wraps (two lines, then an ellipsis with the full text in the tooltip): a one-line ellipsis cut titles with room to spare. */
-    .pd-title { flex: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: var(--pd-weight-medium); }
+    .pd-title { grid-column: 3; line-height: var(--pd-notice-line); min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: var(--pd-weight-medium); }
     .pd-notice:not(.pd-unread) .pd-title { font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
-    .pd-time { white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
-    .pd-body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
-    .pd-actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
+    .pd-time { grid-column: 4; line-height: var(--pd-notice-line); white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
+    .pd-body { grid-column: 3 / -1; margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+    .pd-actions { grid-column: 3 / -1; display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
     .pd-row-actions { position: absolute; inset-block-start: 2px; inset-inline-end: var(--pd-space-1); display: flex; gap: 2px; padding-inline-start: var(--pd-space-2); background: var(--pd-surface-3); border-radius: var(--pd-radius-control); opacity: 0; }
     /* Shown by hover or by focus on one of its own buttons, never by focus on a body action (that would cover the time). */
     .pd-notice:hover .pd-row-actions, .pd-row-actions:focus-within { opacity: 1; }
     /* The buttons sit over the time, so it gives way whole while they show (not cut in half). */
-    .pd-notice:hover .pd-time, .pd-row:has(.pd-row-actions:focus-within) .pd-time { visibility: hidden; }
-    @media (hover: none) { .pd-row-actions { position: static; opacity: 1; padding-inline-start: 0; } .pd-notice:hover .pd-time { visibility: visible; } }
-    .pd-danger { --mat-button-outlined-label-text-color: var(--pd-danger); --mat-button-outlined-outline-color: var(--pd-danger); min-height: 26px; }
+    .pd-notice:hover .pd-time, .pd-notice:has(.pd-row-actions:focus-within) .pd-time { visibility: hidden; }
+    @media (hover: none) { .pd-row-actions { position: static; grid-column: 3 / -1; justify-self: end; opacity: 1; padding-inline-start: 0; } .pd-notice:hover .pd-time { visibility: visible; } }
+    /* Delete all and Mark all read are text buttons in the muted colour; hover fills and reads in the normal text colour (Delete all's danger is in its confirmation). */
+    .pd-quiet { --mat-button-text-label-text-color: var(--pd-text-muted); --mat-button-text-state-layer-color: var(--pd-text); }
+    .pd-quiet:hover:not(:disabled) { --mat-button-text-label-text-color: var(--pd-text); }
     .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
     .pd-btn:disabled { color: var(--pd-text-subtle); cursor: default; }
     .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-icon-btn:hover { background: var(--pd-hover); color: var(--pd-text); }

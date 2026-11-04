@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, bodyIndentProblems, checkboxLayoutProblems, rowPinProblems, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -440,6 +440,39 @@ test.describe('notifications and service health (plan S4)', () => {
     const centre = await app.notifications.openCentre();
     await expect(centre.getByRole('heading', { name: 'Greeting' })).toBeVisible();
     await expect(centre).toContainText('The disk is almost full (×3)');
+  });
+
+  test('the centre lists checkboxes that are not clipped or covered, line up with their titles, and keep bodies under the title', async ({ app, page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    await page.getByRole('button', { name: 'Start sample job' }).click();
+    // A message with a body (the failure's hint) under its title.
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    const centre = await app.notifications.openCentre();
+    await expect(centre.locator('.pd-notice .pd-body').first()).toBeVisible();
+    for (const density of ['comfortable', 'standard', 'compact'] as const) {
+      await page.evaluate((d) => document.documentElement.setAttribute('data-density', d), density);
+      expect(await checkboxLayoutProblems(centre), `density ${density}`).toEqual([]);
+      expect(await bodyIndentProblems(centre), `density ${density}`).toEqual([]);
+      // A title that wraps (the health message does, at this width) keeps the box, dot and time on its first line.
+      const pin = await rowPinProblems(centre);
+      expect(pin.wrapped, `density ${density}: a wrapped title is part of this check`).toBeGreaterThan(0);
+      expect(pin.problems, `density ${density}`).toEqual([]);
+    }
+    // Select all sits in the items' checkbox column, labelled; picking one shows "Delete selected (1)" on one line.
+    const all = centre.getByTestId('notices-select-all');
+    await expect(all).toContainText('Select all');
+    const boxLeft = (l: typeof all) => l.locator('.mdc-checkbox__background').evaluate((e) => Math.round(e.getBoundingClientRect().left));
+    expect(await boxLeft(all)).toBe(await boxLeft(centre.locator('[data-testid^=notice-select-]').first()));
+    await centre.locator('[data-testid^=notice-select-] input').first().check();
+    const del1 = centre.getByTestId('notices-delete-selected');
+    await expect(del1).toBeVisible();
+    expect((await del1.boundingBox())!.height).toBeLessThan(40);
+    // Delete all is not a loud filled or outlined danger button: destructive actions are not the visual default.
+    const del = centre.getByTestId('notices-delete-all');
+    expect(await del.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    expect(await del.evaluate((e) => e.classList.contains('mat-mdc-button'))).toBe(true);
+    expect(await del.evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe('0px');
   });
 
   test('a toast’s "Show in Notifications" opens the centre at its message', async ({ app, page }) => {

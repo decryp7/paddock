@@ -519,6 +519,22 @@ impl NetEvent {
         }
     }
 
+    /// What the event adds to its alarm's title (the title already names the program and the kind): the address, or the reach.
+    pub fn alarm_detail(&self) -> String {
+        match self {
+            NetEvent::NewListener { proto, exposure, .. } => {
+                let reach = match exposure {
+                    Exposure::Loopback => "on this computer only",
+                    Exposure::AllInterfaces => "on every network interface (reachable from the network)",
+                    Exposure::Interface => "on one network interface",
+                };
+                let p = if *proto == Proto::Tcp { "TCP" } else { "UDP" };
+                format!("{p}, {reach}.")
+            }
+            NetEvent::NewRemoteHost { host, port, .. } => format!("Address {host}:{port}"),
+        }
+    }
+
     /// Whether it is worth an entry on the history lane (a new exposed listener is; loopback listeners are not).
     pub fn notable(&self) -> bool {
         match self {

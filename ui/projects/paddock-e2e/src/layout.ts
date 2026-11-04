@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 /**
  * Layout scenarios (rule 18): the widths every frame is checked at (the narrowest supported, the phone widths, the
@@ -236,4 +236,91 @@ export async function buttonLabelsThatWrap(page: Page): Promise<string[]> {
 /** Fails when any button label of the page wraps. */
 export async function expectNoButtonLabelWraps(page: Page, label = ''): Promise<void> {
   expect(await buttonLabelsThatWrap(page), `button label wraps${label ? ` (${label})` : ''}`).toEqual([]);
+/**
+ * Fails when a checkbox's box is clipped (a clipped or covered corner does not hit-test as the checkbox: an `overflow` ancestor, a
+ * border, an accent bar, a sibling), or sits more than `tolerance` px off the centre line of the first line
+ * of the text it belongs to (`.pd-title`, a label or the next text). One check for every page that lists checkboxes; the shared
+ * rule in `_material.scss` pulls each box left of its touch target, so a second shift in a page shows up here.
+ */
+export async function checkboxLayoutProblems(root: Locator, tolerance = 3): Promise<string[]> {
+  return root.evaluate((rootEl, tol) => {
+    const bad: string[] = [];
+    const boxes = Array.from(rootEl.querySelectorAll('.mdc-checkbox__background'));
+    for (const box of boxes) {
+      const r = box.getBoundingClientRect();
+      if (r.width === 0) continue;
+      const host = box.closest('mat-checkbox') as HTMLElement | null;
+      const name = host?.getAttribute('data-testid') ?? host?.getAttribute('aria-label') ?? 'checkbox';
+      const li = host?.closest('li, [role="listitem"]');
+      if (li) {
+        const lr = li.getBoundingClientRect();
+        const bw = parseFloat(getComputedStyle(li).borderInlineStartWidth) || 0;
+        if (r.left < lr.left + bw - 0.5) bad.push(`${name}: box left ${r.left} is over the item's start border (${lr.left + bw})`);
+      }
+      for (const [x, y] of [[r.left + 1, r.top + 1], [r.right - 1, r.top + 1], [r.left + 1, r.bottom - 1], [r.right - 1, r.bottom - 1]] as const) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && !host?.contains(hit)) bad.push(`${name}: covered at ${Math.round(x)},${Math.round(y)} by ${hit.tagName.toLowerCase()}.${hit.className}`);
+      }
+      // The title first: a `label` inside the checkbox's own host comes first in document order and is empty (the pane's box has no label).
+      const scope = host?.parentElement;
+      const text = scope?.querySelector('.pd-title') ?? scope?.querySelector('label, strong');
+      if (text) {
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const line = range.getClientRects()[0] ?? text.getBoundingClientRect();
+        const dy = Math.abs(line.top + line.height / 2 - (r.top + r.height / 2));
+        if (dy > tol) bad.push(`${name}: box centre is ${dy.toFixed(1)} px off the first text line`);
+      }
+    }
+    return bad;
+  }, tolerance);
+}
+
+/** Fails when a notice-style body's text does not start at the left edge of its title's text. */
+export async function bodyIndentProblems(root: Locator, tolerance = 1): Promise<string[]> {
+  return root.evaluate((rootEl, tol) => {
+    const bad: string[] = [];
+    for (const item of Array.from(rootEl.querySelectorAll('.pd-notice'))) {
+      const title = item.querySelector('.pd-title');
+      const body = item.querySelector('.pd-body');
+      if (!title || !body) continue;
+      const text = (e: Element): number => e.getBoundingClientRect().left + (parseFloat(getComputedStyle(e).paddingLeft) || 0);
+      const dx = Math.abs(text(title) - text(body));
+      if (dx > tol) bad.push(`${item.getAttribute('data-testid')}: body starts ${dx.toFixed(1)} px from the title`);
+    }
+    return bad;
+  }, tolerance);
+}
+
+/**
+ * Fails when a notice row's dot or time is not on the centre line of the title's FIRST line (a wrapped title must not pull them
+ * between its lines), or when the title is wrapped and the first line is not the first thing measured. Reports how many titles
+ * wrapped through `wrapped`, so a test can insist that the wrapped case was really present.
+ */
+export async function rowPinProblems(root: Locator, tolerance = 3): Promise<{ problems: string[]; wrapped: number }> {
+  return root.evaluate((rootEl, tol) => {
+    const problems: string[] = [];
+    let wrapped = 0;
+    const firstLine = (e: Element): DOMRect => {
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      return range.getClientRects()[0] ?? e.getBoundingClientRect();
+    };
+    const centre = (r: DOMRect): number => r.top + r.height / 2;
+    for (const item of Array.from(rootEl.querySelectorAll('.pd-notice'))) {
+      const id = item.getAttribute('data-testid');
+      const title = item.querySelector('.pd-title');
+      if (!title) continue;
+      const lines = new Set(Array.from((() => { const r = document.createRange(); r.selectNodeContents(title); return r.getClientRects(); })()).map((r) => Math.round(r.top)));
+      if (lines.size > 1) wrapped += 1;
+      const line = centre(firstLine(title));
+      for (const [what, el] of [['dot', item.querySelector('.pd-dot')], ['time', item.querySelector('.pd-time')], ['checkbox', item.querySelector('.mdc-checkbox__background')]] as const) {
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const c = what === 'time' ? centre(firstLine(el)) : centre(r);
+        if (Math.abs(c - line) > tol) problems.push(`${id}: ${what} centre is ${(c - line).toFixed(1)} px from the title's first line`);
+      }
+    }
+    return { problems, wrapped };
+  }, tolerance);
 }

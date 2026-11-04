@@ -6,6 +6,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `@decryp7/paddock-ui` tokens: the count ramp `--pd-count-1` to `-5`
 - New CSS custom properties `--pd-count-1` to `--pd-count-5` (fewest to most): a five-step ramp for counts drawn as area fills, defined per accent from `count-dark`/`count-light` in `$accents` (Dyno only so far). `npm run test:tokens` measures it: in normal vision and under protanopia, deuteranopia and tritanopia, neighbours CIEDE2000 >= 10 and 1.3:1 in luminance (the last pair 1.4:1) and every step >= 7 from the warning colour; L* >= 10 per step and the darkest step L* >= 12; step 1 at 3:1 on the page in normal vision; `--pd-text` (the marker colour) >= 15 from every step, its fill or a `--pd-bg` halo 3:1 on every step in every vision (design guide, section 4).
+### `@decryp7/paddock-ui`: `--pd-checkbox-box-size`, and the notification pane's grid layout
+
+- New public CSS custom property `--pd-checkbox-box-size` (18px, in the token sheet; read by the shared checkbox pull in `_material.scss`): the shared rule that pulls a checkbox's box back by half the touch target's overhang reads it instead of a literal 18px. A page never adds its own pull on top (a second shift clipped the AI access page and the notification pane).
+- `@decryp7/paddock-ui/shell/notify`: each notification is a grid `[checkbox][dot][title][time]` with the body and buttons under the title; the box, dot and time stay on the title's first line when it wraps. Select all has its own labelled row in the items' checkbox column. Delete all and Mark all read are text buttons in the muted colour (Delete all is no longer outlined in danger red; the confirmation carries the danger). No class or test id was renamed.
+- `@decryp7/paddock-e2e`: `checkboxLayoutProblems`, `bodyIndentProblems` and `rowPinProblems` check a page's checkbox layout (clipped, covered, off the title line, body not under the title, dot or time off the first line).
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
