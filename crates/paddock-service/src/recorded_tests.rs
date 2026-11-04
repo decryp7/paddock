@@ -3,7 +3,7 @@
 //! when and with which command it was recorded; the rest is the tool's raw output.
 
 use crate::backend::{
-    Backend, Job, LastExit, Systemd, Target, UnitFileState, UnitOrigin, WindowsService,
+    Backend, Job, LastExit, LaunchdFile, Systemd, Target, UnitFileState, UnitOrigin, WindowsService,
 };
 use crate::port::Output;
 use crate::spec::{Kind, ServiceSpec};
@@ -152,6 +152,14 @@ fn windows_11_a_service_that_stopped_with_its_own_exit_code_is_failed_with_that_
 }
 
 #[test]
+fn windows_11_a_service_whose_process_was_killed_is_failed_with_the_win32_code_1067() {
+    let sys = FakeSystem::new();
+    let mut b = helper_service(&sys);
+    scm_answers(&sys, "windows-11-sc-query-crashed-1067.txt");
+    assert_eq!(b.inspect().job, Job::Failed(LastExit::Win32(1067)));
+}
+
+#[test]
 fn windows_11_a_running_a_stopping_and_a_cleanly_stopped_service() {
     let sys = FakeSystem::new();
     let mut b = helper_service(&sys);
@@ -166,5 +174,68 @@ fn windows_11_a_running_a_stopping_and_a_cleanly_stopped_service() {
     assert_eq!(
         (look.job, look.last_exit),
         (Job::NotRunning, Some(LastExit::Win32(0)))
+    );
+}
+
+// ------------------------------------------------------------------------------------------------------- macOS 26
+
+fn launchd(sys: &FakeSystem, fixture: &str) -> crate::backend::Inspection {
+    let spec = ServiceSpec::builder("fix.term", "Fixture", "fixjob")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    sys.answer("/bin/launchctl print", Output::ok(&recorded(fixture)));
+    LaunchdFile::new(
+        spec,
+        0,
+        "/Library/LaunchDaemons/fix.term.plist".into(),
+        Target::exe("/tmp/fixjob.sh"),
+        Box::new(sys.clone()),
+    )
+    .inspect()
+}
+
+#[test]
+fn macos_26_a_running_daemon_has_no_last_exit_and_no_restarts() {
+    let look = launchd(&FakeSystem::new(), "macos-26-launchctl-print-running.txt");
+    assert_eq!(
+        (look.job, look.last_exit, look.restarts),
+        (Job::Running, None, Some(0))
+    );
+}
+
+#[test]
+fn macos_26_a_daemon_stopped_by_sigterm_is_not_running_not_failed() {
+    let look = launchd(
+        &FakeSystem::new(),
+        "macos-26-launchctl-print-killed-sigterm.txt",
+    );
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::NotRunning, Some(LastExit::Signal(15)))
+    );
+}
+
+#[test]
+fn macos_26_a_daemon_killed_by_sigkill_is_failed_with_the_signal() {
+    let look = launchd(
+        &FakeSystem::new(),
+        "macos-26-launchctl-print-killed-sigkill.txt",
+    );
+    assert_eq!(look.job, Job::Failed(LastExit::Signal(9)));
+}
+
+#[test]
+fn macos_26_a_daemon_that_exited_zero_is_not_running_and_one_that_exited_three_is_failed() {
+    let sys = FakeSystem::new();
+    let look = launchd(&sys, "macos-26-launchctl-print-exited-0.txt");
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::NotRunning, Some(LastExit::Code(0)))
+    );
+    let look = launchd(&sys, "macos-26-launchctl-print-exited-3.txt");
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::Failed(LastExit::Code(3)), Some(LastExit::Code(3)))
     );
 }
