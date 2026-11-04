@@ -423,6 +423,10 @@ enough to extract one.
 
 ## 6. Memory as a first-class criterion
 
+> The measured memory figures in this section are the first run's RSS, superseded by the physical-footprint
+> [rerun](../performance.md#2026-11-04-fast-ingest-rerun-after-review-one-query-set-physical-footprint) and by ADR 0012 D7, whose budgets
+> and enforcement are the decision. The estimates below are unchanged.
+
 **How each part bounds memory.**
 
 | Mechanism | Where | Effect |
@@ -614,6 +618,9 @@ The user accepted all nine recommendations on 2026-11-04, with one change to D1.
 | D9 | Submodules and nested repositories are indexed on request. |
 
 ## 10a. The questions as they were asked
+
+> Kept as asked, with the first run's numbers. Superseded by section 10, ADR 0012 and the
+> [rerun](../performance.md#2026-11-04-fast-ingest-rerun-after-review-one-query-set-physical-footprint) where they differ.
 
 1. **The user's question: "If code is under Git, only prepare changes; if not, initialise Git to track changes."**
    Recommendation: yes to the first half, no to the second. Under Git, use the git index and trees (read as data through gix, never

@@ -119,13 +119,15 @@ Accepted by the user on 2026-11-04 with ADR 0012, which replaces these parts of 
   that attaches one fact store per repository identity (`facts` appended in insertion order, `fact_keys` as a narrow index; benchmark
   B9 may move the blobs into Arrow IPC segment files behind the `FactStore` port). The rebuild rule of this ADR stays: a schema v1 file
   is moved aside and rebuilt, with no migration before v1.
-- **Content keys.** The fact cache is keyed by a BLAKE3 hash of the raw bytes (ADR 0012 D3). `Fingerprint` (normalised SHA-256) now
-  serves rename detection only and is computed lazily, for added files only when unmatched deleted files remain to pair.
-- **Change plan.** `plan_changes` keeps its rules (unchanged, modified, renamed by `Fingerprint`, added, deleted; a rename keeps the
-  `FileId`). Its input is now the `ChangeSet` of the manifest (ADR 0012 D1), whose stat adds the change time and the file id to size
+- **Content keys and renames.** The fact cache is keyed by a BLAKE3 hash of the raw bytes (ADR 0012 D3). Renames are paired by that
+  raw hash first. `Fingerprint` (normalised SHA-256) is computed in the same read and stored in the manifest, and pairs only the
+  leftovers, which are renames whose line endings changed.
+- **Change plan.** `plan_changes` keeps its rules (unchanged, modified, renamed, added, deleted; a rename keeps the `FileId`). Its input is now the `ChangeSet` of the manifest (ADR 0012 D1), whose stat adds the change time and the file id to size
   and modification time, and whose paths are compared by `path_key` (case-folded on case-insensitive volumes, so a case-only rename is
   a rename).
-- **"All of a run's changes are one transaction".** Now only the swap of the generation's path-to-fact-key map is one transaction.
+- **"All of a run's changes are one transaction".** Now the catalog's swap of the generation's path-to-fact-key map is one transaction,
+  bracketed by two fact-store transactions (add the new generation's reference first, drop the old one last; ADR 0012 D6a), because
+  the two files cannot share a transaction across a crash.
   The fact blobs are content-addressed and are written as they arrive, in transactions of about 50 ms of work, under the run's lease.
   A crash or a cancel before the swap leaves the previous generation readable, plus blobs that the sweep removes once the run's
   lease is stale (ADR 0012 D6a). "Build new data, then swap"

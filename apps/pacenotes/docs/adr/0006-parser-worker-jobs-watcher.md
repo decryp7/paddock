@@ -168,7 +168,8 @@ Accepted by the user on 2026-11-04 with ADR 0012:
   quarantines only the pair (file content, rule pack); a crash in the grammar quarantines the file as in "Crash and stall policy".
 - **Pool size and caps.** The Auto default for parse workers becomes `min(cores − 1, worker share / per-worker peak, 8)` (ADR 0012
   D7), with the per-worker peak measured at start and updated from the reports. The pool shrinks by one worker when the host plus its
-  workers exceed the memory budget, and grows again below 80% of it. The per-worker memory cap becomes `min(1 GiB, worker share / 2)`.
+  workers exceed the memory budget, and grows again below 80% of it. The per-worker memory cap becomes `min(1 GiB, worker share / 2)`,
+  and a file quarantined for hitting it is recorded with the cap value, so a larger cap tries it again.
 - **I/O threads.** The read pass's Auto default is chosen per volume (SSD 4, rotational 1 to 2, network 2; ADR 0012 D7).
 - **The shortcut becomes the manifest** (ADR 0012 D1): equal size, modification time, change time and file id mean unchanged; the
   racy rule stays, and remote and FAT volumes check content by default.

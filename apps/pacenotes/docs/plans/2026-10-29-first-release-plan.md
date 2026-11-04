@@ -367,16 +367,21 @@ Order: top to bottom; two packages run at once when load allows. Designs and the
 Stage 1 delivers no app and nothing the user can run: it is the parsing, history, rules, index, diagram, requirement and
 coverage core with its tests, so stage 2 starts with the hardest pure parts proven.
 
-### 4.3a Fast ingest (ADR 0012, accepted 2026-11-04; about 67.5 agent-days, 70 with IG10)
+### 4.3a Fast ingest (ADR 0012, accepted 2026-11-04; about 69 agent-days, 71.5 with IG10)
 
 [ADR 0012](../adr/0012-fast-ingest.md) replaces the index's storage and change detection with the manifest, the per-repository fact
 cache, the SQLite catalog and the derived mmap graph, and lists the work packages IG0 to IG15 and the benchmark packages IG-B1 to
 IG-B9 with their sizes and dependencies (the ADR's table is the source; it is not copied here). Placement:
 
-- **Stage 1 (pure crates, no shared change):** IG0, IG-B1, IG-B6, IG3, then IG2 (with its `FactStore` port) and IG-B9, IG4, IG-B3,
-  IG5, IG11, IG7, IG-B8, IG13, IG15. They extend A3a and A3's crates and change no shared path.
-- **Stage 2 (shared changes and adapters):** IG14 (the stat fields and the Windows directory enumeration in `paddock-walk`), then IG1
-  and IG-B5; IG6, IG8 and IG-B7; IG9; IG12 (moving the UI and MCP consumers to the snapshot) with wave 3's search and understand
+- **Stage 1 (pure parts only, no shared change, no process or OS concern):** IG0; IG-B1 and IG-B6; IG3's protocol types and replay
+  logic; the pure halves of IG2 (blob format and checksum, `FactKey`, the build-id script and golden corpus, the `FactStore` port with
+  an in-memory double), of IG4 (the snapshot builder and reader over byte slices, the property test) and of IG13 (the swap,
+  reconciliation and sweep rules as pure state machines over the reference and lease tables); IG5 and IG11 over the in-memory snapshot;
+  IG7's rule-on-tree logic.
+- **Stage 2 (adapters and shared changes):** the SQLite `FactStore` adapter, the file layout, repository identity, owner locks and
+  control writes (IG2's rest); the mapped file, fsync and rename (IG4's rest); the lease rows with `ProcessId`, the sweep job and the
+  two-process test (IG13's rest); then IG-B9, IG-B3 and IG-B8; IG14 (the stat fields and the Windows enumeration in `paddock-walk`), IG1
+  and IG-B5; IG6, IG8 and IG-B7; IG9; IG15; IG12 (moving the UI and MCP consumers to the snapshot) with wave 3's search and understand
   packages. IG10 (Parquet export) waits for Debrief's DuckLake trial.
 - **Effect on other packages:** A3's index job gains the phases of ADR 0006's amendment; B2 reads chunk text hashes from the fact
   blobs; A4's references and call graph run on the snapshot's queries (IG5, IG11); C1's rules run in the worker (IG7); H1's
@@ -483,8 +488,8 @@ F1 in detail:
 |---|---|---|
 | Stage 1, beside Pitwall 1.1 and Debrief 1.2 | about 41 | five to seven weeks at one or two agents |
 | Stage 2, waves 2-8 | about 156 | nine to eleven weeks at four agents if nothing waits |
-| Fast ingest (ADR 0012, section 4.3a; added 2026-11-04) | about 67.5 (70 with IG10) | spread over both stages; partly overlaps A3, A4 and C1, reconciled at the stage-1 re-estimate |
-| Package sum | about 265 | |
+| Fast ingest (ADR 0012, section 4.3a; added 2026-11-04) | about 69 (71.5 with IG10) | spread over both stages; partly overlaps A3, A4 and C1, reconciled at the stage-1 re-estimate |
+| Package sum | about 266 | |
 | Review and CI overhead (about 20 %) | about 53 | |
 | **Planning figure for the full v1** | **300 to 350** (230 to 270 before ADR 0012) | re-estimated after stage 1 with the measured pace |
 

@@ -1,0 +1,110 @@
+Raw output of the first 2026-11-04 fast-ingest runs (before the review), as printed. Memory here is RSS (getrusage), not rule-26
+evidence. Machine: Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; nice -n 19 through the machine's semaphore unless noted.
+Sections 1 to 4 are the saved output files of the background runs. Sections 5 to 7 ran in the foreground; their output is copied
+from the session's terminal, line for line. Sections 8 and 9 are the git and shadow-repository timings, copied the same way.
+
+=== 1. ingest-bench parse <Paddock worktree at c1bba3f9f> 2 4
+ 7:58  up 1 day,  1:17, 1 user, load averages: 7.59 17.25 19.09
+corpus: 6419 files (2989 rs, 3430 ts), 50.9 MiB, 1290893 lines, walk+read 3717 ms
+hash sha256: 526 MiB/s (1 thread) [61]
+hash blake3: 1675 MiB/s (1 thread) [130]
+hash xxh3-64: 31986 MiB/s (1 thread) [45]
+1 thread, parse only: 3.44 s, 14.8 MiB/s, 375 klines/s, 16334623 nodes, 0 tag captures
+1 thread, parse+tags query: 4.93 s, 10.3 MiB/s, 262 klines/s, 16334623 nodes, 917172 tag captures
+  rust: 2989 files 30.3 MiB parse only 14.0 MiB/s
+  typescript: 3430 files 20.6 MiB parse only 15.3 MiB/s
+2 threads, parse+tags: 2.86 s, 17.8 MiB/s
+4 threads, parse+tags: 1.39 s, 36.5 MiB/s
+incremental, 20 largest files (1457 KiB): full re-parse 87.65 ms total, incremental 2.23 ms total (39.4x)
+peak RSS 96 MiB
+ 8:03  up 1 day,  1:23, 1 user, load averages: 6.36 11.82 16.09
+
+[exited with code 0]
+
+=== 2. ingest-bench graph 1000000 5000000 <scratch>/graph.db
+ 8:05  up 1 day,  1:25, 1 user, load averages: 21.87 15.14 16.80
+graph: 1000000 nodes, 5000000 edges; CSR reverse build 83 ms (incl. sort), 22.9 MiB
+CSR direct callers: 0.006 us/query (avg 8 hits)
+CSR callers 3 levels: 7.9 us/query (avg 284 reached)
+SQLite insert 1.57 s (3194 k rows/s, prepared, one tx), 2 indexes 4.71 s, file 222.0 MiB
+SQLite direct callers: 4.1 us/query (avg 8 hits)
+SQLite recursive CTE callers 3 levels: 87 us/query (avg 123 reached, 200 queries)
+peak RSS 74 MiB
+ 8:15  up 1 day,  1:34, 1 user, load averages: 13.49 13.91 15.61
+
+[exited with code 0]
+
+=== 3. kv, path keys in random order (5 stores, one run each; the last line's label came from a rebuilt binary, same code)
+ 8:16  up 1 day,  1:36, 1 user, load averages: 13.59 14.03 15.45
+redb 2: bulk load 1000000 rows in batches of 10000: 141.46 s (7 k rows/s); reads during load 998 k/s (worst 9.3 ms); point lookup 1.17 us; 100-row commit 62.60 ms; disk 258 MiB
+peak RSS 381 MiB
+fjall 2: bulk load 1000000 rows in batches of 10000: 5.12 s (195 k rows/s); reads during load 379 k/s (worst 99.0 ms); point lookup 5.98 us; 100-row commit 17.68 ms; disk 53 MiB
+peak RSS 149 MiB
+LMDB (heed 0.22): bulk load 1000000 rows in batches of 10000: 65.31 s (15 k rows/s); reads during load 1032 k/s (worst 3.6 ms); point lookup 1.14 us; 100-row commit 68.63 ms; disk 323 MiB
+peak RSS 428 MiB
+SQLite WAL, synchronous=NORMAL: bulk load 1000000 rows in batches of 10000: 111.13 s (9 k rows/s); reads during load 120 k/s (worst 50.6 ms); point lookup 2.58 us; 100-row commit 20.26 ms; disk 264 MiB
+peak RSS 11 MiB
+SQLite WAL, synchronous=FULL (keys in random order): bulk load 1000000 rows in batches of 10000: 115.88 s (9 k rows/s); reads during load 195 k/s (worst 45.3 ms); point lookup 2.76 us; 100-row commit 15.11 ms; disk 243 MiB
+peak RSS 12 MiB
+ 8:28  up 1 day,  1:47, 1 user, load averages: 3.90 7.50 11.15
+ 33M	/Volumes/d7sst7/dev-targets/pacenotes-ingest-bench-target/kv/fjall
+336M	/Volumes/d7sst7/dev-targets/pacenotes-ingest-bench-target/kv/lmdb
+214M	/Volumes/d7sst7/dev-targets/pacenotes-ingest-bench-target/kv/redb
+129M	/Volumes/d7sst7/dev-targets/pacenotes-ingest-bench-target/kv/sqlite
+129M	/Volumes/d7sst7/dev-targets/pacenotes-ingest-bench-target/kv/sqlite-full
+
+[exited with code 0]
+
+=== 4. REACH=1 ingest-bench graph 1000000 5000000 <scratch>/graph.db (second graph run)
+ 8:38  up 1 day,  1:58, 1 user, load averages: 22.85 17.26 13.82
+graph: 1000000 nodes, 5000000 edges; CSR reverse build 85 ms (incl. sort), 22.9 MiB
+CSR direct callers: 0.066 us/query (avg 8 hits)
+CSR callers 3 levels: 5.0 us/query (avg 284 reached)
+SQLite insert 2.40 s (2081 k rows/s, prepared, one tx), 2 indexes 5.94 s, file 222.0 MiB
+SQLite direct callers: 2.3 us/query (avg 8 hits)
+SQLite recursive CTE callers 3 levels: 93 us/query (avg 123 reached, 200 queries)
+CSR forward build 85 ms
+CSR all callers (reverse), unlimited depth: 24.73 ms/query, reached avg 595796 (min 0, max 992995), 100 queries
+CSR all callees (forward), unlimited depth: 21.17 ms/query, reached avg 582564 (min 0, max 588451), 100 queries
+CSR path A->B, bidirectional BFS: 26.64 us/query, 592/1000 connected, avg length 8.9, visited avg 1277 (max 6692)
+SQLite all callers, unlimited depth (recursive CTE, UNION): 3638 ms/query, reached avg 595796, 5 queries
+SQLite path A->B as forward reach then test (no early exit in SQL): 2742 ms/query, 5/5 connected
+peak RSS 150 MiB
+ 8:44  up 1 day,  2:04, 1 user, load averages: 12.31 14.83 13.94
+
+[exited with code 0]
+
+=== 5. KV_SORTED=1 kv <store> 1000000 (keys in insertion order)
+ 8:28  up 1 day,  1:47, 1 user, load averages: 7.44 8.00 11.24
+redb 2 (keys in insertion order): bulk load 1000000 rows in batches of 10000: 8.18 s (122 k rows/s); reads during load 1129 k/s (worst 5.6 ms); point lookup 1.13 us; 100-row commit 89.36 ms; disk 258 MiB
+peak RSS 312 MiB
+fjall 2 (keys in insertion order): bulk load 1000000 rows in batches of 10000: 4.85 s (206 k rows/s); reads during load 461 k/s (worst 97.5 ms); point lookup 5.00 us; 100-row commit 40.01 ms; disk 45 MiB
+peak RSS 122 MiB
+LMDB (heed 0.22) (keys in insertion order): bulk load 1000000 rows in batches of 10000: 2.90 s (345 k rows/s); reads during load 1189 k/s (worst 0.7 ms); point lookup 1.05 us; 100-row commit 88.53 ms; disk 108 MiB
+peak RSS 114 MiB
+SQLite WAL, synchronous=NORMAL (keys in insertion order): bulk load 1000000 rows in batches of 10000: 2.79 s (359 k rows/s); reads during load 305 k/s (worst 21.3 ms); point lookup 2.64 us; 100-row commit 21.54 ms; disk 122 MiB
+peak RSS 11 MiB
+ 8:29  up 1 day,  1:48, 1 user, load averages: 13.34 9.36 11.56
+
+=== 6. KV_SQLITE_CACHE_KIB=65536 kv sqlite 1000000 (keys in random order)
+SQLite WAL, synchronous=NORMAL (keys in random order): bulk load 1000000 rows in batches of 10000: 85.66 s (12 k rows/s); reads during load 407 k/s (worst 43.1 ms); point lookup 2.38 us; 100-row commit 17.85 ms; disk 169 MiB
+peak RSS 175 MiB
+ 8:30  up 1 day,  1:50, 1 user, load averages: 6.24 8.12 10.81
+
+=== 7. cargo --timings (compile time of the store crates, seconds): lmdb-master-sys 1.3, heed 0.6, redb 4.6, lsm-tree 3.1, fjall 1.8, rusqlite 0.9
+
+=== 8. git timings (git 2.56.0, /usr/bin/time -p, real seconds, nice -n 19, GIT_OPTIONAL_LOCKS=0)
+Paddock worktree at c1bba3f9f (11,867 tracked files):
+  status --porcelain=v2 --untracked-files=all: 0.34, 0.07, 0.08
+  ls-files -s: 0.01; ls-tree -r HEAD: 0.17
+  diff --name-status HEAD~200 HEAD (3,368 paths): 0.82; --no-renames: 0.01
+  diff --name-status <2000th rev-list commit> HEAD (11,086 paths): 0.05 (renameLimit warning); --no-renames: 0.02
+Local mirror of github.com/UberGuidoZ/Flipper at 9bec07fa2 (27,390 tracked files, 27 submodules, 3,704 commits):
+  status -uall: 32.79, 5.96, 5.91; with --ignore-submodules=all: 5.97, 5.92; -uno: 5.90
+  ls-files -s: 0.01; ls-tree -r HEAD: 0.12
+  diff-files --name-only: 27,363 entries stat-dirty; status -uno lists 0 changes
+  private index (GIT_INDEX_FILE): read-tree HEAD 0.03; update-index -q --refresh 5.92, then 0.03; status -uno 0.03; status -uall 0.07; index 3,337,598 bytes
+
+=== 9. shadow repository (git -c core.fsmonitor=false --git-dir=<scratch>/shadow.git --work-tree=<Paddock worktree>)
+  add -A 34.27; status 0.07, 0.06; status after touch 0.07, 0.06; gc 15.70
+  11,778 files, 11,158 loose objects, 398 MB before gc, 371 MB after gc; tracked files 486.173 MiB

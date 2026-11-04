@@ -52,10 +52,16 @@ run's graph comparison and every memory figure of that run (which were RSS). Ind
   - 200 random pairs for paths.
 
   Every traversal is the same BFS with a visited stamp; only the neighbour lookup differs. SQLite has indexes on `(dst, src)` and
-  `(src, dst)`, `cache_size` 512 MiB (larger than its 222 MiB file) and a warmed cache. "Cold mapped" is a file written with
-  `F_NOCACHE`, mapped, and queried for the first time. Time per query (time per node reached):
+  `(src, dst)`, `cache_size` 512 MiB (larger than its 222 MiB file) and a cache warmed by one scan of each index. The CSR columns:
+  - *in memory*: the arrays just built, every page resident (warm);
+  - *mapped, cold*: the same arrays written to a file with `F_NOCACHE` (so the written pages were not left in the page cache), mapped,
+    and queried for the first time, so every first touch of a page is a fault that reads the SSD. Nothing else was purged; this is
+    best effort, not a cold boot;
+  - *mapped, warm*: the second pass over the same mapping, with the pages now resident.
 
-  | Query | CSR in memory | CSR mapped, first pass | CSR mapped, second pass | SQLite, BFS over indexed look-ups | SQLite recursive CTE (`UNION` on the node) |
+  Time per query (time per node reached):
+
+  | Query | CSR in memory (warm) | CSR mapped, cold (first pass) | CSR mapped, warm (second pass) | SQLite, BFS over indexed look-ups (warm cache) | SQLite recursive CTE (`UNION` on the node) |
   |---|---|---|---|---|---|
   | callers, direct (avg 6) | 0.004 ms | 0.518 ms (84 µs a node: page faults) | 0.000 ms | 0.002 ms (0.40 µs) | |
   | callers, 3 levels (avg 201) | 0.005 ms (0.023 µs) | 0.760 ms (3.8 µs) | 0.004 ms (0.018 µs) | 0.075 ms (0.373 µs) | |
@@ -176,8 +182,8 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   Compile time of each store crate in this build (cargo `--timings`, 2 jobs, nice 19): redb about 5 s, fjall with `lsm-tree` about
   5 s, heed with LMDB about 2 s; SQLite's bundled C was built earlier and not timed.
 
-- **Numbers, git change detection** (git 2.56.0; this worktree: 11,867 tracked files; a public open-source checkout on the
-  machine: 27,390 tracked files, 27 submodules, 3,704 commits, its index stat data stale for 27,363 entries):
+- **Numbers, git change detection** (git 2.56.0; this branch's worktree at c1bba3f9f: 11,867 tracked files; a local mirror of the
+  public repository github.com/UberGuidoZ/Flipper at 9bec07fa2 (2024-12-19): 27,390 tracked files, 27 submodules, 3,704 commits, its index stat data stale for 27,363 entries):
 
   | Measure | 11,867 files | 27,390 files |
   |---|---|---|
@@ -194,7 +200,8 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   footprint
 - **Notes:** the parse numbers exclude the worker process, IPC, extraction into facts and SQLite, which the index pays (see
   2026-10-30 below); C and C++ grammars are not measured. The SQLite numbers use one prepared statement and one transaction, unlike
-  stage 1's per-row `execute`. Raw output was kept in the session's scratch area only.
+  stage 1's per-row `execute`. Raw output: [research/2026-11-04-fast-ingest-raw-first-run.txt](research/2026-11-04-fast-ingest-raw-first-run.txt)
+  (the background runs' saved output files; the foreground runs copied from the session's terminal).
 
 ### 2026-10-25 (amended 2026-10-28), embedding engines
 
