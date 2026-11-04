@@ -6,11 +6,11 @@ const driver = (text, opens = true) => ({ openPage: async () => opens, text: asy
 const by = (id) => READINGS.find((r) => r.id === id);
 
 test('a wired reading passes, an unwired one fails with the missing text', async () => {
-  const good = await readingStep(by('processes-all-accounts'), 'windows', driver('Processes Account Name SYSTEM svchost via helper'));
+  const good = await readingStep(by('processes-all-accounts'), 'windows', driver('Processes Account Name SYSTEM svchost Read by the administrator helper'));
   assert.equal(good.status, 'pass');
   const unwired = await readingStep(by('processes-all-accounts'), 'windows', driver('Processes Account Name SYSTEM svchost Needs the helper'));
   assert.equal(unwired.status, 'fail');
-  assert.match(unwired.summary, /via helper/);
+  assert.match(unwired.summary, /administrator helper/);
   assert.match(unwired.summary, /needs the helper/i);
 });
 test('a page that cannot be opened fails', async () => {
