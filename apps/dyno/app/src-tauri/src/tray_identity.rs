@@ -11,6 +11,9 @@ use sha2::{Digest, Sha256};
 /// The reverse-DNS prefix that makes the names unique to Dyno (the bundle identifier in `tauri.conf.json`).
 const NAMESPACE: &str = "net.decryptology.dyno";
 
+/// Dyno's bundle identifier (`tauri.conf.json`), the name an Apple event addresses the app by.
+pub const BUNDLE_ID: &str = "net.decryptology.dyno";
+
 /// The macOS autosave name of an item, e.g. `net.decryptology.dyno.menubar.cpu-1`.
 pub fn autosave_name(item: &str) -> String {
     format!("{NAMESPACE}.menubar.{item}")

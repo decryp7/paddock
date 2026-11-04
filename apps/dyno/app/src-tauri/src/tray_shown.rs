@@ -36,7 +36,10 @@ pub enum Verdict {
 /// Judges the item `autosave_name` against the on-screen `windows`.
 pub fn judge(windows: &[Window], autosave_name: &str) -> Verdict {
     let cc: Vec<&Window> = windows.iter().filter(|w| w.owner == CONTROL_CENTER).collect();
-    if cc.iter().any(|w| w.name.as_deref() == Some(autosave_name) && w.width > 0.0 && w.height > 0.0) {
+    if cc
+        .iter()
+        .any(|w| w.name.as_deref() == Some(autosave_name) && w.width > 0.0 && w.height > 0.0)
+    {
         return Verdict::Shown;
     }
     if cc.iter().all(|w| w.name.is_none()) && !cc.is_empty() {
@@ -45,6 +48,24 @@ pub fn judge(windows: &[Window], autosave_name: &str) -> Verdict {
     Verdict::NotShown {
         control_center_windows: cc.len(),
     }
+}
+
+/// The owners of the listed windows with their counts, most first, for the log (at most 8): it shows whether the list is complete.
+pub fn owners_summary(windows: &[Window]) -> String {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for w in windows {
+        match counts.iter_mut().find(|(o, _)| *o == w.owner) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((&w.owner, 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    counts
+        .iter()
+        .take(8)
+        .map(|(o, n)| format!("{o} {n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -62,7 +83,10 @@ mod tests {
 
     #[test]
     fn a_control_center_window_named_after_the_item_is_shown() {
-        let list = [win("Control Center", Some("net.decryptology.dyno.menubar.cpu-0"), 40.0), win("Dock", None, 9.0)];
+        let list = [
+            win("Control Center", Some("net.decryptology.dyno.menubar.cpu-0"), 40.0),
+            win("Dock", None, 9.0),
+        ];
         assert_eq!(judge(&list, "net.decryptology.dyno.menubar.cpu-0"), Verdict::Shown);
     }
 
@@ -71,9 +95,7 @@ mod tests {
         let list = [win("Control Center", Some("com.apple.menuextra.clock"), 60.0)];
         assert_eq!(
             judge(&list, "net.decryptology.dyno.menubar.cpu-0"),
-            Verdict::NotShown {
-                control_center_windows: 1
-            }
+            Verdict::NotShown { control_center_windows: 1 }
         );
     }
 
@@ -82,6 +104,13 @@ mod tests {
         let name = "net.decryptology.dyno.menubar.cpu-0";
         assert_ne!(judge(&[win("Dyno", Some(name), 40.0)], name), Verdict::Shown);
         assert_ne!(judge(&[win("Control Center", Some(name), 0.0)], name), Verdict::Shown);
+    }
+
+    #[test]
+    fn the_owners_are_counted_most_first() {
+        let list = [win("Dock", None, 1.0), win("Control Center", None, 1.0), win("Dock", None, 1.0)];
+        assert_eq!(owners_summary(&list), "Dock 2, Control Center 1");
+        assert_eq!(owners_summary(&[]), "");
     }
 
     #[test]

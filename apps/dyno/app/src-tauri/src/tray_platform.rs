@@ -17,10 +17,10 @@ pub fn context() -> String {
 #[cfg(target_os = "macos")]
 mod mac {
     use crate::tray::on_main;
-    use crate::tray_focus::{FocusPort, Front};
+    use crate::tray_focus::{FocusPort, Front, Method};
     use crate::tray_shown::Window;
     use objc2::rc::Retained;
-        use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+    use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
     use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
     use objc2_foundation::{MainThreadMarker, NSArray, NSDictionary, NSNumber, NSString};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,17 +72,23 @@ mod mac {
     /// The window server's list of on-screen windows: owner, name (when readable) and size.
     pub fn on_screen_windows() -> Result<Vec<Window>, String> {
         let list = CGWindowListCopyWindowInfo(CGWindowListOption::OptionOnScreenOnly, 0).ok_or("the window list is empty or refused")?;
-        let raw = objc2_core_foundation::CFRetained::into_raw(list).as_ptr().cast::<NSArray<NSDictionary>>();
+        let raw = objc2_core_foundation::CFRetained::into_raw(list)
+            .as_ptr()
+            .cast::<NSArray<NSDictionary>>();
         // Safety: CFArrayRef is toll-free bridged to NSArray, and the list owns +1 reference that `from_raw` takes over.
         let array: Retained<NSArray<NSDictionary>> = unsafe { Retained::from_raw(raw) }.ok_or("null window list")?;
         let mut out = Vec::new();
         for i in 0..array.count() {
             let dict = array.objectAtIndex(i);
-            let Some(owner) = string_of(&dict, "kCGWindowOwnerName") else { continue };
+            let Some(owner) = string_of(&dict, "kCGWindowOwnerName") else {
+                continue;
+            };
             let bounds = dict
                 .objectForKey(&NSString::from_str("kCGWindowBounds"))
                 .and_then(|b| b.downcast::<NSDictionary>().ok());
-            let (width, height) = bounds.map_or((0.0, 0.0), |b| (number_of(&b, "Width").unwrap_or(0.0), number_of(&b, "Height").unwrap_or(0.0)));
+            let (width, height) = bounds.map_or((0.0, 0.0), |b| {
+                (number_of(&b, "Width").unwrap_or(0.0), number_of(&b, "Height").unwrap_or(0.0))
+            });
             out.push(Window {
                 owner,
                 name: string_of(&dict, "kCGWindowName"),
@@ -93,6 +99,21 @@ mod mac {
         Ok(out)
     }
 
+    /// The Apple event `activate` to Dyno itself, sent by `osascript` (a program with a timeout, never a window): macOS honours it
+    /// where the cooperative call is refused for a background launch (measured on macOS 26.6.2).
+    fn apple_event_activate() -> Result<(), String> {
+        let script = format!("tell application id \"{}\" to activate", crate::tray_identity::BUNDLE_ID);
+        let mut cmd = paddock_proc::command("/usr/bin/osascript");
+        cmd.args(["-e", &script]);
+        let out =
+            paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(std::time::Duration::from_secs(5))).map_err(|e| e.to_string())?;
+        if out.success() {
+            Ok(())
+        } else {
+            Err(format!("osascript {:?}: {}", out.outcome, out.stderr_text().trim()))
+        }
+    }
+
     /// [`FocusPort`] over AppKit: every call hops to the main thread (the activation sequence runs on its own thread).
     pub struct NativeFocus {
         /// The app.
@@ -101,7 +122,9 @@ mod mac {
 
     impl NativeFocus {
         fn main<T: Send + 'static>(&self, f: impl FnOnce(MainThreadMarker) -> T + Send + 'static) -> Result<T, String> {
-            on_main(&self.app, move |_| MainThreadMarker::new().map(f).ok_or_else(|| "not on the main thread".to_string()))?
+            on_main(&self.app, move |_| {
+                MainThreadMarker::new().map(f).ok_or_else(|| "not on the main thread".to_string())
+            })?
         }
     }
 
@@ -123,13 +146,16 @@ mod mac {
             self.main(|mtm| NSApplication::sharedApplication(mtm).isActive()).unwrap_or(false)
         }
 
-        fn activate(&mut self) -> Result<(), String> {
-            self.main(|mtm| NSApplication::sharedApplication(mtm).activate())
-        }
-
-        fn activate_forced(&mut self) -> Result<(), String> {
-            #[allow(deprecated)]
-            self.main(|mtm| NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true))
+        fn activate(&mut self, how: Method) -> Result<(), String> {
+            match how {
+                Method::Cooperative => self.main(|mtm| NSApplication::sharedApplication(mtm).activate()),
+                Method::Forced =>
+                {
+                    #[allow(deprecated)]
+                    self.main(|mtm| NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true))
+                }
+                Method::AppleEvent => apple_event_activate(),
+            }
         }
 
         fn give_back(&mut self, to: &Front) -> Result<(), String> {

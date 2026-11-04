@@ -371,7 +371,9 @@ impl NativeIcon {
                 Ok(windows) => match judge(&windows, &name) {
                     Verdict::Shown => Shown::Yes,
                     Verdict::NotShown { control_center_windows } => Shown::No(format!(
-                        "no on-screen Control Center window is named {name} ({control_center_windows} Control Center window(s) on screen)"
+                        "no on-screen Control Center window is named {name} ({control_center_windows} Control Center window(s) of {} on screen; owners: {})",
+                        windows.len(),
+                        crate::tray_shown::owners_summary(&windows)
                     )),
                     Verdict::NamesUnreadable => self.own_window_shown(),
                 },
@@ -395,9 +397,15 @@ impl NativeIcon {
             let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
             let window = t.ns_status_item().and_then(|item| item.button(mtm)).and_then(|b| b.window());
             let Some(w) = window else {
-                return Shown::No(format!("the status item has no window in the menu bar (app active {})", app.isActive()));
+                return Shown::No(format!(
+                    "the status item has no window in the menu bar (app active {})",
+                    app.isActive()
+                ));
             };
-            let (frame, occluded) = (w.frame(), !w.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible));
+            let (frame, occluded) = (
+                w.frame(),
+                !w.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible),
+            );
             if w.isVisible() && !occluded && frame.size.width > 0.0 {
                 Shown::Yes
             } else {
@@ -507,7 +515,9 @@ impl NativeIcon {
         {
             // The name was given when the status item was made (the vendored tray-icon's autosave-name provider); read it back.
             let name = tray_identity::autosave_name(item);
-            let read = self.icon.with_inner_tray_icon(|t| t.ns_status_item().map(|i| i.autosaveName().to_string()));
+            let read = self
+                .icon
+                .with_inner_tray_icon(|t| t.ns_status_item().map(|i| i.autosaveName().to_string()));
             match read {
                 Ok(Some(set)) if set == name => format!("autosave name {name}"),
                 Ok(Some(other)) => format!("autosave name {name} NOT set: the status item says \"{other}\""),
@@ -1352,7 +1362,10 @@ mod tests {
         for pass in 0..3 {
             apply(&mut ops, &state, TrayCommand::Verify { pass }).unwrap();
         }
-        assert_eq!(ops.removed, 0, "a re-make after ControlCenter is up hides the item again; macOS only reports");
+        assert_eq!(
+            ops.removed, 0,
+            "a re-make after ControlCenter is up hides the item again; macOS only reports"
+        );
         assert_eq!(ops.made, 4, "no icon is made again");
         assert_eq!(ops.live.len(), 4);
     }
@@ -1374,18 +1387,13 @@ mod tests {
         fn is_active(&mut self) -> bool {
             self.active
         }
-        fn activate(&mut self) -> Result<(), String> {
-            self.calls.push("activate".into());
+        fn activate(&mut self, how: crate::tray_focus::Method) -> Result<(), String> {
+            self.calls.push(how.name().into());
             if self.ignored > 0 {
                 self.ignored -= 1;
             } else {
                 self.active = true;
             }
-            Ok(())
-        }
-        fn activate_forced(&mut self) -> Result<(), String> {
-            self.calls.push("activate_forced".into());
-            self.active = true;
             Ok(())
         }
         fn give_back(&mut self, to: &crate::tray_focus::Front) -> Result<(), String> {
@@ -1439,6 +1447,24 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_activation_goes_down_the_ladder_to_the_apple_event() {
+        use crate::tray_focus::{activate_once, Outcome};
+        let state = TrayState::default();
+        let mut port = FakeFocus {
+            front: Some(finder()),
+            active: false,
+            ignored: 2,
+            calls: Vec::new(),
+        };
+        let done = activate_once(&mut port, &state.focus, true, true);
+        assert!(matches!(done, Outcome::Activated { how: "apple_event", .. }), "{done:?}");
+        assert_eq!(
+            port.calls,
+            ["frontmost", "activate", "activate_forced", "apple_event", "give_back Finder"]
+        );
+    }
+
+    #[test]
     fn a_refused_cooperative_activation_falls_back_to_the_forced_one() {
         use crate::tray_focus::{activate_once, Outcome};
         let state = TrayState::default();
@@ -1449,7 +1475,16 @@ mod tests {
             calls: Vec::new(),
         };
         let done = activate_once(&mut port, &state.focus, true, true);
-        assert!(matches!(done, Outcome::Activated { how: "activate_forced", .. }), "{done:?}");
+        assert!(
+            matches!(
+                done,
+                Outcome::Activated {
+                    how: "activate_forced",
+                    ..
+                }
+            ),
+            "{done:?}"
+        );
         assert_eq!(port.calls, ["frontmost", "activate", "activate_forced", "give_back Finder"]);
     }
 

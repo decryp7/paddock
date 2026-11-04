@@ -16,16 +16,40 @@ pub struct Front {
     pub name: String,
 }
 
+/// The ways to ask for the activation, in the order they are tried. macOS 14 made the first two cooperative (a background
+/// launch is refused), so the ladder ends with an Apple event `activate` sent by `osascript`, which the OS honours without a window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    /// `NSApplication.activate()`.
+    Cooperative,
+    /// `NSApplication.activateIgnoringOtherApps(true)` (deprecated; kept as the documented fallback).
+    Forced,
+    /// `osascript -e 'tell application id "<bundle id>" to activate'`, bounded by a timeout.
+    AppleEvent,
+}
+
+impl Method {
+    /// The order they are tried in.
+    pub const LADDER: [Method; 3] = [Method::Cooperative, Method::Forced, Method::AppleEvent];
+
+    /// The word the log and the outcome use.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Method::Cooperative => "activate",
+            Method::Forced => "activate_forced",
+            Method::AppleEvent => "apple_event",
+        }
+    }
+}
+
 /// What the activation needs from the OS.
 pub trait FocusPort {
     /// The frontmost app, unless it is Dyno itself.
     fn frontmost(&mut self) -> Option<Front>;
     /// Whether Dyno is the active app now.
     fn is_active(&mut self) -> bool;
-    /// Cooperative activation (`NSApplication.activate()`); the OS may refuse it while another app is active.
-    fn activate(&mut self) -> Result<(), String>;
-    /// Forced activation (`activateIgnoringOtherApps`), the fallback when the cooperative one is refused.
-    fn activate_forced(&mut self) -> Result<(), String>;
+    /// Asks the OS to activate Dyno by `how`.
+    fn activate(&mut self, how: Method) -> Result<(), String>;
     /// Makes `to` the active app again.
     fn give_back(&mut self, to: &Front) -> Result<(), String>;
     /// Waits `ms` milliseconds (a fake does not wait).
@@ -86,18 +110,23 @@ pub fn activate_once<P: FocusPort>(port: &mut P, focus: &StartFocus, hidden: boo
     }
     let started = Instant::now();
     let before = port.frontmost();
-    let front = before.as_ref().map_or_else(|| "none".to_string(), |f| format!("{} (pid {})", f.name, f.pid));
+    let front = before
+        .as_ref()
+        .map_or_else(|| "none".to_string(), |f| format!("{} (pid {})", f.name, f.pid));
     if port.is_active() {
-        logging::info(&format!("tray activation: Dyno is already active (frontmost was {front}); nothing to do"));
+        logging::info(&format!(
+            "tray activation: Dyno is already active (frontmost was {front}); nothing to do"
+        ));
         return Outcome::AlreadyActive;
     }
     logging::info(&format!(
         "tray activation: hidden start, Dyno not active; frontmost app {front}; activating once so macOS shows the menu-bar items"
     ));
     let mut how = None;
-    for (name, forced) in [("activate", false), ("activate_forced", true)] {
+    for method in Method::LADDER {
+        let name = method.name();
         let t = Instant::now();
-        let called = if forced { port.activate_forced() } else { port.activate() };
+        let called = port.activate(method);
         let took = became_active(port);
         logging::info(&format!(
             "tray activation: attempt {name}: call {}, active afterwards {took}, {} ms",
@@ -125,7 +154,10 @@ pub fn activate_once<P: FocusPort>(port: &mut P, focus: &StartFocus, hidden: boo
             started.elapsed().as_millis()
         ));
     } else {
-        logging::info(&format!("tray activation: no other app was in front; Dyno stays active ({} ms)", started.elapsed().as_millis()));
+        logging::info(&format!(
+            "tray activation: no other app was in front; Dyno stays active ({} ms)",
+            started.elapsed().as_millis()
+        ));
     }
     Outcome::Activated { how, returned }
 }
