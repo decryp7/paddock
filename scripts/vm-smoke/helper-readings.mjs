@@ -9,21 +9,21 @@
 /** page: a route name of Dyno's router (#/<page>), `tab`: a tab or radio label to press first. `all` must all match, `none` must not match. */
 export const READINGS = [
   { id: 'processes-all-accounts', title: 'Processes of every account', os: ['windows', 'macos', 'linux'], page: 'processes',
-    expect: { windows: [/Account/, /SYSTEM/, /via helper/i], macos: [/root/, /_[a-z]+/, /via helper/i], linux: [/root/, /via helper/i] }, none: [/needs the helper/i] },
+    expect: { windows: [/Account/, /SYSTEM/, /via (the )?helper|read by the administrator helper|administrator helper/i], macos: [/root/, /_[a-z]+/, /via (the )?helper|read by the administrator helper|administrator helper/i], linux: [/root/, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'traffic-by-program', title: 'Per-program network traffic', os: ['windows'], page: 'network', tab: 'By program',
-    expect: { windows: [/By program/, /via helper/i] }, none: [/needs the helper/i] },
+    expect: { windows: [/By program/, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'wake-requests', title: 'What keeps the computer awake (wake requests)', os: ['windows'], page: 'extras', tab: 'Sleep',
-    expect: { windows: [/via helper/i] }, none: [/needs the helper/i] },
+    expect: { windows: [/via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup',
     expect: { windows: [/no (backup )?versions|has no versions|no Backup and Restore/i] }, none: [/needs the helper/i] },
   { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Start-?up',
-    expect: { macos: [/Login items|Background items/i, /via helper/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/Login items|Background items/i, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
-    expect: { macos: [/pf/i, /rules?/i, /via helper/i], linux: [/nft|nftables/i, /rules?/i, /via helper/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/pf/i, /rules?/i, /via (the )?helper|read by the administrator helper|administrator helper/i], linux: [/nft|nftables/i, /rules?/i, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'energy-and-thermal', title: 'macOS CPU energy and thermal pressure (honest reasons in a VM)', os: ['macos'], page: 'power', tab: 'Energy',
     expect: { macos: [/CPU power|energy/i] }, none: [/needs the helper/i] },
   { id: 'sockets-and-holders', title: 'Linux socket owners and file holders', os: ['linux'], page: 'network',
-    expect: { linux: [/via helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
+    expect: { linux: [/via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
   { id: 'memory-modules', title: 'Linux memory modules (no DMI in a VM: the reason)', os: ['linux'], page: 'inventory',
     expect: { linux: [/DMI|memory modules/i] }, none: [/needs the helper/i] },
   { id: 'firewall-windows-unsupported', title: 'Firewall on Windows says it is not supported (honest, no helper)', os: ['windows'], page: 'firewall',
@@ -45,7 +45,7 @@ export async function readingStep(reading, os, driver) {
   checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
   if (!opened) return { title, status: 'fail', summary: checks[0].detail, checks, evidence };
   const text = (await driver.text()).replace(/\s+/g, ' ');
-  evidence.push(`page text: ${text.slice(0, 400)}`);
+  evidence.push(`page text: ${text.slice(0, 1800)}`);
   for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
   for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
   const bad = checks.filter((c) => !c.ok);

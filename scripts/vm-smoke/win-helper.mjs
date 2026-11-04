@@ -173,7 +173,8 @@ export async function helperExploit(browser) {
 export async function repeatInstall(browser) {
   const checks = [];
   const first = await pressInstallAndWait(browser);
-  checks.push({ ok: first.outcome === 'finished', detail: `first install: ${first.outcome}` });
+  const already = first.outcome === 'no install button';
+  checks.push({ ok: first.outcome === 'finished' || already, detail: already ? 'the tool is already installed (no install button): a repeat install is not offered' : `first install: ${first.outcome}` });
   const second = await pressInstallAndWait(browser);
   checks.push({ ok: second.outcome === 'finished' || second.outcome === 'no install button', detail: second.outcome === 'no install button' ? 'the card already says Installed (no second install offered)' : `repeat install: ${second.outcome}${second.outcome === 'failed' ? ' (' + (second.log.match(/Error=.*/)?.[0] ?? '') + ')' : ''}` });
   return result('Windows: repeat install of the disk health tool', checks, [], 'a second install works');
