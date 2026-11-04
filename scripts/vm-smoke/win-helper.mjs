@@ -9,6 +9,7 @@ import { Vnc } from './win-vnc.mjs';
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let runPassword = null; // the per-run random password of paddock-admin (reverted with the VM); never stored or printed
 const clean = (s) => s.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 export const ssh = (cmd, { admin = false, input, ms = 90_000 } = {}) => clean(spawnSync('bash', [VMWIN, 'ssh', ...(admin ? ['--admin'] : []), cmd], { encoding: 'utf8', timeout: ms, input }).stdout ?? '');
 const result = (title, checks, evidence = [], pass = '') => {
@@ -44,6 +45,7 @@ export async function helperOn(browser, { vnc = new Vnc() } = {}) {
   if (!s) return result('Windows: admin helper Turn on (UAC consent over VNC)', checks);
   const pw = randomBytes(12).toString('hex').replace(/[A-F]/g, '').slice(0, 20) + 'x'; // lowercase and digits: VNC typing drops the shift state
   ssh('$p = [Console]::In.ReadLine(); net user paddock-admin $p | Out-Null', { admin: true, input: `${pw}\n` });
+  runPassword = pw;
   await s.getByRole('button', { name: /Turn on administrator readings/ }).click();
   evidence.push('UAC: "Do you want to allow this app from an unknown publisher to make changes" (dyno-helper.exe), answered with the paddock-admin credentials over the VM VNC');
   await sleep(6000);
@@ -101,6 +103,11 @@ export async function helperOff(browser) {
   const s = await openSettings(browser);
   const pressed = await s.getByRole('button', { name: /Turn off administrator readings/ }).click().then(() => true, () => false);
   checks.push({ ok: pressed, detail: pressed ? 'pressed "Turn off administrator readings"' : 'no "Turn off administrator readings" button' });
+  // Removing the service is a change too: the standard user is asked for the administrator again (consent.exe is the UAC prompt).
+  let prompt = false;
+  for (let i = 0; i < 10 && !prompt; i++) { await sleep(2000); prompt = ssh('if (Get-Process consent -ErrorAction SilentlyContinue) { "yes" } else { "no" }', { admin: true }) === 'yes'; }
+  checks.push({ ok: true, detail: prompt ? 'Turn off asked for the administrator (UAC) and was answered' : 'Turn off asked for no UAC prompt' });
+  if (prompt && runPassword) { const v = new Vnc(); v.key('ctrl-a'); v.key('bsp'); v.type(runPassword); v.key('enter'); }
   let gone = false;
   for (let i = 0; i < 30 && !gone; i++) { await sleep(3000); gone = ssh('if (Get-Service DynoHelper -ErrorAction SilentlyContinue) { "present" } else { "gone" }', { admin: true }) === 'gone'; }
   checks.push({ ok: gone, detail: gone ? 'the DynoHelper service is removed' : 'the DynoHelper service is still there 90 s after Turn off' });
