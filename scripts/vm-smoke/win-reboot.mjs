@@ -51,6 +51,13 @@ export async function trayRecord(actor) {
   return { promoted, visible, overflow, sent };
 }
 
+/** The new crash and removal logging: Application log entries of source "Dyno helper", and the System service events for it. */
+export function eventsDump() {
+  const app = ssh(`Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Dyno helper' } -MaxEvents 40 -ErrorAction SilentlyContinue | ForEach-Object { "$($_.TimeCreated.ToString('s')) id=$($_.Id) level=$($_.LevelDisplayName): $(($_.Message -replace '\\s+', ' ').Substring(0, [Math]::Min(300, $_.Message.Length)))" }`, { admin: true });
+  const sys = ssh(`Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 7034,7036,7040,7045 } -MaxEvents 200 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'Dyno' } | Select-Object -First 25 | ForEach-Object { "$($_.TimeCreated.ToString('s')) id=$($_.Id): $(($_.Message -split '\\n')[0])" }`, { admin: true });
+  return ['--- Application log, source "Dyno helper"', ...(app ? app.split('\n') : ['(none)']), '--- System 7034/7036/7040/7045 for Dyno', ...(sys ? sys.split('\n') : ['(none)'])];
+}
+
 /** The service as the OS and the helper's own log report it. */
 export function snapshot() {
   const qc = ssh('sc.exe qc DynoHelper 2>&1 | Out-String', { admin: true });
@@ -121,7 +128,7 @@ async function runRebootSteps(ctx, steps) {
     { ok: /On/.test(cardBefore), detail: `card: ${cardBefore.slice(0, 80)}` },
     { ok: true, detail: `Launch at login after install: ${launchDefault === 'true' ? 'ON' : launchDefault === 'false' ? 'OFF' : launchDefault}` },
     { ok: trayBefore.visible.length + trayBefore.overflow.length > 0, detail: `${trayBefore.visible.length} tray icon(s) visible, ${trayBefore.overflow.length} in the overflow` },
-  ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
+  ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, ...eventsDump(), '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
   await browser.close().catch(() => {});
   t.close();
 
@@ -164,7 +171,7 @@ async function runRebootSteps(ctx, steps) {
   const ev = ssh(`Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 7034,7036,7040,7045,1074,6005,6006 } -MaxEvents 300 -ErrorAction SilentlyContinue | Where-Object { $_.Id -in 1074,6005,6006 -or $_.Message -match 'Dyno' } | Select-Object -First 30 | ForEach-Object { "$($_.TimeCreated.ToString('s')) id=$($_.Id) $($_.ProviderName): $(($_.Message -split '\n')[0])" }`, { admin: true });
   const fail = ssh('sc.exe qfailure DynoHelper 2>&1 | Out-String; sc.exe qfailureflag DynoHelper 2>&1 | Out-String', { admin: true });
   const proc = ssh(`Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4688 } -MaxEvents 400 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'dyno-helper' } | Select-Object -First 10 | ForEach-Object { "$($_.TimeCreated.ToString('s')) $(($_.Message -split '\n' | Select-String 'New Process Name|Creator Process Name' | ForEach-Object { $_.Line.Trim() }) -join ' ; ')" }`, { admin: true });
-  const evidence = ['--- after the restart, before Dyno runs', idle.qc, idle.q, '--- after Dyno started', after.qc, after.q, '--- helper.log tail', after.log, `card: ${card}`, `Processes text: ${readingText.slice(0, 600)}`, '--- ACLs (always recorded)', ...acl.split('\n'), '--- System event log (service events 7034/7036/7040/7045, restart 1074/6005/6006)', ...ev.split('\n'), '--- sc qfailure DynoHelper', ...fail.split('\n'), '--- Security 4688 dyno-helper process creations (if auditing is on)', ...(proc ? proc.split('\n') : ['(none or auditing off)'])];
+  const evidence = ['--- after the restart, before Dyno runs', idle.qc, idle.q, '--- after Dyno started', after.qc, after.q, '--- helper.log tail', after.log, `card: ${card}`, `Processes text: ${readingText.slice(0, 600)}`, '--- ACLs (always recorded)', ...acl.split('\n'), ...eventsDump().map((l) => `[after restart] ${l}`), '--- System event log (service events 7034/7036/7040/7045, restart 1074/6005/6006)', ...ev.split('\n'), '--- sc qfailure DynoHelper', ...fail.split('\n'), '--- Security 4688 dyno-helper process creations (if auditing is on)', ...(proc ? proc.split('\n') : ['(none or auditing off)'])];
   steps.push(result('Windows restart: the helper works after a real restart without Repair or UAC', checks, evidence, 'service running, card On, readings work, no Repair'));
 
   // With Launch at login on (when it was off): does Dyno start by itself after a restart?
