@@ -118,6 +118,10 @@ impl ServiceSpec {
     pub fn name(&self) -> &str {
         &self.name
     }
+    /// The systemd unit's name without the suffix (`pitwall`).
+    pub fn unit_name(&self) -> &str {
+        &self.unit
+    }
     /// The systemd unit's file name (`pitwall.service`).
     pub fn unit_file_name(&self) -> String {
         format!("{}.service", self.unit)

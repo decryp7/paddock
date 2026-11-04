@@ -166,6 +166,16 @@ impl VerifyError {
     }
 }
 
+/// The trusted comment of a signature (base64 of the minisign signature file). It is **authentic only after
+/// [`verify_file`] has passed** for that signature: the global signature it checks covers the comment. A caller that binds an
+/// update to a product through the signed `file:` field (paddock-setup's `apply-update`) reads it after the check.
+pub fn trusted_comment(signature: &str) -> Option<String> {
+    let text = decode_text(signature, "the signature").ok()?;
+    Signature::decode(&text)
+        .ok()
+        .map(|s| s.trusted_comment().to_string())
+}
+
 /// The `version:` field of a Tauri trusted comment (`timestamp:1\tfile:app.tar.gz\tversion:1.2.3`) must name `announced`
 /// (compared as semantic versions, so `v1.2.3` matches).
 pub fn check_signed_version(

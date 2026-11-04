@@ -458,7 +458,7 @@ mod tests {
         let h = health();
         let c = ServiceControl::with_health(dyno(&sys, d.path(), true), emit, h.clone(), "agent")
             .unwrap();
-        sys.answer("reg query", Output::code(1));
+        sys.emulate_run_registry();
         let s = c.status().unwrap();
         assert_eq!(
             s.condition,
@@ -533,6 +533,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let sys = FakeSystem::new();
         let (emit, _) = emitter();
+        sys.emulate_run_registry();
         let c = ServiceControl::new(dyno(&sys, d.path(), true), emit);
         let c2 = c.clone();
         let _ = std::thread::spawn(move || {
@@ -665,6 +666,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let sys = FakeSystem::new();
         let (emit, seen) = emitter();
+        sys.emulate_run_registry();
         let c = ServiceControl::new(dyno(&sys, d.path(), true), emit);
         let auto: Arc<Mutex<Box<dyn crate::login::Autostart>>> =
             Arc::new(Mutex::new(Box::new(crate::login::NoAutostart)));

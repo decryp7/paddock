@@ -3,7 +3,7 @@
  "crates": false,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -25,6 +25,9 @@
  "why": {
   "app:z": [
    "apps/z/app/src-tauri/tauri.conf.json"
+  ],
+  "conformance": [
+   "C91 reads apps/z/app/src-tauri/tauri.conf.json"
   ]
  }
 }

@@ -80,12 +80,27 @@ pub fn self_test() -> Result<String, String> {
     ))
 }
 
-fn serve() -> Result<(), String> {
-    crate::serve::serve(
-        &crate::elevate::helper_paths(),
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    )
-    .map_err(String::from)
+/// Runs the daemon under `paddock_service::service_main` (the OS log from the first line, the exit code that names a
+/// refusal, a panic caught at the boundary) and returns the process exit status.
+fn serve(hosting: paddock_service::Hosting) -> i32 {
+    let paths = crate::elevate::helper_paths();
+    let result = paddock_service::service_main(&dyno_helper_service::spec(), hosting, move |context| {
+        let early = context.early_sink();
+        crate::serve::serve_with(&paths, context.stop, Some(early))
+    });
+    exit_status_of(result)
+}
+
+/// The process exit status of a finished service run: the body's code as a Unix status (0 stays 0), or 1 when the service
+/// manager could not be reached (the reason is in the OS log and on standard error).
+fn exit_status_of(result: Result<u32, paddock_service::ServiceMainError>) -> i32 {
+    match result {
+        Ok(code) => paddock_service::service_main::exit_status(code),
+        Err(e) => {
+            eprintln!("dyno-helper: {e}");
+            1
+        }
+    }
 }
 
 /// Runs `command` and returns the process exit code (0 done, 1 failed, 2 usage).
@@ -96,11 +111,8 @@ pub fn run(command: Command) -> i32 {
             Ok(())
         }
         Command::SelfTest => self_test().map(|line| println!("{line}")),
-        Command::Serve => serve(),
-        #[cfg(windows)]
-        Command::Service => crate::winsvc::run_as_service(),
-        #[cfg(not(windows))]
-        Command::Service => Err("The service command is for Windows; use `serve`.".to_string()),
+        Command::Serve => return serve(paddock_service::Hosting::Foreground),
+        Command::Service => return serve(paddock_service::Hosting::ServiceManager),
         Command::Install { owner } => crate::setup::install(owner).map(|r| report("install", &r)),
         Command::Uninstall => crate::setup::uninstall().map(|r| report("uninstall", &r)),
     };
@@ -137,6 +149,22 @@ mod tests {
             })
         );
         assert!(parse(&args(&["install", "--for", "sid:S-1-5-21-1"])).is_ok());
+    }
+
+    #[test]
+    fn a_finished_service_run_exits_with_its_code_and_a_missing_manager_exits_with_one() {
+        use paddock_service::ServiceMainError;
+        assert_eq!(exit_status_of(Ok(0)), 0);
+        assert_eq!(exit_status_of(Ok(3)), 3);
+        assert_eq!(exit_status_of(Ok(256)), 1, "never reads as success");
+        assert_eq!(exit_status_of(Err(ServiceMainError::NotStartedByManager("x".into()))), 1);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_service_command_is_refused_off_windows_with_the_way_out() {
+        // The refusal is the shared entry point's: the body never runs and the process exits 1.
+        assert_eq!(run(Command::Service), 1);
     }
 
     #[test]

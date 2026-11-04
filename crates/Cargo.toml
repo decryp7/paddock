@@ -45,6 +45,7 @@ members = [
     "paddock-runtime",
     "paddock-secrets",
     "paddock-service",
+    "paddock-setup",
     "paddock-settings",
     "paddock-shell",
     "paddock-storage",
@@ -121,6 +122,7 @@ paddock-repo-graph = { path = "paddock-repo-graph", version = "0.1.0", registry 
 paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
+paddock-setup = { path = "paddock-setup", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.2.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.3.0", registry = "decryp7" }
 paddock-storage = { path = "paddock-storage", version = "0.1.0", registry = "decryp7" }

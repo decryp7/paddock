@@ -7,7 +7,7 @@ use super::files::{FileKind, HeldSource, ProtectedFiles, Violation, hash_bytes, 
 use super::layout::{CopyTarget, Layout};
 use super::trust::{self, Style, TrustPort, Untrusted};
 use super::windows_acl::{ICACLS, acl_command, acl_shape_ok};
-use crate::backend::{Backend, Job, Registration};
+use crate::backend::{Backend, Inspection, Job, Registration};
 use crate::port::{RegisterError, System};
 use paddock_env::Os;
 use std::path::Path;
@@ -218,6 +218,8 @@ pub struct Installer<'a> {
     waits: Waits,
     report: Report,
     running_here: bool,
+    /// What the OS held right after `register` (ADR 0054 section 1.1): `Confirm` judges it before asking again.
+    registered: Option<Inspection>,
 }
 
 impl<'a> Installer<'a> {
@@ -239,6 +241,7 @@ impl<'a> Installer<'a> {
             waits: Waits::default(),
             report: Report::default(),
             running_here: false,
+            registered: None,
         }
     }
 
@@ -644,7 +647,11 @@ impl<'a> Installer<'a> {
 
     fn register(&mut self) -> Result<String, InstallError> {
         match self.backend.register() {
-            Ok(()) => Ok("registered".into()),
+            Ok(after) => {
+                log::info!(registration:? = after.registration, job:? = after.job; "install: registered, read back");
+                self.registered = Some(after);
+                Ok("registered".into())
+            }
             Err(RegisterError::NeedsElevation) => Err(InstallError::NeedsElevation),
             Err(RegisterError::Declined) => Err(InstallError::Declined),
             Err(e) => Err(failed(Step::Register, e)),
@@ -653,8 +660,10 @@ impl<'a> Installer<'a> {
 
     fn confirm(&mut self) -> Result<String, InstallError> {
         let mut waited = Duration::ZERO;
+        // The read-back `register` returned is the first look; the OS is asked again only to wait for the start.
+        let mut first = self.registered.take();
         loop {
-            let look = self.backend.inspect();
+            let look = first.take().unwrap_or_else(|| self.backend.inspect());
             match look.registration {
                 Registration::Registered => {}
                 Registration::NeedsApproval => {
@@ -694,10 +703,11 @@ impl<'a> Installer<'a> {
                 _ => {}
             }
             if waited >= self.waits.start {
-                return Err(failed(
-                    Step::Confirm,
-                    "it was registered but did not start in time",
-                ));
+                let how = match look.job {
+                    Job::Failed(exit) => format!("it was registered but stopped with {exit}"),
+                    _ => "it was registered but did not start in time".to_string(),
+                };
+                return Err(failed(Step::Confirm, how));
             }
             self.backend.pause(self.waits.poll);
             waited += self.waits.poll;
