@@ -158,3 +158,13 @@ test.describe('the row menu from the keyboard', () => {
     await expect(row).toBeFocused();
   });
 });
+
+test.describe('the Processes columns at the default window', () => {
+  test('the Account column is shown at 1024 px (with the helper on it is the key column)', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await page.goto(url('/processes'));
+    const grid = page.getByRole('treegrid', { name: 'Processes' });
+    await expect(grid).toBeVisible();
+    await expect(grid.getByRole('columnheader', { name: 'Account' })).toBeVisible();
+  });
+});
