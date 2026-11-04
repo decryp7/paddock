@@ -1365,3 +1365,14 @@ temp folder sits under `/Volumes/d7sst7/...`, and `is_network_path` treats every
 mounted" by design. The test now uses a path that is not under a mount point. **Lesson:** a temp folder's location is an environment input: a test of
 path classification must not take its path from `temp_dir()`. (A re-run of an old macOS job after the runner's workdir moved failed differently: "failed to
 read action.yml ... no such file": a stale `hostexecutor` path, so re-dispatch instead of re-running after a runner change.)
+## TCC blocked self-responsible processes on the external work volume (2026-11-04, Mac runner)
+
+With the runner's work folder on the USB volume `/Volumes/d7sst7`, Pitcrew's disclaim and supervision tests failed with
+`getcwd: ... Operation not permitted` and Dyno's `check-bundle.sh` saw empty `launchctl submit` output files, which it blamed on
+the code-signing identifier. The unified log showed the cause: macOS TCC (Removable Volumes) lets the runner read the job's temp
+folder (`<workdir>/<hash>/tmp`, which `job-tmpdir.sh` used as `TMPDIR`) but denies any process that is its own responsible
+process: shells spawned with responsibility disclaim, and `launchctl submit` jobs (xpcproxy cannot open the `-o`/`-e` files).
+Full Disk Access for the runner does not help, because the denied process is not the runner. **Lesson (class: a permission
+belongs to the responsible process, not the parent):** keep the work folder and caches on the external disk if wanted, but put
+each job's `TMPDIR` on the internal disk (`job-tmpdir.sh` now does so on macOS when `diskutil info -plist` says Internal=false),
+and a check that finds empty output from a launchd job prints `launchctl print` and the exit state before it guesses a cause.
