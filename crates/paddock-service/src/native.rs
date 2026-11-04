@@ -367,7 +367,7 @@ pub(crate) fn stderr_identity() -> Option<(u64, u64)> {
     // SAFETY: `stat` is written by fstat before it is read; fd 2 is only asked about.
     unsafe {
         let mut stat: libc::stat = std::mem::zeroed();
-        (libc::fstat(2, &mut stat) == 0).then(|| (stat.st_dev as u64, stat.st_ino as u64))
+        (libc::fstat(2, &mut stat) == 0).then_some((stat.st_dev as u64, stat.st_ino as u64))
     }
 }
 

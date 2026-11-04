@@ -427,6 +427,7 @@ impl Machine for WindowsMachine {
 
     fn terminate(&mut self, held: &HeldProcess) -> Result<(), StopError> {
         // SAFETY: the handle was opened with PROCESS_TERMINATE.
+        // conformance: pid-kill — a process handle held since the identity (pid and start time) was verified: no pid is looked up here
         if unsafe { TerminateProcess(held.handle, 1) } == 0 {
             return Err(StopError::Terminate(unsafe { GetLastError() }));
         }
