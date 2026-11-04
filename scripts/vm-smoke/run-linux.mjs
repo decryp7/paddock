@@ -217,7 +217,7 @@ async function main(argv) {
     for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim(); if (!leftList) break; await sleep(2000); }
     // With the login service on, the supervised agent (`dyno-agent run` under systemd --user, unit active) is expected to survive Quit;
     // everything else of Dyno must be gone.
-    const supervised = g('systemctl --user is-active dyno-agent 2>&1').stdout.trim() === 'active';
+    const supervised = ses('systemctl --user is-active dyno-agent 2>&1').stdout.trim() === 'active';
     const sysUserPid = ses('systemctl --user show -p MainPID --value dyno-agent 2>&1').stdout.trim();
     const leftLines = leftList ? leftList.split('\n') : [];
     const isSupervisedAgent = (l) => { const f = l.trim().split(/\s+/); return supervised && /dyno-agent run$/.test(l.trim()) && f[0] === sysUserPid; };
