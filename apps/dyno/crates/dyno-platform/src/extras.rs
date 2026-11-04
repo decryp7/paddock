@@ -10,6 +10,7 @@ use dyno_core::extras::gpu::{self, GpuReport};
 use dyno_core::extras::sleep::{self, SleepReport};
 use dyno_core::extras::software::{self, SoftwareInventory};
 use dyno_core::extras::usage::{self, EnergySample};
+use dyno_core::helper_extras::{parse_requests, parse_versions};
 use dyno_core::ports::PlatformError;
 use dyno_core::time::{LocalZone, Timestamp};
 use std::time::Duration;
@@ -41,8 +42,36 @@ fn why(tool: &str, e: &PlatformError) -> String {
     }
 }
 
+/// What keeps this Windows computer awake, read with the caller's own rights (`powercfg /requests`; many Windows versions
+/// refuse without administrator rights). The text is parsed by the one parser the helper uses too.
+///
+/// # Errors
+/// The tool's refusal or failure.
+pub fn windows_wake_requests(r: &dyn ToolRunner) -> Result<Vec<sleep::SleepBlocker>, PlatformError> {
+    let text = run(r, "powercfg", &["/requests"], QUICK)?;
+    Ok(sleep::blockers_from_requests(&parse_requests(&text)))
+}
+
+/// The sentence for a refused `powercfg /requests`.
+pub fn windows_wake_refused(e: &PlatformError) -> String {
+    format!(
+        "Windows only lets an administrator list what keeps it awake ({}).",
+        why("powercfg", e)
+    )
+}
+
 /// Sleep blockers and the last wakes.
 pub fn sleep_report(r: &dyn ToolRunner, os: &str) -> SleepReport {
+    sleep_report_with(r, os, &mut || windows_wake_requests(r).map_err(|e| windows_wake_refused(&e)))
+}
+
+/// [`sleep_report`] where the caller reads what keeps a Windows computer awake (the agent asks the helper first). `windows` is
+/// called only for `os == "windows"`; its `Err` is the sentence for `blockers_unavailable`.
+pub fn sleep_report_with(
+    r: &dyn ToolRunner,
+    os: &str,
+    windows: &mut dyn FnMut() -> Result<Vec<sleep::SleepBlocker>, String>,
+) -> SleepReport {
     let mut report = SleepReport::default();
     match os {
         "macos" => {
@@ -57,14 +86,9 @@ pub fn sleep_report(r: &dyn ToolRunner, os: &str) -> SleepReport {
         }
         "windows" => {
             // `powercfg /requests` needs administrator rights on many Windows versions; say so instead of showing nothing.
-            match run(r, "powercfg", &["/requests"], QUICK) {
-                Ok(t) => report.blockers = sleep::parse_powercfg_requests(&t),
-                Err(e) => {
-                    report.blockers_unavailable = Some(format!(
-                        "Windows only lets an administrator list what keeps it awake ({}).",
-                        why("powercfg", &e)
-                    ))
-                }
+            match windows() {
+                Ok(b) => report.blockers = b,
+                Err(why) => report.blockers_unavailable = Some(why),
             }
             match run(r, "powercfg", &["/lastwake"], QUICK) {
                 Ok(t) => report.wakes = sleep::parse_powercfg_lastwake(&t),
@@ -391,8 +415,13 @@ fn repo_problem(tool: BackupTool, e: &PlatformError, var: &str) -> BackupStatus 
     }
 }
 
-fn windows_backup(r: &dyn ToolRunner, now: Timestamp, stale: u32) -> BackupStatus {
-    let tool = BackupTool::WindowsBackup;
+/// What this Windows computer's own tools say about Windows Backup, with the caller's rights: the event log first (no
+/// administrator needed), then `wbadmin get versions` (administrator only). The versions are parsed by the one parser the
+/// helper uses too.
+///
+/// # Errors
+/// `wbadmin`'s refusal or failure when the event log had nothing.
+pub fn windows_backup_facts(r: &dyn ToolRunner) -> Result<backup::WindowsBackupFacts, PlatformError> {
     let args: Vec<String> = [
         "qe",
         "Microsoft-Windows-Backup",
@@ -406,25 +435,28 @@ fn windows_backup(r: &dyn ToolRunner, now: Timestamp, stale: u32) -> BackupStatu
     .collect();
     if let Ok(t) = r.run("wevtutil", &args, SLOW) {
         if let Some((at, _)) = backup::parse_event_log_latest(&t) {
-            return backup::judged(tool, at, now, stale);
+            return Ok(backup::WindowsBackupFacts {
+                count: None,
+                latest: Some(at),
+            });
         }
     }
-    match run(r, "wbadmin", &["get", "versions"], SLOW) {
-        Ok(t) => match backup::parse_wbadmin_latest(&t) {
-            Some(at) => backup::judged(tool, at, now, stale),
-            None => backup::not_configured(
-                tool,
-                "Windows Backup has no backup of this PC.",
-                "Open Settings > Backup and set one up.",
-            ),
-        },
-        Err(e) => backup::cannot_check(
-            tool,
-            &format!(
-                "Windows only lets an administrator list Windows Backup versions ({}).",
-                why("wbadmin", &e)
-            ),
-        ),
+    let text = run(r, "wbadmin", &["get", "versions"], SLOW)?;
+    Ok(backup::WindowsBackupFacts::from_versions(&parse_versions(&text)))
+}
+
+/// The sentence for a refused `wbadmin get versions`.
+pub fn windows_backup_refused_text(e: &PlatformError) -> String {
+    format!(
+        "Windows only lets an administrator list Windows Backup versions ({}).",
+        why("wbadmin", e)
+    )
+}
+
+fn windows_backup(r: &dyn ToolRunner, now: Timestamp, stale: u32) -> BackupStatus {
+    match windows_backup_facts(r) {
+        Ok(f) => f.status(now, stale),
+        Err(e) => backup::cannot_check(BackupTool::WindowsBackup, &windows_backup_refused_text(&e)),
     }
 }
 

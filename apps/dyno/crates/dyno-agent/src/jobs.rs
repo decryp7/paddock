@@ -288,8 +288,7 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             })
         }
         JobSpec::SleepBlockers => tool_step(ctx, "sleep", "Asking the system what keeps it awake", || {
-            let x = &shared.extras;
-            dyno_platform::extras::sleep_report(x.tools().as_ref(), x.os())
+            shared.extras.sleep_report()
         })
         .map(|r| JobOutput::Sleep(Box::new(r))),
         JobSpec::BootAnalysis => tool_step(ctx, "boot", "Reading the boot history", || crate::extras::boot_report(shared))?

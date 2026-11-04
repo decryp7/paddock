@@ -4,6 +4,8 @@
 use super::ExtrasCentre;
 use crate::agent::{lock, now, Shared};
 use dyno_core::backup::{observation, BackupReport, BackupSettings, BackupStatus, BackupTool};
+use dyno_core::metrics::Reading;
+use dyno_core::read_via::ReadVia;
 use dyno_platform::extras::{backup_status_of, backup_tools_present, BackupEnv};
 use dyno_platform::runner::ToolRunner;
 use dyno_platform::toolpath::{PathResolver, PathRunner};
@@ -181,6 +183,7 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         j.phase(Phase::items("tools", "Checking backup tools", tools.len() as u64));
     }
     let mut statuses = Vec::with_capacity(tools.len());
+    let mut via = ReadVia::Local;
     for tool in tools {
         if let Some(j) = job {
             if let Err(e) = j.check() {
@@ -192,7 +195,13 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         // interrupted; it ends at its own timeout.
         let _step = job.map(|j| j.uncancellable("A backup tool is being asked; Cancel takes effect when it has answered."));
         if let Ok(s) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            backup_status_of(&env, tool, t, zone.as_ref(), settings.stale_after_hours)
+            match windows_status_from_helper(x, &resolver, &settings, tool, t, settings.stale_after_hours, job.is_some()) {
+                Some((status, read_via)) => {
+                    via = read_via;
+                    status
+                }
+                None => backup_status_of(&env, tool, t, zone.as_ref(), settings.stale_after_hours),
+            }
         })) {
             statuses.push(s);
         }
@@ -215,12 +224,48 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         checked_at: Some(t),
         checking: false,
         login_path_used: resolver.login_path_used(),
-        // The Windows Backup versions come from the helper when WP-EXT wires them; today every tool is read here.
-        via: dyno_core::read_via::ReadVia::Local,
+        // Only the Windows Backup versions can come from the helper; every other tool is read here.
+        via,
     };
     slot.checking = false;
     x.backup_done.notify_all();
     Ok(())
+}
+
+/// The Windows Backup status read helper first (event log and `wbadmin` with this account's rights when the helper cannot be
+/// asked), with the path that answered. None for any other tool, and when the agent was composed without a helper.
+fn windows_status_from_helper(
+    x: &ExtrasCentre,
+    resolver: &Arc<PathResolver>,
+    settings: &BackupSettings,
+    tool: BackupTool,
+    now: dyno_core::time::Timestamp,
+    stale: u32,
+    asked_by_person: bool,
+) -> Option<(BackupStatus, ReadVia)> {
+    if tool != BackupTool::WindowsBackup {
+        return None;
+    }
+    let mut helper = lock(&x.helper);
+    let h = helper.as_mut()?;
+    let (resolver, dirs, scripted) = (resolver.clone(), settings.dirs_for(tool).to_vec(), lock(&x.backup_tools).clone());
+    h.backup.reading_mut().set_local(Box::new(move || {
+        let runner: Box<dyn ToolRunner> = match &scripted {
+            Some(s) => Box::new(Shared2(s.clone())),
+            None => Box::new(PathRunner::new(&resolver, &dirs)),
+        };
+        dyno_platform::extras::windows_backup_facts(runner.as_ref())
+    }));
+    if asked_by_person {
+        // "Check now": a helper left alone after a hang is asked again at once.
+        h.backup.retry_now();
+    }
+    let got = h.backup.read();
+    let status = match got.value {
+        Reading::Available(facts) => facts.status(now, stale),
+        Reading::Unavailable(why) => dyno_core::backup::cannot_check(tool, &why),
+    };
+    Some((status, got.via))
 }
 
 fn raise_alarms(shared: &Shared, statuses: &[BackupStatus], t: dyno_core::time::Timestamp) {
@@ -236,6 +281,8 @@ fn raise_alarms(shared: &Shared, statuses: &[BackupStatus], t: dyno_core::time::
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     /// Rule 52 (coordinator re-review, 2026-10-30): the first check fills the screen the Backups page polls for, so it runs
     /// as live work.
     #[test]
@@ -248,5 +295,88 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(20))
             .expect("the check ran (a hang guard)");
         assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
+    }
+
+    use crate::helper_first::testkit::{centre, Net};
+    use dyno_core::backup::BackupState;
+    use dyno_core::helper_extras::{BackupVersion, ExtrasAnswer};
+    use dyno_core::helper_wire::HelperReply;
+    use dyno_core::read_via::ReadVia;
+    use dyno_core::time::Timestamp;
+    use paddock_jobs::time::FakeClock;
+
+    /// Every Windows tool refuses, as for a standard account.
+    struct Refusing;
+    impl ToolRunner for Refusing {
+        fn run_tool(
+            &self,
+            _: &dyno_platform::runner::Tool,
+            _: std::time::Duration,
+        ) -> Result<dyno_platform::runner::ToolOutput, dyno_core::ports::PlatformError> {
+            Err(dyno_core::ports::PlatformError::AccessDenied("Access is denied.".into()))
+        }
+    }
+
+    fn status(up: bool, answers: Vec<Result<HelperReply, crate::helper_link::TransportError>>) -> Option<(BackupStatus, ReadVia)> {
+        let x = ExtrasCentre::new(false);
+        x.use_backup_tools(Arc::new(Refusing));
+        let c = centre(&Net::new(up, answers), &FakeClock::new());
+        x.use_helper(Arc::new(crate::helper_first::CentrePort(c)));
+        let resolver = Arc::new(PathResolver::system());
+        windows_status_from_helper(
+            &x,
+            &resolver,
+            &BackupSettings::default(),
+            BackupTool::WindowsBackup,
+            Timestamp(0),
+            48,
+            false,
+        )
+    }
+
+    #[test]
+    fn windows_backup_comes_from_the_helper_when_wbadmin_is_refused() {
+        let newest = BackupVersion {
+            time: "x".into(),
+            location: "D:".into(),
+            identifier: "01/01/1970-00:00".into(),
+            recovers: "Volume(s)".into(),
+        };
+        let answer = ExtrasAnswer::BackupVersions {
+            count: 1,
+            items: Some(vec![newest]),
+        };
+        let (status, via) = status(true, vec![Ok(HelperReply::Extras(answer))]).expect("the helper reading");
+        assert_ne!(status.state, BackupState::CannotCheck, "{status:?}");
+        assert_eq!(via, ReadVia::Helper);
+    }
+
+    #[test]
+    fn windows_backup_without_the_helper_keeps_the_refusal_and_asks_for_the_helper() {
+        let (status, via) = status(false, vec![]).expect("the helper reading");
+        assert_eq!(status.state, BackupState::CannotCheck);
+        assert!(
+            status.summary.contains("administrator list Windows Backup versions"),
+            "{}",
+            status.summary
+        );
+        assert!(matches!(via, ReadVia::NeedsHelper { .. }), "{via:?}");
+    }
+
+    #[test]
+    fn other_backup_tools_never_go_to_the_helper() {
+        let x = ExtrasCentre::new(false);
+        x.use_helper(Arc::new(crate::helper_first::OffPort));
+        let resolver = Arc::new(PathResolver::system());
+        let got = windows_status_from_helper(
+            &x,
+            &resolver,
+            &BackupSettings::default(),
+            BackupTool::TimeMachine,
+            Timestamp(0),
+            48,
+            false,
+        );
+        assert!(got.is_none());
     }
 }

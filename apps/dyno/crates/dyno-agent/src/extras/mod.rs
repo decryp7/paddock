@@ -6,12 +6,17 @@ pub mod backup_check;
 pub mod finder;
 
 use crate::agent::{lock, now, Shared};
+use crate::helper_first::HelperPort;
+use crate::helper_readers::extras::HelperExtras;
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
 use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
 use dyno_core::extras::gpu::GpuReport;
+use dyno_core::extras::sleep::SleepReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
 use dyno_core::extras::usage::{self, UsageReport};
+use dyno_core::metrics::Reading;
 use dyno_core::protocol::{AgentError, BootRecord, ErrorCode, Reply, Request, SavedInventory};
+use dyno_core::read_via::ReadVia;
 use dyno_core::time::{Timestamp, DAY, HOUR, SECOND};
 use dyno_platform::runner::{SystemRunner as OsRunner, ToolRunner};
 use dyno_platform::toolpath::PathResolver;
@@ -64,6 +69,9 @@ pub struct ExtrasCentre {
     /// Its thread, so a test can wait for it to end.
     software_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
+    /// The readings the helper can give better (what keeps Windows awake, Windows Backup versions); none until the agent is
+    /// composed with a helper port ([`ExtrasCentre::use_helper`]), and then everything is read on this computer as before.
+    pub(crate) helper: Mutex<Option<HelperExtras>>,
     /// Signalled when a backup check ends and when a job waiting for one is cancelled.
     pub(crate) backup_done: Arc<std::sync::Condvar>,
     counter: AtomicU64,
@@ -82,6 +90,7 @@ impl ExtrasCentre {
             software_refreshing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             software_thread: Mutex::new(None),
             backup: Arc::new(Mutex::new(backup_check::Slot::default())),
+            helper: Mutex::new(None),
             backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
         }
@@ -93,6 +102,42 @@ impl ExtrasCentre {
         if let Some(h) = handle {
             let _ = h.join();
         }
+    }
+
+    /// Gives the extras the helper: what keeps Windows awake and the Windows Backup versions are then read helper first, and say
+    /// which path answered (`blockers_via`, `BackupReport.via`). Composition calls this once (`agent.rs`).
+    pub fn use_helper(&self, port: Arc<dyn HelperPort>) {
+        *lock(&self.helper) = Some(HelperExtras::new(
+            port,
+            dyno_platform::extras::windows_wake_refused,
+            dyno_platform::extras::windows_backup_refused_text,
+        ));
+    }
+
+    /// What keeps the computer awake and the last wakes. On Windows the blockers are read helper first.
+    pub fn sleep_report(&self) -> SleepReport {
+        let (tools, os) = (self.tools(), self.os());
+        let mut helper = lock(&self.helper);
+        let Some(h) = helper.as_mut().filter(|_| os == "windows") else {
+            return dyno_platform::extras::sleep_report(tools.as_ref(), os);
+        };
+        let mut via = ReadVia::Local;
+        // This runs as the job a person started (the Sleep tab's refresh): a helper left alone after a hang is asked again now.
+        h.wakes.retry_now();
+        let mut report = dyno_platform::extras::sleep_report_with(tools.as_ref(), os, &mut || {
+            let own = tools.clone();
+            h.wakes
+                .reading_mut()
+                .set_local(Box::new(move || dyno_platform::extras::windows_wake_requests(own.as_ref())));
+            let got = h.wakes.read();
+            via = got.via;
+            match got.value {
+                Reading::Available(list) => Ok(list),
+                Reading::Unavailable(why) => Err(why),
+            }
+        });
+        report.blockers_via = via;
+        report
     }
 
     /// Tests: replaces the tool runner for system tools.

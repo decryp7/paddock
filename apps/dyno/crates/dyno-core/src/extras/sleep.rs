@@ -3,6 +3,7 @@
 //! runs the tools and shows what these functions return.
 
 use super::{clean, clip};
+use crate::helper_extras::{Requester, WakeRequest};
 use serde::{Deserialize, Serialize};
 
 /// Most entries of each list.
@@ -138,53 +139,37 @@ pub fn parse_pmset_wakes(text: &str) -> Vec<WakeEvent> {
     out
 }
 
-/// `powercfg /requests`: sections `DISPLAY:`, `SYSTEM:`, `AWAYMODE:`, `EXECUTION:`, `PERFBOOST:`, `ACTIVELOCKSCREEN:`, each
-/// listing `[PROCESS] \Device\...\chrome.exe`, `[DRIVER] name` or `None.`.
-pub fn parse_powercfg_requests(text: &str) -> Vec<SleepBlocker> {
-    let mut section = String::new();
-    let mut out: Vec<SleepBlocker> = Vec::new();
-    let mut in_item = false;
-    for raw in text.lines() {
-        let line = clean(raw);
-        if line.is_empty() {
-            in_item = false;
-            continue;
-        }
-        if line.ends_with(':') && line.chars().all(|c| c.is_ascii_uppercase() || c == ':' || c == ' ') {
-            section = line.trim_end_matches(':').to_string();
-            in_item = false;
-            continue;
-        }
-        if line == "None." {
-            continue;
-        }
-        let prevents = match section.as_str() {
-            "DISPLAY" => Prevents::DisplaySleep,
-            "SYSTEM" | "AWAYMODE" => Prevents::Sleep,
-            _ => Prevents::Other,
-        };
-        if let Some(rest) = line.strip_prefix('[') {
-            let Some((kind, name)) = rest.split_once(']') else { continue };
-            let name = name.trim();
-            let short = name.rsplit(['\\', '/']).next().unwrap_or(name);
-            if out.len() < MAX_ENTRIES {
-                out.push(SleepBlocker {
-                    name: clip(short, 100),
-                    pid: None,
-                    prevents,
-                    reason: format!("{} request ({})", kind.to_ascii_lowercase(), section.to_ascii_lowercase()),
-                    held_for: None,
-                });
+/// The sleep blockers `powercfg /requests` listed. The text is read once, by [`crate::helper_extras::parse_requests`] (the
+/// helper's parser and the agent's own run of the tool share it, rule 55); this turns its requests into the report's blockers.
+pub fn blockers_from_requests(requests: &[WakeRequest]) -> Vec<SleepBlocker> {
+    requests
+        .iter()
+        .take(MAX_ENTRIES)
+        .map(|r| {
+            let prevents = match r.category.as_str() {
+                "DISPLAY" => Prevents::DisplaySleep,
+                "SYSTEM" | "AWAYMODE" => Prevents::Sleep,
+                _ => Prevents::Other,
+            };
+            let short = r.name.rsplit(['\\', '/']).next().unwrap_or(&r.name);
+            let kind = match r.requester {
+                Requester::Process => "process",
+                Requester::Driver => "driver",
+                Requester::Service => "service",
+                Requester::Other => "other",
+            };
+            SleepBlocker {
+                name: clip(short, 100),
+                pid: None,
+                prevents,
+                reason: match &r.reason {
+                    Some(why) => clip(why, 200),
+                    None => format!("{kind} request ({})", r.category.to_ascii_lowercase()),
+                },
+                held_for: None,
             }
-            in_item = true;
-        } else if in_item {
-            // A continuation line: the reason the request gave.
-            if let Some(b) = out.last_mut() {
-                b.reason = clip(line, 200);
-            }
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 /// `powercfg /lastwake`: `Wake History Count - 1`, then `Wake Source [0]` blocks with `Type:` and `Friendly Name:`.
@@ -315,14 +300,14 @@ Playing a video
 AWAYMODE:
 None.
 ";
-        let b = parse_powercfg_requests(t);
+        let b = blockers_from_requests(&crate::helper_extras::parse_requests(t));
         assert_eq!(b.len(), 2);
         assert_eq!(b[0].name, "player.exe");
         assert_eq!(b[0].prevents, Prevents::Sleep);
         assert_eq!(b[0].reason, "Playing a video");
         assert_eq!(b[1].name, "Realtek High Definition Audio");
         assert!(b[1].reason.contains("driver request (system)"));
-        assert!(parse_powercfg_requests("DISPLAY:\nNone.\n").is_empty());
+        assert!(blockers_from_requests(&crate::helper_extras::parse_requests("DISPLAY:\nNone.\n")).is_empty());
     }
 
     #[test]
@@ -361,7 +346,7 @@ GNOME Shell    1000 sam  1500 gnome-shell     handle-power-key     Handling keyp
         let junk = "pid (: \npid x(y): z\n\u{0}\n".to_string() + &"a".repeat(5_000);
         assert!(parse_pmset_assertions(&junk).is_empty());
         assert!(parse_pmset_wakes(&junk).is_empty());
-        assert!(parse_powercfg_requests(&junk).is_empty());
+        assert!(blockers_from_requests(&crate::helper_extras::parse_requests(&junk)).is_empty());
         assert!(parse_systemd_inhibit(&junk).is_empty());
         assert!(parse_pmset_wakes("é".repeat(30).as_str()).is_empty());
     }

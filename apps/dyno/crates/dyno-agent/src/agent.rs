@@ -584,6 +584,12 @@ impl Shared {
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
+        // What keeps Windows awake and the Windows Backup versions are read helper first.
+        if helper_first {
+            shared
+                .extras
+                .use_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
+        }
         shared.disk.set_read_threads(read_threads);
         shared.disk.attach_cache(saved_maps.clone());
         shared.counters.attach_cache(saved_maps);

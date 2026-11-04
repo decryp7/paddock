@@ -3,6 +3,7 @@ import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent
 import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import type { BackupStatus } from '../../core/api.types';
+import { ReadingSource } from '../../core/reading-source';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock, formatDate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -22,7 +23,7 @@ import { MatMenuModule } from '@angular/material/menu';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [FullTextTip, AsyncState, Icon, PdTable, PdCell, MatMenuModule, MatIconButton, MatTooltip, MatButton, JobProgressCard],
+  imports: [FullTextTip, AsyncState, Icon, PdTable, PdCell, MatMenuModule, MatIconButton, MatTooltip, MatButton, JobProgressCard, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -57,6 +58,7 @@ import { MatMenuModule } from '@angular/material/menu';
             <section class="lead" aria-label="Summary">
               <h2 [attr.data-tone]="heroColour()">{{ store.hero() }}</h2>
               <p aria-live="polite">{{ checked() }}</p>
+              <dy-reading-source [via]="r.via" [canRetry]="true" (retry)="store.check()" />
             </section>
 
             <div class="layout" [class.with-detail]="!!selected()">

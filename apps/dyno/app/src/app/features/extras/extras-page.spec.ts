@@ -1,7 +1,7 @@
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
-import type { JobOutput, MaintenanceSettings, SleepReport } from '../../core/api.types';
+import type { JobOutput, MaintenanceSettings, ReadVia, SleepReport } from '../../core/api.types';
 import { mockBoot, mockSoftware, mockUsage } from '../../core/mock/extras';
 import { BACKEND } from '../../core/backend';
 import type { MockBackend } from '../../core/mock-backend';
@@ -162,6 +162,25 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(el.textContent).toContain('Nothing is keeping this computer awake');
     expect(el.textContent).toContain('No log.');
+  });
+
+  it('Sleep: the reading source says who read the blockers, and when the helper would the reason is said once with the button', async () => {
+    const { f, el, mock } = render('sleep');
+    await settle(f);
+    const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: null, wakesUnavailable: null, blockersVia: 'helper' };
+    returns(mock, { sleep: report });
+    await TestBed.inject(ExtrasStore).reload('sleep');
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
+    const reason = 'Windows only lets an administrator list what keeps it awake.';
+    const via: ReadVia = { needsHelper: { reason, next: { openSettings: 'helper' } } };
+    returns(mock, { sleep: { ...report, blockersUnavailable: `${reason} Turn on Administrator readings in Settings so the helper can read this.`, blockersVia: via } });
+    await TestBed.inject(ExtrasStore).reload('sleep');
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain(reason);
+    expect(el.querySelector('[data-testid="reading-source-turn-on"]')?.textContent).toContain('Turn on administrator readings');
+    expect(el.querySelectorAll('.none')[0]?.querySelector('span')).toBeNull();
+    expect(el.textContent?.split(reason).length).toBe(2);
   });
 
   it('Boot: last start-up, verdict, what slowed it and a note when steps are unavailable', async () => {
