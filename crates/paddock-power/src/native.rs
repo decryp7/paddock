@@ -20,9 +20,9 @@ mod imp {
         EventSink, Hold, HoldRequest, PowerError, PowerEvent, PowerOs, Scope, SleepWakeSource,
         Subscription,
     };
-    use std::ffi::{c_char, c_void, CString};
+    use std::ffi::{CString, c_char, c_void};
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-    use std::sync::{mpsc, Arc};
+    use std::sync::{Arc, mpsc};
     use std::thread::JoinHandle;
 
     type CfRef = *const c_void;
@@ -267,9 +267,9 @@ mod imp {
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::System::Power::{
-        PowerClearRequest, PowerCreateRequest, PowerRegisterSuspendResumeNotification,
-        PowerRequestDisplayRequired, PowerRequestSystemRequired, PowerSetRequest,
-        PowerUnregisterSuspendResumeNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,
+        DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, PowerClearRequest, PowerCreateRequest,
+        PowerRegisterSuspendResumeNotification, PowerRequestDisplayRequired,
+        PowerRequestSystemRequired, PowerSetRequest, PowerUnregisterSuspendResumeNotification,
     };
     use windows_sys::Win32::System::Threading::{
         POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0,
@@ -433,11 +433,11 @@ mod imp {
 
 #[cfg(target_os = "linux")]
 mod imp {
+    use crate::event_thread::{EventThread, JOIN_WAIT};
     use crate::{
         EventSink, Hold, HoldRequest, PowerError, PowerEvent, PowerOs, Scope, SleepWakeSource,
         Subscription,
     };
-    use std::thread::JoinHandle;
     use zbus::blocking::Connection;
     use zbus::zvariant::OwnedFd;
 
@@ -531,34 +531,6 @@ mod imp {
         }
     }
 
-    struct Watch {
-        connection: Connection,
-        thread: Option<JoinHandle<()>>,
-    }
-
-    impl Subscription for Watch {}
-
-    impl Drop for Watch {
-        fn drop(&mut self) {
-            // Closing the connection ends the signal stream, which ends the thread. D-Bus decides when that happens (on the
-            // Ubuntu test machine the shutdown never returned, and with it the agent's stop, which then took the 10 s grace and
-            // ended with 143), so it runs on a thread of its own and dropping the subscription never waits for it.
-            let c = self.connection.inner().clone();
-            let thread = self.thread.take();
-            let closing = std::thread::Builder::new()
-                .name("paddock-power-close".into())
-                .spawn(move || {
-                    zbus::block_on(c.graceful_shutdown());
-                    if let Some(t) = thread {
-                        let _ = t.join();
-                    }
-                });
-            if let Err(e) = closing {
-                log::warn!("the power subscription could not be closed on its own thread: {e}");
-            }
-        }
-    }
-
     impl SleepWakeSource for System {
         fn subscribe(&self, sink: EventSink) -> Result<Box<dyn Subscription>, PowerError> {
             let connection =
@@ -568,24 +540,32 @@ mod imp {
             let signals = proxy
                 .receive_signal("PrepareForSleep")
                 .map_err(|e| unavailable("logind signal", &e))?;
-            let thread = std::thread::Builder::new()
-                .name("paddock-power-events".into())
-                .spawn(move || {
+            // `close` ends the connection under the signal stream, which ends the thread's loop. `graceful_shutdown` would wait
+            // for every clone of the connection to be dropped, and the stream (on the thread) holds one: it cannot return.
+            let closing = connection.inner().clone();
+            let closer = Box::new(move || {
+                let _ = zbus::block_on(closing.close());
+                drop(connection);
+            });
+            let watch = EventThread::start(
+                "paddock-power-events",
+                sink,
+                closer,
+                JOIN_WAIT,
+                move |deliver| {
                     for message in signals {
                         match message.body().deserialize::<bool>() {
-                            Ok(true) => sink(PowerEvent::Sleeping),
-                            Ok(false) => sink(PowerEvent::Woke),
+                            Ok(true) => deliver(PowerEvent::Sleeping),
+                            Ok(false) => deliver(PowerEvent::Woke),
                             Err(_) => {}
                         }
                     }
-                })
-                .map_err(|e| PowerError::Unavailable {
-                    reason: format!("could not start the power thread: {e}"),
-                })?;
-            Ok(Box::new(Watch {
-                connection,
-                thread: Some(thread),
-            }))
+                },
+            )
+            .map_err(|e| PowerError::Unavailable {
+                reason: format!("could not start the power thread: {e}"),
+            })?;
+            Ok(Box::new(watch))
         }
     }
 }

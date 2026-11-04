@@ -17,6 +17,7 @@ Conventional Commits; one semver tag for the whole repo.
   `SleepWakeSource` delivers `PowerEvent::Sleeping`/`Woke` (`IORegisterForSystemPower`, `PowerRegisterSuspendResumeNotification`, logind `PrepareForSleep`).
   `FakePower` and `FakeEvents` are the doubles; the real adapters (`system_power`, `system_events`) run only in VMs (ER-14). The adapters are in
   `native.rs`, which the coverage job leaves out (one declared alternative added to the regex in `ci.yml`).
+- Linux: dropping a sleep/wake subscription never waits for D-Bus. It says "stop" first (nothing more reaches the sink), closes the connection (`Connection::close`; `graceful_shutdown` waits for every clone of the connection and the signal iterator on the events thread holds one, so it cannot return), and waits at most 2 s for the events thread, then logs and lets it go. The thread logic is `event_thread::EventThread` with an injectable closer, tested without D-Bus.
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: dialogs size to their content (ADR 0043)
 - **Breaking.** One wire for sizing: `dialog_measure { epoch, seq, measure }` replaces `dialog_fit { measure }` and `dialog_ready { measure }` is now `dialog_ready { epoch, seq }` (it carries no size). `DialogIo.fit` and
   `ready(measure)` become `measure(epoch, seq, measure)` and `ready(epoch, seq)`; `DialogStart.epoch` counts page loads, `Measure.overflow` says the body scrolls, and the events `paddock://dialog-size-mode` and

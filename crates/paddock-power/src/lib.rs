@@ -10,6 +10,8 @@
 //! The core is pure; the OS calls live in the one small file `native.rs`.
 
 mod error;
+#[cfg(any(target_os = "linux", test))]
+mod event_thread;
 mod fake;
 mod keep_awake;
 mod model;
