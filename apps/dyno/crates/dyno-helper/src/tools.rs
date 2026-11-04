@@ -15,7 +15,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::smart::{SmartReader, ToolInstaller};
 use dyno_platform::runner::{SystemRunner, Tool, ToolOutput, ToolRunner};
 use dyno_platform::smart_reader::SmartctlReader;
-use dyno_platform::tool_install::{install, smartctl_path, InstallPorts, InstallRoots, PINS};
+use dyno_platform::tool_install::{InstallPorts, InstallRoots, PINS, install, smartctl_path};
 use paddock_jobs::time::Clock;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -397,11 +397,12 @@ mod tests {
             trusting(),
         );
         let _held = i.guard.try_begin().unwrap();
-        assert!(i
-            .install(ToolKind::Smartmontools, b"x")
-            .unwrap_err()
-            .to_string()
-            .contains("Another tool"));
+        assert!(
+            i.install(ToolKind::Smartmontools, b"x")
+                .unwrap_err()
+                .to_string()
+                .contains("Another tool")
+        );
     }
 
     // Unix only: `trusting()` is a Unix-style fake trust port rooted at `/`, which no Windows temporary folder is below; the

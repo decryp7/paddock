@@ -213,20 +213,26 @@ fn win_trust() -> crate::privileged::trust_fake::FakePort {
     use crate::privileged::trust::{Ace, SID_ADMINISTRATORS, SID_SYSTEM};
     use crate::privileged::trust_fake::*;
     let mut p = windows_machine(|_| locked());
-    p.put("C:\\Program Files", from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES))
-        .put(
-            "C:\\Program Files\\Dyno",
-            from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO),
-        )
-        .put(WIN_SOURCE, file(from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO)))
-        .put(
-            WIN_FOLDER,
-            from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO),
-        )
-        .put(
-            WIN_PROGRAM,
-            file(from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO)),
-        );
+    p.put(
+        "C:\\Program Files",
+        from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES),
+    )
+    .put(
+        "C:\\Program Files\\Dyno",
+        from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO),
+    )
+    .put(
+        WIN_SOURCE,
+        file(from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO)),
+    )
+    .put(
+        WIN_FOLDER,
+        from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO),
+    )
+    .put(
+        WIN_PROGRAM,
+        file(from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO)),
+    );
     let user = "S-1-5-21-1-2-3-1001";
     let mine = || {
         win(
@@ -1477,7 +1483,11 @@ fn a_helper_with_a_bad_or_missing_signature_is_refused_and_nothing_is_written() 
         matches!(&err, InstallError::Refused(w) if w.contains("reinstall Dyno")),
         "{err:?}"
     );
-    assert!(!files.calls().iter().any(|c| c.starts_with("write ")), "{:?}", files.calls());
+    assert!(
+        !files.calls().iter().any(|c| c.starts_with("write ")),
+        "{:?}",
+        files.calls()
+    );
     assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
     // A program that is not the signed one.
     let files = mac_disk();
@@ -1500,7 +1510,8 @@ fn a_helper_with_a_bad_or_missing_signature_is_refused_and_nothing_is_written() 
 }
 
 #[test]
-fn the_bytes_that_are_signed_are_the_bytes_that_are_copied_even_if_the_path_is_swapped_after_the_check() {
+fn the_bytes_that_are_signed_are_the_bytes_that_are_copied_even_if_the_path_is_swapped_after_the_check()
+ {
     // The user replaces the helper after it was checked. A copy that reopens the path would install the replacement; the
     // installer writes the bytes it read through the handle it checked.
     let files = mac_disk();
@@ -1519,4 +1530,82 @@ fn the_bytes_that_are_signed_are_the_bytes_that_are_copied_even_if_the_path_is_s
         files.content_of(Path::new(MAC_PROGRAM)).as_deref(),
         Some(&b"helper build 1"[..])
     );
+}
+
+#[test]
+fn a_copy_without_a_checked_source_is_refused() {
+    let layout = layout_for(Os::MacOs);
+    let (mut f, mut b, mut s) = (mac_disk(), Scripted::default(), FakeSystem::new());
+    let mut installer = Installer::new(&layout, &mut f, &mut b, &mut s);
+    let err = installer
+        .run_step(Step::CopyProgram, Some(Path::new(SOURCE)))
+        .unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("was not checked")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_signature_location_that_cannot_be_read_is_skipped_and_the_next_one_is_used() {
+    struct DeniesFirst(FakeFiles);
+    impl ProtectedFiles for DeniesFirst {
+        fn facts(&mut self, p: &Path) -> std::io::Result<Option<crate::privileged::FileFacts>> {
+            self.0.clone().facts(p)
+        }
+        fn create_dir(&mut self, p: &Path, m: u32) -> std::io::Result<()> {
+            self.0.create_dir(p, m)
+        }
+        fn open_source(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<crate::privileged::HeldSource>> {
+            if p.ends_with("MacOS/dyno-helper.minisig") {
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
+            self.0.open_source(p, m)
+        }
+        fn write_program(&mut self, b: &[u8], to: &Path, m: u32) -> std::io::Result<String> {
+            self.0.write_program(b, to, m)
+        }
+        fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
+            self.0.sha256(p)
+        }
+        fn read_checked(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<(crate::privileged::FileFacts, String)>> {
+            self.0.read_checked(p, m)
+        }
+        fn remove_file(&mut self, p: &Path) -> std::io::Result<()> {
+            self.0.remove_file(p)
+        }
+        fn remove_dir(&mut self, p: &Path) -> std::io::Result<()> {
+            self.0.remove_dir(p)
+        }
+    }
+    let disk = mac_disk();
+    disk.put_file(SIG, b"sig-1", 501, 0o644);
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    let (mut f, mut b, mut s) = (
+        DeniesFirst(disk),
+        Scripted::with(|s| s.starts_after_polls = Some(0)),
+        FakeSystem::new(),
+    );
+    let report = Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier: &v,
+            locations: vec![
+                PathBuf::from("/Applications/Dyno.app/Contents/MacOS/dyno-helper.minisig"),
+                PathBuf::from(SIG),
+            ],
+        })
+        .install(Path::new(SOURCE))
+        .unwrap();
+    assert_eq!(report.signature.as_deref(), Some("valid"));
 }

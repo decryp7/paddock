@@ -556,12 +556,7 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
         Ok(Some(crate::privileged::HeldSource { facts, bytes }))
     }
 
-    fn write_program(
-        &mut self,
-        bytes: &[u8],
-        to: &Path,
-        mode: u32,
-    ) -> std::io::Result<String> {
+    fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> std::io::Result<String> {
         use crate::privileged::{FileFacts, FileKind};
         let mut inner = self.lock();
         inner.calls.push(format!("write {}", to.display()));
@@ -750,5 +745,20 @@ mod tests {
         assert_eq!((facts.owner, text.as_str()), (Some(0), "others"));
         assert!(disk.read_checked(Path::new("/p"), 3).is_err());
         assert!(files.calls().iter().any(|c| c == "read /p"));
+    }
+
+    #[test]
+    fn the_fake_disk_fails_and_bounds_a_source_like_the_real_one() {
+        use crate::privileged::ProtectedFiles;
+        let files = FakeFiles::new();
+        files.put_file("/p", b"abcdef", 0, 0o644);
+        let mut disk = files.clone();
+        assert_eq!(
+            disk.open_source(Path::new("/p"), 3).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        files.fail_with(Some(std::io::ErrorKind::PermissionDenied));
+        assert!(disk.open_source(Path::new("/p"), 9).is_err());
+        assert!(disk.write_program(b"x", Path::new("/q"), 0o755).is_err());
     }
 }

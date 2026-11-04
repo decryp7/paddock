@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::source_check::FamilyKey;
-use paddock_service::privileged::{Assessment, UpdateReason};
-use paddock_service::testing::{FakeElevator, FakeFiles, FakeSystem};
 #[cfg(unix)]
 use paddock_service::Output;
+use paddock_service::privileged::{Assessment, UpdateReason};
+use paddock_service::testing::{FakeElevator, FakeFiles, FakeSystem};
 
 fn roots() -> Roots {
     install_roots(&RealFolders).unwrap()
@@ -124,10 +124,12 @@ fn turning_on_and_off_asks_once_through_the_os_prompt() {
     let windows_log = FakeSystem::new();
     let mut elevator = FakeElevator::new(&windows_log);
     turn_on(Os::Windows, Path::new("C:\\Dyno\\dyno-helper.exe"), &owner, &mut sys, &mut elevator).unwrap();
-    assert!(windows_log
-        .calls()
-        .iter()
-        .any(|c| matches!(c, paddock_service::testing::Call::Os(s) if s == "elevated C:\\Dyno\\dyno-helper.exe install --for uid:501")));
+    assert!(
+        windows_log
+            .calls()
+            .iter()
+            .any(|c| matches!(c, paddock_service::testing::Call::Os(s) if s == "elevated C:\\Dyno\\dyno-helper.exe install --for uid:501"))
+    );
     elevator.results([Err(paddock_service::RegisterError::Declined)]);
     assert_eq!(
         turn_on(Os::Windows, Path::new("C:\\x.exe"), &owner, &mut sys, &mut elevator),
@@ -282,7 +284,10 @@ fn a_macos_helper_is_copied_only_with_a_valid_signature_of_the_family_key() {
     files.put_file(MAC_SOURCE, SIGNED, 501, 0o755);
     // Missing: refused with the next step, nothing written.
     let err = mac_install(&mut files, &sys).unwrap_err();
-    assert!(matches!(&err, InstallError::Refused(w) if w.contains("no signature file") && w.contains("official download")), "{err}");
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("no signature file") && w.contains("official download")),
+        "{err}"
+    );
     assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
     // Not the signature of these bytes (a replaced helper): refused.
     let mut replaced = SIGNED.to_vec();
@@ -290,7 +295,10 @@ fn a_macos_helper_is_copied_only_with_a_valid_signature_of_the_family_key() {
     files.put_file(MAC_SOURCE, &replaced, 501, 0o755);
     files.put_file(MAC_SIGNATURE, SIGNATURE, 501, 0o644);
     let err = mac_install(&mut files, &sys).unwrap_err();
-    assert!(matches!(&err, InstallError::Refused(w) if w.contains("does not match its signature") && w.contains("reinstall Dyno")), "{err}");
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("does not match its signature") && w.contains("reinstall Dyno")),
+        "{err}"
+    );
     assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
     // An empty or garbled signature file (a build that was not signed): refused.
     files.put_file(MAC_SOURCE, SIGNED, 501, 0o755);
@@ -324,12 +332,18 @@ fn a_build_without_the_family_key_refuses_every_helper() {
 
 #[test]
 fn the_signature_is_looked_for_next_to_the_helper_and_in_the_bundles_resources() {
-    use crate::source_check::{signature_locations, SIGNATURE_FILE};
+    use crate::source_check::{SIGNATURE_FILE, signature_locations};
     assert_eq!(
         signature_locations(Path::new(MAC_SOURCE)),
-        [PathBuf::from("/Applications/Dyno.app/Contents/MacOS").join(SIGNATURE_FILE), PathBuf::from(MAC_SIGNATURE)]
+        [
+            PathBuf::from("/Applications/Dyno.app/Contents/MacOS").join(SIGNATURE_FILE),
+            PathBuf::from(MAC_SIGNATURE)
+        ]
     );
-    assert_eq!(signature_locations(Path::new("/opt/dyno/dyno-helper")), [PathBuf::from("/opt/dyno").join(SIGNATURE_FILE)]);
+    assert_eq!(
+        signature_locations(Path::new("/opt/dyno/dyno-helper")),
+        [PathBuf::from("/opt/dyno").join(SIGNATURE_FILE)]
+    );
 }
 
 #[test]

@@ -41,7 +41,9 @@ impl FamilyKey {
     pub fn from_text(text: Option<&str>) -> Self {
         Self(match UpdateKey::resolve([text]) {
             Some(key) => Ok(key),
-            None => Err("this build of Dyno carries no update key, so its helper cannot be checked; install Dyno from the official download".into()),
+            None => Err(
+                "this build of Dyno carries no update key, so its helper cannot be checked; install Dyno from the official download".into(),
+            ),
         })
     }
 }

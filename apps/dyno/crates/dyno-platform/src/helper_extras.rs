@@ -2,7 +2,7 @@
 //! and a 15 second limit, parsed by `dyno_core::helper_extras`. A tool that fails says so with its own message.
 
 use crate::runner::ToolRunner;
-use dyno_core::helper_extras::{parse_requests, parse_versions, BackupVersion, ExtrasReader, WakeRequest};
+use dyno_core::helper_extras::{BackupVersion, ExtrasReader, WakeRequest, parse_requests, parse_versions};
 use dyno_core::ports::PlatformError;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -30,11 +30,17 @@ impl WindowsExtras {
 
 impl ExtrasReader for WindowsExtras {
     fn wake_requests(&self) -> Result<Vec<WakeRequest>, PlatformError> {
-        Ok(parse_requests(&self.runner.run(&self.tool("powercfg"), &["/requests".to_string()], TIMEOUT)?))
+        Ok(parse_requests(&self.runner.run(
+            &self.tool("powercfg"),
+            &["/requests".to_string()],
+            TIMEOUT,
+        )?))
     }
 
     fn backup_versions(&self) -> Result<Vec<BackupVersion>, PlatformError> {
-        let out = self.runner.run_tool(&crate::runner::tool(self.tool("wbadmin"), &["get", "versions"]), TIMEOUT)?;
+        let out = self
+            .runner
+            .run_tool(&crate::runner::tool(self.tool("wbadmin"), &["get", "versions"]), TIMEOUT)?;
         // "No backup was found" exits non-zero but is an answer: there are no versions.
         if !out.ok && parse_versions(&out.stdout).is_empty() && !out.stdout.to_lowercase().contains("no backup") {
             return Err(PlatformError::Failed(format!(
@@ -103,8 +109,10 @@ mod tests {
         assert!(none.backup_versions().unwrap().is_empty());
         let denied = ext(Box::new(Fake(false, "", "Access denied.")));
         assert!(denied.backup_versions().unwrap_err().to_string().contains("Access denied"));
-        assert!(ext(Box::new(Fake(false, "", "You do not have the permissions required")))
-            .wake_requests()
-            .is_err());
+        assert!(
+            ext(Box::new(Fake(false, "", "You do not have the permissions required")))
+                .wake_requests()
+                .is_err()
+        );
     }
 }

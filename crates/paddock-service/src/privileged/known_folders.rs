@@ -188,6 +188,8 @@ mod tests {
                 format!("D:\\RealWin\\System32\\{}.exe", tool.to_ascii_lowercase())
             );
         }
+        assert_eq!(real.program_files().unwrap(), PathBuf::from("D:\\Real Program Files"));
+        assert_eq!(real.program_data().unwrap(), PathBuf::from("D:\\RealData"));
         // A trailing separator is not doubled.
         let slash = Fake {
             system: "D:\\RealWin\\System32\\",
@@ -195,6 +197,30 @@ mod tests {
         assert_eq!(
             system_tool_in(&slash, "sc", true).unwrap(),
             "D:\\RealWin\\System32\\sc.exe"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_the_conventional_folders_are_named() {
+        let os = OsKnownFolders;
+        assert!(
+            os.system_directory()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("System32")
+        );
+        assert!(
+            os.program_files()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("Program Files")
+        );
+        assert!(
+            os.program_data()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("ProgramData")
         );
     }
 
@@ -220,6 +246,7 @@ mod tests {
                 Err(io::Error::other("no answer"))
             }
         }
+        assert!(Broken.program_files().is_err() && Broken.program_data().is_err());
         assert!(system_tool_in(&Broken, "icacls", true).is_err());
         assert_eq!(system_tool_in(&Broken, "x", true).unwrap(), "x");
     }

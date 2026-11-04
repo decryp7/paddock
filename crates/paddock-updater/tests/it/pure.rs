@@ -1058,7 +1058,8 @@ fn whats_new_at_start_is_decided_once_and_recorded() {
 fn bytes_are_checked_against_a_signature_without_a_version_and_a_wrong_one_is_refused() {
     // The helper's signature (Dyno's elevated install, security review F2) is a plain `tauri signer sign` of the bytes: no
     // announced version, the same key and the same pre-hashed format.
-    let comment = signature::verify_bytes(&key(), &package(), &signature("update.bin.sig")).unwrap();
+    let comment =
+        signature::verify_bytes(&key(), &package(), &signature("update.bin.sig")).unwrap();
     assert!(!comment.is_empty());
     let mut tampered = package();
     tampered.push(0);

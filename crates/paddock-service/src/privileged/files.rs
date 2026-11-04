@@ -276,13 +276,7 @@ impl ProtectedFiles for RealFiles {
                 bytes: Vec::new(),
             }));
         }
-        if facts.len > max {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("the program is larger than {max} bytes"),
-            ));
-        }
-        let mut bytes = Vec::with_capacity(usize::try_from(facts.len).unwrap_or(0));
+        let mut bytes = Vec::with_capacity(usize::try_from(facts.len.min(max)).unwrap_or(0));
         file.take(max + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > max {
             return Err(io::Error::new(
@@ -492,8 +486,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert_eq!(files.facts(&link).unwrap().unwrap().kind, FileKind::Symlink);
         // The destination folder is missing: the temporary file cannot be made and nothing is left.
-        let err = copy(&mut files, &target, &dir.path().join("no/such/prog"), 0o755)
-            .unwrap_err();
+        let err = copy(&mut files, &target, &dir.path().join("no/such/prog"), 0o755).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
         // A folder where the program should go: the rename fails and the temporary file is removed.
         let blocked = dir.path().join("blocked");
@@ -549,5 +542,17 @@ mod tests {
         if std::fs::File::open(&locked).is_err() {
             assert!(files.open_source(&locked, 100).is_err());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_source_that_is_neither_file_nor_folder_is_reported_as_other_with_no_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let held = RealFiles.open_source(&fifo, 100).unwrap().unwrap();
+        assert_eq!((held.facts.kind, held.bytes.len()), (FileKind::Other, 0));
     }
 }

@@ -339,12 +339,17 @@ impl<'a> Installer<'a> {
                 ))
             })?;
         }
-        let held = self
-            .files
-            .open_source(source, MAX_PROGRAM)
-            .map_err(|e| failed(Step::CopyProgram, format!("{} cannot be read: {e}", source.display())))?;
+        let held = self.files.open_source(source, MAX_PROGRAM).map_err(|e| {
+            failed(
+                Step::CopyProgram,
+                format!("{} cannot be read: {e}", source.display()),
+            )
+        })?;
         let Some(held) = held else {
-            return Err(InstallError::Refused(format!("the program {} is not there", source.display())));
+            return Err(InstallError::Refused(format!(
+                "the program {} is not there",
+                source.display()
+            )));
         };
         if held.facts.kind != FileKind::File {
             return Err(InstallError::Refused(format!(
@@ -384,7 +389,9 @@ impl<'a> Installer<'a> {
                     break;
                 }
                 Ok(_) => {}
-                Err(e) => log::warn!(signature_file = "unreadable", error:% = e; "install: a signature location could not be read"),
+                Err(e) => {
+                    log::warn!(signature_file = "unreadable", error:% = e; "install: a signature location could not be read")
+                }
             }
         }
         let Some(signature) = found else {
@@ -500,7 +507,8 @@ impl<'a> Installer<'a> {
             let parent = trust::parent_of(&folder, Style::Windows)
                 .ok_or_else(|| InstallError::Refused(format!("{folder} has no parent folder")))?;
             let port = self.trust_port()?;
-            trust::verify_container(port, &parent).map_err(|e| untrusted("the Program Files folder", &e))?;
+            trust::verify_container(port, &parent)
+                .map_err(|e| untrusted("the Program Files folder", &e))?;
             log::info!(root = parent.as_str(); "install: the Program Files folder passed the trust check");
         }
         let facts = self
@@ -550,7 +558,8 @@ impl<'a> Installer<'a> {
         // inheritance, every ancestor) and is what proves nobody else can change it.
         let text = folder.to_string_lossy().into_owned();
         let port = self.trust_port()?;
-        trust::verify_chain(port, &text, FileKind::Dir, Some(&text), false).map_err(|e| untrusted("the protected folder", &e))?;
+        trust::verify_chain(port, &text, FileKind::Dir, Some(&text), false)
+            .map_err(|e| untrusted("the protected folder", &e))?;
         Ok("set and checked".into())
     }
 
@@ -558,10 +567,12 @@ impl<'a> Installer<'a> {
         let copy = self.copy()?.clone();
         let source = source.ok_or_else(|| InstallError::Refused("no program to copy".into()))?;
         // The bytes that were checked through the one open handle; the path is not opened again.
-        let held = self
-            .held
-            .take()
-            .ok_or_else(|| InstallError::Refused(format!("{} was not checked before the copy", source.display())))?;
+        let held = self.held.take().ok_or_else(|| {
+            InstallError::Refused(format!(
+                "{} was not checked before the copy",
+                source.display()
+            ))
+        })?;
         let hash = self
             .files
             .write_program(&held.bytes, &copy.file, copy.file_mode)
@@ -585,7 +596,8 @@ impl<'a> Installer<'a> {
             let text = program.to_string_lossy().into_owned();
             let root = self.copy()?.folder.to_string_lossy().into_owned();
             let port = self.trust_port()?;
-            trust::verify_chain(port, &text, FileKind::File, Some(&root), false).map_err(|e| untrusted("the installed program", &e))?;
+            trust::verify_chain(port, &text, FileKind::File, Some(&root), false)
+                .map_err(|e| untrusted("the installed program", &e))?;
         }
         if let Some(written) = self.report.sha256.clone() {
             let now = self

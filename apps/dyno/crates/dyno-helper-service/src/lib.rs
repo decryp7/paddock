@@ -12,15 +12,15 @@
 //! Registration goes through `paddock-service` (rule 55): this crate only says what Dyno's helper is ([`spec`]) and
 //! where Dyno keeps it ([`windows_roots`], [`install_roots`]).
 
-use dyno_core::helper_wire::{HelperUser, HELPER_API};
 use dyno_core::helper_paths::WindowsRoots;
+use dyno_core::helper_wire::{HELPER_API, HelperUser};
 use paddock_env::Os;
 use paddock_service::hardening::{Hardening, Sandbox};
-use paddock_service::privileged::{
-    assess as assess_installed, backend_for, layout, run_elevated, Assessment, BundledHelper, ElevationError, InstallError,
-    InstalledHelper, Installer, KnownFolders, Layout, ProtectedFiles, Report, Roots, SignatureCheck, SourceVerifier,
-};
 use paddock_service::privileged::trust::TrustPort;
+use paddock_service::privileged::{
+    Assessment, BundledHelper, ElevationError, InstallError, InstalledHelper, Installer, KnownFolders, Layout, ProtectedFiles, Report,
+    Roots, SignatureCheck, SourceVerifier, assess as assess_installed, backend_for, layout, run_elevated,
+};
 use paddock_service::spec::{Kind, Restart, ServiceSpec, WindowsStart};
 use paddock_service::{Elevator, ServiceError, System};
 use std::path::{Path, PathBuf};
