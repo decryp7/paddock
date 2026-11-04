@@ -122,13 +122,11 @@ pub use backend::{
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
 pub use manager::{Manager, Started};
+pub use os_log::OsLog;
 pub use plan::{Hold, Plan, Reason, Refusal};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
-pub use os_log::OsLog;
 pub use repair::{RepairOutcome, Step, Timings};
-pub use service_main::{
-    Context, Hosting, Outcome, ServiceExit, ServiceMainError, service_main,
-};
+pub use service_main::{Context, Hosting, Outcome, ServiceExit, ServiceMainError, service_main};
 pub use spec::{Kind, ProcessType, Restart, ServiceSpec, SpecBuilder, WindowsStart};
 pub use status::{Condition, HealthReport, LOGIN_SECTION, ServiceStatus};
 pub use system::RealSystem;
