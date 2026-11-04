@@ -24,6 +24,10 @@ pub struct JobReport {
     pub last_exit_code: Option<i32>,
     /// `last terminating signal = …`: a signal ended the job's last process.
     pub last_signal: bool,
+    /// The signal number in `last terminating signal = Killed: 9` (`None`: no signal, or none named).
+    pub signal: Option<i32>,
+    /// `runs = <n>`: how often launchd started the job's process.
+    pub runs: Option<u32>,
 }
 
 /// Reads the report of `launchctl print` (catalogue R03). Only the job's own keys count: nested blocks (`arguments`,
@@ -56,8 +60,11 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
             job.exit_config = job.last_exit_code == Some(78);
         } else if let Some(pid) = line.strip_prefix("pid = ") {
             job.pid = pid.trim().parse().ok().filter(|p| *p > 0);
-        } else if line.starts_with("last terminating signal = ") {
+        } else if let Some(sig) = line.strip_prefix("last terminating signal = ") {
             job.last_signal = true;
+            job.signal = sig.rsplit(':').next().and_then(|n| n.trim().parse().ok());
+        } else if let Some(runs) = line.strip_prefix("runs = ") {
+            job.runs = runs.trim().parse().ok();
         } else if line.starts_with("properties = ") {
             job.needs_lwcr_update = line.contains("needs LWCR update");
             job.has_lwcr = line.contains("has LWCR");
@@ -311,6 +318,58 @@ pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
     found
 }
 
+/// What `systemctl show -p FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode` printed (`Key=Value`
+/// lines; a key that is missing, empty or not a number reads as `None`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnitShow {
+    /// `FragmentPath`: the unit file in force (empty for a masked or unknown unit).
+    pub fragment: Option<String>,
+    /// `UnitFileState`: `enabled`, `disabled`, `static`, `masked`, ...
+    pub unit_file_state: Option<String>,
+    /// `NRestarts`.
+    pub restarts: Option<u32>,
+    /// `ExecMainStatus`: the exit status, or the signal number when `ExecMainCode` says killed.
+    pub exec_main_status: Option<i32>,
+    /// `ExecMainCode`: `CLD_EXITED` (1), `CLD_KILLED` (2) or `CLD_DUMPED` (3); 0 when the process never ended.
+    pub exec_main_code: Option<i32>,
+}
+
+/// Reads `systemctl show` output.
+pub fn parse_systemctl_show(stdout: &str) -> UnitShow {
+    let mut show = UnitShow::default();
+    for (key, value) in stdout.lines().filter_map(|l| l.split_once('=')) {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        match key.trim() {
+            "FragmentPath" => show.fragment = Some(value.to_string()),
+            "UnitFileState" => show.unit_file_state = Some(value.to_string()),
+            "NRestarts" => show.restarts = value.parse().ok(),
+            "ExecMainStatus" => show.exec_main_status = value.parse().ok(),
+            "ExecMainCode" => show.exec_main_code = value.parse().ok(),
+            _ => {}
+        }
+    }
+    show
+}
+
+/// The exit codes in `sc query` output of a stopped service: `(WIN32_EXIT_CODE, SERVICE_EXIT_CODE)`.
+pub fn sc_exit_codes(sc_query: &str) -> Option<(u32, u32)> {
+    let first = |name: &str| {
+        sc_field(sc_query, name)?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    Some((first("WIN32_EXIT_CODE")?, first("SERVICE_EXIT_CODE")?))
+}
+
+/// `ERROR_SERVICE_SPECIFIC_ERROR`: the real code is `SERVICE_EXIT_CODE`.
+pub const SC_SERVICE_SPECIFIC: u32 = 1066;
+/// `SERVICE_DEMAND_START` start type.
+pub const SC_DEMAND_START: u32 = 3;
 /// `SERVICE_RUNNING`.
 pub const SC_RUNNING: u32 = 4;
 /// `SERVICE_STOPPED`.

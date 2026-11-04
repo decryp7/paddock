@@ -1,0 +1,658 @@
+//! ADR 0054 section 1.1: a registration is written and read back through the port. `register` returns the post-write
+//! inspection (never `Ok` when it disagrees with what was written), `Inspection` carries the typed last exit, restarts and
+//! the definition in force, and the returned inspection equals a fresh `inspect()` for every backend (the contract case).
+//! Every OS answer below has the shape of the real tool's output; the lifecycle suite records the real ones.
+
+use crate::backend::{
+    Backend, ElevatedWindowsService, Inspection, Job, LastExit, LaunchdBundled, LaunchdFile,
+    Registration, Systemd, Target, UnitFile, UnitFileState, UnitOrigin, WindowsRun, WindowsService,
+};
+use crate::port::{AppServiceStatus, Output, RegisterError};
+use crate::spec::{Kind, ServiceSpec};
+use crate::testing::{FakeAppService, FakeElevator, FakeSystem};
+use std::path::PathBuf;
+
+const LABEL: &str = "net.decryptology.dyno.helper";
+
+fn spec(kind: Kind) -> ServiceSpec {
+    ServiceSpec::builder(LABEL, "Dyno", "dyno-helper")
+        .kind(kind)
+        .build()
+        .unwrap()
+}
+
+// ------------------------------------------------------------------------------------------------------- systemd
+
+const ETC_UNIT: &str = "/etc/systemd/system/dyno.service";
+const EXE: &str = "/usr/lib/dyno/dyno-helper";
+
+fn show(
+    fragment: &str,
+    file_state: &str,
+    result: &str,
+    restarts: u32,
+    status: i32,
+    code: i32,
+) -> Output {
+    Output::ok(&format!(
+        "FragmentPath={fragment}\nUnitFileState={file_state}\nResult={result}\nNRestarts={restarts}\nExecMainStatus={status}\nExecMainCode={code}\n"
+    ))
+}
+
+fn system_unit(sys: &FakeSystem) -> Systemd {
+    sys.put_program(EXE);
+    Systemd::new(
+        spec(Kind::SystemService),
+        ETC_UNIT.into(),
+        Target::exe(EXE),
+        Box::new(sys.clone()),
+    )
+}
+
+fn healthy_unit(sys: &FakeSystem) {
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "enabled", "success", 0, 0, 0),
+    );
+}
+
+#[test]
+fn systemd_register_returns_the_post_write_inspection_with_the_unit_in_force() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    healthy_unit(&sys);
+    let look = b.register().unwrap();
+    assert_eq!(look.registration, Registration::Registered);
+    assert_eq!(look.job, Job::Running);
+    assert_eq!(
+        look.unit,
+        Some(UnitFile {
+            path: PathBuf::from(ETC_UNIT),
+            origin: UnitOrigin::Admin,
+            enabled: UnitFileState::Enabled
+        })
+    );
+    assert_eq!(look.restarts, Some(0));
+    assert_eq!(look.last_exit, None, "a running main process has not ended");
+    assert_eq!(
+        look,
+        b.inspect(),
+        "contract: the returned inspection is a fresh one"
+    );
+}
+
+#[test]
+fn systemd_register_that_reads_back_disabled_is_not_as_written() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "disabled", "success", 0, 0, 0),
+    );
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => {
+            assert_eq!(look.registration, Registration::SwitchedOff);
+            assert_eq!(look.job, Job::NotRunning);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn systemd_register_that_reads_back_another_definition_is_not_as_written() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    healthy_unit(&sys);
+    // Something rewrote the unit between the write and the read-back (a drop-in or a package upgrade).
+    sys.rewrite_after(
+        "systemctl daemon-reload",
+        ETC_UNIT,
+        "[Service]\nExecStart=/opt/other/dyno-helper\n",
+    );
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => {
+            assert_eq!(look.definition_current, Some(false));
+            assert_eq!(look.points_here, Some(false));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_systemd_unit_that_failed_reads_as_failed_with_its_exit_status_restarts_and_origin() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    sys.answer("systemctl is-active", Output::ok("failed\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.answer(
+        "systemctl show",
+        show(
+            "/usr/lib/systemd/system/dyno.service",
+            "enabled",
+            "exit-code",
+            4,
+            3,
+            1,
+        ),
+    );
+    let look = b.inspect();
+    assert_eq!(look.job, Job::Failed(LastExit::Code(3)));
+    assert_eq!(look.last_exit, Some(LastExit::Code(3)));
+    assert_eq!(look.restarts, Some(4));
+    assert_eq!(look.unit.unwrap().origin, UnitOrigin::Packaged);
+}
+
+#[test]
+fn a_systemd_unit_killed_by_a_signal_reads_the_signal_not_an_exit_code() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    sys.answer("systemctl is-active", Output::ok("failed\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "enabled", "signal", 0, 11, 2),
+    );
+    assert_eq!(b.inspect().job, Job::Failed(LastExit::Signal(11)));
+}
+
+#[test]
+fn a_systemd_unit_the_manager_cannot_describe_still_inspects_with_the_new_fields_empty() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("static\n"));
+    sys.answer(
+        "systemctl show",
+        Output {
+            code: Some(1),
+            stderr: "Failed to get properties".into(),
+            ..Output::default()
+        },
+    );
+    let look = b.inspect();
+    assert_eq!(
+        (look.job, look.last_exit, look.restarts, look.unit),
+        (Job::Running, None, None, None)
+    );
+}
+
+#[test]
+fn a_static_unit_is_manual_and_a_masked_one_is_masked() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("static\n"));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "static", "success", 0, 0, 0),
+    );
+    assert_eq!(b.inspect().unit.unwrap().enabled, UnitFileState::Manual);
+    sys.answer("systemctl is-enabled", Output::ok("masked\n"));
+    sys.answer("systemctl show", show("", "masked", "success", 0, 0, 0));
+    assert_eq!(
+        b.inspect().unit,
+        None,
+        "no fragment, no definition in force"
+    );
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "weird", "success", 0, 0, 0),
+    );
+    assert_eq!(b.inspect().unit.unwrap().enabled, UnitFileState::Other);
+}
+
+// -------------------------------------------------------------------------------------------------------- Windows
+
+const SVC_EXE: &str = r"C:\Program Files\Dyno Helper\dyno-helper.exe";
+
+fn scm(sys: &FakeSystem) -> WindowsService {
+    sys.put_program(SVC_EXE);
+    WindowsService::new(
+        spec(Kind::SystemService),
+        Target::exe(SVC_EXE),
+        Box::new(sys.clone()),
+    )
+}
+
+fn sc_query(state: &str, win32: &str, specific: &str) -> Output {
+    Output::ok(&format!(
+        "SERVICE_NAME: Dyno\n        TYPE               : 10  WIN32_OWN_PROCESS\n        STATE              : {state}\n        WIN32_EXIT_CODE    : {win32}\n        SERVICE_EXIT_CODE  : {specific}\n        CHECKPOINT         : 0x0\n        WAIT_HINT          : 0x0\n"
+    ))
+}
+
+fn sc_qc(start: &str, program: &str) -> Output {
+    Output::ok(&format!(
+        "[SC] QueryServiceConfig SUCCESS\n\nSERVICE_NAME: Dyno\n        TYPE               : 10  WIN32_OWN_PROCESS\n        START_TYPE         : {start}\n        BINARY_PATH_NAME   : \"{program}\" --service\n"
+    ))
+}
+
+#[test]
+fn a_stopped_service_with_a_service_specific_code_reads_as_failed_with_that_code() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer(
+        "sc query",
+        sc_query("1  STOPPED", "1066 (0x42a)", "7  (0x7)"),
+    );
+    sys.answer("sc qc", sc_qc("2  AUTO_START  (DELAYED)", SVC_EXE));
+    let look = b.inspect();
+    assert_eq!(look.job, Job::Failed(LastExit::ServiceSpecific(7)));
+    assert_eq!(look.last_exit, Some(LastExit::ServiceSpecific(7)));
+    assert_eq!(
+        look.restarts, None,
+        "Windows counts restarts in the event log"
+    );
+}
+
+#[test]
+fn a_stopped_service_with_a_win32_code_reads_as_failed_with_that_code() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer(
+        "sc query",
+        sc_query("1  STOPPED", "1067 (0x42b)", "0  (0x0)"),
+    );
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    assert_eq!(b.inspect().job, Job::Failed(LastExit::Win32(1067)));
+}
+
+#[test]
+fn a_service_that_stopped_cleanly_is_not_running_and_a_running_one_has_no_last_exit() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    sys.answer("sc query", sc_query("1  STOPPED", "0  (0x0)", "0  (0x0)"));
+    let look = b.inspect();
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::NotRunning, Some(LastExit::Win32(0)))
+    );
+    sys.answer("sc query", sc_query("4  RUNNING", "0  (0x0)", "0  (0x0)"));
+    let look = b.inspect();
+    assert_eq!((look.job, look.last_exit), (Job::Running, None));
+}
+
+#[test]
+fn the_service_manager_is_the_origin_and_the_start_type_is_the_enabled_state() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    for (start, want) in [
+        ("2  AUTO_START  (DELAYED)", UnitFileState::Enabled),
+        ("3  DEMAND_START", UnitFileState::Manual),
+        ("4  DISABLED", UnitFileState::Disabled),
+    ] {
+        sys.answer("sc qc", sc_qc(start, SVC_EXE));
+        let unit = b.inspect().unit.unwrap();
+        assert_eq!(
+            (unit.origin, unit.enabled, unit.path),
+            (UnitOrigin::ServiceManager, want, PathBuf::from(SVC_EXE))
+        );
+    }
+}
+
+#[test]
+fn a_service_registered_with_another_program_is_not_as_written() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START", r"C:\Old\dyno-helper.exe"));
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => assert_eq!(look.points_here, Some(false)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_service_the_scm_reports_disabled_after_it_was_created_is_not_as_written() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc query", sc_query("1  STOPPED", "0", "0"));
+    sys.answer("sc qc", sc_qc("4  DISABLED", SVC_EXE));
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => {
+            assert_eq!(look.registration, Registration::SwitchedOff)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_service_the_scm_does_not_know_after_sc_create_succeeded_is_not_as_written() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc query", Output::code(1060));
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => {
+            assert_eq!(look.registration, Registration::Absent)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_healthy_service_registers_and_the_returned_inspection_is_a_fresh_one() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START  (DELAYED)", SVC_EXE));
+    let look = b.register().unwrap();
+    assert_eq!(look.job, Job::Running);
+    assert_eq!(look, b.inspect());
+}
+
+#[test]
+fn the_elevated_service_judges_what_the_elevated_install_left_behind() {
+    let sys = FakeSystem::new();
+    sys.put_program(SVC_EXE);
+    let mut b = ElevatedWindowsService::new(
+        spec(Kind::SystemService),
+        PathBuf::from(SVC_EXE),
+        Box::new(sys.clone()),
+        Box::new(FakeElevator::new(&sys)),
+    );
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    assert_eq!(b.register().unwrap().job, Job::Running);
+    sys.answer("sc query", Output::code(1060));
+    assert!(matches!(b.register(), Err(RegisterError::NotAsWritten(_))));
+    assert!(matches!(
+        b.replace_in_one_step(),
+        Some(Err(RegisterError::NotAsWritten(_)))
+    ));
+}
+
+#[test]
+fn a_run_value_that_reads_back_missing_is_not_as_written_and_a_present_one_is_returned() {
+    let sys = FakeSystem::new();
+    sys.put_program(SVC_EXE);
+    let mut b = WindowsRun::new(
+        spec(Kind::UserAgent),
+        Target::exe(SVC_EXE),
+        Box::new(sys.clone()),
+    );
+    // `reg add` succeeds (no responder) but `reg query` finds nothing.
+    sys.answer("reg query", Output::code(1));
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => {
+            assert_eq!(look.registration, Registration::Absent)
+        }
+        other => panic!("{other:?}"),
+    }
+    sys.answer(
+        "reg query",
+        Output::ok(&format!("    Dyno    REG_SZ    {}\r\n", b.definition())),
+    );
+    let look = b.register().unwrap();
+    assert_eq!(look.registration, Registration::Registered);
+    assert_eq!(look.definition_current, Some(true));
+    assert_eq!(look, b.inspect());
+}
+
+#[test]
+fn a_run_value_the_user_switched_off_in_task_manager_is_their_choice_not_a_failed_write() {
+    let sys = FakeSystem::new();
+    sys.put_program(SVC_EXE);
+    let mut b = WindowsRun::new(
+        spec(Kind::UserAgent),
+        Target::exe(SVC_EXE),
+        Box::new(sys.clone()),
+    );
+    let value = b.definition();
+    sys.on("reg query", move |args, _| {
+        Ok(if args.iter().any(|a| a.contains("StartupApproved")) {
+            Output::ok("    Dyno    REG_BINARY    030000000000000000000000\r\n")
+        } else {
+            Output::ok(&format!("    Dyno    REG_SZ    {value}\r\n"))
+        })
+    });
+    assert_eq!(
+        b.register().unwrap().registration,
+        Registration::SwitchedOff
+    );
+}
+
+// -------------------------------------------------------------------------------------------------------- launchd
+
+const PLIST: &str = "/Users/ana/Library/LaunchAgents/net.decryptology.dyno.helper.plist";
+const TARGET: &str = "gui/501/net.decryptology.dyno.helper";
+
+fn launchd_print(state: &str, runs: u32, tail: &str) -> Output {
+    Output::ok(&format!(
+        "{TARGET} = {{\n\tstate = {state}\n\tprogram = /dev/dyno-helper\n\truns = {runs}\n{tail}\tproperties = keepalive | runatload\n}}\n"
+    ))
+}
+
+fn launchd_file(sys: &FakeSystem) -> LaunchdFile {
+    sys.put_program("/dev/dyno-helper");
+    LaunchdFile::new(
+        spec(Kind::UserAgent),
+        501,
+        PLIST.into(),
+        Target::exe("/dev/dyno-helper"),
+        Box::new(sys.clone()),
+    )
+}
+
+#[test]
+fn launchd_reads_the_runs_and_the_last_exit_code_of_a_job_that_died() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print("waiting", 3, "\tlast exit code = 1\n"),
+    );
+    let look = b.inspect();
+    assert_eq!(look.job, Job::Failed(LastExit::Code(1)));
+    assert_eq!(
+        (look.last_exit, look.restarts),
+        (Some(LastExit::Code(1)), Some(2))
+    );
+}
+
+#[test]
+fn launchd_reads_the_terminating_signal() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print(
+            "waiting",
+            2,
+            "\tlast terminating signal = Segmentation fault: 11\n",
+        ),
+    );
+    assert_eq!(b.inspect().job, Job::Failed(LastExit::Signal(11)));
+}
+
+#[test]
+fn a_launchd_job_that_never_exited_has_no_last_exit_and_no_restarts() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print("running", 1, "\tlast exit code = (never exited)\n"),
+    );
+    let look = b.inspect();
+    assert_eq!(
+        (look.job, look.last_exit, look.restarts),
+        (Job::Running, None, Some(0))
+    );
+}
+
+#[test]
+fn a_launchd_job_that_exited_cleanly_keeps_the_zero_as_its_last_exit() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print("waiting", 1, "\tlast exit code = 0\n"),
+    );
+    let look = b.inspect();
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::NotRunning, Some(LastExit::Code(0)))
+    );
+}
+
+#[test]
+fn a_launchd_file_names_the_plist_as_the_definition_in_force() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, ""));
+    sys.answer(
+        "/bin/launchctl print-disabled",
+        Output::ok(&format!(
+            "disabled services = {{\n\t\"{LABEL}\" => enabled\n}}\n"
+        )),
+    );
+    assert_eq!(
+        b.inspect().unit,
+        Some(UnitFile {
+            path: PathBuf::from(PLIST),
+            origin: UnitOrigin::Admin,
+            enabled: UnitFileState::Enabled
+        })
+    );
+    sys.answer(
+        "/bin/launchctl print-disabled",
+        Output::ok(&format!(
+            "disabled services = {{\n\t\"{LABEL}\" => disabled\n}}\n"
+        )),
+    );
+    assert_eq!(b.inspect().unit.unwrap().enabled, UnitFileState::Disabled);
+}
+
+#[test]
+fn a_launchd_file_register_returns_the_read_back_and_equals_a_fresh_inspection() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, ""));
+    let look = b.register().unwrap();
+    assert_eq!(
+        (look.registration.clone(), look.job),
+        (Registration::Registered, Job::Running)
+    );
+    assert_eq!(look, b.inspect());
+}
+
+#[test]
+fn a_launchd_file_whose_plist_reads_back_another_text_is_not_as_written() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.rewrite_after(
+        "/bin/launchctl bootstrap",
+        PLIST,
+        "something else rewrote it",
+    );
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => assert_eq!(look.definition_current, Some(false)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_bundled_agent_that_reads_back_not_registered_is_not_as_written_and_approval_is_its_own_error()
+{
+    let sys = FakeSystem::new();
+    let app = FakeAppService::new(&sys);
+    app.set_status(AppServiceStatus::NotRegistered);
+    let mut b = LaunchdBundled::new(
+        spec(Kind::UserAgent),
+        501,
+        Box::new(app.clone()),
+        Box::new(sys.clone()),
+    );
+    // `register` reports success, but Background Task Management still has nothing.
+    app.set_register_sets(Some(AppServiceStatus::NotRegistered));
+    match b.register() {
+        Err(RegisterError::NotAsWritten(look)) => {
+            assert_eq!(look.registration, Registration::Absent)
+        }
+        other => panic!("{other:?}"),
+    }
+    app.set_register_sets(Some(AppServiceStatus::RequiresApproval));
+    assert_eq!(b.register().unwrap_err(), RegisterError::NeedsApproval);
+    app.set_register_sets(Some(AppServiceStatus::Enabled));
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, ""));
+    let look = b.register().unwrap();
+    assert_eq!(look, b.inspect());
+}
+
+#[test]
+fn an_inspection_of_nothing_has_no_exit_restarts_or_unit() {
+    let look = Inspection::absent();
+    assert_eq!(
+        (look.last_exit, look.restarts, look.unit),
+        (None, None, None)
+    );
+}
+
+#[test]
+fn a_last_exit_knows_whether_it_failed_and_has_words() {
+    assert!(!LastExit::Code(0).is_failure() && LastExit::Code(1).is_failure());
+    assert!(LastExit::Signal(9).is_failure());
+    assert!(!LastExit::Win32(0).is_failure() && LastExit::Win32(1067).is_failure());
+    assert!(
+        !LastExit::ServiceSpecific(0).is_failure() && LastExit::ServiceSpecific(7).is_failure()
+    );
+    assert_eq!(
+        LastExit::ServiceSpecific(7).to_string(),
+        "service-specific exit code 7"
+    );
+    assert_eq!(LastExit::Code(3).to_string(), "exit code 3");
+    assert_eq!(LastExit::Signal(11).to_string(), "signal 11");
+    assert_eq!(LastExit::Win32(1067).to_string(), "Win32 error 1067");
+}
+
+#[test]
+fn a_not_as_written_error_says_what_the_os_holds_and_can_be_tried_again() {
+    let mut look = Inspection::absent();
+    look.registration = Registration::SwitchedOff;
+    look.definition_current = Some(false);
+    let e = RegisterError::NotAsWritten(look);
+    assert!(e.retryable());
+    let text = e.to_string();
+    assert!(
+        text.contains("SwitchedOff") && text.contains("another definition"),
+        "{text}"
+    );
+}
+
+#[test]
+fn systemd_origins_follow_the_folder() {
+    use std::path::Path;
+    assert_eq!(
+        UnitOrigin::of_systemd_path(Path::new("/usr/lib/systemd/system/a.service")),
+        UnitOrigin::Packaged
+    );
+    assert_eq!(
+        UnitOrigin::of_systemd_path(Path::new("/lib/systemd/system/a.service")),
+        UnitOrigin::Packaged
+    );
+    assert_eq!(
+        UnitOrigin::of_systemd_path(Path::new("/run/systemd/system/a.service")),
+        UnitOrigin::Runtime
+    );
+    assert_eq!(
+        UnitOrigin::of_systemd_path(Path::new("/etc/systemd/system/a.service")),
+        UnitOrigin::Admin
+    );
+    assert_eq!(
+        UnitOrigin::of_systemd_path(Path::new("/home/a/.config/systemd/user/a.service")),
+        UnitOrigin::Admin
+    );
+}

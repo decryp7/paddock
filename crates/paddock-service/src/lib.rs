@@ -107,10 +107,13 @@ mod generated;
 #[cfg(test)]
 mod golden;
 #[cfg(test)]
+mod readback_tests;
+#[cfg(test)]
 mod scenarios;
 
 pub use backend::{
-    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+    Backend, Capabilities, Inspection, Job, LastExit, Mechanism, Registration, Target, UnitFile,
+    UnitFileState, UnitOrigin, UnregisterError,
 };
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};

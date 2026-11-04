@@ -194,7 +194,11 @@ fn changes(sys: &FakeSystem) -> Vec<String> {
         .filter_map(|c| match c {
             Call::Os(s) => Some(s),
             Call::Run(s) if s.contains(" bootout ") || s.contains("bootstrap") => Some(s),
-            Call::Run(s) if s.starts_with("systemctl") && !s.contains("is-") => Some(s),
+            Call::Run(s)
+                if s.starts_with("systemctl") && !s.contains("is-") && !s.contains(" show ") =>
+            {
+                Some(s)
+            }
             Call::Run(s) if s.starts_with("reg add") || s.starts_with("reg delete") => Some(s),
             Call::Run(s)
                 if s.starts_with("sc ")
@@ -1119,9 +1123,10 @@ fn a_run_entry_is_added_started_switched_off_by_the_user_and_removed() {
         "1.0.0",
         || true,
     );
-    sys.answer("reg query", Output::code(1));
-    m.install(&no_cancel()).unwrap();
+    // The Run value is absent until `reg add` has run, then it reads back as written.
     let value = format!("\"{DYNO_EXE}\" run");
+    sys.emulate_run_registry();
+    m.install(&no_cancel()).unwrap();
     assert_eq!(
         changes(&sys),
         [
@@ -1261,6 +1266,9 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
                 .to_string(),
             "sc failureflag Pitwall 1".to_string(),
             "sc start Pitwall".to_string(),
+            // The read-back (ADR 0054 section 1.1).
+            "sc query Pitwall".to_string(),
+            "sc qc Pitwall".to_string(),
         ]
     );
     sys.answer("sc create", Output::code(5));
@@ -1331,6 +1339,24 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
     assert!(b.evict().is_err());
 }
 
+/// An elevator that remembers the elevated install happened (the scripted SCM then reads this copy's program back).
+struct MarksInstalled(FakeElevator, Arc<std::sync::atomic::AtomicBool>);
+
+impl crate::port::Elevator for MarksInstalled {
+    fn run_elevated(
+        &mut self,
+        program: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<i32, RegisterError> {
+        let code = self.0.run_elevated(program, args, timeout)?;
+        if code == 0 && args == ["install"] {
+            self.1.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(code)
+    }
+}
+
 #[test]
 fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
     let d = tempfile::tempdir().unwrap();
@@ -1348,11 +1374,24 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
     );
     sys.put_program("C:\\Other\\pitwall-server.exe");
     let elevator = FakeElevator::new(&sys);
+    // The elevated install re-registers the service for this copy: the SCM reads it back as this program afterwards.
+    let installed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let here = format!("BINARY_PATH_NAME : \"{}\" --service\r\n", exe.display());
+    let flag = installed.clone();
+    sys.on("sc qc", move |_, _| {
+        Ok(Output::ok(
+            &if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                here.clone()
+            } else {
+                "BINARY_PATH_NAME : \"C:\\Other\\pitwall-server.exe\" --service\r\n".to_string()
+            },
+        ))
+    });
     let b = ElevatedWindowsService::new(
         svc.clone(),
         exe.clone(),
         Box::new(sys.clone()),
-        Box::new(elevator.clone()),
+        Box::new(MarksInstalled(elevator.clone(), installed)),
     );
     let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.0.0", || true);
     crate::record::RecordFile::new(d.path(), LABEL)

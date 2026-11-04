@@ -95,6 +95,98 @@ pub enum Job {
     Refused,
     /// The OS does not say (a `Run` entry; a helper that did not answer).
     Unknown,
+    /// Stopped with an error: the OS keeps how the last process ended (ADR 0054 section 1.1).
+    Failed(LastExit),
+}
+
+/// How the job's last process ended, as the OS reports it (typed, never free text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastExit {
+    /// An exit status (systemd `ExecMainStatus`, launchd `last exit code`).
+    Code(i32),
+    /// A signal ended it (launchd `last terminating signal`, systemd `ExecMainStatus` with a signal code).
+    Signal(i32),
+    /// A Win32 error code (`SERVICE_STATUS_PROCESS.dwWin32ExitCode`).
+    Win32(u32),
+    /// The service's own code (`dwServiceSpecificExitCode`, reported with Win32 error 1066).
+    ServiceSpecific(u32),
+}
+
+impl LastExit {
+    /// Whether the process did not end normally (a non-zero code, any signal).
+    pub fn is_failure(self) -> bool {
+        match self {
+            LastExit::Code(c) => c != 0,
+            LastExit::Signal(_) => true,
+            LastExit::Win32(c) | LastExit::ServiceSpecific(c) => c != 0,
+        }
+    }
+}
+
+impl std::fmt::Display for LastExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LastExit::Code(c) => write!(f, "exit code {c}"),
+            LastExit::Signal(s) => write!(f, "signal {s}"),
+            LastExit::Win32(c) => write!(f, "Win32 error {c}"),
+            LastExit::ServiceSpecific(c) => write!(f, "service-specific exit code {c}"),
+        }
+    }
+}
+
+/// Where the definition in force comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitOrigin {
+    /// The package (`/usr/lib/systemd/system`).
+    Packaged,
+    /// The administrator or the user (`/etc/systemd/system`, `~/.config/systemd/user`, `~/Library/LaunchAgents`).
+    Admin,
+    /// Transient (`/run/systemd`).
+    Runtime,
+    /// The app bundle.
+    Bundle,
+    /// The Service Control Manager.
+    ServiceManager,
+}
+
+/// Whether the OS starts the unit by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitFileState {
+    /// Started at boot or log-in.
+    Enabled,
+    /// Present, not started by itself.
+    Disabled,
+    /// Cannot be enabled; started by something else (systemd `static`, `indirect`), or by hand (SCM demand start).
+    Manual,
+    /// Switched off so that nothing can start it.
+    Masked,
+    /// The OS said something this crate does not model.
+    Other,
+}
+
+/// Which definition is in force.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitFile {
+    /// The file (systemd `FragmentPath`, the plist) or the program the SCM entry starts.
+    pub path: PathBuf,
+    /// Where it comes from.
+    pub origin: UnitOrigin,
+    /// Whether the OS starts it by itself.
+    pub enabled: UnitFileState,
+}
+
+impl UnitOrigin {
+    /// The origin of a systemd unit file by its folder.
+    pub fn of_systemd_path(path: &Path) -> UnitOrigin {
+        let text = path.to_string_lossy();
+        if text.starts_with("/usr/lib/") || text.starts_with("/lib/") {
+            UnitOrigin::Packaged
+        } else if text.starts_with("/run/") {
+            UnitOrigin::Runtime
+        } else {
+            UnitOrigin::Admin
+        }
+    }
 }
 
 /// One look at the registration.
@@ -112,6 +204,13 @@ pub struct Inspection {
     pub points_here: Option<bool>,
     /// Whether the registered definition equals what this copy would register (`None`: not known).
     pub definition_current: Option<bool>,
+    /// How the job's last process ended (`SERVICE_STATUS_PROCESS`, systemd `ExecMainStatus`, launchd `last exit code`).
+    pub last_exit: Option<LastExit>,
+    /// How often the OS restarted the job after it ended (systemd `NRestarts`, launchd `runs` minus one); `None` on
+    /// Windows, where the event log says (ADR 0054 section 1.3), and when the OS does not say.
+    pub restarts: Option<u32>,
+    /// Which definition is in force (`None`: the OS does not say).
+    pub unit: Option<UnitFile>,
 }
 
 impl Inspection {
@@ -133,6 +232,9 @@ impl Inspection {
             program_exists: None,
             points_here: None,
             definition_current: None,
+            last_exit: None,
+            restarts: None,
+            unit: None,
         }
     }
 
@@ -192,8 +294,11 @@ pub trait Backend: Send {
     fn capabilities(&self) -> Capabilities;
     /// Looks at the registration and the job.
     fn inspect(&mut self) -> Inspection;
-    /// Registers (and starts) it.
-    fn register(&mut self) -> Result<(), RegisterError>;
+    /// Registers (and starts) it and returns what the OS holds afterwards (the post-write inspection).
+    ///
+    /// # Errors
+    /// [`RegisterError`]; a write whose read-back disagrees is [`RegisterError::NotAsWritten`], never `Ok`.
+    fn register(&mut self) -> Result<Inspection, RegisterError>;
     /// Removes the registration and returns what the OS holds afterwards (the post-inspection).
     ///
     /// # Errors
@@ -216,7 +321,7 @@ pub trait Backend: Send {
     fn pause(&mut self, how_long: Duration);
     /// Replaces the registration in one step when the mechanism can only do it that way (one elevation prompt instead
     /// of two); `None` means "use the sequence".
-    fn replace_in_one_step(&mut self) -> Option<Result<(), RegisterError>> {
+    fn replace_in_one_step(&mut self) -> Option<Result<Inspection, RegisterError>> {
         None
     }
     /// Opens the OS page where the user allows or switches it; false when there is none.
@@ -226,6 +331,37 @@ pub trait Backend: Send {
     /// The definition this copy registers (plist, unit, `Run` value), when the mechanism has one.
     fn definition(&self) -> Option<String> {
         None
+    }
+}
+
+/// Judges what the OS holds after a registration was written (ADR 0054 section 1.1): the post-write inspection is returned
+/// when it shows the registration as written, [`RegisterError::NotAsWritten`] otherwise. `user_switch_is_not_ours` is true
+/// for mechanisms where the user's own switch (Task Manager > Startup, Login Items) legitimately reads back "switched off".
+pub(crate) fn as_written(
+    after: Inspection,
+    user_switch_is_not_ours: bool,
+) -> Result<Inspection, RegisterError> {
+    match &after.registration {
+        Registration::NeedsApproval => return Err(RegisterError::NeedsApproval),
+        Registration::Absent | Registration::Unavailable(_) => {
+            return Err(RegisterError::NotAsWritten(after));
+        }
+        Registration::SwitchedOff if !user_switch_is_not_ours => {
+            return Err(RegisterError::NotAsWritten(after));
+        }
+        Registration::Registered | Registration::SwitchedOff => {}
+    }
+    if after.definition_current == Some(false) || after.points_here == Some(false) {
+        return Err(RegisterError::NotAsWritten(after));
+    }
+    Ok(after)
+}
+
+/// The job as the OS reports it: stopped with a failing last exit is [`Job::Failed`], anything else keeps `job`.
+pub(crate) fn with_failure(job: Job, last_exit: Option<LastExit>) -> Job {
+    match (job, last_exit) {
+        (Job::NotRunning, Some(exit)) if exit.is_failure() => Job::Failed(exit),
+        _ => job,
     }
 }
 

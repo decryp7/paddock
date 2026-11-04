@@ -12,11 +12,12 @@
 )]
 
 use super::{
-    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+    Backend, Capabilities, Inspection, Job, LastExit, Mechanism, Registration, Target, UnitFile,
+    UnitFileState, UnitOrigin, UnregisterError, as_written, with_failure,
 };
 use crate::parse::{
-    SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_privileges,
-    sc_state, startup_switched_off,
+    SC_DEMAND_START, SC_DISABLED, SC_RUNNING, SC_SERVICE_SPECIFIC, SC_STOPPED, run_value_program,
+    sc_config, sc_exit, sc_exit_codes, sc_privileges, sc_state, startup_switched_off,
 };
 use crate::paths::{REG, SC, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};
 use crate::port::{Elevator, RegisterError, System};
@@ -109,10 +110,13 @@ impl Backend for WindowsRun {
             program,
             program_exists,
             definition_current: Some(data == self.definition()),
+            last_exit: None,
+            restarts: None,
+            unit: None,
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         let name = self.spec.name().to_string();
         let value = self.definition();
         match self.sys.run(
@@ -136,7 +140,10 @@ impl Backend for WindowsRun {
         // Windows starts it at the next log-in; start it now too.
         let exe = self.target.exe.clone();
         let args = self.spec.args().to_vec();
-        self.sys.spawn(&exe, &args).map_err(RegisterError::Other)
+        self.sys.spawn(&exe, &args).map_err(RegisterError::Other)?;
+        let after = self.inspect();
+        log::info!(registration:? = after.registration; "windows: Run value written, read back");
+        as_written(after, true)
     }
 
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
@@ -209,14 +216,32 @@ impl WindowsService {
         Self { spec, target, sys }
     }
 
-    fn state(&mut self) -> Result<Option<u32>, String> {
+    /// `sc query`: the state number and, for a stopped service, how it ended (`None`: the SCM does not know the service).
+    fn status(&mut self) -> Result<Option<(u32, Option<LastExit>)>, String> {
         let name = self.spec.name().to_string();
         match self.sys.run(SC, &["query", &name]) {
             Ok(o) if o.code == Some(sc_exit::DOES_NOT_EXIST) => Ok(None),
-            Ok(o) if o.success() => Ok(Some(sc_state(&o.stdout).unwrap_or(0))),
+            Ok(o) if o.success() => {
+                let state = sc_state(&o.stdout).unwrap_or(0);
+                let exit = (state == SC_STOPPED)
+                    .then(|| sc_exit_codes(&o.stdout))
+                    .flatten()
+                    .map(|(win32, specific)| {
+                        if win32 == SC_SERVICE_SPECIFIC {
+                            LastExit::ServiceSpecific(specific)
+                        } else {
+                            LastExit::Win32(win32)
+                        }
+                    });
+                Ok(Some((state, exit)))
+            }
             Ok(o) => Err(format!("sc query: {}", o.reason())),
             Err(e) => Err(format!("sc.exe {e}")),
         }
+    }
+
+    fn state(&mut self) -> Result<Option<u32>, String> {
+        self.status().map(|s| s.map(|(state, _)| state))
     }
 }
 
@@ -278,7 +303,7 @@ impl Backend for WindowsService {
     }
 
     fn inspect(&mut self) -> Inspection {
-        let state = match self.state() {
+        let (state, last_exit) = match self.status() {
             Ok(None) => return Inspection::absent(),
             Ok(Some(s)) => s,
             Err(why) => {
@@ -307,16 +332,28 @@ impl Backend for WindowsService {
             job: match state {
                 SC_RUNNING => Job::Running,
                 0 => Job::Unknown,
-                _ => Job::NotRunning,
+                _ => with_failure(Job::NotRunning, last_exit),
             },
+            unit: program.as_ref().map(|p| UnitFile {
+                path: PathBuf::from(p),
+                origin: UnitOrigin::ServiceManager,
+                enabled: match start {
+                    Some(SC_DISABLED) => UnitFileState::Disabled,
+                    Some(SC_DEMAND_START) => UnitFileState::Manual,
+                    Some(_) => UnitFileState::Enabled,
+                    None => UnitFileState::Other,
+                },
+            }),
             program,
             program_exists,
             points_here,
             definition_current: points_here,
+            last_exit,
+            restarts: None,
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         let config = scm_config(&self.spec, &self.target.exe_text());
         for call in sc_commands(&config) {
             let args: Vec<&str> = call.iter().map(String::as_str).collect();
@@ -329,10 +366,13 @@ impl Backend for WindowsService {
         self.check_privileges(&config.name, &config.privileges)?;
         match self.sys.run(SC, &["start", &config.name]) {
             // 1056: already running.
-            Ok(o) if o.success() || o.code == Some(1056) => Ok(()),
-            Ok(o) => Err(sc_failure("sc start", &o)),
-            Err(e) => Err(RegisterError::Other(format!("sc.exe {e}"))),
+            Ok(o) if o.success() || o.code == Some(1056) => {}
+            Ok(o) => return Err(sc_failure("sc start", &o)),
+            Err(e) => return Err(RegisterError::Other(format!("sc.exe {e}"))),
         }
+        let after = self.inspect();
+        log::info!(service = config.name.as_str(), registration:? = after.registration, job:? = after.job; "windows: service registered, read back");
+        as_written(after, false)
     }
 
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
@@ -422,12 +462,12 @@ impl ElevatedWindowsService {
         }
     }
 
-    fn elevated(&mut self, verb: Verb) -> Result<(), RegisterError> {
+    fn elevated(&mut self, verb: Verb) -> Result<Inspection, RegisterError> {
         match self
             .elevator
             .run_elevated(&self.program, &[verb.word()], ELEVATED_TIMEOUT)?
         {
-            0 => Ok(()),
+            0 => Ok(self.inner.inspect()),
             code => Err(RegisterError::Other(format!(
                 "{} {} failed (exit code {code}); the service log has details",
                 self.program.display(),
@@ -454,14 +494,15 @@ impl Backend for ElevatedWindowsService {
         self.inner.inspect()
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
-        self.elevated(Verb::Install)
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
+        let after = self.elevated(Verb::Install)?;
+        log::info!(registration:? = after.registration, job:? = after.job; "windows: elevated install, read back");
+        as_written(after, false)
     }
 
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         self.elevated(Verb::Uninstall)
-            .map_err(|e| UnregisterError::Failed(e.to_string()))?;
-        Ok(self.inner.inspect())
+            .map_err(|e| UnregisterError::Failed(e.to_string()))
     }
 
     fn evict(&mut self) -> Result<(), String> {
@@ -477,8 +518,11 @@ impl Backend for ElevatedWindowsService {
     }
 
     /// `<program> install` replaces an existing service itself (it runs the whole sequence elevated), so one prompt.
-    fn replace_in_one_step(&mut self) -> Option<Result<(), RegisterError>> {
-        Some(self.elevated(Verb::Install))
+    fn replace_in_one_step(&mut self) -> Option<Result<Inspection, RegisterError>> {
+        Some(
+            self.elevated(Verb::Install)
+                .and_then(|after| as_written(after, false)),
+        )
     }
 }
 

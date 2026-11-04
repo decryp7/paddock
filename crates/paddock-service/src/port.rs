@@ -125,12 +125,18 @@ pub enum RegisterError {
     Unavailable(String),
     /// Anything else, in words; worth another try.
     Other(String),
+    /// The write reported success, but reading the registration back shows something else (ADR 0054 section 1.1). It
+    /// carries what the OS holds; it is never `Ok`.
+    NotAsWritten(crate::backend::Inspection),
 }
 
 impl RegisterError {
     /// Whether another attempt can help.
     pub fn retryable(&self) -> bool {
-        matches!(self, RegisterError::Other(_))
+        matches!(
+            self,
+            RegisterError::Other(_) | RegisterError::NotAsWritten(_)
+        )
     }
 }
 
@@ -141,6 +147,17 @@ impl std::fmt::Display for RegisterError {
             RegisterError::NeedsElevation => f.write_str("administrator rights are needed"),
             RegisterError::Declined => f.write_str("the permission prompt was declined"),
             RegisterError::Unavailable(why) | RegisterError::Other(why) => f.write_str(why),
+            RegisterError::NotAsWritten(look) => write!(
+                f,
+                "the registration was written, but reading it back shows registration {:?}, job {:?}{}",
+                look.registration,
+                look.job,
+                if look.definition_current == Some(false) {
+                    ", and another definition is in force"
+                } else {
+                    ""
+                }
+            ),
         }
     }
 }
