@@ -65,7 +65,9 @@ impl MemoryListener {
     pub fn tell(&self, label: &str, event: MemoryEvent) {
         let f = self.0.clone();
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(label, event))).is_err() {
-            log::error!("a memory listener panicked while told about `{label}`; the watcher goes on");
+            log::error!(
+                "a memory listener panicked while told about `{label}`; the watcher goes on"
+            );
         }
     }
 }

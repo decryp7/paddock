@@ -2,7 +2,9 @@
 //! backends of each OS on the recording fake (`launchctl`, `sc`, `systemctl` are never run).
 
 use super::*;
-use crate::backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, UnregisterError};
+use crate::backend::{
+    Backend, Capabilities, Inspection, Job, Mechanism, Registration, UnregisterError,
+};
 use crate::port::{Output, RegisterError, RunError};
 use crate::privileged::layout::tests::helper_spec;
 use crate::testing::{FakeFiles, FakeSystem};
@@ -24,7 +26,13 @@ fn a_service_removing_itself_confirms_the_registration_is_gone_and_says_so_when_
         .uninstall_self()
         .unwrap_err();
     assert!(
-        matches!(err, InstallError::Failed { phase: Step::ConfirmGone, .. }),
+        matches!(
+            err,
+            InstallError::Failed {
+                phase: Step::ConfirmGone,
+                ..
+            }
+        ),
         "{err:?}"
     );
 }
@@ -489,9 +497,22 @@ fn a_clean_up_that_fails_after_a_refused_registration_is_logged_and_the_install_
         s.unregister_error = Some("plist locked".into());
     });
     let err = run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE).unwrap_err();
-    assert!(matches!(err, InstallError::Failed { phase: Step::Register, .. }), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            InstallError::Failed {
+                phase: Step::Register,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
     let log = backend.log();
-    assert_eq!(&log[log.len() - 2..], ["evict", "unregister"], "both clean-up steps were tried");
+    assert_eq!(
+        &log[log.len() - 2..],
+        ["evict", "unregister"],
+        "both clean-up steps were tried"
+    );
 }
 
 #[test]

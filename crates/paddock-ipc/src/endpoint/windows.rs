@@ -272,7 +272,10 @@ impl Listener {
         self.pipe = match create_instance(&self.name, false, &self.sddl) {
             Ok(next) => Some(next),
             Err(e) => {
-                paddock_proc::cleanup::report("making the next pipe instance (later accepts report it)", &e);
+                paddock_proc::cleanup::report(
+                    "making the next pipe instance (later accepts report it)",
+                    &e,
+                );
                 None
             }
         };

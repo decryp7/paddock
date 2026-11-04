@@ -10,7 +10,9 @@
     )
 )]
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError};
+use super::{
+    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+};
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};

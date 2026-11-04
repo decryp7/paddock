@@ -421,7 +421,10 @@ impl Peer {
     }
 
     fn cancel(&self, id: u64) {
-        paddock_proc::cleanup::logged("sending the cancel of a call", self.send(&Frame::Cancel { id }));
+        paddock_proc::cleanup::logged(
+            "sending the cancel of a call",
+            self.send(&Frame::Cancel { id }),
+        );
     }
 
     /// The next event of call `id`, waiting at most `timeout` on the peer's clock (`None`: as long as the connection
@@ -564,7 +567,10 @@ impl Peer {
             Some(p) => p.granted += u64::from(n),
             None => return,
         }
-        paddock_proc::cleanup::logged("returning credit to the peer", self.send(&Frame::Credit { id, n }));
+        paddock_proc::cleanup::logged(
+            "returning credit to the peer",
+            self.send(&Frame::Credit { id, n }),
+        );
     }
 
     /// Answers a call this side cannot run now with `busy`.

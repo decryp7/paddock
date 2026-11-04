@@ -373,7 +373,9 @@ mod scm {
             })
             .is_err()
         {
-            log::warn!("run_as_service was called twice in this process; the first configuration stays");
+            log::warn!(
+                "run_as_service was called twice in this process; the first configuration stays"
+            );
         }
         service_dispatcher::start(name, ffi_service_main)
             .map_err(|e| format!("Starting as a Windows service failed: {e}"))
@@ -581,7 +583,10 @@ mod scm {
                     // SAFETY: a valid process handle we own; failure (already gone) is ignored.
                     unsafe {
                         // conformance: pid-kill — a process handle we opened at the start and still hold
-                        paddock_proc::cleanup::logged("ending the stop-verb helper", TerminateProcess(helper.0, 1));
+                        paddock_proc::cleanup::logged(
+                            "ending the stop-verb helper",
+                            TerminateProcess(helper.0, 1),
+                        );
                     }
                     return false;
                 }
@@ -593,7 +598,10 @@ mod scm {
             // SAFETY: a valid process handle we own; failure (already gone) is ignored.
             unsafe {
                 // conformance: pid-kill — a process handle we opened at the start and still hold
-                paddock_proc::cleanup::logged("ending the hosted program", TerminateProcess(self.process.0, 1));
+                paddock_proc::cleanup::logged(
+                    "ending the hosted program",
+                    TerminateProcess(self.process.0, 1),
+                );
             }
         }
     }
@@ -690,7 +698,10 @@ mod scm {
             fn drop(&mut self) {
                 // SAFETY: created by CreateEnvironmentBlock and destroyed once.
                 unsafe {
-                    paddock_proc::cleanup::logged("destroying the environment block", DestroyEnvironmentBlock(self.0));
+                    paddock_proc::cleanup::logged(
+                        "destroying the environment block",
+                        DestroyEnvironmentBlock(self.0),
+                    );
                 }
             }
         }

@@ -92,7 +92,10 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         assert!(remove_dir_all(&file), "a file is not a folder");
         assert!(!join("fine", std::thread::spawn(|| ())));
-        assert!(join("boom", std::thread::spawn(|| panic!("expected by the test"))));
+        assert!(join(
+            "boom",
+            std::thread::spawn(|| panic!("expected by the test"))
+        ));
         report("direct", &"words");
     }
 }

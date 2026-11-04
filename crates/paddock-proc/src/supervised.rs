@@ -285,8 +285,14 @@ impl Supervised {
                 // A hard limit that cannot be set must not become a child without one: the launch fails.
                 Err(e) if hard.is_some() => {
                     let mut child = child;
-                    crate::cleanup::logged("killing the child whose hard limit failed", child.kill());
-                    crate::cleanup::logged("reaping the child whose hard limit failed", child.wait());
+                    crate::cleanup::logged(
+                        "killing the child whose hard limit failed",
+                        child.kill(),
+                    );
+                    crate::cleanup::logged(
+                        "reaping the child whose hard limit failed",
+                        child.wait(),
+                    );
                     log::error!(
                         "The hard memory limit of child {pid} could not be set in its job object, so it was not started: {e}"
                     );

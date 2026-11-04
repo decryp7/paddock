@@ -11,7 +11,9 @@
     )
 )]
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError};
+use super::{
+    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+};
 use crate::parse::{
     SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_privileges,
     sc_state, startup_switched_off,
@@ -340,8 +342,12 @@ impl Backend for WindowsService {
         log::warn!(service = name.as_str(), caller = caller_frames().as_str(); "deleting the Windows service (sc stop, sc delete)");
         // The stop is best effort here; the delete below and the read-back after it judge the outcome.
         match self.sys.run(SC, &["stop", &name]) {
-            Ok(o) if !o.success() => log::debug!(service = name.as_str(), why = o.reason().as_str(); "sc stop before delete did not succeed"),
-            Err(e) => log::debug!(service = name.as_str(), error:% = e; "sc stop before delete could not run"),
+            Ok(o) if !o.success() => {
+                log::debug!(service = name.as_str(), why = o.reason().as_str(); "sc stop before delete did not succeed")
+            }
+            Err(e) => {
+                log::debug!(service = name.as_str(), error:% = e; "sc stop before delete could not run")
+            }
             Ok(_) => {}
         }
         match self.sys.run(SC, &["delete", &name]) {
