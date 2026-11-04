@@ -7,7 +7,7 @@ use crate::helper_peer::PeerTransport;
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_paths::{HelperPaths, WindowsRoots};
 use dyno_core::helper_wire::{HelperAction, HelperUser};
-use dyno_platform::runner::{SystemRunner, ToolRunner, tool};
+use dyno_platform::runner::{tool, SystemRunner, ToolRunner};
 use paddock_env::Os;
 use paddock_jobs::time::SystemClock;
 use paddock_service::{Elevator, RealSystem};
@@ -98,7 +98,11 @@ pub fn is_installed(host: HelperHost, program: &Path, runner: &dyn ToolRunner) -
 /// itself (measured in the Windows 11 VM: `RemoveProgram ... Access is denied`); the bundled copy removes it. Elsewhere the
 /// installed copy does (the running file can be unlinked).
 pub fn uninstall_program<'a>(host: HelperHost, bundled: &'a Path, installed: &'a Path) -> &'a Path {
-    if host == HelperHost::Windows { bundled } else { installed }
+    if host == HelperHost::Windows {
+        bundled
+    } else {
+        installed
+    }
 }
 
 /// The helper program that ships with the agent.
@@ -281,11 +285,9 @@ mod tests {
     fn the_current_owner_uses_the_tool_of_the_system() {
         assert_eq!(current_owner(HelperHost::Macos, &Says("501".into())), Ok(HelperUser::Uid(501)));
         assert!(current_owner(HelperHost::Windows, &Says("\"a\",\"S-1-5-21-9\"".into())).is_ok());
-        assert!(
-            current_owner(HelperHost::Linux, &Says("nope".into()))
-                .unwrap_err()
-                .contains("which account")
-        );
+        assert!(current_owner(HelperHost::Linux, &Says("nope".into()))
+            .unwrap_err()
+            .contains("which account"));
     }
 
     #[test]

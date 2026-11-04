@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::source_check::FamilyKey;
-#[cfg(unix)]
-use paddock_service::Output;
 use paddock_service::privileged::{Assessment, UpdateReason};
 use paddock_service::testing::{FakeElevator, FakeFiles, FakeSystem};
+#[cfg(unix)]
+use paddock_service::Output;
 
 fn roots() -> Roots {
     install_roots(&RealFolders).unwrap()
@@ -124,12 +124,10 @@ fn turning_on_and_off_asks_once_through_the_os_prompt() {
     let windows_log = FakeSystem::new();
     let mut elevator = FakeElevator::new(&windows_log);
     turn_on(Os::Windows, Path::new("C:\\Dyno\\dyno-helper.exe"), &owner, &mut sys, &mut elevator).unwrap();
-    assert!(
-        windows_log
-            .calls()
-            .iter()
-            .any(|c| matches!(c, paddock_service::testing::Call::Os(s) if s == "elevated C:\\Dyno\\dyno-helper.exe install --for uid:501"))
-    );
+    assert!(windows_log
+        .calls()
+        .iter()
+        .any(|c| matches!(c, paddock_service::testing::Call::Os(s) if s == "elevated C:\\Dyno\\dyno-helper.exe install --for uid:501")));
     elevator.results([Err(paddock_service::RegisterError::Declined)]);
     assert_eq!(
         turn_on(Os::Windows, Path::new("C:\\x.exe"), &owner, &mut sys, &mut elevator),
@@ -332,7 +330,7 @@ fn a_build_without_the_family_key_refuses_every_helper() {
 
 #[test]
 fn the_signature_is_looked_for_next_to_the_helper_and_in_the_bundles_resources() {
-    use crate::source_check::{SIGNATURE_FILE, signature_locations};
+    use crate::source_check::{signature_locations, SIGNATURE_FILE};
     assert_eq!(
         signature_locations(Path::new(MAC_SOURCE)),
         [

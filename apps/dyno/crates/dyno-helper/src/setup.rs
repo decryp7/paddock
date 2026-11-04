@@ -364,8 +364,8 @@ mod tests {
         // Another thread's log line recreating helper.log between the unlink and the folder's removal left the folder behind
         // at Turn off. The removal stops the log first.
         use log::{Level, Log, Record};
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
         for round in 0..40 {
             let dir = tempfile::tempdir().unwrap();
             let mut paths = paths_in(dir.path());

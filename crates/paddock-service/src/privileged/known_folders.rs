@@ -188,7 +188,10 @@ mod tests {
                 format!("D:\\RealWin\\System32\\{}.exe", tool.to_ascii_lowercase())
             );
         }
-        assert_eq!(real.program_files().unwrap(), PathBuf::from("D:\\Real Program Files"));
+        assert_eq!(
+            real.program_files().unwrap(),
+            PathBuf::from("D:\\Real Program Files")
+        );
         assert_eq!(real.program_data().unwrap(), PathBuf::from("D:\\RealData"));
         // A trailing separator is not doubled.
         let slash = Fake {

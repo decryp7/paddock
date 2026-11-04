@@ -233,10 +233,9 @@ mod tests {
     fn the_source_is_registered_with_a_message_file_and_removed_by_its_key_only() {
         let add = register_source_commands();
         assert_eq!(add.len(), 2);
-        assert!(
-            add.iter()
-                .all(|c| c[0] == "add" && c[1] == EVENT_KEY && c.last().map(String::as_str) == Some("/f"))
-        );
+        assert!(add
+            .iter()
+            .all(|c| c[0] == "add" && c[1] == EVENT_KEY && c.last().map(String::as_str) == Some("/f")));
         assert!(add[0].iter().any(|a| a.ends_with("EventCreate.exe")));
         assert!(EVENT_KEY.ends_with(EVENT_SOURCE), "the key is named after the source");
         assert_eq!(unregister_source_command(), ["delete", EVENT_KEY, "/f"]);

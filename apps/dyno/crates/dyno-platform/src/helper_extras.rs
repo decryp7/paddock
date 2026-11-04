@@ -2,7 +2,7 @@
 //! and a 15 second limit, parsed by `dyno_core::helper_extras`. A tool that fails says so with its own message.
 
 use crate::runner::ToolRunner;
-use dyno_core::helper_extras::{BackupVersion, ExtrasReader, WakeRequest, parse_requests, parse_versions};
+use dyno_core::helper_extras::{parse_requests, parse_versions, BackupVersion, ExtrasReader, WakeRequest};
 use dyno_core::ports::PlatformError;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -109,10 +109,8 @@ mod tests {
         assert!(none.backup_versions().unwrap().is_empty());
         let denied = ext(Box::new(Fake(false, "", "Access denied.")));
         assert!(denied.backup_versions().unwrap_err().to_string().contains("Access denied"));
-        assert!(
-            ext(Box::new(Fake(false, "", "You do not have the permissions required")))
-                .wake_requests()
-                .is_err()
-        );
+        assert!(ext(Box::new(Fake(false, "", "You do not have the permissions required")))
+            .wake_requests()
+            .is_err());
     }
 }

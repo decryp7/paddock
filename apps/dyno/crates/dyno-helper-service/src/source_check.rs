@@ -8,7 +8,7 @@
 //! accepted risk of ADR 0027's code-signing amendment.
 
 use paddock_service::privileged::SourceVerifier;
-use paddock_updater::signature::{UpdateKey, VerifyError, verify_bytes};
+use paddock_updater::signature::{verify_bytes, UpdateKey, VerifyError};
 use std::path::{Path, PathBuf};
 
 /// The signature file the release job places in the bundle (next to the helper, or in the bundle's `Resources`).
