@@ -32,6 +32,14 @@ impl Method {
     /// The order they are tried in.
     pub const LADDER: [Method; 3] = [Method::Cooperative, Method::Forced, Method::AppleEvent];
 
+    /// How many 100 ms polls to wait for this method to take effect.
+    pub const fn polls(self) -> u32 {
+        match self {
+            Method::Cooperative | Method::Forced => 3,
+            Method::AppleEvent => 20,
+        }
+    }
+
     /// The word the log and the outcome use.
     pub const fn name(self) -> &'static str {
         match self {
@@ -80,14 +88,14 @@ pub struct StartFocus {
     done: AtomicBool,
 }
 
-/// Polls to see whether an activation took (the cooperative one is asynchronous), at this interval and count.
+/// Polls to see whether an activation took, at this interval. The two AppKit calls are refused at once or not at all for a
+/// background launch (measured), so they get a short look; the Apple event gets a longer one.
 const POLL_MS: u64 = 100;
-const POLLS: u32 = 10;
 /// How long Dyno stays active before focus goes back (the menu bar must see the activation).
 const HOLD_MS: u64 = 300;
 
-fn became_active<P: FocusPort>(port: &mut P) -> bool {
-    for _ in 0..POLLS {
+fn became_active<P: FocusPort>(port: &mut P, polls: u32) -> bool {
+    for _ in 0..polls {
         if port.is_active() {
             return true;
         }
@@ -127,7 +135,7 @@ pub fn activate_once<P: FocusPort>(port: &mut P, focus: &StartFocus, hidden: boo
         let name = method.name();
         let t = Instant::now();
         let called = port.activate(method);
-        let took = became_active(port);
+        let took = became_active(port, method.polls());
         logging::info(&format!(
             "tray activation: attempt {name}: call {}, active afterwards {took}, {} ms",
             called.as_ref().map_or_else(|e| format!("failed ({e})"), |()| "ok".to_string()),

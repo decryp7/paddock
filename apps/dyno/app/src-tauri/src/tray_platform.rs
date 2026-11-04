@@ -26,8 +26,14 @@ mod mac {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tauri::{AppHandle, Wry};
 
-    fn epoch_secs(app: &NSRunningApplication) -> Option<f64> {
-        app.launchDate().map(|d| d.timeIntervalSince1970())
+    /// When process `pid` started (seconds since the epoch), from the kernel (`proc_pidinfo`) (`launchDate` is empty for
+    /// ControlCenter, which is not a registered GUI app).
+    fn start_secs(pid: i32) -> Option<f64> {
+        // Safety: an all-zero `proc_bsdinfo` is a valid value to be overwritten; the size passed is its size.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+        (got == size && info.pbi_start_tvsec > 0).then(|| info.pbi_start_tvsec as f64 + info.pbi_start_tvusec as f64 / 1e6)
     }
 
     /// Dyno's activity and ControlCenter's identity, for the log: whether Dyno is the active app now, ControlCenter's pid and start
@@ -37,12 +43,12 @@ mod mac {
             return "context unavailable: not on the main thread".to_string();
         };
         let active = NSApplication::sharedApplication(mtm).isActive();
-        let own = NSRunningApplication::runningApplicationWithProcessIdentifier(std::process::id() as i32).and_then(|a| epoch_secs(&a));
+        let own = start_secs(std::process::id() as i32);
         let cc = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str("com.apple.controlcenter"));
         let cc = cc.firstObject();
         let cc_text = match &cc {
             Some(c) => {
-                let start = epoch_secs(c);
+                let start = start_secs(c.processIdentifier());
                 format!(
                     "ControlCenter pid {} started {} (epoch s)",
                     c.processIdentifier(),
@@ -51,7 +57,7 @@ mod mac {
             }
             None => "ControlCenter not found".to_string(),
         };
-        let after = match (own, cc.as_ref().and_then(|c| epoch_secs(c))) {
+        let after = match (own, cc.as_ref().and_then(|c| start_secs(c.processIdentifier()))) {
             (Some(o), Some(c)) => format!(", Dyno started {:.0} s after ControlCenter", o - c),
             _ => String::new(),
         };

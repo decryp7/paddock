@@ -1300,6 +1300,7 @@ dependencies = [
  "dyno-agent",
  "dyno-core",
  "dyno-platform",
+ "libc",
  "log",
  "objc2",
  "objc2-app-kit",
