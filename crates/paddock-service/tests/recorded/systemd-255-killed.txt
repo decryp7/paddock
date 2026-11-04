@@ -1,0 +1,10 @@
+#! recorded 2026-11-04 on OrbStack paddock-gate-arm (Ubuntu 24.04, systemd 255.4-1ubuntu8.18, kernel 7.2.12-orbstack)
+#! command: systemctl show -p FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode,ActiveState paddock-fixture-kill
+#! state: the main process ended by SIGKILL from outside (systemctl kill -s KILL)
+Result=signal
+NRestarts=0
+ExecMainCode=2
+ExecMainStatus=9
+ActiveState=failed
+FragmentPath=/run/systemd/transient/paddock-fixture-kill.service
+UnitFileState=transient

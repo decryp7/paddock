@@ -41,6 +41,7 @@ struct Inner {
     remove_error: Option<std::io::ErrorKind>,
     read_error: Option<std::io::ErrorKind>,
     spawn_error: Option<String>,
+    effects: Vec<(String, PathBuf, String)>,
 }
 
 /// A recording [`System`]. Clones share one state, so a test keeps a handle while the backend owns another. Commands
@@ -76,6 +77,66 @@ impl FakeSystem {
     /// Answers every command line starting with `prefix` with `out`.
     pub fn answer(&self, prefix: &str, out: Output) -> &Self {
         self.on(prefix, move |_, _| Ok(out.clone()))
+    }
+
+    /// After every command starting with `prefix`, the file `path` holds `text` (something else rewrote it: a drop-in, a
+    /// package upgrade). The effect applies once the command has been answered.
+    pub fn rewrite_after(&self, prefix: &str, path: impl Into<PathBuf>, text: &str) -> &Self {
+        self.lock()
+            .effects
+            .push((prefix.to_string(), path.into(), text.to_string()));
+        self
+    }
+
+    /// Makes `reg add`, `reg delete` and `reg query` on the per-user `Run` key behave like a registry: a value added reads
+    /// back as added (`REG_SZ`), a deleted one is gone (exit 1), and any other key reads as missing. A later
+    /// `answer("reg query", ..)` still wins, so a test can show what someone else left there.
+    pub fn emulate_run_registry(&self) -> &Self {
+        let values: Arc<Mutex<BTreeMap<String, String>>> = Arc::default();
+        let word = |args: &[String], flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        };
+        let store = values.clone();
+        self.on("reg add", move |args, _| {
+            if let (Some(name), Some(data)) = (word(args, "/v"), word(args, "/d")) {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(name, data);
+            }
+            Ok(Output::code(0))
+        });
+        let store = values.clone();
+        self.on("reg delete", move |args, _| {
+            let removed = word(args, "/v").and_then(|name| {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&name)
+            });
+            Ok(Output::code(if removed.is_some() { 0 } else { 1 }))
+        });
+        self.on("reg query", move |args, _| {
+            let data = args
+                .get(2)
+                .filter(|key| key.ends_with("CurrentVersion\\Run"))
+                .and_then(|_| word(args, "/v"))
+                .and_then(|name| {
+                    values
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .get(&name)
+                        .map(|data| (name, data.clone()))
+                });
+            Ok(match data {
+                Some((name, data)) => Output::ok(&format!("    {name}    REG_SZ    {data}\r\n")),
+                None => Output::code(1),
+            })
+        });
+        self
     }
 
     /// Puts a file on the fake disk.
@@ -170,10 +231,18 @@ impl System for FakeSystem {
             .iter_mut()
             .rev()
             .find(|(p, _)| line.starts_with(p.as_str()));
-        match rule {
+        let answer = match rule {
             Some((_, respond)) => respond(&words, now),
             None => Ok(Output::code(0)),
-        }
+        };
+        let rewrites: Vec<(PathBuf, String)> = inner
+            .effects
+            .iter()
+            .filter(|(p, _, _)| line.starts_with(p.as_str()))
+            .map(|(_, path, text)| (path.clone(), text.clone()))
+            .collect();
+        inner.files.extend(rewrites);
+        answer
     }
 
     fn spawn(&mut self, program: &Path, args: &[String]) -> Result<(), String> {
@@ -282,6 +351,12 @@ impl FakeAppService {
         results: impl IntoIterator<Item = Result<(), RegisterError>>,
     ) -> &Self {
         self.lock().register.extend(results);
+        self
+    }
+
+    /// The status a successful `register` leaves (`None`: unchanged).
+    pub fn set_register_sets(&self, status: Option<AppServiceStatus>) -> &Self {
+        self.lock().register_sets = status;
         self
     }
 
@@ -611,6 +686,29 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
             .remove(path)
             .map(drop)
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+}
+
+/// An [`OsLog`](crate::os_log::OsLog) that keeps every line (tests of a service's start-up and failures).
+#[derive(Clone, Default)]
+pub struct RecordingOsLog(Arc<Mutex<Vec<(log::Level, String)>>>);
+
+impl RecordingOsLog {
+    /// Every line written so far, with its level.
+    pub fn lines(&self) -> Vec<(log::Level, String)> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl crate::os_log::OsLog for RecordingOsLog {
+    fn write(&self, level: log::Level, text: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((level, text.to_string()));
     }
 }
 

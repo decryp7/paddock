@@ -1,0 +1,56 @@
+#! recorded 2026-11-04 on a Tart clone of vmgui-base-tahoe (macOS 26.6.2 build 25G83, Darwin 25.6.0), as root through tart exec
+#! command: sudo launchctl print system/<label>
+#! state: a RunAtLoad daemon whose program exited 3
+system/fix.exit3 = {
+	active count = 0
+	path = /Library/LaunchDaemons/fix.exit3.plist
+	type = LaunchDaemon
+	state = not running
+
+	program = /tmp/fixjob.sh
+	arguments = {
+		/tmp/fixjob.sh
+		exit3
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => fix.exit3
+	}
+
+	domain = system
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	last exit code = 3
+
+	resource coalition = {
+		ID = 796
+		type = resource
+		state = active
+		active count = 1
+		name = fix.exit3
+	}
+
+	jetsam coalition = {
+		ID = 797
+		type = jetsam
+		state = active
+		active count = 1
+		name = fix.exit3
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | inferred program | system service | tle system
+}

@@ -104,6 +104,14 @@ on:
         description: "An app's own check of the built Windows binaries: a command run by bash on the Windows runner from the repository root after the installer is built, with the cargo profile folder ($PADDOCK_BUILD_FOLDER/dist, where the sidecars are built) appended as its last argument (Dyno: the PE subsystem of dyno-agent.exe and dyno.exe). Empty: none."
         type: string
         default: ""
+      windows-pre-bundle:
+        description: "A command run by bash on the Windows runner from the repository root before the installer is built (a per-machine app: `node scripts/stage-paddock-setup.mjs --app <app>`, which builds paddock-setup.exe and stages it beside the installer hooks; family ADR 0053 S7). The updater's public key is in PADDOCK_SETUP_UPDATE_KEY. Empty: none."
+        type: string
+        default: ""
+      windows-installer-check:
+        description: "A command run by bash on the Windows runner from the repository root after the installer is built, with the cargo profile folder (holding bundle/nsis) appended: the per-machine artifact gate (`node conformance/release/check-per-machine-installer.mjs --conf <tauri.conf.json> --dir`; ADR 0039). Empty: none."
+        type: string
+        default: ""
       image:
         type: string
         default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -234,6 +242,19 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/build-env
 
+      # A per-machine app's installer embeds paddock-setup.exe (its hooks `File` it): build and stage it first, or the installer
+      # build stops. Fails closed (the script errors without the crate, the include stops makensis without the file).
+      - name: Stage paddock-setup.exe
+        if: inputs.windows-pre-bundle != '' && runner.os == 'Windows'
+        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          STAGE: ${{ inputs.windows-pre-bundle }}
+          PADDOCK_SETUP_UPDATE_KEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: |
+          set -euo pipefail
+          eval "$STAGE" || { echo "::error::staging paddock-setup.exe failed (command: $STAGE); see the lines above"; exit 1; }
+
       - uses: ./.paddock/.gitea/actions/tauri-bundle
         with:
           bundles: ${{ matrix.bundles }}
@@ -264,6 +285,19 @@ jobs:
           set -euo pipefail
           echo "::group::windows binary check"
           eval "$CHECK" "\"$PADDOCK_BUILD_FOLDER/dist\"" || { echo "::error::the Windows binary check failed (command: $CHECK); see the lines above"; exit 1; }
+          echo "::endgroup::"
+
+      # The per-machine installer read as an artifact (ADR 0039): administrator level, paddock-setup.exe inside, the include's version.
+      - name: The per-machine installer check
+        if: inputs.windows-installer-check != '' && runner.os == 'Windows'
+        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          CHECK: ${{ inputs.windows-installer-check }}
+        run: |
+          set -euo pipefail
+          echo "::group::per-machine installer check"
+          eval "$CHECK" "\"$PADDOCK_BUILD_FOLDER/dist\"" || { echo "::error::the per-machine installer check failed (command: $CHECK); see the lines above"; exit 1; }
           echo "::endgroup::"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and the app inside the

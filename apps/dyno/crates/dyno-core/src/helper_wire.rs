@@ -581,7 +581,7 @@ impl StartFailure {
     /// Plain words with the next step.
     pub fn words(self) -> &'static str {
         match self {
-            StartFailure::Other => "the helper could not start (see the Dyno helper entry in the Windows Event Log)",
+            StartFailure::Other => "the helper could not start (see the DynoHelper entries in the Windows Event Log)",
             StartFailure::NotProtected => "a folder or file of the helper is not protected; Repair puts it right",
             StartFailure::BadConfig => "the helper's configuration is missing or damaged; Repair writes it again",
             StartFailure::Endpoint => "the helper could not open its endpoint; another program may hold it, Repair takes it back",
