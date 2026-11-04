@@ -99,10 +99,31 @@ pid (`parentJob` in `apps/dyno/vm-smoke.json`, Dyno ADR 0026), and requires the 
 The macOS "Allow dyno-agent to find devices on local networks?" prompt (UserNotificationCenter) appears after the first Wake-on-LAN; the suite
 answers Allow and screenshots it. Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/*.test.mjs`).
 
-**Not built yet:** the Windows and Linux guests. The Windows adapter (`ADAPTERS.windows`) and parsers are written and tested but never run in a
-VM. Windows needs a WebView2 driver (the web content is not in UI Automation; `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`
-and Playwright over an SSH tunnel would also run `expectScreenshotClean` on the real DOM), a click on the UAC consent (secure desktop: VNC), the
-tray menu and 100 / 150 % dialogs. Linux needs an amd64 `.deb` run in a GNOME VM (Rosetta on this host) and the polkit agent prompt.
+## Windows guest (`run-win.mjs`, Dyno 1.1.0)
+
+`node scripts/vm-smoke/run-win.mjs --app dyno --ui (--run <id> | --installer <setup.exe>)` reverts the Windows 11 Arm test VM
+(`paddock-win11-test`, snapshot `gui-session-tools`; the driver is `vm-win.sh`) , starts it, stages the x64 NSIS installer and runs, in the
+interactive session of `paddock-test` (a scheduled task, as `docs/testing/windows-gui-session.md` describes), `win-suite.ps1`, then the UI
+phase, writes the result in the same format, and stops and reverts the VM (also after a failure; `--keep` leaves it up). Standard-user rights
+throughout; `powercfg` needs an administrator, so the suite asks the host through request files and the host answers with the `paddock-admin`
+key (only `powercfg /requests`, `/waketimers` and `/a` are ever run).
+
+| Step | Judged by |
+|---|---|
+| Install (per-user, silent, no UAC) | files under `%LOCALAPPDATA%\Dyno`, product version |
+| Cold start, second launch | `Win32_Process`: one `dyno-app`, one `dyno-agent run` whose parent is the app, `agent.json` names it, no new process on a second launch |
+| Keep awake | `dyno awake on/off`; `powercfg /requests` lists then drops the Dyno request |
+| Scheduled wake | `dyno wake-schedule add/list/cancel` (the wake setting is seeded; `settings.json` is written without a BOM, serde_json rejects one); `powercfg /waketimers` only where `powercfg /a` shows a sleep state, else SKIP with the evidence (this VM has none) |
+| Idle action | a one-minute rule in `settings.json`; `dyno idle` shows the countdown, Cancel, Snooze; input is `mouse_event` (a cursor set is not input). No sleep is made; the audio wait is not run (no sound device in this VM) |
+| Aero snap (`win-snap.mjs`) | a form dialog (Report a problem) and a viewer dialog (About) are opened through the app's File/Help menu over the WebView2 DevTools port (`--remote-debugging-port`, an SSH tunnel, Playwright `connectOverCDP`), Win+Left is sent by the in-session actor (`win-act.ps1`), and `data-size-mode` on `<html>` must read `manual` |
+| Screenshot check on the real DOM (`win-ui.mjs`) | paddock-e2e's `screenshotProblems` over every Dyno window: clipped text, raw identifiers, mock text, colour-only chips |
+| Quit | File > Exit: no `dyno-app` or `dyno-agent` left |
+
+**Not built yet (manual):** the Windows admin helper (the UAC consent is on the secure desktop: it needs the VM's VNC enabled in the `.vmx`
+after the snapshot revert, and `vncdo` typing the administrator credentials, because the test account is a standard user), the tray
+right-click menu with the Keep awake and Wake device submenus, dialogs at 150 % (the live display-scale change fails on the VMware display),
+Wake-on-LAN on the wire, the "Audio is playing" wait (needs a virtual sound card in the `.vmx`), and everything on Linux (an amd64 `.deb` in a
+Rosetta GNOME VM with the polkit prompt).
 
 ## Not covered here
 
