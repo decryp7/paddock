@@ -96,6 +96,13 @@ async function openState(page: Page, state: State): Promise<void> {
   await page.waitForFunction(() =>
     Array.from(document.querySelectorAll<HTMLElement>('pd-table')).every((t) => !t.clientWidth || t.getAttribute('data-fit-width') === String(Math.round(t.getBoundingClientRect().width))),
   );
+  // A path is cut to the width its box has once the table has fitted; wait until each shown path is the one that fits (the ResizeObserver behind it runs after the fit).
+  await page.waitForFunction(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-testid="path-text"]')).every((b) => {
+      const shown = b.querySelector<HTMLElement>('.pd-shown');
+      return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
+    }),
+  );
 }
 
 test.describe('rows never clip their content, and text that is cut says so with an ellipsis', () => {
@@ -215,5 +222,28 @@ for (const width of WIDTHS) {
     await expect(dialog.getByRole('button', { name: 'Forget saved maps' })).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expectNoButtonLabelWraps(page, `settings at ${width}`);
+  });
+}
+
+/** Rule: a select shows its whole chosen text. "Refresh when opened" has the longest choice, "Never (only when I press Rescan)"; it ran past the window edge. */
+for (const width of WIDTHS) {
+  test(`the Refresh when opened select shows its whole text inside the window at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/?latency=0#/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible({ timeout: 45_000 });
+    await pressMod(page, 'Mod+Comma');
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Dyno', exact: true }).dispatchEvent('click');
+    const select = dialog.getByRole('combobox', { name: 'Refresh when opened' });
+    await select.scrollIntoViewIfNeeded();
+    await expect(select).toContainText('Never (only when I press Rescan)');
+    await page.evaluate(() => document.fonts.ready);
+    const m = await select.evaluate((el) => {
+      const text = el.querySelector<HTMLElement>('.mat-mdc-select-min-line') ?? el;
+      const r = text.getBoundingClientRect();
+      return { right: r.right, vw: document.documentElement.clientWidth, needs: text.scrollWidth, has: text.clientWidth };
+    });
+    expect(m.right, 'the select text ends inside the window').toBeLessThanOrEqual(m.vw);
+    expect(m.needs, 'the select text is not cut').toBeLessThanOrEqual(m.has + 1);
   });
 }

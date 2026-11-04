@@ -211,8 +211,8 @@ export class ProcessesPage implements OnInit, OnDestroy {
     { key: 'cpu', sortStart: 'desc', header: 'CPU', value: (r) => r.cpu, align: 'end', width: '84px' },
     { key: 'memory', sortStart: 'desc', header: 'Memory', value: (r) => r.memory, align: 'end', width: '96px' },
     { key: 'disk', sortStart: 'desc', header: 'Disk', value: (r) => r.disk, align: 'end', width: '96px' },
-    { key: 'user', header: 'Account', value: (r) => r.user, width: '130px', hideBelow: 760 },
-    { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 680 },
+    { key: 'user', header: 'Account', value: (r) => r.user, text: (r) => r.user ?? '—', width: '130px', hideBelow: 600 },
+    { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 760 },
   ];
   /** Apps, processes and their children: the table indents, folds and says the levels. */
   protected readonly tree: PdRowTree<Row> = { level: (r) => r.depth + 1, expanded: (r) => (r.expandable ? r.expanded : null) };

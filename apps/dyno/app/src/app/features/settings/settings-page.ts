@@ -164,7 +164,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
               <div class="row" [class.off]="savedMaps().enabled === false">
                 <div class="lbl"><strong>Refresh when opened</strong><small>Scanning a volume is the heaviest thing Dyno does, so it never refreshes by itself unless you choose. It starts at the first look at the page, never in the background.</small></div>
-                <pd-select [options]="refreshChoices" [value]="savedMaps().refreshOnOpen ?? 'off'" ariaLabel="Refresh when opened" (valueChange)="setSavedMaps({ refreshOnOpen: refreshFrom($event) })" />
+                <pd-select class="refresh-select" [options]="refreshChoices" [value]="savedMaps().refreshOnOpen ?? 'off'" ariaLabel="Refresh when opened" (valueChange)="setSavedMaps({ refreshOnOpen: refreshFrom($event) })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Forget saved maps</strong><small>Deletes the saved maps now. The next scan is kept again if saving is on.</small></div>
@@ -405,6 +405,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { width: 148px; }
+    /* A select shows its whole choice (the longest, "Never (only when I press Rescan)"), never past the window's edge. */
+    .row pd-select.refresh-select { flex: 0 0 auto; width: min(22rem, 100%); }
     .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
     .sub-h { margin-top: var(--sp-5); }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }

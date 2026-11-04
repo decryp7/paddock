@@ -1,7 +1,10 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { MatButton } from '@angular/material/button';
-import type { FirewallProfile, FirewallSource, RuleAction, RuleSourceKind } from '../../core/api.types';
+import type { FirewallProfile, FirewallRule, FirewallSource, RuleAction, RuleSourceKind } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { PdPathText } from '@decryp7/paddock-ui';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import { Icon } from '../../shared/icon';
 import { ReadingSource } from '../../core/reading-source';
 import { FirewallStore } from '../../state/firewall.store';
@@ -30,7 +33,7 @@ export function rulesLine(s: FirewallSource): string {
  */
 @Component({
   selector: 'dy-firewall-page',
-  imports: [AsyncState, Icon, MatButton, ReadingSource],
+  imports: [AsyncState, FullTextTip, Icon, MatButton, PdCell, PdPathText, PdTable, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -67,20 +70,15 @@ export function rulesLine(s: FirewallSource): string {
               @if (!s.rulesHidden) {
                 <p class="faint num">{{ line(s) }}</p>
                 @if (s.rules.length > 0) {
-                  <table class="grid" [attr.aria-label]="name(s.source) + ' rules'">
-                    <thead><tr><th scope="col">Name</th><th scope="col">Direction</th><th scope="col">Action</th><th scope="col">On</th><th scope="col">Program</th><th scope="col">Ports</th><th scope="col">Addresses</th><th scope="col">Network</th></tr></thead>
-                    <tbody>
-                      @for (r of s.rules; track $index) {
-                        <tr>
-                          <th scope="row">{{ r.name }}</th>
-                          <td>{{ r.direction === 'in' ? 'Incoming' : r.direction === 'out' ? 'Outgoing' : 'Both' }}</td>
-                          <td [class.block]="r.action === 'block'">{{ r.action === 'allow' ? 'Allow' : 'Block' }}</td>
-                          <td>{{ r.enabled ? 'Yes' : 'No' }}</td>
-                          <td class="trunc">{{ r.program ?? '—' }}</td><td>{{ r.ports ?? '—' }}</td><td class="trunc">{{ r.addresses ?? '—' }}</td><td>{{ profile(r.profile) }}</td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
+                  <pd-table [toolbar]="false" [label]="name(s.source) + ' rules'" [rows]="s.rules" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [maxHeight]="480">
+                    <ng-template pdCell="program" let-r let-folded="folded">
+                      <span class="prog">
+                        @if (r.program) { <pd-path-text [value]="r.program" /> } @else { <span class="faint">—</span> }
+                        @if (folded) { <span class="faint truncate" [dyFullText]="more(r)">{{ more(r) }}</span> }
+                      </span>
+                    </ng-template>
+                    <ng-template pdCell="action" let-r><span [class.block]="r.action === 'block'">{{ r.action === 'allow' ? 'Allow' : 'Block' }}</span></ng-template>
+                  </pd-table>
                 } @else {
                   <p class="empty">No rules to show.</p>
                 }
@@ -104,10 +102,8 @@ export function rulesLine(s: FirewallSource): string {
     .chip[data-on='false']::before { content: '✕ '; }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .faint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
-    table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-xs); }
-    .grid th, .grid td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-    .grid .trunc { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .grid .block { color: var(--warn); font-weight: var(--fw-semibold); }
+    .prog { display: grid; min-width: 0; width: 100%; line-height: 1.3; }
+    .block { color: var(--warn); font-weight: var(--fw-semibold); }
     .empty { margin: 0; color: var(--text-2); }
   `,
 })
@@ -116,6 +112,22 @@ export class FirewallPage implements OnInit {
   ngOnInit(): void {
     void this.store.load();
   }
+  protected readonly ruleKey = (r: FirewallRule): string => `${r.source}:${r.name}:${r.direction}:${r.program ?? ''}:${r.ports ?? ''}:${r.addresses ?? ''}`;
+  /** Name keeps room for two lines; the path is cut in the middle (the file name stays); the addresses are cut at the end; the rest drop out when the window is narrow. */
+  protected readonly columns: PdColumn<FirewallRule>[] = [
+    { key: 'name', header: 'Name', value: (r) => r.name, width: 'minmax(10rem, 1fr)', required: true },
+    { key: 'direction', header: 'Direction', value: (r) => r.direction, text: (r) => (r.direction === 'in' ? 'Incoming' : r.direction === 'out' ? 'Outgoing' : 'Both'), width: '88px', hideBelow: 760 },
+    { key: 'action', header: 'Action', value: (r) => r.action, width: '64px' },
+    { key: 'enabled', header: 'On', value: (r) => r.enabled, text: (r) => (r.enabled ? 'Yes' : 'No'), width: '48px' },
+    { key: 'program', header: 'Program', value: (r) => r.program ?? '', width: 'minmax(0, 2fr)', foldBelow: 760 },
+    { key: 'ports', header: 'Ports', value: (r) => r.ports, text: (r) => r.ports ?? '—', width: '64px', hideBelow: 760 },
+    { key: 'addresses', header: 'Addresses', value: (r) => r.addresses, text: (r) => r.addresses ?? '—', width: 'minmax(6rem, 0.7fr)', hideBelow: 760 },
+    { key: 'profile', header: 'Network', value: (r) => r.profile, text: (r) => PROFILE[r.profile], width: '120px', hideBelow: 760 },
+  ];
+  /** Where the window is too narrow for the Direction, Network, Ports and Addresses columns, they sit under the program. */
+  protected more = (r: FirewallRule): string =>
+    [this.direction(r), PROFILE[r.profile], r.ports && `Ports ${r.ports}`, r.addresses && `Addresses ${r.addresses}`].filter(Boolean).join(' · ');
+  private direction = (r: FirewallRule): string => (r.direction === 'in' ? 'Incoming' : r.direction === 'out' ? 'Outgoing' : 'Both');
   protected name = sourceName;
   protected line = rulesLine;
   protected countsLine = (s: FirewallSource): string =>

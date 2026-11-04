@@ -92,6 +92,60 @@ test.describe('firewall', () => {
   });
 });
 
+test.describe('firewall rule table at the smallest window (900 px)', () => {
+  test.use({ viewport: { width: 900, height: 800 } });
+  const PROGRAM = 'C:\\Program Files\\WindowsApps\\ExampleVendor.ExampleSync_12.4.2026.0_x64__8wekyb3d8bbwe\\Helper\\ExampleSyncBackgroundService.exe';
+
+  test('a long program path is cut in the middle: the file name stays, the full path is the tooltip, the cell is reachable by keyboard', async ({ page }) => {
+    await page.goto('/?latency=0&mock=windows#/firewall'); // the mock drops ".exe" for the other systems
+    const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
+    await expect(path).toBeVisible();
+    await expect(path.locator('.pd-shown'), 'the end of the path (the program and its extension) stays').toContainText(/Service\.exe$/);
+    await expect(path.locator('.pd-shown')).toContainText('…');
+    await expect(path, 'a cut path is a keyboard stop').toHaveAttribute('tabindex', '0');
+    await path.hover();
+    const tip = page.locator('.mat-mdc-tooltip');
+    await expect(tip).toBeVisible();
+    // The tooltip's text is the program, with a zero-width break hint after each separator.
+    expect((await tip.textContent())?.replaceAll('\u200b', '').trim(), 'the tooltip is exactly the rule\'s program').toBe(PROGRAM);
+    const cut = await tip.locator('.mdc-tooltip__surface').evaluate((s) => s.scrollHeight - s.clientHeight);
+    expect(cut, 'the tooltip shows the whole path (the end is not cut by its height)').toBeLessThanOrEqual(1);
+  });
+
+  test('the full path shows when the cut path is reached by the keyboard', async ({ page }) => {
+    await page.goto('/?latency=0&mock=windows#/firewall');
+    const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
+    await expect(path).toBeVisible();
+    for (let i = 0; i < 60; i++) {
+      if (await path.evaluate((el) => el === document.activeElement)) break;
+      await page.keyboard.press('Tab');
+    }
+    await expect(path, 'Tab reaches the cut path').toBeFocused();
+    await expect(page.locator('.mat-mdc-tooltip')).toBeVisible();
+    expect((await page.locator('.mat-mdc-tooltip').textContent())?.replaceAll('\u200b', '').trim()).toBe(PROGRAM);
+  });
+
+  test('the direction and the network are readable at 900 px (under the program, as the columns drop out)', async ({ page }) => {
+    await page.goto('/?latency=0&mock=windows#/firewall');
+    const rows = page.locator('[data-source="applicationFirewall"] pd-table');
+    await expect(rows.getByText('Direction', { exact: true }), 'the Direction column is not drawn at 900 px').toHaveCount(0);
+    await expect(rows).toContainText('Outgoing');
+    await expect(rows).toContainText('All networks');
+  });
+
+  test('the rule name wraps to at most two lines', async ({ page }) => {
+    await page.goto('/?latency=0&mock=windows#/firewall'); // the mock drops ".exe" for the other systems
+    const name = page.locator('[data-source="applicationFirewall"]').getByText('Example Sync helper (all networks)');
+    await expect(name).toBeVisible();
+    const lines = await name.evaluate((el) => {
+      const cell = el.closest('[role="rowheader"], [role="gridcell"], th, td, mat-cell') ?? el;
+      const lh = parseFloat(getComputedStyle(cell).lineHeight) || 16;
+      return Math.round(cell.getBoundingClientRect().height / lh);
+    });
+    expect(lines, 'lines of the name cell').toBeLessThanOrEqual(2);
+  });
+});
+
 test.describe('connections map legend, narrow window', () => {
   test.use({ viewport: { width: 400, height: 900 } });
   test('the five steps wrap as one block below the lead text and fit the legend', async ({ page }) => {

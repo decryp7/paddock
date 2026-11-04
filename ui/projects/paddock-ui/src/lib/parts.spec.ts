@@ -97,6 +97,13 @@ describe('PdPathText', () => {
     el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
     expect(el.querySelector('.pd-copy')).toBeNull();
+    // Nothing is cut: not a keyboard stop.
+    expect(el.querySelector('.pd-text')?.hasAttribute('tabindex')).toBe(false);
+  });
+
+  it('a text that shows less than the whole value is a keyboard stop, so its tooltip shows on focus', () => {
+    const el = make({ value: 'system.log', full: '/var/log/app/system.log' });
+    expect(el.querySelector('.pd-text')?.getAttribute('tabindex')).toBe('0');
   });
 
   it('shows what it is given but copies and titles the full value', async () => {
@@ -110,7 +117,7 @@ describe('PdPathText', () => {
     const el = f.nativeElement as HTMLElement;
     const text = el.querySelector('.pd-text')!;
     text.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.replaceAll('\u200b', '').trim()).toBe('/var/log/app/system.log'));
     text.dispatchEvent(new MouseEvent('mouseleave'));
     const button = el.querySelector<HTMLButtonElement>('.pd-copy')!;
     expect(button.getAttribute('aria-label')).toBe('Copy the full path');
@@ -164,7 +171,7 @@ describe('PdPathText', () => {
       expect(shown).toContain('…');
       expect(shown.length).toBeLessThan('/var/log/app/system.log'.length);
       el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
-      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.replaceAll('\u200b', '').trim()).toBe('/var/log/app/system.log'));
     });
 
     it('shortens the end of a title when asked to', async () => {
