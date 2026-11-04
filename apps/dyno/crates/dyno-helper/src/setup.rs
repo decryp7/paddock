@@ -198,22 +198,19 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> R
             }
             Ok("removed".into())
         }
-        Err(e) => {
-            // Say what really stopped it: a folder with entries of someone else's, or one that is empty but cannot be removed
-            // (a service sandbox with a read-only parent: the service manager removes it after the stop, see the unit).
-            let remaining = std::fs::read_dir(dir).map_or(0, Iterator::count);
-            if remaining > 0 {
-                Ok(format!(
-                    "left in place: {} holds {remaining} item(s) the helper did not write ({e})",
-                    dir.display()
-                ))
-            } else {
-                Ok(format!(
-                    "left in place: {} is empty but could not be removed from here ({e})",
-                    dir.display()
-                ))
-            }
-        }
+        Err(e) => Ok(left_in_place_note(dir, &e, std::fs::read_dir(dir).map(Iterator::count))),
+    }
+}
+
+/// What the log says when the data folder could not be removed: the real error, and whether the folder holds items (someone
+/// else's), is empty (a service sandbox with a read-only parent: the unit has the service manager remove it after the stop), or
+/// could not be listed (then nothing is claimed about its content).
+fn left_in_place_note(dir: &Path, err: &std::io::Error, remaining: std::io::Result<usize>) -> String {
+    let dir = dir.display();
+    match remaining {
+        Ok(0) => format!("left in place: {dir} is empty but could not be removed from here ({err}); systemd removes it after the stop"),
+        Ok(n) => format!("left in place: {dir} holds {n} item(s) the helper did not write ({err})"),
+        Err(list) => format!("left in place: {dir} could not be removed ({err}) and could not be listed ({list})"),
     }
 }
 
@@ -431,6 +428,20 @@ mod tests {
             note.contains("empty") && note.contains("os error"),
             "the real error is named: {note}"
         );
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_listed_is_not_called_empty_and_an_empty_one_names_systemd() {
+        let dir = Path::new("/var/lib/dyno-helper");
+        let err = std::io::Error::from_raw_os_error(30);
+        let unlisted = left_in_place_note(dir, &err, Err(std::io::Error::from_raw_os_error(13)));
+        assert!(
+            unlisted.contains("could not be listed") && !unlisted.contains("empty"),
+            "{unlisted}"
+        );
+        let empty = left_in_place_note(dir, &err, Ok(0));
+        assert!(empty.contains("systemd removes it after the stop"), "{empty}");
+        assert!(left_in_place_note(dir, &err, Ok(2)).contains("holds 2 item(s)"));
     }
 
     #[test]

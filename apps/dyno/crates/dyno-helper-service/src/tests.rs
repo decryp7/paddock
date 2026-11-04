@@ -253,18 +253,24 @@ fn package_file(name: &str) -> String {
 /// remove its own `StateDirectory=` (rmdir: "Read-only file system"); the empty folder stayed after Turn off. A plain
 /// `ExecStopPost=-+rmdir` does not work either (probe on the guest: "Device or resource busy", the service's bind mount of the
 /// folder is still in the host's mount table during the stop). A transient unit ordered `After=` the service runs once the stop
-/// is over and the mount is gone (probe: folder removed); `rmdir` takes only an empty folder and `-` keeps the stop quiet.
+/// is over and the mount is gone (probe: folder removed). It
+/// - uses `rmdir --ignore-fail-on-non-empty`, so a normal stop (log and tools left) is not a failed unit every time;
+/// - has `DefaultDependencies=no`, so it does not conflict with `shutdown.target` when the stop is part of a shutdown;
+/// - first asks `systemctl is-active`, so after a `systemctl restart` (it is ordered after the restart job) it leaves the
+///   folder of the service that is running again alone.
 #[test]
 fn the_unit_has_the_empty_state_folder_removed_by_a_unit_that_runs_after_the_stop() {
     let unit = paddock_service::render::systemd_unit(&spec(), "/usr/bin/dyno-helper", None);
-    assert!(
-        unit.lines().any(|l| l
-            == "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=After=dyno-helper.service /usr/bin/rmdir /var/lib/dyno-helper"),
+    let line = unit
+        .lines()
+        .find(|l| l.starts_with("ExecStopPost="))
+        .unwrap_or_else(|| panic!("no ExecStopPost: {unit}"));
+    assert_eq!(
+        line,
+        "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no \
+         --property=After=dyno-helper.service /bin/sh -c '/usr/bin/systemctl is-active --quiet dyno-helper.service || \
+         exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/dyno-helper'",
         "{unit}"
-    );
-    assert!(
-        !unit.contains("ExecStopPost=-+/usr/bin/rmdir"),
-        "a direct rmdir in the stop step is busy: {unit}"
     );
 }
 
