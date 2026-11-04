@@ -394,7 +394,7 @@ impl stop::StopPort for StopAdapter {
 #[cfg(has_proc_installed)]
 impl stop::StopPort for StopAdapter {
     fn stop_all(&mut self, dir: &str, images: &[String]) -> Result<stop::StopReport, String> {
-        use paddock_proc::installed::{Bounds, Method, Outcome, stop_all_here};
+        use paddock_proc::installed::{Bounds, Outcome, stop_all_here};
         let report = stop_all_here(std::path::Path::new(dir), images, &Bounds::default());
         let mut out = stop::StopReport {
             still_running: report.still_running.clone(),
@@ -412,10 +412,8 @@ impl stop::StopPort for StopAdapter {
                 pid: a.id.map(|i| i.pid()),
                 started_ms: a.id.map(|i| i.started().as_micros() / 1000),
                 session: a.session,
-                method: match a.method {
-                    Method::RestartManager => "restart-manager".into(),
-                    Method::Handle => "by-handle".into(),
-                },
+                // The stopper no longer reports which step ended a process; its own log lines (ER-27) say.
+                method: "stop-all".into(),
                 outcome: match &a.outcome {
                     Outcome::Ended => "ended".into(),
                     Outcome::Skipped(why) => format!("skipped: {why}"),
