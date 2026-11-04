@@ -1,10 +1,11 @@
-import { computed, inject } from '@angular/core';
-import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import { computed, effect, inject, untracked } from '@angular/core';
+import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { CommandError, ToolOffer } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
+import { HelperStore } from './helper.store';
 
 interface ToolState {
   offer: ToolOffer | null;
@@ -69,4 +70,17 @@ export const ToolStore = signalStore(
       },
     };
   }),
+  // The offer depends on the helper (it needs it, and the helper's copy is what it lists): whenever the helper's status is read again
+  // (Turn on, Turn off, Repair, either card's Check again) the offer is read again, driven by the status the engine publishes.
+  withHooks((store, helper = inject(HelperStore)) => ({
+    onInit(): void {
+      let seen: unknown = helper.status();
+      effect(() => {
+        const status = helper.status();
+        if (status === seen) return;
+        seen = status;
+        if (status !== null) untracked(() => void store.load());
+      });
+    },
+  })),
 );
