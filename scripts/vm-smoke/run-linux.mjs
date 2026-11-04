@@ -80,7 +80,7 @@ async function main(argv) {
     // 1. Install the CI's amd64 .deb (Rosetta runs it; the amd64 libraries were installed in the base).
     let checks = [];
     sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
-    const inst = g('sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/Dyno.deb 2>&1 | tail -3; dpkg-query -W -f="${Version}" dyno', 600_000);
+    const inst = g('sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/Dyno.deb 2>&1 | tail -3; dpkg-query -W -f="\\${Version}\\n" dyno', 600_000);
     const ver = inst.stdout.trim().split('\n').at(-1);
     checks.push({ ok: /^\d+\.\d+\.\d+/.test(ver), detail: `dpkg reports dyno ${ver}` });
     for (const f of ['/usr/bin/dyno', '/usr/bin/dyno-agent', '/usr/bin/dyno-app', '/usr/bin/dyno-helper']) checks.push({ ok: g(`test -x ${f}`).code === 0, detail: `${f} installed` });
@@ -117,8 +117,8 @@ async function main(argv) {
     press('^Dyno$'); await sleep(2000);
     checks.push({ ok: press('Turn on administrator readings'), detail: 'pressed "Turn on administrator readings"' });
     let prompt = false;
-    for (let i = 0; i < 20 && !prompt; i++) { await sleep(2000); prompt = /Authentication Required/.test(ses('xdotool search --name "Authentication Required" getwindowname %@ 2>/dev/null || true').stdout); }
-    checks.push({ ok: prompt, detail: prompt ? 'the polkit "Authentication Required" dialog appeared (dyno-helper install --for uid:1000)' : 'no polkit dialog within 40 s' });
+    for (let i = 0; i < 20 && !prompt; i++) { await sleep(2000); prompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
+    checks.push({ ok: prompt, detail: prompt ? 'pkexec is waiting: the polkit "Authentication Required" dialog is up (dyno-helper install --for uid:1000)' : 'no pkexec (polkit prompt) within 40 s' });
     if (prompt) ses('xdotool type --delay 80 admin; xdotool key Return');
     let active = '';
     for (let i = 0; i < 25 && active !== 'active'; i++) { await sleep(3000); active = g('systemctl is-active dyno-helper.service').stdout.trim(); }
@@ -139,7 +139,7 @@ async function main(argv) {
     press('^Dyno$');
     checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
     await sleep(6000);
-    if (/Authentication Required/.test(ses('xdotool search --name "Authentication Required" getwindowname %@ 2>/dev/null || true').stdout)) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
+    if (g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes') { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
     let gone = false;
     for (let i = 0; i < 25 && !gone; i++) { await sleep(3000); gone = g('systemctl is-active dyno-helper.service; test -e /var/lib/dyno-helper && echo present || echo gone').stdout.includes('gone'); }
     checks.push({ ok: gone, detail: gone ? 'the helper service and data folder are gone' : 'the helper is still installed 75 s after Turn off' });
