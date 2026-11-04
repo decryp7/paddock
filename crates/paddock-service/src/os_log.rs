@@ -114,28 +114,30 @@ pub fn stderr_fallback(why: &str) -> Arc<dyn OsLog> {
     Arc::new(log)
 }
 
+/// The OS log from `native` (this OS's adapter, opened by the caller); when it cannot be opened, standard error with the
+/// reason as its first line. Separate from [`open`] so the fallback is tested on every OS.
+pub fn open_with(native: impl FnOnce() -> Result<Arc<dyn OsLog>, String>) -> Arc<dyn OsLog> {
+    native().unwrap_or_else(|why| stderr_fallback(&why))
+}
+
 /// Opens the OS log of `spec` for this OS.
 pub fn open(spec: &ServiceSpec) -> Arc<dyn OsLog> {
-    #[cfg(windows)]
-    {
-        match crate::native::EventLog::open(spec.name()) {
-            Ok(log) => Arc::new(log),
-            Err(why) => stderr_fallback(&why),
+    open_with(|| {
+        #[cfg(windows)]
+        {
+            crate::native::EventLog::open(spec.name()).map(|log| Arc::new(log) as Arc<dyn OsLog>)
         }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        match crate::native::SysLog::open(spec.label()) {
-            Ok(log) => Arc::new(log),
-            Err(why) => stderr_fallback(&why),
+        #[cfg(target_os = "macos")]
+        {
+            crate::native::SysLog::open(spec.label()).map(|log| Arc::new(log) as Arc<dyn OsLog>)
         }
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        let _ = spec;
-        let prefixed = stderr_is_journal(std::env::var_os("JOURNAL_STREAM").as_deref());
-        Arc::new(JournalLog::new(std::io::stderr(), prefixed))
-    }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            let _ = spec;
+            let prefixed = stderr_is_journal(std::env::var_os("JOURNAL_STREAM").as_deref());
+            Ok(Arc::new(JournalLog::new(std::io::stderr(), prefixed)) as Arc<dyn OsLog>)
+        }
+    })
 }
 
 #[cfg(test)]
@@ -221,6 +223,42 @@ mod tests {
         let text = cut(&"é".repeat(50), 10);
         assert_eq!(text.chars().count(), 10);
         assert!(text.ends_with('…'));
+    }
+
+    #[test]
+    fn an_os_log_that_cannot_be_opened_falls_back_to_standard_error_and_one_that_opens_is_used() {
+        let used = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = used.clone();
+        struct Mine(Arc<Mutex<Vec<String>>>);
+        impl OsLog for Mine {
+            fn write(&self, _: Level, text: &str) {
+                self.0.lock().unwrap().push(text.to_string());
+            }
+        }
+        let log = open_with(|| Ok(Arc::new(Mine(seen)) as Arc<dyn OsLog>));
+        log.write(Level::Info, "to the OS log");
+        assert_eq!(*used.lock().unwrap(), ["to the OS log"]);
+        // The syslog or event log refuses: standard error takes over (its first line, the reason, is checked above).
+        open_with(|| Err("syslog refused".to_string())).write(Level::Info, "to standard error");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_the_os_log_is_standard_error_and_opens_without_the_system() {
+        let spec = ServiceSpec::builder(
+            "net.decryptology.test.service",
+            "TestService",
+            "test-service",
+        )
+        .build()
+        .unwrap();
+        open(&spec).write(Level::Info, "to standard error (the journal under systemd)");
+    }
+
+    #[test]
+    fn the_stream_stubs_of_the_tests_flush() {
+        Write::flush(&mut Sink::default()).unwrap();
+        Write::flush(&mut Closed).unwrap();
     }
 
     #[test]

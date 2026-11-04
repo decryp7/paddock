@@ -558,20 +558,37 @@ mod tests {
     }
 
     #[cfg(not(windows))]
+    fn clean(_: Context) -> Result<(), Refused> {
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
     #[test]
     fn the_service_manager_is_refused_off_windows_and_the_reason_reaches_the_os_log() {
         let log = RecordingOsLog::default();
         let result = run_hosted(
             &spec(),
+            Hosting::Foreground,
+            false,
+            Arc::new(log.clone()),
+            clean,
+        );
+        assert_eq!(
+            result,
+            Ok(0),
+            "the same body runs when the hosting allows it"
+        );
+        let result = run_hosted(
+            &spec(),
             Hosting::ServiceManager,
             false,
             Arc::new(log.clone()),
-            |_| Ok::<(), Refused>(()),
+            clean,
         );
-        let Err(ServiceMainError::NotStartedByManager(why)) = result else {
-            panic!("{result:?}")
-        };
-        assert!(why.contains("for Windows"), "{why}");
+        assert!(
+            matches!(&result, Err(ServiceMainError::NotStartedByManager(why)) if why.contains("for Windows")),
+            "{result:?}"
+        );
         assert!(
             log.lines()
                 .iter()
