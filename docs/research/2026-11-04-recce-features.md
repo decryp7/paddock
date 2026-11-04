@@ -71,7 +71,7 @@ personal use.
 Columns: **Stage** (1 to 4, Later, Never), **Effort** (S/M/L), **Why** (evidence and reasoning), **Privacy** (what to guard).
 "Plan" means the feature is already in the plan; "new" means this catalogue adds it. Ids: Q search, P previews, A actions,
 L launcher, C sources, K answers, M MCP, E extensions, V privacy, F performance, N cross-device, Y accessibility, G family
-(chosen so they do not clash with the plan's spikes S1 to S5, ADRs R1 to R9 and decisions D1 to D16).
+(chosen so they do not clash with the plan's spikes S1 to S6, ADRs R1 to R10 and decisions D1 to D19 (S6, R10 and D17 to D19 added with the scale design, 2026-11-04)).
 
 ### 3.1 Search and filters
 

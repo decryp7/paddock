@@ -163,10 +163,11 @@ calculator (now **AGPL-3.0-only**, crates.io); `fend-core` (MIT) or `numbat` (MI
 | | DuckDB FTS | BM25; stemmers. "By default, the FTS index will not update automatically", but `incremental = 1` exists ([DuckDB 2.0 docs](https://duckdb.org/docs/2.0/core_extensions/full_text_search.html)). | Built for analytics; Pacenotes ADR 0012 D8 keeps DuckDB "for export only". | No. |
 | **Catalog** (sources, manifest, cursors, jobs) | SQLite (`rusqlite` 0.41, bundled) | As Pacenotes ADR 0012 D4 and Dyno's `cache.db`. | | **SQLite.** |
 | **Embeddings** | **`paddock-embed` (planned X55)** with Model2Vec | Measured here: potion-base-8M 9,581 chunks/s on 1 thread, potion-code-16M-v2 6,365, potion-retrieval-32M 8,001, peak RSS 131 to 357 MB; fastembed's BGE peaked at 2.6 to 37 GB ([Pacenotes ADR 0001](../../apps/pacenotes/docs/adr/0001-embeddings.md)). Weights MIT. `potion-multilingual-128M` (MIT, 512 MB safetensors, HF API) covers mail in other languages. | Static vectors lose word order and negation (shared-next X55). | **Model2Vec** by default; **Qwen3-Embedding-0.6B** (Apache-2.0, 639 MB Q8_0 GGUF, HF API) through Pitwall re-ranks a query's top 50. A deep re-embed only as a confirmed job (rule 46). |
-| **Vector store** | Flat (f16 or int8, mmap) brute-force cosine | Simple and exact. 256 dims in f16 is 512 B a chunk: **51 MB per 100k chunks** (arithmetic). | Linear cost: about 1M chunks before latency hurts **(estimate; measure)**. | Up to about 1M chunks. |
-| | **USearch** 2.26.6 (HNSW) | Apache-2.0; mmap; active (pushed 2026-10-31). | C++ core (build per OS). | Beyond 1M chunks, after a spike. |
+| **Vector store** | Flat (f16 or int8, mmap) brute-force cosine | Simple and exact. 256 dims in f16 is 512 B a chunk: **51 MB per 100k chunks** (arithmetic). | Linear cost: about 1M chunks before latency hurts **(estimate; measure)**. | Superseded 2026-11-04 by the scale design ([plan §1](../plans/2026-11-04-pc-search-app.md)): binary search codes (32 B) plus int8 re-score codes (256 B), flat or in USearch; spike S6 decides. |
+| | **USearch** 2.26.6 (HNSW) | Apache-2.0; mmap; active (pushed 2026-10-31). | C++ core (build per OS). | Default candidate with `i8`/`b1x8` codes served from disk (plan §1.7); S6. |
+| | DuckDB-VSS (HNSW) | MIT (DuckDB). | Persistence is experimental; the index must fit in RAM; no WAL recovery for custom indexes ([DuckDB 2.0 VSS docs](https://duckdb.org/docs/2.0/core_extensions/vss.html), read 2026-11-04). | Not the default; compared in S6 at 5 M. |
 | | `sqlite-vec` 0.1.9 | MIT/Apache; inside the catalog. | Brute force; last release 2026-05. | No. |
-| | LanceDB 0.41 | Apache-2.0. | Heavy (Arrow/DataFusion) for one app. | No. |
+| | LanceDB 0.41 | Apache-2.0. | Heavy (Arrow/DataFusion) for one app. | Runner-up at scale (IVF_RQ, IVF_PQ, `refine_factor`; plan §1.7); compared in S6. |
 | | `hnsw_rs` 0.3.5 | Pure Rust, MIT/Apache. | Less used. | Alternative to USearch. |
 | **Fusion** | RRF (k = 60) of BM25 and cosine top lists, as in Pacenotes ADR 0001 and X55 | | | **RRF**, weights tuned on a stored query set. |
 
@@ -385,7 +386,7 @@ Not offered: Raycast or Alfred plugin compatibility (Node or AppleScript runtime
 | First content index | Background, resumable, no budget on total time; throughput target set after spike S2 | Depends on the corpus |
 | Idle CPU (agent) | ≈ 0 % (event-driven, ADR 0024) | Rule 16 budget; measure with `paddock-metrics` |
 | Idle RAM | agent ≤ 150 MB with 1M names and content index closed; launcher webview measured separately | Everything about 100 MB per 1M (vendor); Model2Vec worker 131 to 357 MB **while embedding**, so the worker exits when idle |
-| Index size per 100k files | names ≈ 5 to 10 MB; content: often comparable to the extracted text (Recoll's experience, vendor docs); vectors 51 MB per 100k chunks at 256-dim f16 | Everything 45 MB per 1M (vendor); arithmetic |
+| Index size per 100k files | names ≈ 5 to 10 MB; content: often comparable to the extracted text (Recoll's experience, vendor docs); vectors 51 MB per 100k chunks at 256-dim f16, or 29 MB at the scale design's binary + int8 layout (plan §1.2) | Everything 45 MB per 1M (vendor); arithmetic |
 
 ## 6. Risks
 
@@ -402,6 +403,8 @@ Not offered: Raycast or Alfred plugin compatibility (Node or AppleScript runtime
    useful on its own.
 7. **Wayland hotkey** depends on the desktop's portal.
 8. **Clipboard privacy.** It stays off by default.
+9. **Scale** (10 M files, 5 M mails, 20 M passages). Mitigation: the tiered index, quantised disk-served vectors, per-source
+   shards, budgets with Auto and honest coverage ([plan §1](../plans/2026-11-04-pc-search-app.md)); spike S6 measures it.
 
 ## 7. Decisions for the user (defaults recommended)
 
@@ -415,11 +418,12 @@ See the plan's decision table. In short:
 - Graph with a family app registration plus a BYO client id;
 - MCP off, with mail and M365 hidden from it by default;
 - plugins in three tiers;
+- a vector budget of min(4 GB, 2 % of the index volume) by default, and old archives keyword-only (plan D17, D18);
 - start after Pacenotes and Sighter, with spikes allowed earlier only when load allows.
 
 ## 8. What was not done
 
-No builds, no measurements, no VM tests (Dyno's release has the machine). Spikes S1 to S5 in the plan are the first work
+No builds, no measurements, no VM tests (Dyno's release has the machine). Spikes S1 to S6 in the plan are the first work
 when this app starts.
 
 ## 9. Name
