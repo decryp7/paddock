@@ -1,10 +1,10 @@
 # 52. Wired features, visible outcomes and real layouts: every feature reaches the real engine, every job shows how it ended, every control stays in its box
 
-- Status: Proposed (2026-11-04), revision 2. Written on the user's go-ahead of 2026-11-04 (ER-21 redesign after the
-  Dyno 1.1.0 release-candidate findings on the user's Windows PC). The user accepted D1 to D6 as recommended in
-  revision 1 (2026-11-04). The independent review (round 1, on `e494b2f78`) asked for another round; revision 2 answers
-  it. Its fixes change the details of **D2 and D3**, which go back to the user, and add **D7**. Docs only: nothing here
-  is built yet.
+- Status: Accepted (2026-11-04; user decisions D1–D7; independent review 2 rounds). Written on the user's go-ahead of
+  2026-11-04 (ER-21 redesign after the Dyno 1.1.0 release-candidate findings on the user's Windows PC). Revision 1
+  (`e494b2f78`): the user accepted D1 to D6 as recommended. Review round 1 asked for another round; revision 2
+  (`28cc578ee`) answered it and changed D2 and D3 and added D7, which the user then decided. Round 2 accepted the ADR
+  with the P2 and P3 edits of this revision folded in. Docs only: nothing here is built yet.
 - Date: 2026-11-04
 - Related: ER-14 / rule 7 (tests never touch the user's machine), ER-17 to ER-19 / rules 10 to 12 (long work off the UI
   thread, live progress, no UI timeouts), ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42
@@ -45,7 +45,7 @@ Read in git on 2026-11-04 at the commits named. "Verified" means read in the cod
 | `HelperLink::smart` sends `HelperRequest::Smart` but has no caller outside its own `#[cfg(test)]` module (line 229 on) | `apps/dyno/crates/dyno-agent/src/helper_link.rs:171` at `origin/steward/dyno-1.1.0` (1589c46bb); callers at lines 340 and 351 are tests | verified |
 | The helper answers `Info` with an empty tool list for every caller: `CallerView { .., tools: vec![] }` | `apps/dyno/crates/dyno-helper/src/server.rs:88`; returned by `HelperRequest::Info => Ok(HelperReply::About(self.info.clone(), ctx.view.clone()))`, `dispatch.rs:200` | verified |
 | Effect on the user's PC: Settings showed smartmontools "Not installed" right after a successful install through the helper, and the Lifespan page never read SMART through the helper's `smartctl` | user report 2026-11-04; the fix is in progress on `fix/dyno-windows-smart` (22 files, +737/−90, uncommitted when read) | user report; in progress |
-| The same shape, wider: one more helper sender with no production caller, `HelperLink::log_tail` (line 198). (`HelperLink::firewall`, line 163, has none either, but `HelperRequest::Firewall` is also sent by the `FirewallReader` impl for `HelperLink` at line 223, so that kind is reachable through a trait object; corrected in revision 2.) Eight of the helper's 19 request kinds (`Processes`, `Traffic`, `SocketOwners`, `FileHolders`, `Counters`, `MemoryModules`, `Extras`, `WolState`) are built by no agent code outside tests, only by the helper's own authorisation table and its tests | `git grep -nw <name>` over `apps/dyno/crates/*/src` and `apps/dyno/app/src-tauri/src` at 1589c46bb, excluding `tests` paths and the helper's own crates | measured (grep level, not a call graph). Some may be deliberately later (Dyno ADR 0027 scopes the helper's 1.1.0 reads); nothing in the code says which, and that is the gap |
+| The same shape, wider: two more helper senders with no production caller, `HelperLink::firewall` (line 163) and `HelperLink::log_tail` (line 198). `HelperLink` also implements `FirewallReader` (line 223), but the composition never builds it as one: `FirewallCentre::for_this_os` (`dyno-agent/src/firewall.rs:79`) boxes only `WindowsFirewallReader` and `AlfReader`, and pf and nft appear only as "needs the helper" notes, so `Firewall` is unwired too (revision 2's claim that it was reachable was wrong). Likewise `HelperBtm`, the macOS `BtmSource` over a `LoginItemsLink`, is built only in tests (`dyno-platform/src/macos/startup.rs:600, 604`; grep level, to be confirmed by C83). Eight of the helper's 19 request kinds (`Processes`, `Traffic`, `SocketOwners`, `FileHolders`, `Counters`, `MemoryModules`, `Extras`, `WolState`) are built by no agent code outside tests, only by the helper's own authorisation table and its tests | `git grep -nw <name>` over `apps/dyno/crates/*/src` and `apps/dyno/app/src-tauri/src` at 1589c46bb, excluding `tests` paths and the helper's own crates | measured (grep level, not a call graph). Some may be deliberately later (Dyno ADR 0027 scopes the helper's 1.1.0 reads); nothing in the code says which, and that is the gap |
 | Earlier: three Dyno 1.0 tray and Settings features complete in the browser build and unwired in the app (popover spec, dialog contract, `BroadcastChannel`) | lessons.md "What the browser e2e cannot see" (2026-11-01); ADR 0037 | read |
 | Earlier: a setting nothing in the product filled in (`utcOffsetMinutes`, default 0) made every "local" day a UTC day | lessons.md, 2026-10-30 (Dyno) | read |
 
@@ -59,7 +59,7 @@ real engine never would).
 | Instance | Source | How checked |
 |---|---|---|
 | The tool install job's result is read only for `null` (cancelled); a done job's typed output is dropped and the card reloads, so "installed, but the helper does not list it" became a silent "Not installed" | `apps/dyno/app/src/app/state/tool.store.ts:43-56` at 1589c46bb (`const out = await run.result; if (out === null) …` then `await load()` in `finally`) | verified |
-| Four more stores narrow a job's output with `'x' in out` and have no final `else`, so an output of another kind is ignored without a word: `backup.store.ts:66-67` (`if (out && 'backup' in out)`); `extras.store.ts:178-181`, the finder path (`null` → cancelled, `else if ('finder' in out)`, nothing after; the path at 148-149 maps through `pick` instead); `helper.store.ts:58-60` (`null` → cancelled, `else if ('helper' in out)`); `wol.store.ts:121-122` (`if (out && 'wol' in out)`, so a cancelled run and an output of another kind both fall through silently) | at 1589c46bb | verified |
+| Four more stores narrow a job's output with `'x' in out` and have no final `else`, so an output of another kind is ignored without a word: `backup.store.ts:66-67` (`if (out && 'backup' in out)`); `extras.store.ts:178-181`, the finder path (`null` → cancelled, `else if ('finder' in out)`, nothing after; the path at 148-149 maps through `pick` instead); `helper.store.ts:58-60` (`null` → cancelled, `else if ('helper' in out)`); `wol.store.ts:121-123` (`if (out && 'wol' in out) … else setRun(id, { cancelled: true })`: any output that is not `wol` is shown as "cancelled", a conflation rather than a silent drop) | at 1589c46bb | verified |
 | A cancelled job and a page closed while its job ran both arrive as `null` (`JobFollow.follow` resolves `null` when the owner is destroyed), and `tool.store.ts` and `helper.store.ts` then show "cancelled" | `ui/projects/paddock-ui/shell/jobs/src/job-follow.ts:14-33` (origin/main); Dyno `core/job-starter.ts` | verified |
 | `JobState::Done` carries no outcome at all; "done" cannot say "done, but I could not confirm it" | `crates/paddock-jobs/src/model.rs:99-112` (origin/main) | verified |
 | Benchmarks showed a stored Dyno 1.0 run's "runner missing; reinstall Dyno" in the present tense next to a new run that works | fixed by `33682d905` on `fix/dyno-bench-stale-error` ("a past benchmark failure reads in the past") | verified (commit) |
@@ -113,14 +113,14 @@ the check enumerates the variants of the request roots (`Request`, `HelperReques
 2 kinds at 1589c46bb). For each kind it finds the non-test functions that construct it, and requires one of:
 - the function is called from non-test code outside its own impl block; or
 - the function is a method of a trait impl for a **named concrete type**, and the composition builds that concrete type
-  as the trait's object. The exemption names the type, not the trait (`FirewallReader for HelperLink<_>`, built in
-  Dyno's composition), so a second impl of the same trait does not lend it its reachability.
+  as the trait's object. The exemption names the type, not the trait: `FirewallReader for WindowsFirewallReader<ComFirewall>`
+  counts because `FirewallCentre::for_this_os` boxes exactly that type, while `FirewallReader for HelperLink<_>` does not,
+  because nothing builds it; a second impl of the same trait never lends the first its reachability.
 
 Test code is `#[cfg(test)]` modules, `tests/` folders, `*_tests.rs`, and debug-only test commands. The check is built in
 Rust in `./dev check` (ADR 0022), parsing with `syn`. It is a name-level call check, not a call graph; its fix text says
 so, and the run-time counts of §1.5 are the backstop for everything it cannot see (closures, macros, trait objects).
-At 1589c46bb it would have failed on `Smart` and `LogTail` and on the eight kinds no agent code builds. `Firewall` passes
-through its trait impl.
+At 1589c46bb it would have failed on `Smart`, `Firewall` and `LogTail` and on the eight kinds no agent code builds.
 
 C83 reads `wire.toml`, which ADR 0049's WP-4 creates for Dyno's three wires and Pitcrew's and Debrief's. It therefore
 lands after that WP. An app outside 0049's list (Spotter, Pitwall) gets a roots-only `[[protocol]]` entry (id, format,
@@ -143,6 +143,13 @@ until = "dyno-v1.2.0"        # the app's next release-line tag, or a date at mos
   requires for copies (`user` for a later release line);
 - every CI job that runs one of these checks writes the waiver counts per app (unwired kinds, placeholders, baseline
   sizes, the nearest expiry) to its job summary (ER-27), so growth is visible.
+
+**Inline escape hatches are counted and capped too.** The undated hatches of this ADR are `// silent: <why>` (C87),
+`/* pd-layout-ok: <why> */` (C88), `data-pd-overlap-ok="<why>"` (§3.2) and `[[unlisted]]` (C85). Each check counts its
+hatches per app and writes the counts to the job summary. Each app has a cap per hatch kind in `wiring.toml`
+(`[caps] silent = 20, layout_ok = 10, overlap_ok = 10, unlisted = 5` to start, set from the baselines after WP-0); a
+commit that adds a hatch, or raises a cap, needs an `Escape-hatch: <kind> <path>: <why> approved: <coordinator|user>`
+trailer, which the check reads from the commit range.
 
 **1.2 Every port has a production adapter and a caller.** A port trait carries the marker supertrait
 `paddock_shell::Port` (zero cost; a crate that is not a shell part reaches it through `paddock-commands`). C83 applies
@@ -200,7 +207,10 @@ coverage exclusions for platform code name these VM steps as the `job` that cove
 **1.5 Wire coverage at run time (the dynamic half of C83).** Each wire server keeps a counter per request kind (an array
 indexed by the variant, from the schema; no user content). The counts are available **on demand**: in the reply to the
 wire's own info or status request (for the helper, `HelperReply::About`; for the agent, its status reply), and in the
-diagnostic bundle. At shutdown the server also logs one line, `served: kind=count …` (ER-27).
+diagnostic bundle. At shutdown the server also logs one line, `served: kind=count …` (ER-27). On the helper wire the
+counts are answered only to the helper's owner and to administrators (the `CallerView` scope that `server.rs` already
+computes), never to another account. Adding them to `HelperReply::About` changes the agent-helper wire: it needs ADR
+0049's C80 note and a `HELPER_API` bump, in the release line that adds them (0049 §3: at most one bump per line).
 
 **Which runs read them.** The vm-smoke run reads the counts of every wire server after its steps, on each OS (it is the
 only run with the privileged helper installed). The CI real-app legs (ADR 0037 §8, Linux and Windows) read the
@@ -227,7 +237,9 @@ and anything C83's name-level check exempted.
 `Err(Mismatch)` otherwise. A mismatch ends the job `Unconfirmed { why, next_step }`. For an install, that path is the
 helper's `Info` for Dyno's helper tools, or ADR 0051's state report for managed tools: "smartmontools was installed, but
 the helper does not list it" ends unconfirmed, never confirmed. Every job kind has one engine test in which the read-back
-disagrees and the job ends `Unconfirmed`; C86 (below) enumerates the job kinds and requires that test too.
+disagrees and the job ends `Unconfirmed`; C86 (below) enumerates the job kinds and requires that test too. `observed`
+is built from a port call: `read_back` takes the port (`&dyn ReadPort<T>`, the same port the feature reads through) and
+calls it itself, rather than taking a value the job could have made up.
 
 The executor logs every end with the job id, kind, phase durations, outcome kind, reason and cause chain, and no user
 content (ER-27).
@@ -255,8 +267,13 @@ had no runner"), as `33682d905` does for benchmarks.
   `OutcomeStore.record` or `pd-outcome`, or be switched exhaustively (a `default` that `satisfies never`). An `await`
   whose value is unused, compared only with `null`, or narrowed with `'x' in end` without a final `else` fails. It fails
   on `tool.store.ts:48` and on the four stores above.
-- ESLint `paddock/stamped-only-in-outcome`: a template binding or interpolation whose type is `Stamped<…>` (or a field
-  read from one) outside `pd-outcome` fails, so a stored value cannot be rendered without its time.
+- **`Stamped<T>` is opaque in TypeScript.** The generated type (from the Rust wire types) exposes `at` and
+  `appVersion` but not `value`: `value` sits behind a branded private field, readable only through `readStamped()`,
+  which `@decryp7/paddock-ui/shell/jobs` exports from an internal entry that `pd-outcome` imports. A template that binds
+  `stamped.value` therefore fails to compile under Angular's strict templates, and ESLint's plain
+  `no-restricted-imports` (family preset, `paddock/stamped-only-in-outcome` is the config's name) forbids importing
+  `readStamped` anywhere but `pd-outcome`. No type-aware template linting is needed (ESLint cannot see Angular's template
+  types).
 - **C86:** every job kind of every app (the `JobSpec` root in `wire.toml`) has an outcome spec through the shared
   `outcomeHarness(kind)`, which drives each of the five ends through the mock and asserts that the owning page shows a
   visible outcome (for `confirmed`, the value rather than a reload). C86 also requires the engine test of §2.1 in which the
@@ -269,10 +286,12 @@ had no runner"), as `33682d905` does for benchmarks.
   baseline is cut after WP-0. The upper bound of that baseline is 268 `let Ok(..) = .. else {` sites on origin/main.
 - **Spawns log once, at the spawn point.** Every external program runs through `paddock_proc`'s run helper (rule 53
   already routes kills there). The helper logs the program, masked arguments, exit code, duration and the tail of stderr:
-  **success at `debug`, failure at `info`** with the cause and next step. Clippy's `disallowed-methods` in
-  `lint/clippy.toml` lists `std::process::Command::{spawn, output, status}` (and `tokio::process::Command`'s), with
-  `paddock_proc`'s own module the one allowed site. That covers the 107 silent `dyno-platform` files without a log call
-  in each.
+  **success at `debug`, failure at `info`** with the cause and next step. `lint/clippy.toml` already lists
+  `std::process::Command::new` and `tokio::process::Command::new` in `disallowed-methods` (reason: use `paddock-proc`);
+  this extends it with `Command::{spawn, output, status}`, so a `Command` built under an `#[allow]` still cannot be run
+  outside `paddock_proc`. On origin/main there are 44 `allow(clippy::disallowed_methods)` sites in 65 files that name the
+  lint; WP-B4b sizes them and keeps each existing allow that has a written reason, moving only the spawns that lack one.
+  That covers the 107 silent `dyno-platform` files without a log call in each.
 
 ### 3. The real-UI layout contract
 
@@ -286,9 +305,13 @@ had no runner"), as `33682d905` does for benchmarks.
   shift double.
 - Shared buttons, tabs, chips and menu items are `white-space: nowrap` with a minimum inline size (a token,
   `--pd-control-min-inline`), and truncate with the full text in a tooltip when their container is narrower; a label never
-  wraps to a second line.
-- Widgets scroll inside (the user's Grafana-style decision): a widget whose content is taller than its frame scrolls in
-  its body; it never clips.
+  wraps to a second line. **A declared two-line control** is the one exception: a menu item or list item with a title
+  line and a detail line (Dyno's disk-map volume menu, `apps/dyno/app/src/app/features/disk-map/disk-map-page.ts:443-450`:
+  a volume name over its size, free space or "Not answering") marks its host `data-pd-lines="2"`, or uses the shared
+  two-line item (`pd-two-line-item`, added with WP-C1b), and each line element stays on one line.
+- Widgets: at a widget kind's minimum and default size nothing overflows (ADR 0044's per-kind size rules). Data beyond
+  that scrolls inside the widget's body, never clips (the user's decision of 2026-11-04 09:54, "widgets scroll internally
+  like Grafana", coordinator log `/Volumes/d7sst7/dev-targets/handoff/2026-10-29-overnight.md:831`).
 
 **C88** checks the first two in `.scss` files and in component `styles` strings: a negative margin, inset or translate, or
 a geometry rule on a shared control outside the shared SCSS, fails unless it carries `/* pd-layout-ok: <why> */`. Its
@@ -308,7 +331,9 @@ Node (as `screenshot-check.ts` does). It fails on:
    is not a declared line clamp (`-webkit-line-clamp`/`line-clamp` set, or `data-pd-clamp`). A widget body found this way
    fails with "widgets scroll inside".
 3. **Wrapped control label.** The label of a button, tab, chip or menu item (`button`, `[role=tab]`, `mat-chip`,
-   `[role=menuitem]`) takes more than one line box (its text's client rects span more than one line).
+   `[role=menuitem]`) takes more than one line box (its text's client rects span more than one line). For a declared
+   two-line control (`data-pd-lines="2"` or `pd-two-line-item`) the check measures each line element (its direct
+   children that carry text) and fails when any of them takes more than one line box, or when there are more than two.
 4. **Overlap.** Two in-flow siblings whose boxes intersect by more than 1 px, or a control whose corners `elementFromPoint`
    finds covered by something outside it. Exempt: elements that are `position: sticky` or `fixed` (sticky table headers,
    ADR 0027), absolute overlays marked `[data-pd-overlay]`, and any element with `data-pd-overlap-ok="<why>"`.
@@ -331,7 +356,9 @@ the tour misses one:
 - the shell panes (notifications, jobs, channels, and any pane a shell part contributes);
 - every Settings page, from the settings section registry (rule 44's registry);
 - every tray popover (ADR 0037 §4's `Tray` carries them);
-- every widget kind of the app's catalogue (ADR 0035, ADR 0044), at its minimum and its default size.
+- every widget kind of the app's catalogue (ADR 0035, ADR 0044), at its minimum and its default size; at these two
+  stops the tour also asserts that nothing in the widget overflows (no scroll, no clip), because ADR 0044's size rules
+  promise the content fits there; scrolling inside is checked separately with the `large` profile.
 
 The tour runs over this matrix:
 
@@ -346,7 +373,9 @@ The tour runs over this matrix:
 port) map changed component files to the routes and surfaces that import them, and run those stops at `default` 1 and
 `large` 1.5, Chromium only. A change to shared UI (`ui/projects/paddock-ui`) runs the gallery's stops instead of every
 app's tour. Nightly runs every app's full matrix. Run times are measured in WP-C3 and recorded in `docs/benchmarks.md`
-before anyone quotes them (rule 48).
+before anyone quotes them (rule 48). **Nightly budget:** the full matrix of all apps together takes at most 45 minutes of
+one Linux runner slot; WP-C3's measurement is compared with it, and if the matrix is over budget the `live` profile runs
+at one scale only and the density axis covers the gallery only, until the measurement fits.
 
 **3.4 A Windows VM page pass before every release.** ADR 0040's Windows GUI session already opens every dialog at 100 %
 and 150 %. This adds every surface of §3.3: the real app's tour through ADR 0037 §8's WebDriver kit (WebView2 and
@@ -381,8 +410,10 @@ testing), and the `vm-smoke` pages step. Each WP that adds one adds its entry in
 > done job read as "Not installed", a past failure shown as current, and controls clipped by a doubled negative margin,
 > all with every test green.
 
-The general part goes to the engineering rules as **ER-33** (proposed; ER-31 and ER-32 are taken on branches of
-`engineering-rules`), with the same coordinator-owned sync as the other ER rules:
+The general part goes to the engineering rules as **ER-33** (proposed). ER-31 and ER-32 are on `engineering-rules` main;
+the branch `docs/er-31-33` (head `1c147cc`) has no ER-33 text, but its name suggests the number is meant for something
+else, so the coordinator checks with its owner before taking ER-33 and takes the next free number otherwise. The sync is
+coordinator-owned like the other ER rules:
 
 > ER-33. **Wired, outcome, real screen.** A feature is done only when (a) every request and port it adds has a production
 > caller and one end-to-end test through the real backend on each platform it depends on, (b) every long operation ends
@@ -395,7 +426,7 @@ The general part goes to the engineering rules as **ER-33** (proposed; ER-31 and
 
 | Check | Kind | Would have failed on |
 |---|---|---|
-| C83 static senders (concrete-type trait exemption), bounded `wiring.toml` | source check over every declared wire and port | `HelperLink::smart`, `log_tail`; the eight unbuilt helper kinds (until declared) |
+| C83 static senders (concrete-type trait exemption), bounded `wiring.toml` | source check over every declared wire and port | `HelperLink::smart`, `firewall`, `log_tail`; the eight unbuilt helper kinds (until declared) |
 | `composition()` port adapters (ADR 0037 §7 extended) | enumerating test | a port left on a fake in `Place::Installed` |
 | C84 collection placeholders, bounded `placeholder!` | source check over server crates and adapters | `server.rs:88` `tools: vec![]` |
 | C85 `features.toml` | source check: every surface, job kind, setting and request kind maps to a feature with a real-engine test, VM steps per OS | a SMART feature with no Windows VM step |
@@ -405,7 +436,7 @@ The general part goes to the engineering rules as **ER-33** (proposed; ER-31 and
 | `Stamped<T>`, C90 over `stored_roots`, ESLint `paddock/stamped-only-in-outcome`, `pd-outcome` | type, source check, lint, shared component | the benchmark's present-tense 1.0 failure |
 | C87 silent drops, Clippy `let_underscore_must_use`, spawn logging and `disallowed-methods` for `Command` | source check with baseline; lints; one mechanism | `hardware.rs:263` |
 | C88 negative geometry, page restyles of shared controls | source check with baseline | the MCP page's and the notification pane's second shift |
-| `expectLayoutClean` (clipped with the start-edge rule, self-clipped, wrapped labels, overlap, blank virtual area, alignment), C89 tour over every surface | shared e2e checks plus enumerating check | all three layout instances (`370eac6c6^` is the clipped check's fixture) |
+| `expectLayoutClean` (clipped with the start-edge rule, self-clipped, wrapped labels with the declared two-line variant, overlap, blank virtual area, alignment), C89 tour over every surface, widgets without overflow at minimum and default size | shared e2e checks plus enumerating check | all three layout instances (`370eac6c6^` is the clipped check's fixture) |
 | Windows VM page pass, rule 54 (c) | release gate, local VM | what only WebView2 at 150 % shows |
 
 Each new check ships with a fixture it fails on (the 0046 draft's demand): the 1589c46bb shapes above, reduced to
@@ -423,7 +454,7 @@ ADR 0022 G.7 keeps larger shared changes out of a release window; ADR 0042 §1 h
 | WP-S | **Audit sweep** of Spotter's and Pitwall's release branches for the three patterns with this ADR's measures (senders without callers at grep level, job ends discarded or narrowed without `else`, negative margins and page restyles of shared controls, virtual lists, wrapped labels); each finding becomes a fix with a failing test | 1 | | **before Spotter 1.0** |
 | WP-C1a | C88's "page restyles a shared control" half, report-only | 0.5 | | **before Spotter 1.0** |
 | WP-B4a | C87, report-only | 1 | | **before Spotter 1.0** |
-| WP-C2 | `layoutProblems` and `expectLayoutClean` in `paddock-e2e` (six checks, the `370eac6c6^` fixture, synthetic fixtures for the rest), harness entry | 2.5 | ADR 0042's hold on `ui/` homes, unless waived (D7) | after Spotter 1.0, or before it if D7 waives the hold |
+| WP-C2 | `layoutProblems` and `expectLayoutClean` in `paddock-e2e` (six checks with the two-line variant, the `370eac6c6^` fixture, synthetic fixtures for the rest), harness entry with D7's waiver | 2.5 | D7 (one-off waiver of ADR 0042's hold) | **before Spotter 1.0** |
 | WP-C1b | Remove the negative-margin rule (density tokens), nowrap and minimum size for shared buttons, C88 enforced (baseline after WP-0), design-guide rules, gallery screenshots reviewed | 1.5 | WP-0 | after Spotter 1.0, before Pitcrew 1.1 |
 | WP-B4b | C87 enforced (baseline after WP-0); Clippy `let_underscore_must_use` and `disallowed-methods` for `Command`; spawn logging in `paddock_proc` | 1.5 | WP-0, WP-B4a | after Spotter 1.0 |
 | WP-A1 | C83 with the bounded `wiring.toml`, fixtures; roots-only `wire.toml` entries for Spotter and Pitwall; registers for Dyno, Spotter, Pitwall | 2 | ADR 0049 WP-4 | after 0049 WP-4, before Pitcrew 1.1 |
@@ -439,13 +470,13 @@ ADR 0022 G.7 keeps larger shared changes out of a release window; ADR 0042 §1 h
 | Adoption | Spotter, Pitwall, Pitcrew, the two demos (registers, outcome specs, tours), about 1.25 each; Debrief when it moves to the shell | 6 | | per release |
 | **Total** | | **38** (with five apps' tours: 40.5) | | |
 
-**Before the Spotter 1.0 tag:** WP-S, WP-C1a and WP-B4a: **2.5 days**, all report-only or audit, none touching
-`crates/` or a held harness home. With D7's waiver, WP-C2 joins: **5 days**. (Revision 1 claimed about 8 days for a set
+**Before the Spotter 1.0 tag (D3):** WP-S, WP-C1a, WP-B4a and WP-C2: **5 days**. None touches `crates/`; WP-C2's
+`ui/` harness home lands under D7's one-off waiver. (Revision 1 claimed about 8 days for a set
 that could not be built before Spotter: WP-C4 needs ADR 0037's WP-7 and WP-C3, WP-A1 needs ADR 0049's WP-4, and WP-C2
 sits under ADR 0042's hold.)
 
 **Before the Pitcrew 1.1 tag:** WP-B1 to WP-B3, WP-B5, WP-C1b, WP-B4b, WP-A1 to WP-A4 (as their dependencies land),
-WP-C2 and WP-C3 with Pitcrew's tour, because Pitcrew moves onto the shell in 1.1 and runs long jobs. WP-C4 joins the
+WP-C3 with Pitcrew's tour, because Pitcrew moves onto the shell in 1.1 and runs long jobs. WP-C4 joins the
 release gate of the first release after ADR 0037's WP-7 lands.
 
 **Rollback.** Each check is its own module with its own baseline, and can be reverted alone. WP-B1 is the one breaking
@@ -471,7 +502,10 @@ change; it lands with its adoption in every app in one change (rules 39, 43), so
 - **Logs** gain a served-kinds line per wire server and one line per tool spawn (failures at `info`, successes at
   `debug`); neither carries user content (ER-27).
 - **Limits.** C83 is a name-level check: a call through a closure or a macro can hide a sender, and the trait exemption
-  trusts that the named type is really used; the run-time counts (§1.5) are the backstop. The layout checks see geometry,
+  trusts that the named type is really built; the run-time counts (§1.5) are the backstop. `ReadBack` proves that a port
+  was read and agreed, not that it is the port the feature itself uses: a job could read back through a different port.
+  The mismatch test per job kind enforces the right one (it fakes the feature's port to disagree and expects
+  `Unconfirmed`). The layout checks see geometry,
   not meaning; the reviewed release screenshots stay.
 
 ## Alternatives considered
@@ -485,6 +519,8 @@ change; it lands with its adoption in every app in one change (rules 39, 43), so
   Rejected for now.
 - **C84 over `Option` and `String` fields too.** Measured at 128 and 20 sites in two Dyno crates alone, most of them
   honest; the check would be mostly waivers. Rejected (D2).
+- **A type-aware template lint for `Stamped`.** ESLint cannot see Angular's template types; an opaque generated type that
+  the compiler enforces is simpler and exact. Rejected.
 - **Pixel-diff screenshot regression in CI.** Brittle across fonts, OS builds and scales, high upkeep, and a diff does
   not say what is wrong. The fact-based checks plus a person's review of the release screenshots are used instead.
 - **A toast for every job end.** A toast is gone before it is read and has no time. The outcome sits on the feature's own
@@ -497,20 +533,35 @@ change; it lands with its adoption in every app in one change (rules 39, 43), so
 
 ## Decisions
 
-Accepted by the user on 2026-11-04, as recommended in revision 1: D1 (one rule with three parts), D4 (Material density
-tokens), D5 (the Windows page pass for every release that touches UI; a Rust-only patch may skip it with its reason), D6
-(5 000 rows and 500 notifications; Debrief gets its own larger profile when it adopts the tour). D2 and D3 were accepted
-too, but revision 2 changes their content, so they **need the user again**; D7 is new.
+All decided by the user on 2026-11-04:
+- **D1:** one rule (67) with three parts.
+- **D2:** C84 covers **collection fields only**. Measured in non-test code of `dyno-helper/src` and `dyno-agent/src` at
+  1589c46bb: 128 `: None,`, 24 empty vecs and 20 `String::new()` (the review counted 132, 25 and 21 in its scope). The
+  instance (`tools: vec![]`) is a collection field. (Revision 1 had recommended every constant-empty `Option` or
+  collection field.)
+- **D3:** the Spotter 1.0 gate is **5 days**: WP-S, WP-C1a and WP-B4a (2.5 days, audit and report-only checks) plus WP-C2,
+  the layout checks (2.5 days), which D7 allows into the window.
+- **D4:** inline forms align with Material's density tokens.
+- **D5:** the Windows page pass for every release whose diff touches UI or a shared UI package; a Rust-only patch may skip
+  it with its reason in the tag checklist.
+- **D6:** the `large` profile has 5 000 rows and 500 notifications; Debrief gets its own larger profile when it adopts
+  the tour.
+- **D7:** a **one-off waiver** of ADR 0042 §1's release-window hold for WP-C2 (test code in `paddock-e2e`, additive, no
+  product change), so it lands before the Spotter 1.0 tag and runs over Spotter's pages. It is recorded in the harness
+  register as proposed below; when `docs/harnesses.toml` exists (ADR 0042's WP, not on any branch on 2026-11-04), the
+  entry is added with it:
 
-- **D2 (changed, needs the user):** C84 covers **collection fields only** (recommended). Revision 1 recommended every
-  constant-empty `Option` or collection field. Measured in non-test code of `dyno-helper/src` and `dyno-agent/src` at
-  1589c46bb: 128 `: None,`, 24 empty vecs, 20 `String::new()` (the review counted 132, 25 and 21 in its scope). The
-  instance (`tools: vec![]`) is a collection field.
-- **D3 (changed, needs the user):** the Spotter 1.0 gate is WP-S, WP-C1a and WP-B4a (**2.5 days**, audit and report-only
-  checks), plus WP-C2 (2.5 days, **5 days** in all) only if D7 waives ADR 0042's hold. Revision 1's set of about 8 days
-  could not be built before Spotter: WP-C4 waits for ADR 0037's WP-7 and WP-C3, and WP-A1 for ADR 0049's WP-4 (or roots-only
-  `wire.toml` entries).
-- **D7 (new):** waive ADR 0042 §1's release-window hold so that WP-C2 (the layout checks in `paddock-e2e`, test code only,
-  additive, no product change) lands before the Spotter 1.0 tag and runs over Spotter's pages? Recommended: yes, as a
-  one-off waiver recorded in the harness register, because WP-S's layout part is then a run of the checks instead of a
-  hand review; no, if the Spotter window must stay closed to `ui/` changes.
+```toml
+[[harness]]
+id = "paddock-e2e-layout"
+paths = ["ui/projects/paddock-e2e/src/layout.ts", "ui/projects/paddock-e2e/src/layout-*.ts"]
+home = "feat/layout-checks"          # WP-C2's branch
+mode = "home"
+release_path = false
+[[harness.waiver]]
+of = "ADR 0042 §1 release-window hold"
+window = "spotter-v1.0.0"
+once = true
+why = "WP-C2 is additive test code; Spotter's layout part of WP-S runs it (ADR 0052 D7)"
+approved = "user 2026-11-04"
+```
