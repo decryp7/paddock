@@ -68,6 +68,9 @@ struct TrayUserData {
     visible: bool,
     /// Paddock patch: whether the shell accepted the last add (false when Explorer's notification area was not ready).
     added: bool,
+    /// Paddock patch: how many times the shell announced `TaskbarCreated`, and the outcome of the last re-add.
+    restarts: u32,
+    last_restart: Option<crate::GuidStatus>,
 }
 
 impl TrayUserData {
@@ -127,6 +130,8 @@ impl TrayIcon {
                 menu_on_right_click: attrs.menu_on_right_click,
                 visible: true,
                 added: false,
+                restarts: 0,
+                last_restart: None,
             };
 
             let hwnd = CreateWindowExW(
@@ -197,6 +202,18 @@ impl TrayIcon {
         unsafe {
             let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
             !userdata.is_null() && (*userdata).added
+        }
+    }
+
+    /// Paddock patch: how many `TaskbarCreated` messages the icon saw and what the last re-add came to (for the app's log).
+    pub fn taskbar_restarts(&self) -> (u32, Option<crate::GuidStatus>) {
+        unsafe {
+            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
+            if userdata.is_null() {
+                (0, None)
+            } else {
+                ((*userdata).restarts, (*userdata).last_restart)
+            }
         }
     }
 
@@ -394,6 +411,8 @@ unsafe extern "system" fn tray_proc(
                 userdata.visible,
             );
             userdata.added = status != crate::GuidStatus::NotAdded;
+            userdata.restarts += 1;
+            userdata.last_restart = Some(status);
         }
         WM_USER_SHOW_MENU_ON_LEFT_CLICK => {
             userdata.menu_on_left_click = wparam != 0;

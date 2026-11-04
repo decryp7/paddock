@@ -45,6 +45,9 @@ pub struct TrayState {
     wanted: Mutex<BTreeMap<String, (ItemSpec, Option<Frame>)>>,
     /// Whether the follow-up checks of [`schedule_verify`] have been started.
     verify_started: AtomicBool,
+    /// The one activation of a hidden start (macOS only; read by the tests elsewhere), see [`crate::tray_focus`].
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    focus: crate::tray_focus::StartFocus,
 }
 
 /// What one item last showed: the tooltip and the picture sent, and how many frames were drawn.
@@ -349,7 +352,8 @@ impl NativeIcon {
 
     /// Whether the OS holds this icon: Windows, the shell accepted the add (Explorer's notification area was ready); macOS, the status
     /// item's button sits in a visible window of the menu bar; elsewhere the call that made it is all there is to know.
-    fn shown(&self) -> Shown {
+    fn shown(&self, id: &str) -> Shown {
+        let _ = id;
         #[cfg(windows)]
         {
             match self.icon.with_inner_tray_icon(|t| t.is_added()) {
@@ -360,43 +364,95 @@ impl NativeIcon {
         }
         #[cfg(target_os = "macos")]
         {
-            let asked = self.icon.with_inner_tray_icon(|t| {
-                let Some(mtm) = objc2::MainThreadMarker::new() else {
-                    return Shown::No("not on the main thread".to_string());
-                };
-                let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-                let window = t.ns_status_item().and_then(|item| item.button(mtm)).and_then(|b| b.window());
-                let Some(w) = window else {
-                    return Shown::No(format!(
-                        "the status item has no window in the menu bar (app active {})",
-                        app.isActive()
-                    ));
-                };
-                let (frame, occluded) = (
-                    w.frame(),
-                    !w.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible),
-                );
-                let what = format!(
-                    "window visible {}, occluded {occluded}, frame {:.0},{:.0} {:.0}x{:.0}, app active {}, policy {:?}",
-                    w.isVisible(),
-                    frame.origin.x,
-                    frame.origin.y,
-                    frame.size.width,
-                    frame.size.height,
-                    app.isActive(),
-                    app.activationPolicy()
-                );
-                if w.isVisible() && !occluded && frame.size.width > 0.0 {
-                    Shown::Yes
-                } else {
-                    Shown::No(what)
-                }
-            });
-            asked.unwrap_or_else(|e| Shown::No(format!("the icon could not be asked: {e}")))
+            use crate::tray_shown::{judge, Verdict};
+            // The real test: an on-screen Control Center window named after the item's autosave name.
+            let name = tray_identity::autosave_name(id);
+            match crate::tray_platform::on_screen_windows() {
+                Ok(windows) => match judge(&windows, &name) {
+                    Verdict::Shown => Shown::Yes,
+                    Verdict::NotShown { control_center_windows } => Shown::No(format!(
+                        "no on-screen Control Center window is named {name} ({control_center_windows} Control Center window(s) on screen)"
+                    )),
+                    Verdict::NamesUnreadable => self.own_window_shown(),
+                },
+                Err(e) => Shown::No(format!("the window list could not be read: {e}")),
+            }
         }
         #[cfg(not(any(windows, target_os = "macos")))]
         {
             Shown::Yes
+        }
+    }
+
+    /// macOS, when the window server does not name Control Center's windows: the status item's own window is visible, not occluded
+    /// and sized (the test before the window list was readable).
+    #[cfg(target_os = "macos")]
+    fn own_window_shown(&self) -> Shown {
+        let asked = self.icon.with_inner_tray_icon(|t| {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                return Shown::No("not on the main thread".to_string());
+            };
+            let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            let window = t.ns_status_item().and_then(|item| item.button(mtm)).and_then(|b| b.window());
+            let Some(w) = window else {
+                return Shown::No(format!("the status item has no window in the menu bar (app active {})", app.isActive()));
+            };
+            let (frame, occluded) = (w.frame(), !w.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible));
+            if w.isVisible() && !occluded && frame.size.width > 0.0 {
+                Shown::Yes
+            } else {
+                Shown::No(format!(
+                    "own window visible {}, occluded {occluded}, frame {:.0},{:.0} {:.0}x{:.0}",
+                    w.isVisible(),
+                    frame.origin.x,
+                    frame.origin.y,
+                    frame.size.width,
+                    frame.size.height
+                ))
+            }
+        });
+        asked.unwrap_or_else(|e| Shown::No(format!("the icon could not be asked: {e}")))
+    }
+
+    /// Facts for the log about this icon (see [`IconOps::detail`]).
+    fn detail(&self, id: &str) -> String {
+        #[cfg(target_os = "macos")]
+        {
+            let window = match self.own_window_shown() {
+                Shown::Yes => "its own window is visible".to_string(),
+                Shown::No(why) => format!("its own window: {why}"),
+            };
+            let name = tray_identity::autosave_name(id);
+            let named = crate::tray_platform::on_screen_windows().map_or_else(
+                |e| format!("window list unreadable ({e})"),
+                |w| match crate::tray_shown::judge(&w, &name) {
+                    crate::tray_shown::Verdict::Shown => "on-screen Control Center window named after it: yes".to_string(),
+                    crate::tray_shown::Verdict::NotShown { control_center_windows } => {
+                        format!("on-screen Control Center window named after it: no ({control_center_windows} Control Center windows)")
+                    }
+                    crate::tray_shown::Verdict::NamesUnreadable => "Control Center's window names are not readable".to_string(),
+                },
+            );
+            format!("{named}; {window}")
+        }
+        #[cfg(windows)]
+        {
+            let _ = id;
+            self.icon
+                .with_inner_tray_icon(|t| {
+                    let (n, last) = t.taskbar_restarts();
+                    format!(
+                        "shell holds the icon {}; TaskbarCreated seen {n} time(s), last re-add outcome {}",
+                        t.is_added(),
+                        last.map_or_else(|| "none".to_string(), |s| format!("{s:?}"))
+                    )
+                })
+                .unwrap_or_else(|e| format!("the icon could not be asked: {e}"))
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = id;
+            String::new()
         }
     }
 
@@ -449,18 +505,13 @@ impl NativeIcon {
         main.assert_main();
         #[cfg(target_os = "macos")]
         {
+            // The name was given when the status item was made (the vendored tray-icon's autosave-name provider); read it back.
             let name = tray_identity::autosave_name(item);
-            let for_closure = name.clone();
-            let set = self.icon.with_inner_tray_icon(move |t| match t.ns_status_item() {
-                Some(status_item) => {
-                    status_item.setAutosaveName(Some(&objc2_foundation::NSString::from_str(&for_closure)));
-                    true
-                }
-                None => false,
-            });
-            match set {
-                Ok(true) => format!("autosave name {name}"),
-                Ok(false) => format!("autosave name {name} NOT set: the icon has no status item"),
+            let read = self.icon.with_inner_tray_icon(|t| t.ns_status_item().map(|i| i.autosaveName().to_string()));
+            match read {
+                Ok(Some(set)) if set == name => format!("autosave name {name}"),
+                Ok(Some(other)) => format!("autosave name {name} NOT set: the status item says \"{other}\""),
+                Ok(None) => format!("autosave name {name} NOT set: the icon has no status item"),
                 Err(e) => format!("autosave name {name} NOT set: {e}"),
             }
         }
@@ -501,6 +552,9 @@ pub enum TrayCommand {
         /// The unavailable frame of every item.
         frames: Vec<(String, Frame)>,
     },
+    /// Log, a few seconds after the icons were made, what the OS shows of each (the evidence a diagnostic bundle needs when icons are
+    /// missing); changes nothing.
+    Diagnose,
     /// Check that the OS shows every wanted icon, and add again each one that it does not (follow-up number `pass` after the start).
     Verify {
         /// Which follow-up check this is, from 0.
@@ -540,6 +594,18 @@ pub trait IconOps {
     fn save_position(&mut self, id: &str);
     /// Whether the OS shows the icon of item `id` now (a made icon the OS dropped, or never took, is not shown).
     fn shown(&mut self, id: &str) -> Shown;
+    /// Whether a check may remove and make again an icon that is not shown. Windows and Linux: yes (the shell or host dropped the
+    /// add). macOS: never, a new status item made after ControlCenter is up stays off screen until the app is active, so a re-make
+    /// only hides it again (and crashed the app once).
+    fn remakes_unshown(&self) -> bool;
+    /// Platform facts about item `id` for the log (macOS: the window server's view of the item; Windows: whether the shell holds it
+    /// and the `TaskbarCreated` re-adds).
+    fn detail(&mut self, id: &str) -> String;
+    /// Platform facts for the log that do not belong to one item (macOS: ControlCenter's pid and start time, whether Dyno is
+    /// active; Windows: Explorer's pid and start time).
+    fn context(&mut self) -> String;
+    /// What it usually means when none of the icons is shown a few seconds after they were made, if the platform has such a cause.
+    fn off_screen_hint(&self) -> Option<&'static str>;
 }
 
 /// [`IconOps`] over the real icons; only the main thread can make one (it holds a [`MainToken`]).
@@ -602,7 +668,36 @@ impl IconOps for NativeOps<'_> {
         if !crate::tray_host::current(self.app).is_shown() {
             return Shown::No("the desktop has no StatusNotifier host".to_string());
         }
-        icon.shown()
+        icon.shown(id)
+    }
+
+    fn remakes_unshown(&self) -> bool {
+        !cfg!(target_os = "macos")
+    }
+
+    fn detail(&mut self, id: &str) -> String {
+        NativeIcon::find(self.main, self.app, id).map_or_else(|| "no icon".to_string(), |icon| icon.detail(id))
+    }
+
+    fn context(&mut self) -> String {
+        #[cfg(any(target_os = "macos", windows))]
+        {
+            crate::tray_platform::context()
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            String::new()
+        }
+    }
+
+    fn off_screen_hint(&self) -> Option<&'static str> {
+        if cfg!(target_os = "macos") {
+            Some("macOS holds Dyno's menu-bar items off screen until Dyno has been activated once in this login session")
+        } else if cfg!(windows) {
+            Some("Explorer shows none of Dyno's icons: they may sit in the overflow, or Explorer was not ready (see the GUID and TaskbarCreated lines)")
+        } else {
+            None
+        }
     }
 }
 
@@ -638,6 +733,10 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
                     first_error.get_or_insert(e);
                 }
             }
+            if !plan.create.is_empty() {
+                let context = ops.context();
+                logging::info(&format!("tray sync: {} icon(s) made; {context}", plan.create.len()));
+            }
             first_error.map_or(Ok(()), Err)
         }
         TrayCommand::Paint { item, frame } => {
@@ -654,6 +753,10 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
         }
         TrayCommand::Verify { pass } => {
             verify(ops, state, pass);
+            Ok(())
+        }
+        TrayCommand::Diagnose => {
+            diagnose(ops, state);
             Ok(())
         }
     }
@@ -694,6 +797,16 @@ fn verify<O: IconOps>(ops: &mut O, state: &TrayState, pass: u32) -> usize {
             shown += 1;
             continue;
         };
+        if present && !ops.remakes_unshown() {
+            // macOS: a status item made after ControlCenter is up stays off screen until the app is active; making it again only
+            // hides the new one too (and crashed the app once). The check reports and leaves it.
+            missing += 1;
+            logging::info(&format!(
+                "tray check #{pass}: icon {} is not shown ({why}); not made again on this platform",
+                tray_id(id)
+            ));
+            continue;
+        }
         logging::info(&format!(
             "tray check #{pass}: icon {} is not shown ({why}); adding it again",
             tray_id(id)
@@ -722,6 +835,35 @@ fn verify<O: IconOps>(ops: &mut O, state: &TrayState, pass: u32) -> usize {
     missing
 }
 
+/// How long after the icons were made [`diagnose`] looks at what the OS shows.
+const DIAGNOSE_AFTER_SECS: u64 = 5;
+
+/// Logs what the OS shows of every wanted icon, with the platform's facts, and one summary line when none is shown (ER-27).
+fn diagnose<O: IconOps>(ops: &mut O, state: &TrayState) {
+    let wanted: Vec<String> = lock(&state.wanted).keys().cloned().collect();
+    let context = ops.context();
+    let mut shown = 0;
+    for id in &wanted {
+        let is_shown = ops.shown(id);
+        let detail = ops.detail(id);
+        let (word, why) = match &is_shown {
+            Shown::Yes => ("shown", String::new()),
+            Shown::No(why) => ("NOT shown", format!(" ({why})")),
+        };
+        shown += usize::from(is_shown == Shown::Yes);
+        logging::info(&format!("tray diagnose: icon {} {word}{why}; {detail}", tray_id(id)));
+    }
+    logging::info(&format!(
+        "tray diagnose: {shown} of {} icon(s) shown {DIAGNOSE_AFTER_SECS} s after they were made; {context}",
+        wanted.len()
+    ));
+    if shown == 0 && !wanted.is_empty() {
+        if let Some(hint) = ops.off_screen_hint() {
+            logging::info(&format!("tray diagnose: {hint}"));
+        }
+    }
+}
+
 /// Starts the follow-up checks once per process: a thread that waits [`verify_delay`] before each check and sends it to the main
 /// thread. The first add at login can fail without a signal (Windows' taskbar, the menu bar, a status-notifier host not up yet).
 fn schedule_verify(app: &AppHandle<Wry>) {
@@ -730,6 +872,14 @@ fn schedule_verify(app: &AppHandle<Wry>) {
         return;
     }
     let app = app.clone();
+    let diagnose_app = app.clone();
+    let diagnosing = std::thread::Builder::new().name("tray-diagnose".into()).spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(DIAGNOSE_AFTER_SECS));
+        send(&diagnose_app, TrayCommand::Diagnose);
+    });
+    if let Err(e) = diagnosing {
+        logging::info(&format!("tray diagnose: the thread could not start: {e}"));
+    }
     let spawned = std::thread::Builder::new().name("tray-checks".into()).spawn(move || {
         let mut pass = 0;
         while let Some(wait) = verify_delay(pass) {
@@ -846,12 +996,32 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, 
     let applied = on_main(app, move |main| {
         #[cfg(windows)]
         tray_icon::set_guid_provider(tray_identity::guid_for_tray_id);
+        #[cfg(target_os = "macos")]
+        tray_icon::set_autosave_name_provider(tray_identity::autosave_name_for_tray_id);
         let state = state_of(&handle);
         apply(&mut NativeOps { main, app: &handle }, &state, cmd)
     })?;
     // Whatever the first add did, the checks follow: a refused or dropped add is made again when the OS is ready.
     schedule_verify(app);
     applied
+}
+
+/// macOS: at a hidden start, activates Dyno once so ControlCenter shows the menu-bar items made after it started, then gives focus
+/// back to the app that was in front ([`crate::tray_focus`]). Called from the run loop's `Ready`, after the tray exists; returns at
+/// once (the sequence waits for AppKit, so it runs on its own thread). Never for a start by hand, never a second time.
+#[cfg(target_os = "macos")]
+pub fn activate_at_start(app: &AppHandle<Wry>, hidden: bool) {
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new().name("tray-activation".into()).spawn(move || {
+        let state = state_of(&handle);
+        let icons = !lock(&state.items).is_empty();
+        let mut port = crate::tray_platform::NativeFocus { app: handle.clone() };
+        let outcome = crate::tray_focus::activate_once(&mut port, &state.focus, hidden, icons);
+        logging::info(&format!("tray activation: {outcome:?}"));
+    });
+    if let Err(e) = spawned {
+        logging::info(&format!("tray activation: the thread could not start: {e}"));
+    }
 }
 
 /// The pass number of a check asked for by the tray host appearing (not one of the timed follow-ups, whose passes count from 0).
@@ -981,6 +1151,8 @@ mod tests {
         refuse_makes: usize,
         /// Icons the OS took but does not show (a dropped add).
         not_shown: BTreeSet<String>,
+        /// Whether the platform lets a check re-make an icon that is not shown (false stands in for macOS).
+        remake: bool,
     }
 
     impl FakeOps {
@@ -996,6 +1168,7 @@ mod tests {
                 tips: Vec::new(),
                 refuse_makes: 0,
                 not_shown: BTreeSet::new(),
+                remake: true,
             }
         }
 
@@ -1045,6 +1218,18 @@ mod tests {
             } else {
                 Shown::No("fake".to_string())
             }
+        }
+        fn remakes_unshown(&self) -> bool {
+            self.remake
+        }
+        fn detail(&mut self, _: &str) -> String {
+            "fake detail".to_string()
+        }
+        fn context(&mut self) -> String {
+            "fake context".to_string()
+        }
+        fn off_screen_hint(&self) -> Option<&'static str> {
+            Some("fake hint")
         }
     }
 
@@ -1154,6 +1339,118 @@ mod tests {
         )
         .unwrap();
         assert!(ops.drawn > drawn, "the re-made icon gets its picture");
+    }
+
+    #[test]
+    fn verify_on_macos_never_removes_an_icon() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        ops.remake = false;
+        sync(&mut ops, &state, 4).unwrap();
+        // ControlCenter parks the items off screen: the shown test says No for every one, at every check.
+        ops.not_shown.extend(ops.live.clone());
+        for pass in 0..3 {
+            apply(&mut ops, &state, TrayCommand::Verify { pass }).unwrap();
+        }
+        assert_eq!(ops.removed, 0, "a re-make after ControlCenter is up hides the item again; macOS only reports");
+        assert_eq!(ops.made, 4, "no icon is made again");
+        assert_eq!(ops.live.len(), 4);
+    }
+
+    /// Stands in for AppKit's activation: records the calls in order.
+    struct FakeFocus {
+        front: Option<crate::tray_focus::Front>,
+        active: bool,
+        /// How many activation calls are ignored before one works (the cooperative one is refused while another app is active).
+        ignored: usize,
+        calls: Vec<String>,
+    }
+
+    impl crate::tray_focus::FocusPort for FakeFocus {
+        fn frontmost(&mut self) -> Option<crate::tray_focus::Front> {
+            self.calls.push("frontmost".into());
+            self.front.clone()
+        }
+        fn is_active(&mut self) -> bool {
+            self.active
+        }
+        fn activate(&mut self) -> Result<(), String> {
+            self.calls.push("activate".into());
+            if self.ignored > 0 {
+                self.ignored -= 1;
+            } else {
+                self.active = true;
+            }
+            Ok(())
+        }
+        fn activate_forced(&mut self) -> Result<(), String> {
+            self.calls.push("activate_forced".into());
+            self.active = true;
+            Ok(())
+        }
+        fn give_back(&mut self, to: &crate::tray_focus::Front) -> Result<(), String> {
+            self.calls.push(format!("give_back {}", to.name));
+            self.active = false;
+            Ok(())
+        }
+        fn wait(&mut self, _ms: u64) {}
+    }
+
+    fn finder() -> crate::tray_focus::Front {
+        crate::tray_focus::Front {
+            pid: 101,
+            name: "Finder".into(),
+        }
+    }
+
+    #[test]
+    fn a_hidden_start_on_macos_activates_the_app_once_after_the_tray_exists() {
+        use crate::tray_focus::{activate_once, Outcome};
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        let mut port = FakeFocus {
+            front: Some(finder()),
+            active: false,
+            ignored: 0,
+            calls: Vec::new(),
+        };
+        // No icons yet: nothing is activated and the one activation is not used up.
+        let early = activate_once(&mut port, &state.focus, true, !lock(&state.items).is_empty());
+        assert!(matches!(early, Outcome::Skipped(_)), "{early:?}");
+        assert!(port.calls.is_empty());
+        sync(&mut ops, &state, 4).unwrap();
+        let icons = !lock(&state.items).is_empty();
+        // A start by hand never activates.
+        assert!(matches!(activate_once(&mut port, &state.focus, false, icons), Outcome::Skipped(_)));
+        assert!(port.calls.is_empty());
+        // The hidden start does, once, and gives the focus back to the app that had it.
+        let done = activate_once(&mut port, &state.focus, true, icons);
+        assert_eq!(
+            done,
+            Outcome::Activated {
+                how: "activate",
+                returned: Some(finder())
+            }
+        );
+        assert_eq!(port.calls, ["frontmost", "activate", "give_back Finder"]);
+        // Never again (user focus is not stolen later).
+        assert!(matches!(activate_once(&mut port, &state.focus, true, icons), Outcome::Skipped(_)));
+        assert_eq!(port.calls.len(), 3);
+    }
+
+    #[test]
+    fn a_refused_cooperative_activation_falls_back_to_the_forced_one() {
+        use crate::tray_focus::{activate_once, Outcome};
+        let state = TrayState::default();
+        let mut port = FakeFocus {
+            front: Some(finder()),
+            active: false,
+            ignored: 1,
+            calls: Vec::new(),
+        };
+        let done = activate_once(&mut port, &state.focus, true, true);
+        assert!(matches!(done, Outcome::Activated { how: "activate_forced", .. }), "{done:?}");
+        assert_eq!(port.calls, ["frontmost", "activate", "activate_forced", "give_back Finder"]);
     }
 
     #[test]

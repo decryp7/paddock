@@ -52,3 +52,16 @@
   Run on `paddock-win11-test` (snapshot `gui-session-tools`, 2026-11-04): without `apply_guid` `a_tip_change_names_the_icon_by_its_guid`
   fails; with it both tests pass.
 - Removal: when upstream tray-icon sets the tip by GUID and caps it at 127 units, delete this patch.
+
+### tray-icon-autosave-name.patch (macOS, and a Windows read-out)
+
+- `src/lib.rs`: `set_autosave_name_provider` and its type `AutosaveNameProvider`, like the GUID provider. `src/platform_impl/macos/mod.rs`,
+  `TrayIcon::create`: the status item gets its `autosaveName` from the provider right after `statusItemWithLength` and before the image,
+  tooltip or menu is set. Upstream never sets one; Dyno set it after `build` (ADR 0028), so ControlCenter first saw the item as
+  `Item-0` and logged `Host id changed from ...Item-0... to ...menubar.<n>`. Housekeeping, not the cause of the missing items at login
+  (that is the activation gate, lessons.md 2026-11-05).
+- `src/platform_impl/windows/mod.rs` and `src/lib.rs`: `TrayIcon::taskbar_restarts() -> (count, last outcome)`: how many `TaskbarCreated`
+  messages the icon saw and what its re-add came to (`GuidStatus`). Dyno logs it in `tray diagnose:` so a diagnostic bundle from a PC
+  whose icons are missing at logon shows whether Explorer's taskbar was created after the add. Elsewhere `(0, None)`.
+- Removal: when upstream lets a builder set the autosave name before the item connects, delete the macOS part; the Windows read-out goes
+  with the GUID patch.

@@ -24,12 +24,15 @@ pub mod shell;
 pub mod supervise;
 pub mod tray;
 pub mod tray_away;
+pub mod tray_focus;
 pub mod tray_host;
 pub mod tray_identity;
 pub mod tray_look;
 pub mod tray_model;
+pub mod tray_platform;
 #[cfg(target_os = "macos")]
 pub mod tray_position;
+pub mod tray_shown;
 #[cfg(target_os = "macos")]
 pub mod tray_text;
 pub mod wol_menu;
@@ -414,6 +417,9 @@ fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
         Some(why) => format!("started hidden ({})", why.describe()),
         None => "started with a window".to_string(),
     });
+    // ControlCenter keeps menu-bar items made after it started off screen until the app has been active once: a hidden start never
+    // is, so it activates once now (the tray exists) and gives focus back. A start by hand is active already.
+    tray::activate_at_start(app, hidden);
     if !hidden && app.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
         if let Err(e) = paddock_window::tauri::create_main(app) {
             log::error!(Error = e.message.as_str(); "The main window could not be opened");
