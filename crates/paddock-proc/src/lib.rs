@@ -30,6 +30,7 @@ mod command;
 pub mod console;
 pub mod hint;
 mod identity;
+pub mod installed;
 mod instance;
 #[cfg(windows)]
 mod job;
