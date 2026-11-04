@@ -12,7 +12,7 @@ use crate::helper_policy::{RequestKind, Visibility};
 use crate::helper_requests::{
     validate_tool_bytes, CounterQuery, ExtrasKind, ProcessQuery, RequestError, SmartQuery, ToolKind, MAX_LOG_REPLY,
 };
-use crate::network_traffic::TrafficCounter;
+use crate::network_traffic::TrafficAnswer;
 use crate::smart::SmartReply;
 use crate::wake::{IfName, WakeEntry, WakeTag, WolReply};
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,10 @@ use serde::{Deserialize, Serialize};
 /// - 4: `SmartDisk` gained `wear_id`, `bytes_written` and `rated_bytes` (the helper's SMART reply carries the full wear reading).
 /// - 5: `FirewallSource` gained `via` (helper-wiring plan, WP-0). The helper writes `Local`; the agent always overwrites it with
 ///   `Helper` on a helper reply. 1.1.0 is unreleased, so every dev machine with an older helper must Repair.
-pub const HELPER_API: u32 = 5;
+/// - 6: `HelperReply::Counters(Vec<TrafficCounter>)` became `Traffic(TrafficAnswer)` (helper-wiring plan, WP-TRF): the helper
+///   scopes the counters to the asking account and adds the other accounts' programs as one total. A helper of API 5 would send a
+///   reply the agent cannot read, so every dev machine with an older helper must Repair.
+pub const HELPER_API: u32 = 6;
 
 /// The oldest helper build this Dyno accepts as `Ready`. Raised only when a helper fix must reach users (ADR 0027 section 4).
 pub const MIN_HELPER_VERSION: &str = "1.1.0";
@@ -162,8 +165,8 @@ impl HelperRequest {
 pub enum HelperReply {
     /// Answer to `Info`: who the helper is, and what this caller sees of it.
     About(HelperInfo, CallerView),
-    /// Answer to `Traffic`.
-    Counters(Vec<TrafficCounter>),
+    /// Answer to `Traffic`, scoped to the caller: its own programs and the system's, and other accounts' as the policy says.
+    Traffic(TrafficAnswer),
     /// Answer to `Audit`.
     Entries(Vec<AuditEntry>),
     /// Answer to `Firewall`, already reduced to what the caller may have.
@@ -583,12 +586,19 @@ mod tests {
             HelperMessage::Request(HelperRequest::Traffic),
             HelperMessage::Request(HelperRequest::Uninstall),
             HelperMessage::Request(HelperRequest::Audit(5)),
-            HelperMessage::Reply(HelperReply::Counters(vec![TrafficCounter {
-                pid: 4,
-                name: "x".into(),
-                bytes_in: 1,
-                bytes_out: 2,
-            }])),
+            HelperMessage::Reply(HelperReply::Traffic(TrafficAnswer {
+                counters: vec![crate::network_traffic::TrafficCounter {
+                    pid: 4,
+                    name: "x".into(),
+                    bytes_in: 1,
+                    bytes_out: 2,
+                }],
+                others: Some(crate::network_traffic::OthersTraffic {
+                    programs: 3,
+                    bytes_in: 4,
+                    bytes_out: 5,
+                }),
+            })),
             HelperMessage::Reply(HelperReply::About(
                 info("1", 1),
                 CallerView {
@@ -608,6 +618,25 @@ mod tests {
             let bytes = postcard::to_stdvec(&m).unwrap();
             assert_eq!(postcard::from_bytes::<HelperMessage>(&bytes).unwrap(), m);
         }
+    }
+
+    /// A changed wire must never keep its API number: the history above names the current one, so a change that bumps the constant
+    /// without saying why (or says why without bumping) fails here.
+    #[test]
+    fn the_wire_history_names_the_current_api() {
+        let source = include_str!("helper_wire.rs");
+        let line = format!("/// - {HELPER_API}: ");
+        assert!(
+            source.contains(&line),
+            "add `{line}<what changed>` to the wire history of HELPER_API"
+        );
+        let newest = source
+            .lines()
+            .filter_map(|l| l.strip_prefix("/// - "))
+            .filter_map(|l| l.split_once(": "))
+            .filter_map(|(n, _)| n.parse::<u32>().ok())
+            .max();
+        assert_eq!(newest, Some(HELPER_API), "the newest history entry is the current API");
     }
 
     #[test]

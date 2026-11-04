@@ -124,7 +124,7 @@ fn seen(owner: &RawOwner, caller: &HelperUser, scope: Visibility) -> Seen {
         RawOwner::Service(_, Some(id)) if id == caller => Seen::Show(OwnerKind::Caller),
         RawOwner::Service(n, _) => Seen::Show(OwnerKind::Service(n.clone())),
         RawOwner::Account { id, .. } if id == caller => Seen::Show(OwnerKind::Caller),
-        RawOwner::Account { .. } => match scope {
+        RawOwner::Account { .. } | RawOwner::Unknown => match scope {
             Visibility::Full | Visibility::Own(OthersPolicy::Detail) => Seen::Show(OwnerKind::OtherUser),
             Visibility::Own(OthersPolicy::Total) => Seen::Count,
             Visibility::Own(OthersPolicy::Hidden) => Seen::Hide,

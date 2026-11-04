@@ -3,9 +3,10 @@ import { TreeActions } from '../../shared/tree-actions';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
-import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
+import type { ConnectionRow, ListenerRow, NetProto, ReadVia } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatRate, formatRelative } from '../../shared/format';
+import { formatBytes, formatRate, formatRelative } from '../../shared/format';
+import { ReadingSource } from '../../core/reading-source';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
@@ -41,7 +42,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions],
+  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -61,7 +62,11 @@ function readCollapsed(): Set<string> {
           }
           @if (thisPc(); as ip) { <span class="this-pc">This computer {{ ip }}</span> }
         </p>
-        @if (s.trafficNote; as why) { <p class="faint traffic-note">{{ why }}</p> }
+        <dy-reading-source [via]="s.trafficVia" />
+        @if (s.trafficNote; as why) { @if (!sayingWhy(s.trafficVia)) { <p class="faint traffic-note">{{ why }}</p> } }
+        @if (s.trafficOthers; as o) {
+          <p class="faint traffic-others num" data-testid="traffic-others">Other users: {{ o.programs }} {{ o.programs === 1 ? 'program' : 'programs' }} · ↓ {{ bytes(o.bytesIn) }} · ↑ {{ bytes(o.bytesOut) }} in total since they started</p>
+        }
       }
 
       <div class="bar" role="group" aria-label="Filters">
@@ -250,6 +255,9 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly trafficByName = computed(() => new Map((this.store.snapshot()?.traffic ?? []).map((t) => [t.name, t])));
   protected readonly trafficOf = (title: string) => this.trafficByName().get(title) ?? null;
   protected readonly rate = formatRate;
+  protected readonly bytes = formatBytes;
+  /** The reading source already gives the reason (and the button) for these, so the note is not repeated. */
+  protected readonly sayingWhy = (via: ReadVia): boolean => typeof via === 'object';
   protected readonly hostName = (c: ConnectionRow): string | null => this.store.names()[c.remote] ?? null;
   protected readonly noteDismissed = signal(false);
   protected readonly short = (a: string) => middleEllipsis(a);

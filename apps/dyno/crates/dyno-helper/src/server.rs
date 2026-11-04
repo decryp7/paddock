@@ -217,6 +217,7 @@ mod tests {
                 processes: Box::new(dyno_core::helper_processes::NoProcesses),
                 smart: Box::new(crate::tools::NotHere("none")),
                 tools: Box::new(crate::tools::NotHere("none")),
+                firewall: Box::new(crate::tools::NotHere("none")),
                 wakes: Box::new(dyno_core::wake::NoWakes),
                 wol: Box::new(dyno_core::wake::NoWakes),
                 log_tail: Box::new(|_| vec![]),

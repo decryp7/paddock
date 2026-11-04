@@ -341,6 +341,9 @@ pub struct NetworkSnapshot {
     /// Who read the per-program traffic.
     #[serde(default)]
     pub traffic_via: crate::read_via::ReadVia,
+    /// What other accounts' programs moved together, for a caller who may not see them one by one (the helper's scoping).
+    #[serde(default)]
+    pub traffic_others: Option<crate::network_traffic::OthersTraffic>,
     /// Who read the socket owners.
     #[serde(default)]
     pub owners_via: crate::read_via::ReadVia,
@@ -460,6 +463,7 @@ pub fn build_with_geo(
         traffic: Vec::new(),
         traffic_note: None,
         traffic_via: crate::read_via::ReadVia::Local,
+        traffic_others: None,
         owners_via: crate::read_via::ReadVia::Local,
     }
 }

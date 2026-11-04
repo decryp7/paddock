@@ -13,6 +13,7 @@ use dyno_core::btm::{LoginItemsReader, LoginItemsReply};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::{access, visibility, OthersPolicy, Standing};
+use dyno_core::helper_processes::{ProcessSweeper, RawProcess, Sweep};
 use dyno_core::helper_requests::{SmartQuery, ToolKind};
 use dyno_core::helper_wire::{HelperAction, HelperInfo, HelperReply, HelperRequest, HelperUser, ToolStatus, HELPER_API};
 use dyno_core::inventory::MemoryLayout;
@@ -44,10 +45,21 @@ impl Caller {
         }
     }
 
+    /// The account the connection would have established (a Unix uid): the owner is uid 501, the others differ, so scoping by
+    /// account has someone to compare with.
+    pub fn uid(self) -> u32 {
+        match self {
+            Caller::Owner => 501,
+            Caller::Admin => 502,
+            Caller::Other => 503,
+        }
+    }
+
     fn ctx(self, request: &HelperRequest) -> Ctx {
         let standing = self.standing();
         let mut ctx = Ctx::anonymous(Some(4242));
-        ctx.account = Some(owner());
+        ctx.uid = Some(self.uid());
+        ctx.account = Some(HelperUser::Uid(self.uid()));
         ctx.access = access(request.kind(), standing);
         ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
         ctx
@@ -62,8 +74,8 @@ pub struct Readers {
     pub traffic: Vec<TrafficCounter>,
     /// The SMART reply.
     pub smart: SmartReply,
-    /// The machine's processes as the OS reads them (the helper scopes them to the caller).
-    pub processes: Vec<dyno_core::helper_processes::RawProcess>,
+    /// The process list the helper's scoping reads whose a program is from (empty: nobody's program is known).
+    pub processes: Vec<RawProcess>,
 }
 
 impl Default for Readers {
@@ -96,6 +108,22 @@ impl ProcessTraffic for Traffic {
         Ok(self.0.clone())
     }
 }
+struct Sweeps(Vec<RawProcess>);
+impl ProcessSweeper for Sweeps {
+    fn sweep(&self) -> Result<Sweep, PlatformError> {
+        Ok(Sweep {
+            processes: self.0.clone(),
+            homes: Vec::new(),
+            taken_at: 1,
+        })
+    }
+}
+struct NoFirewall;
+impl dyno_core::firewall::FirewallReader for NoFirewall {
+    fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
+        Err(PlatformError::Unsupported("The rig has no firewall.".into()))
+    }
+}
 struct Items;
 impl LoginItemsReader for Items {
     fn read(&self, _: u32) -> Result<LoginItemsReply, PlatformError> {
@@ -110,16 +138,6 @@ struct Smart(SmartReply);
 impl SmartReader for Smart {
     fn read(&self, _: SmartQuery) -> Result<SmartReply, PlatformError> {
         Ok(self.0.clone())
-    }
-}
-struct Sweeps(Vec<dyno_core::helper_processes::RawProcess>);
-impl dyno_core::helper_processes::ProcessSweeper for Sweeps {
-    fn sweep(&self) -> Result<dyno_core::helper_processes::Sweep, PlatformError> {
-        Ok(dyno_core::helper_processes::Sweep {
-            processes: self.0.clone(),
-            homes: Vec::new(),
-            taken_at: 1_000,
-        })
     }
 }
 struct Tools;
@@ -155,6 +173,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         processes: Box::new(Sweeps(readers.processes)),
         smart: Box::new(Smart(readers.smart)),
         tools: Box::new(Tools),
+        firewall: Box::new(NoFirewall),
         wakes: Box::new(dyno_core::wake::NoWakes),
         wol: Box::new(dyno_core::wake::NoWakes),
         log_tail: Box::new(|_| Vec::new()),
