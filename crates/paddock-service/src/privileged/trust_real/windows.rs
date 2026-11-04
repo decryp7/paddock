@@ -180,11 +180,21 @@ mod win {
         const BACKUP_SEMANTICS: u32 = 0x0200_0000;
         const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
         const REPARSE: u32 = 0x400;
+        // WRITE_OWNER only when the owner may be set: a caller without the right to name an owner (a test, an unprivileged
+        // account) must not be refused at the open for an access it never uses.
+        let access = READ_CONTROL
+            | WRITE_DAC
+            | FILE_READ_ATTRIBUTES
+            | if may_set_owner { WRITE_OWNER } else { 0 };
+        let step = |what: &'static str| {
+            move |e: io::Error| io::Error::new(e.kind(), format!("{what}: {e}"))
+        };
         let file = std::fs::OpenOptions::new()
-            .access_mode(READ_CONTROL | WRITE_DAC | WRITE_OWNER | FILE_READ_ATTRIBUTES)
+            .access_mode(access)
             .share_mode(7)
             .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
-            .open(path)?;
+            .open(path)
+            .map_err(step("open the folder to lock it"))?;
         let meta = file.metadata()?;
         if meta.file_attributes() & REPARSE != 0 || !meta.is_dir() {
             return Err(io::Error::new(
@@ -212,7 +222,8 @@ mod win {
         // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER for the whole call; `sd` is a valid self-relative
         // descriptor (owner, protected DACL) that outlives it.
         unsafe { SetKernelObjectSecurity(HANDLE(file.as_raw_handle()), what, sd.0) }
-            .map_err(|e| io::Error::from_raw_os_error(e.code().0 & 0xffff))?;
+            .map_err(|e| io::Error::from_raw_os_error(e.code().0 & 0xffff))
+            .map_err(step("set the folder's security"))?;
         Ok(())
     }
 
