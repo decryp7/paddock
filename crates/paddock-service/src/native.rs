@@ -129,6 +129,7 @@ mod mac {
     pub struct SmAppService {
         plist: String,
         daemon: bool,
+        main_app: bool,
     }
 
     impl SmAppService {
@@ -137,6 +138,16 @@ mod mac {
             Self {
                 plist: format!("{}.plist", spec.label()),
                 daemon: spec.kind() == Kind::SystemService,
+                main_app: false,
+            }
+        }
+
+        /// The app itself as a login item (`SMAppService.mainApp`: one row in Login Items, nothing in `~/Library/LaunchAgents`).
+        pub fn main_app() -> Self {
+            Self {
+                plist: String::new(),
+                daemon: false,
+                main_app: true,
             }
         }
 
@@ -144,7 +155,9 @@ mod mac {
             let name = NSString::from_str(&self.plist);
             // SAFETY: class methods taking a valid NSString.
             unsafe {
-                if self.daemon {
+                if self.main_app {
+                    Sm::mainAppService()
+                } else if self.daemon {
                     Sm::daemonServiceWithPlistName(&name)
                 } else {
                     Sm::agentServiceWithPlistName(&name)
@@ -760,4 +773,43 @@ mod scm {
         drop(Owned(pi.hThread));
         Ok(Owned(pi.hProcess))
     }
+}
+
+/// Whether this process has a full elevated token (`TokenElevationType` is `TokenElevationTypeFull`). Never the plain
+/// `TokenElevation` flag (true for every process with UAC off). Non-Windows systems and a failed query say no.
+#[cfg(windows)]
+pub fn process_has_full_token() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        GetTokenInformation, TOKEN_ELEVATION_TYPE, TOKEN_QUERY, TokenElevationType,
+        TokenElevationTypeFull,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo handle of this process and an out parameter that lives through the call.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+        return false;
+    }
+    let mut kind = TOKEN_ELEVATION_TYPE(0);
+    let mut returned = 0u32;
+    // SAFETY: `kind` is a TOKEN_ELEVATION_TYPE and the size passed is its size.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevationType,
+            Some(std::ptr::from_mut(&mut kind).cast()),
+            std::mem::size_of::<TOKEN_ELEVATION_TYPE>() as u32,
+            &mut returned,
+        )
+    }
+    .is_ok();
+    // SAFETY: the token was opened above.
+    let _ = unsafe { CloseHandle(token) };
+    ok && kind == TokenElevationTypeFull
+}
+
+/// Non-Windows: no elevated token.
+#[cfg(not(windows))]
+pub fn process_has_full_token() -> bool {
+    false
 }

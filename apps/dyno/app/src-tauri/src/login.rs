@@ -3,7 +3,7 @@
 //!
 //! - the app itself: `SMAppService.mainApp` on macOS (one row in Login Items, nothing under `~/Library/LaunchAgents`;
 //!   started at login, it hides in the tray because macOS says so, [`mac::open_event`]) and
-//!   `tauri-plugin-autostart` with `--hidden` on Linux and Windows ([`crate::login_item::route_for`]);
+//!   an XDG autostart file with `--hidden` on Linux and the per-user `Run` value on Windows ([`paddock_service::login::UserRunEntry`], [`crate::login_item::route_for`]);
 //! - the agent as a per-user service: `SMAppService` on macOS (the plist inside the bundle), a systemd user unit on
 //!   Linux and the per-user `Run` entry on Windows (`dyno_agent::service`).
 //!
@@ -31,11 +31,7 @@ pub trait AgentService: Send {
     fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
 }
 
-/// The app's own start-at-login entry.
-pub trait Autostart: Send {
-    /// Turns it on or off.
-    fn set(&mut self, on: bool) -> Result<(), String>;
-}
+pub use paddock_service::login::Autostart;
 
 /// Applies the `launchAtLogin` setting to both registrations. Each is attempted even if the other fails; the message
 /// names what did not work and what to do.
@@ -70,6 +66,42 @@ pub fn apply_launch_at_login(
     } else {
         Err(format!("Your settings are saved, but {}.", problems.join("; and ")))
     }
+}
+
+/// What the first sight of the settings did about start at login.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FirstRun {
+    /// The default was applied now (the switch was on and the marker was missing).
+    Applied,
+    /// Nothing to do: the marker is there, or the switch is off.
+    Skipped,
+}
+
+/// The marker's file name inside the user's own app data folder.
+pub const FIRST_RUN_MARKER: &str = "login-default-applied";
+
+/// Start at login is on by default, so a fresh install registers itself once without Settings being opened. The first
+/// sight of the settings with the switch on and no per-user `marker` registers both entries and writes the marker, so a user who
+/// later turns the switch off is never overridden; a switch that is off (a file that says `false`) is respected and only
+/// leaves the marker. A failed registration leaves no marker (it is tried again at the next start) and returns the message.
+pub fn apply_first_run(
+    marker: &paddock_service::login::FirstRunMarker,
+    sys: &mut dyn paddock_service::System,
+    wanted: bool,
+    location: Result<(), String>,
+    service: &mut dyn AgentService,
+    autostart: &mut dyn Autostart,
+) -> Result<FirstRun, String> {
+    if marker.is_set(sys) {
+        return Ok(FirstRun::Skipped);
+    }
+    if !wanted {
+        marker.record(sys, "off")?;
+        return Ok(FirstRun::Skipped);
+    }
+    apply_launch_at_login(true, location, service, autostart)?;
+    marker.record(sys, "applied")?;
+    Ok(FirstRun::Applied)
 }
 
 /// Removes the old route's `Dyno.plist` from `launch_agents` (only a file of exactly that shape) and, because its
@@ -172,6 +204,17 @@ pub fn repair_stale_agent_entry(
     Ok(cleaned)
 }
 
+/// Windows, at every start: when start at login is on, the app's own `Run` value is written again (idempotent), so a switch
+/// that says on while nothing is registered (an entry written to the wrong hive, deleted by a cleaner, or never written) heals
+/// itself. A switch that is off is never touched here. Returns whether it wrote.
+pub fn ensure_app_entry(start_at_login: bool, autostart: &mut dyn Autostart) -> Result<bool, String> {
+    if !start_at_login {
+        return Ok(false);
+    }
+    autostart.set(true)?;
+    Ok(true)
+}
+
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
@@ -206,27 +249,7 @@ mod mac {
 
     impl Autostart for MainAppLogin {
         fn set(&mut self, on: bool) -> Result<(), String> {
-            // SAFETY: a class method returning an object we own.
-            let s = unsafe { SMAppService::mainAppService() };
-            // SAFETY: a property read on a valid object.
-            let status = unsafe { s.status() };
-            if on {
-                if status == SMAppServiceStatus::Enabled {
-                    return Ok(());
-                }
-                // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
-                match unsafe { s.registerAndReturnError() } {
-                    Ok(()) => Ok(()),
-                    // Waiting for the user's approval in Login Items is not a failure; the agent registration opens the pane.
-                    Err(_) if unsafe { s.status() } == SMAppServiceStatus::RequiresApproval => Ok(()),
-                    Err(e) => Err(e.localizedDescription().to_string()),
-                }
-            } else if status == SMAppServiceStatus::NotRegistered || status == SMAppServiceStatus::NotFound {
-                Ok(())
-            } else {
-                // SAFETY: a method call on a valid object.
-                unsafe { s.unregisterAndReturnError() }.map_err(|e| e.localizedDescription().to_string())
-            }
+            paddock_service::login::AppServiceAutostart::new(Box::new(paddock_service::native::SmAppService::main_app())).set(on)
         }
     }
 
@@ -531,23 +554,52 @@ pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<
     Box::new(MainAppLogin)
 }
 
-/// The app's own login item: `SMAppService.mainApp` on macOS, `tauri-plugin-autostart` elsewhere.
-#[cfg(not(target_os = "macos"))]
-pub fn platform_autostart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
-    Box::new(AppAutostart(app.clone()))
+/// The app's own login item on Windows: always the per-user `Run` value, never written while elevated
+/// ([`paddock_service::login::UserRunEntry`]).
+#[cfg(windows)]
+pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
+    match std::env::current_exe() {
+        Ok(exe) => Box::new(paddock_service::login::UserRunEntry::new(
+            dyno_agent::service::spec::WINDOWS_APP_VALUE,
+            exe,
+            &[paddock_window::launch::HIDDEN_FLAG],
+            Box::new(paddock_service::RealSystem::new()),
+            Box::new(paddock_service::login::ProcessElevation),
+        )),
+        Err(e) => Box::new(NoAutostart(format!("the app's folder cannot be found: {e}"))),
+    }
 }
 
-/// The app's own login item with `tauri-plugin-autostart` (Linux and Windows).
+/// The app's own login item on Linux: an XDG autostart file that starts the app hidden in the tray
+/// ([`paddock_service::login::XdgAutostart`]).
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    match (config, std::env::current_exe()) {
+        (Some(config), Ok(exe)) => Box::new(paddock_service::login::XdgAutostart::new(
+            &config,
+            // The file name the plugin used (the app name), so an upgrade rewrites it instead of adding a second entry.
+            "Dyno",
+            "Dyno",
+            exe,
+            &[paddock_window::launch::HIDDEN_FLAG],
+            Box::new(paddock_service::RealSystem::new()),
+        )),
+        _ => Box::new(NoAutostart("the home folder or the app's folder cannot be found".into())),
+    }
+}
+
+/// An entry that cannot be written, with the reason.
 #[cfg(not(target_os = "macos"))]
-pub struct AppAutostart<R: tauri::Runtime>(pub tauri::AppHandle<R>);
+struct NoAutostart(String);
 
 #[cfg(not(target_os = "macos"))]
-impl<R: tauri::Runtime> Autostart for AppAutostart<R> {
-    fn set(&mut self, on: bool) -> Result<(), String> {
-        use tauri_plugin_autostart::ManagerExt;
-        let manager = self.0.autolaunch();
-        let result = if on { manager.enable() } else { manager.disable() };
-        result.map_err(|e| e.to_string())
+impl Autostart for NoAutostart {
+    fn set(&mut self, _: bool) -> Result<(), String> {
+        Err(self.0.clone())
     }
 }
 
@@ -626,6 +678,64 @@ mod tests {
         let r = apply_launch_at_login(on, Ok(()), &mut s, &mut a);
         let log = calls.0.lock().unwrap().clone();
         (r, log)
+    }
+
+    fn first_run(
+        marker: &paddock_service::login::FirstRunMarker,
+        sys: &paddock_service::testing::FakeSystem,
+        wanted: bool,
+        autostart_fails: bool,
+    ) -> (Result<FirstRun, String>, Vec<String>) {
+        let calls = Calls::default();
+        let mut s = FakeService {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: autostart_fails,
+        };
+        let r = apply_first_run(marker, &mut sys.clone(), wanted, Ok(()), &mut s, &mut a);
+        let log = calls.0.lock().unwrap().clone();
+        (r, log)
+    }
+
+    fn marker() -> paddock_service::login::FirstRunMarker {
+        paddock_service::login::FirstRunMarker::new(format!("/data/{FIRST_RUN_MARKER}"))
+    }
+
+    #[test]
+    fn a_first_run_with_the_default_registers_once_and_never_again() {
+        let sys = paddock_service::testing::FakeSystem::new();
+        let m = marker();
+        let (r, log) = first_run(&m, &sys, true, false);
+        assert_eq!(r, Ok(FirstRun::Applied));
+        assert_eq!(log, vec!["service install".to_string(), "autostart true".to_string()]);
+        // The user turns it off; the next start sees the marker and leaves it off.
+        let (r, log) = first_run(&m, &sys, true, false);
+        assert_eq!(r, Ok(FirstRun::Skipped));
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn an_explicit_off_is_not_overridden() {
+        let sys = paddock_service::testing::FakeSystem::new();
+        let m = marker();
+        let (r, log) = first_run(&m, &sys, false, false);
+        assert_eq!(r, Ok(FirstRun::Skipped));
+        assert!(log.is_empty(), "nothing registered: {log:?}");
+        assert!(
+            m.is_set(&mut sys.clone()),
+            "recorded, so a later change is not taken for a first run"
+        );
+    }
+
+    #[test]
+    fn a_failed_first_run_is_tried_again_at_the_next_start() {
+        let sys = paddock_service::testing::FakeSystem::new();
+        let m = marker();
+        assert!(first_run(&m, &sys, true, true).0.is_err());
+        assert!(!m.is_set(&mut sys.clone()));
     }
 
     #[test]

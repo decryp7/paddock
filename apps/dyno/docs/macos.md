@@ -24,8 +24,7 @@ bash scripts/check-bundle.sh target/dist/bundle                                 
 
 ## 2. Install
 
-Open the `.dmg`, drag Dyno to Applications and open it from there; it is not notarised, so the first time macOS says "Not Opened": choose Done, then System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again, and enter an administrator's name and password (once). In
-**Settings**, turn on **Launch at login**: Dyno registers the agent with `SMAppService` and macOS may ask you to allow it under
+Open the `.dmg`, drag Dyno to Applications and open it from there; it is not notarised, so the first time macOS says "Not Opened": choose Done, then System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again, and enter an administrator's name and password (once). The first time it runs, Dyno turns on **Launch at login** by itself (Settings can turn it off): it registers the agent with `SMAppService` and macOS may ask you to allow it under
 **System Settings > General > Login Items & Extensions**. No administrator rights are needed.
 
 Why ad-hoc signing matters: `SMAppService` and launch agents refuse a linker-signed bundle (error -67056). After an update

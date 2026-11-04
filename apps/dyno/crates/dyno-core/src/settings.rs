@@ -79,7 +79,7 @@ impl Default for WebApi {
 pub struct Settings {
     /// Schema version.
     pub version: u32,
-    /// Start Dyno at login.
+    /// Start Dyno at login (on by default, in the tray).
     pub launch_at_login: bool,
     /// Sampling.
     pub sampling: Sampling,
@@ -160,7 +160,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             version: SCHEMA_VERSION,
-            launch_at_login: false,
+            launch_at_login: true,
             sampling: Sampling::default(),
             retention: Retention::default(),
             alerts: AlertSettings::default(),
@@ -275,6 +275,13 @@ pub fn parse(text: &str) -> (Settings, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_at_login_is_on_by_default_and_an_explicit_off_is_kept() {
+        assert!(Settings::default().launch_at_login);
+        assert!(parse("{}").0.launch_at_login, "a file without the key means the default");
+        assert!(!parse(r#"{"launchAtLogin":false}"#).0.launch_at_login);
+    }
 
     #[test]
     fn missing_keys_take_defaults() {

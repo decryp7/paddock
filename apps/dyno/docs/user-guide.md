@@ -17,8 +17,8 @@ marked *placeholder* are described in [features.md](features.md) and [roadmap.md
 
 Per OS in the [README](../README.md#quick-start); macOS in [macos.md](macos.md), Linux in [linux.md](linux.md). After
 installing, open Dyno. The window starts with a short splash and then the dashboard. If no agent is running, the app starts
-one; to keep measuring after you log in, turn on **Settings > Launch at login** (this registers the agent with the OS:
-`SMAppService` on macOS, a systemd user unit on Linux, a per-user Run entry on Windows).
+one; **Launch at login** is on by default: the first time Dyno runs it registers itself (this registers the agent with the OS:
+`SMAppService` on macOS, a systemd user unit on Linux, a per-user Run entry on Windows), starts in the tray at login and keeps measuring. Turn it off under **Settings > Launch at login**; Dyno never turns it on again.
 
 ## First run
 
@@ -134,7 +134,7 @@ page says about how long the run takes and the most it writes to each drive.
 | Setting | Meaning |
 | --- | --- |
 | Theme | System, dark or light |
-| Launch at login | Start the app in the tray and register the agent with the OS |
+| Launch at login | On by default (registered at the first run); start the app in the tray and register the agent with the OS |
 | Tray metric and style | What the tray icon shows |
 | Sampling | System and process intervals (Dyno slows itself down when nobody is watching or on battery) |
 | History retention | How long raw points and each rollup tier are kept |
