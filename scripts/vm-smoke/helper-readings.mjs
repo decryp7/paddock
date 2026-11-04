@@ -16,12 +16,12 @@ export const READINGS = [
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup', fullText: 4000,
     expect: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|could not check/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
-  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Boot|Start-?up',
+  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Boot|Start-?up', fullText: 4000,
     expect: { macos: [/Login items|Background items/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
     expect: { macos: [/pf/i, /rules?/i, /Read by the administrator helper/i], linux: [/nft|nftables/i, /rules?/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
-  { id: 'energy-and-thermal', title: 'macOS CPU energy and thermal pressure (honest reasons in a VM)', os: ['macos'], page: 'power', tab: 'Energy',
-    expect: { macos: [/CPU power|energy/i] }, none: [/needs the helper/i] },
+  { id: 'energy-and-thermal', title: 'macOS CPU energy: the VM reason on the Energy tab', os: ['macos'], page: 'power', tab: 'Energy', fullText: 4000,
+    expect: { macos: [/The helper listed no CPU power, as in a virtual machine/i] }, none: [/needs the helper/i] },
   { id: 'sockets-and-holders', title: 'Linux socket owners and file holders', os: ['linux'], page: 'network',
     expect: { linux: [/Read by the administrator helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
   { id: 'memory-modules', title: 'Linux memory modules (no DMI in a VM: the reason)', os: ['linux'], page: 'inventory',
@@ -30,8 +30,8 @@ export const READINGS = [
     expect: { windows: [/Windows Defender Firewall/, /Domain/, /Private/, /Public/] }, none: [] },
   { id: 'wol-state', title: 'Wake devices readiness (WolState)', os: ['linux'], page: 'power', tab: 'Wake devices',
     expect: { linux: [/readiness|Wake for network|Wake-on-LAN/i] }, none: [/needs the helper/i] },
-  { id: 'thermal-pressure', title: 'macOS temperatures: thermal pressure level (VM reason)', os: ['macos'], page: 'power', tab: 'Energy',
-    expect: { macos: [/pressure|thermal|temperature/i] }, none: [/needs the helper/i] },
+  { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on the dashboard widget', os: ['macos'], page: 'dashboard', fullText: 4000,
+    expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i] },
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
     expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i] },
 ];
@@ -91,7 +91,7 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
 
 /** macOS: the driver over a MacGui (sidebar links by label; tabs are radio buttons). */
 export function macDriver(gui) {
-  const label = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
+  const label = { dashboard: 'Dashboard', processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
   return {
     async openPage(page, tab, reading = {}) {
       await gui.closeSettings(); // the Settings window stays open after the helper step and would be read as the page
