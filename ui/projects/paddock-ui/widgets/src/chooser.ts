@@ -213,20 +213,20 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 6px; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
     .pd-wc-count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
     .pd-wc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
-    .pd-wc-item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px var(--pd-space-2) 6px var(--pd-space-1); background: var(--pd-surface-1); }
+    .pd-wc-item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-1) var(--pd-space-2); min-height: 48px; padding: 6px var(--pd-space-2) 6px var(--pd-space-1); background: var(--pd-surface-1); }
     .pd-wc-item + .pd-wc-item { border-top: 1px solid var(--pd-hairline); }
     .pd-wc-add { padding-left: var(--pd-space-3); }
     .pd-wc-added .pd-wc-txt b, .pd-wc-added .pd-wc-kicon.mat-icon { color: var(--pd-text-muted); }
     /* Material's .mat-icon (24 px) is one class; two win. */
     .pd-wc-kicon.mat-icon { width: 16px; height: 16px; color: var(--pd-text-muted); flex: none; }
-    .pd-wc-txt { display: grid; min-width: 0; flex: 1; }
+    .pd-wc-txt { display: grid; min-width: 11rem; flex: 1 1 11rem; }
     .pd-wc-txt b { font-weight: var(--pd-weight-medium); white-space: nowrap; }
     .pd-wc-txt span { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-wc-grip { display: inline-grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: none; color: var(--pd-text-subtle); cursor: grab; flex: none; }
     .pd-wc-grip:hover { background: var(--pd-hover); color: var(--pd-text-muted); }
     .pd-wc-grip:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-wc-grip[aria-disabled='true'] { cursor: default; opacity: 0.5; }
-    .pd-wc-more { flex: none; }
+    .pd-wc-more { flex: none; margin-inline-start: auto; }
     /* The row's ⋯ stays marked while its menu is open: a tint and a ring. */
     .pd-wc-more[aria-expanded='true'] { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }

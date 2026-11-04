@@ -779,6 +779,20 @@ export type MenuBarKind = "lineGraph" | "verticalBars" | "horizontalMeter" | "ri
 
 export type NumberFormat = "stacked" | "line";
 
+export type NumberSupport = { 
+/**
+ * The formats the tray draws; the others are shown but cannot be chosen.
+ */
+formats: Array<NumberFormat>, 
+/**
+ * Whether the label is drawn in the icon (it is always in the tooltip).
+ */
+labelInIcon: boolean, 
+/**
+ * Why a format or the label is missing, in one sentence for the Settings page; `None` when everything is drawn.
+ */
+note: string | null, };
+
 export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
@@ -1065,7 +1079,11 @@ menuBar: Array<MenuBarKindChoices>,
 /**
  * Every metric a menu-bar item may show.
  */
-menuBarMetrics: Array<MetricChoice>, };
+menuBarMetrics: Array<MetricChoice>, 
+/**
+ * What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
+ */
+number: NumberSupport, };
 
 export type MetricReading = { 
 /**

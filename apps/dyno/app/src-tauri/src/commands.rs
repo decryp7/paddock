@@ -155,8 +155,11 @@ pub async fn metric_readings(shell: State<'_, Arc<Shell>>, queries: Vec<dyno_cor
 /// For each kind the chooser can add: a ready default widget and the metrics the engine accepts for it.
 #[tauri::command]
 pub async fn widget_choices() -> Result<Value, CommandError> {
-    serde_json::to_value(dyno_core::widgets::widget_choices())
-        .map_err(|e| CommandError::internal(format!("The choices could not be read: {e}")))
+    serde_json::to_value(dyno_core::widgets::widget_choices(
+        dyno_core::widgets::TrayPlatform::current(),
+        crate::tray::native_icon_px(),
+    ))
+    .map_err(|e| CommandError::internal(format!("The choices could not be read: {e}")))
 }
 
 /// The page or Settings section a widget asked the main window to open, once: a window that was still being created when

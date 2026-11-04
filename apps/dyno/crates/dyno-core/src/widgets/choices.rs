@@ -4,6 +4,7 @@
 use super::dashboard::{DashboardKind, DashboardWidget};
 use super::menu_bar::{MenuBarItem, MenuBarKind};
 use super::metric::Metric;
+use super::number_support::{number_support, NumberSupport, TrayPlatform};
 use super::popover::{PopoverKind, PopoverWidget, VolumeChoice};
 use paddock_widgets::Catalogue;
 use serde::{Deserialize, Serialize};
@@ -67,6 +68,8 @@ pub struct WidgetChoices {
     pub menu_bar: Vec<MenuBarKindChoices>,
     /// Every metric a menu-bar item may show.
     pub menu_bar_metrics: Vec<MetricChoice>,
+    /// What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
+    pub number: NumberSupport,
 }
 
 fn choice(metric: Metric) -> MetricChoice {
@@ -106,8 +109,8 @@ fn popover_default(kind: PopoverKind) -> PopoverWidget {
     }
 }
 
-/// The choices, built from the catalogues.
-pub fn widget_choices() -> WidgetChoices {
+/// The choices, built from the catalogues, for the tray of `platform` with icons of `px` pixels.
+pub fn widget_choices(platform: TrayPlatform, px: u32) -> WidgetChoices {
     let dashboard = super::DashboardCatalogue::kinds()
         .iter()
         .filter_map(|spec| {
@@ -144,6 +147,7 @@ pub fn widget_choices() -> WidgetChoices {
         dashboard,
         menu_bar,
         menu_bar_metrics: Metric::CHOICES.iter().cloned().map(choice).collect(),
+        number: number_support(platform, px),
     }
 }
 
@@ -154,7 +158,7 @@ mod tests {
 
     #[test]
     fn every_default_is_a_widget_the_engine_accepts() {
-        let c = widget_choices();
+        let c = widget_choices(TrayPlatform::Mac, 18);
         assert_eq!(c.dashboard.len(), super::super::DashboardCatalogue::kinds().len());
         for k in &c.dashboard {
             assert_eq!(k.default.validate(), Ok(()), "{:?}", k.kind);
@@ -169,7 +173,7 @@ mod tests {
 
     #[test]
     fn every_popup_default_is_valid_and_of_its_kind() {
-        let c = widget_choices();
+        let c = widget_choices(TrayPlatform::Mac, 18);
         assert_eq!(c.popover.len(), super::super::PopoverCatalogue::kinds().len());
         for k in &c.popover {
             assert_eq!(k.default.validate(), Ok(()), "{:?}", k.kind);
@@ -181,7 +185,7 @@ mod tests {
 
     #[test]
     fn a_kind_offers_exactly_the_metrics_it_accepts() {
-        let c = widget_choices();
+        let c = widget_choices(TrayPlatform::Mac, 18);
         let of = |kind| c.dashboard.iter().find(|k| k.kind == kind).unwrap();
         let heat: Vec<&Metric> = of(DashboardKind::Heatmap).metrics.iter().map(|m| &m.metric).collect();
         assert_eq!(heat, [&Metric::CpuPerCore]);
@@ -197,7 +201,7 @@ mod tests {
 
     #[test]
     fn the_menu_bar_offers_every_metric_with_a_title() {
-        let c = widget_choices();
+        let c = widget_choices(TrayPlatform::Mac, 18);
         assert_eq!(c.menu_bar_metrics.len(), 13);
         assert_eq!(c.menu_bar_metrics[1].title, "CPU per core");
         assert_eq!(Metric::Process("chrome".into()).title(), "Process chrome");
