@@ -97,6 +97,13 @@ describe('PdPathText', () => {
     el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
     expect(el.querySelector('.pd-copy')).toBeNull();
+    // Nothing is cut: not a keyboard stop.
+    expect(el.querySelector('.pd-text')?.hasAttribute('tabindex')).toBe(false);
+  });
+
+  it('a text that shows less than the whole value is a keyboard stop, so its tooltip shows on focus', () => {
+    const el = make({ value: 'system.log', full: '/var/log/app/system.log' });
+    expect(el.querySelector('.pd-text')?.getAttribute('tabindex')).toBe('0');
   });
 
   it('shows what it is given but copies and titles the full value', async () => {

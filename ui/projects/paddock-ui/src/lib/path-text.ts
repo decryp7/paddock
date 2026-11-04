@@ -9,14 +9,14 @@ import { copyText } from './clipboard';
  * The text is fitted to the measured width (`fitPath`), so there is one ellipsis and no gap beside it: the root ("C:\" or "/")
  * stays, then the start of the directory, the ellipsis, the separator and the file name. When the name alone is too wide it shrinks
  * in the middle and keeps its last `keepTail` characters (the extension and the last word). Set in the
- * mono face at 12 px (`plain` for ordinary text). The full value is a `matTooltip`, shown only when the text on screen is not the whole value, and, with `copy`, one click on a Copy button (shown on hover and focus). Fills the
+ * mono face at 12 px (`plain` for ordinary text). The full value is a `matTooltip` above the text, shown only when the text on screen is not the whole value (a cut text is a keyboard stop, so the tooltip shows on focus too), and, with `copy`, one click on a Copy button (shown on hover and focus). Fills the
  * width it is given: put it in a flex or grid child with `min-width: 0`.
  */
 @Component({
   selector: 'pd-path-text',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph, MatTooltip],
-  template: `<span #box class="pd-text" [class.pd-plain]="plain()" [matTooltip]="whole()" [matTooltipDisabled]="!clipped()" [attr.data-full]="whole()" data-testid="path-text"><span class="pd-size" aria-hidden="true" [attr.data-full]="value()"></span><span class="pd-shown">{{ shown() }}</span></span>
+  template: `<span #box class="pd-text" [class.pd-plain]="plain()" [matTooltip]="whole()" matTooltipPosition="above" matTooltipClass="pd-path-tip" [matTooltipDisabled]="!clipped()" [attr.tabindex]="clipped() ? 0 : null" [attr.data-full]="whole()" data-testid="path-text"><span class="pd-size" aria-hidden="true" [attr.data-full]="value()"></span><span class="pd-shown">{{ shown() }}</span></span>
     @if (copy()) {
       <button class="pd-copy" type="button" [attr.aria-label]="copied() ? copiedLabel : copyLabel" [matTooltip]="copied() ? copiedLabel : copyLabel" (click)="doCopy($event)">
         <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="14" />

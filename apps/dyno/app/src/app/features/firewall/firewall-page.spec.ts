@@ -32,7 +32,9 @@ describe('FirewallPage', () => {
     expect(alf.textContent).toContain('Firewall: On');
     expect(alf.textContent).toContain('Stealth mode: On');
     expect(alf.textContent).toContain('Block all incoming: Off');
-    expect(alf.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(alf.textContent).toContain('Example Sync helper (all networks)');
+    expect(alf.textContent).toContain('Safari');
+    expect(alf.textContent).toContain('Example Sync');
     expect(alf.textContent).toContain('Block');
   });
 

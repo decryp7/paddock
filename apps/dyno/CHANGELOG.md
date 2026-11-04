@@ -2,18 +2,18 @@
 
 ## [1.1.0] - 2026-11-04
 
-Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, network lists with a world map and a firewall view, power features, one menu-bar item per metric, a free-size dashboard and dialogs that fit their content. It also fixes the nine problems reported on 1.0.0. Update by hand once from the releases page: 1.0.0 does not look at these releases.
+Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, network lists with a world map and a firewall view, power features, one menu-bar item per metric, a free-size dashboard and dialogs that fit their content. It also fixes the problems reported on 1.0.0. Update by hand once from the releases page: 1.0.0 does not look at these releases.
 
 ### Added
 
 - Administrator readings: an optional helper that Settings can turn on, repair, update or turn off. With it Dyno can read every account's processes, temperatures, fans, energy, memory modules and which program owns each connection or open file. It only reads. Without it everything keeps working with your own rights, and a reading Dyno cannot get says why.
 - Saved views: disk maps, the counter list and the installed-software list are kept and shown at once, with their age, after a restart. Rescan keeps the saved map until the new scan is done. Settings has the space limit and Forget saved maps.
-- Benchmarks: a processor, memory and disk test that you start yourself. Each run warms up and repeats, shows the middle result with its spread, and marks a result as unsteady when the repeats differ a lot. A change counts as better or worse only when it is larger than the noise. The disk test measures the drive itself, not the memory cache, and writes at most 14.5 GB per drive, which it deletes at once. Every run shows in the Jobs view with its phase and can be cancelled, and on battery it asks first. Runs measured by 1.0 are kept and marked "Measured the old way".
-- Network lists: addresses you choose to download are used to flag connections. There is also a world map of your connections and a read-only firewall view. The disk-health tool can be downloaded when you ask. Every network feature is on by default and has its own switch.
-- Keep awake: hold the computer awake for 30 minutes to 7 days, until a time of day, until you stop it, while a program runs, or while the computer is busy. It is on the Power page, in the tray menu and in the dyno awake command. The hold ends if Dyno restarts, and the page says so.
-- Wake-on-LAN: save your other computers and wake them from the Power page or the tray menu, or test whether one wakes. This computer's readiness lists what Dyno can read and what you need to change. The password for a computer is kept in the system's credential store.
+- Benchmarks: a processor, memory and disk test that you start yourself. Each run warms up and repeats, shows the middle result with its spread, and marks a result as unsteady when the repeats differ a lot. A change counts as better or worse only when it is larger than the noise. The disk test measures the drive itself, not the memory cache, and writes at most 14.5 GiB per drive, which it deletes at once. Every run shows in the Jobs view with its phase and can be cancelled, and on battery it asks first. Runs measured by 1.0 are kept and marked "Measured the old way".
+- Network: choose lists of addresses to download and Dyno marks the connections that match. You can also see your connections on a world map and read your firewall rules, which Dyno never changes. Dyno can download the disk-health tool when you ask. Each network feature is on by default and has its own switch.
+- Keep awake: hold the computer awake for 30 minutes to 7 days, until a time of day, until you stop it, while a program runs, or while the computer is busy. It is on the Power page, in the tray menu and in the command "dyno awake". The hold ends if Dyno restarts, and the page says so.
+- Wake-on-LAN: save your other computers and wake them from the Power page or the tray menu, or test whether one wakes. This computer's readiness lists what Dyno can read and what you need to change. The password for a computer is kept safely by your system, never in Dyno's own files.
 - Scheduled wake: wake the computer at a time you choose, keep it awake for a while, wake chosen computers and run one fixed task, such as checking the backups. It is off until you turn it on in Settings. A wake that was missed is shown as missed and never run late. Nothing can wake a computer that is shut down.
-- Every metric can be its own menu-bar or tray item, up to 32. The OS remembers where you put each one. The items have a new look: stacked label and value, a dash when a value is missing, and an alert when the level is held for 3 seconds. The default set is CPU, memory, network and temperature, and Settings has a menu-bar alert level.
+- Every metric can be its own menu-bar or tray item, up to 32. macOS or Windows remembers where you put each one. The items have a new look: stacked label and value, a dash when a value is missing, and an alert when the level is held for 3 seconds. The default set is CPU, memory, network and temperature, and Settings has a menu-bar alert level.
 - Windows: a one-time notice on the first start, and when a new icon is added, tells you to drag Dyno's icons from the arrow to the taskbar, with a button that opens the taskbar settings.
 - The dashboard is a free-size grid of widgets. A Dyno 1.0 dashboard is upgraded on the first start.
 - Notifications: select messages and delete them, or delete all after a confirmation. Deleted messages stay gone after a restart.
@@ -26,12 +26,12 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - The connections map legend uses five clearly different shades that also work with colour-vision deficiency, and its tooltip names the step.
 - Health: an active alarm now lowers the health score, so the dashboard no longer shows "Health 100 Good" next to an active alarm. A Warning caps it at Fair and a Critical at Poor.
 - Disk map: one folder that times out no longer stops the whole scan. Only that folder is marked incomplete.
-- macOS start-up items: login items that need administrator rights are named as not shown, with the reason, instead of "No startup items".
+- macOS startup items: login items that need administrator rights are named as not shown, with the reason, instead of "No startup items".
 - About: "See all releases" opens the releases page.
 - History: switching the range no longer leaves the chart empty until you reopen the view.
 - Windows: at logon the tray icon and window now start, not only the agent, and no command prompt window stays open for the agent.
-- Windows: the tray popup no longer disappears at once after a click on the tray icon.
-- macOS: the Network page lists every program's connections also when Start at login is off.
+- Windows: the small window that opens from the tray icon no longer closes at once after you click the icon.
+- macOS: the Network page lists every program's connections, also when Start at login is off.
 - "Is this normal?" counts local calendar days correctly and says when it will be ready.
 - macOS: the menu-bar icons no longer risk flickering.
 

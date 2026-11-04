@@ -690,6 +690,14 @@ html .mat-mdc-menu-item {
   max-width: min(320px, calc(100vw - var(--pd-space-4)));
 }
 
+// A path's tooltip (pd-path-text): wider than a sentence's, never cut by the height limit (the end of a path, its file name, is the part that matters), and broken anywhere when one word is longer than a line.
+.mat-mdc-tooltip.pd-path-tip .mdc-tooltip__surface {
+  max-width: min(560px, calc(100vw - var(--pd-space-4)));
+  max-height: none;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+
 // Hint and error lines under a field are the field's own (.pd-field__hint): the empty subscript row is dropped.
 .mat-mdc-form-field-subscript-wrapper:empty {
   display: none;

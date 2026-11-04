@@ -144,7 +144,13 @@ describe('buildRows: groups', () => {
   it('orders groups by the sort and collapses them by default', () => {
     const rows = buildRows(input({ processes, groups }));
     expect(names(rows)).toEqual(['Chrome', 'Code', 'Services']);
-    expect(rows[0]).toMatchObject({ kind: 'group', key: 'gchrome', count: 2, expandable: true, expanded: false, user: null, pid: null, ref: null, groupId: 'chrome' });
+    expect(rows[0]).toMatchObject({ kind: 'group', key: 'gchrome', count: 2, expandable: true, expanded: false, user: 'alex', pid: null, ref: null, groupId: 'chrome' });
+  });
+  it('a group shows the account its members share, "Several" when they differ, and none when no member reads', () => {
+    const mixed = [sample(1, 'a', { user: 'alex' }), sample(2, 'a', { user: 'bob' }), sample(3, 'b', { user: null }), sample(4, 'b', { user: null }), sample(5, 'c', { user: 'alex' }), sample(6, 'c', { user: null })];
+    const gs = [group('a', 'A', [1, 2], 5), group('b', 'B', [3, 4], 4), group('c', 'C', [5, 6], 3)];
+    const rows = buildRows(input({ processes: mixed, groups: gs }));
+    expect(rows.map((r) => [r.name, r.user])).toEqual([['A', 'Several'], ['B', null], ['C', 'alex']]);
   });
   it('a single-process group shows its user and cannot expand', () => {
     const code = buildRows(input({ processes, groups })).find((r) => r.name === 'Code')!;
