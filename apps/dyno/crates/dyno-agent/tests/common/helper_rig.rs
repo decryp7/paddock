@@ -11,14 +11,16 @@ use dyno_agent::helper_centre::{HelperCentre, HelperInstaller};
 use dyno_agent::helper_link::{HelperLink, HelperTransport, TransportError};
 use dyno_core::btm::{LoginItemsReader, LoginItemsReply};
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_counters::{CounterAnswer, CounterReader, CounterValue};
 use dyno_core::helper_memory::MemoryReader;
-use dyno_core::helper_policy::{access, visibility, OthersPolicy, Standing};
-use dyno_core::helper_requests::{SmartQuery, ToolKind};
+use dyno_core::helper_policy::Access;
+use dyno_core::helper_requests::{CounterId, SmartQuery, ToolKind};
 use dyno_core::helper_wire::{HelperAction, HelperInfo, HelperReply, HelperRequest, HelperUser, ToolStatus, HELPER_API};
 use dyno_core::inventory::MemoryLayout;
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use dyno_core::smart::{SmartReader, SmartReply, ToolInstaller};
+use dyno_core::wake::{IfName, WolReader, WolReply};
 use dyno_helper::audit::AuditLog;
 use dyno_helper::dispatch::{Ctx, Dispatcher, Parts};
 use paddock_jobs::time::SystemClock;
@@ -36,23 +38,39 @@ pub enum Caller {
 }
 
 impl Caller {
-    fn standing(self) -> Standing {
-        match self {
-            Caller::Owner => Standing::Owner,
-            Caller::Admin => Standing::Administrator,
-            Caller::Other => Standing::Other,
-        }
+    /// The connection's caller as the helper's identity code decides it, from invented OS facts: the owner is uid 501, an
+    /// administrator is in the admin group, anyone else is neither.
+    pub fn peer(self) -> paddock_ipc::Caller {
+        let (uid, groups) = match self {
+            Caller::Owner => (501, vec![20]),
+            Caller::Admin => (502, vec![20, 80]),
+            Caller::Other => (503, vec![20]),
+        };
+        paddock_ipc::identity::identify(
+            paddock_ipc::identity::RawPeer {
+                account: paddock_ipc::AccountId::Uid(uid),
+                admin: paddock_ipc::identity::AdminEvidence::Groups(groups),
+                audit: paddock_ipc::AuditHint::new(Some(4242), Some("/x".into())),
+            },
+            &paddock_ipc::AdminRule::new([80]),
+        )
     }
 
-    fn ctx(self, request: &HelperRequest) -> Ctx {
-        let standing = self.standing();
+    /// What the helper's server decides for this caller and `request`: its own `auth::authorize`, not a copy of it (rule 55).
+    ///
+    /// # Errors
+    /// The server's refusal.
+    pub fn authorize(self, request: &HelperRequest) -> Result<Access, dyno_helper::auth::Refusal> {
+        dyno_helper::auth::authorize(&self.peer(), &owner(), request)
+    }
+
+    fn ctx(self, request: &HelperRequest) -> Result<Ctx, dyno_helper::auth::Refusal> {
         let mut ctx = Ctx::anonymous(Some(4242));
-        ctx.account = Some(owner());
-        ctx.access = access(request.kind(), standing);
-        ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
+        ctx.access = self.authorize(request)?;
+        ctx.view.scope = dyno_helper::auth::scope(&self.peer(), &owner(), &dyno_helper::policy::HelperPolicy::default());
         // The connection's account, which the scoped readings (processes, socket owners, file holders) answer for.
         ctx.account = Some(owner());
-        ctx
+        Ok(ctx)
     }
 }
 
@@ -70,6 +88,12 @@ pub struct Readers {
     pub processes: Vec<dyno_core::helper_processes::RawProcess>,
     /// Who holds which socket or file (Linux); nothing by default.
     pub holders: Box<dyn dyno_core::helper_holders::HolderSource>,
+    /// What each counter id answers (an `Unavailable` value answers as a refusal with its words; an id not listed is unsupported).
+    pub counters: Vec<CounterAnswer>,
+    /// The helper's log, oldest first.
+    pub log: Vec<String>,
+    /// The Wake-on-LAN modes every interface answers; `None` answers like a system that reads none.
+    pub wol: Option<WolReply>,
 }
 
 impl Default for Readers {
@@ -88,6 +112,9 @@ impl Default for Readers {
             firewall: dyno_core::firewall::FirewallSource::new(dyno_core::firewall::RuleSource::Nftables),
             processes: Vec::new(),
             holders: Box::new(dyno_core::helper_holders::NoHolders),
+            counters: Vec::new(),
+            log: Vec::new(),
+            wol: None,
         }
     }
 }
@@ -136,6 +163,24 @@ impl dyno_core::helper_processes::ProcessSweeper for Sweeps {
         })
     }
 }
+struct Counters(Vec<CounterAnswer>);
+impl CounterReader for Counters {
+    fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
+        match self.0.iter().find(|a| a.id == id).map(|a| &a.value) {
+            Some(CounterValue::Unavailable(why)) => Err(PlatformError::Unsupported(why.clone())),
+            Some(v) => Ok(v.clone()),
+            None => Err(PlatformError::Unsupported("The rig has no such reading.".into())),
+        }
+    }
+}
+struct Wol(Option<WolReply>);
+impl WolReader for Wol {
+    fn read(&self, _: &IfName) -> Result<WolReply, PlatformError> {
+        self.0
+            .clone()
+            .ok_or_else(|| PlatformError::Unsupported("The rig reads no Wake-on-LAN modes.".into()))
+    }
+}
 struct Tools;
 impl ToolInstaller for Tools {
     fn install(&self, tool: ToolKind, _: &[u8]) -> Result<ToolStatus, PlatformError> {
@@ -164,15 +209,15 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         login_items: Box::new(Items),
         holders: readers.holders,
         extras: Box::new(dyno_core::helper_extras::NoExtras),
-        counters: Box::new(dyno_core::helper_counters::NoCounters),
+        counters: Box::new(Counters(readers.counters)),
         memory: Box::new(Memory(readers.memory)),
         processes: Box::new(Sweeps(readers.processes)),
         smart: Box::new(Smart(readers.smart)),
         firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),
         wakes: Box::new(dyno_core::wake::NoWakes),
-        wol: Box::new(dyno_core::wake::NoWakes),
-        log_tail: Box::new(|_| Vec::new()),
+        wol: Box::new(Wol(readers.wol)),
+        log_tail: Box::new(move |n| readers.log[readers.log.len().saturating_sub(n)..].to_vec()),
         on_uninstall: Box::new(|| {}),
     })
 }
@@ -206,8 +251,17 @@ impl HelperTransport for DispatcherTransport {
         }
         let on_wire = postcard::to_stdvec(&request).expect("a request encodes");
         let request: HelperRequest = postcard::from_bytes(&on_wire).expect("a request decodes");
-        let ctx = self.caller.lock().unwrap().ctx(&request);
         self.served.lock().unwrap().push(format!("{:?}", request.kind()));
+        // The server checks the restriction table before the dispatcher; the rig asks the same function.
+        let ctx = match self.caller.lock().unwrap().ctx(&request) {
+            Ok(ctx) => ctx,
+            Err(refusal) => {
+                return Err(TransportError::Remote {
+                    code: dyno_core::helper_wire::codes::REFUSED.into(),
+                    message: refusal.to_string(),
+                })
+            }
+        };
         match self.dispatcher.handle_for(&ctx, request) {
             Ok(reply) => {
                 let bytes = postcard::to_stdvec(&reply).expect("a reply encodes");

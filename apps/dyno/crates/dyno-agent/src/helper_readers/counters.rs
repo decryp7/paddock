@@ -59,8 +59,9 @@ impl HelperReading for MacCounters {
     }
 
     fn class(&self) -> ReadClass {
-        // Temperatures and energy are live readings (coordinator, 2026-11-04). The worker, not the sampler, waits for the answer.
-        ReadClass::Live
+        // Read by the 30 s worker, never by the sampler, and `powermetrics` takes about 2 s per id: a live deadline would time out on a
+        // real Mac and put the helper into backoff. A call gets no deadline of its own (the request kind's wait applies).
+        ReadClass::Bulk
     }
 
     fn via_helper(&self, calls: &dyn HelperCalls) -> Result<CounterSet, CallError> {
@@ -371,9 +372,41 @@ mod tests {
     const APPLE_SILICON_NO_TEMPS: &str = "macOS reports a thermal pressure level, not temperatures, to software.";
 
     fn rig(answers: Vec<Result<dyno_core::helper_wire::HelperReply, crate::helper_link::TransportError>>, up: bool) -> HelperClimate {
+        rig_net(answers, up).0
+    }
+
+    fn rig_net(
+        answers: Vec<Result<dyno_core::helper_wire::HelperReply, crate::helper_link::TransportError>>,
+        up: bool,
+    ) -> (HelperClimate, std::sync::Arc<crate::helper_first::testkit::Net>) {
         use crate::helper_first::testkit::{centre, port, Net};
-        let c = centre(&Net::new(up, answers), &paddock_jobs::time::FakeClock::new());
-        HelperClimate::new(port(&c), true, BTreeMap::new())
+        let net = Net::new(up, answers);
+        let c = centre(&net, &paddock_jobs::time::FakeClock::new());
+        (HelperClimate::new(port(&c), true, BTreeMap::new()), net)
+    }
+
+    #[test]
+    fn the_climate_call_gets_no_live_deadline_but_the_readiness_probe_does() {
+        let (c, net) = rig_net(
+            vec![reply(answer(
+                CounterValue::Unavailable("n".into()),
+                CounterValue::Unavailable("n".into()),
+                power(1_000),
+            ))],
+            true,
+        );
+        c.refresh(T0, &UTC);
+        let maxes = net.maxes.lock().unwrap().clone();
+        assert_eq!(
+            maxes.last().copied().flatten(),
+            None,
+            "the Counters call has no live deadline: {maxes:?}"
+        );
+        assert!(
+            maxes[..maxes.len() - 1].iter().all(|m| *m == Some(crate::helper_link::LIVE_WAIT)),
+            "the readiness probe is always live: {maxes:?}"
+        );
+        assert_eq!(MacCounters.class(), ReadClass::Bulk);
     }
 
     fn reply(a: Vec<CounterAnswer>) -> Result<dyno_core::helper_wire::HelperReply, crate::helper_link::TransportError> {
