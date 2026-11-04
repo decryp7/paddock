@@ -233,4 +233,69 @@ mod tests {
             ExtrasAnswer::BackupVersions { count: 0, items: None }
         ));
     }
+
+    const VERSIONS: &str = "wbadmin 1.0\n\nBackup time: 11/3/2026 10:00 AM\nBackup location: Network Share labeled \\\\srv\\share\nVersion identifier: 11/03/2026-10:00\nCan recover: Volume(s), File(s)\n\nBackup time: 11/2/2026 10:00 AM\nBackup location: D:\nVersion identifier: 11/02/2026-10:00\nCan recover: Volume(s)\n";
+
+    /// Every way of damaging a fixture that a real tool run could produce (cut short, lines lost, repeated, replaced, a stray
+    /// control character or a very long line): the parsers must not panic and must keep their bounds (rule: parsers never panic).
+    fn mutations(text: &str) -> Vec<String> {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = vec![String::new(), text.repeat(3), "\u{0}".repeat(10), "é".repeat(MAX_LINE * 3)];
+        for (at, _) in text.char_indices() {
+            out.push(text[..at].to_string());
+            out.push(text[at..].to_string());
+        }
+        for i in 0..lines.len() {
+            let mut gone = lines.clone();
+            gone.remove(i);
+            out.push(gone.join("\n"));
+            let mut twice = lines.clone();
+            twice.insert(i, lines[i]);
+            out.push(twice.join("\n"));
+            let mut junk = lines.clone();
+            junk[i] = "\u{7f}:\t: [ ] ] [ :";
+            out.push(junk.join("\n"));
+            let mut long = lines.clone();
+            let big = "x".repeat(MAX_LINE * 4);
+            long[i] = &big;
+            out.push(long.join("\n"));
+        }
+        out
+    }
+
+    #[test]
+    fn damaged_output_never_panics_and_keeps_its_bounds() {
+        let (mut changed_requests, mut changed_versions) = (0, 0);
+        let (base_r, base_v) = (parse_requests(REQUESTS), parse_versions(VERSIONS));
+        for m in mutations(REQUESTS) {
+            let r = parse_requests(&m);
+            assert!(r.len() <= MAX_ITEMS);
+            assert!(r
+                .iter()
+                .all(|x| x.name.chars().count() <= MAX_LINE && x.category.chars().count() <= MAX_LINE));
+            changed_requests += usize::from(r != base_r);
+            // The next stage takes the parser's output as it is.
+            let _ = crate::extras::sleep::blockers_from_requests(&r);
+        }
+        for m in mutations(VERSIONS) {
+            let v = parse_versions(&m);
+            assert!(v.len() <= MAX_ITEMS);
+            assert!(v.iter().all(|x| x.identifier.chars().count() <= MAX_LINE));
+            changed_versions += usize::from(v != base_v);
+            let _ = crate::backup::latest_version(&v);
+        }
+        // The mutations are not all harmless: the test would pass on a parser that ignored its input if they were.
+        assert!(
+            changed_requests > 10 && changed_versions > 10,
+            "{changed_requests} {changed_versions}"
+        );
+    }
+
+    #[test]
+    fn a_huge_listing_is_capped() {
+        let many = "SYSTEM:\n".to_string() + &"[PROCESS] \\a\\b.exe\n".repeat(MAX_ITEMS + 50);
+        assert_eq!(parse_requests(&many).len(), MAX_ITEMS);
+        let blocks = "Backup time: t\nBackup location: l\nVersion identifier: 1/1/2026-00:00\nCan recover: r\n\n".repeat(MAX_ITEMS + 50);
+        assert_eq!(parse_versions(&blocks).len(), MAX_ITEMS);
+    }
 }

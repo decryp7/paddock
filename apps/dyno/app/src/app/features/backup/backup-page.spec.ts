@@ -1,6 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import type { ReadVia } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
+import { BackupStore } from '../../state/backup.store';
 import type { MockBackend } from '../../core/mock-backend';
 import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
@@ -181,6 +183,22 @@ describe('dy-backup-page', () => {
     await settle(f);
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('The tools did not answer.');
     expect(el.querySelectorAll(ROW)).toHaveLength(3);
+  });
+
+  it('says who read the Windows Backup versions: the helper chip, or the reason and the button to turn it on', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    const report = await mock.backup();
+    vi.spyOn(mock, 'backup').mockResolvedValue({ ...report, via: 'helper' });
+    await TestBed.inject(BackupStore).load();
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
+    const via: ReadVia = { needsHelper: { reason: 'Windows only lets an administrator list Windows Backup versions.', next: { openSettings: 'helper' } } };
+    vi.spyOn(mock, 'backup').mockResolvedValue({ ...report, via });
+    await TestBed.inject(BackupStore).load();
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('administrator list Windows Backup versions');
+    expect(el.querySelector('[data-testid="reading-source-turn-on"]')?.textContent).toContain('Turn on administrator readings');
   });
 
   it('treats finding no backup tool as a normal state that names what Dyno looks for', async () => {

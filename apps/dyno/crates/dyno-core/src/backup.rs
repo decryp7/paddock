@@ -278,27 +278,73 @@ pub fn time_machine_status(
     }
 }
 
-/// `wbadmin get versions`: `Version identifier: 10/23/2026-02:00` lines (the identifier is UTC). The newest.
-pub fn parse_wbadmin_latest(text: &str) -> Option<Timestamp> {
-    text.lines()
-        .filter_map(|l| l.trim().strip_prefix("Version identifier:"))
-        .filter_map(|id| {
-            let id = id.trim();
-            let (date, time) = id.split_once('-')?;
-            let mut d = date.split('/');
-            let (mo, day, y) = (
-                d.next()?.parse::<u32>().ok()?,
-                d.next()?.parse::<u32>().ok()?,
-                d.next()?.parse::<i64>().ok()?,
-            );
-            let (hh, mm) = time.split_once(':')?;
-            let (hh, mm) = (hh.parse::<i64>().ok()?, mm.get(..2)?.parse::<i64>().ok()?);
-            if !(1..=12).contains(&mo) || !(1..=31).contains(&day) || hh > 23 || mm > 59 {
-                return None;
-            }
-            Some(Timestamp(days_from_civil(y, mo, day) * DAY + hh * HOUR + mm * MINUTE))
-        })
-        .max()
+/// When a `wbadmin get versions` version identifier (`10/23/2026-02:00`, UTC) was taken.
+pub fn version_time(identifier: &str) -> Option<Timestamp> {
+    let (date, time) = identifier.trim().split_once('-')?;
+    let mut d = date.split('/');
+    let (mo, day, y) = (
+        d.next()?.parse::<u32>().ok()?,
+        d.next()?.parse::<u32>().ok()?,
+        d.next()?.parse::<i64>().ok()?,
+    );
+    let (hh, mm) = time.split_once(':')?;
+    let (hh, mm) = (hh.trim().parse::<i64>().ok()?, mm.trim().get(..2)?.parse::<i64>().ok()?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&day) || !(1..=9999).contains(&y) || !(0..=23).contains(&hh) || !(0..=59).contains(&mm)
+    {
+        return None;
+    }
+    Some(Timestamp(days_from_civil(y, mo, day) * DAY + hh * HOUR + mm * MINUTE))
+}
+
+/// The newest of the versions `wbadmin get versions` listed (parsed once, by [`crate::helper_extras::parse_versions`], whether the
+/// helper or the agent ran the tool; rule 55). None when there is none or no identifier can be read.
+pub fn latest_version(versions: &[crate::helper_extras::BackupVersion]) -> Option<Timestamp> {
+    versions.iter().filter_map(|v| version_time(&v.identifier)).max()
+}
+
+/// What is known of Windows Backup, from the helper or from this computer's own tools: the same type from both paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowsBackupFacts {
+    /// How many versions exist, when the source counted them (the event log does not).
+    pub count: Option<u32>,
+    /// When the newest was taken, when the source can say (a counts-only caller of the helper cannot).
+    pub latest: Option<Timestamp>,
+}
+
+impl WindowsBackupFacts {
+    /// From a list of versions (the helper's reply or `wbadmin get versions`).
+    pub fn from_versions(versions: &[crate::helper_extras::BackupVersion]) -> WindowsBackupFacts {
+        WindowsBackupFacts {
+            count: Some(u32::try_from(versions.len()).unwrap_or(u32::MAX)),
+            latest: latest_version(versions),
+        }
+    }
+
+    /// Counts only: the helper told a caller who may not see the versions how many there are.
+    pub fn counted(count: u32) -> WindowsBackupFacts {
+        WindowsBackupFacts {
+            count: Some(count),
+            latest: None,
+        }
+    }
+
+    /// The status line these facts make.
+    pub fn status(&self, now: Timestamp, stale_after_hours: u32) -> BackupStatus {
+        let tool = BackupTool::WindowsBackup;
+        match (self.latest, self.count) {
+            (Some(at), _) => judged(tool, at, now, stale_after_hours),
+            (None, Some(0)) => not_configured(
+                tool,
+                "Windows Backup has no backup of this PC.",
+                "Open Settings > Backup and set one up.",
+            ),
+            (None, Some(n)) => cannot_check(
+                tool,
+                &format!("Windows Backup has {n} version{}; Dyno cannot see when the newest was taken (only the account that turned on the helper, or an administrator, can).", if n == 1 { "" } else { "s" }),
+            ),
+            (None, None) => cannot_check(tool, "Windows Backup's answer was not recognised."),
+        }
+    }
 }
 
 /// The newest `SystemTime='...'` of an event log query (`wevtutil qe ... /f:xml`), and whether the newest event is an
@@ -531,10 +577,11 @@ mod tests {
 
     #[test]
     fn windows_backup_versions_and_event_logs() {
-        let t = "Backup time: 10/22/2026 2:00 AM\nVersion identifier: 10/22/2026-18:00\nCan recover: Volume(s), File(s)\n\nBackup time: 10/23/2026 2:00 AM\nVersion identifier: 10/23/2026-00:00\n";
-        assert_eq!(parse_wbadmin_latest(t).unwrap(), Timestamp(NOW.0 - 8 * HOUR));
-        assert_eq!(parse_wbadmin_latest("Version identifier: 13/40/2026-00:00"), None);
-        assert_eq!(parse_wbadmin_latest(""), None);
+        let t = "Backup time: 10/22/2026 2:00 AM\nBackup location: D:\nVersion identifier: 10/22/2026-18:00\nCan recover: Volume(s), File(s)\n\nBackup time: 10/23/2026 2:00 AM\nBackup location: D:\nVersion identifier: 10/23/2026-00:00\nCan recover: Volume(s)\n";
+        let versions = crate::helper_extras::parse_versions(t);
+        assert_eq!(latest_version(&versions).unwrap(), Timestamp(NOW.0 - 8 * HOUR));
+        assert_eq!(version_time("13/40/2026-00:00"), None);
+        assert_eq!(latest_version(&[]), None);
         let xml = "<Event xmlns='x'><System><Level>4</Level><TimeCreated SystemTime='2026-10-23T01:00:00.000000000Z'/></System></Event><Event xmlns='x'><System><Level>2</Level><TimeCreated SystemTime='2026-10-23T07:00:00.000000000Z'/></System></Event>";
         let (at, error) = parse_event_log_latest(xml).unwrap();
         assert_eq!(at, Timestamp(NOW.0 - HOUR));
