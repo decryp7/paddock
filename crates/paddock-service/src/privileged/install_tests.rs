@@ -88,6 +88,39 @@ struct State {
     alive_polls: u32,
 }
 
+/// One look at the scripted OS: it counts as a poll for a job that starts after some.
+fn look(s: &mut State) -> Inspection {
+    if s.registered {
+        s.polls_since_register += 1;
+        if s.starts_after_polls
+            .is_some_and(|n| s.polls_since_register > n)
+        {
+            s.running = true;
+        }
+    }
+    view(s)
+}
+
+/// What the scripted OS holds now, without logging or advancing anything.
+fn view(s: &State) -> Inspection {
+    Inspection {
+        registration: s.registration_override.clone().unwrap_or(if s.registered {
+            Registration::Registered
+        } else {
+            Registration::Absent
+        }),
+        job: s.job_override.unwrap_or(if s.running {
+            Job::Running
+        } else if s.registered {
+            Job::NotRunning
+        } else {
+            Job::Absent
+        }),
+        points_here: s.points_here,
+        ..Inspection::absent()
+    }
+}
+
 #[derive(Clone, Default)]
 struct Scripted(Arc<Mutex<State>>);
 
@@ -116,32 +149,9 @@ impl Backend for Scripted {
     fn inspect(&mut self) -> Inspection {
         let mut s = self.0.lock().unwrap();
         s.log.push("inspect".into());
-        if s.registered {
-            s.polls_since_register += 1;
-            if s.starts_after_polls
-                .is_some_and(|n| s.polls_since_register > n)
-            {
-                s.running = true;
-            }
-        }
-        Inspection {
-            registration: s.registration_override.clone().unwrap_or(if s.registered {
-                Registration::Registered
-            } else {
-                Registration::Absent
-            }),
-            job: s.job_override.unwrap_or(if s.running {
-                Job::Running
-            } else if s.registered {
-                Job::NotRunning
-            } else {
-                Job::Absent
-            }),
-            points_here: s.points_here,
-            ..Inspection::absent()
-        }
+        look(&mut s)
     }
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         let mut s = self.0.lock().unwrap();
         s.log.push("register".into());
         if let Some(e) = s.register_error.clone() {
@@ -149,7 +159,7 @@ impl Backend for Scripted {
         }
         s.registered = true;
         s.polls_since_register = 0;
-        Ok(())
+        Ok(look(&mut s))
     }
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         let mut s = self.0.lock().unwrap();
@@ -560,6 +570,37 @@ fn what_the_os_says_after_registering_decides_the_outcome() {
     let (r, b) = outcome(|s| s.starts_after_polls = Some(5));
     assert!(r.is_ok());
     assert!(b.log().contains(&"pause".to_string()));
+}
+
+#[test]
+fn a_service_that_stops_with_an_error_says_how_it_ended() {
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| {
+        s.job_override = Some(Job::Failed(crate::backend::LastExit::ServiceSpecific(3)));
+    });
+    let r = run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE);
+    match r {
+        Err(InstallError::Failed {
+            phase: Step::Confirm,
+            why,
+        }) => assert!(
+            why.contains("service-specific exit code 3"),
+            "the cause reaches the user: {why}"
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn confirm_judges_the_inspection_register_returned_and_asks_the_os_again_only_to_wait() {
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| s.job_override = Some(Job::Running));
+    run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE).unwrap();
+    assert_eq!(
+        backend.log().iter().filter(|l| *l == "inspect").count(),
+        1,
+        "one look before (is anything registered?); the read-back after registering is not repeated"
+    );
 }
 
 #[test]
@@ -1012,17 +1053,35 @@ fn windows_refuses_to_start_a_service_that_holds_more_privileges() {
 fn linux_enables_the_unit_the_package_shipped_and_leaves_the_file_alone() {
     let layout = layout_for(Os::Linux);
     let sys = FakeSystem::new();
+    // The package put the unit there, disabled; `enable --now` is judged by reading it back.
+    sys.put_file(
+        "/usr/lib/systemd/system/dyno-helper.service",
+        &format!(
+            "[Service]\nExecStart={} --service\n",
+            layout.program.display()
+        ),
+    );
+    sys.put_program(layout.program.clone());
     let mut backend =
         crate::privileged::backend_for(&layout, &helper_spec(), Box::new(sys.clone())).unwrap();
     backend.register().unwrap();
     assert_eq!(
-        sys.commands(),
+        sys.commands()
+            .into_iter()
+            .filter(|c| !c.contains(" show ") && !c.contains("is-"))
+            .collect::<Vec<_>>(),
         ["systemctl enable --now dyno-helper.service"]
     );
     sys.clear_calls();
+    // Turned off, the packaged unit stays on disk but reads back disabled and stopped.
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
     backend.unregister().unwrap();
     assert_eq!(
-        sys.commands(),
+        sys.commands()
+            .into_iter()
+            .filter(|c| !c.contains(" show ") && !c.contains("is-"))
+            .collect::<Vec<_>>(),
         ["systemctl disable --now dyno-helper.service"]
     );
     assert!(sys.calls().iter().all(|c| !matches!(
@@ -1036,6 +1095,7 @@ fn linux_enables_the_unit_the_package_shipped_and_leaves_the_file_alone() {
         "[Service]\nExecStart=\"/usr/bin/dyno-helper\" \"serve\"\n",
     );
     sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
     let look = backend.inspect();
     assert_eq!(
         (look.registration, look.job, look.definition_current),

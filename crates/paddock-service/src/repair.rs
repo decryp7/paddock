@@ -132,7 +132,7 @@ fn stop_for(e: RegisterError) -> Option<RepairOutcome> {
         RegisterError::NeedsElevation => Some(RepairOutcome::NeedsElevation),
         RegisterError::Declined => Some(RepairOutcome::Declined),
         RegisterError::Unavailable(why) => Some(RepairOutcome::Unavailable(why)),
-        RegisterError::Other(_) => None,
+        RegisterError::Other(_) | RegisterError::NotAsWritten(_) => None,
     }
 }
 
@@ -179,7 +179,7 @@ pub fn replace(
     if let Some(result) = b.replace_in_one_step() {
         say(Step::Cycle(0));
         return match result {
-            Ok(()) => wait_for_answer(b, answers, cancel, t, say),
+            Ok(_) => wait_for_answer(b, answers, cancel, t, say),
             Err(e) => stop_for(e.clone())
                 .unwrap_or_else(|| RepairOutcome::Failed(format!("{e}. {NEXT_STEPS}"))),
         };
@@ -217,7 +217,7 @@ pub fn replace(
         }
         say(Step::Registering);
         match b.register() {
-            Ok(()) => last_error = None,
+            Ok(_) => last_error = None,
             Err(e) => {
                 if let Some(stop) = stop_for(e.clone()) {
                     say(Step::Note(format!("Registering stopped: {e}")));
@@ -296,7 +296,7 @@ mod tests {
                 ..Inspection::absent()
             }
         }
-        fn register(&mut self) -> Result<(), RegisterError> {
+        fn register(&mut self) -> Result<Inspection, RegisterError> {
             self.calls.push("register");
             let r = if self.register.is_empty() {
                 Ok(())
@@ -304,7 +304,7 @@ mod tests {
                 self.register.remove(0)
             };
             self.failed_last = r.is_err();
-            r
+            r.map(|()| Inspection::absent())
         }
         fn unregister(&mut self) -> Result<Inspection, crate::backend::UnregisterError> {
             self.calls.push("unregister");
@@ -336,8 +336,10 @@ mod tests {
         fn pause(&mut self, d: Duration) {
             self.paused += d;
         }
-        fn replace_in_one_step(&mut self) -> Option<Result<(), RegisterError>> {
-            self.one_step.take()
+        fn replace_in_one_step(&mut self) -> Option<Result<Inspection, RegisterError>> {
+            self.one_step
+                .take()
+                .map(|r| r.map(|()| Inspection::absent()))
         }
     }
 
