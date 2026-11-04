@@ -3,8 +3,8 @@
 //! Per-program traffic end to end (helper-wiring plan section 2.5, decision D6): a real agent over the fake platform whose helper is
 //! a real `Dispatcher` (`common/helper_rig.rs`). The helper scopes the counters to the account that asks, so the same machine
 //! shows a standard user only that user's programs and the system's, and the other accounts' programs as one total. (The rows are
-//! rates between two reads, eight seconds apart; the per-program scoping itself is tested over every scope in the helper's
-//! `dispatch::tests`, and the total, which a first read already has, here.)
+//! rates between two reads, so the rows are tested below with two reads whose time is passed to the tracker as a value, and the
+//! total, which a first read already has, in the other tests.)
 
 use dyno_agent::cli::{ask_within, connect};
 use dyno_agent::paths::Dirs;
@@ -68,6 +68,10 @@ impl Rig {
     /// A Windows agent whose helper is asked as `caller`. The owner's program is pid 10, the system's pid 30, another account's
     /// pids 20 and 21 (from the point of view of any caller but that account).
     fn start(caller: Caller, up: bool) -> Rig {
+        Rig::start_with(caller, up, false)
+    }
+
+    fn start_with(caller: Caller, up: bool, grows: bool) -> Rig {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
@@ -89,6 +93,7 @@ impl Rig {
                 process(21, someone_else),
                 process(30, RawOwner::System),
             ],
+            traffic_grows: grows,
             ..Readers::default()
         };
         let transport = DispatcherTransport::new(dispatcher(HelperHost::Windows, readers, tmp.path()), caller);
@@ -138,6 +143,23 @@ impl Drop for Rig {
             r.stop();
         }
     }
+}
+
+#[test]
+fn the_rows_of_a_standard_user_hold_only_its_own_and_the_systems_programs() {
+    use dyno_core::network_traffic::TrafficTracker;
+    use dyno_core::time::Timestamp;
+    let rig = Rig::start_with(Caller::Other, true, true);
+    let shared = rig.running.as_ref().unwrap().shared.clone();
+    // The agent's own link to the helper, as the network centre reads it: two reads, the second 8 s after the first.
+    let mut tracker = TrafficTracker::new();
+    let first = shared.network.counters().unwrap();
+    assert!(tracker.update(Timestamp(0), &first).is_empty(), "a first read has no rates");
+    let second = shared.network.counters().unwrap();
+    let rows = tracker.update(Timestamp(8_000), &second);
+    let mut names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["program10", "program30"], "{rows:?}");
 }
 
 #[test]

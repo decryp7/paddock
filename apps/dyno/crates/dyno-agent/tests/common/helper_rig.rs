@@ -72,6 +72,8 @@ pub struct Readers {
     pub memory: MemoryLayout,
     /// The per-program traffic counters.
     pub traffic: Vec<TrafficCounter>,
+    /// Whether the counters grow by 1 000 received bytes with every read (rates need two reads that differ).
+    pub traffic_grows: bool,
     /// The SMART reply.
     pub smart: SmartReply,
     /// The process list the helper's scoping reads whose a program is from (empty: nobody's program is known).
@@ -86,6 +88,7 @@ impl Default for Readers {
                 reason: dyno_core::inventory::Unavailable::failed("fake"),
             },
             traffic: Vec::new(),
+            traffic_grows: false,
             smart: SmartReply {
                 disks: vec![],
                 skipped: vec![],
@@ -102,10 +105,27 @@ impl MemoryReader for Memory {
         self.0.clone()
     }
 }
-struct Traffic(Vec<TrafficCounter>);
+/// The counters, which grow by 1 000 bytes per read when `grows` (so two reads give rates).
+struct Traffic {
+    counters: Vec<TrafficCounter>,
+    grows: bool,
+    reads: std::sync::atomic::AtomicU64,
+}
 impl ProcessTraffic for Traffic {
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        Ok(self.0.clone())
+        let n = if self.grows {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        } else {
+            0
+        };
+        Ok(self
+            .counters
+            .iter()
+            .map(|c| TrafficCounter {
+                bytes_in: c.bytes_in + n * 1_000,
+                ..c.clone()
+            })
+            .collect())
     }
 }
 struct Sweeps(Vec<RawProcess>);
@@ -162,7 +182,11 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
             host,
             agent_exe: "/x/dyno-agent".into(),
         },
-        traffic: Box::new(Traffic(readers.traffic)),
+        traffic: Box::new(Traffic {
+            counters: readers.traffic,
+            grows: readers.traffic_grows,
+            reads: std::sync::atomic::AtomicU64::new(0),
+        }),
         audit: AuditLog::new(dir.join("audit.jsonl")),
         clock: Box::new(|| 1_000),
         login_items: Box::new(Items),
