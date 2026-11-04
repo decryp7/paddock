@@ -29,7 +29,9 @@ fn the_include_can_call_every_command() {
 
 #[test]
 fn the_apply_update_command_keeps_its_version_as_a_semver() {
-    let Ok(Command::ApplyUpdate { version, .. }) = parse(&words("apply-update --file F --signature S --version 1.2.3-beta.1 --restart")) else {
+    let Ok(Command::ApplyUpdate { version, .. }) = parse(&words(
+        "apply-update --file F --signature S --version 1.2.3-beta.1 --restart",
+    )) else {
         panic!("not parsed");
     };
     assert!(version < semver::Version::new(1, 2, 3));
@@ -54,7 +56,6 @@ fn documented_codes_never_change() {
         (Exit::Usage, 4),
         (Exit::Failed, 5),
         (Exit::StillRunning, 11),
-        (Exit::NotBuilt, 12),
         (Exit::Refused(Refusal::NoKey), 20),
         (Exit::Refused(Refusal::Busy), 21),
         (Exit::Refused(Refusal::InstallDir), 22),
@@ -77,7 +78,11 @@ fn never_panics() {
         vec![],
         vec!["".into()],
         vec!["\u{0}".into(), "--dir".into(), "\u{ffff}".into()],
-        vec!["apply-update".into(), "--version".into(), "99999999999999999999.0.0".into()],
+        vec![
+            "apply-update".into(),
+            "--version".into(),
+            "99999999999999999999.0.0".into(),
+        ],
         vec!["apply-update".into(), "--size".into(), "-1".into()],
         vec!["stop-all".into(), "--images".into(), ",,,,".into()],
         vec!["guard".into(), "--update".into(), "--update".into()],

@@ -21,7 +21,10 @@ impl LogFs for FileLog {
         std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0)
     }
     fn append(&mut self, text: &str) -> std::io::Result<()> {
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
         f.write_all(text.as_bytes())
     }
     fn rotate(&mut self) -> std::io::Result<()> {
@@ -36,6 +39,9 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn unix_ms(&self) -> u64 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
     }
 }

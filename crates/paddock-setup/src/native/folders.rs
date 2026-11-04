@@ -9,12 +9,16 @@ use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
 
 /// Creates `path` with the explicit descriptor of section 2.5.
 fn create_with_descriptor(path: &str) -> Result<(), String> {
-    let sd = Descriptor::from_sddl(UPDATES_SDDL).map_err(|e| format!("the folder descriptor could not be built (error {e})"))?;
+    let sd = Descriptor::from_sddl(UPDATES_SDDL)
+        .map_err(|e| format!("the folder descriptor could not be built (error {e})"))?;
     let attrs = sd.attributes();
     let wide = to_wide(path);
     // SAFETY: NUL-terminated path; the attributes point at a live descriptor.
     if unsafe { CreateDirectoryW(wide.as_ptr(), &attrs) } == 0 {
-        return Err(format!("the folder could not be made (error {})", super::handle::last_error()));
+        return Err(format!(
+            "the folder could not be made (error {})",
+            super::handle::last_error()
+        ));
     }
     Ok(())
 }
@@ -30,10 +34,15 @@ pub fn ensure(path: &str) -> Result<UpdatesAction, String> {
         UpdatesAction::RenameAsideAndCreate => {
             let parent = Path::new(path).parent().ok_or("the folder has no parent")?;
             let taken: Vec<String> = std::fs::read_dir(parent)
-                .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+                .map(|d| {
+                    d.filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
                 .unwrap_or_default();
             let aside = parent.join(aside_name(&taken));
-            std::fs::rename(path, &aside).map_err(|e| format!("the folder could not be renamed aside ({e})"))?;
+            std::fs::rename(path, &aside)
+                .map_err(|e| format!("the folder could not be renamed aside ({e})"))?;
             create_with_descriptor(path)?;
         }
     }

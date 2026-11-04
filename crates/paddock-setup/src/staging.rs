@@ -27,12 +27,21 @@ mod tests {
     use super::*;
 
     fn e(name: &str, is_dir: bool) -> Entry {
-        Entry { name: name.into(), is_dir }
+        Entry {
+            name: name.into(),
+            is_dir,
+        }
     }
 
     #[test]
     fn keeps_only_the_log() {
-        let list = [e("setup.log", false), e("SETUP.LOG.1", false), e("update-1.2.0.exe", false), e("tmp", true), e("old.bin", false)];
+        let list = [
+            e("setup.log", false),
+            e("SETUP.LOG.1", false),
+            e("update-1.2.0.exe", false),
+            e("tmp", true),
+            e("old.bin", false),
+        ];
         assert_eq!(removals(&list), vec!["update-1.2.0.exe", "tmp", "old.bin"]);
     }
 

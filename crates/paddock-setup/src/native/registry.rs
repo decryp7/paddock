@@ -3,8 +3,9 @@
 use super::wide::{from_wide, to_wide};
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
-    REG_EXPAND_SZ, REG_SZ, RegCloseKey, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
+    HKEY, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_SET_VALUE,
+    KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_EXPAND_SZ, REG_SZ, RegCloseKey, RegDeleteValueW,
+    RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
 };
 
 /// Which root.
@@ -62,7 +63,12 @@ pub fn open_read(root: Root, path: &str, view: View) -> Option<Key> {
 
 /// Opens for deleting values.
 pub fn open_write(root: Root, path: &str, view: View) -> Option<Key> {
-    open(root, path, view, KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS)
+    open(
+        root,
+        path,
+        view,
+        KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS,
+    )
 }
 
 impl Key {
@@ -74,7 +80,16 @@ impl Key {
             let mut len = buf.len() as u32;
             // SAFETY: `buf` and `len` describe the same buffer.
             let rc = unsafe {
-                RegEnumKeyExW(self.0, index, buf.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+                RegEnumKeyExW(
+                    self.0,
+                    index,
+                    buf.as_mut_ptr(),
+                    &mut len,
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
             };
             if rc != ERROR_SUCCESS {
                 break;
@@ -90,14 +105,32 @@ impl Key {
         let mut kind = 0u32;
         let mut size = 0u32;
         // SAFETY: a size query with a null data pointer.
-        let rc = unsafe { RegQueryValueExW(self.0, wide.as_ptr(), std::ptr::null(), &mut kind, std::ptr::null_mut(), &mut size) };
+        let rc = unsafe {
+            RegQueryValueExW(
+                self.0,
+                wide.as_ptr(),
+                std::ptr::null(),
+                &mut kind,
+                std::ptr::null_mut(),
+                &mut size,
+            )
+        };
         if rc != ERROR_SUCCESS || !(kind == REG_SZ || kind == REG_EXPAND_SZ) || size > 64 * 1024 {
             return None;
         }
         let mut buf = vec![0u16; (size as usize).div_ceil(2) + 1];
         let mut size2 = (buf.len() * 2) as u32;
         // SAFETY: `buf` holds `size2` bytes.
-        let rc = unsafe { RegQueryValueExW(self.0, wide.as_ptr(), std::ptr::null(), &mut kind, buf.as_mut_ptr().cast(), &mut size2) };
+        let rc = unsafe {
+            RegQueryValueExW(
+                self.0,
+                wide.as_ptr(),
+                std::ptr::null(),
+                &mut kind,
+                buf.as_mut_ptr().cast(),
+                &mut size2,
+            )
+        };
         (rc == ERROR_SUCCESS).then(|| from_wide(&buf))
     }
 
@@ -112,7 +145,16 @@ impl Key {
             let mut data_len = (data.len() * 2) as u32;
             // SAFETY: the buffers and their lengths agree.
             let rc = unsafe {
-                RegEnumValueW(self.0, index, name.as_mut_ptr(), &mut name_len, std::ptr::null(), &mut kind, data.as_mut_ptr().cast(), &mut data_len)
+                RegEnumValueW(
+                    self.0,
+                    index,
+                    name.as_mut_ptr(),
+                    &mut name_len,
+                    std::ptr::null(),
+                    &mut kind,
+                    data.as_mut_ptr().cast(),
+                    &mut data_len,
+                )
             };
             if rc != ERROR_SUCCESS {
                 // ERROR_NO_MORE_ITEMS ends; ERROR_MORE_DATA skips the value.

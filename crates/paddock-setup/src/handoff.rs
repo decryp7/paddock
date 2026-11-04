@@ -77,7 +77,10 @@ mod tests {
 
     #[test]
     fn name_is_global_and_stable() {
-        assert_eq!(mutex_name("com.decryp7.dyno"), r"Global\com.decryp7.dyno.setup");
+        assert_eq!(
+            mutex_name("com.decryp7.dyno"),
+            r"Global\com.decryp7.dyno.setup"
+        );
     }
 
     #[test]
@@ -85,28 +88,55 @@ mod tests {
         assert_eq!(MUTEX_SDDL, "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00100000;;;AU)");
         let au = MUTEX_SDDL.split('(').find(|a| a.ends_with(";AU)")).unwrap();
         assert!(au.contains("0x00100000"), "SYNCHRONIZE only");
-        assert!(!MUTEX_SDDL.contains(";WD)") && !MUTEX_SDDL.contains(";BU)"), "no Everyone, no Users");
+        assert!(
+            !MUTEX_SDDL.contains(";WD)") && !MUTEX_SDDL.contains(";BU)"),
+            "no Everyone, no Users"
+        );
     }
 
     #[test]
     fn abandoned_means_the_installer_is_gone() {
         assert_eq!(after_wait(WaitOutcome::Abandoned), InstallerState::Gone);
         assert_eq!(after_wait(WaitOutcome::Released), InstallerState::Gone);
-        assert_eq!(after_wait(WaitOutcome::TimedOut), InstallerState::Installing);
+        assert_eq!(
+            after_wait(WaitOutcome::TimedOut),
+            InstallerState::Installing
+        );
         assert_eq!(after_wait(WaitOutcome::Failed), InstallerState::Installing);
     }
 
     #[test]
     fn a_held_mutex_is_installing() {
-        assert_eq!(still_installing(MutexProbe::Exists, None), InstallerState::Installing);
-        assert_eq!(still_installing(MutexProbe::Exists, Some(Duration::from_secs(3600))), InstallerState::Installing);
+        assert_eq!(
+            still_installing(MutexProbe::Exists, None),
+            InstallerState::Installing
+        );
+        assert_eq!(
+            still_installing(MutexProbe::Exists, Some(Duration::from_secs(3600))),
+            InstallerState::Installing
+        );
     }
 
     #[test]
     fn the_gap_is_covered_by_a_young_record() {
-        assert_eq!(still_installing(MutexProbe::Absent, Some(Duration::from_secs(5))), InstallerState::Installing);
-        assert_eq!(still_installing(MutexProbe::Absent, Some(HANDOFF_GRACE - Duration::from_millis(1))), InstallerState::Installing);
-        assert_eq!(still_installing(MutexProbe::Absent, Some(HANDOFF_GRACE)), InstallerState::Gone);
-        assert_eq!(still_installing(MutexProbe::Absent, None), InstallerState::Gone);
+        assert_eq!(
+            still_installing(MutexProbe::Absent, Some(Duration::from_secs(5))),
+            InstallerState::Installing
+        );
+        assert_eq!(
+            still_installing(
+                MutexProbe::Absent,
+                Some(HANDOFF_GRACE - Duration::from_millis(1))
+            ),
+            InstallerState::Installing
+        );
+        assert_eq!(
+            still_installing(MutexProbe::Absent, Some(HANDOFF_GRACE)),
+            InstallerState::Gone
+        );
+        assert_eq!(
+            still_installing(MutexProbe::Absent, None),
+            InstallerState::Gone
+        );
     }
 }

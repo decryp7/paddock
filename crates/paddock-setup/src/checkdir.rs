@@ -37,7 +37,9 @@ pub enum DirRefusal {
     #[error("the folder or a folder above it is a link")]
     ReparsePoint,
     /// Another account owns it.
-    #[error("the folder is owned by an account that is not SYSTEM, Administrators or TrustedInstaller")]
+    #[error(
+        "the folder is owned by an account that is not SYSTEM, Administrators or TrustedInstaller"
+    )]
     Owner,
     /// It could not be looked at.
     #[error("the folder could not be checked: {0}")]
@@ -45,7 +47,7 @@ pub enum DirRefusal {
 }
 
 impl DirRefusal {
-    /// The installer's message ("Install <App> in Program Files", the folder named).
+    /// The installer's message ("Install `<App>` in Program Files", the folder named).
     pub fn message(&self, app: &str, dir: &str) -> String {
         format!("Install {app} in Program Files. The folder {dir} is not allowed: {self}.")
     }
@@ -83,13 +85,18 @@ pub fn check(facts: &dyn DirFacts, dir: &str) -> Result<CheckedDir, DirRefusal> 
     if found.exists && !found.owner_sid.as_deref().is_some_and(is_trusted_sid) {
         return Err(DirRefusal::Owner);
     }
-    Ok(CheckedDir { canonical: found.canonical })
+    Ok(CheckedDir {
+        canonical: found.canonical,
+    })
 }
 
 /// Splits a Windows path into components, dropping empty ones and a `\\?\` prefix.
 pub fn components(path: &str) -> Vec<String> {
     let p = path.strip_prefix(r"\\?\").unwrap_or(path);
-    p.split('\\').filter(|c| !c.is_empty()).map(String::from).collect()
+    p.split('\\')
+        .filter(|c| !c.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// `true` when `path` is `root` or below it, by components without case (never a string prefix:
@@ -133,7 +140,11 @@ pub fn plan_updates_dir(found: &UpdatesInspect) -> UpdatesAction {
         return UpdatesAction::Create;
     }
     let owner_ok = found.owner_sid.as_deref().is_some_and(is_trusted_sid);
-    if found.is_dir && !found.reparse && owner_ok { UpdatesAction::Use } else { UpdatesAction::RenameAsideAndCreate }
+    if found.is_dir && !found.reparse && owner_ok {
+        UpdatesAction::Use
+    } else {
+        UpdatesAction::RenameAsideAndCreate
+    }
 }
 
 /// A name for the renamed-aside folder that is not in `taken`.
@@ -145,7 +156,12 @@ pub fn aside_name(taken: &[String]) -> String {
 }
 
 fn same_components(a: &[String], b: &[String]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.chars().flat_map(char::to_uppercase).eq(y.chars().flat_map(char::to_uppercase)))
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.chars()
+                .flat_map(char::to_uppercase)
+                .eq(y.chars().flat_map(char::to_uppercase))
+        })
 }
 
 #[cfg(test)]
@@ -171,15 +187,30 @@ mod tests {
     fn fake(canonical: &str, exists: bool, reparse: bool, owner: Option<&str>) -> Fake {
         Fake {
             roots: vec![r"C:\Program Files"],
-            found: Ok(DirInspect { canonical: canonical.into(), exists, reparse_component: reparse, owner_sid: owner.map(String::from) }),
+            found: Ok(DirInspect {
+                canonical: canonical.into(),
+                exists,
+                reparse_component: reparse,
+                owner_sid: owner.map(String::from),
+            }),
         }
     }
 
     #[test]
     fn accepts_a_direct_child_owned_by_admins() {
-        let ok = check(&fake(r"C:\Program Files\Dyno", true, false, Some(ADMINS)), r"C:\Program Files\Dyno").unwrap();
+        let ok = check(
+            &fake(r"C:\Program Files\Dyno", true, false, Some(ADMINS)),
+            r"C:\Program Files\Dyno",
+        )
+        .unwrap();
         assert_eq!(ok.path(), r"C:\Program Files\Dyno");
-        assert!(check(&fake(r"c:\PROGRAM FILES\Dyno", true, false, Some(SYSTEM)), "x").is_ok());
+        assert!(
+            check(
+                &fake(r"c:\PROGRAM FILES\Dyno", true, false, Some(SYSTEM)),
+                "x"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -204,21 +235,48 @@ mod tests {
             r"C:\Users\x\AppData\Local\Dyno",
             r"C:\Program Files Extra\Dyno",
         ] {
-            assert_eq!(check(&fake(p, true, false, Some(ADMINS)), p).unwrap_err(), DirRefusal::NotInProgramFiles, "{p}");
+            assert_eq!(
+                check(&fake(p, true, false, Some(ADMINS)), p).unwrap_err(),
+                DirRefusal::NotInProgramFiles,
+                "{p}"
+            );
         }
     }
 
     #[test]
     fn refuses_reparse_points_and_other_owners() {
-        assert_eq!(check(&fake(r"C:\Program Files\Dyno", true, true, Some(ADMINS)), "x").unwrap_err(), DirRefusal::ReparsePoint);
-        assert_eq!(check(&fake(r"C:\Program Files\Dyno", true, false, Some(USER)), "x").unwrap_err(), DirRefusal::Owner);
-        assert_eq!(check(&fake(r"C:\Program Files\Dyno", true, false, None), "x").unwrap_err(), DirRefusal::Owner);
+        assert_eq!(
+            check(
+                &fake(r"C:\Program Files\Dyno", true, true, Some(ADMINS)),
+                "x"
+            )
+            .unwrap_err(),
+            DirRefusal::ReparsePoint
+        );
+        assert_eq!(
+            check(
+                &fake(r"C:\Program Files\Dyno", true, false, Some(USER)),
+                "x"
+            )
+            .unwrap_err(),
+            DirRefusal::Owner
+        );
+        assert_eq!(
+            check(&fake(r"C:\Program Files\Dyno", true, false, None), "x").unwrap_err(),
+            DirRefusal::Owner
+        );
     }
 
     #[test]
     fn unreadable_is_refused_with_the_reason() {
-        let f = Fake { roots: vec![r"C:\Program Files"], found: Err("access denied".into()) };
-        assert_eq!(check(&f, "x").unwrap_err(), DirRefusal::Unreadable("access denied".into()));
+        let f = Fake {
+            roots: vec![r"C:\Program Files"],
+            found: Err("access denied".into()),
+        };
+        assert_eq!(
+            check(&f, "x").unwrap_err(),
+            DirRefusal::Unreadable("access denied".into())
+        );
     }
 
     #[test]
@@ -230,10 +288,22 @@ mod tests {
 
     #[test]
     fn within_is_by_component_never_by_prefix() {
-        assert!(is_within(r"C:\Program Files\Dyno", r"C:\Program Files\Dyno"));
-        assert!(is_within(r"c:\program files\dyno\sub\a.exe", r"C:\Program Files\Dyno\"));
-        assert!(is_within(r"\\?\C:\Program Files\Dyno\a.exe", r"C:\Program Files\Dyno"));
-        assert!(!is_within(r"C:\Program Files\Dyno Helper\a.exe", r"C:\Program Files\Dyno"));
+        assert!(is_within(
+            r"C:\Program Files\Dyno",
+            r"C:\Program Files\Dyno"
+        ));
+        assert!(is_within(
+            r"c:\program files\dyno\sub\a.exe",
+            r"C:\Program Files\Dyno\"
+        ));
+        assert!(is_within(
+            r"\\?\C:\Program Files\Dyno\a.exe",
+            r"C:\Program Files\Dyno"
+        ));
+        assert!(!is_within(
+            r"C:\Program Files\Dyno Helper\a.exe",
+            r"C:\Program Files\Dyno"
+        ));
         assert!(!is_within(r"C:\Program Files", r"C:\Program Files\Dyno"));
         assert!(!is_within("", r"C:\Program Files"));
     }
@@ -245,24 +315,56 @@ mod tests {
     }
 
     fn up(exists: bool, is_dir: bool, reparse: bool, owner: Option<&str>) -> UpdatesInspect {
-        UpdatesInspect { exists, is_dir, reparse, owner_sid: owner.map(String::from) }
+        UpdatesInspect {
+            exists,
+            is_dir,
+            reparse,
+            owner_sid: owner.map(String::from),
+        }
     }
 
     #[test]
     fn updates_dir_plan() {
-        assert_eq!(plan_updates_dir(&up(false, false, false, None)), UpdatesAction::Create);
-        assert_eq!(plan_updates_dir(&up(true, true, false, Some(ADMINS))), UpdatesAction::Use);
-        assert_eq!(plan_updates_dir(&up(true, true, false, Some(SYSTEM))), UpdatesAction::Use);
-        assert_eq!(plan_updates_dir(&up(true, true, false, Some(USER))), UpdatesAction::RenameAsideAndCreate);
-        assert_eq!(plan_updates_dir(&up(true, true, false, None)), UpdatesAction::RenameAsideAndCreate);
-        assert_eq!(plan_updates_dir(&up(true, true, true, Some(ADMINS))), UpdatesAction::RenameAsideAndCreate);
-        assert_eq!(plan_updates_dir(&up(true, false, false, Some(ADMINS))), UpdatesAction::RenameAsideAndCreate);
+        assert_eq!(
+            plan_updates_dir(&up(false, false, false, None)),
+            UpdatesAction::Create
+        );
+        assert_eq!(
+            plan_updates_dir(&up(true, true, false, Some(ADMINS))),
+            UpdatesAction::Use
+        );
+        assert_eq!(
+            plan_updates_dir(&up(true, true, false, Some(SYSTEM))),
+            UpdatesAction::Use
+        );
+        assert_eq!(
+            plan_updates_dir(&up(true, true, false, Some(USER))),
+            UpdatesAction::RenameAsideAndCreate
+        );
+        assert_eq!(
+            plan_updates_dir(&up(true, true, false, None)),
+            UpdatesAction::RenameAsideAndCreate
+        );
+        assert_eq!(
+            plan_updates_dir(&up(true, true, true, Some(ADMINS))),
+            UpdatesAction::RenameAsideAndCreate
+        );
+        assert_eq!(
+            plan_updates_dir(&up(true, false, false, Some(ADMINS))),
+            UpdatesAction::RenameAsideAndCreate
+        );
     }
 
     #[test]
     fn updates_descriptor_gives_users_read_only() {
-        assert!(UPDATES_SDDL.starts_with("O:BAG:BAD:P"), "owner Administrators, protected");
-        let users: Vec<&str> = UPDATES_SDDL.split('(').filter(|a| a.ends_with(";BU)")).collect();
+        assert!(
+            UPDATES_SDDL.starts_with("O:BAG:BAD:P"),
+            "owner Administrators, protected"
+        );
+        let users: Vec<&str> = UPDATES_SDDL
+            .split('(')
+            .filter(|a| a.ends_with(";BU)"))
+            .collect();
         assert_eq!(users, ["A;OICI;FRFX;;;BU)"]);
         assert!(!UPDATES_SDDL.contains(";WD)") && !UPDATES_SDDL.contains(";AU)"));
     }
@@ -270,6 +372,9 @@ mod tests {
     #[test]
     fn aside_names_skip_taken_ones() {
         assert_eq!(aside_name(&[]), "updates.refused-1");
-        assert_eq!(aside_name(&["updates.refused-1".into(), "UPDATES.REFUSED-2".into()]), "updates.refused-3");
+        assert_eq!(
+            aside_name(&["updates.refused-1".into(), "UPDATES.REFUSED-2".into()]),
+            "updates.refused-3"
+        );
     }
 }

@@ -24,14 +24,26 @@ use std::path::PathBuf;
 type FileSetupLog = SetupLog<FileLog, SystemClock>;
 
 fn opened_log(proof: &CheckedDir) -> FileSetupLog {
-    SetupLog::open(proof, FileLog::new(PathBuf::from(proof.path()).join("updates").join("setup.log")), SystemClock)
+    SetupLog::open(
+        proof,
+        FileLog::new(
+            PathBuf::from(proof.path())
+                .join("updates")
+                .join("setup.log"),
+        ),
+        SystemClock,
+    )
 }
 
 /// `check-dir`, then `updates\` is made, then the log is opened. `None` log when the check refuses.
 fn checked(dir: &str) -> Result<(CheckedDir, FileSetupLog), checkdir::DirRefusal> {
     let proof = checkdir::check(&RealDirs, dir)?;
     // Folder trouble does not fail the check; it only means there is no log.
-    let _ = folders::ensure(&PathBuf::from(proof.path()).join("updates").to_string_lossy());
+    let _ = folders::ensure(
+        &PathBuf::from(proof.path())
+            .join("updates")
+            .to_string_lossy(),
+    );
     let log = opened_log(&proof);
     Ok((proof, log))
 }
@@ -62,8 +74,16 @@ fn run(command: Command) -> Exit {
             Exit::Ok
         }
         Command::SameFolder { a, b } => {
-            let name = |p: &str| handle::open_for_query(p).ok().and_then(|h| handle::final_path(&h));
-            if samefolder::same(name(&a).as_deref(), name(&b).as_deref()) { Exit::Ok } else { Exit::NotSame }
+            let name = |p: &str| {
+                handle::open_for_query(p)
+                    .ok()
+                    .and_then(|h| handle::final_path(&h))
+            };
+            if samefolder::same(name(&a).as_deref(), name(&b).as_deref()) {
+                Exit::Ok
+            } else {
+                Exit::NotSame
+            }
         }
         Command::CheckDir { dir } => match checked(&dir) {
             Ok((proof, mut log)) => {
@@ -78,21 +98,37 @@ fn run(command: Command) -> Exit {
                 Exit::BadDir
             }
         },
-        Command::Guard { dir, product, main, update, restart } => {
+        Command::Guard {
+            dir,
+            product,
+            main,
+            update,
+            restart,
+        } => {
             let mut file_log = dir.as_deref().and_then(|d| checked(d).ok()).map(|(_, l)| l);
             let mut none = NoLog;
             let log: &mut dyn Sink = match file_log.as_mut() {
                 Some(l) => l,
                 None => &mut none,
             };
-            let machine = Machine { product: product.clone() };
+            let machine = Machine {
+                product: product.clone(),
+            };
             match guard::decide(&machine, &product, &main, update, restart, log) {
                 guard::Decision::NotFresh | guard::Decision::Proceed => Exit::Ok,
                 guard::Decision::Blocked { message, restart } => {
                     say(&message);
                     if let Some(program) = restart {
-                        let started = facts::desktop_token().is_some_and(|t| spawn_as_desktop_user(&t, &program));
-                        log.line("guard", if started { "the older copy was started again" } else { "the older copy could not be started again" });
+                        let started = facts::desktop_token()
+                            .is_some_and(|t| spawn_as_desktop_user(&t, &program));
+                        log.line(
+                            "guard",
+                            if started {
+                                "the older copy was started again"
+                            } else {
+                                "the older copy could not be started again"
+                            },
+                        );
                     }
                     Exit::Blocked
                 }
@@ -112,12 +148,17 @@ fn run(command: Command) -> Exit {
         }
         Command::CleanRun { dir, scope } => clean_run(&dir, scope),
         Command::CleanStaging { dir } => {
-            let Ok((_proof, mut log)) = checked(&dir) else { return Exit::BadDir };
+            let Ok((_proof, mut log)) = checked(&dir) else {
+                return Exit::BadDir;
+            };
             let updates = PathBuf::from(&dir).join("updates");
             let entries: Vec<staging::Entry> = std::fs::read_dir(&updates)
                 .map(|d| {
                     d.filter_map(|e| e.ok())
-                        .map(|e| staging::Entry { name: e.file_name().to_string_lossy().into_owned(), is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false) })
+                        .map(|e| staging::Entry {
+                            name: e.file_name().to_string_lossy().into_owned(),
+                            is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -125,14 +166,32 @@ fn run(command: Command) -> Exit {
             for name in staging::removals(&entries) {
                 let p = updates.join(&name);
                 let is_dir = entries.iter().any(|e| e.name == name && e.is_dir);
-                if (if is_dir { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) }).is_err() {
+                if (if is_dir {
+                    std::fs::remove_dir_all(&p)
+                } else {
+                    std::fs::remove_file(&p)
+                })
+                .is_err()
+                {
                     failed = true;
                 }
             }
-            log.line("clean-staging", if failed { "some staged files could not be removed" } else { "staging removed" });
+            log.line(
+                "clean-staging",
+                if failed {
+                    "some staged files could not be removed"
+                } else {
+                    "staging removed"
+                },
+            );
             if failed { Exit::Failed } else { Exit::Ok }
         }
-        Command::ApplyUpdate { file, signature, version, size } => apply_update(file, signature, version, size),
+        Command::ApplyUpdate {
+            file,
+            signature,
+            version,
+            size,
+        } => apply_update(file, signature, version, size),
         Command::HoldInstalling => match BAKED.identifier {
             None => Exit::Failed,
             Some(id) => match hold::hold(id) {
@@ -146,28 +205,59 @@ fn run(command: Command) -> Exit {
     }
 }
 
-fn apply_update(file: String, signature: String, version: semver::Version, size: Option<u64>) -> Exit {
-    let Ok(exe) = std::env::current_exe() else { return Exit::Failed };
-    let Some(instdir) = exe.parent().map(|p| p.to_string_lossy().into_owned()) else { return Exit::Failed };
+fn apply_update(
+    file: String,
+    signature: String,
+    version: semver::Version,
+    size: Option<u64>,
+) -> Exit {
+    let Ok(exe) = std::env::current_exe() else {
+        return Exit::Failed;
+    };
+    let Some(instdir) = exe.parent().map(|p| p.to_string_lossy().into_owned()) else {
+        return Exit::Failed;
+    };
     let layout = crate::apply::Layout::new(&instdir);
     // The log exists only after check-dir passed (a refusal returns before any write).
     let Ok((_proof, mut log)) = checked(&instdir) else {
         return Exit::Refused(crate::apply::Refusal::InstallDir);
     };
-    let key = BAKED.update_key.and_then(|k| paddock_updater::signature::UpdateKey::resolve([Some(k)]));
+    let key = BAKED
+        .update_key
+        .and_then(|k| paddock_updater::signature::UpdateKey::resolve([Some(k)]));
     let (Some(main), Some(identifier)) = (BAKED.main, BAKED.identifier) else {
-        log.line("apply-update", "this build has no identifier or main binary name");
+        log.line(
+            "apply-update",
+            "this build has no identifier or main binary name",
+        );
         return Exit::Refused(crate::apply::Refusal::NoKey);
     };
     let started = SystemClock.unix_ms();
-    let request = crate::apply::Request { file, signature, version, size };
+    let request = crate::apply::Request {
+        file,
+        signature,
+        version,
+        size,
+    };
     let cell = std::cell::RefCell::new(log);
     let result = {
-        let mut port = apply::Real::new(layout.clone(), main.to_string(), identifier.to_string(), key, Shared(&cell));
+        let mut port = apply::Real::new(
+            layout.clone(),
+            main.to_string(),
+            identifier.to_string(),
+            key,
+            Shared(&cell),
+        );
         crate::apply::run(&mut port, &layout, &request, &mut Shared(&cell))
     };
     let mut log = cell.into_inner();
-    log.line("apply-update", &format!("finished in {} ms", SystemClock.unix_ms().saturating_sub(started)));
+    log.line(
+        "apply-update",
+        &format!(
+            "finished in {} ms",
+            SystemClock.unix_ms().saturating_sub(started)
+        ),
+    );
     match result {
         Ok(()) => Exit::Ok,
         Err(r) => {
@@ -188,35 +278,67 @@ impl Sink for Shared<'_> {
 
 fn clean_run(dir: &str, scope: RunScope) -> Exit {
     const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    let Ok((_proof, mut log)) = checked(dir) else { return Exit::BadDir };
+    let Ok((_proof, mut log)) = checked(dir) else {
+        return Exit::BadDir;
+    };
     let mut failed = false;
     let mut removed = 0u32;
     for view in [View::Wide, View::Narrow] {
         if let Some(key) = registry::open_write(Root::Machine, RUN, view) {
-            let values: Vec<runvalues::RunValue> = key.string_values().into_iter().map(|(name, command)| runvalues::RunValue { name, command }).collect();
+            let values: Vec<runvalues::RunValue> = key
+                .string_values()
+                .into_iter()
+                .map(|(name, command)| runvalues::RunValue { name, command })
+                .collect();
             for name in runvalues::machine_removals(&values, dir) {
-                if key.delete_value(&name) { removed += 1 } else { failed = true }
+                if key.delete_value(&name) {
+                    removed += 1
+                } else {
+                    failed = true
+                }
             }
         }
     }
     if scope == RunScope::MachineAndUsers {
         let product = BAKED.product.unwrap_or_default();
-        let hives = registry::open_read(Root::Users, "", View::Wide).map(|k| k.subkeys()).unwrap_or_default();
+        let hives = registry::open_read(Root::Users, "", View::Wide)
+            .map(|k| k.subkeys())
+            .unwrap_or_default();
         for sid in guard::scan_accounts(&hives) {
-            if let Some(key) = registry::open_write(Root::Users, &format!(r"{sid}\{RUN}"), View::Wide) {
-                let values: Vec<runvalues::RunValue> = key.string_values().into_iter().map(|(name, command)| runvalues::RunValue { name, command }).collect();
+            if let Some(key) =
+                registry::open_write(Root::Users, &format!(r"{sid}\{RUN}"), View::Wide)
+            {
+                let values: Vec<runvalues::RunValue> = key
+                    .string_values()
+                    .into_iter()
+                    .map(|(name, command)| runvalues::RunValue { name, command })
+                    .collect();
                 for name in runvalues::user_removals(&values, dir, product) {
-                    if key.delete_value(&name) { removed += 1 } else { failed = true }
+                    if key.delete_value(&name) {
+                        removed += 1
+                    } else {
+                        failed = true
+                    }
                 }
             }
         }
     }
-    log.line("clean-run", &format!("removed {removed} value(s){}", if failed { ", some could not be removed" } else { "" }));
+    log.line(
+        "clean-run",
+        &format!(
+            "removed {removed} value(s){}",
+            if failed {
+                ", some could not be removed"
+            } else {
+                ""
+            }
+        ),
+    );
     if failed { Exit::Failed } else { Exit::Ok }
 }
 
-/// `stop-all` over `paddock_proc::installed::stop_all` (plan S1). Without the `proc-stop` feature the command answers
-/// "not built" instead of guessing.
+/// `stop-all` over `paddock_proc::installed::stop_all_here` (plan S1). Without the `proc-stop` feature the command fails
+/// with "no process stopper" instead of guessing.
 struct StopAdapter;
 
 #[cfg(not(feature = "proc-stop"))]
@@ -229,34 +351,78 @@ impl stop::StopPort for StopAdapter {
 #[cfg(feature = "proc-stop")]
 impl stop::StopPort for StopAdapter {
     fn stop_all(&mut self, dir: &str, images: &[String]) -> Result<stop::StopReport, String> {
-        let _ = (dir, images);
-        // Wired when `paddock_proc::installed::stop_all(dir, images, bounds) -> StopReport` (ADR 0053 section 3) lands.
-        Err("paddock_proc::installed is not available yet".into())
+        use paddock_proc::installed::{Bounds, Method, Outcome, stop_all_here};
+        let report = stop_all_here(std::path::Path::new(dir), images, &Bounds::default());
+        let mut out = stop::StopReport {
+            still_running: report.still_running.clone(),
+            ..stop::StopReport::default()
+        };
+        for error in [&report.restart_manager_error, &report.privilege_error]
+            .into_iter()
+            .flatten()
+        {
+            out.notes.push(error.to_string());
+        }
+        for a in &report.actions {
+            out.processes.push(crate::log::ProcessRecord {
+                image: a.image.clone(),
+                pid: a.id.map(|i| i.pid()),
+                started_ms: a.id.map(|i| i.started().as_micros() / 1000),
+                session: a.session,
+                method: match a.method {
+                    Method::RestartManager => "restart-manager".into(),
+                    Method::Handle => "by-handle".into(),
+                },
+                outcome: match &a.outcome {
+                    Outcome::Ended => "ended".into(),
+                    Outcome::Skipped(why) => format!("skipped: {why}"),
+                    Outcome::Failed(why) => format!("failed: {why}"),
+                },
+            });
+        }
+        Ok(out)
     }
 }
 
 /// Starts `program` with the desktop user's token (`CreateProcessWithTokenW`, unelevated).
 fn spawn_as_desktop_user(token: &handle::Owned, program: &str) -> bool {
-    use windows_sys::Win32::System::Threading::{CreateProcessWithTokenW, PROCESS_INFORMATION, STARTUPINFOW};
+    use windows_sys::Win32::System::Environment::{
+        CreateEnvironmentBlock, DestroyEnvironmentBlock,
+    };
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessWithTokenW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
     let wide = wide::to_wide(program);
     let mut cmd = wide::to_wide(&format!("\"{program}\""));
-    let dir = std::path::Path::new(program).parent().map(|p| wide::to_wide(&p.to_string_lossy()));
+    let dir = std::path::Path::new(program)
+        .parent()
+        .map(|p| wide::to_wide(&p.to_string_lossy()));
     // SAFETY: zeroed structures of the right type; the strings live through the call.
     unsafe {
         let mut si: STARTUPINFOW = std::mem::zeroed();
         si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
         let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        // The desktop user's own environment (their TEMP, not the installer account's), as RunAsUser gives it.
+        let mut env: *mut core::ffi::c_void = std::ptr::null_mut();
+        let have_env = CreateEnvironmentBlock(&mut env, token.0, 0) != 0;
         let ok = CreateProcessWithTokenW(
             token.0,
             0,
             wide.as_ptr(),
             cmd.as_mut_ptr(),
-            0,
-            std::ptr::null(),
+            if have_env { 0x0000_0400 } else { 0 }, // CREATE_UNICODE_ENVIRONMENT
+            if have_env {
+                env.cast_const()
+            } else {
+                std::ptr::null()
+            },
             dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
             &si,
             &mut pi,
         );
+        if have_env {
+            DestroyEnvironmentBlock(env);
+        }
         if ok == 0 {
             return false;
         }

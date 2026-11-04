@@ -16,7 +16,7 @@
 //!
 //! # Logging (ER-27)
 //!
-//! `setup.log` lives in `$INSTDIR\updates\` and is opened only through a [`log::CheckedDir`], which only a passed
+//! `setup.log` lives in `$INSTDIR\updates\` and is opened only through a [`checkdir::CheckedDir`], which only a passed
 //! `check-dir` makes. It holds phases with start time and duration, processes acted on (image, pid, start time, session,
 //! method, outcome), exit codes. No user names, profile paths or command lines.
 
@@ -28,8 +28,8 @@ pub mod guard;
 pub mod handoff;
 pub mod log;
 pub mod runvalues;
-pub mod selftest;
 pub mod samefolder;
+pub mod selftest;
 pub mod staging;
 pub mod stop;
 pub mod versionres;

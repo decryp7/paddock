@@ -122,7 +122,10 @@ impl Options {
     fn collect(rest: &[String]) -> Result<Options, UsageError> {
         for a in rest {
             if a.len() > MAX_ARG {
-                return Err(UsageError::Invalid { option: "argument", reason: "too long" });
+                return Err(UsageError::Invalid {
+                    option: "argument",
+                    reason: "too long",
+                });
             }
         }
         let mut items: Vec<(String, Option<String>)> = Vec::new();
@@ -189,20 +192,36 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
             update: o.flag("--update"),
             restart: o.flag("--restart"),
         },
-        "check-dir" => Command::CheckDir { dir: o.required("--dir")? },
-        "same-folder" => Command::SameFolder { a: o.required("--a")?, b: o.required("--b")? },
+        "check-dir" => Command::CheckDir {
+            dir: o.required("--dir")?,
+        },
+        "same-folder" => Command::SameFolder {
+            a: o.required("--a")?,
+            b: o.required("--b")?,
+        },
         "stop-all" => {
             let dir = o.required("--dir")?;
             let list = o.required("--images")?;
-            let images: Vec<String> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+            let images: Vec<String> = list
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
             if images.is_empty() {
                 return Err(UsageError::Missing("--images"));
             }
             if images.len() > MAX_IMAGES {
-                return Err(UsageError::Invalid { option: "--images", reason: "too many programs" });
+                return Err(UsageError::Invalid {
+                    option: "--images",
+                    reason: "too many programs",
+                });
             }
             if images.iter().any(|i| i.contains(['\\', '/', ':'])) {
-                return Err(UsageError::Invalid { option: "--images", reason: "file names only, no paths" });
+                return Err(UsageError::Invalid {
+                    option: "--images",
+                    reason: "file names only, no paths",
+                });
             }
             Command::StopAll { dir, images }
         }
@@ -211,24 +230,42 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
             let scope = match o.required("--scope")?.as_str() {
                 "machine" => RunScope::Machine,
                 "all" => RunScope::MachineAndUsers,
-                _ => return Err(UsageError::Invalid { option: "--scope", reason: "expected `machine` or `all`" }),
+                _ => {
+                    return Err(UsageError::Invalid {
+                        option: "--scope",
+                        reason: "expected `machine` or `all`",
+                    });
+                }
             };
             Command::CleanRun { dir, scope }
         }
-        "clean-staging" => Command::CleanStaging { dir: o.required("--dir")? },
+        "clean-staging" => Command::CleanStaging {
+            dir: o.required("--dir")?,
+        },
         "apply-update" => {
             let file = o.required("--file")?;
             let signature = o.required("--signature")?;
-            let version = Version::parse(&o.required("--version")?)
-                .map_err(|_| UsageError::Invalid { option: "--version", reason: "not a semantic version" })?;
+            let version =
+                Version::parse(&o.required("--version")?).map_err(|_| UsageError::Invalid {
+                    option: "--version",
+                    reason: "not a semantic version",
+                })?;
             let size = match o.optional("--size")? {
                 None => None,
-                Some(s) => Some(s.parse::<u64>().map_err(|_| UsageError::Invalid { option: "--size", reason: "not a number of bytes" })?),
+                Some(s) => Some(s.parse::<u64>().map_err(|_| UsageError::Invalid {
+                    option: "--size",
+                    reason: "not a number of bytes",
+                })?),
             };
             if !o.flag("--restart") {
                 return Err(UsageError::Missing("--restart"));
             }
-            Command::ApplyUpdate { file, signature, version, size }
+            Command::ApplyUpdate {
+                file,
+                signature,
+                version,
+                size,
+            }
         }
         "hold-installing" => Command::HoldInstalling,
         "self-test" => Command::SelfTest,
@@ -243,7 +280,11 @@ mod tests {
     use super::*;
 
     fn p(line: &str) -> Result<Command, UsageError> {
-        let v: Vec<String> = line.split('|').filter(|s| !s.is_empty()).map(String::from).collect();
+        let v: Vec<String> = line
+            .split('|')
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
         parse(&v)
     }
 
@@ -251,89 +292,205 @@ mod tests {
     fn guard_with_flags() {
         assert_eq!(
             p("guard|--product|Dyno|--main|dyno.exe|--update|--restart"),
-            Ok(Command::Guard { dir: None, product: "Dyno".into(), main: "dyno.exe".into(), update: true, restart: true })
+            Ok(Command::Guard {
+                dir: None,
+                product: "Dyno".into(),
+                main: "dyno.exe".into(),
+                update: true,
+                restart: true
+            })
         );
         assert_eq!(
             p("guard|--product|Dyno|--main|dyno.exe"),
-            Ok(Command::Guard { dir: None, product: "Dyno".into(), main: "dyno.exe".into(), update: false, restart: false })
+            Ok(Command::Guard {
+                dir: None,
+                product: "Dyno".into(),
+                main: "dyno.exe".into(),
+                update: false,
+                restart: false
+            })
         );
         assert_eq!(
             p("guard|--product|Dyno|--main|dyno.exe|--dir|D"),
-            Ok(Command::Guard { dir: Some("D".into()), product: "Dyno".into(), main: "dyno.exe".into(), update: false, restart: false })
+            Ok(Command::Guard {
+                dir: Some("D".into()),
+                product: "Dyno".into(),
+                main: "dyno.exe".into(),
+                update: false,
+                restart: false
+            })
         );
     }
 
     #[test]
     fn simple_commands() {
-        assert_eq!(p("check-dir|--dir|C:\\Program Files\\Dyno"), Ok(Command::CheckDir { dir: "C:\\Program Files\\Dyno".into() }));
-        assert_eq!(p("same-folder|--a|X|--b|Y"), Ok(Command::SameFolder { a: "X".into(), b: "Y".into() }));
-        assert_eq!(p("clean-staging|--dir|D"), Ok(Command::CleanStaging { dir: "D".into() }));
+        assert_eq!(
+            p("check-dir|--dir|C:\\Program Files\\Dyno"),
+            Ok(Command::CheckDir {
+                dir: "C:\\Program Files\\Dyno".into()
+            })
+        );
+        assert_eq!(
+            p("same-folder|--a|X|--b|Y"),
+            Ok(Command::SameFolder {
+                a: "X".into(),
+                b: "Y".into()
+            })
+        );
+        assert_eq!(
+            p("clean-staging|--dir|D"),
+            Ok(Command::CleanStaging { dir: "D".into() })
+        );
         assert_eq!(p("hold-installing"), Ok(Command::HoldInstalling));
         assert_eq!(p("self-test"), Ok(Command::SelfTest));
         assert_eq!(
             p("clean-run|--dir|D|--scope|all"),
-            Ok(Command::CleanRun { dir: "D".into(), scope: RunScope::MachineAndUsers })
+            Ok(Command::CleanRun {
+                dir: "D".into(),
+                scope: RunScope::MachineAndUsers
+            })
         );
-        assert_eq!(p("clean-run|--dir|D|--scope|machine"), Ok(Command::CleanRun { dir: "D".into(), scope: RunScope::Machine }));
+        assert_eq!(
+            p("clean-run|--dir|D|--scope|machine"),
+            Ok(Command::CleanRun {
+                dir: "D".into(),
+                scope: RunScope::Machine
+            })
+        );
     }
 
     #[test]
     fn stop_all_images_split_and_bounded() {
         assert_eq!(
             p("stop-all|--dir|D|--images|dyno.exe,dyno-agent.exe, x.exe"),
-            Ok(Command::StopAll { dir: "D".into(), images: vec!["dyno.exe".into(), "dyno-agent.exe".into(), "x.exe".into()] })
+            Ok(Command::StopAll {
+                dir: "D".into(),
+                images: vec!["dyno.exe".into(), "dyno-agent.exe".into(), "x.exe".into()]
+            })
         );
-        let many = (0..=MAX_IMAGES).map(|i| format!("a{i}.exe")).collect::<Vec<_>>().join(",");
-        assert!(matches!(p(&format!("stop-all|--dir|D|--images|{many}")), Err(UsageError::Invalid { option: "--images", .. })));
-        assert!(matches!(p("stop-all|--dir|D|--images|a\\b.exe"), Err(UsageError::Invalid { option: "--images", .. })));
-        assert!(matches!(p("stop-all|--dir|D|--images|"), Err(UsageError::Missing("--images")) | Err(UsageError::NoValue(_))));
+        let many = (0..=MAX_IMAGES)
+            .map(|i| format!("a{i}.exe"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(matches!(
+            p(&format!("stop-all|--dir|D|--images|{many}")),
+            Err(UsageError::Invalid {
+                option: "--images",
+                ..
+            })
+        ));
+        assert!(matches!(
+            p("stop-all|--dir|D|--images|a\\b.exe"),
+            Err(UsageError::Invalid {
+                option: "--images",
+                ..
+            })
+        ));
+        assert!(matches!(
+            p("stop-all|--dir|D|--images|"),
+            Err(UsageError::Missing("--images")) | Err(UsageError::NoValue(_))
+        ));
     }
 
     #[test]
     fn apply_update_parses_a_version_and_size() {
-        let c = p("apply-update|--file|F|--signature|S|--version|1.2.3|--size|99|--restart").unwrap();
+        let c =
+            p("apply-update|--file|F|--signature|S|--version|1.2.3|--size|99|--restart").unwrap();
         assert_eq!(
             c,
-            Command::ApplyUpdate { file: "F".into(), signature: "S".into(), version: Version::new(1, 2, 3), size: Some(99) }
+            Command::ApplyUpdate {
+                file: "F".into(),
+                signature: "S".into(),
+                version: Version::new(1, 2, 3),
+                size: Some(99)
+            }
         );
         assert!(matches!(
             p("apply-update|--file|F|--signature|S|--version|nonsense|--restart"),
-            Err(UsageError::Invalid { option: "--version", .. })
+            Err(UsageError::Invalid {
+                option: "--version",
+                ..
+            })
         ));
-        assert!(matches!(p("apply-update|--file|F|--signature|S|--restart"), Err(UsageError::Missing("--version"))));
+        assert!(matches!(
+            p("apply-update|--file|F|--signature|S|--restart"),
+            Err(UsageError::Missing("--version"))
+        ));
         assert!(matches!(
             p("apply-update|--file|F|--signature|S|--version|1.0.0|--size|x|--restart"),
-            Err(UsageError::Invalid { option: "--size", .. })
+            Err(UsageError::Invalid {
+                option: "--size",
+                ..
+            })
         ));
     }
 
     #[test]
     fn apply_update_requires_the_restart_marker() {
-        assert!(matches!(p("apply-update|--file|F|--signature|S|--version|1.0.0"), Err(UsageError::Missing("--restart"))));
+        assert!(matches!(
+            p("apply-update|--file|F|--signature|S|--version|1.0.0"),
+            Err(UsageError::Missing("--restart"))
+        ));
     }
 
     #[test]
     fn errors() {
         assert_eq!(p(""), Err(UsageError::NoCommand));
-        assert_eq!(p("frobnicate"), Err(UsageError::UnknownCommand("frobnicate".into())));
+        assert_eq!(
+            p("frobnicate"),
+            Err(UsageError::UnknownCommand("frobnicate".into()))
+        );
         assert_eq!(p("check-dir"), Err(UsageError::Missing("--dir")));
-        assert_eq!(p("check-dir|--dir"), Err(UsageError::NoValue("--dir".into())));
-        assert_eq!(p("check-dir|--dir|A|--dir|B"), Err(UsageError::Repeated("--dir".into())));
-        assert_eq!(p("check-dir|--dir|A|--oops"), Err(UsageError::Unexpected("--oops".into())));
-        assert_eq!(p("check-dir|stray"), Err(UsageError::Unexpected("stray".into())));
-        assert_eq!(p("clean-run|--dir|D|--scope|nope").unwrap_err(), UsageError::Invalid { option: "--scope", reason: "expected `machine` or `all`" });
+        assert_eq!(
+            p("check-dir|--dir"),
+            Err(UsageError::NoValue("--dir".into()))
+        );
+        assert_eq!(
+            p("check-dir|--dir|A|--dir|B"),
+            Err(UsageError::Repeated("--dir".into()))
+        );
+        assert_eq!(
+            p("check-dir|--dir|A|--oops"),
+            Err(UsageError::Unexpected("--oops".into()))
+        );
+        assert_eq!(
+            p("check-dir|stray"),
+            Err(UsageError::Unexpected("stray".into()))
+        );
+        assert_eq!(
+            p("clean-run|--dir|D|--scope|nope").unwrap_err(),
+            UsageError::Invalid {
+                option: "--scope",
+                reason: "expected `machine` or `all`"
+            }
+        );
     }
 
     #[test]
     fn long_and_empty_values_are_refused() {
         let long = "x".repeat(MAX_ARG + 1);
-        assert!(matches!(parse(&["check-dir".into(), "--dir".into(), long]), Err(UsageError::Invalid { option: "argument", .. })));
-        assert!(matches!(parse(&["check-dir".into(), "--dir".into(), String::new()]), Err(UsageError::NoValue(_))));
+        assert!(matches!(
+            parse(&["check-dir".into(), "--dir".into(), long]),
+            Err(UsageError::Invalid {
+                option: "argument",
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse(&["check-dir".into(), "--dir".into(), String::new()]),
+            Err(UsageError::NoValue(_))
+        ));
     }
 
     #[test]
     fn never_panics_on_odd_input() {
-        for s in ["--", "-", "guard|--product", "\u{0}|\u{1f600}", "same-folder|--a|--b|--a"] {
+        for s in [
+            "--",
+            "-",
+            "guard|--product",
+            "\u{0}|\u{1f600}",
+            "same-folder|--a|--b|--a",
+        ] {
             let _ = p(s);
         }
     }

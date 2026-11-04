@@ -19,8 +19,6 @@ pub enum Exit {
     Failed,
     /// `stop-all`: a listed program still runs (ADR section 3, exit 11).
     StillRunning,
-    /// `stop-all` in a build without `proc-stop`.
-    NotBuilt,
     /// `apply-update` refused.
     Refused(Refusal),
 }
@@ -36,7 +34,6 @@ impl Exit {
             Exit::Usage => 4,
             Exit::Failed => 5,
             Exit::StillRunning => 11,
-            Exit::NotBuilt => 12,
             Exit::Refused(r) => r.code(),
         }
     }
@@ -51,7 +48,6 @@ impl Exit {
             Exit::Usage,
             Exit::Failed,
             Exit::StillRunning,
-            Exit::NotBuilt,
         ]
         .into_iter()
         .find(|e| e.code() == code)
@@ -68,7 +64,6 @@ impl Exit {
             Exit::Usage => "the setup program was started with wrong arguments",
             Exit::Failed => "the setup program failed; the reason is in setup.log",
             Exit::StillRunning => "a program of the app is still running for another user",
-            Exit::NotBuilt => "this build cannot stop programs of other users",
             Exit::Refused(r) => r.sentence(),
         }
     }
@@ -105,7 +100,6 @@ mod tests {
             Exit::Usage,
             Exit::Failed,
             Exit::StillRunning,
-            Exit::NotBuilt,
         ];
         v.extend(Refusal::ALL.into_iter().map(Exit::Refused));
         v

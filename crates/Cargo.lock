@@ -3843,6 +3843,7 @@ name = "paddock-setup"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "paddock-proc",
  "paddock-service",
  "paddock-updater",
  "paddock-workspace-hack",

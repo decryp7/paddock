@@ -98,13 +98,23 @@ impl Refusal {
         match self {
             Refusal::NoKey => "Updates are not available in this build.",
             Refusal::Busy => "Another install of this app is already running.",
-            Refusal::InstallDir => "This copy is not installed in a protected Program Files folder.",
+            Refusal::InstallDir => {
+                "This copy is not installed in a protected Program Files folder."
+            }
             Refusal::SourceNotLocal => "The update must be on this PC's own disk.",
-            Refusal::TooLarge => "The downloaded update is larger than announced. Download it again.",
-            Refusal::Io => "The update could not be copied. The reason is in setup.log in the install folder's updates folder.",
-            Refusal::SignatureInvalid => "The downloaded update did not pass the signature check. Download it again.",
+            Refusal::TooLarge => {
+                "The downloaded update is larger than announced. Download it again."
+            }
+            Refusal::Io => {
+                "The update could not be copied. The reason is in setup.log in the install folder's updates folder."
+            }
+            Refusal::SignatureInvalid => {
+                "The downloaded update did not pass the signature check. Download it again."
+            }
             Refusal::NotNewer => "The update is not newer than the installed version.",
-            Refusal::StartFailed => "The installer could not be started. The reason is in setup.log in the install folder's updates folder.",
+            Refusal::StartFailed => {
+                "The installer could not be started. The reason is in setup.log in the install folder's updates folder."
+            }
         }
     }
 }
@@ -140,7 +150,12 @@ pub fn copy_limit(announced: Option<u64>) -> u64 {
 
 /// The rule for the opened download (section 4.2 step 2, and the size bound).
 pub fn check_source(facts: &SourceFacts, limit: u64) -> Result<(), Refusal> {
-    if !facts.is_disk_file || facts.is_directory || facts.is_reparse || !is_drive_letter_path(&facts.final_path) || !facts.volume_fixed {
+    if !facts.is_disk_file
+        || facts.is_directory
+        || facts.is_reparse
+        || !is_drive_letter_path(&facts.final_path)
+        || !facts.volume_fixed
+    {
         return Err(Refusal::SourceNotLocal);
     }
     if facts.size > limit {
@@ -167,7 +182,12 @@ impl Layout {
     pub fn new(instdir: &str) -> Layout {
         let instdir = instdir.trim_end_matches('\\').to_string();
         let updates = format!(r"{instdir}\updates");
-        Layout { tmp: format!(r"{updates}\tmp"), log: format!(r"{updates}\setup.log"), updates, instdir }
+        Layout {
+            tmp: format!(r"{updates}\tmp"),
+            log: format!(r"{updates}\setup.log"),
+            updates,
+            instdir,
+        }
     }
 
     /// The staged copy for `version`.
@@ -223,7 +243,12 @@ pub struct Request {
 }
 
 /// Steps 1 to 5 after the mutex is held.
-fn locked(port: &mut dyn UpdatePort, layout: &Layout, req: &Request, log: &mut dyn Sink) -> Result<(), Refusal> {
+fn locked(
+    port: &mut dyn UpdatePort,
+    layout: &Layout,
+    req: &Request,
+    log: &mut dyn Sink,
+) -> Result<(), Refusal> {
     port.clean_previous();
     let installed = port.installed_version()?;
     let signature = port.read_signature(&req.signature)?;
@@ -232,10 +257,16 @@ fn locked(port: &mut dyn UpdatePort, layout: &Layout, req: &Request, log: &mut d
     check_source(&facts, limit)?;
     let dest = layout.staged(&req.version);
     let copied = port.copy_source(&dest, limit)?;
-    log.line("apply-update", &format!("copied {copied} bytes into the protected folder"));
+    log.line(
+        "apply-update",
+        &format!("copied {copied} bytes into the protected folder"),
+    );
     port.hold_copy(&dest)?;
     port.verify(&dest, &signature, &req.version)?;
-    log.line("apply-update", "signature and signed version verified on the held copy");
+    log.line(
+        "apply-update",
+        "signature and signed version verified on the held copy",
+    );
     if req.version <= installed {
         return Err(Refusal::NotNewer);
     }
@@ -244,7 +275,12 @@ fn locked(port: &mut dyn UpdatePort, layout: &Layout, req: &Request, log: &mut d
 }
 
 /// Runs the sequence. Whatever happens after the mutex was taken, [`UpdatePort::release`] runs last.
-pub fn run(port: &mut dyn UpdatePort, layout: &Layout, req: &Request, log: &mut dyn Sink) -> Result<(), Refusal> {
+pub fn run(
+    port: &mut dyn UpdatePort,
+    layout: &Layout,
+    req: &Request,
+    log: &mut dyn Sink,
+) -> Result<(), Refusal> {
     let refuse = |log: &mut dyn Sink, r: Refusal| {
         log.line("apply-update", &format!("refused: {}", r.sentence()));
         Err(r)
@@ -277,7 +313,14 @@ mod tests {
     const INST: &str = r"C:\Program Files\Dyno";
 
     fn good_source() -> SourceFacts {
-        SourceFacts { is_disk_file: true, is_directory: false, is_reparse: false, final_path: r"C:\Users\x\AppData\Local\Temp\Dyno_1.2.0_x64-setup.exe".into(), volume_fixed: true, size: 1000 }
+        SourceFacts {
+            is_disk_file: true,
+            is_directory: false,
+            is_reparse: false,
+            final_path: r"C:\Users\x\AppData\Local\Temp\Dyno_1.2.0_x64-setup.exe".into(),
+            volume_fixed: true,
+            size: 1000,
+        }
     }
 
     #[test]
@@ -288,9 +331,18 @@ mod tests {
             assert!(r.sentence().ends_with('.'));
         }
         assert_eq!(Refusal::from_code(1), None);
-        assert_eq!(Refusal::SignatureInvalid.sentence(), "The downloaded update did not pass the signature check. Download it again.");
-        assert_eq!(Refusal::SourceNotLocal.sentence(), "The update must be on this PC's own disk.");
-        assert_eq!(Refusal::NoKey.sentence(), "Updates are not available in this build.");
+        assert_eq!(
+            Refusal::SignatureInvalid.sentence(),
+            "The downloaded update did not pass the signature check. Download it again."
+        );
+        assert_eq!(
+            Refusal::SourceNotLocal.sentence(),
+            "The update must be on this PC's own disk."
+        );
+        assert_eq!(
+            Refusal::NoKey.sentence(),
+            "Updates are not available in this build."
+        );
     }
 
     #[test]
@@ -325,14 +377,24 @@ mod tests {
             ("pipe or device", Box::new(|f| f.is_disk_file = false)),
             ("directory", Box::new(|f| f.is_directory = true)),
             ("reparse point", Box::new(|f| f.is_reparse = true)),
-            ("unc", Box::new(|f| f.final_path = r"\\?\UNC\srv\share\u.exe".into())),
-            ("share", Box::new(|f| f.final_path = r"\\srv\share\u.exe".into())),
+            (
+                "unc",
+                Box::new(|f| f.final_path = r"\\?\UNC\srv\share\u.exe".into()),
+            ),
+            (
+                "share",
+                Box::new(|f| f.final_path = r"\\srv\share\u.exe".into()),
+            ),
             ("network volume", Box::new(|f| f.volume_fixed = false)),
         ];
         for (name, edit) in cases {
             let mut f = good_source();
             edit(&mut f);
-            assert_eq!(check_source(&f, 1000), Err(Refusal::SourceNotLocal), "{name}");
+            assert_eq!(
+                check_source(&f, 1000),
+                Err(Refusal::SourceNotLocal),
+                "{name}"
+            );
         }
     }
 
@@ -350,7 +412,10 @@ mod tests {
         assert_eq!(l.updates, r"C:\Program Files\Dyno\updates");
         assert_eq!(l.tmp, r"C:\Program Files\Dyno\updates\tmp");
         assert_eq!(l.log, r"C:\Program Files\Dyno\updates\setup.log");
-        assert_eq!(l.staged(&Version::new(1, 2, 0)), r"C:\Program Files\Dyno\updates\update-1.2.0.exe");
+        assert_eq!(
+            l.staged(&Version::new(1, 2, 0)),
+            r"C:\Program Files\Dyno\updates\update-1.2.0.exe"
+        );
         assert!(l.owns(&l.log) && l.owns(&l.tmp) && l.owns(&l.staged(&Version::new(1, 2, 0))));
         assert!(!l.owns(&l.updates));
         assert!(!l.owns(r"C:\ProgramData\Paddock\update.exe"));
@@ -389,7 +454,12 @@ mod tests {
     }
     impl Fake {
         fn ok() -> Fake {
-            Fake { key: true, installed: Some(Version::new(1, 1, 0)), source: Some(good_source()), ..Fake::default() }
+            Fake {
+                key: true,
+                installed: Some(Version::new(1, 1, 0)),
+                source: Some(good_source()),
+                ..Fake::default()
+            }
         }
         fn ev(&mut self, s: &str) {
             self.events.push(s.to_string());
@@ -461,7 +531,12 @@ mod tests {
         }
     }
     fn req() -> Request {
-        Request { file: r"C:\Users\x\AppData\Local\Temp\Dyno_1.2.0_x64-setup.exe".into(), signature: r"C:\Users\x\AppData\Local\Temp\sig.txt".into(), version: Version::new(1, 2, 0), size: Some(1000) }
+        Request {
+            file: r"C:\Users\x\AppData\Local\Temp\Dyno_1.2.0_x64-setup.exe".into(),
+            signature: r"C:\Users\x\AppData\Local\Temp\sig.txt".into(),
+            version: Version::new(1, 2, 0),
+            size: Some(1000),
+        }
     }
     fn go(port: &mut Fake) -> (Result<(), Refusal>, Vec<String>) {
         let mut log = Lines::default();
@@ -474,7 +549,22 @@ mod tests {
         let mut p = Fake::ok();
         let (r, _) = go(&mut p);
         assert_eq!(r, Ok(()));
-        assert_eq!(p.events, ["prepare", "mutex", "clean", "installed", "signature", "open", "copy limit=1000", "hold", "verify 1.2.0", "start", "release"]);
+        assert_eq!(
+            p.events,
+            [
+                "prepare",
+                "mutex",
+                "clean",
+                "installed",
+                "signature",
+                "open",
+                "copy limit=1000",
+                "hold",
+                "verify 1.2.0",
+                "start",
+                "release"
+            ]
+        );
     }
 
     #[test]
@@ -549,7 +639,11 @@ mod tests {
 
     #[test]
     fn an_older_or_equal_version_is_refused_after_the_signature_passed() {
-        for installed in [Version::new(1, 2, 0), Version::new(2, 0, 0), Version::parse("1.2.1").unwrap()] {
+        for installed in [
+            Version::new(1, 2, 0),
+            Version::new(2, 0, 0),
+            Version::parse("1.2.1").unwrap(),
+        ] {
             let mut p = Fake::ok();
             p.installed = Some(installed);
             assert_eq!(go(&mut p).0, Err(Refusal::NotNewer));
@@ -562,8 +656,14 @@ mod tests {
         let mut p = Fake::ok();
         p.installed = Some(Version::new(1, 2, 0));
         let mut log = Lines::default();
-        let r = Request { version: Version::parse("1.2.0-beta.1").unwrap(), ..req() };
-        assert_eq!(run(&mut p, &Layout::new(INST), &r, &mut log), Err(Refusal::NotNewer));
+        let r = Request {
+            version: Version::parse("1.2.0-beta.1").unwrap(),
+            ..req()
+        };
+        assert_eq!(
+            run(&mut p, &Layout::new(INST), &r, &mut log),
+            Err(Refusal::NotNewer)
+        );
     }
 
     #[test]
@@ -605,13 +705,20 @@ mod tests {
         let mut p = Fake::ok();
         let (r, log) = go(&mut p);
         r.unwrap();
-        assert!(log.iter().any(|l| l.contains("phase") || l.starts_with("apply-update")));
+        assert!(
+            log.iter()
+                .any(|l| l.contains("phase") || l.starts_with("apply-update"))
+        );
         for l in &log {
             assert!(!l.contains("Users") && !l.contains("AppData"), "{l}");
         }
         let mut p = Fake::ok();
         p.verify = Some(Refusal::SignatureInvalid);
         let (_, log) = go(&mut p);
-        assert!(log.iter().any(|l| l.contains("refused") && l.contains("signature")), "{log:?}");
+        assert!(
+            log.iter()
+                .any(|l| l.contains("refused") && l.contains("signature")),
+            "{log:?}"
+        );
     }
 }

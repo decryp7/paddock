@@ -19,9 +19,15 @@ fn main() {
     let Ok(product) = std::env::var("PADDOCK_SETUP_PRODUCT") else {
         return;
     };
-    let version = std::env::var("PADDOCK_SETUP_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
-    let info = versionres::VersionInfo { description: format!("{product} update"), product, version };
-    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default()).join("paddock-setup.res");
+    let version = std::env::var("PADDOCK_SETUP_VERSION")
+        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
+    let info = versionres::VersionInfo {
+        description: format!("{product} update"),
+        product,
+        version,
+    };
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default())
+        .join("paddock-setup.res");
     if std::fs::write(&out, versionres::to_res(&info)).is_ok() {
         println!("cargo:rustc-link-arg-bins={}", out.display());
     } else {

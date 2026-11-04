@@ -1,5 +1,5 @@
 //! A Windows version resource (`VS_VERSION_INFO`) as a `.res` file, written without a resource compiler so the per-app
-//! build (and a cross build from macOS or Linux) can give `paddock-setup.exe` its `FileDescription` "<App> update" (ADR 0053
+//! build (and a cross build from macOS or Linux) can give `paddock-setup.exe` its `FileDescription` `<App> update` (ADR 0053
 //! section 4.2: the UAC prompt and Task Manager show it). `build.rs` includes this file by path and hands the `.res` to the
 //! linker.
 
@@ -18,10 +18,25 @@ pub struct VersionInfo {
 pub fn to_res(info: &VersionInfo) -> Vec<u8> {
     let (ms, ls) = numeric_version(&info.version);
     let mut fixed = Vec::with_capacity(52);
-    for dword in [0xFEEF_04BDu32, 0x0001_0000, ms, ls, ms, ls, 0x3F, 0, 0x0004_0004, 1, 0, 0, 0] {
+    for dword in [
+        0xFEEF_04BDu32,
+        0x0001_0000,
+        ms,
+        ls,
+        ms,
+        ls,
+        0x3F,
+        0,
+        0x0004_0004,
+        1,
+        0,
+        0,
+        0,
+    ] {
         fixed.extend(dword.to_le_bytes());
     }
-    let entry = |k: &str, v: &str| block(k, &utf16z(v), (v.encode_utf16().count() + 1) as u16, 1, &[]);
+    let entry =
+        |k: &str, v: &str| block(k, &utf16z(v), (v.encode_utf16().count() + 1) as u16, 1, &[]);
     let table = {
         let strings: Vec<u8> = [
             ("FileDescription", info.description.as_str()),
@@ -37,7 +52,10 @@ pub fn to_res(info: &VersionInfo) -> Vec<u8> {
     let string_file_info = block("StringFileInfo", &[], 0, 1, &padded(table));
     let var = block("Translation", &0x04B0_0409u32.to_le_bytes(), 4, 0, &[]);
     let var_file_info = block("VarFileInfo", &[], 0, 1, &padded(var));
-    let children: Vec<u8> = padded(string_file_info).into_iter().chain(padded(var_file_info)).collect();
+    let children: Vec<u8> = padded(string_file_info)
+        .into_iter()
+        .chain(padded(var_file_info))
+        .collect();
     let data = block("VS_VERSION_INFO", &fixed, 52, 0, &children);
 
     let mut res = Vec::new();
@@ -69,7 +87,10 @@ fn numeric_version(text: &str) -> (u32, u32) {
 }
 
 fn utf16z(s: &str) -> Vec<u8> {
-    s.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect()
+    s.encode_utf16()
+        .chain([0])
+        .flat_map(u16::to_le_bytes)
+        .collect()
 }
 
 /// `bytes` followed by zeros up to a multiple of four.
@@ -102,10 +123,17 @@ mod tests {
     use super::*;
 
     fn info() -> VersionInfo {
-        VersionInfo { description: "Dyno update".into(), product: "Dyno".into(), version: "1.1.0".into() }
+        VersionInfo {
+            description: "Dyno update".into(),
+            product: "Dyno".into(),
+            version: "1.1.0".into(),
+        }
     }
     fn utf16z(s: &str) -> Vec<u8> {
-        s.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect()
+        s.encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect()
     }
     fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
         hay.windows(needle.len()).position(|w| w == needle)
@@ -117,7 +145,13 @@ mod tests {
     #[test]
     fn starts_with_the_empty_header_resource() {
         let r = to_res(&info());
-        assert_eq!(&r[..32], &[0, 0, 0, 0, 0x20, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            &r[..32],
+            &[
+                0, 0, 0, 0, 0x20, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
     }
 
     #[test]
@@ -135,8 +169,17 @@ mod tests {
         assert_eq!(u16::from_le_bytes([body[0], body[1]]) as usize, data);
         assert_eq!(u16::from_le_bytes([body[2], body[3]]), 52);
         assert!(find(body, &utf16z("VS_VERSION_INFO")).is_some());
-        assert_eq!(u32_at(body, find(body, &0xFEEF04BDu32.to_le_bytes()).unwrap() + 4), 0x0001_0000, "fixed-info struct version");
-        for (key, value) in [("FileDescription", "Dyno update"), ("ProductName", "Dyno"), ("FileVersion", "1.1.0"), ("ProductVersion", "1.1.0")] {
+        assert_eq!(
+            u32_at(body, find(body, &0xFEEF04BDu32.to_le_bytes()).unwrap() + 4),
+            0x0001_0000,
+            "fixed-info struct version"
+        );
+        for (key, value) in [
+            ("FileDescription", "Dyno update"),
+            ("ProductName", "Dyno"),
+            ("FileVersion", "1.1.0"),
+            ("ProductVersion", "1.1.0"),
+        ] {
             assert!(find(body, &utf16z(key)).is_some(), "{key}");
             assert!(find(body, &utf16z(value)).is_some(), "{value}");
         }

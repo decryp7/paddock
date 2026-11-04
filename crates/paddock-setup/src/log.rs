@@ -54,12 +54,12 @@ impl Sink for NoLog {
 pub struct ProcessRecord {
     /// The image file name (no path).
     pub image: String,
-    /// The pid.
-    pub pid: u32,
-    /// Start time, Unix milliseconds.
-    pub started_ms: u64,
-    /// The session id.
-    pub session: u32,
+    /// The pid, when known.
+    pub pid: Option<u32>,
+    /// Start time, Unix milliseconds, when known.
+    pub started_ms: Option<u64>,
+    /// The session id, when known.
+    pub session: Option<u32>,
     /// `restart-manager` or `by-handle`.
     pub method: String,
     /// `ended`, `skipped: another folder`, `still running`, ...
@@ -72,9 +72,10 @@ impl ProcessRecord {
         format!(
             "image={} pid={} start={} session={} method={} outcome={}",
             clean(&self.image),
-            self.pid,
-            format_utc(self.started_ms),
-            self.session,
+            self.pid.map_or_else(|| "?".to_string(), |p| p.to_string()),
+            self.started_ms.map_or_else(|| "?".to_string(), format_utc),
+            self.session
+                .map_or_else(|| "?".to_string(), |s| s.to_string()),
             clean(&self.method),
             clean(&self.outcome)
         )
@@ -97,7 +98,11 @@ pub struct SetupLog<F: LogFs, C: Clock> {
 impl<F: LogFs, C: Clock> SetupLog<F, C> {
     /// Opens the log for a folder that passed `check-dir`.
     pub fn open(_proof: &CheckedDir, fs: F, clock: C) -> Self {
-        SetupLog { fs, clock, dropped: 0 }
+        SetupLog {
+            fs,
+            clock,
+            dropped: 0,
+        }
     }
 
     /// Lines that could not be written.
@@ -108,13 +113,18 @@ impl<F: LogFs, C: Clock> SetupLog<F, C> {
     /// Starts a phase (logs its start).
     pub fn begin(&mut self, phase: &str) -> Phase {
         self.line(phase, "start");
-        Phase { started_ms: self.clock.unix_ms() }
+        Phase {
+            started_ms: self.clock.unix_ms(),
+        }
     }
 
     /// Ends a phase with its outcome and duration.
     pub fn end(&mut self, phase: &str, token: Phase, outcome: &str) {
         let duration = self.clock.unix_ms().saturating_sub(token.started_ms);
-        self.line(phase, &format!("end outcome={outcome} duration_ms={duration}"));
+        self.line(
+            phase,
+            &format!("end outcome={outcome} duration_ms={duration}"),
+        );
     }
 
     /// Logs the exit code and its meaning.
@@ -159,12 +169,20 @@ pub fn format_utc(unix_ms: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{ms:03}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{ms:03}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// Removes control characters and cuts at [`MAX_LINE`].
 pub fn clean(text: &str) -> String {
-    text.chars().map(|c| if c.is_control() { ' ' } else { c }).take(MAX_LINE).collect()
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(MAX_LINE)
+        .collect()
 }
 
 #[cfg(test)]
@@ -243,7 +261,10 @@ mod tests {
         let mut l = log(1_700_000_000_000);
         l.line("guard", "no per-user copy");
         let fs = l.into_fs();
-        assert_eq!(fs.current, "2023-11-14T22:13:20.000Z phase=guard no per-user copy\n");
+        assert_eq!(
+            fs.current,
+            "2023-11-14T22:13:20.000Z phase=guard no per-user copy\n"
+        );
     }
 
     #[test]
@@ -256,7 +277,11 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].ends_with("phase=stop-all start"));
         assert!(lines[1].contains("phase=stop-all end outcome=ok duration_ms="));
-        assert!(lines[1].ends_with("duration_ms=250") || lines[1].ends_with("duration_ms=500"), "{}", lines[1]);
+        assert!(
+            lines[1].ends_with("duration_ms=250") || lines[1].ends_with("duration_ms=500"),
+            "{}",
+            lines[1]
+        );
     }
 
     #[test]
@@ -264,9 +289,9 @@ mod tests {
         let mut l = log(1_700_000_000_000);
         l.process(&ProcessRecord {
             image: "dyno.exe".into(),
-            pid: 4242,
-            started_ms: 1_700_000_000_000,
-            session: 2,
+            pid: Some(4242),
+            started_ms: Some(1_700_000_000_000),
+            session: Some(2),
             method: "restart-manager".into(),
             outcome: "ended".into(),
         });
@@ -275,10 +300,30 @@ mod tests {
     }
 
     #[test]
+    fn unknown_process_facts_are_question_marks() {
+        let rec = ProcessRecord {
+            image: "dyno.exe".into(),
+            pid: None,
+            started_ms: None,
+            session: None,
+            method: "by-handle".into(),
+            outcome: "skipped: another folder".into(),
+        };
+        assert_eq!(
+            rec.describe(),
+            "image=dyno.exe pid=? start=? session=? method=by-handle outcome=skipped: another folder"
+        );
+    }
+
+    #[test]
     fn exit_codes_are_logged() {
         let mut l = log(0);
         l.exit(11, "a program is still running");
-        assert!(l.into_fs().current.contains("phase=exit code=11 a program is still running"));
+        assert!(
+            l.into_fs()
+                .current
+                .contains("phase=exit code=11 a program is still running")
+        );
     }
 
     #[test]
@@ -296,7 +341,10 @@ mod tests {
         l.fs.current = "x".repeat(MAX_BYTES as usize - 10);
         l.line("p", "this line does not fit");
         let fs = l.into_fs();
-        assert_eq!(fs.rotated.as_deref().map(str::len), Some(MAX_BYTES as usize - 10));
+        assert_eq!(
+            fs.rotated.as_deref().map(str::len),
+            Some(MAX_BYTES as usize - 10)
+        );
         assert!(fs.current.contains("this line does not fit"));
         assert!(fs.current.len() < 200);
     }

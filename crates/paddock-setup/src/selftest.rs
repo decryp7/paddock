@@ -17,7 +17,13 @@ pub fn key_fingerprint(key_text: &str) -> Option<String> {
     if raw.len() < 10 || &raw[..2] != b"Ed" {
         return None;
     }
-    Some(raw[2..10].iter().rev().map(|b| format!("{b:02X}")).collect())
+    Some(
+        raw[2..10]
+            .iter()
+            .rev()
+            .map(|b| format!("{b:02X}"))
+            .collect(),
+    )
 }
 
 /// The lines `self-test` prints: `name=value`, one per line.
@@ -32,7 +38,14 @@ pub fn report(b: &crate::Baked) -> Vec<String> {
         format!("identifier={}", or_none(b.identifier)),
         format!("product={}", or_none(b.product)),
         format!("main={}", or_none(b.main)),
-        format!("update_key={}", if b.update_key.is_some() { "present" } else { "none" }),
+        format!(
+            "update_key={}",
+            if b.update_key.is_some() {
+                "present"
+            } else {
+                "none"
+            }
+        ),
         format!("key_fingerprint={fingerprint}"),
     ]
 }
@@ -46,36 +59,64 @@ mod tests {
         raw.extend(id);
         raw.extend([7u8; 32]);
         let inner = base64::engine::general_purpose::STANDARD.encode(raw);
-        base64::engine::general_purpose::STANDARD.encode(format!("untrusted comment: minisign public key: X\n{inner}\n"))
+        base64::engine::general_purpose::STANDARD.encode(format!(
+            "untrusted comment: minisign public key: X\n{inner}\n"
+        ))
     }
 
     #[test]
     fn fingerprint_is_the_key_id_most_significant_byte_first() {
-        assert_eq!(key_fingerprint(&key([0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF])).as_deref(), Some("EFCDAB8967452301"));
+        assert_eq!(
+            key_fingerprint(&key([0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF])).as_deref(),
+            Some("EFCDAB8967452301")
+        );
     }
 
     #[test]
     fn not_a_key_has_no_fingerprint() {
         assert_eq!(key_fingerprint(""), None);
         assert_eq!(key_fingerprint("!!!"), None);
-        assert_eq!(key_fingerprint(&base64::engine::general_purpose::STANDARD.encode("only one line")), None);
+        assert_eq!(
+            key_fingerprint(&base64::engine::general_purpose::STANDARD.encode("only one line")),
+            None
+        );
         let short = base64::engine::general_purpose::STANDARD.encode("c\nQUJD\n");
         assert_eq!(key_fingerprint(&short), None);
     }
 
     #[test]
     fn report_names_everything_baked_in() {
-        let b = crate::Baked { identifier: Some("com.decryp7.dyno"), product: Some("Dyno"), main: Some("dyno.exe"), update_key: None };
+        let b = crate::Baked {
+            identifier: Some("com.decryp7.dyno"),
+            product: Some("Dyno"),
+            main: Some("dyno.exe"),
+            update_key: None,
+        };
         assert_eq!(
             report(&b),
-            ["setup_version=1", "identifier=com.decryp7.dyno", "product=Dyno", "main=dyno.exe", "update_key=none", "key_fingerprint=none"]
+            [
+                "setup_version=1",
+                "identifier=com.decryp7.dyno",
+                "product=Dyno",
+                "main=dyno.exe",
+                "update_key=none",
+                "key_fingerprint=none"
+            ]
         );
         let k: &'static str = Box::leak(key([1, 2, 3, 4, 5, 6, 7, 8]).into_boxed_str());
-        let b2 = crate::Baked { update_key: Some(k), ..b };
+        let b2 = crate::Baked {
+            update_key: Some(k),
+            ..b
+        };
         let r = report(&b2);
         assert_eq!(r[4], "update_key=present");
         assert_eq!(r[5], "key_fingerprint=0807060504030201");
-        let b3 = crate::Baked { identifier: None, product: None, main: None, update_key: Some("garbage") };
+        let b3 = crate::Baked {
+            identifier: None,
+            product: None,
+            main: None,
+            update_key: Some("garbage"),
+        };
         let r3 = report(&b3);
         assert_eq!(&r3[1..4], ["identifier=none", "product=none", "main=none"]);
         assert_eq!(r3[5], "key_fingerprint=invalid");

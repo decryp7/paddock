@@ -34,7 +34,11 @@ pub fn names_program_in(command: &str, dir: &str) -> bool {
 
 /// HKLM: every value whose command names a program in `dir`.
 pub fn machine_removals(values: &[RunValue], dir: &str) -> Vec<String> {
-    values.iter().filter(|v| names_program_in(&v.command, dir)).map(|v| v.name.clone()).collect()
+    values
+        .iter()
+        .filter(|v| names_program_in(&v.command, dir))
+        .map(|v| v.name.clone())
+        .collect()
 }
 
 /// A user hive: only the value named `product` (the app's own), and only when it points into `dir`.
@@ -51,15 +55,27 @@ mod tests {
     use super::*;
 
     fn v(name: &str, command: &str) -> RunValue {
-        RunValue { name: name.into(), command: command.into() }
+        RunValue {
+            name: name.into(),
+            command: command.into(),
+        }
     }
     const DIR: &str = r"C:\Program Files\Dyno";
 
     #[test]
     fn program_quoted_and_unquoted() {
-        assert_eq!(program_of(r#""C:\Program Files\Dyno\dyno.exe" --hidden"#).as_deref(), Some(r"C:\Program Files\Dyno\dyno.exe"));
-        assert_eq!(program_of(r"C:\Program Files\Dyno\dyno.exe --hidden").as_deref(), Some(r"C:\Program Files\Dyno\dyno.exe"));
-        assert_eq!(program_of(r"C:\Dyno\DYNO.EXE").as_deref(), Some(r"C:\Dyno\DYNO.EXE"));
+        assert_eq!(
+            program_of(r#""C:\Program Files\Dyno\dyno.exe" --hidden"#).as_deref(),
+            Some(r"C:\Program Files\Dyno\dyno.exe")
+        );
+        assert_eq!(
+            program_of(r"C:\Program Files\Dyno\dyno.exe --hidden").as_deref(),
+            Some(r"C:\Program Files\Dyno\dyno.exe")
+        );
+        assert_eq!(
+            program_of(r"C:\Dyno\DYNO.EXE").as_deref(),
+            Some(r"C:\Dyno\DYNO.EXE")
+        );
         assert_eq!(program_of(""), None);
         assert_eq!(program_of(r#""unterminated"#), None);
         assert_eq!(program_of("notepad"), None);
@@ -67,15 +83,28 @@ mod tests {
 
     #[test]
     fn names_program_in_dir_by_component() {
-        assert!(names_program_in(r#""C:\Program Files\Dyno\dyno.exe" --hidden"#, DIR));
+        assert!(names_program_in(
+            r#""C:\Program Files\Dyno\dyno.exe" --hidden"#,
+            DIR
+        ));
         assert!(names_program_in(r"c:\program files\dyno\sub\x.exe", DIR));
-        assert!(!names_program_in(r#""C:\Program Files\Dyno Helper\dyno-helper.exe""#, DIR));
-        assert!(!names_program_in(r"C:\Users\x\AppData\Local\Dyno\dyno.exe", DIR));
+        assert!(!names_program_in(
+            r#""C:\Program Files\Dyno Helper\dyno-helper.exe""#,
+            DIR
+        ));
+        assert!(!names_program_in(
+            r"C:\Users\x\AppData\Local\Dyno\dyno.exe",
+            DIR
+        ));
     }
 
     #[test]
     fn machine_removes_any_value_into_the_folder() {
-        let vals = [v("Dyno", r#""C:\Program Files\Dyno\dyno.exe""#), v("Other", r"C:\Tools\o.exe"), v("Agent", r"C:\Program Files\Dyno\dyno-agent.exe run")];
+        let vals = [
+            v("Dyno", r#""C:\Program Files\Dyno\dyno.exe""#),
+            v("Other", r"C:\Tools\o.exe"),
+            v("Agent", r"C:\Program Files\Dyno\dyno-agent.exe run"),
+        ];
         assert_eq!(machine_removals(&vals, DIR), vec!["Dyno", "Agent"]);
     }
 

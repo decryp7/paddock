@@ -13,9 +13,9 @@ build = "build.rs"
 scaffold = true
 
 [features]
-# `stop-all` over `paddock_proc::installed::stop_all` (S1, branch feat/per-machine-stop-and-include). Without it the
-# subcommand answers exit 12 "not built into this program".
-proc-stop = []
+# `stop-all` over `paddock_proc::installed::stop_all_here` (S1, branch feat/per-machine-stop-and-include). Without it the
+# subcommand fails with "no process stopper" (exit 5) and says so in setup.log.
+proc-stop = ["dep:paddock-proc"]
 
 [lib]
 name = "paddock_setup"
@@ -37,11 +37,13 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 # The native glue (`src/native/`): registry, tokens, handles, security descriptors, the mutex and the process start.
 [target.'cfg(windows)'.dependencies]
+paddock-proc = { workspace = true, optional = true }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
+    "Win32_System_Environment",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
