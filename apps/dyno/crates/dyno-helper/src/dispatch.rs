@@ -197,7 +197,15 @@ impl Dispatcher {
         let peer = ctx.pid;
         request.validate().map_err(|e| RemoteError::new(codes::REFUSED, e.to_string()))?;
         match request {
-            HelperRequest::Info => Ok(HelperReply::About(self.info.clone(), ctx.view.clone())),
+            HelperRequest::Info => {
+                // The tools are what the helper's own folder holds, not what the caller's view says (ER-27: Settings must
+                // be able to tell "installed" from "not installed" after an install).
+                let view = CallerView {
+                    tools: self.tools.installed(),
+                    ..ctx.view.clone()
+                };
+                Ok(HelperReply::About(self.info.clone(), view))
+            }
             HelperRequest::LoginItems => {
                 let uid = ctx.uid.ok_or_else(|| {
                     RemoteError::new(codes::UNSUPPORTED, "Login items are read for a Unix account; this caller has none.")
@@ -333,6 +341,12 @@ mod tests {
                 tool,
                 installed: Some("7.5".into()),
             })
+        }
+        fn installed(&self) -> Vec<dyno_core::helper_wire::ToolStatus> {
+            vec![dyno_core::helper_wire::ToolStatus {
+                tool: ToolKind::Smartmontools,
+                installed: Some("7.5".into()),
+            }]
         }
     }
 
@@ -527,7 +541,17 @@ mod tests {
             view: view.clone(),
         };
         match r.d.handle_for(&ctx, HelperRequest::Info).unwrap() {
-            HelperReply::About(_, v) => assert_eq!(v, view),
+            HelperReply::About(_, v) => {
+                assert_eq!(v.scope, view.scope);
+                // The tools are the helper's own, never the caller's say-so.
+                assert_eq!(
+                    v.tools,
+                    vec![dyno_core::helper_wire::ToolStatus {
+                        tool: ToolKind::Smartmontools,
+                        installed: Some("7.5".into())
+                    }]
+                );
+            }
             other => panic!("{other:?}"),
         }
         match r.d.handle_for(&ctx, HelperRequest::LoginItems).unwrap() {

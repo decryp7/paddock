@@ -49,6 +49,14 @@ pub struct HardwareCentre {
     wear: Mutex<Box<dyn DiskWearSource>>,
     battery: Mutex<Box<dyn BatteryCapacitySource>>,
     state: Mutex<State>,
+    /// A background re-read is running, or ran at this time.
+    reread: Mutex<Reread>,
+}
+
+#[derive(Default)]
+struct Reread {
+    running: bool,
+    last: Option<Instant>,
 }
 
 impl HardwareCentre {
@@ -62,6 +70,7 @@ impl HardwareCentre {
             signals: Mutex::new(signals),
             wear: Mutex::new(wear),
             battery: Mutex::new(battery),
+            reread: Mutex::new(Reread::default()),
             state: Mutex::new(State {
                 tracker: ThrottleTracker::new(),
                 os: Reading::unavailable("Not read yet"),
@@ -87,6 +96,21 @@ impl HardwareCentre {
         let mut s = lock(&self.state);
         s.os_at = None;
         s.os = Reading::unavailable("Not read yet");
+    }
+
+    /// Whether a re-read may start now: none is running and the last one began at least `min_gap` ago. Marks it running.
+    fn begin_reread(&self, min_gap: Duration) -> bool {
+        let mut r = lock(&self.reread);
+        if r.running || r.last.is_some_and(|t| t.elapsed() < min_gap) {
+            return false;
+        }
+        r.running = true;
+        r.last = Some(Instant::now());
+        true
+    }
+
+    fn end_reread(&self) {
+        lock(&self.reread).running = false;
     }
 
     /// Remembers whether a battery-saving mode is on (from the facts, refreshed by the background cycle).
@@ -311,6 +335,31 @@ pub fn handle_events(shared: &Arc<Shared>, events: Vec<TrackerEvent>, confidence
             }
         }
     }
+}
+
+/// Reads SSD wear and battery capacity again now, off the caller's thread (ER-17), unless one is running or began less than
+/// `min_gap` ago. Used after a tool is installed, when the Settings card is asked again and after a tool is removed, so a change
+/// shows without waiting for the next slow cycle (hours away). Returns whether a read was started.
+pub fn request_reread(shared: &Arc<Shared>, min_gap: Duration) -> bool {
+    if !shared.hardware.begin_reread(min_gap) {
+        log::debug!(target: "dyno::hardware", "SSD wear: a re-read was asked for but one ran or is running");
+        return false;
+    }
+    log::info!(target: "dyno::hardware", "SSD wear: reading again on request");
+    let shared = Arc::clone(shared);
+    let spawned = std::thread::Builder::new().name("dyno-wear-reread".into()).spawn({
+        let shared = Arc::clone(&shared);
+        move || {
+            slow_cycle(&shared);
+            shared.hardware.end_reread();
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!(target: "dyno::hardware", "SSD wear: the re-read thread could not start: {e}");
+        shared.hardware.end_reread();
+        return false;
+    }
+    true
 }
 
 /// One slow cycle: reads the hardware, stores the readings that are due and raises or returns the lifespan alarms.

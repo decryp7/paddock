@@ -244,7 +244,13 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
                 ),
             )),
         },
-        Request::ToolOffer => Ok(Reply::ToolOffer(Box::new(crate::tool_download::offer(shared)))),
+        Request::ToolOffer => {
+            let offer = crate::tool_download::offer(shared);
+            // Asking again ("Check again", or opening Settings) also reads the disks again, so a tool installed by hand is
+            // picked up now and not at the next slow cycle (hours away); at most once in 30 s.
+            crate::hardware::request_reread(shared, std::time::Duration::from_secs(30));
+            Ok(Reply::ToolOffer(Box::new(offer)))
+        }
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {

@@ -2339,6 +2339,9 @@ export interface ToolStatus {
 /** Where the offer stands: downloadable, installed (the version), needs the helper first, or not offered here (what to do instead). */
 export type OfferState = 'available' | { installed: string } | { needsHelper: string } | { notHere: string };
 
+/** Which copy of the tool Dyno uses: the helper's, Dyno's own, or one the person installed (the path of its smartctl). */
+export type ToolSource = 'helper' | 'dyno' | { own: string };
+
 /** What the Settings card shows for the disk-health tool. */
 export interface ToolOffer {
   tool: ToolKind;
@@ -2349,6 +2352,8 @@ export interface ToolOffer {
   licence: string;
   sourceUrl: string;
   state: OfferState;
+  /** Which copy Dyno uses, when it is installed. */
+  source?: ToolSource | null;
 }
 
 // ---------------------------------------------------------------------------------------------------- power (ADR 0032)

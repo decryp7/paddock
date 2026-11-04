@@ -3,8 +3,11 @@
 //! through [`crate::process`] with timeouts; anything missing or refused is an unavailable reading that says why and
 //! what would help. The `Fake*` readers are for tests and for the other OSes' tests.
 
-use crate::parse::hardware::{parse_smartctl_scan, parse_smartctl_ssd, smartctl_refusal};
+use crate::parse::hardware::{parse_smartctl_ssd, smartctl_refusal_kind, Refusal};
+use crate::parse::smart::{parse_scan, ScanDevice};
+use crate::smartctl_search::{self, SearchEnv, SystemEnv};
 use dyno_core::hardware::{BatteryCapacity, DiskWear, OsThrottle};
+use dyno_core::helper::HelperHost;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::{BatteryCapacitySource, DiskWearSource, ThrottleSignals};
 use std::path::{Path, PathBuf};
@@ -33,7 +36,7 @@ pub fn throttle_signals() -> Box<dyn ThrottleSignals> {
 
 /// The reader of SSD wear for this OS.
 pub fn disk_wear() -> Box<dyn DiskWearSource> {
-    Box::new(SmartctlWear::new(smartctl_candidates()))
+    Box::new(SmartctlWear::new(system_smartctl()).with_search(Box::new(SystemEnv)))
 }
 
 /// The reader of the battery's capacity for this OS.
@@ -57,18 +60,30 @@ pub fn battery_capacity() -> Box<dyn BatteryCapacitySource> {
 }
 
 /// The SSD wear reader that tries Dyno's own copy of smartctl first (`<tools>/smartmontools-*/smartctl`, newest name first), then
-/// the usual places on the PATH and in Homebrew.
+/// the usual places, then any smartmontools the person installed themselves (Program Files, the registry, the PATH).
 pub fn disk_wear_with_own_tools(tools: &Path) -> Box<dyn DiskWearSource> {
-    Box::new(SmartctlWear::new(system_smartctl()).with_own_tools(tools.to_path_buf()))
+    Box::new(
+        SmartctlWear::new(system_smartctl())
+            .with_own_tools(tools.to_path_buf())
+            .with_search(Box::new(SystemEnv)),
+    )
 }
 
-fn smartctl_candidates() -> Vec<PathBuf> {
-    smartctl_candidates_with(None)
+/// The smartctl this computer would use for a local reading, if any (Dyno's own copy first, then the places searched).
+pub fn locate_smartctl(own_tools: &Path) -> Option<PathBuf> {
+    SmartctlWear::new(system_smartctl())
+        .with_own_tools(own_tools.to_path_buf())
+        .with_search(Box::new(SystemEnv))
+        .locate()
 }
 
-/// The places to look for smartctl: Dyno's own copies under `own_tools` first, then the system's.
-fn smartctl_candidates_with(own_tools: Option<&Path>) -> Vec<PathBuf> {
-    own_copies(own_tools).into_iter().chain(system_smartctl()).collect()
+/// The version `program --version` prints, when it runs.
+pub fn smartctl_version(program: &Path) -> Option<String> {
+    let mut cmd = crate::process::command(program);
+    cmd.arg("--version");
+    crate::process::output_text(cmd, TOOL_TIMEOUT)
+        .ok()
+        .and_then(|t| crate::parse::hardware::parse_smartctl_version(&t))
 }
 
 /// Dyno's own copies of smartctl (`<tools>/smartmontools-*/smartctl`), newest name first.
@@ -87,6 +102,7 @@ fn own_copies(own_tools: Option<&Path>) -> Vec<PathBuf> {
     own
 }
 
+/// The fixed places on Unix systems; the Windows places come from the environment ([`crate::smartctl_search`]).
 fn system_smartctl() -> Vec<PathBuf> {
     [
         "/opt/homebrew/sbin/smartctl",
@@ -95,11 +111,44 @@ fn system_smartctl() -> Vec<PathBuf> {
         "/usr/local/bin/smartctl",
         "/usr/sbin/smartctl",
         "/usr/bin/smartctl",
-        r"C:\Program Files\smartmontools\bin\smartctl.exe",
     ]
     .iter()
     .map(PathBuf::from)
     .collect()
+}
+
+fn this_host() -> HelperHost {
+    if cfg!(windows) {
+        HelperHost::Windows
+    } else if cfg!(target_os = "macos") {
+        HelperHost::Macos
+    } else {
+        HelperHost::Linux
+    }
+}
+
+/// What to say when smartmontools is not found, with the next step for this OS.
+pub fn not_installed_text(host: HelperHost) -> &'static str {
+    match host {
+        HelperHost::Windows => "Dyno reads SSD wear through smartmontools, which it did not find. Install it in Settings > Disk health tool, or install smartmontools yourself (Dyno looks in Program Files and on the PATH).",
+        HelperHost::Macos => "Dyno reads SSD wear through smartmontools, which it did not find. Install it in Settings > Disk health tool, or with Homebrew (brew install smartmontools).",
+        HelperHost::Linux => "Dyno reads SSD wear through smartmontools, which it did not find. Install it with your package manager (for example: sudo apt install smartmontools).",
+    }
+}
+
+/// What to say when the OS withholds a drive from this account, naming the drives and the next step for this OS.
+pub fn needs_admin_text(host: HelperHost, drives: &[String]) -> String {
+    let which = if drives.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", drives.join(", "))
+    };
+    match host {
+        HelperHost::Windows | HelperHost::Linux => {
+            format!("Reading these drives{which} needs Administrator readings (Settings): the helper reads them with the rights they need.")
+        }
+        HelperHost::Macos => format!("Reading these drives{which} needs administrator rights, which Dyno does not ask for on macOS."),
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ CPU speed limit
@@ -209,13 +258,25 @@ impl ThrottleSignals for NoThrottleSignals {
 
 // ---------------------------------------------------------------------------------------------------- SSD wear
 
-/// SSD wear through smartmontools (`smartctl -a -j`, read-only). Without it, or without the rights, it says what would
-/// help; the privileged helper (WP-01) will read it for the user later.
+/// SSD wear through smartmontools (`smartctl -a -j`, read-only). Without it, or without the rights, it says what would help.
 pub struct SmartctlWear {
     candidates: Vec<PathBuf>,
     /// Dyno's own tools folder, looked at on every read so a copy installed later is found without a restart.
     own_tools: Option<PathBuf>,
+    /// Where else to look (Program Files, the registry, the PATH), asked on every read.
+    search: Option<Box<dyn SearchEnv + Send>>,
+    host: HelperHost,
 }
+
+/// One finished `smartctl` run.
+struct Run {
+    stdout: String,
+    code: Option<i32>,
+    ms: u64,
+}
+
+/// At most this many drives are read per cycle.
+const MAX_DRIVES: usize = 16;
 
 impl SmartctlWear {
     /// A reader that looks for `smartctl` at these paths.
@@ -223,6 +284,8 @@ impl SmartctlWear {
         SmartctlWear {
             candidates,
             own_tools: None,
+            search: None,
+            host: this_host(),
         }
     }
 
@@ -232,42 +295,112 @@ impl SmartctlWear {
         self
     }
 
-    fn run(&self, program: &Path, args: &[&str]) -> Result<String, String> {
+    /// Also looks where a person's own install may be (on every read, after the fixed places).
+    pub fn with_search(mut self, env: Box<dyn SearchEnv + Send>) -> SmartctlWear {
+        self.search = Some(env);
+        self
+    }
+
+    /// Words its messages for this system (tests).
+    pub fn with_host(mut self, host: HelperHost) -> SmartctlWear {
+        self.host = host;
+        self
+    }
+
+    /// The `smartctl` this reader would use now.
+    pub fn locate(&self) -> Option<PathBuf> {
+        let own = own_copies(self.own_tools.as_deref());
+        own.iter().chain(self.candidates.iter()).find(|p| p.is_file()).cloned().or_else(|| {
+            let env = self.search.as_deref()?;
+            smartctl_search::first_existing(env, self.host == HelperHost::Windows, &|p| p.is_file())
+        })
+    }
+
+    fn run(&self, program: &Path, args: &[&str]) -> Result<Run, String> {
         let mut cmd = crate::process::command(program);
         cmd.args(args);
+        let started = std::time::Instant::now();
         // smartctl's exit status is a bit mask of findings, not a failure flag: judge the JSON.
-        crate::process::run_with_timeout(cmd, TOOL_TIMEOUT)
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .map_err(|e| e.to_string())
+        let out = crate::process::run_with_timeout(cmd, TOOL_TIMEOUT).map_err(|e| e.to_string())?;
+        Ok(Run {
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            code: out.status.code(),
+            ms: started.elapsed().as_millis() as u64,
+        })
     }
+}
+
+/// The arguments for one drive of the scan: `-a -j [-d <type>] <name>`.
+fn drive_args(d: &ScanDevice) -> Vec<&str> {
+    let mut args = vec!["-a", "-j"];
+    if let Some(kind) = d.kind.as_deref() {
+        args.extend(["-d", kind]);
+    }
+    args.push(&d.name);
+    args
 }
 
 impl DiskWearSource for SmartctlWear {
     fn read(&mut self) -> Reading<Vec<DiskWear>> {
-        let own = own_copies(self.own_tools.as_deref());
-        let Some(program) = own.iter().chain(self.candidates.iter()).find(|p| p.is_file()) else {
-            return Reading::unavailable(
-                "Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools).",
-            );
+        let Some(program) = self.locate() else {
+            log::info!(target: "dyno::hardware", "SSD wear: smartctl not found (own copies, fixed places, Program Files, registry, PATH)");
+            return Reading::unavailable(not_installed_text(self.host));
         };
-        let scan = match self.run(program, &["--scan", "-j"]) {
-            Ok(t) => t,
-            Err(e) => return Reading::unavailable(e),
+        log::info!(target: "dyno::hardware", "SSD wear: using {}", program.display());
+        let scan = match self.run(&program, &["--scan", "-j"]) {
+            Ok(r) => {
+                log::info!(target: "dyno::hardware", "SSD wear: scan exit {:?} in {} ms", r.code, r.ms);
+                r.stdout
+            }
+            Err(e) => {
+                log::warn!(target: "dyno::hardware", "SSD wear: the scan did not run: {e}");
+                return Reading::unavailable(format!("smartctl could not list the drives: {e}"));
+            }
         };
-        let devices = parse_smartctl_scan(&scan);
+        let devices = parse_scan(&scan, MAX_DRIVES);
         if devices.is_empty() {
             return Reading::unavailable("smartctl found no drives it can read.");
         }
-        let (mut found, mut refusal) = (Vec::new(), None);
-        for d in devices {
-            let Ok(out) = self.run(program, &["-a", "-j", &d]) else { continue };
-            match parse_smartctl_ssd(&out) {
-                Some(w) => found.push(w),
-                None => refusal = refusal.or_else(|| smartctl_refusal(&out)),
+        let (mut found, mut denied, mut other) = (Vec::new(), Vec::new(), None::<String>);
+        for d in &devices {
+            let run = match self.run(&program, &drive_args(d)) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!(target: "dyno::hardware", "SSD wear: {} skipped, smartctl did not run: {e}", d.name);
+                    other = other.or(Some(e));
+                    continue;
+                }
+            };
+            match parse_smartctl_ssd(&run.stdout) {
+                Some(w) => {
+                    log::info!(target: "dyno::hardware", "SSD wear: {} read (exit {:?}, {} ms)", d.name, run.code, run.ms);
+                    found.push(w);
+                }
+                None => {
+                    let why = match smartctl_refusal_kind(&run.stdout) {
+                        Some(Refusal::Access) => {
+                            denied.push(d.name.clone());
+                            "the OS withheld it from this account (needs Administrator readings)"
+                        }
+                        Some(Refusal::Unsupported) => "it does not expose SMART data to apps",
+                        None => "it reports no SSD wear counters (a hard disk, or no counters)",
+                    };
+                    log::info!(target: "dyno::hardware", "SSD wear: {} skipped (exit {:?}, {} ms): {why}", d.name, run.code, run.ms);
+                }
             }
         }
+        if !denied.is_empty() {
+            // Drives the OS withheld are named, whether or not others were read, so a missing drive is explained.
+            log::info!(target: "dyno::hardware", "SSD wear: {} drive(s) need Administrator readings: {}", denied.len(), denied.join(", "));
+        }
         if found.is_empty() {
-            Reading::unavailable(refusal.unwrap_or_else(|| "No SSD reports wear counters to apps.".into()))
+            Reading::unavailable(if !denied.is_empty() {
+                needs_admin_text(self.host, &denied)
+            } else if let Some(e) = other {
+                format!("smartctl could not read the drives: {e}")
+            } else {
+                "No SSD reports wear counters to apps.".into()
+            })
         } else {
             Reading::Available(found)
         }
@@ -508,15 +641,15 @@ mod tests {
             std::fs::create_dir_all(dir.join(v)).unwrap();
         }
         std::fs::create_dir_all(dir.join("other-tool")).unwrap();
-        let c = smartctl_candidates_with(Some(&dir));
+        let c: Vec<PathBuf> = own_copies(Some(&dir));
         let name = |i: usize| c[i].parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
         assert_eq!(
             (name(0), name(1)),
             ("smartmontools-7.5".to_string(), "smartmontools-7.4".to_string())
         );
         assert!(c.iter().all(|p| !p.to_string_lossy().contains("other-tool")));
-        assert_eq!(&c[2..], &smartctl_candidates()[..], "then the system places, unchanged");
-        assert_eq!(smartctl_candidates_with(Some(&dir.join("missing"))), smartctl_candidates());
+        assert_eq!(c.len(), 2);
+        assert!(own_copies(Some(&dir.join("missing"))).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -575,7 +708,16 @@ mod tests {
         let dir = temp("smartdeny");
         let denied = r#"{"smartctl":{"messages":[{"string":"open device failed: Permission denied"}]}}"#;
         let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/disk0"}]}"#, denied);
-        assert!(matches!(SmartctlWear::new(vec![tool.clone()]).read(), Reading::Unavailable(m) if m.contains("administrator")));
+        assert!(
+            matches!(SmartctlWear::new(vec![tool.clone()]).with_host(HelperHost::Macos).read(), Reading::Unavailable(m) if m.contains("administrator rights"))
+        );
+        // Windows words the refusal differently and has its own next step.
+        let win = r#"{"smartctl":{"messages":[{"string":"Smartctl open device: /dev/sdb failed: Access is denied"}]}}"#;
+        let tool_win = fake_smartctl(&temp("smartdeny-win"), r#"{"devices":[{"name":"/dev/sdb","type":"sat"}]}"#, win);
+        assert!(matches!(
+            SmartctlWear::new(vec![tool_win]).with_host(HelperHost::Windows).read(),
+            Reading::Unavailable(m) if m.contains("Administrator readings (Settings)") && m.contains("/dev/sdb")
+        ));
         let blank = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/disk0"}]}"#, "{}");
         assert!(matches!(SmartctlWear::new(vec![blank]).read(), Reading::Unavailable(m) if m.contains("No SSD")));
         let none = fake_smartctl(&dir, "{}", "{}");
@@ -584,9 +726,69 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_smartctl_is_explained() {
-        let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing/smartctl")]).read();
-        assert!(matches!(r, Reading::Unavailable(m) if m.contains("smartmontools") && !m.contains("helper")));
+    fn a_missing_smartctl_is_explained_for_this_os_only() {
+        for (host, has, hasnt) in [
+            (HelperHost::Windows, "Program Files", "brew"),
+            (HelperHost::Macos, "brew install smartmontools", "apt"),
+            (HelperHost::Linux, "apt install smartmontools", "brew"),
+        ] {
+            let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing/smartctl")])
+                .with_host(host)
+                .read();
+            assert!(
+                matches!(&r, Reading::Unavailable(m) if m.contains(has) && !m.contains(hasnt) && !m.contains("helper")),
+                "{host:?}: {r:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_device_type_of_the_scan_is_passed_to_smartctl() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("smart-d");
+        let script = dir.join("smartctl");
+        let log = dir.join("args.log");
+        let scan = r#"{"devices":[{"name":"/dev/sdb","type":"sat"},{"name":"/dev/nvme0"}]}"#;
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{log}'\nif [ \"$1\" = \"--scan\" ]; then echo '{scan}'; else echo '{drive}'; fi\nexit 4\n",
+                log = log.display(),
+                drive = crate::parse::hardware::tests_nvme().replace('\n', " "),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = SmartctlWear::new(vec![script]).read();
+        let seen = std::fs::read_to_string(&log).unwrap();
+        assert!(seen.lines().any(|l| l == "-a -j -d sat /dev/sdb"), "{seen}");
+        assert!(
+            seen.lines().any(|l| l == "-a -j /dev/nvme0"),
+            "no -d when the scan gave no type: {seen}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_that_prints_nothing_is_explained() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("smart-run");
+        let script = dir.join("smartctl");
+        // The scan works; the drive run exits without any output at all.
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then echo '{\"devices\":[{\"name\":\"/dev/sda\"}]}'; fi\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(SmartctlWear::new(vec![script]).read(), Reading::Unavailable(m) if m.contains("No SSD")));
+        assert!(matches!(
+            SmartctlWear::new(vec![dir.join("not-executable-dir")]).read(),
+            Reading::Unavailable(_)
+        ));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

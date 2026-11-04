@@ -500,7 +500,11 @@ impl Shared {
             hardware: crate::hardware::HardwareCentre::new(
                 hardware.signals,
                 if own_folder {
-                    dyno_platform::hardware::disk_wear_with_own_tools(&own_tools)
+                    // The real machine: the helper first, then the local reader (which also finds a person's own install).
+                    Box::new(crate::helper_wear::HelperFirstWear::new(
+                        Box::new(crate::helper_wear::SharedSmart(me.clone())),
+                        dyno_platform::hardware::disk_wear_with_own_tools(&own_tools),
+                    ))
                 } else {
                     hardware.wear
                 },

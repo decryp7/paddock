@@ -11,6 +11,16 @@ describe('tool offer faces', () => {
     expect(offerFace(offer({ notHere: 'Use apt.' }))).toMatchObject({ kind: 'notHere', message: 'Use apt.' });
   });
 
+  it('names the copy Dyno uses, including one the person installed themselves', () => {
+    const installed = (source: ToolOffer['source']): ToolOffer => ({ ...offer({ installed: '7.5' }), source });
+    expect(offerFace(installed('helper')).message).toContain('installed by the helper');
+    expect(offerFace(installed('dyno')).message).toContain("Dyno's own folder");
+    const own = offerFace(installed({ own: 'C:\\Example\\smartmontools\\bin\\smartctl.exe' }));
+    expect(own.kind).toBe('installed');
+    expect(own.message).toContain('that you installed (C:\\Example');
+    expect(offerFace(installed(null)).kind).toBe('installed');
+  });
+
   it('shows sizes in megabytes', () => {
     expect(megabytes(1_508_408)).toBe('1.5');
   });

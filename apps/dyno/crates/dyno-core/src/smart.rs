@@ -66,4 +66,6 @@ pub trait SmartReader: Send + Sync {
 pub trait ToolInstaller: Send + Sync {
     /// Installs `tool` from `bytes` and says what is now installed.
     fn install(&self, tool: ToolKind, bytes: &[u8]) -> Result<ToolStatus, PlatformError>;
+    /// The tools that are installed now, found by looking at the tools folder (empty when none or on a system without them).
+    fn installed(&self) -> Vec<ToolStatus>;
 }
