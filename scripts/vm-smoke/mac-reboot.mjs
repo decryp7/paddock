@@ -64,7 +64,7 @@ export function macRebootCheck({ waitReady }) {
       const owners = (await g.exec('/usr/local/bin/axdrive windows | cut -f1,4 | sort | uniq -c | sort -rn | head -25')).stdout.trim();
       const lsapp = (await g.exec('lsappinfo list 2>&1 | grep -i -B1 -A10 "dyno" | head -40')).stdout.trim();
       const ccItems = (await g.exec('/usr/local/bin/axdrive tree ControlCenter 6 2>&1 | grep -i -E "dyno|menu bar item|AXMenuBarItem|AXStatusItem" | head -20; echo --- SystemUIServer; /usr/local/bin/axdrive tree SystemUIServer 6 2>&1 | grep -i -E "dyno|AXMenuBarItem" | head -10')).stdout.trim();
-      const log = (await g.exec('grep -h -i -E "tray|tooltip|status item|menubar" "$HOME/Library/Application Support/Dyno/logs/"*.log 2>/dev/null | tail -15; ls -la "$HOME/Library/Application Support/Dyno/logs/" 2>&1 | tail -4')).stdout.trim();
+      const log = (await g.exec('for d in "$HOME/Library/Logs/Dyno" "$HOME/Library/Application Support/Dyno/logs" "$HOME/Library/Application Support/Dyno"; do ls -la "$d" 2>&1 | tail -4; grep -h -i -E "tray|tooltip|status item|menubar" "$d"/*.log 2>/dev/null | tail -10; done')).stdout.trim();
       await g.exec('open -a /Applications/Dyno.app'); await sleep(25_000);
       const after = (await g.exec('/usr/local/bin/axdrive windows')).stdout.split('\n').filter((l) => /dyno/i.test(l));
       const items2 = after.filter((l) => /menubar/.test(l));
