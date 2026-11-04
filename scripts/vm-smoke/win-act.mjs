@@ -1,8 +1,9 @@
 // The host side of win-act.ps1: sends one input or window command to the in-session actor of the Windows test VM and returns its answer.
 // Commands are written as files through the standard user's SSH; every wait is bounded.
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
+const VMWIN = process.env.PADDOCK_VM_WIN ?? fileURLToPath(new URL('../vm-win.sh', import.meta.url));
 const DIR = 'C:\\paddock-test\\vmcheck\\act';
 const run = (cmd, timeoutMs = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encoding: 'utf8', timeout: timeoutMs }).stdout.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -1,0 +1,44 @@
+  let started = false;
+  let vnc = false;
+  const cleanup = () => {
+    if (started && o.keep) log('--keep: the VM is left running with Dyno up (CDP port 9222 in the guest); revert it with: vm-win.sh stop; vm-win.sh revert gui-session-tools');
+    else if (started) {
+      log(`reverting the VM to ${SNAPSHOT}`);
+      vm(['stop'], 200_000);
+      if (vnc) { writeFileSync(VMX, fixDiskName(stripVnc(readFileSync(VMX, 'utf8')), readdirSync(dirname(VMX)))); log('vmx: VNC lines removed from the current file (no old copy is ever restored)'); }
+      vm(['revert', SNAPSHOT], 300_000);
+    }
+    rmSync(scratch, { recursive: true, force: true });
+  };
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
+  try {
+    const exe = o.installer ? resolve(o.installer) : await download(o.run, 'dyno-Windows', scratch);
+    if (!existsSync(exe)) throw new Error(`${exe} is not a file`);
+    const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
+    // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
+    if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
+    started = true;
+    { const cur = readFileSync(VMX, 'utf8'); const fixed = fixDiskName(cur, readdirSync(dirname(VMX))); if (fixed !== cur) { writeFileSync(VMX, fixed); log('vmx named a missing redo log: pointed at the newest existing one'); } }
+    {
+      // Preflight, logged: the vmx parses, no key twice, the disk it names exists; stale lock folders are only reported (VMware clears its own on a start; never deleted here).
+      const dir = dirname(VMX); const files = readdirSync(dir); const c = vmxCheck(readFileSync(VMX, 'utf8'), files);
+      const locks = files.filter((f) => f.endsWith('.lck'));
+      log(`vmx check: ${c.lines} lines, ${c.duplicates.length ? `DUPLICATE keys ${c.duplicates.join(', ')}` : 'no duplicate keys'}, disk ${c.disk} ${c.diskExists ? 'exists' : 'MISSING'}; ${locks.length} lock folder(s) present${locks.length ? ` (${locks.join(', ')})` : ''}, left alone`);
+      if (c.duplicates.length || !c.diskExists) throw new Error('the vmx is not usable (duplicate keys or a missing disk); not starting the VM');
+    }
+    log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
+    if (o.vnc) {
+      // VNC for the UAC consent (secure desktop). Only between revert and start, on the CURRENT vmx: only the RemoteDisplay.vnc.* lines are added and removed.
+      vnc = true;
+      vm(['stop'], 200_000);
+      writeFileSync(VMX, withVnc(fixDiskName(readFileSync(VMX, 'utf8'), readdirSync(dirname(VMX))), VNC_PORT, VNC_PW));
+      log(`vmx: VNC on port ${VNC_PORT} for this run (backup kept until the end)`);
+    }
+    log('start (bounded 10 min)'); if (vm(['start'], 600_000).code !== 0) throw new Error('the VM did not start or SSH did not answer');
+  const cleanup = () => {
+    if (run) run.kill('SIGTERM');
+    if (cloned) { if (o.keep) log(`--keep-vm: ${vm} stays; delete it with: tart delete ${vm}`); else { sh('tart', ['stop', vm], 120_000); sh('tart', ['delete', vm], 120_000); } }
+    rmSync(scratch, { recursive: true, force: true });
+  };
+    if (sh('tart', ['clone', BASE, vm], 600_000).code !== 0) throw new Error('tart clone failed');
+    run = spawn('tart', ['run', '--no-graphics', '--vnc-experimental', '--rosetta=rosetta', vm], { env: { ...process.env, TART_HOME }, stdio: 'ignore' });

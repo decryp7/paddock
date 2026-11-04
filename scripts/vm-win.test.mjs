@@ -108,25 +108,65 @@ describe('guard rails', () => {
   });
 });
 
-describe('vmrun password', () => {
-  test('an unencrypted VM gets no -vp and never reads the keychain', () => {
-    const dir = join(scratch, 'plain');
-    const fusion = join(scratch, 'PlainFusion.app');
-    const bin = join(scratch, 'plain-bin');
-    const log = join(scratch, 'plain-vmrun.log');
+describe('the broker', () => {
+  // A stand-in for `./dev`: records every call, answers `lease` with an id, `status` with a state file and `snapshots` with a list.
+  const rig = (state = 'stopped') => {
+    const dir = join(scratch, `broker-${Math.random().toString(36).slice(2)}`);
     mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
-    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\nguestOS = "arm-windows11-64"\n');
-    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
-    writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "$*" >> '${log}'\necho "Total snapshots: 0"\n`);
-    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, 'security'), `#!/bin/sh\necho security >> '${log}'\nexit 1\n`);
-    chmodSync(join(bin, 'security'), 0o755);
-    const r = run('vm-win.sh', ['snapshot', 'probe'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PATH: `${bin}:${process.env.PATH}` });
-    assert.equal(r.status, 0, r.stderr);
-    const calls = readFileSync(log, 'utf8');
-    assert.match(calls, /^-T fusion snapshot \S+paddock-win11-test\.vmx probe$/m);
-    assert.doesNotMatch(calls, /-vp|security/);
+    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
+    const log = join(dir, 'dev.log');
+    const dev = join(dir, 'dev');
+    writeFileSync(dev, `#!/bin/sh\necho "$*" >> '${log}'\ncase "$2" in\n  lease) echo paddock-win11-test.1.2;;\n  status) echo ${state};;\n  snapshots) printf 'clean-baseline\\ngui-session-tools\\n';;\n  *) echo ok;;\nesac\n`);
+    chmodSync(dev, 0o755);
+    return { dir, log, env: { PADDOCK_WIN_VM_DIR: dir, PADDOCK_DEV: dev, HOME: process.env.HOME } };
+  };
+  const calls = (log) => readFileSync(log, 'utf8').trim().split('\n');
+
+  test('snapshot takes a lease for this script, snapshots through the broker, and releases', () => {
+    const r = rig();
+    const out = run('vm-win.sh', ['snapshot', 'probe'], r.env);
+    assert.equal(out.status, 0, out.stderr);
+    const c = calls(r.log);
+    assert.match(c[0], new RegExp(`^vm lease paddock-win11-test --for vm-win\\.sh snapshot --holder-pid \\d+$`));
+    assert.equal(c[1], 'vm snapshot paddock-win11-test.1.2 --name probe');
+    assert.equal(c.at(-1), 'vm release paddock-win11-test.1.2');
+  });
+
+  test('revert checks the snapshot through the broker first and refuses an unknown one without reverting', () => {
+    const r = rig();
+    assert.equal(run('vm-win.sh', ['revert', 'gui-session-tools'], r.env).status, 0);
+    assert.ok(calls(r.log).includes('vm revert paddock-win11-test.1.2 --to gui-session-tools'));
+    const r2 = rig();
+    const bad = run('vm-win.sh', ['revert', 'nope'], r2.env);
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, /no snapshot named nope/);
+    assert.ok(!calls(r2.log).some((l) => l.startsWith('vm revert')));
+  });
+
+  test('stop on a stopped VM does nothing; on a running one it adopts the lease and stops through the broker', () => {
+    const idle = rig('stopped');
+    assert.match(run('vm-win.sh', ['stop'], idle.env).stdout, /already stopped/);
+    assert.ok(!calls(idle.log).some((l) => l.includes('lease')));
+    const up = rig('running');
+    assert.equal(run('vm-win.sh', ['stop'], up.env).status, 0);
+    const c = calls(up.log);
+    assert.match(c.find((l) => l.includes('lease')), /--adopt$/);
+    assert.ok(c.includes('vm stop paddock-win11-test.1.2 --grace 120'));
+  });
+
+  test('a refused lease stops the command before any VM action', () => {
+    const r = rig();
+    const dev = join(r.dir, 'dev');
+    writeFileSync(dev, `#!/bin/sh\necho "$*" >> '${r.log}'\necho 'the VM is leased to "dyno lifecycle"' >&2\nexit 4\n`);
+    const out = run('vm-win.sh', ['snapshot', 'probe'], r.env);
+    assert.notEqual(out.status, 0);
+    assert.match(out.stderr, /leased to "dyno lifecycle"/);
+    assert.equal(calls(r.log).length, 1);
+  });
+
+  test('vm-win.sh calls no VM tool itself', () => {
+    const text = read('vm-win.sh').split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+    assert.doesNotMatch(text, /vmrun|vmcli|vmware-vmx/);
   });
 });
 

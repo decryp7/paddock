@@ -2,15 +2,17 @@
 // The Linux guest of the VM release checks (local only, never CI): a fresh Tart clone of the GNOME desktop base `linux-gnome-base` (Ubuntu 24.04
 // arm64 with GNOME on X11, auto-login, screen lock off, polkit, AT-SPI, and Rosetta mounted at /mnt/rosetta so the CI's amd64 .deb runs), the
 // installer is the CI's `dyno-Linux` artifact. Steps are judged by the OS (ps, systemd, stat) and by the app's own text through AT-SPI
-// (guest/atspi.py); the helper's polkit prompt is answered like a person would. The clone is deleted afterwards.
+// (guest/atspi.py); the helper's polkit prompt is answered like a person would. The clone is deleted afterwards. The clone, its start
+// (headless) and its deletion go through the VM broker (`./dev vm`, broker.mjs; ADR 0054 §1.5); `tart exec` into the guest stays here.
 //
 //   node scripts/vm-smoke/run-linux.mjs --app dyno (--installer <x.deb> | --run <ci run id>) [--out <dir>] [--keep-vm]
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderResult } from './judge.mjs';
+import { BrokerError, Lease } from './broker.mjs';
+import { renderResult, verdict } from './judge.mjs';
 import { readingSteps } from './helper-readings.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
 
@@ -44,10 +46,13 @@ async function main(argv) {
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-linux-'));
   const vm = `paddock-vmsmoke-linux-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${process.pid}`;
-  let cloned = false, run = null;
+  let lease = null, cloned = false;
   const cleanup = () => {
-    if (run) run.kill('SIGTERM');
-    if (cloned) { if (o.keep) log(`--keep-vm: ${vm} stays; delete it with: tart delete ${vm}`); else { sh('tart', ['stop', vm], 120_000); sh('tart', ['delete', vm], 120_000); } }
+    if (lease && cloned) {
+      if (o.keep) log(`--keep-vm: ${vm} stays (running, no lease now); stop and delete it with: ./dev vm lease ${vm} --for cleanup --adopt, then ./dev vm stop and delete`);
+      else { try { lease.stop({ graceSec: 30 }); lease.delete(); } catch (e) { log(`clean-up of ${vm}: ${e.message}`); } }
+    }
+    lease?.release();
     rmSync(scratch, { recursive: true, force: true });
   };
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
@@ -66,10 +71,11 @@ async function main(argv) {
       deb = join(dir, readdirSync(dir).find((f) => f.endsWith('.deb')));
     }
     if (!existsSync(deb)) throw new Error(`${deb} is not a file`);
-    log(`cloning ${BASE} as ${vm}`);
-    cloned = true;
-    if (sh('tart', ['clone', BASE, vm], 600_000).code !== 0) throw new Error('tart clone failed');
-    run = spawn('tart', ['run', '--no-graphics', '--vnc-experimental', '--rosetta=rosetta', vm], { env: { ...process.env, TART_HOME }, stdio: 'ignore' });
+    lease = Lease.take(REPO, vm, `vm-smoke linux ${o.app} ${o.installer ?? `CI run ${o.run}`}`, { waitSec: Number(process.env.PADDOCK_VM_LEASE_WAIT ?? 0) });
+    log(`lease ${lease.id}; cloning ${BASE} as ${vm}`);
+    cloned = true; // before the clone: a signal during the clone still deletes whatever it left
+    lease.clone(BASE);
+    lease.start({ args: ['--vnc-experimental', '--rosetta=rosetta'] });
     for (let i = 0; i < 75 && g('true', 20_000).code !== 0; i++) await sleep(4000);
     // the desktop session: gnome-shell running as admin, Rosetta registered
     for (let i = 0; i < 60 && !/gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); i++) await sleep(3000);
@@ -208,12 +214,12 @@ async function main(argv) {
 
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();
-    const md = renderResult({ app: 'Dyno', version: ver, installer: o.installer ?? `CI run ${o.run}, artifact dyno-Linux, ${basename(deb)}`, guest: `Tart Ubuntu 24.04 arm64 GNOME (X11) clone of ${BASE}, amd64 .deb under Rosetta`, started, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], 20_000).stdout.trim(), steps });
+    const md = renderResult({ ...lease.stamp({ snapshot: BASE, command: `node scripts/vm-smoke/run-linux.mjs ${argv.join(' ')}` }), app: 'Dyno', version: ver, installer: o.installer ?? `CI run ${o.run}, artifact dyno-Linux, ${basename(deb)}`, guest: `Tart Ubuntu 24.04 arm64 GNOME (X11) clone of ${BASE}, amd64 .deb under Rosetta`, started, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], 20_000).stdout.trim(), steps });
     const file = join(out, `${started.replace(/[:.]/g, '-')}-dyno-linux.md`);
     writeFileSync(file, md);
     log(`result: ${file}`); console.log(file);
-    return steps.some((s) => s.status === 'fail') ? 1 : 0;
-  } catch (e) { log(`error: ${e.message}`); return 2; } finally { cleanup(); }
+    return verdict(steps).blocksTag ? 1 : 0;
+  } catch (e) { log(`${e instanceof BrokerError && e.couldNotRun ? 'could not run' : 'error'}: ${e.message}`); return 2; } finally { cleanup(); }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).then((c) => process.exit(c));

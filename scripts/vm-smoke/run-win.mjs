@@ -2,7 +2,8 @@
 // The Windows guest of the VM release checks (local only, never CI): reverts the Windows 11 test VM (VMware Fusion, `vm-win.sh`) to its
 // `gui-session-tools` snapshot, starts it, waits for the interactive session, stages the installer and win-suite.ps1, runs the suite there
 // (a scheduled task in the paddock-test session), polls for its result file with a bounded wait, and writes the Markdown result in the
-// vm-smoke format. The VM is reverted and stopped at the end, also after a failure.
+// vm-smoke format. The VM is reverted and stopped at the end, also after a failure. Every start, revert, stop and .vmx edit goes through
+// the VM broker (`./dev vm`, broker.mjs): one lease per VM, a preflight, headless only (ADR 0054 §1.5). Only `ssh` and `ip` of vm-win.sh remain.
 //
 //   node scripts/vm-smoke/run-win.mjs --app dyno (--installer <setup.exe> | --run <ci run id>) [--out <dir>]
 import { spawnSync } from 'node:child_process';
@@ -10,18 +11,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderResult } from './judge.mjs';
+import { renderResult, verdict } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
 import { helperSteps } from './win-helper.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
-import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
+import { BrokerError, Lease } from './broker.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
+const VMWIN = process.env.PADDOCK_VM_WIN ?? join(REPO, 'scripts', 'vm-win.sh');
+const VM_NAME = 'paddock-win11-test';
 const VMDIR = process.env.PADDOCK_WIN_VM_DIR ?? '/Volumes/d7sst7/vms/paddock-win11-test';
 const SNAPSHOT = 'gui-session-tools';
-const VMX = process.env.PADDOCK_WIN_VMX ?? '/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx';
 export const VNC_PORT = 5995;
 const GUEST = 'C:\\paddock-test\\vmcheck';
 const VNC_PW = process.env.PADDOCK_VNC_PW ?? Math.random().toString(36).slice(2, 10); // a per-run password, never printed
@@ -47,6 +48,7 @@ function sh(cmd, args, timeoutMs, input) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: timeoutMs, input, env: process.env });
   return { code: r.status ?? (r.signal ? 124 : 1), stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
+// vm-win.sh is used for `ssh` and `ip` only; the VM itself is driven by the broker lease.
 const vm = (args, timeoutMs = 120_000) => sh('bash', [VMWIN, ...args], timeoutMs);
 const ssh = (cmd, timeoutMs = 90_000, admin = false) => vm(['ssh', ...(admin ? ['--admin'] : []), cmd], timeoutMs);
 const clean = (s) => s.split('\n').filter((l) => !l.startsWith('**')).join('\n');
@@ -72,16 +74,21 @@ async function main(argv) {
   const out = resolve(o.out ?? process.env.PADDOCK_VM_SMOKE_OUT ?? join(REPO, 'vm-smoke-results'));
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-win-'));
+  let lease = null;
   let started = false;
   let vnc = false;
   const cleanup = () => {
-    if (started && o.keep) log('--keep: the VM is left running with Dyno up (CDP port 9222 in the guest); revert it with: vm-win.sh stop; vm-win.sh revert gui-session-tools');
-    else if (started) {
+    if (lease && started && o.keep) {
+      log(`--keep: the VM is left running with Dyno up (CDP port 9222 in the guest); the lease is released. Revert it with: vm-win.sh stop; vm-win.sh revert ${SNAPSHOT}`);
+    } else if (lease && started) {
       log(`reverting the VM to ${SNAPSHOT}`);
-      vm(['stop'], 200_000);
-      if (vnc) { writeFileSync(VMX, fixDiskName(stripVnc(readFileSync(VMX, 'utf8')), readdirSync(dirname(VMX)))); log('vmx: VNC lines removed from the current file (no old copy is ever restored)'); }
-      vm(['revert', SNAPSHOT], 300_000);
+      // Ask Windows to shut down first (the broker powers off hard after the grace period), then the parsed .vmx edit, then the revert.
+      vm(['ssh', '--admin', 'shutdown /s /t 0'], 30_000);
+      try { lease.stop({ graceSec: 120 }); } catch (e) { log(`stop: ${e.message}`); }
+      if (vnc) { try { lease.vncOff(); log('vmx: VNC lines removed from the current file (no old copy is ever restored)'); } catch (e) { log(`vnc off: ${e.message}`); } }
+      try { lease.revert(SNAPSHOT); } catch (e) { log(`revert: ${e.message}`); }
     }
+    lease?.release();
     rmSync(scratch, { recursive: true, force: true });
   };
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
@@ -89,26 +96,20 @@ async function main(argv) {
     const exe = o.installer ? resolve(o.installer) : await download(o.run, 'dyno-Windows', scratch);
     if (!existsSync(exe)) throw new Error(`${exe} is not a file`);
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
-    // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
-    if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
+    // One lease per VM. A VM that is leased, or that runs without a lease (another job), is refused here and never touched.
+    lease = Lease.take(REPO, VM_NAME, `vm-smoke win ${o.app} ${source}`, { waitSec: Number(process.env.PADDOCK_VM_LEASE_WAIT ?? 0) });
+    log(`lease ${lease.id}`);
     started = true;
-    { const cur = readFileSync(VMX, 'utf8'); const fixed = fixDiskName(cur, readdirSync(dirname(VMX))); if (fixed !== cur) { writeFileSync(VMX, fixed); log('vmx named a missing redo log: pointed at the newest existing one'); } }
-    {
-      // Preflight, logged: the vmx parses, no key twice, the disk it names exists; stale lock folders are only reported (VMware clears its own on a start; never deleted here).
-      const dir = dirname(VMX); const files = readdirSync(dir); const c = vmxCheck(readFileSync(VMX, 'utf8'), files);
-      const locks = files.filter((f) => f.endsWith('.lck'));
-      log(`vmx check: ${c.lines} lines, ${c.duplicates.length ? `DUPLICATE keys ${c.duplicates.join(', ')}` : 'no duplicate keys'}, disk ${c.disk} ${c.diskExists ? 'exists' : 'MISSING'}; ${locks.length} lock folder(s) present${locks.length ? ` (${locks.join(', ')})` : ''}, left alone`);
-      if (c.duplicates.length || !c.diskExists) throw new Error('the vmx is not usable (duplicate keys or a missing disk); not starting the VM');
-    }
-    log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
+    log('revert to the snapshot (the broker runs its preflight on the .vmx, the boot disk and leftover lock folders)');
+    lease.revert(SNAPSHOT);
     if (o.vnc) {
-      // VNC for the UAC consent (secure desktop). Only between revert and start, on the CURRENT vmx: only the RemoteDisplay.vnc.* lines are added and removed.
+      // VNC for the UAC consent (secure desktop). Only between revert and start: the broker adds the RemoteDisplay.vnc.* lines to the CURRENT .vmx.
       vnc = true;
-      vm(['stop'], 200_000);
-      writeFileSync(VMX, withVnc(fixDiskName(readFileSync(VMX, 'utf8'), readdirSync(dirname(VMX))), VNC_PORT, VNC_PW));
-      log(`vmx: VNC on port ${VNC_PORT} for this run (backup kept until the end)`);
+      lease.vncOn({ port: VNC_PORT, passwordEnv: 'PADDOCK_VNC_PW' });
+      log(`vmx: VNC on port ${VNC_PORT} for this run`);
     }
-    log('start (bounded 10 min)'); if (vm(['start'], 600_000).code !== 0) throw new Error('the VM did not start or SSH did not answer');
+    log('start (headless, bounded 10 min)'); lease.start();
+    if (vm(['ip'], 60_000).code !== 0) throw new Error('the VM started but has no address yet');
     const ip = vm(['ip'], 30_000).stdout.trim().split('\n')[0];
     log(`guest ${ip}; waiting for the console session (bounded 6 min)`);
     let session = false;
@@ -182,15 +183,15 @@ async function main(argv) {
     steps.push(...uiSteps);
     steps.push({ title: 'Tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });
     const started_ = new Date().toISOString();
-    const md = renderResult({ app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps });
+    const md = renderResult({ ...lease.stamp({ snapshot: SNAPSHOT, command: `node scripts/vm-smoke/run-win.mjs ${argv.join(' ')}` }), app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps });
     const file = join(out, `${started_.replace(/[:.]/g, '-')}-dyno-win.md`);
     writeFileSync(file, md);
     for (const f of readdirSync(dest)) if (f.endsWith('.png')) writeFileSync(join(out, `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
     log(`result: ${file}`);
     console.log(file);
-    return steps.some((s) => s.status === 'fail') ? 1 : 0;
+    return verdict(steps).blocksTag ? 1 : 0;
   } catch (e) {
-    log(`error: ${e.message}`);
+    log(`${e instanceof BrokerError && e.couldNotRun ? 'could not run' : 'error'}: ${e.message}`);
     return 2;
   } finally {
     cleanup();

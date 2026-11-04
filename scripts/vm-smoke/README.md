@@ -99,10 +99,30 @@ pid (`parentJob` in `apps/dyno/vm-smoke.json`, Dyno ADR 0026), and requires the 
 The macOS "Allow dyno-agent to find devices on local networks?" prompt (UserNotificationCenter) appears after the first Wake-on-LAN; the suite
 answers Allow and screenshots it. Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/*.test.mjs`).
 
+## The VM broker (ADR 0054 section 1.5)
+
+Every start, revert, stop and `.vmx` edit of a test VM goes through `./dev vm` (`tools/paddock-dev/src/vm/`; from Node, `broker.mjs`). No
+runner calls `vmrun`, `tart run|clone|delete|stop|set` or writes a `.vmx`; check C97 fails on any script that does.
+
+- **One lease per VM.** `Lease.take(REPO, vm, purpose)` is held by the runner process (pid and start time) and gone when it ends. A second
+  runner is refused with the holder's purpose and age (`PADDOCK_VM_LEASE_WAIT=<s>` queues instead); a guest that runs without a lease
+  (an old-style run, a person's `vm-win.sh start`) is refused, naming the process. A refusal or a failed preflight is exit 2 "could not
+  run", never a FAIL.
+- **Preflight before every start and revert:** the `.vmx` parses, no key twice, the boot disk exists, no leftover `.lck` folders over a
+  stopped guest, nobody else runs it. Headless only (`vmrun ... nogui`, `tart run --no-graphics`). The `.vmx` is edited only by the broker
+  (parsed edit, temporary file, rename); a backup is never restored.
+- **Results carry the stamp:** the lease id, the VM, the snapshot (or Tart base image) and the runner's command are in the result file;
+  `./dev vm verify <lease id>` says whether the broker issued it.
+- **Positive controls and classes:** `lifecycle.mjs` defines a check only with a positive control; a failing step is `product`
+  (FAIL) or `check` (CHECK BROKEN) with the probe and control output as evidence, and both block a tag, reported apart.
+- Journal: `$PADDOCK_VM_STATE/log/<vm>.log` (default `/tmp/paddock-vm`), one line per phase with the lease id.
+- By hand: `scripts/vm-win.sh start|stop|revert|snapshot|status|ip|ssh`; `stop` is the one command that takes over a guest that runs without
+  a lease (`./dev vm lease <vm> --for <why> --adopt`).
+
 ## Windows guest (`run-win.mjs`, Dyno 1.1.0)
 
 `node scripts/vm-smoke/run-win.mjs --app dyno --ui (--run <id> | --installer <setup.exe>)` reverts the Windows 11 Arm test VM
-(`paddock-win11-test`, snapshot `gui-session-tools`; the driver is `vm-win.sh`) , starts it, stages the x64 NSIS installer and runs, in the
+(`paddock-win11-test`, snapshot `gui-session-tools`; the broker, with `vm-win.sh` for `ssh` and `ip`), starts it, stages the x64 NSIS installer and runs, in the
 interactive session of `paddock-test` (a scheduled task, as `docs/testing/windows-gui-session.md` describes), `win-suite.ps1`, then the UI
 phase, writes the result in the same format, and stops and reverts the VM (also after a failure; `--keep` leaves it up). Standard-user rights
 throughout; `powercfg` needs an administrator, so the suite asks the host through request files and the host answers with the `paddock-admin`
@@ -127,7 +147,7 @@ Rosetta GNOME VM with the polkit prompt).
 
 ## Not covered here
 
-- **Windows guests** (VMware Fusion, Windows 11 Arm): `scripts/vm-win.sh` on `origin/tools/win-test-vm` drives it (`revert`,
+- **Windows guests** (VMware Fusion, Windows 11 Arm): `scripts/vm-win.sh` drives it by hand through the broker (`revert`,
   `start`, `ssh`); the Dyno runbook rows 24a/24d are still partly manual. A Windows port of this check would reuse `judge.mjs`
   and `checks.mjs` with a PowerShell `exec`. Never the personal Windows Fusion VM.
 - **Linux guests**: `tools/macos-vm-smoke.sh --guest linux` (systemd user session, light X session).

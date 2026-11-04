@@ -11,7 +11,7 @@ import { trayCountdownStep, trayMenuStep } from './win-tray.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
+const VMWIN = process.env.PADDOCK_VM_WIN ?? fileURLToPath(new URL('../vm-win.sh', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ssh = (cmd, ms = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encoding: 'utf8', timeout: ms }).stdout.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 const result = (title, checks, evidence = [], pass = '') => {

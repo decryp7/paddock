@@ -161,6 +161,7 @@ if [ -f "$vmx" ]; then
 else
   mkdir -p "$vmdir"
   "$lib/vmware-vdiskmanager" -c -s 80GB -a lsilogic -t 0 "$vmdir/$name.vmdk" >/dev/null
+  # conformance: vm-broker — one-time provisioning: creates the VM before any lease or guest exists (the broker needs an existing .vmx)
   cat >"$vmx" <<EOF
 .encoding = "UTF-8"
 config.version = "8"

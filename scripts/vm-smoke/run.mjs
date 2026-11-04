@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
+import { BrokerError, Lease } from './broker.mjs';
 import { renderResult } from './judge.mjs';
 import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 import { MacGui } from './mac-gui.mjs';
@@ -116,22 +117,21 @@ async function main(argv) {
   const vm = `paddock-vmsmoke-${o.app}-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${process.pid}`;
   const slotRoot = join(tartHome, '.paddock-vm');
   const dev = (args) => hostRun('bash', ['./dev', ...args], { timeoutMs: 600_000, env: { ...process.env } , cwd: REPO });
-  let slot = null, runChild = null, cloned = false, cleaning = null;
+  let slot = null, lease = null, cloned = false, cleaning = null;
 
   // Runs once, whoever calls it (the normal end, an error, a signal): ends every host child, stops and deletes the clone, gives
   // the slot back, removes the scratch folders.
   const cleanup = () => {
     cleaning ??= (async () => {
       for (const c of children) c.kill('SIGTERM');
-      if (runChild) runChild.kill('SIGTERM');
-      if (cloned) {
-        if (o.keep) log(`--keep-vm: ${vm} is still there; delete it with: tart delete ${vm}`);
+      if (lease && cloned) {
+        // The clone is stopped and deleted through the broker (ADR 0054 §1.5), which refuses anything but a leased clone.
+        if (o.keep) log(`--keep-vm: ${vm} is still there (no lease now); stop and delete it with: ./dev vm lease ${vm} --for cleanup --adopt, then ./dev vm stop and delete`);
         else {
-          await tart(['stop', vm], { timeoutMs: 120_000 });
-          const d = await tart(['delete', vm], { timeoutMs: 120_000 });
-          if (d.code !== 0 && (await tart(['list', '--quiet'])).stdout.split('\n').includes(vm)) log(`WARNING: could not delete ${vm}; run: tart delete ${vm}`);
+          try { lease.stop({ graceSec: 30 }); lease.delete(); } catch (e) { log(`WARNING: could not stop and delete ${vm}: ${e.message}`); }
         }
       }
+      lease?.release();
       if (slot) await dev(['ci', 'slot', 'release', '--slot', slot.name, '--token', slot.token, '--root', slotRoot]);
       rmSync(owner, { recursive: true, force: true });
       rmSync(scratch, { recursive: true, force: true });
@@ -201,16 +201,15 @@ async function main(argv) {
       const pulled = await tart(['pull', base], { timeoutMs: 3_600_000 });
       if (pulled.code !== 0) throw new Error(`pulling the base image failed: ${pulled.stderr.trim().slice(0, 200)}`);
     }
-    cloned = true; // before the clone: a signal during `tart clone` still deletes whatever it left
-    const c = await tart(['clone', base, vm], { timeoutMs: 1_800_000 });
-    if (c.code !== 0) throw new Error(`tart clone failed: ${c.stderr.trim().slice(0, 300)}`);
+    lease = Lease.take(REPO, vm, `vm-smoke macos ${o.app} ${o.suite}`, { waitSec: Number(process.env.PADDOCK_VM_LEASE_WAIT ?? 0) });
+    log(`lease ${lease.id}`);
+    cloned = true; // before the clone: a signal during the clone still deletes whatever it left
+    lease.clone(base);
 
     log('booting headless');
     // The power suite also needs the VM's own VNC server (real pointer drags); it listens on 127.0.0.1 only and the URL stays in memory.
     const vnc = o.suite === 'power' || o.suite === 'helper';
-    runChild = spawn(tartBin, ['run', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
-    let vncUrl = null;
-    runChild.stdout.on('data', (d) => { vncUrl ??= /vnc:\/\/\S+/.exec(String(d))?.[0] ?? null; });
+    lease.start({ args: [...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`] });
     const exec = async (cmd, opts = {}) => {
       const r = await tart(['exec', vm, 'env', 'PADDOCK_DISPOSABLE_VM=1', 'bash', '-c', cmd], { timeoutMs: opts.timeoutMs ?? 120_000 });
       return r;
@@ -218,7 +217,6 @@ async function main(argv) {
     const t0 = Date.now();
     for (;;) {
       if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0) break;
-      if (runChild.exitCode !== null) throw new Error('the VM stopped while booting');
       if (Date.now() - t0 > 300_000) throw new Error('the VM was not ready after the 300 s guard');
       await new Promise((r) => setTimeout(r, 4000));
     }
@@ -257,14 +255,14 @@ async function main(argv) {
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-    const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
+    const md = renderResult({ ...lease.stamp({ snapshot: base, command: `node scripts/vm-smoke/run.mjs ${argv.join(' ')}` }), app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
     const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}${o.suite === 'power' ? '-power' : o.suite === 'helper' ? '-helper' : ''}.md`);
     writeFileSync(file, md);
     log(`result: ${file}`);
     console.log(file);
     return steps.some((s) => s.status === 'fail') ? 1 : 0;
   } catch (e) {
-    log(`error: ${e.message}`);
+    log(`${e instanceof BrokerError && e.couldNotRun ? 'could not run' : 'error'}: ${e.message}`);
     return 2;
   } finally {
     await cleanup();

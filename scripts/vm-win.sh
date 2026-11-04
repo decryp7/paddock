@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Drives the local Windows 11 Arm test VM (VMware Fusion, headless through vmrun; commands inside it over SSH).
+# Drives the local Windows 11 Arm test VM (VMware Fusion; commands inside it over SSH). Starting, stopping, reverting and snapshotting go through
+# the VM broker (`./dev vm`, ADR 0054 section 1.5): one lease per VM, a preflight, headless only, the only writer of the .vmx. This script calls
+# no VM tool itself (check C97).
 # Local only, never CI. Setup and the update test: docs/testing/windows-test-vm.md.
 #
 #   scripts/vm-win.sh start [--no-wait]       start headless and wait until SSH answers
@@ -12,21 +14,24 @@
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
 #
 # Only ever acts on the VM under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test); any other VM on
-# this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
-# from the login keychain (service paddock-win11-test-vm, account vmrun) and passed to vmrun as -vp.
+# this Mac is never started, stopped or changed. A guest that runs without a lease (another job) is refused, except by `stop`, which
+# takes it on your word. Only if the VM is encrypted (option A, virtual TPM) does the broker read its password from the login keychain
+# (service paddock-win11-test-vm, account vmrun).
 set -euo pipefail
 
 dir=${PADDOCK_WIN_VM_DIR:-/Volumes/d7sst7/vms/paddock-win11-test}
-fusion=${FUSION_APP:-/Applications/VMware Fusion.app}
-lib="$fusion/Contents/Library"
 name=paddock-win11-test
 vmx="$dir/vm/$name.vmwarevm/$name.vmx"
+export PADDOCK_WIN_VMX="$vmx" # the broker edits and starts this .vmx and no other
 mac=00:50:56:2a:d0:c7
 leases=${PADDOCK_VM_LEASES:-/var/db/vmware/vmnet-dhcpd-vmnet8.leases}
 max_load=${PADDOCK_VM_MAX_LOAD:-25}
 ssh_deadline=${PADDOCK_VM_SSH_DEADLINE:-300}
 install_deadline=${PADDOCK_VM_INSTALL_DEADLINE:-7200}
 baseline=clean-baseline
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+dev=${PADDOCK_DEV:-$repo/dev}
+lease_id=""
 
 die() { echo "vm-win: $*" >&2; exit 1; }
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
@@ -34,32 +39,19 @@ usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
   [ -f "$vmx" ] || die "no test VM at $vmx; run scripts/vm-win/prepare.sh first"
-  [ -x "$lib/vmrun" ] || die "vmrun not found in $lib (set FUSION_APP)"
 }
 
-# An encrypted VM (option A: TPM files encrypted) has encryption.* keys in its .vmx and needs the password from the login
-# keychain; an unencrypted VM (option B, the default set-up) never reads the keychain.
-encrypted() { grep -q '^encryption\.' "$vmx"; }
+# The broker, in text mode: `lease` prints the lease id; every other command prints a short result. Its own errors name the next step.
+broker() { "$dev" vm "$@"; }
 
-vmrun() {
-  local cmd=$1; shift
-  if encrypted; then
-    local pw
-    pw=$(security find-generic-password -s paddock-win11-test-vm -a vmrun -w 2>/dev/null) ||
-      die "the VM is encrypted but the keychain has no item paddock-win11-test-vm/vmrun (docs/testing/windows-test-vm.md, TPM)"
-    "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"
-  else
-    "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"
-  fi
+# Takes the lease on the VM for this script (released when the script ends). Extra arguments go to `dev vm lease` (for example --adopt).
+take_lease() {
+  local purpose=$1; shift
+  lease_id=$(broker lease "$name" --for "$purpose" --holder-pid $$ "$@") || exit 1
+  trap 'broker release "$lease_id" >/dev/null 2>&1 || true' EXIT
 }
 
-running() { "$lib/vmrun" -T fusion list | grep -Fxq "$vmx"; }
-
-load_ok() {
-  local load
-  load=$(sysctl -n vm.loadavg | awk '{print $2}')
-  awk -v l="$load" -v m="$max_load" 'BEGIN{exit !(l<m)}' || die "1-minute load $load is not under $max_load; try again later"
-}
+running() { [ "$(broker status "$name" 2>/dev/null)" = running ]; }
 
 # The guest's IPv4 address: the newest NAT DHCP lease for the VM's fixed MAC address (vmrun getGuestIPAddress needs
 # VMware Tools, which Arm guests may lack).
@@ -97,21 +89,29 @@ wait_off() { # deadline in seconds, label
   done
 }
 
-has_snapshot() { vmrun listSnapshots | tail -n +2 | grep -Fxq "$1"; }
+has_snapshot() { broker snapshots "$lease_id" | grep -Fxq "$1"; }
+
+# Powers the guest off the way a person would: Windows is asked to shut down, the broker waits and then powers off hard.
+shut_down() { # grace seconds
+  (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 || true
+  broker stop "$lease_id" --grace "$1"
+}
 
 cmd=${1:-}
 [ $# -gt 0 ] && shift
 case $cmd in
   start)
     guard
-    if running; then echo "already running"; else load_ok; vmrun start nogui; fi
+    take_lease "vm-win.sh start"
+    broker start "$lease_id" --max-load "$max_load"
     [ "${1:-}" = "--no-wait" ] || { wait_ssh; echo "ready: $(ip)"; }
+    echo "the VM keeps running without a lease; stop it with: scripts/vm-win.sh stop"
     ;;
   stop)
     guard
     running || { echo "already stopped"; exit 0; }
-    (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 || true
-    wait_off 120 "shutting down" || { echo "  no clean shutdown in 120 s; powering off"; vmrun stop hard; }
+    take_lease "vm-win.sh stop" --adopt
+    shut_down 120
     echo "stopped"
     ;;
   ssh)
@@ -123,14 +123,16 @@ case $cmd in
   snapshot)
     guard
     [ -n "${1:-}" ] || die "usage: vm-win.sh snapshot <name>"
-    vmrun snapshot "$1"
+    take_lease "vm-win.sh snapshot"
+    broker snapshot "$lease_id" --name "$1" >/dev/null
     echo "snapshot $1 taken"
     ;;
   revert)
     guard
     snap=${1:-$baseline}
+    take_lease "vm-win.sh revert"
     has_snapshot "$snap" || die "no snapshot named $snap"
-    vmrun revertToSnapshot "$snap"
+    broker revert "$lease_id" --to "$snap" >/dev/null
     echo "reverted to $snap"
     ;;
   status)
@@ -146,13 +148,12 @@ case $cmd in
     win_iso=$(sed -n 's/^sata0:0.fileName = "\(.*\)"$/\1/p' "$vmx")
     [ -z "$win_iso" ] || [ -f "$win_iso" ] || die "Windows ISO missing at $win_iso; run scripts/vm-win/prepare.sh (docs/testing/windows-test-vm.md)"
     [ -f "$dir/iso/paddock-setup.iso" ] || die "setup disc missing; run scripts/vm-win/prepare.sh"
+    take_lease "vm-win.sh install" # refused while the VM runs: stop it first
     has_snapshot "$baseline" && die "the VM already has $baseline; revert to it instead of reinstalling"
-    running && die "the VM is running; stop it first"
-    for dev in sata0:0 sata0:1; do "$lib/vmcli" "$vmx" ConfigParams SetEntry "$dev.present" TRUE >/dev/null; done
-    load_ok
+    for dev_key in sata0:0 sata0:1; do broker set "$lease_id" --key "$dev_key.present" --value TRUE >/dev/null; done
     echo "Installing Windows headless from the no-prompt ISO (no window, no key to press); the VM powers off when done."
     started=$SECONDS
-    vmrun start nogui
+    broker start "$lease_id" --max-load "$max_load"
     wait_off "$install_deadline" "installing Windows" || die "setup did not finish within ${install_deadline}s; see $(dirname "$vmx")/vmware.log"
     took=$(((SECONDS - started) / 60))
     # Setup takes far longer than this; an earlier stop is a crash or a boot failure, never a finished install.
@@ -161,19 +162,17 @@ case $cmd in
     ;;
   baseline)
     guard
-    running && die "the VM is running; baseline is taken from a powered-off VM"
+    take_lease "vm-win.sh baseline" # refused while the VM runs: baseline is taken from a powered-off VM
     has_snapshot "$baseline" && die "$baseline already exists"
-    load_ok
     # Check first, with the discs still attached: Windows Setup puts Windows Boot Manager first in the boot order, so
     # the disk boots; if setup had not finished, nothing is lost and install can be run again.
-    vmrun start nogui
+    broker start "$lease_id" --max-load "$max_load"
     wait_ssh
     ssh_to paddock-admin 'if (-not (Test-Path C:\paddock-setup\done.marker)) { exit 3 }' ||
       die "setup did not finish (no C:\\paddock-setup\\done.marker); read C:\\paddock-setup\\setup.log in the VM"
-    (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 || true
-    wait_off 180 "shutting down" || vmrun stop hard
-    for dev in sata0:0 sata0:1; do "$lib/vmcli" "$vmx" ConfigParams SetEntry "$dev.present" FALSE >/dev/null; done
-    vmrun snapshot "$baseline"
+    shut_down 180
+    for dev_key in sata0:0 sata0:1; do broker set "$lease_id" --key "$dev_key.present" --value FALSE >/dev/null; done
+    broker snapshot "$lease_id" --name "$baseline" >/dev/null
     echo "snapshot $baseline taken; the install discs are detached and the VM is off"
     ;;
   -h | --help | help) usage ;;

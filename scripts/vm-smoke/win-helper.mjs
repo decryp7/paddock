@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Vnc } from './win-vnc.mjs';
 
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
+const VMWIN = process.env.PADDOCK_VM_WIN ?? fileURLToPath(new URL('../vm-win.sh', import.meta.url));
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let runPassword = null; // the per-run random password of paddock-admin (reverted with the VM); never stored or printed
@@ -182,6 +182,7 @@ export async function repeatInstall(browser) {
 
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 import { scopingStep } from './win-scoping.mjs';
+import { fileURLToPath } from 'node:url';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
 
 

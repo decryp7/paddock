@@ -3,8 +3,9 @@
 // menu's items, `rclick`/`click` act), the idle state is read with `dyno idle`. Dyno's icons are promoted to the taskbar (IsPromoted) so they have
 // a place to click.
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
+const VMWIN = process.env.PADDOCK_VM_WIN ?? fileURLToPath(new URL('../vm-win.sh', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ssh = (cmd, ms = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encoding: 'utf8', timeout: ms }).stdout.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };

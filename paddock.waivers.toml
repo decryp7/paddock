@@ -93,6 +93,14 @@ path = "apps/spotter/crates/spotter-sources/tests/http_sources.rs"
 reason = "Spotter: an unreachable-source test on a freed port; to use HeldPort::reset"
 expires = "2026-12-31"
 
+# ADR 0054 section 1.5 (check C97): the macOS/Linux smoke driver still clones, runs, stops and deletes its Tart VM itself; it is not on V-3's list
+# (scripts/vm-smoke and vm-win.sh are). It moves onto `./dev vm` (its tools/test shims then fake `dev vm`) or is replaced by scripts/vm-smoke/run.mjs.
+[[waiver]]
+check = "C97"
+path = "tools/macos-vm-smoke.sh"
+reason = "ADR 0054 section 1.5: clones, runs, stops and deletes its Tart VM itself; migrate to ./dev vm or retire it for scripts/vm-smoke/run.mjs"
+expires = "2026-12-31"
+
 # ADR 0033 (rule 53): known bare-pid kills, parent-pid walks and file-wide allows of the kill ban in the apps and tools,
 # each a dated follow-up with its work package.
 [[waiver]]
