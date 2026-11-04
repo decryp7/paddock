@@ -17,9 +17,14 @@
 
 use crate::backend::{Backend, Choice, Side, Target, choose};
 use crate::error::ServiceError;
+use crate::os_log::OsLog;
+use crate::service_main::{Context, Hosting, Outcome, ServiceMainError};
 use crate::spec::ServiceSpec;
 use crate::system::RealSystem;
 use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 /// The user id (`gui/<uid>` is their launchd domain); 0 on Windows.
 pub fn current_uid() -> u32 {
@@ -296,24 +301,264 @@ mod win {
     }
 }
 
+/// What `service_main` hands the host: the body to run and whether it wants session-change events.
+pub(crate) struct Job {
+    pub(crate) run: Box<dyn FnOnce(Context) -> Outcome + Send>,
+    /// The body is the Windows service host: it moves a program with the user's session (read by the SCM entry point).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) sessions: bool,
+}
+
+pub(crate) type Slot = Arc<Mutex<Option<Job>>>;
+
+/// Runs the job in `slot` under `hosting` and returns the code it ended with.
+pub(crate) fn host(
+    spec: &ServiceSpec,
+    hosting: Hosting,
+    os_log: Arc<dyn OsLog>,
+    slot: Slot,
+) -> Result<u32, ServiceMainError> {
+    log::info!(service = spec.name(), hosting:? = hosting; "service: hosting starts");
+    match hosting {
+        #[cfg(windows)]
+        Hosting::ServiceManager => scm::dispatch(spec.name(), os_log, slot),
+        #[cfg(not(windows))]
+        Hosting::ServiceManager => Err(ServiceMainError::NotStartedByManager(
+            "The service command is for Windows; use `serve`.".to_string(),
+        )),
+        Hosting::Foreground => foreground(os_log, slot),
+    }
+}
+
+/// Runs the job on this thread; on Unix SIGTERM and SIGINT mean stop (waited for on a thread of their own, so the stop is an
+/// event, not a poll).
+fn foreground(os_log: Arc<dyn OsLog>, slot: Slot) -> Result<u32, ServiceMainError> {
+    let Some(job) = crate::service_main::take_job(&slot) else {
+        return Err(ServiceMainError::NotStartedByManager(
+            "the service body already ran in this process".to_string(),
+        ));
+    };
+    let (stop, tx, events) = crate::service_main::stop_pair();
+    #[cfg(unix)]
+    if let Err(why) = signals::stop_on_signals(stop.clone(), tx) {
+        os_log.write(
+            log::Level::Warn,
+            &format!("SIGTERM and SIGINT will not stop the service gracefully: {why}"),
+        );
+    }
+    #[cfg(not(unix))]
+    drop(tx);
+    let context = Context {
+        stop,
+        events,
+        os_log,
+    };
+    Ok((job.run)(context).code)
+}
+
+#[cfg(unix)]
+mod signals {
+    use crate::scm_host::Control;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc::Sender;
+
+    /// Blocks SIGTERM and SIGINT in the calling thread (and so in every thread started after it) and starts the thread that
+    /// waits for them with `sigwait`.
+    pub(super) fn stop_on_signals(
+        stop: Arc<AtomicBool>,
+        tx: Sender<Control>,
+    ) -> Result<(), String> {
+        // SAFETY: `set` is initialised by sigemptyset before use; the calls only read it.
+        let set = unsafe {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            if libc::sigemptyset(&mut set) != 0
+                || libc::sigaddset(&mut set, libc::SIGTERM) != 0
+                || libc::sigaddset(&mut set, libc::SIGINT) != 0
+            {
+                return Err("the signal set could not be built".to_string());
+            }
+            let rc = libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+            if rc != 0 {
+                return Err(format!("pthread_sigmask failed with {rc}"));
+            }
+            set
+        };
+        std::thread::Builder::new()
+            .name("signal-wait".into())
+            .spawn(move || {
+                loop {
+                    let mut signal = 0;
+                    // SAFETY: `set` and `signal` are valid for the call.
+                    match unsafe { libc::sigwait(&set, &mut signal) } {
+                        0 => {
+                            log::info!(signal = signal; "service: stop requested by a signal");
+                            crate::service_main::signal_stop(&stop, &tx);
+                            return;
+                        }
+                        libc::EINTR => {}
+                        rc => {
+                            log::error!(rc = rc; "service: sigwait failed; signals no longer stop the service");
+                            return;
+                        }
+                    }
+                }
+            })
+            .map(drop)
+            .map_err(|e| format!("the signal thread could not start: {e}"))
+    }
+}
+
+/// The host of a program that runs in the logged-on user's session (Pitwall, Pitcrew): the SCM runs `--service`, the body
+/// supervises the program ([`crate::scm_host::supervise`]). Returns the exit code the service ended with.
+///
+/// # Errors
+/// [`ServiceMainError`] when this process was not started by the SCM.
 #[cfg(windows)]
-pub use scm::run_as_service;
+pub fn host_program(spec: &ServiceSpec, exe: PathBuf) -> Result<u32, ServiceMainError> {
+    scm::host_program(spec, exe)
+}
+
+/// The Windows Application event log under the service's own source (registered by the install plan,
+/// [`crate::render::event_source_commands`]).
+#[cfg(windows)]
+pub use eventlog::EventLog;
+
+#[cfg(windows)]
+mod eventlog {
+    use crate::os_log::{OsLog, cut};
+    use log::Level;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::EventLog::{
+        DeregisterEventSource, EVENTLOG_ERROR_TYPE, EVENTLOG_INFORMATION_TYPE,
+        EVENTLOG_WARNING_TYPE, RegisterEventSourceW, ReportEventW,
+    };
+    use windows::core::PCWSTR;
+
+    /// The longest string `ReportEventW` takes is 31 839 characters.
+    const MAX_CHARS: usize = 30_000;
+    /// The generic message table of `EventCreate.exe` prints ids 1 to 1000 with their one string.
+    const EVENT_ID: u32 = 1;
+
+    /// An open event source.
+    pub struct EventLog(HANDLE);
+
+    // SAFETY: an event log handle may be used and closed from any thread.
+    unsafe impl Send for EventLog {}
+    // SAFETY: ReportEventW serialises on the handle.
+    unsafe impl Sync for EventLog {}
+
+    impl EventLog {
+        /// Opens the source `source` of the Application log on this computer.
+        ///
+        /// # Errors
+        /// The Win32 error in words.
+        pub fn open(source: &str) -> Result<EventLog, String> {
+            let name: Vec<u16> = source.encode_utf16().chain(std::iter::once(0)).collect();
+            // SAFETY: `name` is NUL-terminated and outlives the call.
+            unsafe { RegisterEventSourceW(PCWSTR::null(), PCWSTR(name.as_ptr())) }
+                .map(EventLog)
+                .map_err(|e| format!("RegisterEventSourceW failed: {}", e.message()))
+        }
+    }
+
+    impl OsLog for EventLog {
+        fn write(&self, level: Level, text: &str) {
+            let kind = match level {
+                Level::Error => EVENTLOG_ERROR_TYPE,
+                Level::Warn => EVENTLOG_WARNING_TYPE,
+                _ => EVENTLOG_INFORMATION_TYPE,
+            };
+            let text: Vec<u16> = cut(text, MAX_CHARS)
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let strings = [PCWSTR(text.as_ptr())];
+            // SAFETY: the handle is open; `strings` holds one NUL-terminated string that outlives the call.
+            let reported =
+                unsafe { ReportEventW(self.0, kind, 0, EVENT_ID, None, 0, Some(&strings), None) };
+            if let Err(e) = reported {
+                // The event log is the log of last resort: say it on standard error and in the app log.
+                log::warn!(error:% = e; "the event log refused a line");
+                eprintln!("event log refused a line: {e}");
+            }
+        }
+    }
+
+    impl Drop for EventLog {
+        fn drop(&mut self) {
+            // SAFETY: the handle was opened by `open` and is closed once.
+            paddock_proc::cleanup::logged("closing the event source", unsafe {
+                DeregisterEventSource(self.0)
+            });
+        }
+    }
+}
+
+/// The macOS unified log through `syslog(3)`: the lines carry the process and the service's identifier.
+#[cfg(target_os = "macos")]
+pub use syslog::SysLog;
+
+#[cfg(target_os = "macos")]
+mod syslog {
+    use crate::os_log::{OsLog, syslog_priority};
+    use log::Level;
+    use std::ffi::CString;
+    use std::sync::OnceLock;
+
+    /// `openlog` keeps the pointer to its identifier, so it lives as long as the process.
+    static IDENT: OnceLock<CString> = OnceLock::new();
+
+    /// An open syslog connection.
+    pub struct SysLog;
+
+    impl SysLog {
+        /// Opens syslog under `ident` (the service's launchd label).
+        ///
+        /// # Errors
+        /// When the identifier holds a NUL.
+        pub fn open(ident: &str) -> Result<SysLog, String> {
+            let ident =
+                CString::new(ident).map_err(|e| format!("the identifier is not valid: {e}"))?;
+            let ident = IDENT.get_or_init(|| ident);
+            // SAFETY: `ident` is a static NUL-terminated string.
+            unsafe { libc::openlog(ident.as_ptr(), libc::LOG_PID, libc::LOG_DAEMON) };
+            Ok(SysLog)
+        }
+    }
+
+    impl OsLog for SysLog {
+        fn write(&self, level: Level, text: &str) {
+            let priority = libc::c_int::from(syslog_priority(level));
+            for line in text.lines().filter(|l| !l.trim().is_empty()) {
+                let Ok(line) = CString::new(line.replace('\0', " ")) else {
+                    continue;
+                };
+                // SAFETY: "%s" with one NUL-terminated string argument.
+                unsafe { libc::syslog(priority, c"%s".as_ptr(), line.as_ptr()) };
+            }
+        }
+    }
+}
 
 /// The Windows service host's Win32 side: the SCM dispatcher, the sessions and starting the program in one
 /// ([`crate::scm_host`] has the logic and its tests). Adapted from Pitwall's `service/windows.rs`.
 #[cfg(windows)]
 mod scm {
+    use super::Slot;
+    use crate::os_log::OsLog;
     use crate::render::windows_quote;
     use crate::scm_host::{
         Control, HostEvent, HostTimings, HostedChild, Sessions, Target, UserSession,
         env_block_with, pick_user_session, supervise,
     };
+    use crate::service_main::{Context, HOST_EXIT_CODE, Hosting, ServiceExit, ServiceMainError};
     use crate::spec::ServiceSpec;
     use crate::verbs::Verb;
     use std::ffi::{OsString, c_void};
     use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
     use std::sync::mpsc;
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
     use std::time::{Duration, Instant};
     use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
     use windows::Win32::Security::{
@@ -352,47 +597,114 @@ mod scm {
     /// How long the program's `stop` verb may take.
     const STOP_VERB_TIMEOUT: Duration = Duration::from_secs(10);
 
-    struct Config {
-        spec: ServiceSpec,
-        exe: PathBuf,
+    /// The job `service_main` handed over, and how the SCM entry point reaches it (the SCM calls a plain function).
+    struct Dispatch {
+        os_log: Arc<dyn OsLog>,
+        slot: Slot,
+        name: String,
+        code: Mutex<Option<u32>>,
     }
 
-    static CONFIG: OnceLock<Config> = OnceLock::new();
+    static DISPATCH: OnceLock<Dispatch> = OnceLock::new();
 
-    define_windows_service!(ffi_service_main, service_main);
+    define_windows_service!(ffi_service_main, scm_service_main);
 
-    /// Hands this process to the Service Control Manager (the `--service` verb) and returns when the service stopped.
-    /// The program `exe` (normally this executable) is started in the user's session with the spec's arguments and
-    /// supervised variable. The app's log (`paddock-log`) is set up before; the host writes its events there.
-    pub fn run_as_service(spec: &ServiceSpec, exe: PathBuf) -> Result<(), String> {
-        let name = spec.name().to_string();
-        if CONFIG
-            .set(Config {
-                spec: spec.clone(),
-                exe,
-            })
-            .is_err()
-        {
-            log::warn!(
-                "run_as_service was called twice in this process; the first configuration stays"
-            );
+    /// Hands this process to the Service Control Manager and returns when the service stopped, with the exit code it
+    /// reported.
+    pub(super) fn dispatch(
+        name: &str,
+        os_log: Arc<dyn OsLog>,
+        slot: Slot,
+    ) -> Result<u32, ServiceMainError> {
+        let dispatch = Dispatch {
+            os_log,
+            slot,
+            name: name.to_string(),
+            code: Mutex::new(None),
+        };
+        if DISPATCH.set(dispatch).is_err() {
+            return Err(ServiceMainError::NotStartedByManager(
+                "the service was already dispatched in this process".to_string(),
+            ));
         }
-        service_dispatcher::start(name, ffi_service_main)
-            .map_err(|e| format!("Starting as a Windows service failed: {e}"))
+        let began = Instant::now();
+        service_dispatcher::start(name, ffi_service_main).map_err(|e| {
+            ServiceMainError::NotStartedByManager(format!(
+                "This program must be started by Windows as a service: {e}"
+            ))
+        })?;
+        let code = DISPATCH
+            .get()
+            .and_then(|d| *d.code.lock().unwrap_or_else(PoisonError::into_inner))
+            .unwrap_or(HOST_EXIT_CODE);
+        log::info!(code = code, ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "service: dispatcher returned");
+        Ok(code)
     }
 
-    fn status(state: ServiceState) -> ServiceStatus {
+    /// The service supervising a program in the user's session (see [`super::host_program`]).
+    pub(super) fn host_program(spec: &ServiceSpec, exe: PathBuf) -> Result<u32, ServiceMainError> {
+        let spec = spec.clone();
+        crate::service_main::service_main_with(
+            &spec.clone(),
+            Hosting::ServiceManager,
+            true,
+            move |context| {
+                let Context { events, os_log, .. } = context;
+                let mut sessions = WtsSessions {
+                    spec: spec.clone(),
+                    exe,
+                    rx: events,
+                };
+                supervise(
+                    &mut sessions,
+                    &HostTimings::default(),
+                    &mut |e: HostEvent| {
+                        log::info!(event:? = e; "service host");
+                        os_log.write(log::Level::Info, &format!("service host: {e:?}"));
+                    },
+                );
+                Ok::<(), HostError>(())
+            },
+        )
+    }
+
+    /// The host cannot fail once it runs; the type gives it the exit-code table `service_main` wants.
+    #[derive(Debug)]
+    struct HostError;
+
+    impl std::fmt::Display for HostError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("the service host stopped")
+        }
+    }
+
+    impl std::error::Error for HostError {}
+
+    impl ServiceExit for HostError {
+        fn exit_code(&self) -> u32 {
+            2
+        }
+    }
+
+    fn status(state: ServiceState, accept_sessions: bool, exit_code: u32) -> ServiceStatus {
         ServiceStatus {
             service_type: ServiceType::OWN_PROCESS,
             current_state: state,
             controls_accepted: if state == ServiceState::Running {
-                ServiceControlAccept::STOP
-                    | ServiceControlAccept::SHUTDOWN
-                    | ServiceControlAccept::SESSION_CHANGE
+                let base = ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN;
+                if accept_sessions {
+                    base | ServiceControlAccept::SESSION_CHANGE
+                } else {
+                    base
+                }
             } else {
                 ServiceControlAccept::empty()
             },
-            exit_code: ServiceExitCode::Win32(0),
+            exit_code: if exit_code == 0 {
+                ServiceExitCode::Win32(0)
+            } else {
+                ServiceExitCode::ServiceSpecific(exit_code)
+            },
             checkpoint: 0,
             wait_hint: Duration::from_secs(if state == ServiceState::StopPending {
                 30
@@ -403,25 +715,49 @@ mod scm {
         }
     }
 
-    /// Tells the SCM the new state; a refusal is logged (the SCM then times the service out or keeps the old state).
-    fn report_status(handle: &ServiceStatusHandle, state: ServiceState) {
-        if let Err(e) = handle.set_service_status(status(state)) {
-            log::error!(state:? = state, error:% = e; "the service status could not be reported to the Service Control Manager");
+    /// Tells the SCM the new state. A refusal goes to the OS log and the app log (the SCM then times the service out or keeps
+    /// the old state); the result says whether it was accepted.
+    fn report_status(
+        handle: &ServiceStatusHandle,
+        os_log: &dyn OsLog,
+        state: ServiceState,
+        accept_sessions: bool,
+        exit_code: u32,
+    ) -> bool {
+        match handle.set_service_status(status(state, accept_sessions, exit_code)) {
+            Ok(()) => true,
+            Err(e) => {
+                log::error!(state:? = state, error:% = e; "the service status could not be reported to the Service Control Manager");
+                os_log.write(
+                    log::Level::Error,
+                    &format!("The Service Control Manager refused the state {state:?}: {e}"),
+                );
+                false
+            }
         }
     }
 
-    fn service_main(_arguments: Vec<OsString>) {
-        let Some(config) = CONFIG.get() else { return };
-        let (tx, rx) = mpsc::channel::<Control>();
+    fn scm_service_main(_arguments: Vec<OsString>) {
+        let Some(dispatch) = DISPATCH.get() else {
+            return;
+        };
+        let os_log = dispatch.os_log.clone();
+        let Some(job) = crate::service_main::take_job(&dispatch.slot) else {
+            os_log.write(
+                log::Level::Error,
+                "The service main was called twice in this process.",
+            );
+            return;
+        };
+        let began = Instant::now();
+        let (stop, tx, events) = crate::service_main::stop_pair();
+        let (flag, sessions) = (stop.clone(), job.sessions);
         let handler = move |control| match control {
             ServiceControl::Stop | ServiceControl::Shutdown => {
-                paddock_proc::cleanup::logged(
-                    "forwarding a stop after the host loop ended",
-                    tx.send(Control::Stop),
-                );
+                crate::service_main::signal_stop(&flag, &tx);
                 ServiceControlHandlerResult::NoError
             }
-            ServiceControl::SessionChange(_) => {
+            ServiceControl::SessionChange(_) if sessions => {
                 paddock_proc::cleanup::logged(
                     "forwarding a session change after the host loop ended",
                     tx.send(Control::SessionChange),
@@ -431,30 +767,48 @@ mod scm {
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
             _ => ServiceControlHandlerResult::NotImplemented,
         };
-        let handle = match service_control_handler::register(config.spec.name(), handler) {
+        let handle = match service_control_handler::register(&dispatch.name, handler) {
             Ok(h) => h,
             Err(e) => {
                 log::error!(error:% = e; "the service control handler could not be registered");
+                os_log.write(
+                    log::Level::Error,
+                    &format!("The service control handler could not be registered: {e}"),
+                );
+                *dispatch.code.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some(HOST_EXIT_CODE);
                 return;
             }
         };
-        report_status(&handle, ServiceState::Running);
-        log::info!("service started");
-        let mut sessions = WtsSessions { config, rx };
-        supervise(
-            &mut sessions,
-            &HostTimings::default(),
-            &mut |e: HostEvent| {
-                log::info!(event:? = e; "service host");
-            },
+        let registered_ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let running = report_status(&handle, os_log.as_ref(), ServiceState::Running, sessions, 0);
+        log::info!(registered_ms = registered_ms, running_reported = running; "service started");
+        let outcome = (job.run)(Context {
+            stop,
+            events,
+            os_log: os_log.clone(),
+        });
+        report_status(
+            &handle,
+            os_log.as_ref(),
+            ServiceState::StopPending,
+            sessions,
+            outcome.code,
         );
-        report_status(&handle, ServiceState::StopPending);
-        report_status(&handle, ServiceState::Stopped);
-        log::info!("service stopped");
+        report_status(
+            &handle,
+            os_log.as_ref(),
+            ServiceState::Stopped,
+            sessions,
+            outcome.code,
+        );
+        *dispatch.code.lock().unwrap_or_else(PoisonError::into_inner) = Some(outcome.code);
+        log::info!(code = outcome.code; "service stopped");
     }
 
     struct WtsSessions {
-        config: &'static Config,
+        spec: ServiceSpec,
+        exe: PathBuf,
         rx: mpsc::Receiver<Control>,
     }
 
@@ -464,22 +818,20 @@ mod scm {
         }
 
         fn start(&mut self, target: Target) -> Result<Box<dyn HostedChild>, String> {
-            let args = self.config.spec.args().to_vec();
-            let env = self.config.spec.supervised_env();
+            let args = self.spec.args().to_vec();
+            let env = self.spec.supervised_env();
             match target {
                 Target::Nobody => Err("nobody is logged on".into()),
-                Target::NotSystem => start_plain(&self.config.exe, &args, env)
-                    .map(|c| Box::new(Plain(c, self.config.exe.clone())) as Box<dyn HostedChild>),
-                Target::Session(id) => {
-                    start_in_session(id, &self.config.exe, &args, env).map(|p| {
-                        Box::new(InSession {
-                            process: p,
-                            session: id,
-                            exe: self.config.exe.clone(),
-                            env: env.map(str::to_string),
-                        }) as Box<dyn HostedChild>
-                    })
-                }
+                Target::NotSystem => start_plain(&self.exe, &args, env)
+                    .map(|c| Box::new(Plain(c, self.exe.clone())) as Box<dyn HostedChild>),
+                Target::Session(id) => start_in_session(id, &self.exe, &args, env).map(|p| {
+                    Box::new(InSession {
+                        process: p,
+                        session: id,
+                        exe: self.exe.clone(),
+                        env: env.map(str::to_string),
+                    }) as Box<dyn HostedChild>
+                }),
             }
         }
 

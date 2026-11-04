@@ -656,3 +656,42 @@ fn systemd_origins_follow_the_folder() {
         UnitOrigin::Admin
     );
 }
+
+#[test]
+fn the_service_registers_its_event_source_before_it_is_created_and_removes_it_with_the_service() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    b.register().unwrap();
+    let commands = sys.commands();
+    let key = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\Dyno";
+    let source = commands
+        .iter()
+        .position(|c| c.starts_with(&format!("reg add {key} /v EventMessageFile")));
+    let create = commands.iter().position(|c| c.starts_with("sc create"));
+    assert!(source.is_some() && source < create, "{commands:?}");
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.starts_with(&format!("reg add {key} /v TypesSupported")))
+    );
+    sys.clear_calls();
+    sys.answer("sc query", Output::code(1060));
+    b.unregister().unwrap();
+    assert!(
+        sys.commands().contains(&format!("reg delete {key} /f")),
+        "{:?}",
+        sys.commands()
+    );
+}
+
+#[test]
+fn an_event_source_that_cannot_be_registered_does_not_stop_the_service_from_being_registered() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("reg add", Output::code(5));
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    assert_eq!(b.register().unwrap().job, Job::Running);
+}

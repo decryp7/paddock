@@ -1252,12 +1252,17 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         .kind(Kind::SystemService)
         .build()
         .unwrap();
+    const EVENT_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\Pitwall";
     let exe = r"C:\Program Files\Pitwall\pitwall-server.exe";
     let mut b = WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone()));
     b.register().unwrap();
     assert_eq!(
         sys.commands(),
         [
+            format!(
+                "reg add {EVENT_KEY} /v EventMessageFile /t REG_EXPAND_SZ /d %SystemRoot%\\System32\\EventCreate.exe /f"
+            ),
+            format!("reg add {EVENT_KEY} /v TypesSupported /t REG_DWORD /d 7 /f"),
             format!(
                 "sc create Pitwall binPath= \"{exe}\" --service start= delayed-auto DisplayName= Pitwall local LLM server"
             ),

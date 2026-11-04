@@ -21,7 +21,10 @@ use crate::parse::{
 };
 use crate::paths::{REG, SC, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};
 use crate::port::{Elevator, RegisterError, System};
-use crate::render::{sc_commands, scm_config, windows_command_line};
+use crate::render::{
+    event_source_commands, event_source_remove_command, sc_commands, scm_config,
+    windows_command_line,
+};
 use crate::spec::ServiceSpec;
 use crate::verbs::Verb;
 use std::path::{Path, PathBuf};
@@ -240,6 +243,41 @@ impl WindowsService {
         }
     }
 
+    /// Registers the Event Log source the service writes its start-up failures to (`os_log::EventLog`). A failure is logged
+    /// and does not stop the service from being registered: the entries then show with Windows' "description cannot be
+    /// found" wrapper around the same text.
+    fn register_event_source(&mut self) {
+        for call in event_source_commands(&self.spec) {
+            let args: Vec<&str> = call.iter().map(String::as_str).collect();
+            match self.sys.run(REG, &args) {
+                Ok(o) if o.success() => {
+                    log::info!(service = self.spec.name(), value = args.get(3).copied().unwrap_or(""); "windows: Event Log source registered");
+                }
+                Ok(o) => {
+                    log::warn!(service = self.spec.name(), why = o.reason().as_str(); "windows: the Event Log source could not be registered");
+                }
+                Err(e) => {
+                    log::warn!(service = self.spec.name(), why = e.to_string().as_str(); "windows: the Event Log source could not be registered");
+                }
+            }
+        }
+    }
+
+    /// Removes the Event Log source (best effort: it is a courtesy to the person reading the log).
+    fn remove_event_source(&mut self) {
+        let call = event_source_remove_command(&self.spec);
+        let args: Vec<&str> = call.iter().map(String::as_str).collect();
+        match self.sys.run(REG, &args) {
+            Ok(o) if o.success() || o.code == Some(1) => {}
+            Ok(o) => {
+                log::warn!(service = self.spec.name(), why = o.reason().as_str(); "windows: the Event Log source could not be removed");
+            }
+            Err(e) => {
+                log::warn!(service = self.spec.name(), why = e.to_string().as_str(); "windows: the Event Log source could not be removed");
+            }
+        }
+    }
+
     fn state(&mut self) -> Result<Option<u32>, String> {
         self.status().map(|s| s.map(|(state, _)| state))
     }
@@ -355,6 +393,7 @@ impl Backend for WindowsService {
 
     fn register(&mut self) -> Result<Inspection, RegisterError> {
         let config = scm_config(&self.spec, &self.target.exe_text());
+        self.register_event_source();
         for call in sc_commands(&config) {
             let args: Vec<&str> = call.iter().map(String::as_str).collect();
             match self.sys.run(SC, &args) {
@@ -396,6 +435,7 @@ impl Backend for WindowsService {
                     || o.code == Some(sc_exit::DOES_NOT_EXIST)
                     || o.code == Some(sc_exit::MARKED_FOR_DELETE) =>
             {
+                self.remove_event_source();
                 Ok(self.inspect())
             }
             Ok(o) => Err(UnregisterError::Failed(

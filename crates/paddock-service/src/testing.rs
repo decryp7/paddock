@@ -689,6 +689,29 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
     }
 }
 
+/// An [`OsLog`](crate::os_log::OsLog) that keeps every line (tests of a service's start-up and failures).
+#[derive(Clone, Default)]
+pub struct RecordingOsLog(Arc<Mutex<Vec<(log::Level, String)>>>);
+
+impl RecordingOsLog {
+    /// Every line written so far, with its level.
+    pub fn lines(&self) -> Vec<(log::Level, String)> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl crate::os_log::OsLog for RecordingOsLog {
+    fn write(&self, level: log::Level, text: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((level, text.to_string()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

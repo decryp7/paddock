@@ -1588,7 +1588,7 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
   found), the program started there with the user's token and environment plus the supervised variable, restarted after
   a pause, moved when the session changes, stopped gracefully (its `stop` verb, a grace period, then ended).
-  `native::run_as_service(spec, exe)` is the SCM dispatcher and the Win32 side. Pitcrew's pipe SDDL is the app ↔ service
+  `native::host_program(spec, exe)` runs it under `service_main` (the one entry point: SCM dispatcher, OS log from the first line, exit codes), with the Win32 side in `native`. Pitcrew's pipe SDDL is the app ↔ service
   link and stays with `paddock-ipc` (X13).
 - **In the app** (`tauri` feature, `control::ServiceControl`): `service_status`, `service_repair`, `service_install`,
   `open_login_items` and the `paddock://service` event (`ServiceUpdate { status, error }`); requests run on their own
