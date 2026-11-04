@@ -3,7 +3,7 @@
 # and Quit, each judged by the OS (Win32_Process, powercfg), with Dyno's own `dyno` command as the actuator. It writes one JSON file of steps
 # ({title,status,summary,checks:[{ok,detail}],evidence:[]}) that the host renders with the same result format as the macOS check.
 # Every wait polls a condition with a bounded deadline. Usage: win-suite.ps1 -Installer C:\paddock-test\vmcheck\Dyno_x64-setup.exe -Out C:\paddock-test\vmcheck\out
-param([string]$Installer, [string]$Out = 'C:\paddock-test\vmcheck\out', [int]$CdpPort = 9222, [switch]$KeepRunning)
+param([string]$Installer, [string]$Out = 'C:\paddock-test\vmcheck\out', [int]$CdpPort = 9222, [switch]$KeepRunning, [string]$Only = '')
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Out | Out-Null
 $steps = New-Object System.Collections.ArrayList
@@ -36,11 +36,9 @@ function Start-App([switch]$Cdp) {
 $script:ar = 0
 function Admin-Run([string]$Cmd) {
   $script:ar++; $n = $script:ar
-  Set-Content "$Out
-eq-$n.txt" $Cmd
-  $ans = Wait-Until { if (Test-Path "$Out
-esp-$n.txt") { Get-Content "$Out
-esp-$n.txt" -Raw } } 90 1000
+  Set-Content (Join-Path $Out "req-$n.txt") $Cmd
+  $resp = Join-Path $Out "resp-$n.txt"
+  $ans = Wait-Until { if (Test-Path $resp) { Get-Content $resp -Raw } } 90 1000
   if ($null -eq $ans) { return "(no answer from the host for: $Cmd)" }
   return $ans
 }
@@ -89,6 +87,8 @@ Start-Process (Join-Path $bin 'dyno-app.exe'); Start-Sleep -Seconds 8
 $after = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
 Check $s (($before -join ',') -eq ($after -join ',')) "processes before [$($before -join ',')] and after [$($after -join ',')]"
 Finish $s 'single instance: no new process'
+
+if ($Only -eq 'start') { 'done' | Set-Content "$Out\done.txt"; exit 0 }   # exploration: install and start only, the app stays up with the DevTools port
 
 # 4. Keep awake for 1 hour: powercfg /requests lists Dyno, then not.
 $s = New-Step 'Keep awake: held by the OS, then released'
