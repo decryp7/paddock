@@ -56,7 +56,8 @@ The user's decision D1 (helper first, then this computer, for every reading) is 
 
 ## 2026-11-04: Windows installs per machine (reverses D1 = L for Windows only; user)
 
-Revision 2 (2026-11-04) answers the independent review of `86e1ac62a` together with family ADR 0053's revision 2.
+Revision 2 (2026-11-04) answers the independent review of `86e1ac62a` together with family ADR 0053's revision 2; revision 3
+answers the re-review of `ca3b6365e` with ADR 0053's revision 3 (staging and `setup.log` in `$INSTDIR\updates\`, H1's order).
 
 The user decided on 2026-11-04 that Dyno 1.1.0 on Windows installs **per machine**, to `C:\Program Files\Dyno`, for all users,
 with start at login always written per user (HKCU), even when Dyno runs elevated, and then chose the full design of ADR 0053
@@ -94,7 +95,9 @@ copy (section 1). What changes is where Windows puts the app, and with it:
   turning the helper on; (2) run from the newly installed `$INSTDIR\dyno-helper.exe refresh` (after the template's `File`
   steps, so from the Program Files copy), keeping the recorded owner, the policy file and the data folder; (3) a failure never
   fails the install: it is logged in `setup.log` and the helper's audit log, and Settings shows `Outdated` with "Update the
-  helper" (one prompt, as before). This amends D5 for Windows: the installer's own prompt covers the update.
+  helper" (one prompt, as before). This amends D5 for Windows: the installer's own prompt covers the update. `POSTINSTALL` runs
+  inside the template's `Section Install`, before `.onInstSuccess` starts Dyno again with `RunAsUser`, so the restarted app and
+  agent find the refreshed helper already serving.
 - **Start at login.** On Windows `AppAutostart` (`tauri-plugin-autostart`) is replaced by `paddock_service::login::UserRunEntry`
   with the value name `Dyno` (`WINDOWS_APP_VALUE`, the name the 1.0 copy and the template's uninstaller use) and `--hidden`. The
   first-run default of `feat/dyno-launch-at-login-default` (uncommitted in its worktree on 2026-11-04) lands first and runs
@@ -134,7 +137,7 @@ Dyno's VM cases, added to the family suite (ADR 0053 §9):
 | --- | --- | --- |
 | D-1 | Helper on in a per-user development build, uninstalled by hand, then 1.1.0 per machine | the uninstall's one prompt removes the service, protected copy and data folder; after install, Turn on gives `Ready`; the config records `C:\Program Files\Dyno` |
 | D-2 | Helper on across a per-machine update from the app (same `HELPER_API`, then a changed one) | one UAC prompt in both; the first leaves the helper as it was, the second refreshes it in `POSTINSTALL`; `Ready` after; the owner is unchanged; the orphan watch never fires |
-| D-3 | D-2's changed-API update with the refresh made to fail (the service stopped and its copy locked by the test) | the install succeeds; Settings shows `Outdated` with "Update the helper"; `setup.log` has the step |
+| D-3 | D-2's changed-API update with the refresh made to fail (the service stopped and its copy locked by the test) | the install succeeds; Settings shows `Outdated` with "Update the helper"; `$INSTDIR\updates\setup.log` has the step |
 | D-4 | Uninstall with the helper on and two users signed in | one prompt; the service, protected copy and data are gone; both users' agents and apps ended |
 | D-5 | Manual upgrade by running the next installer by hand with the helper on (PM-12) | the helper, its owner and its data stay; `Ready` after |
 | D-6 | Reboot with the helper on, two users with start at login | the service starts at boot; each user's tray and agent at sign-in show `Ready` with their own scope (owner in full, the other per U3) |
@@ -148,7 +151,7 @@ Work packages (Dyno's part, ADR 0053's row D; the shared S-packages are the fami
 | PM-c | Helper: the `refresh` verb under H1's conditions, the uninstall without `runas` and only when not updating, the Windows `app_location` test | `crates/dyno-helper/src/{cli.rs,setup.rs,orphan.rs}` | – | 1–1.5 |
 | PM-d | Release notes, the user guide's Windows install section, `docs/testing-manual.md`, the Settings text for R1 on Windows | `CHANGELOG.md`, `docs/user-guide.md`, `docs/testing-manual.md` | PM-a | 0.5–1 |
 | PM-f | Rule 54: dispatch `dyno-release.yml` with gates on and bundles built from the branch before it lands; the ADR 0039 gate on the installer | – | PM-a to PM-c | 0.5 |
-| PM-e | VM runs: PM-1 to PM-17 and D-1 to D-6, a first pass and a re-run after fixes | – | S9, PM-f | 2–3 |
+| PM-e | VM runs: PM-1 to PM-19 (with PM-5b and PM-12b) and D-1 to D-6, a first pass and a re-run after fixes | – | S9, PM-f | 2–3 |
 
 **Dyno: 7 to 10 agent-days.**
 

@@ -1,6 +1,6 @@
 # 53. Per-machine Windows installs: one shared mechanism, Dyno first
 
-- Status: Proposed (2026-11-04), revision 2. The user decided the direction on 2026-11-04: Dyno 1.1.0 on Windows installs per
+- Status: Proposed (2026-11-04), revision 3. The user decided the direction on 2026-11-04: Dyno 1.1.0 on Windows installs per
   machine, to `C:\Program Files\Dyno`, for all users; start at login is always written per user (HKCU), even when the app runs
   elevated; the other apps follow on the same mechanism (rule 42 / ER-22); **no migration**: a per-user copy is uninstalled by
   hand, and the per-machine installer refuses a fresh install while one is there ("no backward compatibility before v1").
@@ -13,6 +13,15 @@
   `TokenElevationTypeFull` (§6.1), a leftover per-user copy at the app's start (§6.2), HKLM `Run` values (§6.3), the missing
   work packages and a new estimate, and the hive scan (§5). The user's decisions on the open questions of revision 1 are under
   "Decisions (the user, 2026-11-04)"; the full design ships, not a slice.
+- Revision 3 (2026-11-04): answers the re-review of `ca3b6365e`. P1: nothing elevated is staged or logged under
+  `%ProgramData%`, which a standard user can pre-create; the update is staged and `setup.log` written in `$INSTDIR\updates\`
+  (§2.2's chain), and the verified copy stays open with read-only sharing until `CreateProcessW` returns (§2.5, §4.2). P2: the
+  `QUERY_LIMITED` open without `SeDebugPrivilege` measured in S0 (§3); the reinstall marker compares folders canonically and
+  without case, the HKLM uninstall key text corrected, a cancel after the in-place uninstall (§2.4, §7, PM-12b), same-version
+  "Uninstall"; `apply-update` takes a regular local file only, opened for identification, says what a hand-off timeout does,
+  carries a version-resource description, and "What stays" names the split-token `%TEMP%` point (§4.2); the abort restart only
+  for the desktop user's own hit and no "stopped" message while the installer still runs (§4.1, §4.3, §5); H1's order (Dyno
+  amendment); the last `RmGetList` is in `PREINSTALL`.
 - Date: 2026-11-04
 - Related:
   - Dyno ADR [0027](../../apps/dyno/docs/adr/0027-helper-for-1-1-0.md) D1 (L: packaging unchanged), reversed for Windows only
@@ -69,8 +78,9 @@ registry (`tauri-plugin-updater` 2.14.1, `tauri-plugin-autostart` 2.7.0, `auto-l
   uninstaller **in place** (`"<UninstallString>" _?=<old dir>`), adding `/UPDATE` only when the new installer itself has
   `/UPDATE`. A manual upgrade therefore runs the old uninstaller as a full uninstall.
 - **Uninstaller.** `un.onInit` sets `$UpdateMode` from `/UPDATE`; `PREUNINSTALL` runs first in `Section Uninstall`. Then it deletes
-  the listed files one by one and `RMDir "$INSTDIR"` (not recursive); unless `$UpdateMode = 1` it removes the shortcuts, the
-  uninstall key and `HKCU\...\Run\${PRODUCTNAME}`; with "Delete the application data" ticked and not updating, it switches to
+  the listed files one by one and `RMDir "$INSTDIR"` (not recursive); it deletes the HKLM uninstall key **whatever
+  `$UpdateMode` says** (`DeleteRegKey HKLM "${UNINSTKEY}"` for `perMachine`); unless `$UpdateMode = 1` it removes the shortcuts
+  and `HKCU\...\Run\${PRODUCTNAME}`; with "Delete the application data" ticked and not updating, it switches to
   `SetShellVarContext current` and deletes `$APPDATA\${BUNDLEID}` and `$LOCALAPPDATA\${BUNDLEID}` **of the account the uninstaller
   runs as**.
 - **`tauri-plugin-updater`** runs the installer with `ShellExecuteW("open")` and the mode's arguments (`/P` for passive) plus
@@ -115,15 +125,16 @@ updater's elevated hand-off, §4.2, and the uninstaller run it from there).
 | --- | --- | --- |
 | `PADDOCK_CHECK_DIR` | `PREINSTALL`, first | `paddock-setup check-dir --dir "$INSTDIR"` (§2.2) |
 | `PADDOCK_GUARD_PER_USER` | `PREINSTALL`, fresh install only | `paddock-setup guard` (§5) |
-| `PADDOCK_STOP_ALL` | `PREINSTALL`, `PREUNINSTALL` | `paddock-setup stop-all --dir "$INSTDIR" --images ${PADDOCK_STOP_IMAGES}` (§3), then a last `RmGetList` over the same files |
+| `PADDOCK_STOP_ALL` | `PREINSTALL`, `PREUNINSTALL` | `paddock-setup stop-all --dir "$INSTDIR" --images ${PADDOCK_STOP_IMAGES}` (§3), then, still in `PREINSTALL` (or `PREUNINSTALL`), a last `RmGetList` over the same files |
 | `PADDOCK_REINSTALL_AS_UPDATE` | `PREUNINSTALL`, first | an in-place run is a reinstall: `StrCpy $UpdateMode 1` (§2.4) |
 | `PADDOCK_CLEAN_RUN_VALUES` | `POSTINSTALL`; `PREUNINSTALL` unless `$UpdateMode = 1` | §6.3 |
-| `PADDOCK_ABORT` | every refusal | the message, the clean-up of §2.3, the restart of §4.3, `SetErrorLevel` and `Quit` |
+| `PADDOCK_ABORT` | every refusal | the message, the clean-up of §2.3, the restart of §4.3 or §5, `SetErrorLevel` and `Quit` |
+| `PADDOCK_INSTALLING` | `PREINSTALL`, before `PADDOCK_CHECK_DIR`; `PREUNINSTALL` | creates and holds `Global\<identifier>.setup`, a named mutex, until the process exits (§4.1 step 4) |
 
 The app's own steps go between them (register or remove its service, Dyno's helper). Each step writes a `DetailPrint` line
-with the program's exit code and its meaning, and `paddock-setup` appends to `%ProgramData%\Paddock\<identifier>\setup.log` (1
-MiB, one rotation; the folder made administrator-only by `paddock_service::privileged`'s protected-folder rule): each phase with
-its start time and duration, every process acted on (image file name, pid, start time, session id, the method, the outcome),
+with the program's exit code and its meaning, and `paddock-setup` appends to `$INSTDIR\updates\setup.log` (1 MiB, one
+rotation; §2.5) once `check-dir` has passed (a `check-dir` refusal is in the installer's details only, because the folder is
+the thing refused): each phase with its start time and duration, every process acted on (image file name, pid, start time, session id, the method, the outcome),
 and the exit code. No user names, profile paths or command lines are logged (ER-27).
 
 #### 2.1 The stop list comes from the bundle config
@@ -132,7 +143,8 @@ and the exit code. No user names, profile paths or command lines are logged (ER-
 plus the file name of every `bundle.externalBin` entry (with Tauri's target-triple suffix removed, as installed), minus the
 app's declared exclusions, each with a reason (Dyno: `dyno-helper.exe`, its amendment). It is synced like the include, so a
 new sidecar is in the list without anyone remembering it; C91 compares the generated list with the config and the exclusions.
-`paddock-setup.exe` itself is always in the list (a hand-off that is still exiting).
+`paddock-setup.exe` itself is always in the list (a hand-off that is still exiting); `stop-all` never ends its own process (its
+own pid and start time), which matters in `PREUNINSTALL`, where it runs from `$INSTDIR`.
 
 #### 2.2 The directory check, twice
 
@@ -145,10 +157,12 @@ exists. Otherwise `PADDOCK_ABORT` with "Install <App> in Program Files" and the 
 #### 2.3 What exists before a refusal, and what a refusal removes
 
 Before the first macro runs: `$INSTDIR` exists (the template's `SetOutPath`; empty on a fresh install), `$PLUGINSDIR` holds the
-installer's temporary files, the WebView2 runtime may have been installed by the template's earlier section, and `setup.log`
-has the refusal. Nothing else is written: no file in `$INSTDIR`, no registry value, no shortcut. On a refusal during a fresh
-install (no HKLM uninstall key), `PADDOCK_ABORT` runs `RMDir "$INSTDIR"` (not recursive: an empty folder only) before `Quit`.
-The WebView2 runtime stays (it is a shared Windows component); the log stays on purpose.
+installer's temporary files, and the WebView2 runtime may have been installed by the template's earlier section. A refusal
+after `check-dir` has written `$INSTDIR\updates\setup.log`. Nothing else is written: no other file in `$INSTDIR`, no registry
+value, no shortcut. On a refusal during a fresh install (no HKLM uninstall key), `PADDOCK_ABORT` runs `RMDir "$INSTDIR"` (not
+recursive) before `Quit`: after a `check-dir` refusal the folder is empty and goes; after a later refusal it holds only
+`updates\setup.log`, which stays on purpose (the evidence, readable by users; the message names it) and is reused by the next
+run. The WebView2 runtime stays (it is a shared Windows component).
 
 #### 2.4 A manual upgrade's old uninstaller acts as an update (the reinstall marker)
 
@@ -156,14 +170,41 @@ A user who runs a newer installer by hand reaches `PageLeaveReinstall`, which ru
 `/UPDATE`. Without a guard that uninstall would remove the shortcuts, the caller's `Run` value, the other users' `Run` values
 (§6.3) and an app's service or helper. The marker is the in-place run itself: an NSIS uninstaller started without `_?=` copies
 itself to the temporary folder and runs from there, and the template starts the old uninstaller with `_?=` only from
-`PageLeaveReinstall`. So `PADDOCK_REINSTALL_AS_UPDATE`, first in `PREUNINSTALL`, treats `$EXEDIR == $INSTDIR` as a reinstall,
-sets `$UpdateMode 1` (which the template checks after the hook) and logs "reinstall: treated as an update". An uninstall from
-Settings › Apps or from `uninstall.exe` started by hand runs from the temporary copy and is a real uninstall. **Every
+`PageLeaveReinstall`. So `PADDOCK_REINSTALL_AS_UPDATE`, first in `PREUNINSTALL`, asks `"$INSTDIR\paddock-setup.exe" same-folder
+--a "$EXEDIR" --b "$INSTDIR"`, which compares the two **canonically and without case**: each folder opened (without following
+a final reparse point) and named by `GetFinalPathNameByHandleW` (long names, so 8.3 short names and a trailing backslash do not
+matter), then `CompareStringOrdinal` with `ignoreCase`; a folder that cannot be opened is "not the same". When they are the
+same it is a reinstall: it sets `$UpdateMode 1` (which the template checks after the hook) and logs "reinstall: treated as an
+update". An uninstall from Settings › Apps or from `uninstall.exe` started by hand runs from the temporary copy and is a real
+uninstall.
+
+What "as an update" keeps and what it does not: the shortcuts, every user's `Run` value, an app's service or helper and its
+data stay. The HKLM uninstall key is deleted anyway (the template deletes it whatever `$UpdateMode` says), and the program files
+go; the new installer writes both again right after. On the same version, the reinstall page's "Uninstall" choice is the same
+in-place run and therefore also acts as an update: the template installs again after it in both choices, so nothing is lost.
+
+**A cancel between the two halves.** If the new installer is cancelled, or fails, after the old uninstaller ran in place, the
+PC holds a half-removed app: no program files and no HKLM uninstall key, but shortcuts that point at nothing, `Run` values that
+name a missing program, and (an app with a service or helper) a service whose program folder is gone. Running the installer
+again is a fresh install (no HKLM key, so the guard runs and finds no per-user copy) and restores the files; the shortcuts and
+`Run` values then work again. Dyno's helper runs from its protected copy and keeps running; its orphan watch removes it if the
+app is still missing after one hour (Dyno's amendment), after which it is turned on again in Settings. PM-12b tests it. **Every
 per-machine release's uninstaller must carry this macro, starting with the first** (Dyno 1.1.0), because the next version's
 installer runs it. S0 confirms that `$EXEDIR` tells the two apart and that the template reads `$UpdateMode` after the hook; if
 either fails, a marker written by the new installer is not an option (the template owns `.onInit` and the reinstall page,
 which run before any hook), so the fallback is `PREUNINSTALL` asking `paddock-setup is-reinstall` whether its parent process is
 an installer of the same product (the parent's image and version resource, read through a held handle).
+
+#### 2.5 Where elevated code stages and logs: `$INSTDIR\updates\`
+
+Nothing elevated is staged, logged or read under `%ProgramData%`. A standard user can create `%ProgramData%\Paddock` (the default
+`%ProgramData%` ACL lets users create folders and owns them as the creator), put a junction or hard-link target in it, and so
+steer an elevated write or a staged file. `$INSTDIR\updates\` cannot be pre-created by a standard user: `%ProgramFiles%` lets
+only administrators and TrustedInstaller create children, and §2.2 checked that `$INSTDIR` is a direct child, with no reparse
+point, owned by SYSTEM, Administrators or TrustedInstaller. `paddock-setup` makes `updates\` (or checks an existing one: same
+owner rule, no reparse point, else renamed aside and made again) with an explicit descriptor: SYSTEM and Administrators full,
+Users read, no inheritance, through `paddock_service::privileged`'s protected-folder rule (rule 55). It holds `setup.log` and the
+staged update (§4.2). The uninstaller removes it with the program files (not on a reinstall, which keeps the log).
 
 ### 3. Stopping every session on install, update and uninstall
 
@@ -177,15 +218,17 @@ an installer of the same product (the parent's image and version resource, read 
 2. **Fallback: by handle, with `SeDebugPrivilege`.** Only for what Restart Manager could not list or end (it reports
    `RmStatusUnknown`, a process it could not shut down, or the session failed). One process snapshot; for each entry whose
    file name is in `images`: open a handle (`PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`), read the image path and start
-   time **from that handle**; the image's parent folder must equal the canonical `dir` (compared as paths, never as a string
+   time **from that handle**. S0 measures whether an elevated administrator can make that open on another account's process
+   without `SeDebugPrivilege`; if not, the privilege is enabled around the open too, only inside this fallback loop, and
+   dropped after each entry; the image's parent folder must equal the canonical `dir` (compared as paths, never as a string
    prefix: `C:\Program Files\Dyno Helper\` starts with `C:\Program Files\Dyno`), otherwise it is left alone and logged as
    skipped. Only then is `SeDebugPrivilege` enabled in `paddock-setup`'s own token (it is present but disabled in an elevated
    administrator's token), a second handle with `PROCESS_TERMINATE` is opened and checked to be the same process (same start
    time), `TerminateProcess` runs, and the privilege is disabled again at once; the wait on the held handles is bounded by
    `bounds.end` (5 s each, 20 s in all). If the privilege cannot be enabled (a policy removed it), that is logged with the
    error and the step reports what is still running.
-3. **Report.** Exit 0 when nothing listed runs from `dir` (a last `RmGetList`, in the include, right before the template's
-   first `File`); exit 11 with the image names still running otherwise, and `PADDOCK_ABORT` says "<App> could not be closed
+3. **Report.** Exit 0 when nothing listed runs from `dir` (a last `RmGetList`, run by the include at the end of `PREINSTALL`, so
+   before the template's `CheckIfAppIsRunning` and its first `File`); exit 11 with the image names still running otherwise, and `PADDOCK_ABORT` says "<App> could not be closed
    for every signed-in user. Ask them to quit <App>, then run this installer again."
 
 These bounds are an installer's, not a UI's (ER-19 is about the app's own jobs): an installer must finish, and when it cannot
@@ -214,8 +257,9 @@ account, the signature checked after the download).
    `tauri-plugin-updater`: `ShellExecuteExW` with the verb `runas` on `$INSTDIR\paddock-setup.exe apply-update --file
    <download> --signature <signature file> --version <v> --restart` (`$INSTDIR` from the running executable's folder, which
    §2.2 made a Program Files folder). The UAC prompt names `paddock-setup.exe` in `C:\Program Files\<App>` (unsigned: "Unknown
-   publisher" until the family has a signing identity). It waits for `paddock-setup.exe`'s exit code (it only copies, checks
-   and starts the installer: seconds), bounded by the hand-off's patience (ADR 0031).
+   publisher" until the family has a signing identity; the program name shown is the version resource's description, "<App>
+   update"). It waits for `paddock-setup.exe`'s exit code (it only copies, checks and starts the installer: seconds), bounded
+   by the hand-off's patience (ADR 0031).
 3. **Outcomes in the exit hook.**
    - UAC declined: `ShellExecuteExW` fails with `ERROR_CANCELLED` (1223). `InstallFailed("Windows permission was declined")`;
      `failed_install` recorded; `ExitAction::Failed { relaunch: true }`: the old version starts again and shows "Not
@@ -223,9 +267,19 @@ account, the signature checked after the download).
    - `apply-update` refused (signature, version, folder; its exit code maps to a sentence): the same Failed path with that
      sentence, for example "The downloaded update did not pass the signature check. Download it again."
    - Handed off (exit 0): `ExitAction::Installed { relaunch: false }`; the app exits and the installer restarts it (§4.3).
+   - The wait runs out (the hand-off is still working, for example on a slow disk): the outcome is unknown, so the app does not
+     start itself again (that would race the installer's stop): it logs "hand-off still running", keeps the hand-off record and
+     exits as in the handed-off case. Whatever happens next is settled by step 4 at the next start: the installer's own
+     restart, or the user's.
 4. **Start after the update.** The new version clears the hand-off record. A start that finds a hand-off record for a version
-   newer than itself knows the installer did not finish: it shows Failed with "The installer stopped before it finished. The
-   reason is in <ProgramData>\Paddock\<identifier>\setup.log" and Install again, and clears the record.
+   newer than itself first checks whether an installer of this app is still running: `paddock-setup apply-update` and the
+   include (`PADDOCK_INSTALLING`) hold the named mutex `Global\<identifier>.setup` while they run (a standard user cannot create
+   `Global\` objects, which needs `SeCreateGlobalPrivilege`, so the name cannot be squatted to fake a running install). While it
+   exists the app shows "An update is being installed" and waits on it (a wait on the mutex, no polling); once it is gone, a
+   record still naming a newer version means the installer did not finish: Failed with "The installer stopped before it
+   finished. The reason is in <install folder>\updates\setup.log" and Install again, and the record is cleared. The old version
+   started by `PADDOCK_ABORT` (§4.3) therefore starts while the installer still holds the mutex and shows the failure only after
+   it has quit.
 5. **Accounts that are not administrators** (not a member of Administrators, even with a filtered token) see "An administrator
    must install this update. Windows will ask for an administrator's name and password." The button stays (decision O3).
 
@@ -236,28 +290,54 @@ account, the signature checked after the download).
 - **Untrusted:** everything the unelevated side hands over: the download in the user's temporary folder (any program of the
   user, or of a standard user whose prompt an administrator approves, can replace it at any time until it is copied), the
   signature file, the version and every argument.
-- **Steps, all in the elevated process:** make or check `%ProgramData%\Paddock\<identifier>\updates\` with
-  `paddock_service::privileged`'s protected-folder rule (owner SYSTEM or Administrators, no inheritance, SYSTEM and
-  Administrators full, nothing for users; a folder that fails is renamed aside and made again); open the download once, with no
-  sharing for writes and without following reparse points, and copy it by that handle into a new file there (bounded size: the
-  size `latest.json` announced, at most 1 GiB); verify the copy, never the original, with `paddock_updater::signature::verify_file`
-  (rule 55: the same code the app uses) against the compiled key, including the signed `version:` in the trusted comment; the
-  signed version must be newer than the version resource of `$INSTDIR\<main>.exe` (no downgrade); then start the copy with
-  `/P /UPDATE /R` by `CreateProcessW` (already elevated: no second prompt) and exit. No argument from the caller reaches the
-  installer except through these checks; the relaunch arguments are fixed (none).
+- **Steps, all in the elevated process,** holding `Global\<identifier>.setup` (§4.1 step 4):
+  1. Make or check `$INSTDIR\updates\` (§2.5); `$INSTDIR` is the folder of the running `paddock-setup.exe`, checked again by
+     `check-dir`'s rule.
+  2. Open the download once with `CreateFileW(..., GENERIC_READ, FILE_SHARE_READ, ..., OPEN_EXISTING,
+     FILE_FLAG_OPEN_REPARSE_POINT | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)`: a named pipe server behind the path can at
+     most identify the elevated caller, never impersonate it. The handle must be a regular file on a local disk:
+     `GetFileType` is `FILE_TYPE_DISK` (no pipe, no character device), `GetFileInformationByHandleEx` shows no directory and no
+     reparse point, `GetFinalPathNameByHandleW` gives a drive-letter path (no `\\server\share`, no `\\?\UNC`) whose volume is
+     `DRIVE_FIXED`. Anything else is refused ("The update must be on this PC's own disk").
+  3. Copy by that handle into a new file in `updates\` (create-new, no sharing while writing; bounded size: the size
+     `latest.json` announced, at most 1 GiB), then close the write handle.
+  4. Open the copy again with `GENERIC_READ` and `FILE_SHARE_READ` only, and keep that handle open until `CreateProcessW` has
+     returned: while it is open nobody, administrators included, can open the file for writing or deleting. Verify the copy
+     **through that handle**, never the original, with `paddock_updater::signature::verify_file` (rule 55: the same code the
+     app uses) against the compiled key, including the signed `version:` in the trusted comment; the signed version must be
+     newer than the version resource of `$INSTDIR\<main>.exe` (no downgrade).
+  5. Start the copy with `/P /UPDATE /R` by `CreateProcessW` (already elevated: no second prompt), with `TEMP` and `TMP` set to
+     `$INSTDIR\updates\tmp\` (made like `updates\`), so the installer's `$PLUGINSDIR`, where it extracts and runs its own
+     `paddock-setup.exe` and NSIS plug-ins, is in an administrator-only folder too. Then close the handle and exit. S0 confirms
+     that `CreateProcessW` succeeds while the read-only handle is open.
+
+  No argument from the caller reaches the installer except through these checks; the relaunch arguments are fixed (none).
 - **What this closes:** the window between the app's own check and the elevated run of a file the user can write (review P1-4),
   which matters most when a standard user's malware could hand an administrator a substituted installer.
-- **What stays:** a manual install is trusted like any download the person runs; the updater of a per-user release (the 1.0
-  line) still runs the download from the temporary folder itself, which this record cannot change, and meets the guard (§5);
-  a build without a key refuses `apply-update` ("Updates are not available in this build").
-- The staged copy is deleted by the next `apply-update` and by the installer's `POSTINSTALL` (`paddock-setup clean-staging`).
+- **What stays:**
+  - A manual install is trusted like any download the person runs.
+  - **The split-token `%TEMP%`.** A manually started installer (or an uninstaller) extracts `$PLUGINSDIR`, with
+    `paddock-setup.exe` and the NSIS plug-ins it then runs elevated, into the elevated process's `%TEMP%`. For an administrator
+    who approves their own prompt, that is their own profile's temporary folder, which the unelevated half of the same account
+    can write: a program of that account could swap a file there between extraction and use. Microsoft does not treat the two
+    halves of one account as a security boundary, and that program could raise its own prompt anyway. For a standard user who
+    types an administrator's credentials, `%TEMP%` is the administrator's, out of the standard user's reach. The update path
+    does not have this gap (step 5).
+  - The updater of a per-user release (the 1.0 line) still runs the download from the temporary folder itself, which this
+    record cannot change, and meets the guard (§5).
+  - A build without a key refuses `apply-update` ("Updates are not available in this build").
+- The staged copy and `updates\tmp\` are deleted by the next `apply-update` and by the installer's `POSTINSTALL` (`paddock-setup
+  clean-staging`); `setup.log` stays.
+- `paddock-setup.exe` carries a version resource whose `FileDescription` is "<App> update" (and `ProductName` the app's), set by
+  the per-app build (S7), so the UAC prompt and Task Manager name it for the app.
 
 #### 4.3 After the installer
 
 The template's `.onInstSuccess` starts the app again with `RunAsUser` (the desktop user, unelevated) because of `/R`, in the
 updating user's session only. When the include refuses (`PADDOCK_ABORT`) during an update started with `/UPDATE /R`, it starts
 the still-installed old version the same way (`nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe"`; nothing was
-replaced), and that start shows the Failed state of §4.1 step 4.
+replaced). That start waits for the installer to quit before it shows the Failed state (§4.1 step 4), so it never says "stopped"
+while the installer is still running.
 
 ### 5. The per-user guard (no migration)
 
@@ -280,12 +360,14 @@ There is no migration: a per-user copy is uninstalled by hand. `paddock-setup gu
   or deletes anything; `PADDOCK_ABORT` removes only the empty `$INSTDIR` (§2.3).
 
 **An older per-user release meets the new feed** (decision O8: one feed). Its updater quits the app and runs the downloaded
-per-machine installer with `/P /UPDATE /R`; UAC appears; the guard stops with the message. Because the installer had `/UPDATE`
-and `/R`, `PADDOCK_ABORT` starts the per-user copy again as the desktop user (`RunAsUser` on `<install folder>\<main>.exe`,
+per-machine installer with `/P /UPDATE /R`; UAC appears; the guard stops with the message. When the installer had `/UPDATE`
+and `/R` **and the blocking hit is the desktop user's own uninstall key** (not only the installer account's, which with typed
+credentials is another account), `PADDOCK_ABORT` starts that per-user copy again as the desktop user (`RunAsUser` on
+`<install folder>\<main>.exe`,
 the folder taken from the blocking uninstall key's `UninstallString` and checked to hold that file; the start is unelevated,
 so a changed value can only start what that user could start anyway). With "install when the app quits" the old updater gives
-no `/R`, so nothing is started: the user was quitting. If the file is not there, the message ends with "Then start <App>
-again." The old copy stays installed and usable, with its data. Each app's release notes for its first per-machine version say
+no `/R`, so nothing is started: the user was quitting. If the file is not there, or the hit is not the desktop user's,
+nothing is started and the message ends with "Then start <App> again." The old copy stays installed and usable, with its data. Each app's release notes for its first per-machine version say
 all this and how to uninstall without losing data.
 
 ### 6. Start at login, always per user
@@ -344,12 +426,17 @@ probe as the guard; rule 55):
 | Fresh install, a file-only hit or another account's per-user copy | logged; the install continues; §6.2 handles it at that account's next start |
 | Update or reinstall with a per-user copy somewhere | no guard; §6.2 at that account's start |
 | A per-user release's updater runs the new installer | UAC, then the guard message; the old copy is started again (with `/R`) and is unchanged |
-| Manual upgrade (reinstall page) | the old uninstaller runs in place, acts as an update: shortcuts, `Run` values, services and the helper stay (§2.4) |
+| Manual upgrade (reinstall page), or "Uninstall" on the same version | the old uninstaller runs in place, acts as an update: shortcuts, `Run` values, services and the helper stay; the HKLM key and the files go and are written again (§2.4) |
+| The new installer cancelled or failing after the in-place uninstall | a half-removed app (no files, no HKLM key; shortcuts and `Run` values point at nothing; a service whose folder is gone); running the installer again is a fresh install and repairs it; Dyno's helper removes itself after one hour if the app stays missing (§2.4) |
+| `%ProgramData%\Paddock` (or any folder under it) pre-created by a standard user, with junctions or links | not used: nothing elevated stages, logs or reads there (§2.5) |
+| `$INSTDIR\updates\` exists with another owner or as a reparse point | renamed aside and made again (§2.5) |
+| The download is a pipe, a device, a UNC or network path, a directory or a reparse point | `apply-update` refuses: "The update must be on this PC's own disk"; the old version starts again with that sentence |
+| The hand-off wait runs out | the app exits without starting itself; the next start waits for the installer's mutex and then shows the outcome (§4.1) |
 | UAC declined (update) | the old version starts again: "Windows permission was declined", Install again |
 | UAC declined (manual install) | nothing runs |
 | The download changed after the check | `apply-update` refuses on the protected copy; the old version starts again with the reason |
 | An older or equal version handed to `apply-update` | refused ("not newer than the installed version") |
-| The installer stops after the hand-off (guard, stop, folder) | `PADDOCK_ABORT` starts the old version; it shows "The installer stopped before it finished" (§4.1 step 4) |
+| The installer stops after the hand-off (stop, folder) | `PADDOCK_ABORT` starts the old version; once the installer has quit it shows "The installer stopped before it finished" (§4.1 step 4) |
 | A standard user without administrator credentials | the update cannot be installed; the status says an administrator must install it |
 | A listed program does not end through Restart Manager | the fallback by handle with `SeDebugPrivilege` (§3 step 2) |
 | A listed program still runs after both steps | exit 11; message; nothing copied; the log lists image, pid, start time, session, method |
@@ -372,10 +459,13 @@ probe as the guard; rule 55):
 - **ADR 0039 artifact gate:** the built NSIS installer requests administrator level and contains `paddock-setup.exe`, whose
   `--self-test` names the app's identifier and key fingerprint, and the include's version string.
 - **Unit tests:** the guard decision (fresh install only; the two blocking accounts; key versus file; the skipped hives; Local
-  AppData from the hive); the reinstall marker decision; `stop_all` over a fake Restart Manager and a fake process table (the
+  AppData from the hive); the reinstall marker decision and `same-folder` (case, trailing backslash, an 8.3 short name, a folder
+  that cannot be opened); `stop_all` over a fake Restart Manager and a fake process table (the
   `Dyno Helper` prefix case, the fallback only for what RM left, the privilege enabled only around the end and dropped again);
   `apply-update` over a fake file system (a changed source, a bad signature, an older version, a folder with a wrong owner, a
-  reparse point), plus Windows tests with real children of `paddock_proc::testchild` in a temporary folder (ER-14: only
+  reparse point, a pipe or device or UNC source, the copy held read-only until the start returns), and **"`%ProgramData%\Paddock`
+  pre-created by a standard user"**: with that folder made by another owner and holding a junction to a system folder, a run of
+  `apply-update` and of the log writer touches nothing under `%ProgramData%` and writes only under `$INSTDIR\updates\`, plus Windows tests with real children of `paddock_proc::testchild` in a temporary folder (ER-14: only
   processes the test started); `UserRunEntry` over the fake `System` (HKCU only; nothing for `Full`; writes for `Default`); the
   updater's scope rules and the hand-off record.
 
@@ -392,7 +482,7 @@ home (ADR 0042).
 | --- | --- | --- |
 | PM-1 | Fresh install as an administrator | files in `%ProgramFiles%\<App>` with `paddock-setup.exe`; HKLM uninstall key; all-users Start menu shortcut; the started app is not elevated and runs as the desktop user; the first-run default wrote HKCU `Run`; no HKLM `Run` value |
 | PM-2 | Fresh install as a standard user with an administrator's credentials | as PM-1, and the app, its `Run` value and its data belong to the standard user; the administrator's hive is unchanged |
-| PM-3 | Guard on a fresh install: per-user key for the installer's account; for the desktop user (PM-2's set-up); file only; another signed-in account; a signed-out account | the first two stop with the message, leave no file, key or shortcut, and remove the empty `$INSTDIR`; the other three are logged and install |
+| PM-3 | Guard on a fresh install: per-user key for the installer's account; for the desktop user (PM-2's set-up); file only; another signed-in account; a signed-out account | the first two stop with the message and leave no key, shortcut or file except `$INSTDIR\updates\setup.log`; the other three are logged and install |
 | PM-4 | The last per-user release updates from the feed: Install, then "install when the app quits" | Install: the app quits, UAC, the guard message, the per-user copy starts again, its data intact; on quit: the same without the restart |
 | PM-5 | Uninstall the per-user release by hand ("Delete the application data" unticked), then install per machine | the data folder survives; the per-machine app reads it |
 | PM-5b | The same with the box ticked | the suite records which folders went (expected: only `%APPDATA%\<identifier>` and `%LOCALAPPDATA%\<identifier>`) and that the app's own data folder stayed |
@@ -402,12 +492,15 @@ home (ADR 0042).
 | PM-9 | Uninstall with two signed-in users and one signed-out user | every session's programs end; HKLM key and folder gone; both signed-in users' `Run` values and any HKLM `Run` value naming the app gone; the signed-out user's value stays (O6); every user's data stays |
 | PM-10 | Reboot with start at login on for both users | at each sign-in: one app, one of each sidecar, the tray icon, nothing elevated, no HKLM `Run` value |
 | PM-11 | The app started with Run as administrator (split token), and as the built-in Administrator | the first writes nothing and logs it; the second writes HKCU `Run` |
-| PM-12 | Manual upgrade: run the next version's installer by hand, keep the reinstall page's default | the old uninstaller runs in place as an update: shortcuts, all `Run` values, the service or helper stay; the log says "treated as an update" |
+| PM-12 | Manual upgrade: run the next version's installer by hand, keep the reinstall page's default | the old uninstaller runs in place as an update: shortcuts, all `Run` values, the service or helper stay; the log says "treated as an update"; repeated with "Uninstall" chosen on the same version, and with `$INSTDIR` given as an 8.3 short name |
+| PM-12b | PM-12, cancelling the new installer right after the old uninstaller ran in place | a half-removed app as in §7; running the installer again repairs it (shortcuts and `Run` values work again); Dyno: with the installer not run again, the helper removes itself after one hour |
 | PM-13 | The download replaced in the user's temporary folder after the check, before Install | `apply-update` refuses; the old version starts with the signature sentence; nothing installed |
 | PM-14 | A per-user copy left beside the per-machine one: not running, then running in the same session | the Health line; then the message and exit; nothing changed |
 | PM-15 | An HKLM `Run` value naming the app, written before an install and before an uninstall | removed both times; a value naming another program stays |
-| PM-16 | The installer stops after the hand-off (a listed program kept alive by a test helper that ignores Restart Manager and is protected from the fallback) | exit 11 message; the old version starts again and shows "The installer stopped before it finished" |
+| PM-16 | The installer stops after the hand-off (a listed program kept alive by a test helper that ignores Restart Manager and is protected from the fallback) | exit 11 message; the old version starts while the installer runs, shows "An update is being installed", and only after the installer has quit shows "The installer stopped before it finished" |
 | PM-17 | PM-6 with the secure desktop on, by hand | the same outcome |
+| PM-18 | `%ProgramData%\Paddock\<identifier>\updates\` pre-created by the standard user, holding a junction to `C:\Windows\System32`, then a fresh install and an update from the app | both succeed; nothing under `%ProgramData%\Paddock` changed; the log and staged copy are under `$INSTDIR\updates\` |
+| PM-19 | The download replaced by a named pipe of the same name, and by a path on a network share | `apply-update` refuses with the disk sentence; the old version starts again |
 
 An app adds its own cases (Dyno: the helper, in its amendment).
 
@@ -425,24 +518,26 @@ modules, a new enum with a `PerUser` default), so no other app must change with 
 
 | WP | Package | Shared | Owned paths | Depends on | Days |
 | --- | --- | --- | --- | --- | --- |
-| S0 | VM spikes: embedding via `${__FILEDIR__}`; the reinstall marker (`$EXEDIR` in place, `$UpdateMode` read after the hook); `Quit`, error level and `RMDir` from `PREINSTALL` in passive and `/UPDATE`; `RunAsUser` from an abort; Restart Manager across sessions as an elevated administrator; `SeDebugPrivilege` enable and drop; `ShellExecuteExW` `runas` cancel code; the desktop user from the shell window; `PromptOnSecureDesktop = 0` with the GUI automation; that a per-user uninstall keeps the app's own data | – | `docs/research/` note | – | 2–3 |
+| S0 | VM spikes: embedding via `${__FILEDIR__}`; the reinstall marker (`$EXEDIR` in place, `$UpdateMode` read after the hook); whether an elevated administrator opens another account's process with `PROCESS_QUERY_LIMITED_INFORMATION` without `SeDebugPrivilege`; `CreateProcessW` with the read-only handle open; `TEMP`/`TMP` moving the child installer's `$PLUGINSDIR`; the `Global\` mutex from the installer and from `apply-update`; `Quit`, error level and `RMDir` from `PREINSTALL` in passive and `/UPDATE`; `RunAsUser` from an abort; Restart Manager across sessions as an elevated administrator; `SeDebugPrivilege` enable and drop; `ShellExecuteExW` `runas` cancel code; the desktop user from the shell window; `PromptOnSecureDesktop = 0` with the GUI automation; that a per-user uninstall keeps the app's own data | – | `docs/research/` note | – | 2.5–3.5 |
 | S1 | `paddock_proc::installed::stop_all`: Restart Manager first, the fallback by handle, the report; unit and Windows tests | crates/ | `crates/paddock-proc/src/installed.rs` (+ one `lib.rs` line) | S0 | 2–3 |
 | S2 | New crate `paddock-setup` (new-crate skill): `check-dir`, `guard` (two blocking accounts, the hive scan), `per_user_copy`, `clean-run` (HKCU hives, HKLM both views), `is-reinstall` (fallback), the log, `--self-test` | crates/ | `crates/paddock-setup/` (+ the workspace line) | S1 | 3–4 |
-| S3 | `apply-update` and `clean-staging`: the protected staging folder, the copy by handle, the signature with the compiled key, the version rule, the hand-off to the installer | crates/ | `crates/paddock-setup/src/apply.rs` | S2 | 2–3 |
+| S3 | `apply-update` and `clean-staging`: `$INSTDIR\updates\` (§2.5), the local regular file opened for identification, the copy, the read-only hold until the start, the signature with the compiled key, the version rule, `TEMP`/`TMP` for the child, the mutex; the version resource | crates/ | `crates/paddock-setup/src/apply.rs`, `crates/paddock-setup/build.rs` | S2 | 2.5–3.5 |
 | S4 | The include and its generated stop list: the six macros, `.onVerifyInstDir`, the reinstall marker, the abort clean-up and restart; `render` for `PerMachine`; sync tests | crates/ | `crates/paddock-setup/nsis/`, `crates/paddock-service/src/render.rs` | S2 | 2–3 |
 | S5 | `paddock_service::login::UserRunEntry` (`TokenElevationType`) | crates/ | `crates/paddock-service/src/login.rs` | – | 1–1.5 |
 | S6 | `paddock-updater`: `InstallScope`, `ElevatedHandoff` installer, the hand-off record and its Failed state at start, install-on-quit refused, the administrator and declined texts; the updater panel | crates/, ui/ | `crates/paddock-updater/src/{state.rs,updater.rs,record.rs,tauri.rs,tauri/native.rs}`, the updater component in `ui/projects/paddock-ui` | S3 | 3–4 |
 | S7 | Build and stage `paddock-setup.exe` per app with its key: the `./dev`/workflow step in each per-machine app's Windows bundle job, `check-bundle`, the ADR 0039 gate entries | tools/, .gitea/ (integrator) | `tools/paddock-dev` bundle step, `conformance/release/` | S2 | 1.5–2.5 |
 | S8 | Conformance C91 | conformance/ | `conformance/src/checks/C91-per-machine.mjs` | S4, S6, S7 | 1–1.5 |
-| S9 | The Windows per-machine suite (PM-1 to PM-17) in `scripts/vm-smoke`, its `paddock.ci.json` fields, the VM image setting, the UAC automation, the testing-manual page | scripts/ (vm-smoke home) | `scripts/vm-smoke/` | S4 | 4–5 |
+| S9 | The Windows per-machine suite (PM-1 to PM-19, PM-12b) in `scripts/vm-smoke`, its `paddock.ci.json` fields, the VM image setting, the UAC automation, the testing-manual page | scripts/ (vm-smoke home) | `scripts/vm-smoke/` | S4 | 4.5–5.5 |
 | S10 | New apps: `scripts/new-app.mjs` writes the per-machine config, the hooks, the scope and the bundle step | new-app | `scripts/new-app.mjs`, `templates/` | S4, S6, S7 | 0.5–1 |
 | D | Dyno's adoption (its amendment PM-a to PM-f: config, hooks, scope, `UserRunEntry` and the start check, helper steps, docs, the rule-54 dispatch, its VM runs) | Dyno | see the amendment | S4–S7 | 7–10 |
 
-**Shared: 22 to 31.5 agent-days; Dyno: 7 to 10; in all 29 to 41.5.** Revision 1 said 14 to 20.5; the difference is the
+**Shared: 23.5 to 33 agent-days; Dyno: 7 to 10; in all 30.5 to 43.** Revision 2 said 29 to 41.5 (revision 3 adds the
+`$INSTDIR\updates\` staging, the file checks and the mutex to S3, three spikes to S0 and three VM cases to S9); revision 1 said
+14 to 20.5; the difference from revision 1 is the
 elevated hand-off (S3, part of S6), the reinstall marker, Restart Manager plus the fallback, the per-app build of
 `paddock-setup.exe` (S7), UAC automation and six more VM cases (S9), and the rule-54 dispatch. Order: S0 → S1 → S2 → (S3 → S6)
 and S4 → S7 → Dyno PM-a → PM-f (dispatch) → VM runs, with S5, S8, S9 and S10 beside them. With four agents the critical path
-S0, S1, S2, S3, S6, Dyno's adoption and two VM passes is about **14 to 19 working days (3 to 4 weeks)**, against the 1 to 1.5
+S0, S1, S2, S3, S6, Dyno's adoption and two VM passes is about **15 to 20 working days (3 to 4 weeks)**, against the 1 to 1.5
 weeks accepted for revision 1's scope; the user chose the full design on 2026-11-04 knowing the review's findings.
 
 ### Adoption by the other apps (later, each in its own release line)
