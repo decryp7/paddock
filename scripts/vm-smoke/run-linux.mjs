@@ -124,7 +124,7 @@ async function main(argv) {
     for (let i = 0; i < 25 && active !== 'active'; i++) { await sleep(3000); active = g('systemctl is-active dyno-helper.service').stdout.trim(); }
     checks.push({ ok: active === 'active', detail: `dyno-helper.service is ${active || 'absent'}` });
     const stat = g('sudo sh -c "stat -c \'%n %U:%G %a\' /var/lib/dyno-helper /var/lib/dyno-helper/* /usr/bin/dyno-helper" 2>&1').stdout.trim();
-    const bad = stat.split('\n').filter((l) => /\/var\/lib\/dyno-helper/.test(l) && !/ root:root (7[0-5][0-5])$/.test(l));
+    const bad = stat.split('\n').filter((l) => /\/var\/lib\/dyno-helper/.test(l) && !/ root:root [0-7][0-5][0-5]$/.test(l));
     checks.push({ ok: bad.length === 0 && /dyno-helper/.test(stat), detail: bad.length ? `helper paths not root-only: ${bad.join('; ')}` : 'the helper data folder and its files are root:root and not writable by others' });
     const w = g('mkdir -p /var/lib/dyno-helper/tools/x 2>&1; touch /var/lib/dyno-helper/probe 2>&1; echo $?').stdout.trim();
     checks.push({ ok: !/^0$/m.test(w.split('\n').at(-1)), detail: 'a standard user cannot create files in the helper data folder' });
@@ -144,7 +144,9 @@ async function main(argv) {
     let gone = false;
     for (let i = 0; i < 25 && !gone; i++) { await sleep(3000); gone = g('systemctl is-active dyno-helper.service; test -e /var/lib/dyno-helper && echo present || echo gone').stdout.includes('gone'); }
     checks.push({ ok: gone, detail: gone ? 'the helper service and data folder are gone' : 'the helper is still installed 75 s after Turn off' });
-    push(result('Admin helper Turn off removes it', checks, [], 'service and data removed'));
+    const why = g('echo "pkexec: $(pgrep -x pkexec || echo none)"; echo "service: $(systemctl is-active dyno-helper.service)"; ls -ld /var/lib/dyno-helper 2>&1; sudo journalctl -u dyno-helper.service --no-pager 2>&1 | tail -5').stdout.trim();
+    const card = atspi('tree dyno 60').stdout.split('\n').map((l) => l.trim()).filter((l) => /administrator|Turn|helper|polkit|authenticate|not allowed|cancel/i.test(l)).slice(0, 8);
+    push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), ...card], 'service and data removed'));
 
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit$', 'menu item'); await sleep(8000);
