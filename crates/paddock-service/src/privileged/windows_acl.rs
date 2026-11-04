@@ -1,6 +1,14 @@
 //! The ACL of the helper's Program Files folder (ADR 0027 §1): SYSTEM and Administrators Full control, Users Read and
 //! execute, no inheritance. Set with `icacls` by well-known SID (so the language of the system does not matter) and
 //! checked afterwards from `icacls`'s own listing by the shape of the rights, which are abbreviations in every language.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::path::Path;
 

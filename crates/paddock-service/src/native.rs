@@ -5,6 +5,14 @@
 //! - `SmAppService`: `SMAppService` (macOS 13+) for one plist in the app bundle (macOS builds only).
 //! - `RunAsElevator`: Windows' own elevation prompt (`ShellExecuteExW` with `runas`; Windows builds only).
 //! - [`current_uid`] and [`host_backend`]: the user, and the backend for this OS from [`crate::backend::choose`].
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use crate::backend::{Backend, Choice, Side, Target, choose};
@@ -272,9 +280,15 @@ mod win {
                 let waited = WaitForSingleObject(info.hProcess, ms);
                 let mut code = 1u32;
                 if waited == WAIT_OBJECT_0 {
-                    let _ = GetExitCodeProcess(info.hProcess, &mut code);
+                    paddock_proc::cleanup::logged(
+                        "reading the elevated program's exit code (reported as 1)",
+                        GetExitCodeProcess(info.hProcess, &mut code),
+                    );
                 }
-                let _ = CloseHandle(info.hProcess);
+                paddock_proc::cleanup::logged(
+                    "closing the elevated program's handle",
+                    CloseHandle(info.hProcess),
+                );
                 code
             };
             Ok(i32::try_from(code).unwrap_or(1))
@@ -328,7 +342,9 @@ mod scm {
         ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
         ServiceType,
     };
-    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+    use windows_service::service_control_handler::{
+        self, ServiceControlHandlerResult, ServiceStatusHandle,
+    };
     use windows_service::{define_windows_service, service_dispatcher};
 
     const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
@@ -350,10 +366,15 @@ mod scm {
     /// supervised variable. The app's log (`paddock-log`) is set up before; the host writes its events there.
     pub fn run_as_service(spec: &ServiceSpec, exe: PathBuf) -> Result<(), String> {
         let name = spec.name().to_string();
-        let _ = CONFIG.set(Config {
-            spec: spec.clone(),
-            exe,
-        });
+        if CONFIG
+            .set(Config {
+                spec: spec.clone(),
+                exe,
+            })
+            .is_err()
+        {
+            log::warn!("run_as_service was called twice in this process; the first configuration stays");
+        }
         service_dispatcher::start(name, ffi_service_main)
             .map_err(|e| format!("Starting as a Windows service failed: {e}"))
     }
@@ -380,16 +401,29 @@ mod scm {
         }
     }
 
+    /// Tells the SCM the new state; a refusal is logged (the SCM then times the service out or keeps the old state).
+    fn report_status(handle: &ServiceStatusHandle, state: ServiceState) {
+        if let Err(e) = handle.set_service_status(status(state)) {
+            log::error!(state:? = state, error:% = e; "the service status could not be reported to the Service Control Manager");
+        }
+    }
+
     fn service_main(_arguments: Vec<OsString>) {
         let Some(config) = CONFIG.get() else { return };
         let (tx, rx) = mpsc::channel::<Control>();
         let handler = move |control| match control {
             ServiceControl::Stop | ServiceControl::Shutdown => {
-                let _ = tx.send(Control::Stop);
+                paddock_proc::cleanup::logged(
+                    "forwarding a stop after the host loop ended",
+                    tx.send(Control::Stop),
+                );
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::SessionChange(_) => {
-                let _ = tx.send(Control::SessionChange);
+                paddock_proc::cleanup::logged(
+                    "forwarding a session change after the host loop ended",
+                    tx.send(Control::SessionChange),
+                );
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -402,7 +436,7 @@ mod scm {
                 return;
             }
         };
-        let _ = handle.set_service_status(status(ServiceState::Running));
+        report_status(&handle, ServiceState::Running);
         log::info!("service started");
         let mut sessions = WtsSessions { config, rx };
         supervise(
@@ -412,8 +446,8 @@ mod scm {
                 log::info!(event:? = e; "service host");
             },
         );
-        let _ = handle.set_service_status(status(ServiceState::StopPending));
-        let _ = handle.set_service_status(status(ServiceState::Stopped));
+        report_status(&handle, ServiceState::StopPending);
+        report_status(&handle, ServiceState::Stopped);
         log::info!("service stopped");
     }
 
@@ -477,8 +511,8 @@ mod scm {
                 .is_ok_and(|o| o.success())
         }
         fn kill(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
+            paddock_proc::cleanup::logged("killing the hosted program", self.0.kill());
+            paddock_proc::cleanup::logged("reaping the hosted program", self.0.wait());
         }
     }
 
@@ -507,7 +541,7 @@ mod scm {
             if !self.0.is_invalid() {
                 // SAFETY: the handle is owned by this value and closed exactly once.
                 unsafe {
-                    let _ = CloseHandle(self.0);
+                    paddock_proc::cleanup::logged("closing an owned handle", CloseHandle(self.0));
                 }
             }
         }
@@ -547,7 +581,7 @@ mod scm {
                     // SAFETY: a valid process handle we own; failure (already gone) is ignored.
                     unsafe {
                         // conformance: pid-kill — a process handle we opened at the start and still hold
-                        let _ = TerminateProcess(helper.0, 1);
+                        paddock_proc::cleanup::logged("ending the stop-verb helper", TerminateProcess(helper.0, 1));
                     }
                     return false;
                 }
@@ -559,7 +593,7 @@ mod scm {
             // SAFETY: a valid process handle we own; failure (already gone) is ignored.
             unsafe {
                 // conformance: pid-kill — a process handle we opened at the start and still hold
-                let _ = TerminateProcess(self.process.0, 1);
+                paddock_proc::cleanup::logged("ending the hosted program", TerminateProcess(self.process.0, 1));
             }
         }
     }
@@ -656,7 +690,7 @@ mod scm {
             fn drop(&mut self) {
                 // SAFETY: created by CreateEnvironmentBlock and destroyed once.
                 unsafe {
-                    let _ = DestroyEnvironmentBlock(self.0);
+                    paddock_proc::cleanup::logged("destroying the environment block", DestroyEnvironmentBlock(self.0));
                 }
             }
         }
@@ -700,6 +734,8 @@ mod scm {
 
         let mut size = 0usize;
         // SAFETY: the first call only computes the size (it fails with ERROR_INSUFFICIENT_BUFFER by design).
+        // silent: the sizing call fails with ERROR_INSUFFICIENT_BUFFER by design; the second call below is checked
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = unsafe { InitializeProcThreadAttributeList(None, 1, None, &mut size) };
         let mut list_buf = vec![0u8; size.max(64)];
         let list = LPPROC_THREAD_ATTRIBUTE_LIST(list_buf.as_mut_ptr().cast());
@@ -804,7 +840,7 @@ pub fn process_has_full_token() -> bool {
     }
     .is_ok();
     // SAFETY: the token was opened above.
-    let _ = unsafe { CloseHandle(token) };
+    paddock_proc::cleanup::logged("closing the token handle", unsafe { CloseHandle(token) });
     ok && kind == TokenElevationTypeFull
 }
 

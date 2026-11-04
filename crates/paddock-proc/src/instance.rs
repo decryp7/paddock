@@ -3,6 +3,14 @@
 //! however it ends, so a lock is never stale and nothing reclaims it. This is the authority for "is one running here?"
 //! (rule 53: hold the thing itself, never trust a pid read earlier). A discovery file ([`crate::hint`]) only says how to
 //! reach the holder.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::start::Pace;
 use std::fs::{File, OpenOptions, TryLockError};

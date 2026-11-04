@@ -5,6 +5,14 @@
 //! log): it impersonates the client for the moment it takes to read the client's own token (`OpenThreadToken`), takes the
 //! account SID and the group list from that token, and reverts. The impersonation level is the one the client chose
 //! (`SECURITY_IDENTIFICATION`), so the server can read the token but not act as the client (WP-0, ADR 0027).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use crate::identity::{AccountId, AdminEvidence, AuditHint, PeerError, RawPeer, TokenAdmin};

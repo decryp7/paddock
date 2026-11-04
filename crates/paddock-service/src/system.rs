@@ -1,5 +1,13 @@
 //! The real [`System`]: helper programs through `paddock-proc` (no console window, a timeout that ends the whole tree,
 //! bounded output), files through `paddock-env`'s atomic write.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::port::{Output, RunError, System};
 use paddock_proc::{Limits, Outcome};

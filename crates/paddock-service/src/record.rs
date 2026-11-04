@@ -2,6 +2,14 @@
 //! [`VersionedFile`]: atomic, damaged or missing gives defaults, a newer format is left alone): the version that
 //! registered it last (rule 24's "once per version change", catalogue C21's `service_registered_version`), and a lock
 //! so two copies of the app never repair at the same time.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::error::ServiceError;
 use paddock_env::VersionedFile;
@@ -78,7 +86,10 @@ impl RecordFile {
                 .open(&self.lock)
             {
                 Ok(mut f) => {
-                    let _ = write!(f, "{} {now_secs}", std::process::id());
+                    if let Err(e) = write!(f, "{} {now_secs}", std::process::id()) {
+                        // The lock file exists, so the lock is held; without its time it is only taken over as stale.
+                        log::warn!(error:% = e; "the service repair lock's time could not be written");
+                    }
                     return Some(RepairLock {
                         path: self.lock.clone(),
                     });
@@ -92,7 +103,7 @@ impl RecordFile {
                     if !stale {
                         return None;
                     }
-                    let _ = std::fs::remove_file(&self.lock);
+                    paddock_proc::cleanup::remove_file(&self.lock);
                 }
                 Err(e) => {
                     // A folder that cannot hold the lock must not stop a repair: run without it.
@@ -116,7 +127,7 @@ pub struct RepairLock {
 impl Drop for RepairLock {
     fn drop(&mut self) {
         if !self.path.as_os_str().is_empty() {
-            let _ = std::fs::remove_file(&self.path);
+            paddock_proc::cleanup::remove_file(&self.path);
         }
     }
 }

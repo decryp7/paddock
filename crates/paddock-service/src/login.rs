@@ -5,6 +5,14 @@
 //!
 //! The section only stores the switch; applying it registers with the OS, which is slow, so the app runs
 //! [`apply_launch_at_login`] on a background thread from its section's `apply` (settings changes must return at once).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::manager::Manager;
 use crate::parse::reg_value;

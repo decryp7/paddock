@@ -1,5 +1,13 @@
 //! The few platform calls, in one small file: signals and priority on Unix, process handles and `taskkill` on Windows, and
 //! when a process started. Everything here is a single call that hands over to tested code or makes one OS request.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 #[cfg(unix)]

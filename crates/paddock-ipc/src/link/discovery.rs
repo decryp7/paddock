@@ -2,6 +2,14 @@
 //! the token, the companion's pid and build, so it is written owner-only (atomically, through `paddock-env`) and removed
 //! when the companion stops. A file whose process is gone is stale and ignored; a file anyone else could have written is
 //! not trusted.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::frame::ProtocolVersion;
 use crate::token::Token;
@@ -62,7 +70,7 @@ impl Discovery {
         if let Found::Live(d) | Found::Stale(d) = read(path, |_| true)
             && d.pid == pid
         {
-            let _ = std::fs::remove_file(path);
+            paddock_proc::cleanup::remove_file(path);
         }
     }
 }

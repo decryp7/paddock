@@ -1,5 +1,13 @@
 //! The file side of a protected install: the [`ProtectedFiles`] port (what is there, make a folder, copy the program with
 //! one open handle while hashing it, remove), the real adapter, and the rule that decides whether a copy is protected.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -212,7 +220,7 @@ impl ProtectedFiles for RealFiles {
         }
         #[cfg(not(unix))]
         {
-            let _ = mode;
+            let _: u32 = mode;
             std::fs::create_dir_all(path)
         }
     }
@@ -220,7 +228,7 @@ impl ProtectedFiles for RealFiles {
     fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> io::Result<String> {
         let source = std::fs::File::open(from)?;
         let tmp = temp_name(to);
-        let _ = std::fs::remove_file(&tmp);
+        paddock_proc::cleanup::remove_file(&tmp);
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -229,7 +237,7 @@ impl ProtectedFiles for RealFiles {
             options.mode(mode);
         }
         #[cfg(not(unix))]
-        let _ = mode;
+        let _: u32 = mode;
         let mut out = options.open(&tmp)?;
         let result = hash_stream(&source, Some(&mut out)).and_then(|hash| {
             out.sync_all()?;
@@ -245,13 +253,13 @@ impl ProtectedFiles for RealFiles {
                     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
                 }
                 if let Err(e) = std::fs::rename(&tmp, to) {
-                    let _ = std::fs::remove_file(&tmp);
+                    paddock_proc::cleanup::remove_file(&tmp);
                     return Err(e);
                 }
                 Ok(hash)
             }
             Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
+                paddock_proc::cleanup::remove_file(&tmp);
                 Err(e)
             }
         }

@@ -4,6 +4,14 @@
 //! client with one handler. [`Subscriptions`] carries Pitcrew's pushed events to the connections that asked for a
 //! topic. Stopping (or dropping) the server closes every connection and removes the discovery file if it still names
 //! this process.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::discovery::Discovery;
 use crate::endpoint::Access;
@@ -233,7 +241,7 @@ impl LinkServer {
     pub fn stop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         if let Some(t) = self.accept.take() {
-            let _ = t.join();
+            paddock_proc::cleanup::join("the link server's accept thread", t);
         }
         for p in lock(&self.shared.peers).drain(..) {
             p.close();
