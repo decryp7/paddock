@@ -4,10 +4,51 @@
 // runs and after Dyno is launched, with no Repair, and read a helper reading, 5. when it fails keep the ACLs and the System event log entries.
 import { cardText, helperOn, openSettings, ssh } from './win-helper.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
+import { Actor } from './win-act.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
 const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };
+
+
+/** Dyno's "Start Dyno at login" setting as the Settings page shows it. */
+async function launchAtLogin(browser) {
+  const s = await openSettings(browser);
+  if (!s) return 'Settings did not open';
+  const box = s.getByRole('switch', { name: /Start Dyno at login/i }).or(s.getByRole('checkbox', { name: /Start Dyno at login/i }));
+  if (!(await box.count())) return 'no "Start Dyno at login" control found';
+  return (await box.first().getAttribute('aria-checked').catch(() => null)) ?? ((await box.first().isChecked().catch(() => false)) ? 'true' : 'false');
+}
+
+async function setLaunchAtLogin(browser, on) {
+  const s = await openSettings(browser);
+  const box = s.getByRole('switch', { name: /Start Dyno at login/i }).or(s.getByRole('checkbox', { name: /Start Dyno at login/i }));
+  const now = (await box.first().getAttribute('aria-checked').catch(() => 'false')) === 'true';
+  if (now !== on) await box.first().click();
+  await sleep(2500);
+}
+
+/** What starts Dyno at logon: the Run key, the Startup folder, scheduled tasks and services; and what is running, with its start time against the logon time. */
+export function autoStartRecord() {
+  const run = ssh(`Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue | Select-Object * -ExcludeProperty PS* | Format-List | Out-String`);
+  const startup = ssh(`Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name`);
+  const tasks = ssh(`schtasks /query /fo csv /nh 2>$null | Select-String -Pattern 'Dyno' | ForEach-Object { $_.Line }`, { admin: true });
+  const logon = ssh(`(Get-Process -Name explorer -ErrorAction SilentlyContinue | Sort-Object StartTime | Select-Object -First 1).StartTime.ToString('s')`);
+  const procs = ssh(`Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessName) pid=$($_.Id) started=$($_.StartTime.ToString('s'))" }`);
+  return { run, startup, tasks, logon, procs, running: /dyno-app|dyno-agent/.test(procs) };
+}
+
+/** Dyno's tray icons: in the visible taskbar area and the overflow (UI Automation), IsPromoted per icon, and the log's "tooltip sent" lines. */
+export async function trayRecord(actor) {
+  const promoted = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "promoted=$($_.IsPromoted) tooltip=$($_.InitialTooltip)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
+  const visible = (await actor.send('tray Dyno').catch(() => '')).split('\n').map((l) => l.split('\t')[0].trim()).filter(Boolean);
+  // the overflow: open the "Show hidden icons" chevron and read again
+  const chevron = (await actor.send('tray ^(Show Hidden Icons|Hidden icons|Show hidden)').catch(() => '')).split('\n')[0]?.split('\t')[1];
+  let overflow = [];
+  if (chevron) { await actor.send(`click ${chevron.replace(',', ' ')}`).catch(() => {}); await sleep(1500); overflow = (await actor.send('tray Dyno').catch(() => '')).split('\n').map((l) => l.split('\t')[0].trim()).filter(Boolean).filter((n) => !visible.includes(n)); await actor.send('key ESC').catch(() => {}); }
+  const sent = ssh(`Get-ChildItem "$env:LOCALAPPDATA\\Dyno\\logs" -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Select-String -Pattern 'tooltip sent' | Select-Object -Last 8 | ForEach-Object { $_.Line }`).split('\n').filter(Boolean);
+  return { promoted, visible, overflow, sent };
+}
 
 /** The service as the OS and the helper's own log report it. */
 export function snapshot() {
@@ -27,34 +68,63 @@ async function cardState(browser) {
   return (await cardText(s, 'Administrator readings')).slice(0, 220);
 }
 
+async function restartGuest(ctx) {
+  ctx.log('restarting the guest (a real OS restart)');
+  ssh('Set-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon" AutoAdminLogon 1; shutdown /r /t 3', { admin: true, ms: 60_000 });
+  await sleep(50_000);
+  const ok = await ctx.waitConsole();
+  if (ok) await sleep(45_000); // services and the logon's own start-ups settle
+  return ok;
+}
+
+const fmtTray = (r) => [`visible taskbar area (UI Automation): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `NotifyIconSettings: ${r.promoted.join(' ; ') || '-'}`, `app log "tooltip sent" lines: ${r.sent.length}`, ...r.sent.map((l) => `  ${l.slice(0, 180)}`)];
+
+/** After a restart, before Dyno is started by hand: what (if anything) started it, by which mechanism, how long after logon; and the tray. */
+async function afterRestartRecord(actor, label) {
+  const auto = autoStartRecord();
+  actor.start(); await sleep(8000);
+  const tray = await trayRecord(actor);
+  await actor.send('quit', 5000).catch(() => {});
+  const evidence = [`logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, '--- tray', ...fmtTray(tray)];
+  return { auto, tray, evidence };
+}
+
 /** `ctx`: { vm(args, ms), waitConsole(), launchDyno(), log }. Returns the steps. */
 export async function runRebootPhase(ctx) {
   const steps = [];
   let t = tunnel();
   let browser = await connect();
-  const on = await helperOn(browser);
-  steps.push(on);
+  steps.push(await helperOn(browser));
+  const launchDefault = await launchAtLogin(browser);
   const before = snapshot();
   const cardBefore = await cardState(browser);
-  steps.push(result('Windows restart: helper before the restart (installed and on as the owner)', [
+  const actor = new Actor();
+  actor.start(); await sleep(6000);
+  const trayBefore = await trayRecord(actor);
+  await actor.send('quit', 5000).catch(() => {});
+  steps.push(result('Windows restart: helper, Launch at login and tray before the restart', [
     { ok: before.state === 'RUNNING', detail: `service ${before.state}, start type ${before.start}` },
     { ok: /On/.test(cardBefore), detail: `card: ${cardBefore.slice(0, 80)}` },
-  ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
+    { ok: true, detail: `Launch at login after install: ${launchDefault === 'true' ? 'ON' : launchDefault === 'false' ? 'OFF' : launchDefault}` },
+    { ok: trayBefore.visible.length + trayBefore.overflow.length > 0, detail: `${trayBefore.visible.length} tray icon(s) visible, ${trayBefore.overflow.length} in the overflow` },
+  ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
   await browser.close().catch(() => {});
   t.close();
 
-  // The restart. Windows resets AutoAdminLogon after a restart that ends a manual session, so it is set again first.
-  ctx.log('restarting the guest (a real OS restart)');
-  ssh('Set-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon" AutoAdminLogon 1; shutdown /r /t 3', { admin: true, ms: 60_000 });
-  await sleep(50_000);
-  const session = await ctx.waitConsole();
-  if (!session) { steps.push(result('Windows restart: the guest did not come back to a GUI session', [{ ok: false, detail: 'no console session after the restart (6 min)' }])); return steps; }
-  await sleep(40_000); // services and the logon's own start-ups settle
-
+  if (!(await restartGuest(ctx))) { steps.push(result('Windows restart: the guest did not come back to a GUI session', [{ ok: false, detail: 'no console session after the restart (6 min)' }])); return steps; }
+  const rec1 = await afterRestartRecord(actor, 'default');
   const idle = snapshot();
-  const checks = [
-    { ok: idle.state === 'RUNNING' || /DEMAND|AUTO/i.test(idle.start), detail: `after the restart, before Dyno runs: service ${idle.state}, start type ${idle.start}` },
-  ];
+  const delay = rec1.auto.running ? 'started by something at logon' : 'nothing started Dyno at logon';
+  steps.push(result(`Windows restart: auto start with Launch at login ${launchDefault === 'true' ? 'ON' : 'OFF'} (the default after install)`, [
+    { ok: true, detail: `${delay}: ${rec1.auto.procs.replace(/\n/g, '; ') || 'no Dyno process'}` },
+    { ok: launchDefault === 'true' ? rec1.auto.running : true, detail: launchDefault === 'true' ? (rec1.auto.running ? 'Dyno started by itself at logon' : 'Launch at login is ON but Dyno did not start at logon') : 'Launch at login is off by default: Dyno is not expected to start by itself (tested with it on below)' },
+  ], rec1.evidence, delay));
+  steps.push(result('Windows restart: tray icons after the restart (compared with before)', [
+    { ok: true, detail: `before: ${trayBefore.visible.length} visible, ${trayBefore.overflow.length} overflow; after (no hand start): ${rec1.tray.visible.length} visible, ${rec1.tray.overflow.length} overflow` },
+    { ok: rec1.auto.running ? rec1.tray.visible.length + rec1.tray.overflow.length > 0 : true, detail: rec1.auto.running ? 'Dyno is running and its icons exist' : 'Dyno is not running at logon, so no icons are expected yet' },
+  ], fmtTray(rec1.tray), 'recorded'));
+
+  // The helper after the restart, with Dyno started by hand and no Repair.
   ctx.launchDyno();
   await sleep(25_000);
   t = tunnel();
@@ -70,15 +140,31 @@ export async function runRebootPhase(ctx) {
   } catch (e) { card = `could not read the window: ${e.message}`; }
   t.close();
   const after = snapshot();
-  checks.push({ ok: after.state === 'RUNNING', detail: `after Dyno started (no Repair): service ${after.state}, start type ${after.start}` });
-  checks.push({ ok: /On/.test(card) && !/Repair|Not running|Needs repair/.test(card), detail: `card after the restart: ${card.slice(0, 100)}` });
-  checks.push({ ok: /Read by the administrator helper/i.test(readingText), detail: /Read by the administrator helper/i.test(readingText) ? 'a helper reading (Processes) works after the restart' : 'the Processes page does not show the helper chip after the restart' });
-  const evidence = ['--- after the restart, before Dyno runs', idle.qc, idle.q, '--- after Dyno started', after.qc, after.q, '--- helper.log tail', after.log, `card: ${card}`, `Processes text: ${readingText.slice(0, 600)}`].join('\n').split('\n');
-  {
-    const acl = ssh(`"== C:\\ProgramData\\Dyno"; (Get-Acl "C:\\ProgramData\\Dyno").Owner; icacls "C:\\ProgramData\\Dyno"; "== ${HELPER}"; (Get-Acl "${HELPER}").Owner; icacls "${HELPER}"`, { admin: true });
-    const ev = ssh(`Get-WinEvent -LogName System -MaxEvents 400 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'DynoHelper|Dyno Helper' } | Select-Object -First 15 | ForEach-Object { "$($_.TimeCreated.ToString('s')) id=$($_.Id) $($_.ProviderName): $(($_.Message -split '\\n')[0])" }`, { admin: true });
-    evidence.push('--- ACLs (always recorded)', ...acl.split('\n'), '--- System event log, DynoHelper entries', ...ev.split('\n'));
-  }
+  const checks = [
+    { ok: idle.state === 'RUNNING' || /DEMAND|AUTO/i.test(idle.start), detail: `after the restart, before Dyno runs: service ${idle.state}, start type ${idle.start}` },
+    { ok: after.state === 'RUNNING', detail: `after Dyno started (no Repair): service ${after.state}, start type ${after.start}` },
+    { ok: /On/.test(card) && !/Repair|Not running|Needs repair/.test(card), detail: `card after the restart: ${card.slice(0, 100)}` },
+    { ok: /Read by the administrator helper/i.test(readingText), detail: /Read by the administrator helper/i.test(readingText) ? 'a helper reading (Processes) works after the restart' : 'the Processes page does not show the helper chip after the restart' },
+  ];
+  const acl = ssh(`"== C:\\ProgramData\\Dyno"; (Get-Acl "C:\\ProgramData\\Dyno").Owner; icacls "C:\\ProgramData\\Dyno"; "== ${HELPER}"; (Get-Acl "${HELPER}").Owner; icacls "${HELPER}"`, { admin: true });
+  const ev = ssh(`Get-WinEvent -LogName System -MaxEvents 400 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'DynoHelper|Dyno Helper' } | Select-Object -First 15 | ForEach-Object { "$($_.TimeCreated.ToString('s')) id=$($_.Id) $($_.ProviderName): $(($_.Message -split '\\n')[0])" }`, { admin: true });
+  const evidence = ['--- after the restart, before Dyno runs', idle.qc, idle.q, '--- after Dyno started', after.qc, after.q, '--- helper.log tail', after.log, `card: ${card}`, `Processes text: ${readingText.slice(0, 600)}`, '--- ACLs (always recorded)', ...acl.split('\n'), '--- System event log, DynoHelper entries', ...ev.split('\n')];
   steps.push(result('Windows restart: the helper works after a real restart without Repair or UAC', checks, evidence, 'service running, card On, readings work, no Repair'));
+
+  // With Launch at login on (when it was off): does Dyno start by itself after a restart?
+  if (launchDefault !== 'true') {
+    t = tunnel(); browser = await connect();
+    await setLaunchAtLogin(browser, true);
+    const nowOn = await launchAtLogin(browser);
+    await browser.close().catch(() => {}); t.close();
+    if (await restartGuest(ctx)) {
+      const rec2 = await afterRestartRecord(actor, 'on');
+      steps.push(result('Windows restart: auto start with Launch at login switched ON', [
+        { ok: nowOn === 'true', detail: `Launch at login after switching it on: ${nowOn}` },
+        { ok: rec2.auto.running, detail: rec2.auto.running ? `Dyno started by itself at logon: ${rec2.auto.procs.replace(/\n/g, '; ')}` : 'Dyno did not start by itself at logon with Launch at login on' },
+        { ok: rec2.tray.visible.length + rec2.tray.overflow.length > 0, detail: `tray after logon: ${rec2.tray.visible.length} visible, ${rec2.tray.overflow.length} overflow` },
+      ], rec2.evidence, 'Dyno starts by itself and its tray icons exist'));
+    } else steps.push(result('Windows restart (Launch at login on): the guest did not come back', [{ ok: false, detail: 'no console session after the second restart' }]));
+  }
   return steps;
 }
