@@ -48,7 +48,9 @@ export async function trayRecord(actor) {
   const promoted = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "$($_.PSChildName) promoted=$($_.IsPromoted) tooltip=$($_.InitialTooltip) uid=$($_.UID) guid=$($_.IconGuid)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
   const log = ssh(APP_LOG_PS);
   const metrics = metricsFromLog(log);
-  const read = async () => (await actor.send(TRAY_ICONS_CMD).catch(() => ''));
+  const errors = [];
+  // An actor that does not answer is a measurement failure, never "0 icons": its error is recorded.
+  const read = async () => (await actor.send(TRAY_ICONS_CMD).catch((e) => { errors.push(String(e.message ?? e)); return ''; }));
   const rows1 = await read();
   const first = dynoTrayIcons(rows1, metrics);
   const visible = first.filter((i) => i.where === 'taskbar').map((i) => i.name);
@@ -65,7 +67,7 @@ export async function trayRecord(actor) {
   }
   const lines = trayLogLines(log);
   const buttons = [...new Set([...notificationAreaButtons(rows1), ...notificationAreaButtons(rows2)])];
-  return { promoted, visible, overflow, metrics, logFile: [...log.matchAll(/^@@ (.*)$/gm)].map((m) => m[1]).join(', ') || '(none)', lines, buttons };
+  return { promoted, visible, overflow, metrics, logFile: [...log.matchAll(/^@@ (.*)$/gm)].map((m) => m[1]).join(', ') || '(none)', lines, buttons, errors, measured: buttons.length > 0 };
 }
 
 /** The new crash and removal logging: Application log entries of source "Dyno helper", and the System service events for it. */
@@ -102,17 +104,23 @@ async function restartGuest(ctx) {
   return ok;
 }
 
-const fmtTray = (r) => [`visible taskbar area (UI Automation, explorer buttons named after a Dyno metric): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `metrics the app log says it created icons for: ${r.metrics.join(', ') || '(none logged)'}`, `NotifyIconSettings (dyno-app.exe): ${r.promoted.join(' ; ') || '-'}`, `app log ${r.logFile}: ${r.lines.length} tray line(s)`, ...r.lines.slice(-60).map((l) => `  ${l.slice(0, 220)}`), `notification-area buttons seen (name, class, top-level class): ${r.buttons.length}`, ...r.buttons.slice(0, 60).map((b) => `  ${b.slice(0, 200)}`)];
+const fmtTray = (r) => [`visible taskbar area (UI Automation, explorer buttons named after a Dyno metric): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `metrics the app log says it created icons for: ${r.metrics.join(', ') || '(none logged)'}`, `NotifyIconSettings (dyno-app.exe): ${r.promoted.join(' ; ') || '-'}`, `app log ${r.logFile}: ${r.lines.length} tray line(s)`, ...r.lines.slice(-60).map((l) => `  ${l.slice(0, 220)}`), `measurement: ${r.measured ? 'valid (the notification area was read)' : `NOT VALID: no notification-area button was read at all${r.errors.length ? ` (actor: ${r.errors[0]})` : ''}`}`, `notification-area buttons seen (name, class, top-level class): ${r.buttons.length}`, ...r.buttons.slice(0, 60).map((b) => `  ${b.slice(0, 200)}`)];
 
 /** After a restart, before Dyno is started by hand: what (if anything) started it, by which mechanism, how long after logon; and the tray. */
 async function afterRestartRecord(actor, label) {
   const auto = autoStartRecord();
-  actor.start(); await sleep(8000);
+  // After a restart the in-session actor may not start at once (the console session is still being set up): start it again until it
+  // answers, bounded, and record how long that took.
+  let actorUp = null;
+  for (let i = 0; i < 8 && actorUp === null; i++) {
+    actor.start(); await sleep(8000);
+    if ((await actor.send('windows', 20_000).then(() => true).catch(() => false))) actorUp = i;
+  }
   let tray = await trayRecord(actor);
   // An autostarted app builds its tray icons a little after it starts: poll up to 60 s when it is running and nothing shows yet.
-  for (let i = 0; i < 6 && auto.running && tray.visible.length + tray.overflow.length === 0; i++) { await sleep(10_000); tray = await trayRecord(actor); }
+  for (let i = 0; i < 6 && auto.running && (!tray.measured || tray.visible.length + tray.overflow.length === 0); i++) { await sleep(10_000); tray = await trayRecord(actor); }
   await actor.send('quit', 5000).catch(() => {});
-  const evidence = [`logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, '--- tray', ...fmtTray(tray)];
+  const evidence = [`logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, `--- actor: ${actorUp === null ? 'did NOT answer after 8 starts' : `answered after ${actorUp + 1} start(s)`}`, '--- tray', ...fmtTray(tray)];
   return { auto, tray, evidence };
 }
 
@@ -184,6 +192,7 @@ async function runRebootSteps(ctx, steps) {
   ], rec1.evidence, delay));
   steps.push(result('Windows restart: tray icons after the restart (compared with before)', [
     { ok: true, detail: `before: ${trayBefore.visible.length} visible, ${trayBefore.overflow.length} overflow; after (no hand start): ${rec1.tray.visible.length} visible, ${rec1.tray.overflow.length} overflow` },
+    { ok: rec1.tray.measured, detail: rec1.tray.measured ? 'the notification area was read after the restart' : 'the tray could not be measured after the restart (no notification-area button read; see the actor line)' },
     { ok: rec1.auto.running ? rec1.tray.visible.length + rec1.tray.overflow.length > 0 : true, detail: rec1.auto.running ? 'Dyno is running and its icons exist' : 'Dyno is not running at logon, so no icons are expected yet' },
   ], fmtTray(rec1.tray), 'recorded'));
 
