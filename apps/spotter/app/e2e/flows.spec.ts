@@ -1,7 +1,10 @@
 import { expect, test } from '@decryp7/paddock-e2e';
 
 test.describe('Spotter against the mock backend', () => {
+  // The mock's newest release is three hours old, so "Today" holds only after 03:00 local time: pin the clock (a run at
+  // 00:35 UTC failed on this in CI, run 7502). Local time, so the day grouping is the same in every time zone.
   test('the first load shows content, not a blank window', async ({ page }) => {
+    await page.clock.setFixedTime(new Date(2026, 5, 15, 12, 0, 0));
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
     await expect(page.getByRole('heading', { name: "What's new" })).toBeVisible();

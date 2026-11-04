@@ -59,3 +59,5 @@ Process and workflow
 - Tests never use the production names of anything: pipes, sockets, ports, data folders, keychain entries. The CI runner itself may run the installed app (Pitcrew supervises the runners), so a test that binds the real pipe fails with access denied. Derive names from the data folder (installed folder → production name; anything else → name-<hash>).
 
 - Tray/menu-bar popups must look native: frameless transparent window with rounded corners (~12 px macOS, 8 px Windows 11 via DWMWCP_ROUND), the OS material (NSVisualEffectView popover/menu; Acrylic/Mica), hairline border, soft shadow, height fitted to content (no empty gap), anchored to the tray icon, close on blur/Escape, quick fade (none with reduced motion). A square opaque web page in a box looks wrong (Dyno feedback).
+
+- A browser test that reads a day label ("Today", "Yesterday") pins the clock first (`page.clock.setFixedTime`, local time): the mock's releases are hours old, so the same test failed in CI at 00:35 UTC (Spotter `flows.spec.ts`, ci.yml run 7502, 2026-11-04) and passed after 03:00. Unit specs set `ClockService` and `NOW`. ER-12.
