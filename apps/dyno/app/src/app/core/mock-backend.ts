@@ -20,6 +20,7 @@ import type {
   ShelveFor,
   ActivityEntry,
   AgentStatus,
+  TrayAvailability,
   Alert,
   Anomaly,
   CommandError,
@@ -135,6 +136,10 @@ import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
 
+/** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
+const NO_TRAY_HOST_NOTE =
+  "Your desktop isn't showing tray icons. On GNOME, turn on the AppIndicator extension (gnome-shell-extension-appindicator), then Dyno's icons appear.";
+
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 const MIN = 60_000;
@@ -182,6 +187,8 @@ export interface MockOptions {
   idle?: MockIdleVariant;
   /** Which Wake-on-LAN state the mock starts in (`?wol=empty|off|cantSend|noNeighbours|neighboursFail|readinessCantTell|timeout`; default two saved computers). */
   wol?: MockWolVariant;
+  /** Whether the mock's desktop shows the tray icons (`?tray=noHost` gives the engine's note about the missing host; default shown). */
+  tray?: 'shown' | 'noHost';
   /** Which Schedule state the mock starts in (`?wake=empty|needsHelper|unavailable|agent|failed`; default two schedules through the helper). */
   wake?: MockWakeVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
@@ -229,6 +236,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
     ...(['unavailable', 'ended', 'waiting', 'busy', 'quiet'].includes(q.get('power') ?? '') ? { power: q.get('power') as MockPowerVariant } : {}),
+    ...(q.get('tray') === 'noHost' ? { tray: 'noHost' as const } : {}),
     ...(['empty', 'off', 'cantSend', 'noNeighbours', 'neighboursFail', 'readinessCantTell', 'timeout'].includes(q.get('wol') ?? '') ? { wol: q.get('wol') as MockWolVariant } : {}),
     ...(['on', 'empty', 'off', 'needsHelper', 'unavailable', 'agent', 'failed'].includes(q.get('wake') ?? '') ? { wake: q.get('wake') as MockWakeVariant } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
@@ -306,6 +314,8 @@ export class MockBackend implements DynoBackend {
   private readonly alertListeners = new Set<(a: Alert) => void>();
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
+  private trayValue: TrayAvailability;
+  private readonly trayListeners = new Set<(a: TrayAvailability) => void>();
   private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
   /** The widget layouts and the popup's values (family ADR 0035), kept in the browser's storage so a reload keeps them. */
   readonly widgets: MockWidgets;
@@ -389,6 +399,7 @@ export class MockBackend implements DynoBackend {
       const p = this.settingsValue.power;
       this.settingsValue = { ...this.settingsValue, power: { ...p, energy: { ...p.energy, wattsOn: 65, wattsSleep: 1.5, tariffPerKwh: 0.32, currency: 'S$', co2GPerKwh: 408 } } };
     }
+    this.trayValue = options.tray === 'noHost' ? { noHost: { hint: NO_TRAY_HOST_NOTE } } : 'shown';
     this.wolMock = new MockWol(options.wol ?? 'normal', this.now, () => this.settingsValue.power.wol.enabled);
     this.wakeMock = new MockWakes(options.wake ?? 'normal', this.now, () => this.settingsValue.power.wake.enabled);
     // Scheduled wake is off on a fresh install (the engine's default); a variant that shows the tab at work turns it on.
@@ -1783,6 +1794,21 @@ export class MockBackend implements DynoBackend {
   pushAlert(alert: Alert): void {
     this.alertLog = [alert, ...this.alertLog];
     for (const l of this.alertListeners) l(copy(alert));
+  }
+
+  trayAvailability(): Promise<TrayAvailability> {
+    return this.reply('trayAvailability', () => copy(this.trayValue));
+  }
+
+  onTrayAvailability(listener: (a: TrayAvailability) => void): Unsubscribe {
+    this.trayListeners.add(listener);
+    return () => this.trayListeners.delete(listener);
+  }
+
+  /** Emits a change of the tray host (dev tools and tests): the desktop started or stopped showing the icons. */
+  pushTrayAvailability(value: TrayAvailability): void {
+    this.trayValue = value;
+    for (const l of this.trayListeners) l(copy(value));
   }
 
   /** Emits an agent status change (dev tools and tests). */

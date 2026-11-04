@@ -597,6 +597,11 @@ impl IconOps for NativeOps<'_> {
         let Some(icon) = NativeIcon::find(self.main, self.app, id) else {
             return Shown::No("the app has no icon of that id".to_string());
         };
+        // Linux: an icon the desktop has no StatusNotifier host to show is not shown, whatever the add said.
+        #[cfg(target_os = "linux")]
+        if !crate::tray_host::current(self.app).is_shown() {
+            return Shown::No("the desktop has no StatusNotifier host".to_string());
+        }
         icon.shown()
     }
 }
@@ -849,6 +854,15 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, 
     applied
 }
 
+/// The pass number of a check asked for by the tray host appearing (not one of the timed follow-ups, whose passes count from 0).
+const HOST_CHECK_PASS: u32 = 1000;
+
+/// The desktop's tray host appeared (Linux: an extension turned on, a panel that started late): check the icons now, so each one
+/// the host was not there to show is added again by the same check the login start uses ([`TrayCommand::Verify`]). Returns at once.
+pub fn verify_now(app: &AppHandle<Wry>) {
+    send(app, TrayCommand::Verify { pass: HOST_CHECK_PASS });
+}
+
 /// Draws a frame on an item. Returns at once; the main thread does it.
 pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     send(
@@ -907,7 +921,14 @@ impl TrayBackend<Wry> for DynoTray {
         // The icons start as unavailable at their final widths; the first live update replaces them.
         let initial =
             crate::tray_model::TrayItems::new(self.items.clone(), crate::tray_model::Env::native()).unavailable_frames(dark_taskbar());
-        sync_items(app, &self.items, &initial).map_err(|e| e.to_string())
+        sync_items(app, &self.items, &initial).map_err(|e| e.to_string())?;
+        // The icons exist; whether the desktop shows them is another matter (Linux: a StatusNotifier host). With none the shell
+        // is told there is no tray (a hidden start opens the window), and told again when the host appears.
+        if crate::tray_host::start(app) {
+            Ok(())
+        } else {
+            Err("the desktop shows no tray icons (no StatusNotifier host)".to_string())
+        }
     }
 
     fn update(&self, _app: &AppHandle<Wry>, _view: &TrayView) -> Result<(), String> {
@@ -1133,6 +1154,23 @@ mod tests {
         )
         .unwrap();
         assert!(ops.drawn > drawn, "the re-made icon gets its picture");
+    }
+
+    #[test]
+    fn the_tray_host_appearing_adds_again_the_icons_it_was_not_there_to_show_through_the_same_check() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        sync(&mut ops, &state, 2).unwrap();
+        // No host: the desktop shows neither icon.
+        ops.not_shown.extend(["cpu-0".to_string(), "cpu-1".to_string()]);
+        // The host appears: `verify_now` sends this check, which is not one of the timed follow-ups.
+        assert!(verify_delay(HOST_CHECK_PASS).is_none());
+        apply(&mut ops, &state, TrayCommand::Verify { pass: HOST_CHECK_PASS }).unwrap();
+        assert_eq!((ops.removed, ops.made), (2, 4));
+        assert!(ops.not_shown.is_empty());
+        // Asked again with nothing wrong: nothing is touched.
+        apply(&mut ops, &state, TrayCommand::Verify { pass: HOST_CHECK_PASS }).unwrap();
+        assert_eq!((ops.removed, ops.made), (2, 4));
     }
 
     #[test]

@@ -1,0 +1,19 @@
+{
+  "cantTell": "shown",
+  "noHostRegistered": {
+    "noHost": {
+      "hint": "Your desktop isn't showing tray icons. On GNOME, turn on the AppIndicator extension (gnome-shell-extension-appindicator), then Dyno's icons appear."
+    }
+  },
+  "shown": "shown",
+  "standardNote": {
+    "noHost": {
+      "hint": "Your desktop isn't showing tray icons. On GNOME, turn on the AppIndicator extension (gnome-shell-extension-appindicator), then Dyno's icons appear."
+    }
+  },
+  "watcherAbsent": {
+    "noHost": {
+      "hint": "Your desktop isn't showing tray icons. On GNOME, turn on the AppIndicator extension (gnome-shell-extension-appindicator), then Dyno's icons appear."
+    }
+  }
+}

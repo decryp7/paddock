@@ -2,6 +2,7 @@ import { InjectionToken } from '@angular/core';
 import type {
   ActivityEntry,
   AgentStatus,
+  TrayAvailability,
   Alarm,
   AlarmChange,
   AlarmFilter,
@@ -108,6 +109,10 @@ export interface DynoBackend {
   onAlert(listener: (a: Alert) => void): Unsubscribe;
   onActivity(listener: (a: ActivityEntry) => void): Unsubscribe;
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
+  /** Whether the desktop shows the tray icons now (Settings > Menu bar shows the engine's note when it does not). */
+  trayAvailability(): Promise<TrayAvailability>;
+  /** The desktop started or stopped showing the tray icons (a tray host appeared after the start, or went). */
+  onTrayAvailability(listener: (a: TrayAvailability) => void): Unsubscribe;
   /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
   /** A disk scan's status changed (at most four a second per scan, one final); keep the highest `seq`. No polling. */

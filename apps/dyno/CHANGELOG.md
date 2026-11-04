@@ -19,6 +19,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - Notifications: select messages and delete them, or delete all after a confirmation. Deleted messages stay gone after a restart.
 - Expand all and Collapse all buttons in Network, Processes, What changed and Files.
 - Dyno starts when you log in. This is on by default and can be turned off in Settings.
+- Linux: when no tray is available (for example GNOME without the AppIndicator extension), Dyno tells you so and opens its window at login instead of hiding it with no way back.
 - Dialogs (About, What's new, Updates and the confirmations) fit their content, grow or shrink when the content arrives late, keep the size you gave them and follow a change of display scale.
 
 ### Fixed

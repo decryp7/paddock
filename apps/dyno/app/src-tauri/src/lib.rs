@@ -24,6 +24,7 @@ pub mod shell;
 pub mod supervise;
 pub mod tray;
 pub mod tray_away;
+pub mod tray_host;
 pub mod tray_identity;
 pub mod tray_look;
 pub mod tray_model;
@@ -73,6 +74,8 @@ paddock_commands::command_table! {
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
     Mutation [MAIN] => commands::open_taskbar_settings,
+    /// Whether the desktop shows Dyno's tray icons: Settings › Menu bar shows the note when it does not.
+    Query [MAIN | DIALOG] => commands::tray_availability,
     Mutation [MAIN] => commands::pick_folder,
     /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035). The tray popup reads its
     /// own layout to draw its widgets.

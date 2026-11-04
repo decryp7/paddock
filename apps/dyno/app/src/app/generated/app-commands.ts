@@ -18,6 +18,7 @@ export const APP_COMMANDS = {
   save_issues: { kind: 'mutation', windows: ['main'], limit: 262144 },
   save_report: { kind: 'mutation', windows: ['main'], limit: 262144 },
   take_navigation: { kind: 'mutation', windows: ['main'], limit: 262144 },
+  tray_availability: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   widget_choices: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   widget_layout: { kind: 'query', windows: ['main', 'dialog', 'tray'], limit: 262144 },
 } as const;

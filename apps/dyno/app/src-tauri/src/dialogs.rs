@@ -33,6 +33,7 @@ paddock_dialogs::dialogs! {
             app::widget_choices,
             app::popover_preview,
             app::popover_snapshot,
+            app::tray_availability,
         ],
     },
     // Adding or changing an alert rule: validated by the engine on save.

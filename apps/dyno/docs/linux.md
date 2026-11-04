@@ -28,7 +28,7 @@ agent measuring when nobody is logged in, run `loginctl enable-linger $USER` onc
 
 Without systemd (or when the unit is not installed) the app starts the agent itself and it stops with your session.
 
-The tray needs a status-notifier host (GNOME: the AppIndicator extension). Without a tray, closing the window quits the app.
+The tray needs a status-notifier host (GNOME: the AppIndicator extension, package `gnome-shell-extension-appindicator`). Dyno reads the host from the session bus (`org.kde.StatusNotifierWatcher`, `IsStatusNotifierHostRegistered`) at the start and then on its D-Bus signals (`NameOwnerChanged` of the watcher, `StatusNotifierHostRegistered`/`Unregistered`; a look every 60 seconds only as a safety net): without one, Settings > Menu bar and the status bar say what to turn on, a start at login opens the window, and closing the window quits the app; when a host appears the missing icons are added again and the note goes. The log lines start with `tray host:`.
 
 ## 3. Verify
 

@@ -78,6 +78,11 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDp
 # The GUID provider for the tray icons (the vendored, patched copy: apps/dyno/vendor/PATCHES.md).
 tray-icon = { version = "=0.25.1", default-features = false }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The session bus: whether a StatusNotifier host shows the tray icons (tray_host.rs). The blocking API with a call timeout; the
+# same crate paddock-power uses for logind.
+zbus = { version = "5", features = ["blocking-api"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # Registering the bundled launch agent with SMAppService (macOS 13+).
 objc2 = "0.6"

@@ -50,6 +50,8 @@ pub mod events {
     pub const WOL: &str = "dyno://wol";
     /// `WakesView`: the scheduled wakes changed.
     pub const WAKES: &str = "dyno://wakes";
+    /// `TrayAvailability`: the desktop started or stopped showing the tray icons.
+    pub const TRAY: &str = "dyno://tray";
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

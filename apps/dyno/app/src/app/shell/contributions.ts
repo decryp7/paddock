@@ -195,6 +195,9 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
   ],
   settingsPages: SETTINGS_PAGES,
   dialogs: DIALOGS,
-  healthServices: [defineHealthService({ id: 'dy.agent', label: msg('dy.health.agent', 'the Dyno agent'), icon: 'dy:processes' })],
+  healthServices: [
+    defineHealthService({ id: 'dy.agent', label: msg('dy.health.agent', 'the Dyno agent'), icon: 'dy:processes' }),
+    defineHealthService({ id: 'dy.tray', label: msg('dy.health.tray', 'the tray icons'), icon: 'dy:dashboard' }),
+  ],
   notificationKinds: [defineNotificationKind({ id: 'dy.alarm', title: msg('dy.notification.alarm', 'Alarm'), actions: [] })],
 };

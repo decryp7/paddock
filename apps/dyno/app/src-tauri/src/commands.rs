@@ -280,6 +280,14 @@ pub async fn open_taskbar_settings(app: AppHandle) -> Result<Value, CommandError
     Ok(Value::Null)
 }
 
+/// Whether the desktop shows Dyno's tray icons (the engine's `TrayAvailability`; the changes arrive as `dyno://tray`). Settings ›
+/// Menu bar shows the engine's note when it does not.
+#[tauri::command]
+pub async fn tray_availability(app: AppHandle) -> Result<Value, CommandError> {
+    serde_json::to_value(crate::tray_host::current(&app))
+        .map_err(|e| CommandError::internal(format!("The tray state could not be read: {e}")))
+}
+
 /// What [`open_taskbar_settings`] opens.
 pub const TASKBAR_SETTINGS_URL: &str = "ms-settings:taskbar";
 

@@ -71,6 +71,7 @@ pub mod time;
 pub mod tool_offer;
 pub mod toolpath;
 pub mod tray;
+pub mod tray_host;
 pub mod units;
 pub mod unusual;
 pub mod wake;
