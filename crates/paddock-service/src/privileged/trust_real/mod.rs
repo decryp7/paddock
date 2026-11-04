@@ -124,7 +124,8 @@ fn sweep_aside_free(
     Ok(removed)
 }
 
-/// `std::fs::remove_dir_all` removes a link inside the tree (and the root, if it is one) and never follows it, on Unix
+/// `std::fs::remove_dir_all` removes a link inside the tree (and the root, if it is one) and never follows it; a file or a link
+/// given as the root is removed by its name, on Unix
 /// and on Windows (it opens each entry with `FILE_FLAG_OPEN_REPARSE_POINT`); a root that is itself a link is removed as the
 /// link it is.
 fn remove_tree_no_follow(path: &str) -> io::Result<()> {
@@ -133,7 +134,9 @@ fn remove_tree_no_follow(path: &str) -> io::Result<()> {
             // A directory symlink or junction is removed with remove_dir on Windows, a file symlink with remove_file.
             std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path))
         }
-        Ok(_) => std::fs::remove_dir_all(path),
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(path),
+        // A plain file (a planted one) goes by its name.
+        Ok(_) => std::fs::remove_file(path),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }

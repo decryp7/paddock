@@ -256,6 +256,22 @@ mod unix_tests {
     }
 
     #[test]
+    fn remove_tree_removes_a_plain_file_and_a_link_to_a_file_by_name_never_the_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let keep = dir.path().join("keep.txt");
+        std::fs::write(&keep, b"keep").unwrap();
+        let planted = dir.path().join("planted.txt");
+        std::fs::write(&planted, b"x").unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&keep, &link).unwrap();
+        let mut port = RealTrust;
+        port.remove_tree(&text(&planted)).unwrap();
+        port.remove_tree(&text(&link)).unwrap();
+        assert!(!planted.exists() && std::fs::symlink_metadata(&link).is_err());
+        assert_eq!(std::fs::read(&keep).unwrap(), b"keep");
+    }
+
+    #[test]
     fn walk_lists_links_without_entering_them_and_is_bounded() {
         let dir = tempfile::tempdir().unwrap();
         let outside = dir.path().join("outside");

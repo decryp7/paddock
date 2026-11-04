@@ -201,18 +201,25 @@ impl TrustGuard {
                         log::warn!(Dir = folder.as_str(), Found = found.to_string().as_str(); "Helper: a folder on the way is not trusted; moved aside");
                         Self::move_aside(port.as_mut(), folder, style)?;
                         port.create_dir(folder).map_err(|e| could_not("create", &e))?;
-                    } else if let Err(found) = verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE) {
+                    } else if let Err(mut found) = verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE) {
                         // Locking sets this folder alone; whatever is in it was not changed by that and must be the
                         // helper's already. A foreign entry (or one whose security is not the helper's) is moved aside
-                        // by a repair or install and only refused at start.
+                        // by a repair or install, one entry at a time until the folder is clean, and only refused at start.
                         if on_untrusted == OnUntrusted::Refuse {
                             return Err(Unusable::HelperFolderNotProtected(found));
                         }
-                        let entry = child_of(folder, &found.path, style).ok_or_else(|| could_not("examine", &found.describe()))?;
-                        log::warn!(Dir = folder.as_str(), Entry = entry.as_str(), Found = found.to_string().as_str(); "Helper: a foreign entry in a folder on the way; moved aside");
-                        Self::move_aside(port.as_mut(), &entry, style)?;
-                        verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE)
-                            .map_err(|u| could_not("verify after moving aside", &u.describe()))?;
+                        for moved in 0..=MAX_MOVED_ENTRIES {
+                            if moved == MAX_MOVED_ENTRIES {
+                                return Err(could_not("too many foreign entries", &found.describe()));
+                            }
+                            let entry = child_of(folder, &found.path, style).ok_or_else(|| could_not("examine", &found.describe()))?;
+                            log::warn!(Dir = folder.as_str(), Entry = entry.as_str(), Found = found.to_string().as_str(); "Helper: a foreign entry in a folder on the way; moved aside");
+                            Self::move_aside(port.as_mut(), &entry, style)?;
+                            match verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE) {
+                                Ok(()) => break,
+                                Err(next) => found = next,
+                            }
+                        }
                     }
                 }
             }
@@ -257,6 +264,14 @@ impl TrustGuard {
         };
         let aside = port.rename_aside(entry).map_err(|e| could_not("move aside", &e))?;
         log::warn!(Dir = entry, Aside = aside.as_str(); "Helper: the untrusted folder was moved aside and is never read");
+        // A planted file or a junction or link is no folder to keep (and cannot be locked): it is removed by its name, never
+        // through the link, so that the folder it was in can be verified and the repair can finish.
+        let kind = port.node(&aside).map_err(|e| could_not("examine", &e))?.map(|n| n.kind);
+        if kind != Some(FileKind::Dir) {
+            port.remove_tree(&aside).map_err(|e| could_not("remove", &e))?;
+            log::warn!(Aside = aside.as_str(); "Helper: a moved-aside entry that is not a folder was removed by its name");
+            return Ok(());
+        }
         // Best effort: if the owner cannot be given to the trusted set the folder is simply never swept.
         if let Err(e) = port.lock_dir(&aside) {
             log::warn!(Aside = aside.as_str(), Error = e.to_string().as_str(); "Helper: a moved-aside folder could not be locked; it is kept");
@@ -359,6 +374,9 @@ impl TrustGuard {
         Ok(held)
     }
 }
+
+/// The most foreign entries one repair moves out of a folder on the way before it gives up.
+const MAX_MOVED_ENTRIES: usize = 64;
 
 /// How many moved-aside `*.untrusted-<n>` folders are kept next to the one they replaced (the newest).
 const MAX_ASIDE: usize = 2;

@@ -301,6 +301,47 @@ fn a_foreign_entry_in_the_vendor_folder_is_refused_at_start_and_moved_aside_by_a
     assert!(c.contains(&"sweep_aside c:\\programdata\\dyno evil 2".to_string()), "{c:?}");
 }
 
+#[test]
+fn a_planted_file_and_a_junction_in_the_vendor_folder_are_removed_by_name_and_the_repair_finishes() {
+    // In an unlocked Dyno a user left a file and a junction. Moved aside they cannot be locked as folders; kept, they would
+    // fail the check forever and Repair could never finish.
+    let user = "S-1-5-21-111-222-333-1001";
+    let make = || {
+        let mut m = windows_machine(|_| locked());
+        m.put("C:\\ProgramData\\Dyno", inherited_from_program_data());
+        let mut planted = file(locked());
+        if let Security::Windows(d) = &mut planted.security {
+            d.owner = user.into();
+        }
+        let mut junction = locked();
+        junction.kind = paddock_service::privileged::files::FileKind::Symlink;
+        m.put("C:\\ProgramData\\Dyno\\planted.txt", planted);
+        m.put("C:\\ProgramData\\Dyno\\junction", junction);
+        // What a junction points at is not under Dyno and must never be touched.
+        m.put("C:\\Users\\Eve\\target", locked());
+        m
+    };
+    let (g, machine) = guard(make(), HelperHost::Windows, None);
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap_err();
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    let c: Vec<String> = calls(&machine).iter().map(|x| x.to_lowercase()).collect();
+    for name in ["planted.txt", "junction"] {
+        let aside = format!("c:\\programdata\\dyno\\{name}.untrusted-1");
+        assert!(c.contains(&format!("rename_aside c:\\programdata\\dyno\\{name}")), "{name}: {c:?}");
+        assert!(
+            c.contains(&format!("remove_tree {aside}")),
+            "{name} removed by its (moved) name: {c:?}"
+        );
+        assert!(!machine.0.lock().unwrap().nodes.contains_key(&aside), "{name} is gone");
+    }
+    let nodes = machine.0.lock().unwrap().nodes.clone();
+    assert!(nodes.contains_key("c:\\users\\eve\\target"), "the junction's target is untouched");
+    // And the folder is locked and passes the whole check now.
+    g.verify_dir(Path::new(TOOLS), Path::new(TOOLS)).unwrap();
+    assert!(c.contains(&"lock_dir c:\\programdata\\dyno".to_string()));
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap();
+}
+
 /// A tree a standard user made before the fix: owned by that user, Users may add things.
 fn user_made_tree() -> FakePort {
     let user = "S-1-5-21-111-222-333-1001";
