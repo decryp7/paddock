@@ -13,7 +13,8 @@ use crate::tray_model::{plan_sync, Frame, ItemSpec};
 use paddock_window::popover::Rect;
 use paddock_window::tauri::{PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{item, TrayView, QUIT_ID, SHOW_ID};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -39,6 +40,11 @@ pub struct TrayState {
     drawn: Mutex<HashMap<String, Drawn>>,
     /// Per item: how many pictures in a row were refused (the log tells the first, then a count, then the recovery).
     refused: Mutex<HashMap<String, u32>>,
+    /// Every icon the app wants (its spec and the frame it starts with), whether or not the OS took it yet: what [`verify`] adds
+    /// again when an icon is missing or not shown (the login start, when the taskbar or menu bar is not ready for the first add).
+    wanted: Mutex<BTreeMap<String, (ItemSpec, Option<Frame>)>>,
+    /// Whether the follow-up checks of [`schedule_verify`] have been started.
+    verify_started: AtomicBool,
 }
 
 /// What one item last showed: the tooltip and the picture sent, and how many frames were drawn.
@@ -341,6 +347,59 @@ impl NativeIcon {
         })
     }
 
+    /// Whether the OS holds this icon: Windows, the shell accepted the add (Explorer's notification area was ready); macOS, the status
+    /// item's button sits in a visible window of the menu bar; elsewhere the call that made it is all there is to know.
+    fn shown(&self) -> Shown {
+        #[cfg(windows)]
+        {
+            match self.icon.with_inner_tray_icon(|t| t.is_added()) {
+                Ok(true) => Shown::Yes,
+                Ok(false) => Shown::No("the shell refused the add (Explorer's taskbar is not ready)".to_string()),
+                Err(e) => Shown::No(format!("the icon could not be asked: {e}")),
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let asked = self.icon.with_inner_tray_icon(|t| {
+                let Some(mtm) = objc2::MainThreadMarker::new() else {
+                    return Shown::No("not on the main thread".to_string());
+                };
+                let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+                let window = t.ns_status_item().and_then(|item| item.button(mtm)).and_then(|b| b.window());
+                let Some(w) = window else {
+                    return Shown::No(format!(
+                        "the status item has no window in the menu bar (app active {})",
+                        app.isActive()
+                    ));
+                };
+                let (frame, occluded) = (
+                    w.frame(),
+                    !w.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible),
+                );
+                let what = format!(
+                    "window visible {}, occluded {occluded}, frame {:.0},{:.0} {:.0}x{:.0}, app active {}, policy {:?}",
+                    w.isVisible(),
+                    frame.origin.x,
+                    frame.origin.y,
+                    frame.size.width,
+                    frame.size.height,
+                    app.isActive(),
+                    app.activationPolicy()
+                );
+                if w.isVisible() && !occluded && frame.size.width > 0.0 {
+                    Shown::Yes
+                } else {
+                    Shown::No(what)
+                }
+            });
+            asked.unwrap_or_else(|e| Shown::No(format!("the icon could not be asked: {e}")))
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            Shown::Yes
+        }
+    }
+
     /// Removes the icon of item `id` and drops the handle here, on the main thread.
     fn remove(main: &MainToken, app: &AppHandle<Wry>, id: &str) {
         main.assert_main();
@@ -442,12 +501,30 @@ pub enum TrayCommand {
         /// The unavailable frame of every item.
         frames: Vec<(String, Frame)>,
     },
-    /// The desktop's tray host appeared after the icons were made (Linux: an extension turned on, a panel that started late):
-    /// make every icon again so it registers with the host, starting from these frames.
-    Rebuild {
-        /// The unavailable frame of every item.
-        frames: Vec<(String, Frame)>,
+    /// Check that the OS shows every wanted icon, and add again each one that it does not (follow-up number `pass` after the start).
+    Verify {
+        /// Which follow-up check this is, from 0.
+        pass: u32,
     },
+}
+
+/// Whether the OS shows an icon now (the add can be accepted by the call and still show nothing).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shown {
+    /// The OS holds the icon and shows it.
+    Yes,
+    /// It does not, and why (for the log).
+    No(String),
+}
+
+/// The pauses before each follow-up check of the icons after the start: the first add can fail or be dropped while the login is
+/// still building the taskbar (Windows), the menu bar (macOS) or waiting for a status-notifier host (Linux), and no event says
+/// when it is ready. The checks cover about three minutes.
+const VERIFY_DELAYS_SECS: [u64; 9] = [1, 2, 4, 8, 15, 30, 30, 45, 60];
+
+/// The pause before follow-up check number `pass` (counted from 0), or none when the checks are over.
+pub fn verify_delay(pass: u32) -> Option<std::time::Duration> {
+    VERIFY_DELAYS_SECS.get(pass as usize).map(|s| std::time::Duration::from_secs(*s))
 }
 
 /// The native operations [`apply`] needs: [`NativeOps`] over real icons, a fake in the tests.
@@ -461,6 +538,8 @@ pub trait IconOps {
     fn draw(&mut self, id: &str, frame: &Frame, picture: bool, tooltip: bool) -> Result<(), String>;
     /// Copies the OS's saved position of item `id` aside (macOS).
     fn save_position(&mut self, id: &str);
+    /// Whether the OS shows the icon of item `id` now (a made icon the OS dropped, or never took, is not shown).
+    fn shown(&mut self, id: &str) -> Shown;
 }
 
 /// [`IconOps`] over the real icons; only the main thread can make one (it holds a [`MainToken`]).
@@ -513,6 +592,18 @@ impl IconOps for NativeOps<'_> {
         #[cfg(not(target_os = "macos"))]
         let _ = id;
     }
+
+    fn shown(&mut self, id: &str) -> Shown {
+        let Some(icon) = NativeIcon::find(self.main, self.app, id) else {
+            return Shown::No("the app has no icon of that id".to_string());
+        };
+        // Linux: an icon the desktop has no StatusNotifier host to show is not shown, whatever the add said.
+        #[cfg(target_os = "linux")]
+        if !crate::tray_host::current(self.app).is_shown() {
+            return Shown::No("the desktop has no StatusNotifier host".to_string());
+        }
+        icon.shown()
+    }
 }
 
 /// Applies one command to the icons and the bookkeeping, in the order commands arrive. This is the only place that decides what
@@ -531,42 +622,26 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
                 // AppKit may forget the position of a removed status item: keep a copy.
                 ops.save_position(id);
                 ops.remove(id);
-                lock(&state.items).remove(id);
-                lock(&state.painted).remove(id);
-                lock(&state.drawn).remove(id);
-                lock(&state.refused).remove(id);
+                forget(state, id);
+                lock(&state.wanted).remove(id);
             }
+            let mut first_error = None;
             for spec in &plan.create {
                 let first = initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f);
-                let tooltip = first_tooltip(spec, first);
-                ops.make(spec, first, &tooltip)?;
-                lock(&state.items).insert(spec.id.clone(), spec.clone());
+                lock(&state.wanted).insert(spec.id.clone(), (spec.clone(), first.cloned()));
+                // One icon the OS refuses must not stop the others, and is tried again by `Verify`.
+                if let Err(e) = make_one(ops, state, spec, first) {
+                    logging::info(&format!(
+                        "tray icon {}: could not be added: {e}; it is tried again in the follow-up checks",
+                        tray_id(&spec.id)
+                    ));
+                    first_error.get_or_insert(e);
+                }
             }
-            Ok(())
+            first_error.map_or(Ok(()), Err)
         }
         TrayCommand::Paint { item, frame } => {
             paint_one(ops, state, &item, &frame);
-            Ok(())
-        }
-        TrayCommand::Rebuild { frames } => {
-            let specs: Vec<ItemSpec> = {
-                let items = lock(&state.items);
-                items.values().cloned().collect()
-            };
-            logging::info(&format!("tray rebuild: making {} icon(s) again", specs.len()));
-            for spec in &specs {
-                ops.remove(&spec.id);
-                lock(&state.painted).remove(&spec.id);
-                // The next live picture and tooltip are always sent again.
-                lock(&state.drawn).remove(&spec.id);
-                lock(&state.refused).remove(&spec.id);
-                let first = frames.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f);
-                let tooltip = first_tooltip(spec, first);
-                if let Err(e) = ops.make(spec, first, &tooltip) {
-                    logging::info(&format!("tray rebuild: icon {} could not be made again: {e}", tray_id(&spec.id)));
-                    lock(&state.items).remove(&spec.id);
-                }
-            }
             Ok(())
         }
         TrayCommand::Disconnected { frames } => {
@@ -577,6 +652,94 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
             }
             Ok(())
         }
+        TrayCommand::Verify { pass } => {
+            verify(ops, state, pass);
+            Ok(())
+        }
+    }
+}
+
+/// Makes the icon of `spec` and records it as existing.
+fn make_one<O: IconOps>(ops: &mut O, state: &TrayState, spec: &ItemSpec, first: Option<&Frame>) -> Result<(), String> {
+    let tooltip = first_tooltip(spec, first);
+    ops.make(spec, first, &tooltip)?;
+    lock(&state.items).insert(spec.id.clone(), spec.clone());
+    Ok(())
+}
+
+/// Forgets what was drawn on the icon of `id`, so the next frame draws it whole.
+fn forget(state: &TrayState, id: &str) {
+    lock(&state.items).remove(id);
+    lock(&state.painted).remove(id);
+    lock(&state.drawn).remove(id);
+    lock(&state.refused).remove(id);
+}
+
+/// One follow-up check: every wanted icon that was never made, or that the OS does not show, is made again. Returns how many are
+/// still missing. Logs each add outcome, and a summary line on the first and last check and whenever something was wrong.
+fn verify<O: IconOps>(ops: &mut O, state: &TrayState, pass: u32) -> usize {
+    let wanted: Vec<(String, (ItemSpec, Option<Frame>))> = lock(&state.wanted).iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let (mut shown, mut repaired, mut missing) = (0, 0, 0);
+    for (id, (spec, first)) in &wanted {
+        let present = lock(&state.items).contains_key(id);
+        let why = if present {
+            match ops.shown(id) {
+                Shown::Yes => None,
+                Shown::No(why) => Some(why),
+            }
+        } else {
+            Some("it was never added".to_string())
+        };
+        let Some(why) = why else {
+            shown += 1;
+            continue;
+        };
+        logging::info(&format!(
+            "tray check #{pass}: icon {} is not shown ({why}); adding it again",
+            tray_id(id)
+        ));
+        if present {
+            ops.remove(id);
+            forget(state, id);
+        }
+        match make_one(ops, state, spec, first.as_ref()) {
+            Ok(()) => {
+                repaired += 1;
+                logging::info(&format!("tray check #{pass}: icon {} added again", tray_id(id)));
+            }
+            Err(e) => {
+                missing += 1;
+                logging::info(&format!("tray check #{pass}: icon {} could not be added again: {e}", tray_id(id)));
+            }
+        }
+    }
+    if pass == 0 || repaired + missing > 0 || verify_delay(pass + 1).is_none() {
+        logging::info(&format!(
+            "tray check #{pass}: {} wanted, {shown} shown, {repaired} added again, {missing} still missing",
+            wanted.len()
+        ));
+    }
+    missing
+}
+
+/// Starts the follow-up checks once per process: a thread that waits [`verify_delay`] before each check and sends it to the main
+/// thread. The first add at login can fail without a signal (Windows' taskbar, the menu bar, a status-notifier host not up yet).
+fn schedule_verify(app: &AppHandle<Wry>) {
+    let state = state_of(app);
+    if state.verify_started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    let spawned = std::thread::Builder::new().name("tray-checks".into()).spawn(move || {
+        let mut pass = 0;
+        while let Some(wait) = verify_delay(pass) {
+            std::thread::sleep(wait);
+            send(&app, TrayCommand::Verify { pass });
+            pass += 1;
+        }
+    });
+    if let Err(e) = spawned {
+        logging::info(&format!("tray checks: the thread could not start: {e}"));
     }
 }
 
@@ -680,20 +843,24 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, 
         },
         app.clone(),
     );
-    on_main(app, move |main| {
+    let applied = on_main(app, move |main| {
         #[cfg(windows)]
         tray_icon::set_guid_provider(tray_identity::guid_for_tray_id);
         let state = state_of(&handle);
         apply(&mut NativeOps { main, app: &handle }, &state, cmd)
-    })?
+    })?;
+    // Whatever the first add did, the checks follow: a refused or dropped add is made again when the OS is ready.
+    schedule_verify(app);
+    applied
 }
 
-/// Makes every icon again from the unavailable frames (the tray host appeared); the next live picture follows. Returns at once.
-pub fn rebuild(app: &AppHandle<Wry>) {
-    let Some(state) = app.try_state::<TrayState>() else { return };
-    let specs: Vec<ItemSpec> = lock(&state.items).values().cloned().collect();
-    let frames = crate::tray_model::TrayItems::new(specs, crate::tray_model::Env::native()).unavailable_frames(dark_taskbar());
-    send(app, TrayCommand::Rebuild { frames });
+/// The pass number of a check asked for by the tray host appearing (not one of the timed follow-ups, whose passes count from 0).
+const HOST_CHECK_PASS: u32 = 1000;
+
+/// The desktop's tray host appeared (Linux: an extension turned on, a panel that started late): check the icons now, so each one
+/// the host was not there to show is added again by the same check the login start uses ([`TrayCommand::Verify`]). Returns at once.
+pub fn verify_now(app: &AppHandle<Wry>) {
+    send(app, TrayCommand::Verify { pass: HOST_CHECK_PASS });
 }
 
 /// Draws a frame on an item. Returns at once; the main thread does it.
@@ -810,9 +977,28 @@ mod tests {
         saved: usize,
         /// The tooltip the platform call got, per icon, in order.
         tips: Vec<(String, String)>,
+        /// How many of the next `make` calls the OS refuses (the taskbar or menu bar is not ready).
+        refuse_makes: usize,
+        /// Icons the OS took but does not show (a dropped add).
+        not_shown: BTreeSet<String>,
     }
 
     impl FakeOps {
+        fn new() -> FakeOps {
+            FakeOps {
+                owner: std::thread::current().id(),
+                live: BTreeSet::new(),
+                made: 0,
+                removed: 0,
+                drawn: 0,
+                pictures: 0,
+                saved: 0,
+                tips: Vec::new(),
+                refuse_makes: 0,
+                not_shown: BTreeSet::new(),
+            }
+        }
+
         fn here(&self) {
             assert_eq!(std::thread::current().id(), self.owner, "a native tray call off the owner thread");
         }
@@ -821,6 +1007,10 @@ mod tests {
     impl IconOps for FakeOps {
         fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>, tooltip: &str) -> Result<(), String> {
             self.here();
+            if self.refuse_makes > 0 {
+                self.refuse_makes -= 1;
+                return Err("the taskbar is not ready".to_string());
+            }
             assert!(initial.is_some(), "every new icon starts with its unavailable frame");
             self.tips.push((spec.id.clone(), tooltip.to_string()));
             assert!(self.live.insert(spec.id.clone()), "{} made twice", spec.id);
@@ -830,6 +1020,7 @@ mod tests {
         fn remove(&mut self, id: &str) {
             self.here();
             assert!(self.live.remove(id), "{id} removed but not there");
+            self.not_shown.remove(id);
             self.removed += 1;
         }
         fn draw(&mut self, id: &str, frame: &Frame, picture: bool, tooltip: bool) -> Result<(), String> {
@@ -846,6 +1037,14 @@ mod tests {
         fn save_position(&mut self, _: &str) {
             self.here();
             self.saved += 1;
+        }
+        fn shown(&mut self, id: &str) -> Shown {
+            self.here();
+            if self.live.contains(id) && !self.not_shown.contains(id) {
+                Shown::Yes
+            } else {
+                Shown::No("fake".to_string())
+            }
         }
     }
 
@@ -869,16 +1068,7 @@ mod tests {
         let state = TrayState::default();
         let specs = items(2);
         let initial = frames(&specs);
-        let mut ops = FakeOps {
-            owner: std::thread::current().id(),
-            live: BTreeSet::new(),
-            made: 0,
-            removed: 0,
-            drawn: 0,
-            pictures: 0,
-            saved: 0,
-            tips: Vec::new(),
-        };
+        let mut ops = FakeOps::new();
         apply(
             &mut ops,
             &state,
@@ -896,22 +1086,119 @@ mod tests {
         }
     }
 
+    fn sync(ops: &mut FakeOps, state: &TrayState, n: usize) -> Result<(), String> {
+        let specs = items(n);
+        let initial = frames(&specs);
+        apply(ops, state, TrayCommand::Sync { specs, initial })
+    }
+
+    #[test]
+    fn a_refused_add_at_login_does_not_stop_the_other_icons_and_is_added_again_by_the_next_check() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        ops.refuse_makes = 1;
+        // The taskbar or menu bar is not ready: the first icon is refused, the second is taken.
+        assert!(sync(&mut ops, &state, 2).is_err());
+        assert_eq!(ops.live.len(), 1, "the refused icon must not stop the next one");
+        apply(&mut ops, &state, TrayCommand::Verify { pass: 0 }).unwrap();
+        assert_eq!(ops.live, BTreeSet::from(["cpu-0".to_string(), "cpu-1".to_string()]));
+        // A later check finds nothing to do.
+        let made = ops.made;
+        apply(&mut ops, &state, TrayCommand::Verify { pass: 1 }).unwrap();
+        assert_eq!(ops.made, made);
+    }
+
+    #[test]
+    fn a_check_keeps_trying_while_the_os_keeps_refusing() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        ops.refuse_makes = 3;
+        assert!(sync(&mut ops, &state, 1).is_err());
+        for pass in 0..2 {
+            apply(&mut ops, &state, TrayCommand::Verify { pass }).unwrap();
+            assert!(ops.live.is_empty(), "pass {pass}: still refused");
+        }
+        apply(&mut ops, &state, TrayCommand::Verify { pass: 2 }).unwrap();
+        assert_eq!(ops.live.len(), 1);
+    }
+
+    #[test]
+    fn an_icon_the_os_took_but_does_not_show_is_removed_and_added_again_and_drawn_afresh() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        sync(&mut ops, &state, 2).unwrap();
+        let specs = items(2);
+        let frame = frames(&specs).remove(0).1;
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Paint {
+                item: "cpu-0".into(),
+                frame: frame.clone(),
+            },
+        )
+        .unwrap();
+        let drawn = ops.drawn;
+        ops.not_shown.insert("cpu-0".to_string());
+        apply(&mut ops, &state, TrayCommand::Verify { pass: 0 }).unwrap();
+        assert_eq!((ops.removed, ops.made), (1, 3), "only the hidden icon is made again");
+        assert!(ops.not_shown.is_empty());
+        // The new icon has nothing on it yet: the same frame is drawn again.
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Paint {
+                item: "cpu-0".into(),
+                frame,
+            },
+        )
+        .unwrap();
+        assert!(ops.drawn > drawn, "the re-made icon gets its picture");
+    }
+
+    #[test]
+    fn the_tray_host_appearing_adds_again_the_icons_it_was_not_there_to_show_through_the_same_check() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        sync(&mut ops, &state, 2).unwrap();
+        // No host: the desktop shows neither icon.
+        ops.not_shown.extend(["cpu-0".to_string(), "cpu-1".to_string()]);
+        // The host appears: `verify_now` sends this check, which is not one of the timed follow-ups.
+        assert!(verify_delay(HOST_CHECK_PASS).is_none());
+        apply(&mut ops, &state, TrayCommand::Verify { pass: HOST_CHECK_PASS }).unwrap();
+        assert_eq!((ops.removed, ops.made), (2, 4));
+        assert!(ops.not_shown.is_empty());
+        // Asked again with nothing wrong: nothing is touched.
+        apply(&mut ops, &state, TrayCommand::Verify { pass: HOST_CHECK_PASS }).unwrap();
+        assert_eq!((ops.removed, ops.made), (2, 4));
+    }
+
+    #[test]
+    fn a_removed_item_is_not_added_again_by_a_check() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        sync(&mut ops, &state, 2).unwrap();
+        sync(&mut ops, &state, 1).unwrap();
+        apply(&mut ops, &state, TrayCommand::Verify { pass: 0 }).unwrap();
+        assert_eq!(ops.live, BTreeSet::from(["cpu-0".to_string()]));
+    }
+
+    #[test]
+    fn the_follow_up_checks_start_within_two_seconds_and_cover_two_minutes_then_stop() {
+        let delays: Vec<_> = (0..).map_while(verify_delay).collect();
+        assert!(delays[0] <= std::time::Duration::from_secs(2));
+        assert!(delays.iter().sum::<std::time::Duration>() >= std::time::Duration::from_secs(120));
+        assert!(delays.windows(2).all(|w| w[0] <= w[1]), "backs off, never speeds up");
+        assert!(verify_delay(delays.len() as u32).is_none());
+    }
+
     #[test]
     fn a_bulk_change_32_to_6_to_32_goes_through_one_owner_thread_and_stays_consistent() {
         let (tx, rx) = mpsc::channel::<TrayCommand>();
         // The "main thread": the only one that owns icons; the test thread plays the agent link and only sends messages.
         let owner = std::thread::spawn(move || {
             let state = TrayState::default();
-            let mut ops = FakeOps {
-                owner: std::thread::current().id(),
-                live: BTreeSet::new(),
-                made: 0,
-                removed: 0,
-                drawn: 0,
-                pictures: 0,
-                saved: 0,
-                tips: Vec::new(),
-            };
+            let mut ops = FakeOps::new();
             for cmd in rx {
                 apply(&mut ops, &state, cmd).unwrap();
             }
@@ -953,16 +1240,7 @@ mod tests {
     #[test]
     fn a_tooltip_only_change_sets_no_picture() {
         let state = TrayState::default();
-        let mut ops = FakeOps {
-            owner: std::thread::current().id(),
-            live: BTreeSet::new(),
-            made: 0,
-            removed: 0,
-            drawn: 0,
-            pictures: 0,
-            saved: 0,
-            tips: Vec::new(),
-        };
+        let mut ops = FakeOps::new();
         let specs = items(1);
         let initial = frames(&specs);
         apply(
@@ -1000,16 +1278,7 @@ mod tests {
     #[test]
     fn each_icon_gets_its_own_metric_tooltip_from_the_frame() {
         let state = TrayState::default();
-        let mut ops = FakeOps {
-            owner: std::thread::current().id(),
-            live: BTreeSet::new(),
-            made: 0,
-            removed: 0,
-            drawn: 0,
-            pictures: 0,
-            saved: 0,
-            tips: Vec::new(),
-        };
+        let mut ops = FakeOps::new();
         let specs = vec![
             ItemSpec::new("cpu", Metric::CpuTotal, crate::tray_model::Glyph::Number),
             ItemSpec::new("mem", Metric::Memory, crate::tray_model::Glyph::Number),
@@ -1057,16 +1326,7 @@ mod tests {
     #[test]
     fn the_position_is_saved_on_its_count_even_when_nothing_is_drawn() {
         let state = TrayState::default();
-        let mut ops = FakeOps {
-            owner: std::thread::current().id(),
-            live: BTreeSet::new(),
-            made: 0,
-            removed: 0,
-            drawn: 0,
-            pictures: 0,
-            saved: 0,
-            tips: Vec::new(),
-        };
+        let mut ops = FakeOps::new();
         let specs = items(1);
         let initial = frames(&specs);
         apply(
