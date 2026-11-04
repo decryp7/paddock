@@ -1305,3 +1305,11 @@ Five Dyno tests failed only on the Windows leg (2147 passed, 5 failed); each was
 **Lesson:** a test that builds a fake Linux or macOS tree runs on all three runners: build paths from the OS (`temp_dir`, `Path::join`), keep
 test inputs LF in `.gitattributes`, and gate a test by `cfg` only with the reason (never `#[ignore]`). The check before pushing is `cargo xwin clippy
 --all-targets` (an import used only by a gated test is an unused-import error on Windows).
+
+## A CDK virtual viewport measures its height once; a body that grows later is blank (2026-11-04, paddock-ui `pd-table`, Dyno 1.1.0 RC)
+Dyno's Processes page (458 rows) showed blank space under the last drawn row. `CdkVirtualScrollViewport` measures its own
+height at start and on a window resize only; `pd-table`'s body height follows its frame (`maxHeight`) and its rows, so a body
+that grew after the first measure drew only the rows its old height plus the buffer cover. Confirmed: a gallery spec grows
+the body to 1600 px and found an 800 px gap before the fix and none after. **Rule:** whatever sizes a CDK viewport from
+outside re-measures it when it resizes (`pd-table` calls `checkViewportSize()` from its body ResizeObserver); a virtual
+list spec asserts the last drawn row meets the body's bottom edge after the body changed height.
