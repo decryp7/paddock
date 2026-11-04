@@ -31,6 +31,10 @@ struct Proc {
     hidden_from_table: bool,
     /// Restart Manager lists it although its program is not one of the listed ones (a system component mapping the files).
     rm_lists_anyway: bool,
+    /// The second open (to end) finds it gone.
+    gone_on_end: bool,
+    /// The second open (to end) is refused.
+    denied_on_end: bool,
 }
 
 /// The file name of a Windows path (the host may not split on a backslash).
@@ -52,6 +56,8 @@ fn proc(pid: u32, session: u32, image: &str) -> Proc {
         terminate_fails: false,
         hidden_from_table: false,
         rm_lists_anyway: false,
+        gone_on_end: false,
+        denied_on_end: false,
     }
 }
 
@@ -151,6 +157,12 @@ impl Machine for Fake {
     fn open(&mut self, pid: u32, for_end: bool) -> Result<FakeHeld, OpenFailure> {
         self.events.push(format!("open:{pid}:{}", if for_end { "end" } else { "query" }));
         let p = self.procs.iter().find(|p| p.id.pid() == pid && p.alive).ok_or(OpenFailure::Gone)?;
+        if for_end && p.gone_on_end {
+            return Err(OpenFailure::Gone);
+        }
+        if for_end && p.denied_on_end {
+            return Err(OpenFailure::Denied(5));
+        }
         if (p.needs_privilege && !self.privilege_on) || p.denied {
             return Err(OpenFailure::Denied(5));
         }
@@ -185,7 +197,27 @@ fn images() -> Vec<String> {
     vec!["Dyno.exe".into(), "dyno-agent.exe".into(), "paddock-setup.exe".into()]
 }
 
+/// A logger that accepts everything and prints nothing, so the log lines' arguments are evaluated like in production.
+struct Quiet;
+impl log::Log for Quiet {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        let _ = format!("{}", record.args());
+    }
+    fn flush(&self) {}
+}
+
+fn init_log() {
+    static Q: Quiet = Quiet;
+    if log::set_logger(&Q).is_ok() {
+        log::set_max_level(log::LevelFilter::Trace);
+    }
+}
+
 fn run(f: &mut Fake) -> StopReport {
+    init_log();
     let imgs = images();
     let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: None };
     stop_all(f, &req, &Bounds::default())
@@ -437,4 +469,18 @@ fn the_check_runs_with_the_privilege_and_drops_it() {
     run(&mut f);
     let ev: Vec<&str> = f.events.iter().map(String::as_str).collect();
     assert_eq!(ev, vec!["processes", "enable", "rm_list", "drop"]);
+}
+
+#[test]
+fn a_process_gone_or_refused_at_the_second_open_is_handled() {
+    let mut a = dyno(10, 1);
+    a.gone_on_end = true;
+    let mut b = dyno(11, 1);
+    b.denied_on_end = true;
+    let mut f = Fake::new(vec![a, b]);
+    let r = run(&mut f);
+    assert!(matches!(&r.actions[0].outcome, Outcome::Skipped(w) if w.contains("exited")), "{r:?}");
+    assert!(matches!(&r.actions[1].outcome, Outcome::Failed(w) if w.contains("to end")), "{r:?}");
+    assert_eq!(f.count("terminate"), 0);
+    assert!(!f.privilege_on);
 }
