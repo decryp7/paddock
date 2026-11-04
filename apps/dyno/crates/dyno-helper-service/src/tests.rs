@@ -149,7 +149,11 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
     let flag = removed.clone();
     sys.on("systemctl is-active", move |_, _| {
         Ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
-            Output { code: Some(3), stdout: "inactive\n".into(), ..Output::default() }
+            Output {
+                code: Some(3),
+                stdout: "inactive\n".into(),
+                ..Output::default()
+            }
         } else {
             Output::ok("active\n")
         })
@@ -157,7 +161,11 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
     let flag = removed.clone();
     sys.on("systemctl is-enabled", move |_, _| {
         Ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
-            Output { code: Some(1), stdout: "disabled\n".into(), ..Output::default() }
+            Output {
+                code: Some(1),
+                stdout: "disabled\n".into(),
+                ..Output::default()
+            }
         } else {
             Output::ok("enabled\n")
         })
