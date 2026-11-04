@@ -79,8 +79,15 @@ type PushFn = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
 pub struct PeerOptions {
     /// Names the other side in messages ("plugin \"x\"", "the agent").
     pub label: String,
-    /// Calls of the other side handled at once; more are refused with [`codes::BUSY`].
+    /// Calls of the other side handled at once; more wait in [`PeerOptions::call_queue`], and past that are refused with
+    /// [`codes::BUSY`].
     pub max_concurrent_calls: usize,
+    /// Calls over [`PeerOptions::max_concurrent_calls`] that wait their turn, first come first served (0: none wait, they
+    /// are refused at once). A waiting call can be cancelled and ends with the connection.
+    pub call_queue: usize,
+    /// The most request bytes that wait in the call queue at once; a call that would exceed it is refused with
+    /// [`codes::BUSY`] (default 16 MiB, the default frame limit, so one connection cannot park an unbounded amount).
+    pub call_queue_bytes: usize,
     /// How long a callee has to end a call after a cancel ([`CANCEL_GRACE`]).
     pub cancel_grace: Duration,
     /// Pushes waiting for the push callback; newer ones are dropped and counted when it falls behind.
@@ -95,6 +102,8 @@ impl fmt::Debug for PeerOptions {
         f.debug_struct("PeerOptions")
             .field("label", &self.label)
             .field("max_concurrent_calls", &self.max_concurrent_calls)
+            .field("call_queue", &self.call_queue)
+            .field("call_queue_bytes", &self.call_queue_bytes)
             .field("cancel_grace", &self.cancel_grace)
             .field("push_queue", &self.push_queue)
             .field("on_push", &self.on_push.is_some())
@@ -108,6 +117,8 @@ impl PeerOptions {
         PeerOptions {
             label: label.into(),
             max_concurrent_calls: 64,
+            call_queue: 0,
+            call_queue_bytes: 16 << 20,
             cancel_grace: CANCEL_GRACE,
             push_queue: 64,
             clock: Arc::new(SystemClock),
@@ -173,10 +184,21 @@ struct Inner {
     closer: crate::endpoint::Closer,
     pending: Mutex<HashMap<u64, Pending>>,
     served: Mutex<HashMap<u64, Arc<Served>>>,
+    /// Running calls and the calls waiting for a free slot (lock before `served`).
+    gate: Mutex<Gate>,
     next: AtomicU64,
     dropped_pushes: AtomicU64,
     closed: Mutex<Option<IpcError>>,
     closed_cv: Condvar,
+}
+
+/// The calls running now and those waiting for a slot.
+#[derive(Default)]
+struct Gate {
+    running: usize,
+    /// Request bytes waiting in `waiting`.
+    queued_bytes: usize,
+    waiting: std::collections::VecDeque<(u64, Vec<u8>, Arc<Served>)>,
 }
 
 static NEXT_PEER: AtomicU64 = AtomicU64::new(1);
@@ -235,6 +257,7 @@ impl Peer {
                 closer,
                 pending: Mutex::new(HashMap::new()),
                 served: Mutex::new(HashMap::new()),
+                gate: Mutex::new(Gate::default()),
                 next: AtomicU64::new(1),
                 dropped_pushes: AtomicU64::new(0),
                 closed: Mutex::new(None),
@@ -537,13 +560,16 @@ impl Peer {
     }
 
     fn serve_call(&self, handler: &Arc<dyn Handler>, id: u64, credit: u32, body: Vec<u8>) {
-        let served = {
-            let mut s = lock(&self.inner.served);
-            if s.len() >= self.inner.opts.max_concurrent_calls {
-                drop(s);
+        let opts = &self.inner.opts;
+        let started_now = {
+            let mut gate = lock(&self.inner.gate);
+            let mut served = lock(&self.inner.served);
+            if served.len() >= opts.max_concurrent_calls.saturating_add(opts.call_queue) {
+                drop(served);
+                drop(gate);
                 return self.refuse_call(id, "too many calls are running; try again");
             }
-            let served = Arc::new(Served {
+            let call = Arc::new(Served {
                 state: Mutex::new(ServedState {
                     credit: u64::from(credit),
                     streams: credit > 0,
@@ -551,42 +577,91 @@ impl Peer {
                 }),
                 cv: Condvar::new(),
             });
-            s.insert(id, served.clone());
-            served
+            served.insert(id, call.clone());
+            if gate.running < opts.max_concurrent_calls {
+                gate.running += 1;
+                Some(call)
+            } else if gate.queued_bytes.saturating_add(body.len()) > opts.call_queue_bytes {
+                served.remove(&id);
+                drop(served);
+                drop(gate);
+                return self.refuse_call(id, "too many calls are waiting; try again");
+            } else {
+                gate.queued_bytes += body.len();
+                gate.waiting.push_back((id, body.clone(), call));
+                None
+            }
+        };
+        let Some(first) = started_now else {
+            return;
         };
         let (peer, handler) = (self.clone(), handler.clone());
         let started = spawn("paddock-ipc-call", move || {
-            let ctx = CallCtx {
-                peer: peer.clone(),
-                id,
-                served,
-            };
-            let result = catch_unwind(AssertUnwindSafe(|| handler.call(&ctx, &body)))
-                .unwrap_or_else(|p| {
-                    Err(RemoteError::new(
-                        codes::PANIC,
-                        format!("it panicked: {}", panic_message(p.as_ref())),
-                    ))
-                });
-            lock(&peer.inner.served).remove(&id);
-            let reply = match result {
-                Ok(body) => Frame::Reply { id, body },
-                Err(error) => Frame::Fail { id, error },
-            };
-            if let Err(IpcError::TooLarge { len, max }) = peer.send(&reply) {
-                // The answer does not fit in a frame: this call fails, the connection stays.
-                let _ = peer.send(&Frame::Fail {
-                    id,
-                    error: RemoteError::new(
-                        codes::TOO_LARGE,
-                        format!("the answer could not be sent: {len} bytes exceed the limit of {max} bytes"),
-                    ),
-                });
+            let mut next = Some((id, body, first));
+            while let Some((id, body, served)) = next {
+                peer.run_call(&handler, id, body, served);
+                next = peer.next_waiting();
             }
         });
         if let Err(e) = started {
             lock(&self.inner.served).remove(&id);
+            lock(&self.inner.gate).running -= 1;
             self.refuse_call(id, &e.to_string());
+        }
+    }
+
+    /// The next waiting call that is still wanted (the connection did not end it); frees the slot when there is none.
+    fn next_waiting(&self) -> Option<(u64, Vec<u8>, Arc<Served>)> {
+        let mut gate = lock(&self.inner.gate);
+        while let Some((id, body, served)) = gate.waiting.pop_front() {
+            gate.queued_bytes -= body.len();
+            if !lock(&self.inner.served).contains_key(&id) {
+                continue;
+            }
+            // The caller gave up while the call waited: it is answered as cancelled and never runs.
+            if lock(&served.state).cancelled {
+                lock(&self.inner.served).remove(&id);
+                let _ = self.send(&Frame::Fail {
+                    id,
+                    error: CallCtx::cancelled_error(),
+                });
+                continue;
+            }
+            return Some((id, body, served));
+        }
+        gate.running -= 1;
+        None
+    }
+
+    fn run_call(&self, handler: &Arc<dyn Handler>, id: u64, body: Vec<u8>, served: Arc<Served>) {
+        let ctx = CallCtx {
+            peer: self.clone(),
+            id,
+            served,
+        };
+        let result =
+            catch_unwind(AssertUnwindSafe(|| handler.call(&ctx, &body))).unwrap_or_else(|p| {
+                Err(RemoteError::new(
+                    codes::PANIC,
+                    format!("it panicked: {}", panic_message(p.as_ref())),
+                ))
+            });
+        lock(&self.inner.served).remove(&id);
+        let reply = match result {
+            Ok(body) => Frame::Reply { id, body },
+            Err(error) => Frame::Fail { id, error },
+        };
+        if let Err(IpcError::TooLarge { len, max }) = self.send(&reply) {
+            // The answer does not fit in a frame: this call fails, the connection stays.
+            let _ = self.send(&Frame::Fail {
+                id,
+                error: RemoteError::new(
+                    codes::TOO_LARGE,
+                    format!(
+                        "the answer could not be sent: {len} bytes exceed the limit of {max} bytes"
+                    ),
+                ),
+            });
         }
     }
 

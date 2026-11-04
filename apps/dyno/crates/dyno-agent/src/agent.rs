@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 /// Locks, recovering from poisoning: a panic in one request must not wedge the agent.
@@ -109,11 +109,20 @@ impl VolumesSlot {
     }
 }
 
+/// The value [`Sub::detail`] holds for `detail` (0 is "not subscribed yet").
+pub fn detail_code(detail: LiveDetail) -> u8 {
+    match detail {
+        LiveDetail::Summary => 1,
+        LiveDetail::Processes => 2,
+        LiveDetail::Tray => 3,
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
     pub id: u64,
-    /// 0 = not subscribed yet, 1 = summary, 2 = processes.
+    /// 0 = not subscribed yet, otherwise [`detail_code`] of the detail.
     pub detail: Arc<AtomicU8>,
     /// Bounded: a slow app loses frames, it never slows the sampler.
     pub tx: SyncSender<Message>,
@@ -131,6 +140,7 @@ impl Sub {
         match self.detail.load(Ordering::Relaxed) {
             1 => Some(LiveDetail::Summary),
             2 => Some(LiveDetail::Processes),
+            3 => Some(LiveDetail::Tray),
             _ => None,
         }
     }
@@ -249,6 +259,10 @@ pub struct Shared {
     pub reveal: Reveal,
     /// Open ports and connections (observe-only).
     pub network: crate::network::NetCentre,
+    /// The user's IP lists, the match index, the location databases and the user's own location.
+    pub intel: crate::intel_centre::IntelCentre,
+    /// The firewall of this computer (read-only).
+    pub firewall: crate::firewall::FirewallCentre,
     /// The performance counters browser (observe-only).
     pub counters: crate::counters::CounterCentre,
     /// The OS problem logs (observe-only).
@@ -271,11 +285,63 @@ pub struct Shared {
     pub baselines: crate::baselines::BaselineCentre,
     /// The disk map: volumes and scans (read-only).
     pub disk: Arc<crate::disk::centre::DiskCentre>,
+    /// The saved-views cache (ADR 0029), when there is one: the disk map, the counter catalog and the software list keep
+    /// their last answer in it.
+    pub cache: Option<crate::cache::Cache>,
+    /// Keep awake: the OS hold and its state machine (ADR 0032).
+    pub power: Arc<crate::power::PowerCentre>,
+    /// Wake-on-LAN: the saved computers and the wake job (ADR 0032).
+    pub wol: crate::wol::WolCentre,
+    /// Scheduled wake: the schedules, their OS wakes and what happens at their time (ADR 0032 section 5).
+    pub wakes: crate::wakes::WakeCentre,
+    /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
+    pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     next_conn: AtomicU64,
+}
+
+/// What the benchmark centre gets from the agent: a job in the Jobs view and the latest power source.
+struct AgentBenchEnv(Weak<Shared>);
+
+impl crate::bench::BenchEnv for AgentBenchEnv {
+    fn register_job(&self, title: &str, subject: Option<&str>) -> Option<paddock_jobs::JobContext> {
+        Some(self.0.upgrade()?.jobs.register_external("benchmark", title, subject))
+    }
+
+    fn on_battery(&self) -> Option<bool> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent
+            .back()
+            .and_then(|s| s.battery.value().map(|b| b.source == dyno_core::metrics::PowerSource::Battery))
+    }
+
+    fn volumes(&self) -> Vec<dyno_core::disk::volume::Volume> {
+        self.0.upgrade().map(|shared| shared.disk.volumes()).unwrap_or_default()
+    }
+
+    fn available_memory(&self) -> Option<u64> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent.back().map(|s| s.memory.available)
+    }
+
+    fn throttle_input(&self) -> Option<dyno_core::throttle::ThrottleInput> {
+        let shared = self.0.upgrade()?;
+        let core = lock(&shared.core);
+        core.recent.back().map(|s| {
+            // What the OS says about its own limits is read by the hardware centre while the CPU is busy, as a run is.
+            let ctx = shared.hardware.context();
+            dyno_core::throttle::ThrottleInput::from_sample(s, ctx.power_saver, ctx.os)
+        })
+    }
+
+    fn space(&self, mount: &str) -> Option<(u64, u64)> {
+        dyno_platform::volumes::capacity(mount)
+    }
 }
 
 impl Shared {
@@ -318,7 +384,36 @@ impl Shared {
         notes.extend(note);
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
-        let settings = settings.unwrap_or_default().normalised();
+        let mut settings = settings.unwrap_or_default().normalised();
+        // A dashboard read from Dyno 1.0's span layout: written at once under its new key, logged once (ADR 0044 §4, ER-27).
+        let upgraded = settings.dashboard.take_upgraded().map(|from| {
+            let dropped: u32 = settings
+                .dashboard
+                .notes()
+                .iter()
+                .map(|n| match n.code {
+                    paddock_widgets::NoteCode::Dropped { count } => count,
+                    _ => 0,
+                })
+                .sum();
+            format!(
+                "The dashboard layout was upgraded from version {from} to 2: {} placements, {dropped} dropped.",
+                settings.dashboard.layout().placements.len()
+            )
+        });
+        // The saved-maps cache (ADR 0029): a second, rebuildable file in the OS cache folder. Off for this run (said once) when its
+        // folder cannot be written or another process holds the file; the disk map then works without it.
+        let started = crate::cache::Cache::start(
+            dirs.cache_db(),
+            crate::cache::CacheSettings::from(settings.disk.saved_maps),
+            crate::cache::CacheDeps {
+                clock: Arc::new(crate::disk::centre::SystemClock::default()),
+                free: Arc::new(crate::cache::db::OsFreeSpace),
+            },
+        );
+        notes.extend(started.note);
+        let saved_maps = started.cache;
+        let saved_maps_settings = settings.disk.saved_maps;
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let zone = platform.zone.clone();
@@ -344,17 +439,23 @@ impl Shared {
         for n in notes {
             core.log(t, ActivityKind::System, "Dyno started with a clean slate".into(), n);
         }
+        if let Some(detail) = upgraded {
+            core.log(t, ActivityKind::System, "Dashboard layout upgraded".into(), detail);
+            core.save_settings(&dirs);
+        }
         let (bench, bench_note) = crate::bench::BenchCentre::load(
             dirs.benchmarks(),
             std::env::temp_dir(),
-            Box::new(crate::bench::ProcessLauncher::beside_agent()),
+            Box::new(crate::bench::ProcessLauncher::beside_agent(&dirs.benchmarks())),
         );
         if let Some(n) = bench_note {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
+        let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
+        let own_tools = dirs.tools();
         let Platform {
             sensors,
             processes,
@@ -368,8 +469,12 @@ impl Shared {
             counters,
             network,
             hardware,
+            power,
+            wol,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
+            firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
+            intel: crate::intel_centre::IntelCentre::new(dirs.clone(), Arc::new(paddock_jobs::time::SystemClock)),
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
             core: Mutex::new(core),
@@ -392,8 +497,17 @@ impl Shared {
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
             network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
-            hardware: crate::hardware::HardwareCentre::new(hardware.signals, hardware.wear, hardware.battery),
+            hardware: crate::hardware::HardwareCentre::new(
+                hardware.signals,
+                if own_folder {
+                    dyno_platform::hardware::disk_wear_with_own_tools(&own_tools)
+                } else {
+                    hardware.wear
+                },
+                hardware.battery,
+            ),
             baselines: crate::baselines::BaselineCentre::new(),
+            cache: saved_maps.clone(),
             disk: Arc::new(crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),
                 disk_ports.volumes,
@@ -403,12 +517,26 @@ impl Shared {
                 cores,
                 settings_limits,
             )),
+            power: Arc::new(crate::power::PowerCentre::new(
+                power.os,
+                power.events,
+                power.actions,
+                power.signals,
+                power_marker,
+            )),
+            wakes: crate::wakes::WakeCentre::new(wol.wake_timer.clone(), Arc::new(crate::wakes::SharedHelper::new(me.clone()))),
+            wol: crate::wol::WolCentre::new(wol),
+            helper: crate::helper_os::centre(),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
         shared.disk.set_read_threads(read_threads);
+        shared.disk.attach_cache(saved_maps.clone());
+        shared.counters.attach_cache(saved_maps);
+        shared.disk.apply_saved_maps(saved_maps_settings);
+        shared.bench.attach(Arc::new(AgentBenchEnv(Arc::downgrade(&shared))));
         Ok((shared, sensors, processes))
     }
 
@@ -426,6 +554,8 @@ impl Shared {
     pub fn request_stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
         self.wake_sampler();
+        self.power.wake();
+        self.wakes.wake();
     }
 
     /// Cuts the sampler's sleep short (a subscriber arrived, settings changed, the agent is stopping).
@@ -447,16 +577,7 @@ impl Shared {
 
     /// The most detailed live view anyone wants.
     pub fn watching(&self) -> Option<LiveDetail> {
-        let subs = lock(&self.subs);
-        let mut best = None;
-        for s in subs.iter() {
-            match s.wants() {
-                Some(LiveDetail::Processes) => return Some(LiveDetail::Processes),
-                Some(LiveDetail::Summary) => best = Some(LiveDetail::Summary),
-                None => {}
-            }
-        }
-        best
+        lock(&self.subs).iter().filter_map(Sub::wants).max_by_key(|d| d.rank())
     }
 
     /// Hands a scan status to every connected app: it replaces the older one of the same scan that has not been sent yet, and

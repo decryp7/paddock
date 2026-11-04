@@ -92,6 +92,25 @@
         "spec": "softwareInventory"
       }
     },
+    {
+      "startJob": {
+        "spec": {
+          "helper": {
+            "action": "turnOn"
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "helper": {
+            "action": "turnOff"
+          }
+        }
+      }
+    },
+    "helperStatus",
     "jobs",
     {
       "cancelJob": {
@@ -111,6 +130,11 @@
       "finderHashGib": 64,
       "notableFileMib": 10,
       "readThreads": "auto",
+      "savedMaps": {
+        "enabled": true,
+        "maxMb": 1024,
+        "refreshOnOpen": "off"
+      },
       "scanFolders": 2000000
     },
     "diskFixed": {
@@ -120,6 +144,11 @@
       "notableFileMib": 10,
       "readThreads": {
         "fixed": 6
+      },
+      "savedMaps": {
+        "enabled": true,
+        "maxMb": 1024,
+        "refreshOnOpen": "off"
       },
       "scanFolders": 2000000
     },

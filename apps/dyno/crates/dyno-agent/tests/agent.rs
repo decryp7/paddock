@@ -8,9 +8,9 @@ use dyno_agent::Running;
 use dyno_core::history::HistoryRange;
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
-use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::Platform;
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
@@ -85,17 +85,17 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
-    fn subscriber(&self, detail: LiveDetail) -> (Peer<Message>, Receiver<LiveUpdate>) {
+    fn subscriber(&self, detail: LiveDetail) -> (BodyPeer<Message>, Receiver<LiveUpdate>) {
         let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     let _ = tx.send(*l);
                 }
@@ -143,14 +143,45 @@ fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
     assert!(!s.top_cpu.is_empty());
 }
 
+// The menu bar icons alone (no window open) used to subscribe at the summary level, so the process table was read every
+// 2 s for nobody (docs/benchmarks.md 2026-11-03). A tray subscriber gets the system numbers at the user's pace and the
+// process table at the unwatched pace, and a window's summary still wins over it.
+#[test]
+fn a_tray_subscriber_keeps_the_system_pace_and_the_process_table_slows_down() {
+    let h = Harness::start();
+    let (_t, tray) = h.subscriber(LiveDetail::Tray);
+    let wanted = dyno_core::settings::Settings::default().sampling;
+    let slow = loop {
+        let l = tray.recv_timeout(Duration::from_secs(10)).expect("a tray update");
+        assert!(l.processes.is_none() && l.groups.is_none(), "the tray gets no process list");
+        if l.overhead.process_interval_ms == dyno_core::sampling::UNWATCHED_PROCESS_MS {
+            break l;
+        }
+    };
+    assert_eq!(slow.overhead.sampling_interval_ms, wanted.interval_ms);
+    let (_s, summary) = h.subscriber(LiveDetail::Summary);
+    loop {
+        let l = summary.recv_timeout(Duration::from_secs(10)).expect("a summary update");
+        if l.overhead.process_interval_ms == wanted.process_interval_ms {
+            break;
+        }
+    }
+}
+
 #[test]
 fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
-    let h = Harness::start();
-    for pid in [200, 201] {
-        let mut p = process(pid, "theirs", 3.0);
-        p.owner = dyno_core::process::Owner::Other;
-        h.fake.add_process(p);
-    }
+    // Both are on the fake machine before the agent first looks at it: adding them one by one to a running agent let a sample land
+    // between the two adds (a count of 1 on the first update that had other users at all).
+    let h = Harness::start_seeded(
+        |fake| {
+            for pid in [200, 201] {
+                let mut p = process(pid, "theirs", 3.0);
+                p.owner = dyno_core::process::Owner::Other;
+                fake.add_process(p);
+            }
+        },
+        |platform| platform,
+    );
     let (_p, rx) = h.subscriber(LiveDetail::Processes);
     let live = loop {
         let l = rx.recv_timeout(Duration::from_secs(10)).expect("a live update");
@@ -302,8 +333,8 @@ fn shutdown_removes_the_discovery_file_and_a_second_agent_is_not_needed() {
 fn a_wrong_token_is_refused_and_the_agent_keeps_serving() {
     let h = Harness::start();
     let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-    let bad = dyno_ipc::Token::from_bytes([1; 32]);
-    assert!(Client::connect(&d.endpoint, &bad).is_err());
+    let bad = paddock_ipc::Token::from_bytes([1; 32]);
+    assert!(dyno_agent::wire::connect(&d.endpoint, &bad).is_err());
     let peer = h.client();
     ask(&peer, Request::Settings).unwrap();
 }
@@ -746,7 +777,15 @@ fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
     h.running.as_ref().unwrap().shared.clone()
 }
 
-fn alarm_rules(peer: &Peer<Message>) -> Vec<String> {
+/// The code the agent refused a request with.
+fn ask_code(peer: &BodyPeer<Message>, request: Request) -> dyno_core::protocol::ErrorCode {
+    match peer.call(Message::Request(Box::new(request)), Duration::from_secs(15)) {
+        Ok(Message::Reply(r)) => (*r).expect_err("the request is refused").code,
+        other => panic!("not a reply: {other:?}"),
+    }
+}
+
+fn alarm_rules(peer: &BodyPeer<Message>) -> Vec<String> {
     let Reply::Alarms(list) = ask(
         peer,
         Request::Alarms {
@@ -889,6 +928,16 @@ fn lifespan_forecasts_come_from_stored_readings_and_a_worn_battery_raises_an_ala
     assert!(alarm_rules(&peer).contains(&"lifespan:battery".to_string()));
 }
 
+/// A wear reader that waits for the test to let it answer, so the test controls when the slow read ends.
+struct GatedWear(std::sync::mpsc::Receiver<()>);
+
+impl dyno_core::ports::DiskWearSource for GatedWear {
+    fn read(&mut self) -> dyno_core::metrics::Reading<Vec<dyno_core::hardware::DiskWear>> {
+        let _ = self.0.recv();
+        dyno_core::metrics::Reading::unavailable("the tool is gone; wear is not read")
+    }
+}
+
 #[test]
 fn the_agent_records_and_logs_the_first_sighting_at_start_without_a_baselines_request() {
     let _ = captured();
@@ -906,6 +955,45 @@ fn the_agent_records_and_logs_the_first_sighting_at_start_without_a_baselines_re
             && r.contains("Rule=")),
         "{records:?}"
     );
+}
+
+#[test]
+fn removing_the_own_tool_answers_at_once_and_reads_the_ssd_wear_again_in_the_background() {
+    use dyno_core::metrics::Reading;
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle};
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let (release, gate) = std::sync::mpsc::channel();
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(GatedWear(gate)),
+        Box::new(FakeBattery(Reading::unavailable("none"))),
+    );
+    let reason = |peer: &_| {
+        let Reply::Lifespan(o) = ask(peer, Request::Lifespan).unwrap() else {
+            panic!("lifespan")
+        };
+        o.forecasts
+            .iter()
+            .find(|f| f.subject == dyno_core::lifespan::LifeSubject::Ssd)
+            .unwrap()
+            .explanation
+            .clone()
+    };
+    assert!(reason(&peer).contains("Not read yet"), "nothing has read the wear yet");
+    // The read is blocked, yet Remove answers: the request does not wait for it.
+    assert_eq!(ask(&peer, Request::RemoveTool).unwrap(), Reply::Ok);
+    assert!(reason(&peer).contains("Not read yet"), "the slow read has not ended");
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while !reason(&peer).contains("the tool is gone") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background read never updated the reading"
+        );
+        std::thread::yield_now();
+    }
 }
 
 #[test]
@@ -1149,7 +1237,7 @@ mod widget_layouts {
         v.layout.placements.iter().map(|p| p.id.to_string()).collect()
     }
 
-    fn view(peer: &Peer<Message>, surface: DynoSurface) -> SurfaceView {
+    fn view(peer: &BodyPeer<Message>, surface: DynoSurface) -> SurfaceView {
         let Reply::WidgetLayout(v) = ask(peer, Request::WidgetLayout { surface }).unwrap() else {
             panic!("a layout")
         };
@@ -1157,13 +1245,13 @@ mod widget_layouts {
     }
 
     /// A second app connection that reports the surfaces whose layout changed.
-    fn watcher(h: &Harness) -> (Peer<Message>, Receiver<DynoSurface>) {
+    fn watcher(h: &Harness) -> (BodyPeer<Message>, Receiver<DynoSurface>) {
         let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::WidgetLayoutChanged(s) = m {
                     let _ = tx.send(s);
                 }
@@ -1184,7 +1272,11 @@ mod widget_layouts {
         let SurfaceView::MenuBar(m) = view(&peer, DynoSurface::MenuBar) else {
             panic!()
         };
-        assert_eq!(m.layout.placements.len(), 2);
+        // The menu bar starts as the catalogue's own default set, whatever it is.
+        assert_eq!(
+            m.layout.placements,
+            <dyno_core::widgets::MenuBarCatalogue as paddock_widgets::Catalogue>::defaults()
+        );
         assert!(m.editable && !m.can_undo);
         let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
             panic!()
@@ -1198,7 +1290,7 @@ mod widget_layouts {
         let (_watching, changed) = watcher(&h);
         let peer = h.client();
         let edit = SurfaceEdit::Popover(Edit::Remove { id: id("cpu-memory") });
-        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit }).unwrap() else {
+        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit, base_revision: None }).unwrap() else {
             panic!("a layout")
         };
         assert_eq!(popover_ids(&after), ["active-alarms", "disk-space"]);
@@ -1225,7 +1317,7 @@ mod widget_layouts {
             span: None,
             at: None,
         });
-        let e = ask(&peer, Request::EditWidgetLayout { edit }).unwrap_err();
+        let e = ask(&peer, Request::EditWidgetLayout { edit, base_revision: None }).unwrap_err();
         assert!(!e.is_empty() && !e.contains("internal"), "{e}");
         assert_eq!(popover_ids(&view(&peer, DynoSurface::Popover)).len(), 3);
         // Events arrive in order: the first one after a refused edit and a good one is the good one's.
@@ -1233,6 +1325,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1241,6 +1334,77 @@ mod widget_layouts {
             DynoSurface::MenuBar,
             "no change event for the refused edit"
         );
+    }
+
+    #[test]
+    fn an_edit_on_an_old_revision_is_refused_and_a_dashboard_gesture_saves_a_new_revision() {
+        let h = Harness::start();
+        let peer = h.client();
+        let SurfaceView::Dashboard(before) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        let first = before.layout.placements[0].id.clone();
+        let nudge = |revision| Request::EditWidgetLayout {
+            edit: SurfaceEdit::Dashboard(Edit::Arrange {
+                gesture: paddock_widgets::GridGesture::Nudge {
+                    id: first.clone(),
+                    dir: paddock_widgets::Dir::Right,
+                },
+            }),
+            base_revision: Some(revision),
+        };
+        let Reply::WidgetLayout(after) = ask(&peer, nudge(before.revision)).unwrap() else {
+            panic!("a layout")
+        };
+        let SurfaceView::Dashboard(after) = *after else { panic!() };
+        assert_eq!(after.revision, before.revision + 1);
+        let e = ask(&peer, nudge(before.revision)).unwrap_err();
+        assert!(e.contains("another window"), "{e}");
+        assert_eq!(ask_code(&peer, nudge(before.revision)), dyno_core::protocol::ErrorCode::Stale);
+    }
+
+    #[test]
+    fn a_dyno_1_0_dashboard_is_upgraded_at_start_written_at_once_and_logged() {
+        let mut h = Harness::start();
+        h.running.take().unwrap().stop();
+        wait_until_free(&h.dirs);
+        let v1 = serde_json::json!({ "version": 1, "placements": [
+            { "id": "graph", "span": 6, "widget": { "kind": "graph", "metric": "memory" } },
+            { "id": "ring", "span": 6, "widget": { "kind": "ring", "metric": "battery" } },
+        ], "presets": [] });
+        std::fs::write(h.dirs.settings(), serde_json::json!({ "dashboard": v1 }).to_string()).unwrap();
+        let again = Running::start(h.dirs.clone(), h.fake.platform(), Box::new(h.fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(h.dirs.settings()).unwrap()).unwrap();
+        assert_eq!(saved["dashboardGrid"]["version"], 2, "written at once, before any edit");
+        assert_eq!(saved["dashboard"], v1, "Dyno 1.0 still finds its own layout");
+        let peer = connect(&h.dirs).unwrap().0;
+        let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+            panic!("activities")
+        };
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.title.contains("Dashboard layout upgraded") && e.detail.contains("2 placements, 0 dropped")),
+            "{entries:?}"
+        );
+        // The first dashboard edit drops the old value.
+        let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        let edit = SurfaceEdit::Dashboard(Edit::Remove {
+            id: d.layout.placements[0].id.clone(),
+        });
+        ask(
+            &peer,
+            Request::EditWidgetLayout {
+                edit,
+                base_revision: Some(d.revision),
+            },
+        )
+        .unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(h.dirs.settings()).unwrap()).unwrap();
+        assert!(saved["dashboard"].is_null());
+        again.stop();
     }
 
     #[test]
@@ -1254,6 +1418,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1261,6 +1426,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::Popover(Edit::Remove { id: id("disk-space") }),
+                base_revision: None,
             },
         )
         .unwrap();

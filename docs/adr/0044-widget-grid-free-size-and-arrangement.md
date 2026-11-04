@@ -92,6 +92,7 @@ pub struct Rect { pub x: u8, pub y: u16, pub w: u8, pub h: u8 }   // cells; x + 
      those overlap is pushed below them in turn (a cascade, bounded by the placement count).
   3. Then the whole layout is compacted. The moved placement is compacted too: a drop into empty space under the last row
      rises to it.
+- **End is the exception to gravity (amendment 2026-11-03).** `ToLast` puts the placement in the first free place after the last one in reading order and does not let gravity lift it into a hole earlier in reading order (a layout is therefore compacted after edits, not on read); the others are compacted as usual, so End always means last.
 - **Keyboard steps** are defined on the same rules (§5): a nudge moves one cell, or past the neighbour that blocks it.
 - **Identity and limits** stay ADR 0035's: ids from the kind, `max_instances`, `max_placements` (32 on the dashboard),
   presets of at most 24, the 128 KiB file limit.
@@ -150,8 +151,10 @@ no copy is left behind (rule 55 (c)).
 - Narrower arrangements are **derived, not stored**: `derive(layout, columns)` takes the placements in the design's
   reading order, gives each the half or the full width of the narrower grid (the smaller one that is not below its share
   `w × columns / design`, and never below the kind's minimum scaled the same way), keeps each height, and places each one
-  at the first free place after the previous one (CSS grid's sparse auto-placement), without compaction. At 1 column every
-  widget is full width. Reading order, and so focus order, is the design's at every width (a proptest checks it).
+  at the first free place after the previous one (CSS grid's sparse auto-placement), without compaction; one exception: a
+  half-width widget left alone in its rows (nothing beside it, which an odd number of half-width widgets before a
+  full-width one causes) takes the whole row if its kind's maximum width allows (amended 2026-11-04 after the screenshot
+  review: no hole beside a widget). At 1 column every widget is full width. Reading order, and so focus order, is the design's at every width (a proptest checks it).
 - `LayoutView` carries every breakpoint's arrangement, computed by the engine on each change (three arrangements of 32
   rectangles), so a window resize never needs a round trip and the UI only picks one by container width.
 - **Editing happens on the design arrangement.** Below the first breakpoint "Edit layout" is disabled, with the reason

@@ -4,6 +4,7 @@
 //! names and arguments that would break a file or a command line (parse, don't validate).
 
 use crate::error::SpecError;
+use crate::hardening::Hardening;
 
 /// Who the process runs as (decision D4: a per-user agent unless the work must run without a logged-on user).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +77,7 @@ pub struct ServiceSpec {
     low_priority: bool,
     memory_high_mb: Option<u32>,
     docs_url: Option<String>,
+    hardening: Option<Hardening>,
 }
 
 impl ServiceSpec {
@@ -101,6 +103,7 @@ impl ServiceSpec {
                 low_priority: false,
                 memory_high_mb: None,
                 docs_url: None,
+                hardening: None,
             },
         }
     }
@@ -177,6 +180,10 @@ impl ServiceSpec {
     /// The documentation link (systemd `Documentation=`).
     pub fn docs_url(&self) -> Option<&str> {
         self.docs_url.as_deref()
+    }
+    /// What a privileged service gives up (Windows token privileges, who may start it, the systemd sandbox).
+    pub fn hardening(&self) -> Option<&Hardening> {
+        self.hardening.as_ref()
     }
 }
 
@@ -258,6 +265,12 @@ impl SpecBuilder {
         self
     }
 
+    /// What a privileged service gives up ([`Hardening`]); only for [`Kind::SystemService`].
+    pub fn hardening(mut self, hardening: Hardening) -> Self {
+        self.spec.hardening = Some(hardening);
+        self
+    }
+
     /// Checks every part and returns the spec.
     pub fn build(self) -> Result<ServiceSpec, SpecError> {
         let s = self.spec;
@@ -312,6 +325,12 @@ impl SpecBuilder {
             && !(16..=65536).contains(&mb)
         {
             return Err(SpecError::new("memory high", "must be 16 to 65536 MiB"));
+        }
+        if let Some(h) = &s.hardening {
+            if s.kind != Kind::SystemService {
+                return Err(SpecError::new("hardening", "is only for a system service"));
+            }
+            h.check()?;
         }
         if let Some(u) = &s.docs_url {
             let ok = u.starts_with("https://")
@@ -478,5 +497,28 @@ mod tests {
         assert!(bad(base().memory_high_mb(1)).contains("memory"));
         assert!(bad(base().docs_url("http://x")).contains("docs"));
         assert!(bad(base().docs_url("https://x y")).contains("docs"));
+    }
+
+    #[test]
+    fn hardening_is_for_system_services_and_checked() {
+        use crate::hardening::{Hardening, Sandbox};
+        let h = || Hardening::new().windows_privileges(["SeChangeNotifyPrivilege"]);
+        let err = base().hardening(h()).build().unwrap_err();
+        assert_eq!(err.field, "hardening");
+        let s = base()
+            .kind(Kind::SystemService)
+            .hardening(h())
+            .build()
+            .unwrap();
+        assert_eq!(
+            s.hardening().unwrap().privileges(),
+            ["SeChangeNotifyPrivilege"]
+        );
+        assert!(base().build().unwrap().hardening().is_none());
+        let bad = base()
+            .kind(Kind::SystemService)
+            .hardening(Hardening::new().sandbox(Sandbox::new()))
+            .build();
+        assert_eq!(bad.unwrap_err().field, "sandbox");
     }
 }

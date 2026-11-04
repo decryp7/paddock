@@ -3,11 +3,14 @@
 
 pub mod activity;
 pub mod counters;
+pub mod firewall_com;
 pub mod net;
 pub mod nt_query;
 pub mod pdh;
+pub mod power;
 pub mod topology;
 pub mod traffic;
+pub mod wake_timer;
 
 use crate::processes::{NoDetails, SysinfoProcesses};
 use crate::sensors::SysinfoSensors;
@@ -29,6 +32,8 @@ pub fn platform() -> Platform {
         counters: std::sync::Arc::new(crate::counters::OsCounters),
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
+        power: crate::PowerPorts::os(),
+        wol: crate::wol::WolPorts::os(),
         ..f
     }
 }

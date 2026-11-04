@@ -646,14 +646,14 @@ describe('matrix legs', () => {
     const t = JOB.tmp;
     const other = '/Users/x/gitea-runner/work/fedcba9876543210/tmp';
     const ours = {
-      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-test-plugin echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
       pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
       pitcrew: [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon', '/Users/x/.paddock-ci/target-pitcrew-app-s1/debug/examples/fake_runner --exit-after 5'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s1/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s1\\chrome-win64\\chrome.exe --headless'],
     };
     // Another job on the same host: the next slot's kept folders, another runner folder's temp.
     const otherJob = {
-      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-ipc-test-child echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-test-plugin echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
       pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine'],
       pitcrew: [`${other}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, '/Users/x/.paddock-ci/target-pitcrew-app-s2/debug/examples/fake_runner'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s2/chrome-mac/Google Chrome for Testing', '/Users/x/.paddock-ci/test-browser-spotter-s12/chrome-mac/Google Chrome for Testing', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s2\\chrome.exe'],
@@ -817,7 +817,7 @@ describe('contracts', () => {
   test("Dyno's process pattern ends only test programs of its own build folder: never the installed app, its agent, another job's folder or the user's tools", () => {
     const dyno = graph.apps.get('dyno');
     const t = JOB.tmp;
-    const ours = ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
+    const ours = ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-test-plugin echo', '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
     const near = [
       '/Users/x/Library/Application Support/Dyno/plugins/p1/plugin',
       `${t}/other-it-plugins-Xk3a9Q/p1/plugin`,
@@ -827,12 +827,12 @@ describe('contracts', () => {
       '/Applications/Dyno.app/Contents/MacOS/dyno-agent run',
       '/Applications/Dyno.app/Contents/MacOS/dyno-helper',
       '/Applications/Dyno.app/Contents/MacOS/dyno-bench',
-      '/Users/x/.paddock-ci/target-dyno-bundle-s1/debug/dyno-ipc-test-child echo',
-      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-dyno-bundle-s1/debug/dyno-test-plugin echo',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/dyno-test-plugin echo',
       '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-agent run',
       '/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-bench cpu',
       '/Users/x/.paddock-ci/target-dyno-app2/debug/dyno-bench cpu',
-      '/Users/x/dev/dyno/target/debug/dyno-ipc-test-child echo',
+      '/Users/x/dev/dyno/target/debug/dyno-test-plugin echo',
       'C:\\Program Files\\Dyno\\dyno-agent.exe',
     ];
     const res = scopedAll('dyno', dyno.processPatterns);

@@ -1,4 +1,4 @@
-//! The link to the agent (ADR 0002, ADR 0025): finds the running agent, starts one when there is none, keeps one dyno-ipc
+//! The link to the agent (ADR 0002, ADR 0025): finds the running agent, starts one when there is none, keeps one `paddock-ipc`
 //! connection, forwards the webview's requests and fans the agent's pushes out to a [`Sink`].
 //!
 //! The supervision is a pure state machine ([`machine::Supervisor`]) with one owner thread ([`driver`], the generic
@@ -36,10 +36,10 @@ use dyno_agent::discovery::Discovery;
 use dyno_agent::paths::Dirs;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::{activity::ActivityEntry, alerts::Alert};
-use dyno_ipc::{IpcError, Peer};
 #[cfg(any(target_os = "macos", test))]
 pub use launchd::LaunchdLauncher;
 use machine::{Event, Snapshot, Supervisor};
+use paddock_ipc::{BodyPeer, IpcError};
 use paddock_proc::StallCause;
 pub use ports::{agent_exe, launch_route, Child, LaunchRoute, Launcher, ProcessLauncher};
 use std::collections::HashMap;
@@ -88,6 +88,12 @@ pub trait Sink: Send + Sync {
     fn job(&self, _status: paddock_jobs::wire::WireSnapshot) {}
     /// A surface's widget layout was edited (by any window).
     fn widget_layout_changed(&self, _surface: dyno_core::widgets::DynoSurface) {}
+    /// The power view changed (a hold started, ended or was ended by the OS).
+    fn power_changed(&self, _view: dyno_core::power::PowerView) {}
+    /// The Wake-on-LAN list changed (a save or remove from any window, or a wake that ended).
+    fn wol_changed(&self, _view: dyno_core::wol::WolView) {}
+    /// The scheduled wakes changed (a save, a cancel, or a schedule that ran).
+    fn wakes_changed(&self, _view: dyno_core::power::schedule::WakesView) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.
@@ -183,8 +189,9 @@ pub fn stop_agent_on_quit(started_by_this_app: bool, service_installed: bool) ->
 }
 
 /// What each window wants from the live stream. The agent keeps one subscription per connection, so the link asks for
-/// the most any window wants (`processes` while a task manager is open), never less than `summary` (the tray icon
-/// needs the numbers even when no window is open).
+/// the most any window wants (`processes` while a task manager is open). With no window it asks for `tray`: the menu bar
+/// icons still need the system numbers, but nothing shows the process table, which the agent then reads at its unwatched
+/// pace.
 #[derive(Debug, Default)]
 pub struct DetailVotes {
     votes: HashMap<String, LiveDetail>,
@@ -203,13 +210,21 @@ impl DetailVotes {
 
     /// What the connection should ask the agent for.
     pub fn effective(&self) -> LiveDetail {
-        if self.votes.values().any(|d| *d == LiveDetail::Processes) {
-            LiveDetail::Processes
-        } else {
-            LiveDetail::Summary
-        }
+        self.votes.values().copied().max_by_key(|d| d.rank()).unwrap_or(LiveDetail::Tray)
     }
 }
+/// Where a voice that is not a window's (the menu bar items) gives its live-detail wish: the link, or a fake in tests.
+pub trait LiveVotes: Send + Sync {
+    /// `Some` sets the wish of `voter`, `None` withdraws it.
+    fn set_vote(&self, voter: &str, detail: Option<LiveDetail>) -> Result<(), CommandError>;
+}
+
+/// What to ask for instead when the agent refused `wanted` as unreadable: an agent older than the tray level cannot read
+/// `Subscribe { tray }` (a new value inside a request loses the whole request), so it gets the summary it understood before.
+pub fn older_agent_fallback(wanted: LiveDetail, error: &CommandError) -> Option<LiveDetail> {
+    (wanted == LiveDetail::Tray && error.code == ErrorCode::BadRequest).then_some(LiveDetail::Summary)
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     // Every guarded value stays consistent if a holder panicked.
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -223,7 +238,7 @@ pub struct AgentLink {
     pub(crate) sink: Arc<dyn Sink>,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// What requests go to (set by the supervisor's `UsePeer`).
-    pub(crate) peer: Mutex<Option<Arc<Peer<Message>>>>,
+    pub(crate) peer: Mutex<Option<Arc<BodyPeer<Message>>>>,
     votes: Mutex<DetailVotes>,
     /// The detail last sent over the current connection.
     sent: Mutex<Option<LiveDetail>>,
@@ -385,8 +400,8 @@ impl AgentLink {
         let result = match peer.call(Message::Request(Box::new(request)), timeout) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),
             Ok(_) => Err(CommandError::internal("The agent sent something unexpected.")),
-            Err(IpcError::Timeout(_)) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
-            Err(IpcError::Closed) => Err(CommandError::unavailable()),
+            Err(IpcError::Timeout) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
+            Err(IpcError::Closed(_)) => Err(CommandError::unavailable()),
             Err(e) => {
                 chain = Some(e.to_string());
                 Err(CommandError::new(ErrorCode::Internal, format!("The agent link failed: {e}")))
@@ -418,7 +433,7 @@ impl AgentLink {
     /// The connection. Before the very first one has been made, a request waits for it, or for a shown stall or a failure
     /// (the window asks for data the moment it opens, usually before the agent has answered; the wait is on the state, not
     /// on a clock). After a first connection, requests fail fast instead.
-    fn peer_or_wait(&self) -> Option<Arc<Peer<Message>>> {
+    fn peer_or_wait(&self) -> Option<Arc<BodyPeer<Message>>> {
         // A connection the supervisor has published (`UsePeer`) is used at once. Its snapshot follows the step that made it,
         // so a request that starts in between (the worker that subscribes right after a connect) must not read the older
         // snapshot, which may say "settled, not connected" (a stall had been shown) and fail it as unavailable.
@@ -461,7 +476,16 @@ impl AgentLink {
         if *lock(&self.sent) == Some(wanted) {
             return Ok(());
         }
-        self.call(Request::Subscribe { detail: wanted })?;
+        match self.call(Request::Subscribe { detail: wanted }) {
+            Ok(_) => {}
+            Err(e) => {
+                let Some(instead) = older_agent_fallback(wanted, &e) else {
+                    return Err(e);
+                };
+                logging::info(&format!("the agent cannot read the {wanted:?} live level; asking for {instead:?}"));
+                self.call(Request::Subscribe { detail: instead })?;
+            }
+        }
         *lock(&self.sent) = Some(wanted);
         Ok(())
     }
@@ -489,5 +513,16 @@ impl AgentLink {
         let _ = self.events.send(Event::Quit);
         let snapshot = self.transitions.wait_until(Snapshot::stopped);
         snapshot.outcome().is_some_and(|o| o.stopped_own)
+    }
+}
+
+impl LiveVotes for AgentLink {
+    /// Makes a request to the agent when the effective detail changes, so never call it on the UI thread.
+    fn set_vote(&self, voter: &str, detail: Option<LiveDetail>) -> Result<(), CommandError> {
+        match detail {
+            Some(d) => lock(&self.votes).set(voter, d),
+            None => lock(&self.votes).remove(voter),
+        }
+        self.sync_detail()
     }
 }

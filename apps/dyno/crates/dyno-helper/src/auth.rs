@@ -1,161 +1,182 @@
-//! Who may call the helper (ADR 0016 section 3). Pure over the facts the OS gave about the peer; the real facts come
-//! from `dyno-ipc` (the kernel's user id and process id) and [`crate::sys::process_image`].
+//! What each caller may ask (ADR 0027 §2). The caller is the account the OS reports for the connection (`paddock-ipc`
+//! `caller_of`: kernel credentials or the caller's own token, never a process id and never a program path), decided once
+//! per connection; this module decides per request, purely. Anyone local may ask who the helper is; the rest needs the
+//! owner (the account that turned the helper on) or an administrator. The request handlers (WP-3) widen the list by
+//! adding rows here, not by changing the connection code.
 
-use dyno_core::helper_wire::HelperUser;
-use std::path::{Path, PathBuf};
+use crate::policy::HelperPolicy;
+use dyno_core::helper_policy::{access, visibility, Access, Standing, Visibility};
+use dyno_core::helper_wire::{HelperRequest, HelperUser};
+use paddock_ipc::{AccountId, Caller, Weight};
 
-/// The rules the daemon was installed with.
+/// Why a request was refused (recorded in the audit log, with the reason, never shown with more than this to the caller).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Policy {
-    /// The only user served.
-    pub user: HelperUser,
-    /// The only program that may call.
-    pub agent_exe: PathBuf,
-}
-
-/// Why a caller was refused (recorded in the audit log, never shown with details to the caller).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Refusal {
-    /// The kernel did not say who connected, or it is another user.
-    WrongUser(String),
-    /// The caller's program could not be determined or is not the recorded agent.
-    WrongProgram(String),
-}
+pub struct Refusal(pub String);
 
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Refusal::WrongUser(m) | Refusal::WrongProgram(m) => f.write_str(m),
-        }
+        f.write_str(&self.0)
     }
 }
 
-/// Looks up the program file of a process.
-pub trait ImageOf: Send + Sync {
-    /// The program file of `pid`, when known.
-    fn image(&self, pid: u32) -> Option<PathBuf>;
-}
-
-/// The real lookup.
-pub struct OsImages;
-
-impl ImageOf for OsImages {
-    fn image(&self, pid: u32) -> Option<PathBuf> {
-        crate::sys::process_image(pid)
+/// Whether `account` is the owner the helper was installed for.
+pub fn is_owner(owner: &HelperUser, account: &AccountId) -> bool {
+    match (owner, account) {
+        (HelperUser::Uid(a), AccountId::Uid(b)) => a == b,
+        (HelperUser::Sid(a), AccountId::Sid(b)) => a.eq_ignore_ascii_case(b),
+        _ => false,
     }
 }
 
-fn same_file(a: &Path, b: &Path) -> bool {
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let (a, b) = (canon(a), canon(b));
-    if cfg!(windows) {
-        a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+/// How the caller stands with the helper: the owner, an administrator (also a UAC-filtered token, D9), or anyone else.
+pub fn standing(caller: &Caller, owner: &HelperUser) -> Standing {
+    Standing::of(is_owner(owner, caller.account()), caller.is_admin())
+}
+
+/// What `caller` gets from `request` (the restriction table of `dyno_core::helper_policy`).
+///
+/// # Errors
+/// A [`Refusal`] saying who asked for what.
+pub fn authorize(caller: &Caller, owner: &HelperUser, request: &HelperRequest) -> Result<Access, Refusal> {
+    match access(request.kind(), standing(caller, owner)) {
+        Access::Denied => Err(Refusal(format!(
+            "{} may not make this request: it is for the owner or an administrator",
+            caller.account()
+        ))),
+        granted => Ok(granted),
+    }
+}
+
+/// How much of an account's allowance the request uses.
+pub fn weight(request: &HelperRequest) -> Weight {
+    if request.kind().is_slow() {
+        Weight::Slow
     } else {
-        a == b
+        Weight::Light
     }
 }
 
-impl Policy {
-    /// Decides whether a peer may use the helper. `uid` is the kernel's answer on Unix (`None` on Windows, where the
-    /// pipe's access list already admitted only SYSTEM and the authorised account); `pid` the peer's process id.
-    pub fn check(&self, uid: Option<u32>, pid: Option<u32>, images: &dyn ImageOf) -> Result<(), Refusal> {
-        match (&self.user, uid) {
-            (HelperUser::Uid(allowed), Some(got)) if *allowed == got => {}
-            (HelperUser::Uid(_), Some(got)) => return Err(Refusal::WrongUser(format!("user {got} is not the user the helper serves"))),
-            (HelperUser::Uid(_), None) => return Err(Refusal::WrongUser("the system did not say who connected".into())),
-            // The pipe's access list is the check on Windows.
-            (HelperUser::Sid(_), _) => {}
-        }
-        let pid = pid.ok_or_else(|| Refusal::WrongProgram("the system did not say which process connected".into()))?;
-        let image = images
-            .image(pid)
-            .ok_or_else(|| Refusal::WrongProgram(format!("process {pid} could not be identified")))?;
-        if same_file(&image, &self.agent_exe) {
-            Ok(())
-        } else {
-            Err(Refusal::WrongProgram(format!(
-                "process {pid} is {}, not the Dyno agent",
-                image.display()
-            )))
-        }
+/// What the caller sees of other accounts (the owner and administrators in full; others as the policy says; a UAC-filtered
+/// administrator token as the policy says for it).
+pub fn scope(caller: &Caller, owner: &HelperUser, policy: &HelperPolicy) -> Visibility {
+    visibility(
+        standing(caller, owner),
+        caller.elevated().unwrap_or(true),
+        policy.others,
+        policy.filtered_as_total,
+    )
+}
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use paddock_ipc::identity::{AdminEvidence, RawPeer};
+    use paddock_ipc::{AccountId, AdminRule, AuditHint, Caller};
+
+    /// A caller as the identity code decides it from invented OS facts.
+    pub fn caller(account: AccountId, groups: &[u32]) -> Caller {
+        paddock_ipc::identity::identify(
+            RawPeer {
+                account,
+                admin: AdminEvidence::Groups(groups.to_vec()),
+                audit: AuditHint::new(Some(7), Some("/x".into())),
+            },
+            &AdminRule::new([80]),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::testing::caller;
     use super::*;
+    use dyno_core::helper_policy::OthersPolicy;
 
-    struct Images(Option<PathBuf>);
-    impl ImageOf for Images {
-        fn image(&self, _: u32) -> Option<PathBuf> {
-            self.0.clone()
+    fn owner() -> HelperUser {
+        HelperUser::Uid(501)
+    }
+
+    #[test]
+    fn anyone_may_read_and_only_the_owner_and_administrators_may_see_the_audit_log_or_remove_the_helper() {
+        let other = caller(AccountId::Uid(502), &[20]);
+        for r in [
+            HelperRequest::Info,
+            HelperRequest::Traffic,
+            HelperRequest::LoginItems,
+            HelperRequest::MemoryModules,
+        ] {
+            assert_eq!(authorize(&other, &owner(), &r), Ok(Access::Full), "{r:?}");
         }
-    }
-
-    fn policy(user: HelperUser) -> Policy {
-        Policy {
-            user,
-            agent_exe: PathBuf::from("/opt/dyno/dyno-agent"),
-        }
-    }
-
-    #[test]
-    fn the_authorised_user_with_the_recorded_agent_is_let_in() {
-        let p = policy(HelperUser::Uid(501));
-        assert_eq!(p.check(Some(501), Some(9), &Images(Some("/opt/dyno/dyno-agent".into()))), Ok(()));
-    }
-
-    #[test]
-    fn another_user_an_unknown_user_or_an_unknown_process_is_refused() {
-        let p = policy(HelperUser::Uid(501));
-        let agent = Images(Some("/opt/dyno/dyno-agent".into()));
-        assert!(matches!(p.check(Some(502), Some(9), &agent), Err(Refusal::WrongUser(m)) if m.contains("502")));
-        assert!(matches!(p.check(None, Some(9), &agent), Err(Refusal::WrongUser(_))));
-        assert!(matches!(p.check(Some(501), None, &agent), Err(Refusal::WrongProgram(_))));
-        assert!(matches!(p.check(Some(501), Some(9), &Images(None)), Err(Refusal::WrongProgram(m)) if m.contains("identified")));
-    }
-
-    #[test]
-    fn another_program_of_the_same_user_is_refused() {
-        let p = policy(HelperUser::Uid(501));
-        let other = Images(Some("/tmp/evil/dyno-agent".into()));
-        let r = p.check(Some(501), Some(9), &other).unwrap_err();
-        assert!(matches!(&r, Refusal::WrongProgram(m) if m.contains("/tmp/evil/dyno-agent") && m.contains("not the Dyno agent")));
-        assert!(r.to_string().contains("not the Dyno agent"));
-    }
-
-    #[test]
-    fn on_windows_the_pipe_list_is_the_user_check_and_the_program_is_still_checked() {
-        let p = policy(HelperUser::Sid("S-1-5-21-1-2-3-1001".into()));
-        assert_eq!(p.check(None, Some(9), &Images(Some("/opt/dyno/dyno-agent".into()))), Ok(()));
-        assert!(p.check(None, Some(9), &Images(Some("/x".into()))).is_err());
-    }
-
-    #[test]
-    fn a_link_to_the_agent_counts_as_the_agent() {
-        #[cfg(unix)]
-        {
-            let dir = tempfile::tempdir().unwrap();
-            let real = dir.path().join("dyno-agent");
-            std::fs::write(&real, b"x").unwrap();
-            let link = dir.path().join("link");
-            std::os::unix::fs::symlink(&real, &link).unwrap();
-            let p = Policy {
-                user: HelperUser::Uid(1),
-                agent_exe: real,
-            };
-            assert_eq!(p.check(Some(1), Some(2), &Images(Some(link))), Ok(()));
-        }
-    }
-
-    #[test]
-    fn the_real_lookup_knows_this_process() {
-        let me = OsImages.image(std::process::id());
-        if cfg!(any(windows, target_os = "macos", target_os = "linux")) {
-            assert_eq!(
-                me.map(|p| std::fs::canonicalize(p).unwrap()),
-                Some(std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap())
+        assert_eq!(authorize(&other, &owner(), &HelperRequest::Firewall), Ok(Access::CountsOnly));
+        for r in [HelperRequest::Audit(5), HelperRequest::LogTail(5), HelperRequest::Uninstall] {
+            let e = authorize(&other, &owner(), &r).unwrap_err();
+            assert!(
+                e.to_string().contains("uid 502") && e.to_string().contains("owner or an administrator"),
+                "{e}"
             );
+        }
+    }
+
+    #[test]
+    fn the_owner_and_administrators_may_make_every_request_in_full() {
+        let me = caller(AccountId::Uid(501), &[20]);
+        let admin = caller(AccountId::Uid(502), &[20, 80]);
+        let root = caller(AccountId::Uid(0), &[]);
+        for c in [&me, &admin, &root] {
+            for r in [
+                HelperRequest::Info,
+                HelperRequest::Audit(5),
+                HelperRequest::LogTail(5),
+                HelperRequest::Uninstall,
+                HelperRequest::Firewall,
+            ] {
+                assert_eq!(authorize(c, &owner(), &r), Ok(Access::Full));
+            }
+        }
+        assert_eq!(standing(&me, &owner()), Standing::Owner);
+        assert_eq!(standing(&admin, &owner()), Standing::Administrator);
+    }
+
+    #[test]
+    fn the_scope_follows_the_standing_and_the_policy() {
+        let policy = HelperPolicy {
+            others: OthersPolicy::Detail,
+            filtered_as_total: false,
+        };
+        assert_eq!(scope(&caller(AccountId::Uid(501), &[]), &owner(), &policy), Visibility::Full);
+        assert_eq!(scope(&caller(AccountId::Uid(502), &[80]), &owner(), &policy), Visibility::Full);
+        assert_eq!(
+            scope(&caller(AccountId::Uid(502), &[]), &owner(), &policy),
+            Visibility::Own(OthersPolicy::Detail)
+        );
+        assert_eq!(
+            scope(&caller(AccountId::Uid(502), &[]), &owner(), &HelperPolicy::default()),
+            Visibility::Own(OthersPolicy::Total)
+        );
+    }
+
+    #[test]
+    fn an_account_is_the_owner_only_by_kind_and_value() {
+        assert!(is_owner(&HelperUser::Uid(5), &AccountId::Uid(5)));
+        assert!(!is_owner(&HelperUser::Uid(5), &AccountId::Uid(6)));
+        assert!(is_owner(
+            &HelperUser::Sid("S-1-5-21-1".into()),
+            &AccountId::Sid("s-1-5-21-1".into())
+        ));
+        assert!(!is_owner(&HelperUser::Sid("S-1-5-21-1".into()), &AccountId::Uid(1)));
+        assert!(!is_owner(&HelperUser::Uid(1), &AccountId::Sid("S-1-5-21-1".into())));
+    }
+
+    #[test]
+    fn the_slow_kinds_take_the_slow_slot() {
+        assert_eq!(weight(&HelperRequest::LoginItems), Weight::Slow);
+        assert_eq!(weight(&HelperRequest::Firewall), Weight::Slow);
+        for r in [
+            HelperRequest::Info,
+            HelperRequest::Audit(1),
+            HelperRequest::Uninstall,
+            HelperRequest::Traffic,
+        ] {
+            assert_eq!(weight(&r), Weight::Light);
         }
     }
 }

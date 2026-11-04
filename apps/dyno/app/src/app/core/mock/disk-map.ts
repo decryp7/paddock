@@ -242,6 +242,9 @@ export class MockDiskMap {
   private readonly scans = new Map<number, Scan>();
   private readonly listeners = new Set<(s: DiskScanStatus) => void>();
   private nextScan = 1;
+  /** While true, a scan's steps wait (a test or an e2e flow holds the scan where it is and lets it go itself). */
+  private held = false;
+  private readonly waiting: Array<() => void> = [];
   /** The paths "revealed", for tests. */
   readonly revealed: string[] = [];
 
@@ -266,7 +269,51 @@ export class MockDiskMap {
     return mockVolumes();
   }
 
-  start(target: DiskTarget): DiskScanStatus {
+  /**
+   * A saved map, as the agent offers one after a restart (ADR 0029): a finished scan of `target` that was written to the cache
+   * `ageMs` ago. `changedBytes` is the net change in used space since then; `null` for a folder.
+   */
+  seedSaved(target: DiskTarget, ageMs: number, changedBytes: number | null): DiskScanStatus {
+    const started = this.start(target, null);
+    const scan = this.find(started.scan);
+    scan.timers.forEach(clearTimeout);
+    scan.timers = [];
+    const total = scan.tree.totalBytes;
+    const at = this.now() - ageMs;
+    this.emit(scan, {
+      state: 'done',
+      phase: 'readingFolders',
+      progress: { ...scan.status.progress, bytes: total, items: Math.round(total / (4 * MB)), folders: 1800, totalBytes: scan.status.progress.totalBytes === null ? null : Math.max(total, scan.status.progress.totalBytes) },
+      scannedAt: at,
+      origin: { saved: { savedAt: at } },
+      changedBytes,
+    });
+    return structuredClone(scan.status);
+  }
+
+  /** Holds every scan step from now on until [`release`](MockDiskMap.release). */
+  hold(): void {
+    this.held = true;
+  }
+
+  /** Lets the held steps run, and stops holding. */
+  release(): void {
+    this.held = false;
+    for (const run of this.waiting.splice(0)) run();
+  }
+
+  /** Forgets one saved map (a scan of this run stays). */
+  forgetSaved(scan: number): void {
+    const s = this.find(scan);
+    if (typeof s.status.origin === 'object') this.scans.delete(scan);
+  }
+
+  /** Forgets every saved map. */
+  forgetAllSaved(): void {
+    for (const [id, s] of this.scans) if (typeof s.status.origin === 'object') this.scans.delete(id);
+  }
+
+  start(target: DiskTarget, replaces: number | null = null): DiskScanStatus {
     const volumes = mockVolumes();
     const volume = 'volume' in target ? volumes.find((v) => v.id === target.volume.id) : undefined;
     if ('volume' in target && !volume) throw this.error('notFound', 'That volume is not mounted any more.');
@@ -298,12 +345,17 @@ export class MockDiskMap {
         etaSeconds: null,
         hiddenBytes: null,
         scannedAt: null,
+        origin: 'live',
+        changedBytes: null,
+        replaces: replaces !== null && this.scans.get(replaces) && JSON.stringify(this.scans.get(replaces)?.status.target) === JSON.stringify(target) ? replaces : null,
+        notSaved: null,
       },
     };
     this.scans.set(scan.status.scan, scan);
     this.emit(scan, {});
     STEPS.forEach((share, i) => {
-      scan.timers.push(this.later(() => this.step(scan, share, i === STEPS.length - 1), i + 1));
+      const run = () => this.step(scan, share, i === STEPS.length - 1);
+      scan.timers.push(this.later(() => (this.held ? void this.waiting.push(run) : run()), i + 1));
     });
     return structuredClone(scan.status);
   }
@@ -372,8 +424,11 @@ export class MockDiskMap {
     this.revealed.push(this.path(scan, node));
   }
 
+  /** The kept scans, except those a finished Rescan has taken the place of. */
   list(): DiskScanStatus[] {
-    return [...this.scans.values()].map((s) => structuredClone(s.status));
+    const all = [...this.scans.values()];
+    const replaced = new Set(all.filter((s) => s.status.state === 'done' && s.status.replaces !== null).map((s) => s.status.replaces));
+    return all.filter((s) => !replaced.has(s.status.scan)).map((s) => structuredClone(s.status));
   }
 
   children(q: DiskChildrenQuery): DiskChildren {

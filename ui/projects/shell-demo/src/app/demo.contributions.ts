@@ -65,6 +65,11 @@ export const UNSAVED_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.unsaved'], {
   load: () => import('./dialogs/unsaved-dialog').then((m) => m.UnsavedDialog),
 });
 
+/** The size-to-content fixtures, one per kind (ADR 0043 check 4): the same content in a decision, a form, a viewer and a tool. */
+const fixture = (id: 'sd.fixture-decision' | 'sd.fixture-form' | 'sd.fixture-viewer' | 'sd.fixture-tool') =>
+  defineDialog(DIALOG_CONTRACTS[id], { title: msg('sd.dialog.fixture', 'Size fixture'), load: () => import('./dialogs/fixture-dialog').then((m) => m.FixtureDialog) });
+export const FIXTURE_DIALOGS = [fixture('sd.fixture-decision'), fixture('sd.fixture-form'), fixture('sd.fixture-viewer'), fixture('sd.fixture-tool')] as const;
+
 /** A required choice: a modal without Cancel. */
 export const CHOOSE_STYLE_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.choose-style'], {
   title: msg('sd.dialog.choose-style', 'Choose a greeting style'),
@@ -188,7 +193,7 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, CONFIRM_DIALOG, UNSAVED_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, CONFIRM_DIALOG, UNSAVED_DIALOG, ...FIXTURE_DIALOGS, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);

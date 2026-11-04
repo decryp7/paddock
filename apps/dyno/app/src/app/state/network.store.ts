@@ -8,7 +8,7 @@ import { Notifier } from '../shared/notifier';
 /** The page asks again this often while it is open (the engine caches reads for a moment, so this stays cheap). */
 export const NETWORK_POLL_MS = 2000;
 
-export const DEFAULT_QUERY: NetworkQuery = { showLoopback: false, proto: null, state: null, exposedOnly: false, search: '' };
+export const DEFAULT_QUERY: NetworkQuery = { showLoopback: false, proto: null, state: null, exposedOnly: false, search: '', country: null };
 
 interface NetworkState {
   snapshot: NetworkSnapshot | null;
@@ -95,7 +95,7 @@ export const NetworkStore = signalStore(
       },
       /** What one program has open now, without touching the page's own filters. */
       async forProcess(pid: number): Promise<ProcessNetwork> {
-        const snap = await backend.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '' });
+        const snap = await backend.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '', country: null });
         const mine = (o: { kind: string; pid?: number }) => o.kind === 'process' && o.pid === pid;
         return {
           connections: snap.connections.filter((c) => mine(c.owner)),

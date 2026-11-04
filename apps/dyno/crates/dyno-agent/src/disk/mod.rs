@@ -4,6 +4,7 @@ pub mod centre;
 pub mod engine;
 pub mod folder;
 pub mod fs;
+pub mod keep;
 pub mod names;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -17,7 +18,12 @@ pub fn handle(shared: &crate::agent::Shared, request: Request) -> Result<Reply, 
     let d = &shared.disk;
     match request {
         Request::DiskVolumes => Ok(Reply::DiskVolumes(d.volumes())),
-        Request::StartDiskScan { target } => d.start(target).map(|s| Reply::DiskScan(Box::new(s))),
+        Request::StartDiskScan { target, replaces } => d.start_replacing(target, replaces).map(|s| Reply::DiskScan(Box::new(s))),
+        Request::ForgetSavedDiskMap { scan } => d.forget_saved(scan).map(|()| Reply::Ok),
+        Request::ForgetSavedDiskMaps => {
+            d.forget_all_saved();
+            Ok(Reply::Ok)
+        }
         Request::CancelDiskScan { scan } => d.cancel(scan).map(|()| Reply::Ok),
         Request::DiskScans => Ok(Reply::DiskScans(d.scans())),
         Request::DiskChildren {

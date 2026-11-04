@@ -45,12 +45,12 @@
 
 use crate::contract::{Grant, Modality, Size};
 use crate::placement::{self, Bounds, Monitor, Placement, Rect, ScreenPosition};
-use crate::registry::{CloseDecision, Dialogs, OpenDialog, OwnSize};
+use crate::registry::{CloseDecision, Dialogs, OpenDialog};
 use crate::window::{
-    Around, CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
-    DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
-    RESULT_EVENT, SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry,
-    json_len, plan_fit, validate, viewport_delta, window_config,
+    CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
+    DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure, RESULT_EVENT,
+    SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry, json_len, validate,
+    viewport_delta, window_config,
 };
 use ::tauri::window::Color;
 use ::tauri::{
@@ -60,6 +60,9 @@ use ::tauri::{
 use paddock_commands::labels::{Label, resolve};
 use serde_json::Value;
 use std::time::{Duration, Instant};
+
+mod sizing;
+pub use sizing::user_resize_started;
 
 /// The log target of this crate.
 const TARGET: &str = "paddock_dialogs";
@@ -425,6 +428,7 @@ fn build_window<R: Runtime>(
     if let Some(f) = hooks.as_ref().and_then(|h| h.built.as_ref()) {
         f(&window);
     }
+    sizing::install_edge(app, window.as_ref().window());
     // Where logical coordinates are not one global space (Windows, Linux with mixed DPI), the builder converted them
     // with some monitor's scale: set the exact physical place (on the parent's monitor) and size now. The size is the placed one rounded up once. Both values come from a monitor
     // rectangle (i32/u32) plus a clamped offset, so they fit.
@@ -579,31 +583,18 @@ pub fn moved<R: Runtime>(window: &Window<R>) {
     }
 }
 
-/// A dialog was resized to `size` (as the window system reported it): remember where it is, and whether the user did it
-/// (the report of a size this layer asked for is not, however late, nor is a clamp of it, nor a resize that comes with a
-/// scale change: [`Dialogs::note_resized`]). From a user's resize on, fits leave its size alone (rule 17: the window is
-/// the user's). The log says which size was asked for last, so a wrong switch can be diagnosed.
+/// A dialog moved: its bounds are remembered and the size state makes the clamp again on the monitor it is on now.
+fn moved_event<R: Runtime>(window: &Window<R>) {
+    moved(window);
+    sizing::moved(window);
+}
+
+/// A dialog was resized to `size` (as the window system reported it): remember where it is, and let the size state say
+/// whether it was the echo of a request (taken off its queue), the user (on a platform with no resize signal) or neither
+/// (logged as unexplained, with the queue).
 pub fn resized<R: Runtime>(window: &Window<R>, size: PhysicalSize<u32>) {
     moved(window);
-    let (Some(d), Ok(scale)) = (
-        window.app_handle().try_state::<Dialogs>(),
-        window.scale_factor(),
-    ) else {
-        return;
-    };
-    let was = d.is_user_sized(window.label());
-    let asked = d.last_requested(window.label());
-    if d.note_resized(window.label(), size.width, size.height, scale) && !was {
-        let asked = asked.map_or_else(
-            || "none".to_string(),
-            |a| format!("{}x{} @{}", a.width, a.height, a.scale),
-        );
-        log::info!(
-            target: TARGET,
-            Window = window.label(), Width = size.width, Height = size.height, Scale = scale, Asked = asked.as_str();
-            "Dialog window resized by the user: its size is no longer fitted to its content"
-        );
-    }
+    sizing::resized(window, size);
 }
 
 /// A dialog window is gone: forget it, re-enable and refocus its parent, tell the opener where it was.
@@ -612,6 +603,8 @@ pub fn on_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
 }
 
 fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
+    #[cfg(all(target_os = "macos", not(any(test, feature = "mock-runtime"))))]
+    crate::edge::macos::remove(label);
     let Some(dialogs) = app.try_state::<Dialogs>() else {
         return;
     };
@@ -705,7 +698,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
                 api.prevent_close();
             }
         }
-        WindowEvent::Moved(_) if is_dialog => moved(window),
+        WindowEvent::Moved(_) if is_dialog => moved_event(window),
         WindowEvent::Resized(size) if is_dialog => resized(window, *size),
         WindowEvent::ScaleFactorChanged { .. } if is_dialog => scale_changed(window),
         WindowEvent::Destroyed if is_dialog => on_destroyed(app, label),
@@ -725,7 +718,7 @@ pub fn invoke_handler<R: Runtime>()
         dialog_take_input,
         dialog_close,
         dialog_ready,
-        dialog_fit
+        dialog_measure
     ]
 }
 
@@ -757,6 +750,7 @@ fn take_input<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<DialogStart
         modality: entry.modality,
         required_choice: entry.required_choice,
         input: entry.input,
+        epoch: dialogs(app)?.next_epoch(label).ok_or_else(not_a_dialog)?,
     })
 }
 
@@ -800,41 +794,30 @@ fn close<R: Runtime>(
     window.destroy().map_err(failed)
 }
 
-/// The dialog's page measured itself (ADR 0026 §4.2): sizes the calling dialog window, makes the measure's minimum
-/// content the OS minimum, and shows and focuses the window if it is still pending. Sent once per window; one that
-/// arrives after the show deadline fits the window once.
+/// The dialog's page measured its content (ADR 0043 §2): measure `seq` of page load `epoch`. The one way a dialog window
+/// is sized: the size state decides what the window should be and the glue carries it out on the main thread. A measure
+/// that is not a size is refused; an older one is ignored.
+#[::tauri::command]
+pub async fn dialog_measure<R: Runtime>(
+    app: AppHandle<R>,
+    window: Window<R>,
+    epoch: u64,
+    seq: u64,
+    measure: Measure,
+) -> Result<(), DialogError> {
+    sizing::measure(&app, &window, epoch, seq, measure, std::env::consts::OS)
+}
+
+/// The dialog's page says measure `seq` of `epoch` is the one to show at (ADR 0043 §2): the window is shown once that
+/// measure has been applied and its resize has arrived, or at the show deadline. Carries no size.
 #[::tauri::command]
 pub async fn dialog_ready<R: Runtime>(
     app: AppHandle<R>,
     window: Window<R>,
-    measure: Measure,
+    epoch: u64,
+    seq: u64,
 ) -> Result<(), DialogError> {
-    let os = std::env::consts::OS;
-    ready(&app, &window, measure, os)
-}
-
-/// A refit of a dialog (ADR 0026 §4.5): its content, the theme, the density or the fonts changed. Sizes the window like
-/// [`dialog_ready`] but never shows it.
-#[::tauri::command]
-pub async fn dialog_fit<R: Runtime>(
-    app: AppHandle<R>,
-    window: Window<R>,
-    measure: Measure,
-) -> Result<(), DialogError> {
-    let monitor = monitor_of_window(&window).map(|m| m.0);
-    fit_as(&app, &window, measure, monitor, std::env::consts::OS, "fit")
-}
-
-fn ready<R: Runtime>(
-    app: &AppHandle<R>,
-    window: &Window<R>,
-    measure: Measure,
-    os: &str,
-) -> Result<(), DialogError> {
-    let monitor = monitor_of_window(window).map(|m| m.0);
-    fit_as(app, window, measure, monitor, os, "ready")?;
-    show(app, window.label(), os, false);
-    Ok(())
+    sizing::ready(&app, &window, epoch, seq, std::env::consts::OS)
 }
 
 /// A window's decorations, logical px: its outer size minus its inner size (a side where the platform reports the
@@ -853,109 +836,6 @@ fn decor_of<R: Runtime>(w: &Window<R>, scale: f64) -> Size {
         w.inner_size().unwrap_or_default(),
         scale,
     )
-}
-
-/// Sizes the dialog window `window` for `measure` (see [`plan_fit`]): the minimum content first (so the size is never
-/// below it), then the size in whole physical px rounded up once, then the move that keeps it on its monitor.
-#[cfg(test)]
-fn fit<R: Runtime>(
-    app: &AppHandle<R>,
-    window: &Window<R>,
-    measure: Measure,
-    monitor: Option<Monitor>,
-    os: &str,
-) -> Result<(), DialogError> {
-    fit_as(app, window, measure, monitor, os, "fit")
-}
-
-/// Sizes the window for `measure` (see [`plan_fit`]), logged as `phase`: "ready" (the handshake), "fit" (a refit) or "scale" (the window changed monitor).
-fn fit_as<R: Runtime>(
-    app: &AppHandle<R>,
-    window: &Window<R>,
-    measure: Measure,
-    monitor: Option<Monitor>,
-    os: &str,
-    phase: &str,
-) -> Result<(), DialogError> {
-    let dialogs = dialogs(app)?;
-    let entry = dialogs.get(window.label()).ok_or_else(not_a_dialog)?;
-    let floor = entry.kind.policy().min_size.map_or(0.0, |s| s.height);
-    let scale = window.scale_factor().map_err(failed)?;
-    let inner = window
-        .inner_size()
-        .map_err(failed)?
-        .to_logical::<f64>(scale);
-    let around = Around {
-        current: Size {
-            width: inner.width,
-            height: inner.height,
-        },
-        decor: decor_of(window, scale),
-        outer: outer_rect(window),
-        monitor,
-        os,
-        viewport_delta: 0.0,
-        user_sized: dialogs.is_user_sized(window.label()),
-    };
-    // The page reports CSS px: logical px once the webview zoom is taken out. The viewport delta is measured once, on the
-    // window as it is at the first fit, and kept (a later fit must not read it off a resized window).
-    let measure = measure.checked()?;
-    let zoom = dialogs
-        .zoom_for(window.label(), measure.device_pixel_ratio, scale)
-        .ok_or_else(not_a_dialog)?;
-    let measure = measure.logical(zoom);
-    let viewport_delta = dialogs
-        .viewport_delta_or(window.label(), || {
-            viewport_delta(around.current.height, measure.viewport_height)
-        })
-        .ok_or_else(not_a_dialog)?;
-    let around = Around {
-        viewport_delta,
-        ..around
-    };
-    let plan = plan_fit(entry.kind, measure, floor, &around)?;
-    dialogs.set_measure(window.label(), measure);
-    window
-        .set_min_size(Some(PhysicalSize::new(
-            placement::physical_ceil(plan.min.width, scale),
-            placement::physical_ceil(plan.min.height, scale),
-        )))
-        .map_err(failed)?;
-    // What was asked of the window system, noted before it is asked, so its report is not taken for the user's resize.
-    if plan.resize {
-        let own = OwnSize {
-            width: placement::physical_ceil(plan.size.width, scale),
-            height: placement::physical_ceil(plan.size.height, scale),
-            scale,
-        };
-        dialogs.note_own_size(window.label(), own);
-        window
-            .set_size(PhysicalSize::new(own.width, own.height))
-            .map_err(failed)?;
-    } else {
-        let now = window.inner_size().map_err(failed)?;
-        dialogs.note_current_size(
-            window.label(),
-            OwnSize {
-                width: now.width,
-                height: now.height,
-                scale,
-            },
-        );
-    }
-    if let Some(at) = plan.move_to {
-        set_position(window, &at).map_err(failed)?;
-    }
-    log::info!(
-        target: TARGET,
-        Dialog = entry.dialog_id.as_str(), Content = measure.content.height, Height = plan.size.height,
-        Delta = viewport_delta, Current = around.current.height, Decor = around.decor.height, Scale = scale,
-        Zoom = zoom, Resized = plan.resize, Phase = phase;
-        "Dialog window fitted to its content: requested inner {}x{} (content {}x{}), was {}x{}, scale {}",
-        plan.size.width, plan.size.height, measure.content.width, measure.content.height,
-        around.current.width, around.current.height, scale
-    );
-    Ok(())
 }
 
 /// Shows and focuses the pending dialog window `label`, once; later calls do nothing. The parent is attached (macOS)
@@ -1019,56 +899,34 @@ fn schedule_deadline<R: Runtime>(app: &AppHandle<R>, dialogs: &Dialogs, label: &
     let (app, label, os) = (app.clone(), label.to_string(), os.to_string());
     dialogs.scheduler().after(
         dialogs.show_deadline(),
-        Box::new(move || show(&app, &label, &os, true)),
+        Box::new(move || {
+            sizing::deadline(&app, &label);
+            show(&app, &label, &os, true);
+        }),
     );
 }
 
-/// The scale factor of a dialog window changed (it was dragged to another display, or the display's scale was changed):
-/// refit it from its last measure, which is in logical px and so still right; a dialog that has not reported yet has
-/// nothing to refit and is sized by its `dialog_ready` at the scale it has then.
+/// The scale factor of a dialog window changed (it was dragged to another display, or the display's scale was changed).
 ///
 /// The refit is posted to the main thread from another one (the scheduler's), never run inside the event: the window system resizes the window itself after it has told the
 /// app (tao's `WM_DPICHANGED` sends `ScaleFactorChanged`, then calls `SetWindowPos` with its own size), so a size set in
-/// the event is overwritten (Windows VM, 2026-11-03: asked 614.4 px wide, ended 512).
+/// the event is overwritten (Windows VM, 2026-11-03: asked 614.4 px wide, ended 512). The size state keeps the logical size
+/// it had and asks for it at the new scale, and the page is told to measure again (`remeasure`: text may re-wrap).
 pub fn scale_changed<R: Runtime>(window: &Window<R>) {
     let app = window.app_handle();
     let Some(dialogs) = app.try_state::<Dialogs>() else {
         return;
     };
-    if dialogs
-        .get(window.label())
-        .and_then(|e| e.measure)
-        .is_none()
-    {
-        return;
-    }
-    // Posted to the main thread from another one: run inside the event (as `run_on_main_thread` does from the main
-    // thread itself) it would be overwritten again.
-    let (app, window) = (app.clone(), window.clone());
+    let window = window.clone();
     dialogs.scheduler().after(
         Duration::ZERO,
         Box::new(move || {
-            let (a, w) = (app.clone(), window.clone());
-            if let Err(e) = app.run_on_main_thread(move || refit_after_scale(&a, &w)) {
+            let w = window.clone();
+            if let Err(e) = window.app_handle().run_on_main_thread(move || sizing::scale_now(&w)) {
                 log::warn!(target: TARGET, Window = window.label(); "Dialog refit after a scale change could not be posted: {e}");
             }
         }),
     );
-}
-
-/// The refit of [`scale_changed`], from the dialog's last measure as it is when this runs.
-fn refit_after_scale<R: Runtime>(app: &AppHandle<R>, window: &Window<R>) {
-    let Some(measure) = app
-        .try_state::<Dialogs>()
-        .and_then(|d| d.get(window.label()))
-        .and_then(|e| e.measure)
-    else {
-        return;
-    };
-    let monitor = monitor_of_window(window).map(|m| m.0);
-    if let Err(e) = fit_as(app, window, measure, monitor, std::env::consts::OS, "scale") {
-        log::warn!(target: TARGET, Window = window.label(); "Dialog refit after a scale change failed: {e}");
-    }
 }
 
 /// Moves a window to `at`: the exact physical place where logical coordinates are not global, else points.

@@ -13,9 +13,9 @@ use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR};
-use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
-use dyno_platform::issues::ToolRunner;
+use dyno_platform::runner::ToolRunner;
+use paddock_ipc::BodyPeer;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -38,29 +38,37 @@ impl Tools {
 }
 
 impl ToolRunner for Tools {
-    fn run(&self, program: &str, args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
-        let key = format!(
-            "{} {}",
-            program.rsplit('/').next().unwrap_or(program),
-            args.first().map(String::as_str).unwrap_or("")
-        );
-        self.calls.lock().unwrap().push(key.trim().to_string());
-        let mut answers = self.answers.lock().unwrap();
-        let bare = program.rsplit('/').next().unwrap_or(program).to_string();
-        let name = if answers.contains_key(key.trim()) {
-            key.trim().to_string()
-        } else {
-            bare
+    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
+        let (program, args) = (tool.program.as_str(), &tool.args);
+        let answer: Result<String, PlatformError> = {
+            let key = format!(
+                "{} {}",
+                program.rsplit('/').next().unwrap_or(program),
+                args.first().map(String::as_str).unwrap_or("")
+            );
+            self.calls.lock().unwrap().push(key.trim().to_string());
+            let mut answers = self.answers.lock().unwrap();
+            let bare = program.rsplit('/').next().unwrap_or(program).to_string();
+            let name = if answers.contains_key(key.trim()) {
+                key.trim().to_string()
+            } else {
+                bare
+            };
+            let hit = answers.get_mut(&name);
+            match hit {
+                Some(v) if v.len() > 1 => v.remove(0),
+                Some(v) => v
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
+                None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
+            }
         };
-        let hit = answers.get_mut(&name);
-        match hit {
-            Some(v) if v.len() > 1 => v.remove(0),
-            Some(v) => v
-                .first()
-                .cloned()
-                .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
-            None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
-        }
+        answer.map(|stdout| dyno_platform::runner::ToolOutput {
+            ok: true,
+            stdout,
+            error: String::new(),
+        })
     }
 }
 
@@ -84,8 +92,16 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
+    }
+
+    /// Stops the agent and starts another on the same data folder, as a login or an update does.
+    fn restart(&mut self) {
+        self.running.take().unwrap().stop();
+        let fake = Fake::new();
+        fake.add_process(process(100, "calm", 1.0));
+        self.running = Some(Running::start(self.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap());
     }
 
     fn shared(&self) -> Arc<dyno_agent::agent::Shared> {
@@ -191,7 +207,7 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
 }
 
 /// Runs the finder as a job and waits for its result.
-fn find(peer: &Peer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
+fn find(peer: &BodyPeer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
     match run_job(peer, JobSpec::FindFiles { query }, Duration::from_secs(60))? {
         JobOutput::Finder(r) => Ok(*r),
         other => panic!("{other:?}"),
@@ -233,7 +249,7 @@ fn the_finder_refuses_a_folder_that_is_not_there() {
     assert!(find(&peer, q).unwrap_err().contains("cannot be opened"));
 }
 
-fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
+fn backup_report(peer: &BodyPeer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
     if refresh {
         let JobOutput::Backup(r) = run_job(peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
             panic!("backup")
@@ -433,6 +449,43 @@ fn the_inventory_report_is_written_only_to_a_valid_path() {
     assert!(text.contains("| bash | 5.2 |"), "{text}");
     assert!(ask(&peer, req(&dir.path().join("inv.json"))).is_err(), "wrong extension");
     assert!(ask(&peer, req(&dir.path().join("missing/inv.md"))).is_err(), "folder must exist");
+}
+
+/// ADR 0029 (D7): the software list read in one run is shown at once, with its time, after the agent restarts, while the system
+/// is read again in the background; the next ask has the fresh list.
+#[test]
+fn the_software_list_is_saved_and_shown_at_once_after_a_restart() {
+    let mut h = Harness::start();
+    let first = |h: &Harness, tools: Arc<Tools>| {
+        let s = h.shared();
+        s.extras.use_os("linux");
+        s.extras.use_tools(tools);
+        let JobOutput::Software(sw) = run_job(&h.client(), JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
+            panic!("software")
+        };
+        (sw, s)
+    };
+    let (live, s) = first(&h, Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\n")])]));
+    assert_eq!((live.items.len(), live.saved_at), (2, None), "read just now");
+    s.cache.as_ref().unwrap().flush();
+    drop(s);
+    h.restart();
+    let (saved, s) = first(
+        &h,
+        Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\ngit\t2.43\n")])]),
+    );
+    assert_eq!(saved.items.len(), 2, "the saved list answers at once");
+    assert!(saved.saved_at.is_some_and(|t| t.millis() > 0), "with the time it was saved");
+    // The background read ends (joined, not polled) and the next ask has the fresh list.
+    s.extras.wait_background_software();
+    let JobOutput::Software(fresh) = run_job(&h.client(), JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
+        panic!("software")
+    };
+    assert_eq!(fresh.saved_at, None);
+    assert_eq!(fresh.items.len(), 3);
+    s.cache.as_ref().unwrap().flush();
+    let (_, _, data) = s.cache.as_ref().unwrap().view("extras.software").unwrap();
+    assert!(data.contains("git"), "kept for the next run");
 }
 
 #[test]

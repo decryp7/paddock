@@ -3,14 +3,14 @@
 
 use crate::dto::AgentStatus;
 use crate::health::Hub;
-use crate::link::{AgentLink, Sink};
+use crate::link::{AgentLink, LiveVotes, Sink};
 use crate::logging;
 use crate::login;
 use crate::popover::{Ask, PopoverModel};
 use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
-use dyno_core::protocol::{LiveUpdate, Reply, Request};
+use dyno_core::protocol::{LiveDetail, LiveUpdate, Reply, Request};
 use dyno_core::settings::Settings;
 use dyno_core::time::Timestamp;
 use dyno_core::widgets::popover_values::{Navigate, PopoverState, PopoverSurfaceValues};
@@ -44,6 +44,12 @@ pub mod events {
     pub const WIDGET_LAYOUT: &str = "dyno://widget-layout";
     /// `Navigate`: a widget's button asks the main window to open a page or a Settings section.
     pub const NAVIGATE: &str = "dyno://navigate";
+    /// `PowerView`: the keep-awake state changed.
+    pub const POWER: &str = "dyno://power";
+    /// `WolView`: the Wake-on-LAN list changed.
+    pub const WOL: &str = "dyno://wol";
+    /// `WakesView`: the scheduled wakes changed.
+    pub const WAKES: &str = "dyno://wakes";
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -59,6 +65,8 @@ fn now_millis() -> i64 {
 
 /// The icons are redrawn at most this often (and only when their picture changed).
 const TRAY_INTERVAL: Duration = Duration::from_millis(500);
+/// The menu bar's own voice in the link's live-detail votes (beside the windows').
+pub const MENU_BAR_VOTER: &str = "menu-bar";
 /// One line in the log per this many live updates (the log shows that data flows, without filling up).
 const LOG_EVERY: u64 = 60;
 
@@ -83,6 +91,13 @@ pub fn alarm_notice(alarm: &dyno_core::alarms::Alarm) -> paddock_health::notify:
     notice
 }
 
+/// The tray items in the agent's saved settings file: the layout the person made. A missing, unreadable or damaged file gives the
+/// defaults, so a start never waits for the agent and a custom layout never flashes the default items first.
+pub fn saved_items(settings_file: &std::path::Path) -> Vec<crate::tray_model::ItemSpec> {
+    let (settings, _) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    initial_items(&settings.unwrap_or_default().menu_bar.layout().placements)
+}
+
 /// The tray items: the menu bar layout the agent keeps, or the comma-separated `DYNO_TRAY_ITEMS` (development and
 /// measurements).
 pub fn initial_items(placements: &[Placement<MenuBarItem>]) -> Vec<crate::tray_model::ItemSpec> {
@@ -97,25 +112,45 @@ pub fn initial_items(placements: &[Placement<MenuBarItem>]) -> Vec<crate::tray_m
 /// What the shell draws in the tray: the native icons in the app ([`NativePixels`]), nothing in a test ([`NoPixels`]).
 pub trait TrayPixels<R: Runtime>: Send + Sync {
     /// The tray items changed.
-    fn sync_items(&self, app: &AppHandle<R>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String>;
+    fn sync_items(
+        &self,
+        app: &AppHandle<R>,
+        specs: &[crate::tray_model::ItemSpec],
+        initial: &[(String, crate::tray_model::Frame)],
+    ) -> Result<(), String>;
     /// Draws one item's frame.
     fn paint(&self, app: &AppHandle<R>, item: &str, frame: &crate::tray_model::Frame);
     /// Shows that the agent is not connected.
-    fn show_disconnected(&self, app: &AppHandle<R>);
+    fn show_disconnected(&self, app: &AppHandle<R>, frames: &[(String, crate::tray_model::Frame)]);
+    /// The tray menu's Keep awake entries follow `menu` (`None`: the menu has none).
+    fn set_power_menu(&self, app: &AppHandle<R>, menu: Option<&crate::power_menu::Menu>);
+    /// The tray menu's Wake submenu follows `menu` (`None`: the menu has none).
+    fn set_wol_menu(&self, app: &AppHandle<R>, menu: Option<&crate::wol_menu::Menu>);
 }
 
 /// The tray icons of the menu bar or notification area.
 pub struct NativePixels;
 
 impl TrayPixels<Wry> for NativePixels {
-    fn sync_items(&self, app: &AppHandle<Wry>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
-        crate::tray::sync_items(app, specs).map_err(|e| e.to_string())
+    fn sync_items(
+        &self,
+        app: &AppHandle<Wry>,
+        specs: &[crate::tray_model::ItemSpec],
+        initial: &[(String, crate::tray_model::Frame)],
+    ) -> Result<(), String> {
+        crate::tray::sync_items(app, specs, initial).map_err(|e| e.to_string())
     }
     fn paint(&self, app: &AppHandle<Wry>, item: &str, frame: &crate::tray_model::Frame) {
         crate::tray::paint(app, item, frame);
     }
-    fn show_disconnected(&self, app: &AppHandle<Wry>) {
-        crate::tray::show_disconnected(app);
+    fn show_disconnected(&self, app: &AppHandle<Wry>, frames: &[(String, crate::tray_model::Frame)]) {
+        crate::tray::show_disconnected(app, frames);
+    }
+    fn set_power_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::power_menu::Menu>) {
+        crate::tray::set_power_menu(app, menu);
+    }
+    fn set_wol_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::wol_menu::Menu>) {
+        crate::tray::set_wol_menu(app, menu);
     }
 }
 
@@ -123,11 +158,18 @@ impl TrayPixels<Wry> for NativePixels {
 pub struct NoPixels;
 
 impl<R: Runtime> TrayPixels<R> for NoPixels {
-    fn sync_items(&self, _: &AppHandle<R>, _: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
+    fn sync_items(
+        &self,
+        _: &AppHandle<R>,
+        _: &[crate::tray_model::ItemSpec],
+        _: &[(String, crate::tray_model::Frame)],
+    ) -> Result<(), String> {
         Ok(())
     }
     fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Frame) {}
-    fn show_disconnected(&self, _: &AppHandle<R>) {}
+    fn show_disconnected(&self, _: &AppHandle<R>, _: &[(String, crate::tray_model::Frame)]) {}
+    fn set_power_menu(&self, _: &AppHandle<R>, _: Option<&crate::power_menu::Menu>) {}
+    fn set_wol_menu(&self, _: &AppHandle<R>, _: Option<&crate::wol_menu::Menu>) {}
 }
 
 /// The installed app's shell glue (the commands' state).
@@ -153,6 +195,8 @@ pub struct ShellOf<R: Runtime> {
     popover: Mutex<PopoverModel>,
     /// The connection, for the requests the shell itself makes (layouts, popup values).
     link: Mutex<Option<Arc<AgentLink>>>,
+    /// Where the menu bar's live-detail wish goes (the link once connected).
+    votes: Mutex<Option<Arc<dyn LiveVotes>>>,
     /// A `PopoverValues` request is out (one at a time).
     asking: AtomicBool,
     /// This shell, for the threads that answer later.
@@ -166,19 +210,36 @@ pub struct ShellOf<R: Runtime> {
     popover_gate: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
     /// Connection to first live update, for the login-start log.
     first_data: crate::first_data::FirstData,
+    /// The open alarms that name a metric, by alarm id: a tray item whose metric an alarm rule covers shows its alert exactly
+    /// while one of these is open.
+    open_alarms: Mutex<crate::tray_look::OpenAlarms>,
+    /// The delay before the tray items show the agent is away (on the injected clock).
+    away: crate::tray_away::AwayTimer,
+    /// The agent's last power view (the tray's Keep awake entries follow it).
+    power: Mutex<Option<dyno_core::power::PowerView>>,
+    /// `power.keepAwake.trayItem` and `.display` as last read from the settings.
+    power_tray: AtomicBool,
+    power_display: AtomicBool,
+    power_keep: Mutex<dyno_core::power::settings::KeepAwakeSettings>,
+    /// When the tray menu's time left was last drawn (it is drawn again after a minute, while a hold runs).
+    power_drawn_at: std::sync::atomic::AtomicI64,
 }
 
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
-    pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>) -> Arc<ShellOf<R>> {
-        let size = if cfg!(target_os = "macos") { 44 } else { 32 };
+    pub fn new(
+        app: AppHandle<R>,
+        hub: Hub<R>,
+        pixels: Arc<dyn TrayPixels<R>>,
+        items: Vec<crate::tray_model::ItemSpec>,
+        clock: Arc<dyn paddock_jobs::Clock>,
+    ) -> Arc<ShellOf<R>> {
         Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
-            tray: Mutex::new(TrayItems::new(
-                initial_items(&Settings::default().menu_bar.layout().placements),
-                size,
-            )),
+            tray: Mutex::new(TrayItems::new(items, crate::tray_model::Env::native())),
+            open_alarms: Mutex::new(Default::default()),
+            away: crate::tray_away::AwayTimer::new(clock),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
@@ -187,23 +248,142 @@ impl<R: Runtime> ShellOf<R> {
             hub,
             popover: Mutex::new(PopoverModel::default()),
             link: Mutex::new(None),
+            votes: Mutex::new(None),
             asking: AtomicBool::new(false),
             me: me.clone(),
             last_live: Mutex::new(None),
             navigation: Mutex::new(None),
             popover_gate: Mutex::new(None),
             first_data: crate::first_data::FirstData::default(),
+            power: Mutex::new(None),
+            power_tray: AtomicBool::new(false),
+            power_display: AtomicBool::new(false),
+            power_keep: Mutex::new(Default::default()),
+            power_drawn_at: std::sync::atomic::AtomicI64::new(0),
         })
+    }
+
+    /// Where the menu bar's live-detail wish goes from now on (the link at connect; a fake in tests).
+    pub fn use_votes(&self, votes: Arc<dyn LiveVotes>) {
+        *lock(&self.votes) = Some(votes);
     }
 
     /// The tray items changed (settings, or the development override): the icons follow.
     pub fn set_items(&self, specs: Vec<crate::tray_model::ItemSpec>) {
+        // With no window open the link asks for the tray level (no process table at the user's pace); an item that shows
+        // one app needs the top lists at that pace, so the menu bar asks for the summary while it has one.
+        if let Some(votes) = lock(&self.votes).clone() {
+            let wish = crate::tray_model::shows_apps(&specs).then_some(LiveDetail::Summary);
+            if let Err(e) = votes.set_vote(MENU_BAR_VOTER, wish) {
+                logging::info(&format!("could not update the menu bar's live detail: {}", e.message));
+            }
+        }
         let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
         if changed {
-            if let Err(e) = self.pixels.sync_items(&self.app, &specs) {
+            let initial = self
+                .tray
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unavailable_frames(crate::tray::dark_taskbar());
+            if let Err(e) = self.pixels.sync_items(&self.app, &specs, &initial) {
                 logging::info(&format!("could not update the tray items: {e}"));
             }
         }
+    }
+
+    /// Draws the tray menu's Keep awake entries from the last power view (none when the setting is off).
+    fn draw_power_menu(&self) {
+        let now = now_millis();
+        self.power_drawn_at.store(now, Ordering::Relaxed);
+        let show_keep_awake = self.power_tray.load(Ordering::Relaxed);
+        let menu = lock(&self.power).as_ref().and_then(|v| {
+            let programs = if show_keep_awake { self.busiest_programs() } else { Vec::new() };
+            let mut m = crate::power_menu::menu(v, now, &programs, self.power_display.load(Ordering::Relaxed));
+            if show_keep_awake {
+                return Some(m);
+            }
+            // The Keep awake submenu is off, but a countdown to sleep or shut down always shows its line and Cancel (safety).
+            m.entries.clear();
+            m.header = None;
+            m.countdown_header.is_some().then_some(m)
+        });
+        self.pixels.set_power_menu(&self.app, menu.as_ref());
+    }
+
+    /// The busiest programs in the newest live update (root process of each app), for the "until a program quits" entries.
+    fn busiest_programs(&self) -> Vec<(u32, String)> {
+        lock(&self.last_live)
+            .as_ref()
+            .map(|l| {
+                l.top_cpu
+                    .iter()
+                    .filter_map(|g| g.pids.first().map(|p| (*p, g.name.clone())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Asks the agent for an MCP tool: its answer, or the words to give the client.
+    pub fn call_agent(&self, request: Request) -> Result<Reply, String> {
+        let Some(link) = lock(&self.link).clone() else {
+            return Err("Dyno is not connected to its agent; try again in a moment.".into());
+        };
+        link.call(request).map_err(|e| e.message)
+    }
+
+    /// A Wake entry of the tray menu was chosen: wake the computer (a job the agent runs) or open the Power page.
+    pub fn wol_menu_chosen(&self, id: &str) {
+        let Some(action) = crate::wol_menu::action_of(id) else {
+            return;
+        };
+        let device = match action {
+            crate::wol_menu::Action::Manage => {
+                self.navigate(Navigate::Page(dyno_core::widgets::popover_values::Page::Power));
+                return;
+            }
+            crate::wol_menu::Action::Wake(device) => device,
+        };
+        let Some(link) = lock(&self.link).clone() else {
+            logging::info("wake from the tray: the agent is not connected");
+            return;
+        };
+        let _ = std::thread::Builder::new().name("dyno-wol-menu".into()).spawn(move || {
+            match link.call(Request::WolWake { id: device, test: false }) {
+                Ok(_) => logging::info(&format!("wake from the tray: device {device} started")),
+                Err(e) => logging::info(&format!("wake from the tray: device {device} failed: {}", e.message)),
+            }
+        });
+    }
+
+    /// A Keep awake entry of the tray menu was chosen: ask the agent (it answers with the new view, which is pushed back).
+    pub fn power_menu_chosen(&self, id: &str) {
+        let keep = lock(&self.power_keep).clone();
+        let Some(action) = crate::power_menu::action_of(id, self.power_display.load(Ordering::Relaxed), &keep) else {
+            return;
+        };
+        if action == crate::power_menu::Action::ToggleDisplay {
+            self.power_display.fetch_xor(true, Ordering::Relaxed);
+            self.draw_power_menu();
+            return;
+        }
+        let Some(link) = lock(&self.link).clone() else {
+            logging::info("keep awake from the tray: the agent is not connected");
+            return;
+        };
+        let request = match action {
+            crate::power_menu::Action::Start(spec) => Request::PowerKeepAwake { spec },
+            crate::power_menu::Action::Stop => Request::PowerStopKeepAwake,
+            crate::power_menu::Action::ToggleDisplay => return,
+            crate::power_menu::Action::CancelIdle => Request::PowerIdleCancel,
+            crate::power_menu::Action::SnoozeIdle => Request::PowerIdleSnooze { minutes: 30 },
+        };
+        let id = id.to_string();
+        let _ = std::thread::Builder::new()
+            .name("dyno-power-menu".into())
+            .spawn(move || match link.call(request) {
+                Ok(_) => logging::info(&format!("keep awake from the tray: {id} done")),
+                Err(e) => logging::info(&format!("keep awake from the tray: {id} failed: {}", e.message)),
+            });
     }
 
     /// How many live updates arrived (for the log and tests).
@@ -216,8 +396,19 @@ impl<R: Runtime> ShellOf<R> {
     /// registers itself unasked.
     pub fn settings_changed(&self, settings: &Settings, link: &AgentLink) -> Result<(), String> {
         self.set_items(initial_items(&settings.menu_bar.layout().placements));
+        self.tray
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_policy(crate::tray_look::AlertPolicy::from_settings(settings));
         lock(&self.popover).set_layout(settings.popover.layout().placements.clone());
         self.notifications.store(settings.notifications, Ordering::Relaxed);
+        self.power_tray.store(
+            settings.power.keep_awake.tray_item && settings.power.keep_awake.enabled,
+            Ordering::Relaxed,
+        );
+        self.power_display.store(settings.power.keep_awake.display, Ordering::Relaxed);
+        *lock(&self.power_keep) = settings.power.keep_awake.clone();
+        self.draw_power_menu();
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
         let wanted = settings.launch_at_login;
         match previous {
@@ -451,6 +642,25 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
+    /// The agent is not running: after [`crate::tray_away::AWAY_DELAY`], if it is still away, every item shows its unavailable frame.
+    fn agent_away(&self) {
+        let me = self.me.clone();
+        self.away.lost(move || {
+            let Some(shell) = me.upgrade() else { return };
+            let frames = shell
+                .tray
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unavailable_frames(crate::tray::dark_taskbar());
+            logging::info(&format!(
+                "tray: the agent is still away after {} s, showing {} item(s) as unavailable",
+                crate::tray_away::AWAY_DELAY.as_secs(),
+                frames.len()
+            ));
+            shell.pixels.show_disconnected(&shell.app, &frames);
+        });
+    }
+
     fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
         if let Err(e) = self.app.emit(event, payload) {
             logging::info(&format!("could not emit {event}: {e}"));
@@ -460,6 +670,17 @@ impl<R: Runtime> ShellOf<R> {
 
 impl<R: Runtime> Sink for ShellOf<R> {
     fn live(&self, update: LiveUpdate) {
+        // The tray's "N min left" is drawn again after a minute while a hold with an end runs.
+        let (counting, holding) = lock(&self.power).as_ref().map_or((false, false), |v| {
+            (
+                matches!(v.idle, dyno_core::power::idle::IdleView::Countdown { .. }),
+                matches!(v.awake, dyno_core::power::awake::AwakeView::Holding { ends: Some(_), .. }),
+            )
+        });
+        // A countdown's seconds are drawn again every ten.
+        if now_millis() - self.power_drawn_at.load(Ordering::Relaxed) >= if counting { 10_000 } else { 60_000 } && (counting || holding) {
+            self.draw_power_menu();
+        }
         let n = self.updates.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(ms) = self.first_data.first_update(Instant::now()) {
             logging::info(&format!("first data {ms} ms after the connection"));
@@ -474,11 +695,14 @@ impl<R: Runtime> Sink for ShellOf<R> {
             ));
         }
         if self.throttle.lock().unwrap_or_else(|e| e.into_inner()).allow(Instant::now()) {
-            let frames = self
-                .tray
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .frames(&update, crate::tray::dark_taskbar());
+            let mut tray = self.tray.lock().unwrap_or_else(|e| e.into_inner());
+            // The taskbar's DPI may have changed: every item is drawn again at the new size.
+            #[cfg(not(target_os = "macos"))]
+            if tray.set_px(crate::tray::native_icon_px()) {
+                logging::info("tray: the icon size changed, drawing every item again");
+            }
+            let frames = tray.frames(&update, crate::tray::dark_taskbar());
+            drop(tray);
             for (id, frame) in frames {
                 self.pixels.paint(&self.app, &id, &frame);
             }
@@ -500,6 +724,11 @@ impl<R: Runtime> Sink for ShellOf<R> {
     }
 
     fn alarm(&self, change: dyno_core::alarms::AlarmChange) {
+        {
+            // The tray items whose metric an alarm rule covers show their alert while an alarm for it is open.
+            let metrics = lock(&self.open_alarms).update(change.alarm.id, change.alarm.metric.as_ref(), change.alarm.state.is_open());
+            self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_alarmed(metrics);
+        }
         if change.notify {
             // The shell's notification centre: one message per alarm, updated in place while it repeats (an in-app toast
             // when a window is open, the list in the centre otherwise).
@@ -514,6 +743,41 @@ impl<R: Runtime> Sink for ShellOf<R> {
         }
         self.popover_changed();
         self.emit(events::ALARM, change);
+    }
+
+    fn wakes_changed(&self, view: dyno_core::power::schedule::WakesView) {
+        self.emit(events::WAKES, view);
+    }
+
+    fn wol_changed(&self, view: dyno_core::wol::WolView) {
+        self.pixels.set_wol_menu(&self.app, crate::wol_menu::menu(&view).as_ref());
+        self.emit(events::WOL, view);
+    }
+
+    fn power_changed(&self, view: dyno_core::power::PowerView) {
+        let was_counting = lock(&self.power)
+            .as_ref()
+            .is_some_and(|v| matches!(v.idle, dyno_core::power::idle::IdleView::Countdown { .. }));
+        if let (false, dyno_core::power::idle::IdleView::Countdown { action, deadline, .. }) = (was_counting, &view.idle) {
+            // The warning before anything happens: what, how long, and where to cancel.
+            use tauri_plugin_notification::NotificationExt;
+            let secs = (deadline.since(Timestamp(now_millis())) / 1000).max(0);
+            let verb = action.verb();
+            let body = format!("Dyno will {verb} this computer in {secs} seconds. Open Dyno's menu and choose Cancel {verb} to stop it.");
+            if let Err(e) = self
+                .app
+                .notification()
+                .builder()
+                .title(format!("Dyno is about to {verb}"))
+                .body(body)
+                .show()
+            {
+                logging::info(&format!("could not show the countdown notification: {e}"));
+            }
+        }
+        *lock(&self.power) = Some(view.clone());
+        self.draw_power_menu();
+        self.emit(events::POWER, view);
     }
 
     fn disk_scan(&self, status: dyno_core::disk::scan::DiskScanStatus) {
@@ -540,9 +804,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         self.hub.report(&status);
         if matches!(status.state, crate::dto::AgentState::Running) {
+            self.away.back();
             lock(&self.popover).agent_back();
         } else {
-            self.pixels.show_disconnected(&self.app);
+            self.agent_away();
             lock(&self.popover).agent_lost(Timestamp(now_millis()));
             self.emit_popover(Timestamp(now_millis()));
         }
@@ -563,6 +828,17 @@ impl<R: Runtime> Sink for ShellOf<R> {
 
     fn connected(&self, link: &Arc<AgentLink>) {
         *lock(&self.link) = Some(link.clone());
+        self.use_votes(link.clone());
+        match link.call(Request::PowerState) {
+            Ok(Reply::Power(v)) => self.power_changed(*v),
+            Ok(_) => {}
+            Err(e) => logging::info(&format!("could not read the power state: {}", e.message)),
+        }
+        match link.call(Request::WolDevices) {
+            Ok(Reply::Wol(v)) => self.wol_changed(*v),
+            Ok(_) => {}
+            Err(e) => logging::info(&format!("could not read the Wake-on-LAN list: {}", e.message)),
+        }
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
             Ok(Reply::Settings(s)) => {
@@ -571,5 +847,45 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
         }
+    }
+}
+
+#[cfg(test)]
+mod saved_items_tests {
+    use super::*;
+    use dyno_core::widgets::{edit_layout, SurfaceEdit};
+    use paddock_widgets::{Edit, PlacementId};
+
+    fn write(dir: &std::path::Path, text: &str) -> std::path::PathBuf {
+        let path = dir.join("settings.json");
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_saved_custom_layout_is_what_the_tray_starts_with() {
+        let mut s = Settings::default();
+        edit_layout(
+            &mut s,
+            SurfaceEdit::MenuBar(Edit::Remove {
+                id: PlacementId::new("number-2").unwrap(),
+            }),
+            None,
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(dir.path(), &serde_json::to_string(&s).unwrap());
+        let items = saved_items(&path);
+        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["number", "number-3", "number-4"], "not the four default items");
+    }
+
+    #[test]
+    fn no_file_or_a_damaged_one_gives_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults = initial_items(&Settings::default().menu_bar.layout().placements);
+        assert_eq!(saved_items(&dir.path().join("missing.json")), defaults);
+        let path = write(dir.path(), "{ not json");
+        assert_eq!(saved_items(&path), defaults);
     }
 }

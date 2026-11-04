@@ -214,6 +214,8 @@ the operating system's entries and signed apps. Dyno does not enable or disable 
   <img alt="Benchmarks" src="screenshots/benchmarks-light.png">
 </picture>
 
+**Benchmarks** (ADR 0030) run only on a click, as a job with phases, a Cancel that always works, and no timeout. *Quick* and *Full* presets, a *Sustained processor* run (2 to 20 minutes, with clock and temperature beside the throughput, stopped by Dyno if the processor stays close to its critical temperature) and *Custom*. The picker shows about how long the run takes and the most it writes to each drive. The disk test writes one scratch file per chosen drive with the file system's cache bypassed, removes it whatever happens, and never writes more than the amount shown. Results show the median with the spread of the repetitions and mark an unsteady metric in words; no single score.
+
 **Built** ([WP-23](roadmap.md#wp-23-throttling-detector), [WP-24](roadmap.md#wp-24-disk-and-battery-life-forecasts),
 [WP-25](roadmap.md#wp-25-is-this-normal-baselines), [ADR 0018](adr/0018-throttling-lifespan-and-baselines.md)). All three only
 observe; nothing here changes a setting.
@@ -256,8 +258,22 @@ hover for name, size and share. The scan is a live job with phases and Cancel, b
 lists the same level with the keyboard. It is a map to look at: Dyno deletes, moves and renames nothing; the only actions are
 Reveal in the file manager and Copy path.
 
+**Saved maps (1.1, ADR 0029).** A finished scan is kept on this computer, in the
+system cache folder (on macOS marked out of Time Machine backups; on Windows and Linux the cache folder, which backup tools usually skip, is not enforced), so the disk map opens on the last map at once after a restart, an update or a login,
+with its age ("scanned 3 days ago", "saved") and, for a whole volume, the net change in used space since the scan (a net
+figure: files deleted and files written add up). A cancelled or failed scan is kept too and marked partial. Nothing is read
+again unless you press **Rescan**, or choose "Refresh when opened" in Settings (off by default: scanning a volume is the
+heaviest thing Dyno does). **Rescan changed in 1.1:** the map you were looking at stays on screen, readable, with the new
+pass's progress above it and **Show progress** for the growing tree; the page swaps to the new map when the pass is done, and
+Cancel or a failed rescan keeps the old map. The counter list and the installed-software list are kept the same way and
+shown at once as "last known", with their age, while Dyno reads them again. In Settings > Saved disk maps: keep them or not
+(off forgets them all, with the saved counter list and software list), the space they may take (1,024 MB by default, 64 to 8,192), refresh when opened, and **Forget saved
+maps**; each map has **Forget this map**. Sixteen maps at most, one per volume or folder; a map of a different disk
+mounted under the same name is not shown.
+
 **Planned for 1.1.** Tabs for the largest files, the oldest large files and duplicate hints, and the breakdown of hidden space
-(purgeable space, snapshots, other volumes).
+(purgeable space, snapshots, other volumes). **Planned for 1.2.** Refreshing a saved map by reading only what changed (macOS
+file-system events; the Windows change journal once the helper exists).
 
 ## Alerts and reports
 

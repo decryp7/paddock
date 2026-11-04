@@ -3065,13 +3065,17 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
+ "windows",
 ]
 
 [[package]]
@@ -3273,6 +3277,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "windows",
  "windows-service",

@@ -18,6 +18,9 @@ pub struct ListedVolume {
     pub volume: Volume,
     /// Where the walk starts (the mount point, except on the macOS startup disk).
     pub root: PathBuf,
+    /// The disk's identity (volume UUID or GUID) where the OS gives one: a saved map of another disk mounted at the same
+    /// place is not offered (ADR 0029).
+    pub identity: Option<String>,
 }
 
 /// Lists volumes. The real one asks the OS; tests give a fixed list.
@@ -126,6 +129,7 @@ pub fn list_mounts(
             ListedVolume {
                 volume: classify(&m, &medium, size, reachable),
                 root,
+                identity: medium.identity.clone(),
             }
         })
         .collect()
@@ -214,6 +218,7 @@ mod tests {
             ],
             |m| MediaTraits {
                 internal: Some(m.mount == "/"),
+                identity: (m.mount == "/").then(|| "UUID-ROOT".to_string()),
                 ..MediaTraits::default()
             },
             |m| Some((1000, if m == "/" { 250 } else { 900 })),
@@ -223,6 +228,12 @@ mod tests {
         let names: Vec<&str> = listed.iter().map(|l| l.volume.id.as_str()).collect();
         assert_eq!(names, ["/", "/Volumes/usb", "/Volumes/media"], "proc is not a volume");
         assert_eq!(listed[0].root, PathBuf::from("/System/Volumes/Data"));
+        assert_eq!(
+            listed[0].identity.as_deref(),
+            Some("UUID-ROOT"),
+            "the identity of the medium is kept with the volume"
+        );
+        assert_eq!(listed[2].identity, None, "a share has none");
         assert_eq!(listed[0].volume.used(), Some(750));
         assert!(matches!(listed[1].volume.location, VolumeLocation::External { .. }));
         assert_eq!(listed[1].root, PathBuf::from("/Volumes/usb"));

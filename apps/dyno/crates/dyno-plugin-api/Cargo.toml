@@ -9,7 +9,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

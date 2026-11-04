@@ -1388,3 +1388,90 @@ fonts (same content height in the later fit). Found on the way: tao resizes the 
 so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
+## `maxminddb` `Reader::verify` never returns on a search tree with a cycle (2026-11-03, Dyno)
+
+Dyno's location databases are downloaded, so their bytes are untrusted. A byte-damage scan over a tiny valid file (every
+position, four values) hung on one case: the first record of the root node set to 0, which makes the root its own child.
+`Reader::verify` (`maxminddb` 0.27.3) then loops and grows memory until the process is killed (SIGKILL after 5 minutes); a
+property test showed the same as a test that "ran for over 60 seconds" with nothing printed. In debug builds the same crate also
+panics on arithmetic overflow in `resolve_data_pointer` for a damaged pointer (release wraps and its next bounds check rejects
+it). **Fix** (`dyno-agent/src/geo_db.rs`): before `verify`, a bounded walk of our own proves the tree is acyclic and no deeper
+than 128 bits (one byte of state per node, `O(nodes)`); opening and lookups run under `catch_unwind`; tests pin both; a fuzz
+target (`apps/dyno/fuzz`) runs the open-and-verify path. **Lesson:** a library's "verify" is not a safe parser for untrusted
+bytes; scan single-byte damage of a valid file with a time limit per case, and do not trust a green proptest that never
+finishes.
+
+## A window's size is a state with one owner, not a sequence of events (2026-11-04, ADR 0043)
+
+Sixteen dialog-size fixes in two weeks each closed one gap between two baselines (a handshake measure, a watch started later, a
+scale-change hook). The class is "nothing states what the size should be at any moment". ADR 0043 makes the size a pure state
+machine (`paddock_dialogs::size`) fed by numbered measures `(epoch, seq)` and the OS's own events, carried out on the main
+thread; the page has one measure loop with a last-sent baseline and a guard of two sends per change. **Lessons:** (1) an
+echo of our own `set_size` is told from the user's resize by a queue of what was asked, and by the OS's signal where it has one
+(`WM_SIZING`, live resize), never by comparing sizes alone; (2) anything that touches a native window (`ns_window`) must be
+left out under the mock runtime, which hands out a dangling pointer (SIGSEGV, not an error); (3) an e2e that fixes the
+viewport to a width other than the contract's asserts the wrong thing: at another width the content wraps differently and
+the loop rightly measures again.
+
+## Tests never wait on `requestAnimationFrame`; they wait on a state the page exposes (2026-11-04, ADR 0043)
+
+The dialog size e2e declared the page quiet after two animation frames. WebKit withholds frames from an occluded window, and
+with four parallel workers a window can get none for seconds: 32 of 200 runs saw one height sent and the loop already quiet,
+then hung waiting for frames that did not come. Refuted first: an oscillating loop (the height history was a single value)
+and load alone. **Fix:** the page exposes `data-fit-pending` (the follow-up frames still owed) and `quiet()` waits for 0
+pending and a sequence number that moved past its value before the change and then held (0 of 200). **Lesson:** a test
+that waits on a rendering callback depends on whether the browser renders that window; wait on a condition the page states
+itself (ER-12), and measure the failure rate before and after (ER-28).
+
+## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
+
+I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.
+
+## land-f's first CI run: eight causes, none visible on the Mac (2026-11-04; runs 7485 and 7486)
+
+Everything below passed locally on the macOS dev machine and failed on the Linux or Windows runners. **Lesson:** a Mac-only local run
+proves little for code that depends on the user id, the path separator, the font or the rasteriser; the checks that would have
+caught each one are named.
+- `paddock-dialogs` `any_interleaving_keeps_the_size_rules` (proptest, seed `ef445c8e`): the OS echoes requests A, B, A in order, but the
+  echo of the first A matched the newest A (`rposition`) and took B and the second A off the queue, so B's echo arrived with nothing
+  pending and was read as the user resizing. The state now remembers the requests an equal-sized echo took off the queue (`late`) and
+  explains their own echoes. Regression: `the_late_echo_of_an_older_request_after_an_identical_newer_one_is_not_the_user`.
+  A proptest with a random seed is a flaky test until its counterexample is a fixed test; run it with `PROPTEST_CASES=30000` after a change.
+- `paddock-ipc` `a_client_finding_no_folder_...`: the second half assumed the test user is not root; the CI containers run as root,
+  where a folder the client owns is the service's folder. Guarded as the test above it already was (`geteuid() != 0`).
+- `paddock-service` and `dyno-agent` tests built paths with a hard-coded `/` (`"/Library/LaunchDaemons/x.plist"`, `rsplit('/')`),
+  which differ from the code's `Path::join` on Windows: use `Path::join` and `file_name` in tests that compare paths.
+- `dyno-plugin-host`: a plugin that exits at once may be gone before the bootstrap line is written ("exited before it took its
+  bootstrap") or after ("exited before it connected"): a race, so the test accepts both.
+- Clippy `assertions_on_constants` (Linux-only `edge/linux.rs`), `-webkit-user-select` missing on one rule (`webkit-prefix` test),
+  `THIRD_PARTY_NOTICES.md` out of date for Dyno (`scripts/notices.sh dyno`): run the CI's cheap checks (`notices.sh <app> --check`,
+  `node --test scripts/*.test.mjs`) before pushing a batch that adds crates or CSS.
+- Dyno e2e at 500 and 900x600: the "Is this normal?" sentence ended in an ellipsis with its tooltip on the parent, and the network
+  row's `flagged` and country chips could not shrink inside a clipping cell. The sentence now wraps and both chips ellipsize with their
+  titles. Both pass on the Mac with the old CSS (narrower font): layout checks need the Linux run.
+- `widget-grid.spec` "frame budget": ADR 0044 §7 sets 16.7 ms for the CI Mac; the Linux runner's software rasteriser measured 31.6 ms
+  for the same drag. The budget is now asserted on macOS and only recorded (annotation) elsewhere.
+
+## The real-window probe is outside the coverage gate (2026-11-04, paddock-dialogs)
+
+`paddock-dialogs/src/probe.rs` (feature `probe`, 554 lines) is the ADR 0026 section 6 harness that opens real webview windows. It runs only
+with `PADDOCK_REAL_WINDOWS=1` where there is a window system, so the line-coverage gate of the `crates` job (98.67% with it, over the 99%
+line) never sees it, like the other harnesses it joins in the ignore regex (`paddock-proc` test child, `paddock-chromium` fake browser,
+`paddock-ipc` test child). Its check is the `dialog-window-probe` job instead. **Lesson:** a harness is excluded by name with its reason beside
+the regex, never by lowering the gate; and a job that stops at its first failing step (here coverage, before `cargo deny check`) hides the
+steps after it: read a red job's later steps as not run, not as passed.
+
+## Windows-only assumptions in tests that came in with land-f (2026-11-04, Dyno gates run 7494)
+
+Five Dyno tests failed only on the Windows leg (2147 passed, 5 failed); each was a Unix assumption in the test, and one was a real checkout bug.
+- `dyno-helper-service` unit, maintainer-script and polkit tests read `app/src-tauri/linux/*`; `* text=auto` checked them out with CRLF on
+  Windows (`#!/bin/sh\r`, a unit that differs from its render). The packaging files are now `text eol=lf` in `.gitattributes`
+  (`/apps/*/app/src-tauri/linux/**`, the macOS plists). The same files built on a Windows checkout would ship scripts that sh cannot run.
+- `bench::export::tests::the_destination_is_checked_before_anything_is_written`: `/Users/x/results.csv` is not absolute on Windows (no drive). The product
+  is right; the test now builds its paths from `std::env::temp_dir()` and adds a real `C:\...` case and a drive-less one on Windows.
+- `the_helper_installs_and_removes_itself_on_linux_from_the_package` models Linux paths with the fake system's string keys: `Path::join` spells them
+  with backslashes on Windows. `#[cfg(unix)]`, with the reason beside it.
+- `helper_counters::a_sysfs_tree_...`: the fake sysfs tree has `intel-rapl:0`; a colon is not valid in a Windows file name. `#[cfg(unix)]`, with the reason.
+**Lesson:** a test that builds a fake Linux or macOS tree runs on all three runners: build paths from the OS (`temp_dir`, `Path::join`), keep
+test inputs LF in `.gitattributes`, and gate a test by `cfg` only with the reason (never `#[ignore]`). The check before pushing is `cargo xwin clippy
+--all-targets` (an import used only by a gated test is an unused-import error on Windows).

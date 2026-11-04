@@ -37,6 +37,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -47,6 +48,15 @@ import type {
   CounterObjectList,
   CounterReading,
   NetworkQuery,
+  AwakeSpec,
+  EnergyReport,
+  PowerView,
+  Neighbour,
+  ThisPcWol,
+  WolDeviceInput,
+  WolView,
+  WakeInput,
+  WakesView,
   NetworkSnapshot,
   BenchOverview,
   StartBenchmark,
@@ -54,6 +64,10 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  GpuAdapter,
+  BenchExportFormat,
+  BenchEstimateRequest,
+  BenchRunEstimate,
   BackupReport,
   ChangeTimeline,
   ChangesQuery,
@@ -70,9 +84,15 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  IntelStatus,
+  IntelEdit,
+  EditOutcome,
+  GeoSummary,
+  FirewallView,
+  ToolOffer,
 } from './api.types';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
@@ -114,8 +134,15 @@ export interface DynoBackend {
   // The disk map.
   /** The volumes mounted now: internal, external and network, with capacity. */
   diskVolumes(): Promise<Volume[]>;
-  /** Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. */
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus>;
+  /**
+   * Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. `replaces` is
+   * the kept scan of the same target a Rescan will replace: that map stays readable until the new pass is done.
+   */
+  startDiskScan(target: DiskTarget, replaces?: number | null): Promise<DiskScanStatus>;
+  /** Forgets one saved map: its row in the cache is deleted. A scan of this run stays in memory. */
+  forgetSavedDiskMap(scan: number): Promise<void>;
+  /** Forgets every saved map. */
+  forgetSavedDiskMaps(): Promise<void>;
   /** Stops a scan and resolves at once; what was counted stays. */
   cancelDiskScan(scan: number): Promise<void>;
   /** The status of every kept scan (a window that opens late asks once). */
@@ -138,6 +165,11 @@ export interface DynoBackend {
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
 
+  /** Whether the privileged helper is off, running, outdated and so on (it never blocks: an absent helper is a state). */
+  helperStatus(): Promise<HelperStatus>;
+  /** What Settings offers for the disk-health tool (smartmontools): the pinned download, or why not. */
+  toolOffer(): Promise<ToolOffer>;
+
   // Performance counters (observe-only): browse, search, read now, and the readings kept with the app's events.
   counterObjects(): Promise<CounterObjectList>;
   counterObject(name: string): Promise<CounterObject>;
@@ -150,6 +182,31 @@ export interface DynoBackend {
   lifespan(): Promise<LifespanOverview>;
   baselines(): Promise<BaselineOverview>;
 
+  // Power (ADR 0032): keep awake. The agent holds the OS object; a change is pushed to every window.
+  powerState(): Promise<PowerView>;
+  powerKeepAwake(spec: AwakeSpec): Promise<PowerView>;
+  powerStopKeepAwake(): Promise<PowerView>;
+  powerIdleCancel(): Promise<PowerView>;
+  powerIdleSnooze(minutes: number): Promise<PowerView>;
+  onPower(listener: (v: PowerView) => void): Unsubscribe;
+  /** The energy report for the last `days` local days (1 to 366). */
+  energyReport(days: number): Promise<EnergyReport>;
+
+  // Wake-on-LAN (ADR 0032): the saved computers, "Add from network", and this PC's readiness. A wake itself is a job (`startJob`).
+  wolDevices(): Promise<WolView>;
+  wolCandidates(): Promise<Neighbour[]>;
+  wolSave(device: WolDeviceInput): Promise<WolView>;
+  wolRemove(id: number): Promise<WolView>;
+  wolReadiness(): Promise<ThisPcWol>;
+  // Scheduled wake (ADR 0032 section 5): the schedules and who sets the OS wake. The agent validates and acts.
+  powerWakes(): Promise<WakesView>;
+  powerSetWake(entry: WakeInput): Promise<WakesView>;
+  powerCancelWake(id: number): Promise<WakesView>;
+  /** The schedules changed (a save or cancel from any window, or a schedule that ran). */
+  onWakes(listener: (v: WakesView) => void): Unsubscribe;
+  /** The list changed (a save or remove from any window, or a wake that ended). */
+  onWol(listener: (v: WolView) => void): Unsubscribe;
+
   // Open ports and connections (observe-only), and "Look up IP" (the shell opens the browser; Dyno never fetches).
   network(query: NetworkQuery): Promise<NetworkSnapshot>;
   /** Opens the lookup page for a public address in the default browser; `template` tests one that is not saved yet. */
@@ -157,6 +214,15 @@ export interface DynoBackend {
 
   /** Reverse DNS through the OS resolver for up to 64 addresses; cached by the agent. Only on request, never in the background. */
   resolveHosts(addresses: string[]): Promise<HostName[]>;
+
+  /** The user's IP lists, the allow list, the network switches and the location databases (ADR 0031 and its amendments). */
+  intelStatus(): Promise<IntelStatus>;
+  /** Changes the lists, the allow list or the switches; a "Remove duplicates" preview changes nothing. */
+  intelEdit(edit: IntelEdit): Promise<EditOutcome>;
+  /** The connections map's data, aggregated before any page cap. */
+  geoSummary(): Promise<GeoSummary>;
+  /** The firewall of this computer (read-only). */
+  firewall(): Promise<FirewallView>;
 
   // Alarms (ISA-18.2 style): one open alarm per condition, acknowledge, shelve, mute, notes. Each change answers the changed alarms.
   alarms(filter: AlarmFilter): Promise<Alarm[]>;
@@ -184,6 +250,12 @@ export interface DynoBackend {
   startBenchmark(request: StartBenchmark): Promise<BenchOverview>;
   cancelBenchmark(): Promise<void>;
   deleteBenchmark(id: string): Promise<void>;
+  /** The graphics adapters the GPU runner sees (it is started for a moment). */
+  benchGpuAdapters(): Promise<GpuAdapter[]>;
+  /** The engine's estimate of a chosen run; `null` while a drive is still to be chosen. */
+  benchEstimate(request: BenchEstimateRequest): Promise<BenchRunEstimate | null>;
+  /** The shell shows the OS save dialog and the agent writes the chosen runs as JSON or CSV there; `null` when they cancel. */
+  saveBenchmarks(ids: string[], format: BenchExportFormat): Promise<SavedReport | null>;
   compareBenchmarks(before: string, after: string): Promise<BenchComparison>;
 
   // Reports, settings, plugins.
@@ -248,8 +320,14 @@ export interface DynoBackend {
   // Widget layouts (family ADR 0035): the engine owns the layouts, their limits, edits and undo; the UI draws and sends edits.
   /** One surface's layout with its catalogue, built-in presets, notes, `canUndo` and `editable`. */
   widgetLayout(surface: DynoSurface): Promise<SurfaceView>;
-  /** Applies one edit; answers the new view, or rejects with the reason it was refused (the message says what to change). */
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView>;
+  /**
+   * Applies one edit; answers the new view, or rejects with the reason it was refused (the message says what to change).
+   * `baseRevision` is the `revision` of the view the edit was computed on: a layout edited since rejects with code
+   * `stale`, and the caller reads the view again and tries once more.
+   */
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView>;
+  /** What a dashboard arrangement gesture would give on `request.revision` (answered in the app's own process; stores nothing). */
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>>;
   /** The popup's values now (the first paint; later ones are pushed). */
   popoverValues(): Promise<PopoverSurfaceValues>;
   /** The popup's values as they are now, for the Settings preview: asking changes nothing about the popover's visibility or its pushes. */

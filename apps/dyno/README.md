@@ -16,8 +16,8 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 ![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=a7ee67cb)
 
 
-> **Status: 1.0.0 in preparation, unreleased.** Dyno 1.0.0 is a monitor: live and history, processes and why it is slow,
-> alarms, issues, a disk map, counters, extras, benchmarks and the command line, all read-only. Taming, cleanup, tuning and
+> **Status: 1.1.0.** Dyno is a monitor: live and history, processes and why it is slow,
+> alarms, issues, a disk map, counters, extras, benchmarks and the command line, read-only apart from the opt-in keep awake, Wake-on-LAN and administrator helper. Taming, cleanup, tuning and
 > every other way of changing the machine are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.

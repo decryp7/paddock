@@ -57,6 +57,29 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
   ready after the same week with only a few hours of history, so its first comparisons are rougher until more weeks are
   recorded.
 
+## Disk map and saved maps
+
+**Disk map** shows where the space on a volume or a folder went, one folder level at a time (ring chart or table). Pick a
+volume or choose a folder and the scan runs as a job with progress and Cancel.
+
+A finished scan is **kept** on this computer, in the system cache folder (it never leaves the computer; on macOS it is marked out of Time Machine backups, on Windows and Linux the cache folder is not backed up by the usual tools but Dyno does not enforce it), so
+after a restart, an update or a login the page opens on the last map at once. The line under the title says how old it is and
+that it is saved ("scanned 3 days ago (saved)"), and for a whole volume how the used space changed since: "Net change in used
+space since: +12.4 GB". It is a **net** figure: files deleted and files written add up, so equal amounts show as no change.
+Folders show their age only.
+
+- **Rescan** reads everything again. The map you were looking at **stays on screen** and stays usable while the new pass runs;
+  a strip above it shows the progress, with **Show progress** to watch the growing tree instead and **Cancel rescan**. When the
+  pass is done the page swaps to the new map. If you cancel, or the rescan fails, the earlier map is still there.
+- Dyno never rescans by itself unless you ask: in **Settings > Saved disk maps**, "Refresh when opened" can refresh a map older
+  than a day or a week, at the first time you open the page (never in the background).
+- **Forget this map** (on the page) and **Forget saved maps** (in Settings) delete them; switching **Keep disk maps** off
+  forgets them all, and the saved counter and software lists with them. They share a limit (1,024 MB by default, 64 to 8,192 MB), at most 16 maps, one per volume or folder; the
+  least recently shown go first. A map too big for the limit says "Too big to keep; raise the limit in Settings".
+- If a different disk is mounted under the same name, its old map is not shown.
+- The list of performance counters and the list of installed software are kept the same way: they show at once as "Last
+  known list", with their age, while Dyno reads them again; **Refresh** loads the new one.
+
 ## Issues and new programs
 
 Open **Issues** to see what your system itself recorded going wrong: crashes, apps that stopped responding, unexpected
@@ -87,6 +110,24 @@ why. In *Files*, Dyno lists duplicates and where they are; it removes nothing.
 changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) raises an alarm. For restic
 and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
 is a normal answer.
+
+## Benchmarks
+
+Open Benchmarks, pick what to run and click Run benchmarks; nothing runs before that. **Quick** measures the processor, memory and the
+system drive with a small test file, **Full** adds the graphics adapter and the drives you tick, **Sustained processor** runs every
+core flat out for 2 to 20 minutes and shows whether the speed holds, and **Custom** lets you choose everything. Under the buttons the
+page says about how long the run takes and the most it writes to each drive.
+
+- **The disk test** writes one temporary file on each drive you choose, with the system's cache bypassed so the numbers are the
+  drive's, and deletes it afterwards, also after Cancel or a crash. It never touches your files. A drive that is read-only, full,
+  disconnected or a network drive (unless you tick the box) is reported with the reason and the other drives still run. If a drive
+  does not let Dyno write at its top, the result offers "Choose a folder on this drive and run again". The optional sustained write
+  names the amount before it runs.
+- **Cancel** works at any moment. A run is never ended by a timer: "Still working" or "Not responding" only tell you; you decide.
+  The sustained processor run stops by itself, with the reason, if the processor stays close to its critical temperature.
+- **Reading the results:** each number is the median of the repetitions with their range, and a number whose repetitions differ by
+  more than 10 % is marked "Unsteady". There is no single score. Runs are compared only when measured the same way on the same drive.
+  On battery Dyno asks first; leave the computer otherwise idle while a run is going.
 
 ## Settings
 
@@ -152,8 +193,20 @@ Processes are grouped three ways. Yours and the system's are listed one by one. 
 users** row with whatever totals the OS allows. On Linux, a system that hides other accounts' processes (`hidepid`) says so
 in one line above the list.
 
-Dyno 1.0 runs only with your own rights, so there is nothing to approve and nothing to install. Elevation (a read-only helper
-that gives the readings Dyno cannot get today, and starting as administrator at login) is planned for Dyno 1.1.
+### Administrator readings (Dyno 1.1)
+
+Out of the box Dyno still runs only with your own rights. **Settings > Dyno > Administrator readings** can turn on a small
+read-only helper that gives the readings your account cannot take. Turning it on asks the operating system once: a password
+or Touch ID on macOS, the polkit prompt on Linux, and on Windows the User Account Control prompt, which names an unknown
+publisher because the Windows build is not signed; that is expected. The helper only reads (and sets or cancels Dyno's own scheduled
+wakes); it changes nothing else, and the card's Turn off removes it.
+
+What it adds: every account's processes in detail, per-program network traffic (Windows), disk health (SMART), the program that
+holds a socket or a file (Linux), temperatures, fans and CPU energy, memory slots (Linux), and on Windows what keeps the computer
+awake and the Windows Backup versions. Who sees what: the account that turned it on and administrators see everything; any other
+account sees its own and the system's programs, and the rest as one **Other users** total (or not at all), never another
+person's program folder. Every change request is recorded in the helper's audit log, which the card shows. The helper's log never
+holds file contents or command lines.
 
 ## Troubleshooting
 

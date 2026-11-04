@@ -1,6 +1,8 @@
-//! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in dyno-ipc frames
+//! The app ↔ agent protocol: requests, replies and pushed events. Carried as postcard bodies in `paddock-ipc` frames
 //! between the processes, and as camelCase JSON between the Tauri shell and the webview (`api.types.ts` mirrors it).
-//! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`].
+//! Append new variants at the end; anything else is a new [`PROTOCOL_VERSION`]. An appended value inside a request (a new
+//! `LiveDetail` in `Subscribe`) still makes an older agent lose the whole request ("could not read that request"), so the
+//! sender needs a fallback for it (the link asks for `Summary` when `Tray` is refused).
 
 use crate::activity::ActivityEntry;
 use crate::alerts::Alert;
@@ -25,8 +27,45 @@ use serde::{Deserialize, Serialize};
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
 ///
-/// 4: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`).
+/// 4 (unreleased; one bump for everything below; the protocol is positional postcard, so an older peer reads these wrongly):
+/// - learning: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`);
+/// - saved disk maps (ADR 0029): `DiskScanStatus` gained `origin`, `changed_bytes`, `replaces` and `not_saved`, `StartDiskScan`
+///   gained `replaces`; `ForgetSavedDiskMap` and `ForgetSavedDiskMaps` are new;
+/// - benchmarks (ADR 0030): `StartBenchmark` gained `allow_battery`; `BenchMetric` gained `samples`, `min`, `max`, `cv`,
+///   `unsteady`; `KindResult` gained `method`; `BenchRun` gained `old_way` and `limited`; `BenchProgress` gained `phase`,
+///   `liveness`, `limited`; `BenchOverview` gained `disk_test_enabled`; `MetricDelta` gained the spreads and `unsteady`;
+///   `ErrorCode::NeedsConsent` is new; the disk test (WP-B3): `StartBenchmark` gained `disk_volumes`, `allow_network_drives`,
+///   `sustained_minutes` and `sustained_write_gib`, `KindResult` gained `device` and `trace`, `BenchProgress` gained `trace`, and the
+///   runner's `Line` gained `Sample`;
+/// - helper (ADR 0027): `Request::HelperStatus`, `Reply::HelperStatus`, `JobSpec::Helper` and `JobOutput::Helper` are new;
+/// - network features (ADR 0031): `Request::{IntelStatus, IntelEdit, GeoSummary, Firewall, ToolOffer, RemoveTool}`,
+///   `Reply::{Intel, IntelEdited, Geo, Firewall, ToolOffer}`, `JobSpec::{UpdateList, UpdateGeo, RebuildIntel, InstallTool}` and
+///   `JobOutput::{Intel, Tool}` are new;
+/// - widget grid (ADR 0044): `EditWidgetLayout` gained `base_revision`; `ErrorCode::Stale` is new (the layout views travel as JSON
+///   on the link);
+/// - benchmarks B3-B8: `Request::{SaveBenchmarks, BenchGpuAdapters, BenchEstimate}` and `Reply::{GpuAdapters, BenchEstimate}` are new,
+///   `StartBenchmark` also gained `disk_folders` and `gpu_adapter`;
+/// - power (ADR 0032): `Request::{PowerState, PowerKeepAwake, PowerStopKeepAwake, PowerIdleCancel, PowerIdleSnooze, EnergyReport}`,
+///   `Reply::{Power, Energy}` and `Message::PowerChanged` are new;
+/// - Wake-on-LAN (ADR 0032): `Request::{WolDevices, WolCandidates, WolSave, WolRemove, WolWake, WolReadiness}`,
+///   `Reply::{Wol, WolCandidates, WolReadiness}`, `Message::WolChanged`, `JobSpec::WolWake` and `JobOutput::Wol` are new;
+/// - scheduled wake (ADR 0032 section 5): `Request::{PowerWakes, PowerSetWake, PowerCancelWake}`, `Reply::PowerWakes` and
+///   `Message::WakesChanged` are new;
+/// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
+///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
+
+/// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
+/// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the
+/// end of the enums and need no check).
+pub const WIRE_MAJOR: u16 = {
+    assert!(PROTOCOL_VERSION <= u16::MAX as u32);
+    PROTOCOL_VERSION as u16
+};
+
+/// The largest frame between the app and the agent, in bytes. A reply over it fails that one call (disk-map pages and history
+/// are paged to stay far below).
+pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -37,6 +76,21 @@ pub enum LiveDetail {
     Summary,
     /// Also every process and group (the task manager is open).
     Processes,
+    /// Only what the menu bar icons draw: no window shows live data. The agent keeps the user's system interval (the
+    /// icons stay live) but reads the process table at its unwatched pace, and sends no process list.
+    Tray,
+}
+
+impl LiveDetail {
+    /// How much this detail asks of the sampler: `Tray` < `Summary` < `Processes`. The sampler serves the most any
+    /// subscriber wants.
+    pub fn rank(self) -> u8 {
+        match self {
+            LiveDetail::Tray => 1,
+            LiveDetail::Summary => 2,
+            LiveDetail::Processes => 3,
+        }
+    }
 }
 
 /// Something the app asks the agent.
@@ -209,6 +263,27 @@ pub enum Request {
         phase: Option<crate::bench::BenchPhase>,
         /// Scratch file size for the disk test, MiB (default and cap in `bench`).
         disk_mib: Option<u32>,
+        /// The person agreed to run on battery, for this run only (ADR 0030 D6). Without it a run on battery answers `NeedsConsent`.
+        #[serde(default)]
+        allow_battery: bool,
+        /// The volumes the disk test measures, by id (their mount points, from the disk map's list); empty means the system drive.
+        #[serde(default)]
+        disk_volumes: Vec<String>,
+        /// Network drives may be tested in this run (the person ticked it); their results are marked network.
+        #[serde(default)]
+        allow_network_drives: bool,
+        /// Folders chosen for drives whose top is not writable (the shell's folder dialog gave them).
+        #[serde(default)]
+        disk_folders: Vec<crate::bench::DiskFolder>,
+        /// The graphics adapter to measure, by its index in [`Reply::GpuAdapters`]; the default is the discrete one.
+        #[serde(default)]
+        gpu_adapter: Option<u32>,
+        /// Run the CPU kind as a sustained run of this many minutes (2, 5, 10 or 20) instead of the short test.
+        #[serde(default)]
+        sustained_minutes: Option<u32>,
+        /// Also run the sustained disk write (past the drive's cache), up to this many GiB per drive; the person confirmed the amount.
+        #[serde(default)]
+        sustained_write_gib: Option<u32>,
     },
     /// Stops the run in progress after the current kind (that kind is stopped at once). Appended.
     CancelBenchmark,
@@ -372,6 +447,9 @@ pub enum Request {
     StartDiskScan {
         /// What to scan.
         target: crate::disk::scan::DiskTarget,
+        /// The kept scan of the same target this one replaces (Rescan, ADR 0029): the old map stays readable until the new
+        /// pass is done. `None` for a first scan.
+        replaces: Option<u64>,
     },
     /// Stops a scan and returns at once; what was counted stays. Appended.
     CancelDiskScan {
@@ -454,6 +532,9 @@ pub enum Request {
     EditWidgetLayout {
         /// The edit; its variant names the surface.
         edit: crate::widgets::SurfaceEdit,
+        /// The revision of the view the edit was computed on (`LayoutView.revision`). When it is not the layout's current
+        /// one the edit is refused (another window edited meanwhile) and the app reloads the view. `None`: applied as is.
+        base_revision: Option<u64>,
     },
     /// The popup's values for the widgets that are not live (alarms, disk space, backup, last issue, pinned counters),
     /// from state the agent already keeps. Placements that are not in the popup layout, or are live, are left out.
@@ -461,6 +542,114 @@ pub enum Request {
     PopoverValues {
         /// Which placements.
         placements: Vec<paddock_widgets::PlacementId>,
+    },
+    /// Forgets one saved disk map (ADR 0029): its row is deleted and its pages overwritten. A map that is also scanning or
+    /// finished in this run stays in memory. Answers [`Reply::Ok`].
+    ForgetSavedDiskMap {
+        /// The scan.
+        scan: u64,
+    },
+    /// Forgets every saved disk map: the cache files are deleted outright. Answers [`Reply::Ok`].
+    ForgetSavedDiskMaps,
+    /// Whether the privileged helper is off, running, outdated and so on, with the audit entries this account may read
+    /// (ADR 0027). A query; answers [`Reply::HelperStatus`]. Appended (needs the protocol bump the steward makes).
+    HelperStatus,
+
+    // ---- IP lists and the connections map (ADR 0031 and its amendments) ----
+    /// The user's lists with their counts and state, the allow list, the network switches and the location databases'
+    /// state (answers [`Reply::Intel`]). Appended.
+    IntelStatus,
+    /// Changes the lists, the allow list or the switches (answers [`Reply::IntelEdited`]); the agent validates, saves and
+    /// starts the index rebuild job when matching changed. A "Remove duplicates" preview changes nothing. Appended.
+    IntelEdit {
+        /// The change.
+        edit: crate::intel_lists::IntelEdit,
+    },
+    /// The map's data for the connections now, aggregated before any page cap (answers [`Reply::Geo`]). Appended.
+    GeoSummary,
+    /// The firewall of this computer, read-only (answers [`Reply::Firewall`]); sources only the helper can read say so. Appended.
+    Firewall,
+    /// What Settings offers for the disk-health tool (answers [`Reply::ToolOffer`]). Appended (the steward's protocol bump covers it).
+    ToolOffer,
+    /// Removes Dyno's own copy of the disk-health tool (macOS); answers [`Reply::Ok`]. Appended.
+    RemoveTool,
+    /// Writes saved benchmark runs as JSON or CSV to a path the user picked in the OS save dialog (answers `ReportSaved`). Appended.
+    SaveBenchmarks {
+        /// Where (absolute, ending in the format's extension).
+        path: String,
+        /// The file format.
+        format: crate::bench::export::ExportFormat,
+        /// The runs to write, by id (at most 200); an id that no longer exists is skipped.
+        ids: Vec<String>,
+    },
+    /// The graphics adapters the GPU runner sees (answers [`Reply::GpuAdapters`]); starts the runner briefly. Appended.
+    BenchGpuAdapters,
+    /// About how long a chosen run takes and what it writes to each drive (answers [`Reply::BenchEstimate`]; `null` while a drive
+    /// is still to be chosen). Appended.
+    BenchEstimate {
+        /// What is chosen.
+        request: crate::bench::estimate::EstimateRequest,
+    },
+    /// The power view: keep-awake state and what works here (ADR 0032). Answers [`Reply::Power`]; also pushed as
+    /// [`Message::PowerChanged`] on every change.
+    PowerState,
+    /// Holds the computer awake as `spec` says, replacing a hold already taken. Answers [`Reply::Power`] or `BadRequest`
+    /// (the message says what to fix).
+    PowerKeepAwake {
+        /// The request.
+        spec: crate::power::awake::AwakeSpec,
+    },
+    /// Releases the keep-awake hold (and clears a notice that it ended). Answers [`Reply::Power`].
+    PowerStopKeepAwake,
+    /// Cancels the idle or timed countdown, or the wait after the system was asked (the rule acts again only after new
+    /// activity). Answers [`Reply::Power`]. Appended.
+    PowerIdleCancel,
+    /// Snoozes the countdown for this many minutes (1 to 1440). Answers [`Reply::Power`]. Appended.
+    PowerIdleSnooze {
+        /// Minutes.
+        minutes: u32,
+    },
+    /// The energy report for the last `days` local days (1 to 366). Answers [`Reply::Energy`]. Appended.
+    EnergyReport {
+        /// How many days.
+        days: u32,
+    },
+    /// The saved Wake-on-LAN computers. Answers [`Reply::Wol`].
+    WolDevices,
+    /// The neighbour-table entries not yet saved, for "Add from network" (read on demand, only when the setting allows it).
+    /// Answers [`Reply::WolCandidates`].
+    WolCandidates,
+    /// Adds a computer or changes one (a name, an address, a SecureOn password). Answers [`Reply::Wol`] or `BadRequest`
+    /// (the message says what to fix).
+    WolSave {
+        /// What the person typed or picked.
+        device: crate::wol::WolDeviceInput,
+    },
+    /// Removes a saved computer and its SecureOn password. Answers [`Reply::Wol`].
+    WolRemove {
+        /// Which.
+        id: u64,
+    },
+    /// Wakes a saved computer as a job (answers [`Reply::Job`] at once); `test` also waits for an answer.
+    WolWake {
+        /// Which.
+        id: u64,
+        /// Wait for an answer and say whether it woke.
+        test: bool,
+    },
+    /// This PC's Wake-on-LAN readiness. Answers [`Reply::WolReadiness`].
+    WolReadiness,
+    /// The scheduled wakes and who sets the OS wake here (ADR 0032 section 5). Answers [`Reply::PowerWakes`].
+    PowerWakes,
+    /// Adds a scheduled wake or changes one. Answers [`Reply::PowerWakes`] or `BadRequest` (the message says what to fix).
+    PowerSetWake {
+        /// What the person chose.
+        entry: crate::power::schedule::WakeInput,
+    },
+    /// Cancels a scheduled wake (its OS wake too). Answers [`Reply::PowerWakes`].
+    PowerCancelWake {
+        /// Which.
+        id: u32,
     },
 }
 
@@ -752,6 +941,39 @@ pub enum Reply {
     WidgetLayout(Box<crate::widgets::SurfaceView>),
     /// The popup's values for the asked placements.
     PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
+    /// The helper's state. Appended.
+    HelperStatus(Box<crate::helper_wire::HelperStatus>),
+
+    // ---- IP lists and the connections map ----
+    /// The lists page.
+    Intel(Box<crate::intel_lists::IntelStatus>),
+    /// What an edit produced.
+    IntelEdited(Box<crate::intel_lists::EditOutcome>),
+    /// The map's data.
+    Geo(Box<crate::geo::GeoSummary>),
+    /// The firewall view.
+    Firewall(Box<crate::firewall::FirewallView>),
+    /// The disk-health tool as offered.
+    ToolOffer(Box<crate::tool_offer::ToolOffer>),
+    // ---- benchmarks ----
+    /// The graphics adapters, for the picker.
+    GpuAdapters(Vec<crate::bench::gpu::GpuAdapter>),
+    /// The estimate for a chosen run; `None` until a drive is chosen.
+    BenchEstimate(Option<crate::bench::estimate::RunEstimate>),
+
+    // ---- power ----
+    /// The power view.
+    Power(Box<crate::power::PowerView>),
+    /// The energy report. Appended.
+    Energy(Box<crate::power::energy::EnergyReport>),
+    /// The Wake-on-LAN list.
+    Wol(Box<crate::wol::WolView>),
+    /// Neighbour-table entries not yet saved.
+    WolCandidates(Vec<crate::wol::Neighbour>),
+    /// This PC's Wake-on-LAN readiness.
+    WolReadiness(Box<crate::wol::ThisPcWol>),
+    /// The scheduled wakes.
+    PowerWakes(Box<crate::power::schedule::WakesView>),
 }
 
 /// The inventory report that was written.
@@ -832,6 +1054,20 @@ impl Reply {
             Reply::JobOutput(x) => v(x),
             Reply::WidgetLayout(x) => v(x),
             Reply::PopoverValues(x) => v(x),
+            Reply::ToolOffer(x) => v(x),
+            Reply::HelperStatus(x) => v(x),
+            Reply::Intel(x) => v(x),
+            Reply::IntelEdited(x) => v(x),
+            Reply::Geo(x) => v(x),
+            Reply::Firewall(x) => v(x),
+            Reply::GpuAdapters(x) => v(x),
+            Reply::BenchEstimate(x) => v(x),
+            Reply::Power(x) => v(x),
+            Reply::Energy(x) => v(x),
+            Reply::Wol(x) => v(x),
+            Reply::WolCandidates(x) => v(x),
+            Reply::WolReadiness(x) => v(x),
+            Reply::PowerWakes(x) => v(x),
         }
     }
 }
@@ -856,6 +1092,11 @@ pub enum ErrorCode {
     Busy,
     /// A bug.
     Internal,
+    /// The person has to agree first (a benchmark on battery); ask, then send the request again with the consent. Appended.
+    NeedsConsent,
+    /// The edit was computed on an older revision of a layout (another window edited meanwhile): reload the view and try
+    /// again.
+    Stale,
 }
 
 /// A failed request.
@@ -917,6 +1158,12 @@ pub enum Message {
     Job(Box<paddock_jobs::wire::WireSnapshot>),
     /// Agent -> app: a surface's layout changed (an edit from any window). Appended.
     WidgetLayoutChanged(crate::widgets::DynoSurface),
+    /// Agent -> app: the power view changed (a hold started, ended, was ended by the OS). Appended.
+    PowerChanged(Box<crate::power::PowerView>),
+    /// Agent -> app: the Wake-on-LAN list changed (a save, a remove, or a wake that ended). Appended.
+    WolChanged(Box<crate::wol::WolView>),
+    /// Agent -> app: the scheduled wakes changed (a save, a cancel, or a schedule that ran). Appended.
+    WakesChanged(Box<crate::power::schedule::WakesView>),
 }
 
 #[cfg(test)]
@@ -969,6 +1216,215 @@ mod tests {
     }
 
     #[test]
+    fn power_requests_replies_and_pushes_survive_postcard() {
+        use crate::power::awake::{AwakeScope, AwakeSpec, AwakeUntil, AwakeView, BusyCond};
+        use crate::power::{Capability, PowerCaps, PowerView};
+        let spec = |until| AwakeSpec {
+            scope: AwakeScope::SystemAndDisplay,
+            until,
+        };
+        let untils = [
+            AwakeUntil::Indefinite,
+            AwakeUntil::For { minutes: 5 },
+            AwakeUntil::At { minute_of_day: 600 },
+            AwakeUntil::WhileProcess {
+                process: ProcessRef {
+                    pid: 1,
+                    started: Some(Timestamp(2)),
+                },
+            },
+            AwakeUntil::WhileBusy {
+                conds: vec![BusyCond::Cpu { above_pct: 5.0 }, BusyCond::Process { program: "a".into() }],
+                grace_secs: 30,
+            },
+        ];
+        for u in untils {
+            let m = Message::Request(Box::new(Request::PowerKeepAwake { spec: spec(u.clone()) }));
+            assert_eq!(round(&m), m);
+            let view = |awake| PowerView {
+                awake,
+                ..Default::default()
+            };
+            for awake in [
+                AwakeView::Off,
+                AwakeView::Holding {
+                    spec: spec(u.clone()),
+                    since: Timestamp(1),
+                    ends: None,
+                    os_ref: "r".into(),
+                    busy: Some(crate::power::awake::BusyNow {
+                        active: false,
+                        detail: "quiet".into(),
+                        quiet_secs: 1,
+                        release_in_secs: Some(2),
+                    }),
+                },
+                AwakeView::Waiting {
+                    spec: spec(u.clone()),
+                    why: "w".into(),
+                    since: Timestamp(1),
+                    ends: None,
+                },
+                AwakeView::Ended {
+                    why: "w".into(),
+                    at: Timestamp(3),
+                },
+            ] {
+                let push = Message::PowerChanged(Box::new(view(awake.clone())));
+                assert_eq!(round(&push), push);
+                let reply = Message::Reply(Box::new(Ok(Reply::Power(Box::new(view(awake))))));
+                assert_eq!(round(&reply), reply);
+            }
+        }
+        let cant = Message::PowerChanged(Box::new(PowerView {
+            awake: AwakeView::Off,
+            caps: PowerCaps {
+                keep_awake: Capability::CantTell { reason: "r".into() },
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+        assert_eq!(round(&cant), cant);
+        for r in [Request::PowerState, Request::PowerStopKeepAwake, Request::EnergyReport { days: 30 }] {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+    }
+
+    #[test]
+    fn wol_requests_and_replies_survive_postcard() {
+        use crate::wol::{Mac, Neighbour, NeighbourState, SecureOnEdit, WolDeviceInput, WolView};
+        let input = |secure_on| WolDeviceInput {
+            id: Some(2),
+            name: "Test box".into(),
+            mac: "02:00:5e:10:00:01".into(),
+            last_ip: Some("192.0.2.40".into()),
+            interface: Some("en0".into()),
+            secure_on,
+        };
+        let requests = [
+            Request::WolDevices,
+            Request::WolCandidates,
+            Request::WolReadiness,
+            Request::WolRemove { id: 3 },
+            Request::WolWake { id: 3, test: true },
+            Request::WolSave {
+                device: input(SecureOnEdit::Keep),
+            },
+            Request::WolSave {
+                device: input(SecureOnEdit::Clear),
+            },
+            Request::WolSave {
+                device: input(SecureOnEdit::Set {
+                    password: "01:02:03:04".into(),
+                }),
+            },
+        ];
+        for r in requests {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+        let replies = [
+            Reply::Wol(Box::new(WolView {
+                enabled: true,
+                devices: vec![],
+                can_send: crate::power::Capability::Known,
+            })),
+            Reply::WolCandidates(vec![Neighbour {
+                name: None,
+                mac: Mac([2, 0, 0x5e, 0x10, 0, 1]),
+                ip: "192.0.2.40".into(),
+                interface: "en0".into(),
+                state: NeighbourState::Reachable,
+            }]),
+            Reply::WolReadiness(Box::default()),
+            Reply::JobOutput(Box::new(crate::jobs::JobOutput::Wol(Box::new(crate::wol::WolOutcome {
+                sent: vec![],
+                answered: Some(crate::wol::Answer {
+                    how: crate::wol::AnswerHow::Ping,
+                    after_secs: 4,
+                    new_ip: None,
+                }),
+                tested: true,
+                elapsed_secs: 4,
+                timed_out: false,
+                cancelled: false,
+                message: "Awake after 4 s (answered ping).".into(),
+            })))),
+        ];
+        for r in replies {
+            let m = Message::Reply(Box::new(Ok(r)));
+            assert_eq!(round(&m), m);
+        }
+        {
+            use crate::power::schedule::{
+                DynoJob, Repeat, RowState, WakeInput, WakeRoute, WakeRouteState, WakeRow, WakeSchedule, WakesView,
+            };
+            let entry = WakeInput {
+                id: Some(1),
+                name: "Morning".into(),
+                minute_of_day: 420,
+                repeat: Repeat::Days { mask: 0b101 },
+                stay_awake_minutes: Some(30),
+                wake_devices: vec![1],
+                job: Some(DynoJob::BackupCheck),
+                enabled: true,
+            };
+            for r in [
+                Request::PowerWakes,
+                Request::PowerCancelWake { id: 2 },
+                Request::PowerSetWake { entry },
+            ] {
+                let m = Message::Request(Box::new(r));
+                assert_eq!(round(&m), m);
+            }
+            for state in [
+                RowState::Armed { route: WakeRoute::Helper },
+                RowState::Off,
+                RowState::Paused,
+                RowState::NeedsHelper,
+                RowState::Failed { why: "w".into() },
+            ] {
+                let view = WakesView {
+                    rows: vec![WakeRow {
+                        entry: WakeSchedule::default(),
+                        state,
+                    }],
+                    route: WakeRouteState::HelperReady,
+                };
+                let m = Message::Reply(Box::new(Ok(Reply::PowerWakes(Box::new(view)))));
+                assert_eq!(round(&m), m);
+            }
+            for route in [
+                WakeRouteState::Agent {
+                    note: "n".into(),
+                    cant_tell: vec!["c".into()],
+                },
+                WakeRouteState::NeedsHelper { reason: "r".into() },
+                WakeRouteState::Unavailable { reason: "r".into() },
+            ] {
+                let m = Message::Reply(Box::new(Ok(Reply::PowerWakes(Box::new(WakesView { rows: vec![], route })))));
+                assert_eq!(round(&m), m);
+            }
+        }
+        let wakes = Message::WakesChanged(Box::new(crate::power::schedule::WakesView {
+            rows: vec![],
+            route: crate::power::schedule::WakeRouteState::HelperReady,
+        }));
+        assert_eq!(round(&wakes), wakes);
+        let push = Message::WolChanged(Box::new(WolView {
+            enabled: false,
+            devices: vec![],
+            can_send: crate::power::Capability::Known,
+        }));
+        assert_eq!(round(&push), push);
+        let job = Message::Request(Box::new(Request::StartJob {
+            spec: crate::jobs::JobSpec::WolWake { id: 1, test: false },
+        }));
+        assert_eq!(round(&job), job);
+    }
+
+    #[test]
     fn messages_survive_postcard() {
         let live = LiveUpdate {
             system: sample(1),
@@ -1015,6 +1471,21 @@ mod tests {
             Reply::AlarmChanges(vec![]),
             Reply::Benchmarks(Box::default()),
             Reply::Network(Box::default()),
+            Reply::Power(Box::new(crate::power::PowerView {
+                awake: crate::power::awake::AwakeView::Off,
+                caps: crate::power::PowerCaps {
+                    keep_awake: crate::power::Capability::Known,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })),
+            Reply::Energy(Box::new(crate::power::energy::report(
+                &[],
+                1,
+                Timestamp(0),
+                &crate::time::FixedZone::UTC,
+                &Default::default(),
+            ))),
             Reply::HostNames(vec![]),
             Reply::Changes(Box::default()),
             Reply::Gpu(Box::default()),
@@ -1081,6 +1552,10 @@ mod tests {
             eta_seconds: None,
             hidden_bytes: None,
             scanned_at: None,
+            origin: ScanOrigin::Saved { saved_at: Timestamp(5) },
+            changed_bytes: Some(-7),
+            replaces: Some(3),
+            not_saved: Some(NotSaved::TooBig),
         }
     }
 
@@ -1108,7 +1583,10 @@ mod tests {
             Request::DiskVolumes,
             Request::StartDiskScan {
                 target: crate::disk::scan::DiskTarget::Volume { id: "/".into() },
+                replaces: Some(2),
             },
+            Request::ForgetSavedDiskMap { scan: 1 },
+            Request::ForgetSavedDiskMaps,
             Request::CancelDiskScan { scan: 1 },
             Request::DiskScans,
             Request::DiskChildren {
@@ -1127,10 +1605,13 @@ mod tests {
             },
             Request::EditWidgetLayout {
                 edit: crate::widgets::SurfaceEdit::Popover(paddock_widgets::Edit::ResetToDefaults),
+                base_revision: Some(3),
             },
             Request::PopoverValues {
                 placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
             },
+            Request::ToolOffer,
+            Request::RemoveTool,
             Request::DiskRings {
                 scan: 1,
                 node: Some(2),
@@ -1138,6 +1619,15 @@ mod tests {
                 min_share: 0.01,
                 max_nodes: 500,
             },
+            Request::IntelStatus,
+            Request::IntelEdit {
+                edit: crate::intel_lists::IntelEdit::SetEnabled {
+                    id: "list-1".into(),
+                    enabled: false,
+                },
+            },
+            Request::GeoSummary,
+            Request::Firewall,
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));
@@ -1155,6 +1645,19 @@ mod tests {
                 crate::widgets::DynoSurface::Popover,
             ))),
             Reply::PopoverValues(crate::widgets::JsonOnLink(vec![])),
+            Reply::Intel(Box::default()),
+            Reply::IntelEdited(Box::new(crate::intel_lists::EditOutcome::Done)),
+            Reply::Geo(Box::default()),
+            Reply::Firewall(Box::new(crate::firewall::FirewallView {
+                os: crate::helper::HelperHost::Macos,
+                sources: vec![crate::firewall::FirewallSource::new(crate::firewall::RuleSource::Pf)],
+            })),
+            Reply::ToolOffer(Box::new(crate::tool_offer::smartmontools_offer(
+                crate::helper::HelperHost::Linux,
+                None,
+                false,
+                None,
+            ))),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);

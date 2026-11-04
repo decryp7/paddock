@@ -282,3 +282,29 @@ export function findRingNode(from: RingNode, id: number): DiskNode | null {
   }
   return null;
 }
+
+/** What a saved map says about itself: its age is the page's "scanned" line; this is the rest. `null` for a map of this run. */
+export function savedNote(s: DiskScanStatus, ago: string, bytes: (n: number) => string): string | null {
+  if (typeof s.origin === 'string') return null;
+  const change =
+    s.changedBytes === null
+      ? ''
+      : s.changedBytes === 0
+        ? ' Used space is the same as when it was scanned (a net figure: files deleted and written add up).'
+        : ` Net change in used space since: ${s.changedBytes > 0 ? '+' : '\u2212'}${bytes(Math.abs(s.changedBytes))} (a net figure: files deleted and written add up).`;
+  return `Saved map, scanned ${ago}.${change} Rescan to see what changed.`;
+}
+
+/** Why a finished scan was not kept for the next time, in words; `null` when it was kept. */
+export function notSavedText(s: DiskScanStatus): string | null {
+  switch (s.notSaved) {
+    case 'tooBig':
+      return 'Too big to keep; raise the limit in Settings.';
+    case 'noSpace':
+      return 'Not kept for next time: the disk would be left with too little free space.';
+    case 'failed':
+      return 'Not kept for next time: writing the map failed. The earlier saved map is unchanged.';
+    default:
+      return null;
+  }
+}

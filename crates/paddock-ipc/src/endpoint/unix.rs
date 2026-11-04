@@ -128,6 +128,14 @@ impl Listener {
     }
 }
 
+/// A system service's socket folder must belong to the account running this process and be closed to others.
+pub(super) fn check_own_folder(socket: &str) -> Result<(), crate::trust::Untrusted> {
+    // SAFETY: `geteuid` has no arguments and cannot fail.
+    #[allow(unsafe_code)]
+    let me = unsafe { libc::geteuid() };
+    super::unix_peer::check_folder_of(socket, me)
+}
+
 impl Drop for Listener {
     fn drop(&mut self) {
         match &self.cleanup {
@@ -163,6 +171,48 @@ impl Stream {
     /// The user id of the process on the other end, from the kernel.
     pub(super) fn peer_uid(&self) -> Option<u32> {
         peer_uid(&self.s)
+    }
+
+    /// The facts the kernel holds about the other end.
+    pub(super) fn raw_peer(&self) -> Result<crate::identity::RawPeer, crate::identity::PeerError> {
+        super::unix_peer::raw_peer(&self.s)
+    }
+
+    /// Connects to a system endpoint served by root; see [`super::Stream::connect_system`].
+    pub(super) fn connect_system(
+        name: &str,
+        timeout: Duration,
+    ) -> Result<Stream, super::SystemConnectError> {
+        Stream::connect_expecting(name, timeout, 0)
+    }
+
+    /// [`Stream::connect_system`] for a server that runs as `expected_uid`.
+    fn connect_expecting(
+        name: &str,
+        timeout: Duration,
+        expected_uid: u32,
+    ) -> Result<Stream, super::SystemConnectError> {
+        use super::SystemConnectError::{Connect, Untrusted};
+        // No folder at all means nothing is listening (the service was never installed): that is not an untrusted server.
+        let parent = Path::new(name)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        if let Err(e) = std::fs::symlink_metadata(parent)
+            && e.kind() == io::ErrorKind::NotFound
+        {
+            return Err(Connect(e));
+        }
+        super::unix_peer::check_folder_of(name, expected_uid).map_err(Untrusted)?;
+        let stream = Stream::connect(name, timeout).map_err(Connect)?;
+        let uid = peer_uid(&stream.s).ok_or_else(|| {
+            Untrusted(crate::trust::Untrusted::Unreadable {
+                what: "the listener's uid",
+                cause: io::Error::last_os_error().to_string(),
+            })
+        })?;
+        crate::trust::check_server_account(uid, expected_uid).map_err(Untrusted)?;
+        Ok(stream)
     }
 
     pub(super) fn connect(name: &str, _timeout: Duration) -> io::Result<Stream> {
@@ -375,6 +425,35 @@ fn peer_uid(_: &UnixStream) -> Option<u32> {
 mod tests {
     #[allow(unused_imports)]
     use super::*;
+
+    /// The client's checks of a system server, with this account standing in for root (a test cannot be root).
+    #[test]
+    fn a_server_run_by_the_expected_account_in_its_closed_folder_is_trusted() {
+        use std::os::unix::fs::PermissionsExt;
+        #[allow(unsafe_code)]
+        let me = unsafe { libc::geteuid() };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let name = dir.path().join("s.sock").to_string_lossy().into_owned();
+        let mut listener =
+            Listener::bind_fixed(&name, &crate::endpoint::Access::system_for_all_users()).unwrap();
+        let ok = Stream::connect_expecting(&name, Duration::from_secs(5), me).unwrap();
+        drop(ok);
+        assert!(listener.accept(Duration::from_secs(5)).is_ok());
+        // The same server, expected to be another account: refused after the folder check, naming the owner.
+        let e = Stream::connect_expecting(&name, Duration::from_secs(5), me.wrapping_add(1))
+            .err()
+            .unwrap();
+        assert!(
+            matches!(e, crate::endpoint::SystemConnectError::Untrusted(crate::trust::Untrusted::FolderOwner { uid }) if uid == me)
+        );
+        // Nobody listening: a connect error, not a trust error.
+        drop(listener);
+        let e = Stream::connect_expecting(&name, Duration::from_secs(1), me)
+            .err()
+            .unwrap();
+        assert!(matches!(e, crate::endpoint::SystemConnectError::Connect(_)));
+    }
 
     /// macOS: whether the socket behind `fd` is marked SS_DRAINING (0x4000 in `so_state`, read through
     /// `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)`; `soi_state` sits at byte 192 of the 792-byte `socket_fdinfo`).

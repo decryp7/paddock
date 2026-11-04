@@ -74,6 +74,42 @@ test.describe('disk map', () => {
     await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
   });
 
+  test('a saved map opens at once, stays during a Rescan and is swapped when the new pass is done', async ({ page }) => {
+    // The rescan's pass is held where it starts until the test lets it go: no timing to guess.
+    await page.goto(url('&saved=3&gate=scans'));
+    await expect(page.getByText('scanned 3 days ago (saved)')).toBeVisible();
+    const note = page.getByTestId('saved-map');
+    await expect(note).toContainText('Net change in used space since: +12.4 GB');
+    await expect(note).toContainText('a net figure');
+    const list = page.getByRole('region', { name: 'In this folder' }).or(page.locator('section.list'));
+    await expect(list.getByRole('button', { name: /^Open Users/ })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Rescan Macintosh HD' }).click();
+    // The old map stays on screen with the rescan's progress above it.
+    await expect(page.getByRole('region', { name: 'Rescan progress' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Rescan progress' })).toContainText('the map below stays until this is done');
+    await expect(list.getByRole('button', { name: /^Open Users/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeDisabled();
+
+    // Done: the page swaps to the new map and the saved note goes.
+    await page.evaluate(() => (window as unknown as { __dynoReleaseScans: () => void }).__dynoReleaseScans());
+    await expect(page.getByRole('region', { name: 'Rescan progress' })).toBeHidden();
+    await expect(page.getByTestId('saved-map')).toBeHidden();
+    await expect(page.getByText('(saved)')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeEnabled();
+  });
+
+  test('a cancelled Rescan keeps the saved map, and Forget this map clears the page', async ({ page }) => {
+    await page.goto(url('&saved=2&gate=scans'));
+    await expect(page.getByTestId('saved-map')).toBeVisible();
+    await page.getByRole('button', { name: 'Rescan Macintosh HD' }).click();
+    await page.getByRole('region', { name: 'Rescan progress' }).getByRole('button', { name: 'Cancel rescan' }).click();
+    await expect(page.getByRole('region', { name: 'Rescan progress' })).toBeHidden();
+    await expect(page.getByTestId('saved-map')).toBeVisible();
+    await page.getByRole('button', { name: 'Forget this map' }).click();
+    await expect(page.getByRole('heading', { name: 'See what fills Macintosh HD' })).toBeVisible();
+  });
+
   test('the sidebar and the command palette reach the page', async ({ page }) => {
     await page.goto('/?latency=0#/');
     await page.getByRole('navigation').first().getByRole('link', { name: 'Disk map', exact: true }).click();

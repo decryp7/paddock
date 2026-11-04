@@ -33,7 +33,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-08 | Alerts and the weekly report | built: weekly report from stored data (health trend, apps, disk forecast, issues, changes), Reports page with week selector, Markdown/HTML export; Why slow page (G10). Planned: alert history on the page, weekly OS notification (superseded in part by WP-26) |
 | WP-09 | Right-click search | built: redacted editable text (`dyno_core::weblinks`), the dialog from the Processes, Network, Issues and New and unusual menus, nothing sent until Search |
 | WP-10 | Watched folders with keep-for times | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
-| WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
+| WP-11 | Benchmarks on click | built (ADR 0015, rebuilt by ADR 0030): CPU (four kernels, sustained run with throttle tracking and a heat stop), memory (STREAM-style and a latency sweep), disk per drive with direct I/O and a write budget, GPU through wgpu in its own runner; jobs with phases and Cancel, spread and unsteady marks, history with method and device. Open: Windows and Linux direct-I/O verification on the runners, export, GPU adapter picker, `vm-smoke` plan, signing dry runs |
 | WP-12 | Performance counters browser | built: Counters page (objects, search, instances), chart any counter with the app's events marked, pinned counters and saved sets in settings, "Add to the dashboard" as a counter widget, `dyno counters`; Windows PDH (`PdhEnumObjectsW`, `PdhEnumObjectItemsW`, one persistent query; type-checked and linted from macOS, run by the Windows runner), macOS `vm_stat`/`netstat -inb`/`iostat -Id`/`sysctl`, Linux `/proc`; IOKit per-device statistics are not read |
 | WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | built (feat/wp13-14-36): the Extras page with eight tabs over pure parsers with fixtures ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)). Verified by fixtures only: the Windows and Linux readers. Not built: per-app network and energy are not stored as app-minute columns (shown live, macOS only for energy), and Linux GPU per process needs NVIDIA's tool |
@@ -502,7 +502,8 @@ Not part of 1.0.0; anything new that only watches goes here. Anything that would
 | Unusual processes | `unusual-*.png` | captured |
 | Web and hash search (browser hand-offs) | `web-search-*.png`, `hash-search-*.png` | captured |
 | Benchmarks | `benchmarks-*.png` | captured |
-| Benchmarks, running and compare | `benchmarks-running-*.png`, `benchmarks-compare-*.png` | not captured |
+| Benchmarks, running (a sustained run) | `benchmarks-running-*.png` | captured |
+| Benchmarks, compare | `benchmarks-compare-*.png` | not captured |
 | Network | `network-connections-*.png` | captured |
 | Network, listening ports | `network-*.png` | not captured |
 | Performance counters | `counters-*.png` | captured |

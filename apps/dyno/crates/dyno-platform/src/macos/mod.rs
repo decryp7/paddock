@@ -36,6 +36,8 @@ pub fn platform() -> Platform {
         counters: std::sync::Arc::new(crate::counters::OsCounters),
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
+        power: crate::PowerPorts::os(),
+        wol: crate::wol::WolPorts::os(),
     }
 }
 

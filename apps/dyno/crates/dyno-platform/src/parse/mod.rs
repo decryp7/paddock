@@ -4,6 +4,7 @@
 pub mod btm;
 pub mod cpu_topology;
 pub mod desktop_entry;
+pub mod firewall;
 pub mod gpu;
 pub mod hardware;
 pub mod ioreg;
@@ -18,6 +19,7 @@ pub mod mac_pcblist;
 pub mod mac_tools;
 pub mod pdh_list;
 pub mod powercfg;
+pub mod smart;
 pub mod sock_diag;
 pub mod socket_owner;
 pub mod startup_approved;

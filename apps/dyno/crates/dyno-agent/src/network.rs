@@ -4,7 +4,7 @@
 
 use crate::agent::{lock, now, Shared};
 use dyno_core::activity::ActivityKind;
-use dyno_core::network::{build, NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
+use dyno_core::network::{NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
 use dyno_core::network_traffic::{TrafficRow, TrafficTracker};
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
@@ -158,10 +158,34 @@ impl NetCentre {
         record(shared, &events);
         let mut snapshot = {
             let s = lock(&self.state);
-            build(now(), &rows, &processes, &query.normalised(), &s.tracker)
+            let geo = shared.intel.geo();
+            dyno_core::network::build_with_geo(
+                now(),
+                &rows,
+                &processes,
+                &query.normalised(),
+                &s.tracker,
+                geo.is_on().then_some(&*geo as &dyn dyno_core::geo::GeoLookup),
+                Some(&|ip: &IpAddr| shared.intel.flagged_by(ip)),
+            )
         };
         (snapshot.traffic, snapshot.traffic_note) = self.traffic();
         Ok(snapshot)
+    }
+
+    /// The remote address and program name of every connected socket now, for the map: every row, before any page cap.
+    pub fn remote_rows(&self, shared: &Shared) -> Result<Vec<(IpAddr, String)>, AgentError> {
+        let processes = lock(&shared.core).latest.processes.clone();
+        let (rows, _) = self.look(&processes)?;
+        let names: HashMap<u32, &str> = processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let (ip, _) = r.remote?;
+                let name = r.pid.and_then(|p| names.get(&p).copied()).unwrap_or("Unknown program");
+                Some((ip, name.to_string()))
+            })
+            .collect())
     }
 
     /// One background look (for the slow loop).

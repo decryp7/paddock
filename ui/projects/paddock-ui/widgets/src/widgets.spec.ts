@@ -8,13 +8,15 @@ import { DomSanitizer, By } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement, Preset, Progress, SurfaceValues, WidgetState } from '../generated/widgets';
+import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement as GenericPlacement, Preset as GenericPreset, Progress, Span, SurfaceValues, WidgetState } from '../generated/widgets';
 import { PdWidgetArea } from './area';
 import { PdWidgetChooser } from './chooser';
 import { progressText, PdWidgetFrame } from './frame';
 import { relativeAgo } from './time';
 import { defaultKindOf, PdSkeleton, PdWidget, PdWidgetOption } from './widget';
 
+type Placement<W> = GenericPlacement<W, Span>;
+type Preset<W> = GenericPreset<W, Span>;
 type W = { kind: 'cpu' | 'alarms' | 'disk' | 'net'; volume?: string };
 type V = { text: string };
 type A = 'retry' | 'open';
@@ -24,7 +26,7 @@ const kind = (k: string, title: string, spans: number[], maxInstances = 1, icon 
   title,
   summary: `${title} summary`,
   icon,
-  spans,
+  size: { spans: { spans } },
   maxInstances,
   refresh,
 });
@@ -34,8 +36,13 @@ const CATALOGUE: CatalogueInfo<string, string> = {
 };
 const place = (id: string, k: W['kind'], span = 2): Placement<W> => ({ id, span, widget: { kind: k } });
 const PLACEMENTS = [place('alarms', 'alarms'), place('disk', 'disk'), place('cpu', 'cpu'), place('net', 'net', 1)];
-const view = (over: Partial<LayoutView<string, W, string>> = {}, placements = PLACEMENTS, catalogue = CATALOGUE): LayoutView<string, W, string> => ({
+const view = (over: Partial<LayoutView<string, W, Span, string>> = {}, placements = PLACEMENTS, catalogue = CATALOGUE): LayoutView<string, W, Span, string> => ({
   layout: { version: 1, placements, presets: [] },
+  revision: 1,
+  arrangements: [],
+  moves: [],
+  canRedo: false,
+  outcome: null,
   catalogue,
   builtinPresets: [],
   notes: [],
@@ -76,11 +83,12 @@ class AreaHost {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdWidgetFrame, PdWidget],
   template: `
-    <pd-widget-frame title="Disk space" icon="pd:folder" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
-    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p></ng-template>
+    <pd-widget-frame title="Disk space" icon="pd:folder" [attr.inert]="inert() ? '' : null" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
+    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p><button type="button" class="mat-mdc-unelevated-button mdc-button">Check now</button><div class="mat-button-toggle-group"><span class="mat-button-toggle mat-button-toggle-checked"><span class="mat-button-toggle-label-content">Now</span></span></div><label class="mat-mdc-checkbox"><input type="checkbox" /></label></ng-template>
   `,
 })
 class FrameHost {
+  readonly inert = signal(false);
   readonly w: V | null = null;
   readonly state = signal<WidgetState<V, A> | null | undefined>(undefined);
   readonly span = signal(2);
@@ -185,6 +193,39 @@ describe('pd-widget-frame', () => {
     expect(s.getAttribute('aria-busy')).toBe('true');
   });
 
+  it('drops the filled emphasis of a body button while the frame is inert, so the page keeps one primary action', async () => {
+    const f = await setup();
+    f.componentInstance.state.set(ready('182 GB'));
+    await settle(f);
+    const button = q(f, '.mat-mdc-unelevated-button')!;
+    expect(getComputedStyle(button).color).not.toContain('pd-text-muted');
+    f.componentInstance.inert.set(true);
+    await settle(f);
+    expect(frame(f, 0).hasAttribute('inert')).toBe(true);
+    expect(getComputedStyle(button).color).toContain('pd-text-muted');
+    f.componentInstance.inert.set(false);
+    await settle(f);
+    expect(getComputedStyle(button).color).not.toContain('pd-text-muted');
+  });
+
+  it('dims segmented controls, toggles and checkboxes in an inert body, and keeps the chosen label readable', async () => {
+    const f = await setup();
+    f.componentInstance.state.set(ready('182 GB'));
+    await settle(f);
+    const group = q(f, '.mat-button-toggle-group')!;
+    const box = q(f, '.mat-mdc-checkbox')!;
+    const label = q(f, '.mat-button-toggle-label-content')!;
+    expect(getComputedStyle(group).opacity).toBe('1');
+    f.componentInstance.inert.set(true);
+    await settle(f);
+    expect(getComputedStyle(group).opacity).toBe('0.7');
+    expect(getComputedStyle(box).opacity).toBe('0.7');
+    expect(getComputedStyle(label).color).toContain('pd-text-muted');
+    f.componentInstance.inert.set(false);
+    await settle(f);
+    expect(getComputedStyle(group).opacity).toBe('1');
+  });
+
   it('draws the ready template with a value, a fresh reading with its meta and the span as a grid column', async () => {
     const f = await setup();
     const cmp = frameCmp(f).componentInstance as PdWidgetFrame<V, A>;
@@ -251,7 +292,7 @@ describe('pd-widget-frame', () => {
     f.componentInstance.state.set({ state: 'empty', title: 'No active alarms', detail: 'checked 2 min ago', next: act('open', 'Open alarms'), calm: false });
     await settle(f);
     expect(q(f, 'button.pd-w-calm')).toBeNull();
-    expect(q(f, '.pd-w-st')).not.toBeNull();
+    expect(q(f, '.pd-w-st')!.getAttribute('role')).toBe('status');
   });
 
   it('draws an error with its cause and Retry, never as the whole surface', async () => {
@@ -259,6 +300,7 @@ describe('pd-widget-frame', () => {
     f.componentInstance.state.set({ state: 'error', title: "Couldn't read volumes", cause: 'The volume list did not answer.', next: act('retry', 'Retry') });
     await settle(f);
     expect(q(f, '.pd-w-st--error .pd-w-d')!.textContent).toBe('The volume list did not answer.');
+    expect(q(f, '.pd-w-st--error')!.getAttribute('role')).toBe('alert');
     q(f, '.pd-w-act')!.click();
     expect(f.componentInstance.actions).toEqual(['retry']);
     f.componentInstance.state.set({ state: 'error', title: 'E', cause: null, next: null });
@@ -470,7 +512,7 @@ describe('pd-widget-area', () => {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdWidgetChooser, PdWidgetOption],
   template: `
-    <pd-widget-chooser [view]="v()" [error]="err()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="preview()" (edit)="edits.push($event)">
+    <pd-widget-chooser [view]="v()" [error]="err()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="preview()" [mode]="mode()" (edit)="edits.push($event)">
       <ng-template pdWidgetOption="disk" [pdWidgetOptionOf]="sample" let-p><span class="opt">volume of {{ p.id }}:{{ p.widget.kind }}</span></ng-template>
       <div slot="preview" class="pv">preview</div>
     </pd-widget-chooser>
@@ -481,6 +523,7 @@ class ChooserHost {
   readonly sample: W | null = null;
   readonly v = signal(view());
   readonly preview = signal(false);
+  readonly mode = signal<'edit' | 'add'>('edit');
   readonly err = signal<string | null>(null);
   readonly widgetFor = (k: string): W => ({ kind: k as W['kind'] });
   edits: Edit<W>[] = [];
@@ -750,6 +793,33 @@ describe('pd-widget-chooser', () => {
     expect(document.activeElement).toBe(q(f, '[data-preset-delete="mine"]'));
   });
 
+  it('cancels the delete confirm with Escape on the Cancel button', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(withPresets(2, [preset('mine', 'Work', false, 1)], []));
+    await settle(f);
+    (q(f, '[data-preset-delete="mine"]') as HTMLElement).click();
+    await settle(f);
+    const cancel = q(f, '[data-preset-confirm="mine"]')!.nextElementSibling!;
+    cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle(f);
+    expect(q(f, '.pd-wc-ask')).toBeNull();
+  });
+
+  it('hides the shown list in add mode', async () => {
+    const f = await setup();
+    f.componentInstance.mode.set('add');
+    await settle(f);
+    expect(qa(f, '.pd-wc-label span').map((s) => s.textContent)).toEqual(['Add a widget']);
+  });
+
+  it('offers no span choice for a grid kind', async () => {
+    const f = await setup();
+    const grid: KindInfo<string> = { ...kind('net', 'Network', [1]), size: { cells: { widths: { min: 1, max: 4, step: 1 }, heights: { min: 1, max: 4, step: 1 }, defaultW: 2, defaultH: 2 } } as never };
+    f.componentInstance.v.set(view({}, PLACEMENTS, { ...CATALOGUE, kinds: [...CATALOGUE.kinds.slice(0, 3), grid] }));
+    await settle(f);
+    expect(qa(f, 'mat-button-toggle').length).toBe(0);
+  });
+
   it('balances the keyboard hint so no word is left alone on the last line', async () => {
     const f = await setup();
     const text = q(f, '.pd-wc-hint-text')!;
@@ -840,7 +910,7 @@ describe('pd-widget-chooser', () => {
   });
 
   const preset = (id: string, name: string, builtin: boolean, n: number): Preset<W> => ({ id, name, builtin, placements: PLACEMENTS.slice(0, n) });
-  const withPresets = (max: number, user: Preset<W>[], builtin: Preset<W>[], over: Partial<LayoutView<string, W, string>> = {}) =>
+  const withPresets = (max: number, user: Preset<W>[], builtin: Preset<W>[], over: Partial<LayoutView<string, W, Span, string>> = {}) =>
     view({ layout: { version: 1, placements: PLACEMENTS, presets: user }, builtinPresets: builtin, ...over }, PLACEMENTS, { ...CATALOGUE, surface: { ...CATALOGUE.surface, maxUserPresets: max } });
   const nameInput = (f: ComponentFixture<unknown>) => q(f, '.pd-wc-save input') as HTMLInputElement;
   const type = async (f: ComponentFixture<ChooserHost>, text: string) => {

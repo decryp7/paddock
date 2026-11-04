@@ -1,0 +1,6 @@
+# libFuzzer output: working corpora, crash artifacts, coverage
+work/
+artifacts/
+coverage/
+target/
+corpus/

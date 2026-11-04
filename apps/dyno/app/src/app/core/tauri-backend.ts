@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import type {
   ActivityEntry,
   AgentStatus,
@@ -40,6 +40,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -57,7 +58,20 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  GpuAdapter,
+  BenchExportFormat,
+  BenchEstimateRequest,
+  BenchRunEstimate,
+  AwakeSpec,
+  EnergyReport,
   BackupReport,
+  PowerView,
+  Neighbour,
+  ThisPcWol,
+  WolDeviceInput,
+  WolView,
+  WakeInput,
+  WakesView,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
@@ -73,6 +87,12 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  IntelStatus,
+  IntelEdit,
+  EditOutcome,
+  GeoSummary,
+  FirewallView,
+  ToolOffer,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -95,6 +115,9 @@ export const EVENTS = {
   alert: 'dyno://alert',
   activity: 'dyno://activity',
   agent: 'dyno://agent',
+  power: 'dyno://power',
+  wol: 'dyno://wol',
+  wakes: 'dyno://wakes',
   alarm: 'dyno://alarm',
   diskScan: 'dyno://disk-scan',
   diskVolumes: 'dyno://disk-volumes',
@@ -141,6 +164,9 @@ export class TauriBackend implements DynoBackend {
   private readonly alertChannel: EventChannel<Alert>;
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
+  private readonly powerChannel: EventChannel<PowerView>;
+  private readonly wolChannel: EventChannel<WolView>;
+  private readonly wakesChannel: EventChannel<WakesView>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
   private readonly diskScanChannel: EventChannel<DiskScanStatus>;
   private readonly diskVolumesChannel: EventChannel<Volume[]>;
@@ -160,6 +186,9 @@ export class TauriBackend implements DynoBackend {
     this.alertChannel = new EventChannel(listenFn, EVENTS.alert);
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
+    this.powerChannel = new EventChannel(listenFn, EVENTS.power);
+    this.wolChannel = new EventChannel(listenFn, EVENTS.wol);
+    this.wakesChannel = new EventChannel(listenFn, EVENTS.wakes);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
     this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
     this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
@@ -192,6 +221,18 @@ export class TauriBackend implements DynoBackend {
 
   onActivity(listener: (a: ActivityEntry) => void): Unsubscribe {
     return this.activityChannel.add(listener);
+  }
+
+  onPower(listener: (v: PowerView) => void): Unsubscribe {
+    return this.powerChannel.add(listener);
+  }
+
+  onWakes(listener: (v: WakesView) => void): Unsubscribe {
+    return this.wakesChannel.add(listener);
+  }
+
+  onWol(listener: (v: WolView) => void): Unsubscribe {
+    return this.wolChannel.add(listener);
   }
 
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe {
@@ -274,8 +315,16 @@ export class TauriBackend implements DynoBackend {
     return this.request('diskVolumes');
   }
 
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
-    return this.request({ startDiskScan: { target } });
+  startDiskScan(target: DiskTarget, replaces: number | null = null): Promise<DiskScanStatus> {
+    return this.request({ startDiskScan: { target, replaces } });
+  }
+
+  forgetSavedDiskMap(scan: number): Promise<void> {
+    return this.request({ forgetSavedDiskMap: { scan } });
+  }
+
+  forgetSavedDiskMaps(): Promise<void> {
+    return this.request('forgetSavedDiskMaps');
   }
 
   cancelDiskScan(scan: number): Promise<void> {
@@ -326,6 +375,14 @@ export class TauriBackend implements DynoBackend {
     return this.request('inventory');
   }
 
+  helperStatus(): Promise<HelperStatus> {
+    return this.request('helperStatus');
+  }
+
+  toolOffer(): Promise<ToolOffer> {
+    return this.request('toolOffer');
+  }
+
   counterObjects(): Promise<CounterObjectList> {
     return this.request('counterObjects');
   }
@@ -368,6 +425,22 @@ export class TauriBackend implements DynoBackend {
 
   resolveHosts(addresses: string[]): Promise<HostName[]> {
     return this.request({ resolveHosts: { addresses } });
+  }
+
+  intelStatus(): Promise<IntelStatus> {
+    return this.request('intelStatus');
+  }
+
+  intelEdit(edit: IntelEdit): Promise<EditOutcome> {
+    return this.request({ intelEdit: { edit } });
+  }
+
+  geoSummary(): Promise<GeoSummary> {
+    return this.request('geoSummary');
+  }
+
+  firewall(): Promise<FirewallView> {
+    return this.request('firewall');
   }
 
   // ---------------------------------------------------------------------------------------------------- alarms
@@ -454,11 +527,23 @@ export class TauriBackend implements DynoBackend {
   }
 
   startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
-    return this.request({ startBenchmark: { kinds: r.kinds, label: r.label, group: r.group ?? null, phase: r.phase ?? null, diskMib: r.diskMib ?? null } });
+    return this.request({ startBenchmark: { kinds: r.kinds, label: r.label, group: r.group ?? null, phase: r.phase ?? null, diskMib: r.diskMib ?? null, allowBattery: r.allowBattery ?? false, diskVolumes: r.diskVolumes ?? [], allowNetworkDrives: r.allowNetworkDrives ?? false, diskFolders: r.diskFolders ?? [], gpuAdapter: r.gpuAdapter ?? null, sustainedMinutes: r.sustainedMinutes ?? null, sustainedWriteGib: r.sustainedWriteGib ?? null } });
   }
 
   cancelBenchmark(): Promise<void> {
     return this.request('cancelBenchmark');
+  }
+
+  benchEstimate(request: BenchEstimateRequest): Promise<BenchRunEstimate | null> {
+    return this.request({ benchEstimate: { request } });
+  }
+
+  benchGpuAdapters(): Promise<GpuAdapter[]> {
+    return this.request('benchGpuAdapters');
+  }
+
+  saveBenchmarks(ids: string[], format: BenchExportFormat): Promise<SavedReport | null> {
+    return this.command<SavedReport | null>('save_benchmarks', { ids, format });
   }
 
   deleteBenchmark(id: string): Promise<void> {
@@ -523,8 +608,12 @@ export class TauriBackend implements DynoBackend {
     return this.command<SurfaceView>('widget_layout', { surface });
   }
 
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
-    return this.command<SurfaceView>('edit_widget_layout', { edit });
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView> {
+    return this.command<SurfaceView>('edit_widget_layout', { edit, baseRevision: baseRevision ?? null });
+  }
+
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>> {
+    return this.command<PreviewReply<DashboardView>>('preview_widget_layout', { request });
   }
 
   popoverValues(): Promise<PopoverSurfaceValues> {
@@ -618,6 +707,66 @@ export class TauriBackend implements DynoBackend {
 
   backup(): Promise<BackupReport> {
     return this.request('backup');
+  }
+
+  // ----------------------------------------------------------------------------------------------------- power
+
+  powerState(): Promise<PowerView> {
+    return this.request('powerState');
+  }
+
+  powerKeepAwake(spec: AwakeSpec): Promise<PowerView> {
+    return this.request({ powerKeepAwake: { spec } });
+  }
+
+  powerIdleCancel(): Promise<PowerView> {
+    return this.request('powerIdleCancel');
+  }
+
+  powerIdleSnooze(minutes: number): Promise<PowerView> {
+    return this.request({ powerIdleSnooze: { minutes } });
+  }
+
+  energyReport(days: number): Promise<EnergyReport> {
+    return this.request({ energyReport: { days } });
+  }
+
+  powerStopKeepAwake(): Promise<PowerView> {
+    return this.request('powerStopKeepAwake');
+  }
+
+  // ----------------------------------------------------------------------------------------------- wake-on-lan
+
+  wolDevices(): Promise<WolView> {
+    return this.request('wolDevices');
+  }
+
+  wolCandidates(): Promise<Neighbour[]> {
+    return this.request('wolCandidates');
+  }
+
+  wolSave(device: WolDeviceInput): Promise<WolView> {
+    return this.request({ wolSave: { device } });
+  }
+
+  wolRemove(id: number): Promise<WolView> {
+    return this.request({ wolRemove: { id } });
+  }
+
+  powerWakes(): Promise<WakesView> {
+    return this.request('powerWakes');
+  }
+
+  powerSetWake(entry: WakeInput): Promise<WakesView> {
+    return this.request({ powerSetWake: { entry } });
+  }
+
+  powerCancelWake(id: number): Promise<WakesView> {
+    return this.request({ powerCancelWake: { id } });
+  }
+
+  wolReadiness(): Promise<ThisPcWol> {
+    return this.request('wolReadiness');
   }
 
   // ------------------------------------------------------------------------------------------------------ jobs

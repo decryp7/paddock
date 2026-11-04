@@ -163,22 +163,26 @@ test.describe('popup widgets', () => {
 });
 
 test.describe('dashboard and menu-bar editors', () => {
-  test('the dashboard chooser removes a widget, undoes it and applies a preset', async ({ page }) => {
+  test('the dashboard grid removes a widget, undoes it and applies a preset', async ({ page }) => {
     await page.goto('/?latency=0#/');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-    await page.getByRole('button', { name: 'Customize dashboard' }).click();
-    const chooser = page.locator('dy-widget-board pd-widget-chooser');
-    await expect(shown(chooser)).toHaveCount(15);
-    await chooser.getByRole('button', { name: 'More actions for Health' }).click();
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    const cells = page.locator('dy-widget-board [data-pd-cell]');
+    await expect(cells).toHaveCount(15);
+    await cells.filter({ has: page.locator('dy-widget[data-kind="health"]') }).getByRole('button', { name: 'Actions for Health' }).click();
     await page.getByRole('menuitem', { name: 'Remove' }).click();
-    await expect(shown(chooser)).toHaveCount(14);
-    await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(shown(chooser)).toHaveCount(15);
-    await chooser.getByRole('button', { name: 'Apply the Developer preset' }).click();
-    await expect(shown(chooser)).toHaveCount(7);
+    await expect(cells).toHaveCount(14);
+    await page.getByRole('button', { name: 'Undo' }).first().click();
+    await expect(cells).toHaveCount(15);
+    await page.getByRole('button', { name: 'More layout actions' }).click();
+    await page.getByRole('menuitem', { name: /Developer/ }).click();
+    await expect(cells).toHaveCount(7);
+    await page.getByRole('button', { name: 'More layout actions' }).click();
+    await page.getByRole('menuitem', { name: /Reset to defaults/ }).click();
+    await expect(cells).toHaveCount(15);
   });
 
-  test('the menu-bar editor adds an item up to four', async ({ page }) => {
+  test('the menu-bar editor starts with the four default items and adds one', async ({ page }) => {
     await page.goto('/?latency=0#/');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     await pressMod(page, 'Mod+Comma');
@@ -187,9 +191,9 @@ test.describe('dashboard and menu-bar editors', () => {
     await dialog.getByText('Dyno', { exact: true }).click();
     const editor = dialog.locator('dy-menu-bar-items');
     await editor.scrollIntoViewIfNeeded();
-    await expect(shown(editor)).toHaveCount(2);
-    await editor.getByRole('button', { name: 'Add Number' }).click();
-    await expect(shown(editor)).toHaveCount(3);
+    await expect(shown(editor)).toHaveCount(4);
+    await editor.getByRole('button', { name: 'Add another Number' }).click();
+    await expect(shown(editor)).toHaveCount(5);
   });
 });
 

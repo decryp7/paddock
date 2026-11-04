@@ -87,6 +87,7 @@ fn menu_bar_default(kind: MenuBarKind) -> MenuBarItem {
             metric,
             unit: "%".into(),
             label: String::new(),
+            format: super::menu_bar::NumberFormat::Stacked,
         },
         MenuBarKind::GraphAndNumber => MenuBarItem::GraphAndNumber { metric },
     }

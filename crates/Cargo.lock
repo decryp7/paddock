@@ -3348,17 +3348,22 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-testkit",
  "paddock-workspace-hack",
+ "proptest",
  "serde",
  "serde_json",
  "tauri",
  "tauri-runtime",
  "toml 0.9.12+spec-1.1.0",
  "ts-rs",
+ "windows",
 ]
 
 [[package]]
@@ -3714,6 +3719,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-power"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+ "zbus",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -3798,6 +3816,7 @@ dependencies = [
  "plist",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tempfile",
  "ts-rs",

@@ -1,7 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { TreeActions } from '../../shared/tree-actions';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree } from '@decryp7/paddock-ui/table';
-import { ChangeDetectionStrategy, Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -47,7 +47,7 @@ function readCollapsed(): Set<string> {
     <div class="page">
       <header class="page-head">
         <div class="titles">
-          <h1>Network</h1>
+          <h1 tabindex="-1" #heading>Network</h1>
           <p>Which programs listen for connections and who they talk to. Dyno only looks: it never closes a connection or changes a firewall.</p>
         </div>
       </header>
@@ -76,6 +76,10 @@ function readCollapsed(): Set<string> {
           <mat-checkbox [checked]="store.resolveNames()" (change)="store.setResolveNames(!store.resolveNames())" matTooltip="Look up host names through your DNS resolver. Off by default: each address is sent to it.">Host names</mat-checkbox>
         }
       </div>
+
+      @if (store.query().country; as cc) {
+        <p class="note" data-testid="country-filter"><dy-icon name="globe" /> <span>Showing connections to <b>{{ cc }}</b> only.</span> <button type="button" matButton="outlined" (click)="store.setQuery({ country: null })">Show all countries</button></p>
+      }
 
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
         @if (store.snapshot(); as s) {
@@ -116,7 +120,7 @@ function readCollapsed(): Set<string> {
                 @if (r.kind === 'group') {
                   <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span></span>
+                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span>@if (r.item.country) { <span class="cc" [title]="'Registered in ' + r.item.country">{{ r.item.country }}</span> }@if (r.item.flaggedBy.length > 0) { <span class="flagged" [title]="'Flagged by ' + r.item.flaggedBy.join(', ')">⚑ flagged</span> }</span>
                 }
               </ng-template>
               <ng-template pdCell="service" let-r>
@@ -199,8 +203,11 @@ function readCollapsed(): Set<string> {
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .muted { color: var(--text-2); }
-    .truncate { overflow: hidden; text-overflow: ellipsis; }
-    .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
+    .truncate { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    h1:focus { outline: none; }
+    .flagged { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 6px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 4px; color: var(--text-1); font: var(--fw-semibold) var(--fs-xs) / 1.5 var(--font-sans); }
+    .cc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 6px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); font: var(--fw-regular) var(--fs-xs) / 1.4 var(--font-mono); }
+    .addr { flex: none; white-space: nowrap; font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
     .gname { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; }
     .meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
@@ -249,7 +256,7 @@ export class NetworkPage implements OnInit, OnDestroy {
 
   protected readonly connections = computed<ConnectionRow[]>(() => this.store.snapshot()?.connections ?? []);
   protected readonly listeners = computed<ListenerRow[]>(() => sortListeners(this.store.snapshot()?.listeners ?? []));
-  protected readonly sum = computed(() => summarise(this.connections(), this.listeners()));
+  protected readonly sum = computed(() => summarise(this.connections(), this.listeners(), this.tab()));
   protected readonly rows = computed<Row[]>(() => {
     const by = this.tab() === 'listening' && this.group() === 'host' ? 'none' : this.group();
     return this.tab() === 'connections'
@@ -327,6 +334,15 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly asConn = (x: ConnectionRow | ListenerRow) => x as ConnectionRow;
   protected readonly asListener = (x: ConnectionRow | ListenerRow) => x as ListenerRow;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private readonly heading = viewChild<ElementRef<HTMLElement>>('heading');
+
+  constructor() {
+    // Arriving from the map with a country chosen: focus goes to the heading (no ring), not to the whole pane.
+    afterNextRender(() => {
+      if (this.store.query().country) this.heading()?.nativeElement.focus({ preventScroll: true });
+    });
+  }
 
   ngOnInit(): void {
     const onResize = () => this.viewportHeight.set(window.innerHeight);

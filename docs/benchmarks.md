@@ -153,6 +153,11 @@ One line each. The dated records are in the app files.
     [the record](#2026-10-29-paddock-chromium-browserclose-exit-time-under-load-fixflaky-browser-close).
 - **CI** (2026-10-24, before the monorepo): Paddock `ci.yml` median 3m05s. App builds 15–37 min median; Debrief's is
   24 min. See [ci-timings](research/2026-10-ci-timings.md). The monorepo has no re-run yet.
+- **Dyno** (2026-11-03, macOS VM, A/B, branch `perf/dyno-cpu`): the whole guest with Dyno on the Counters page
+  28–37% → 9–10% of one core, on the dashboard 18–22% → 12–16%, with the window closed 5.8–7.0% → 5.0–6.4% (agent
+  0.85–0.97% → 0.57–0.73%). Causes: chart animations replayed on every poll, number glides painting every frame, the
+  tray-only app subscribing at the summary level, menu bar icons drawn twice per update. See
+  [the record](../apps/dyno/docs/performance.md#2026-11-03-cpu-per-process-in-a-macos-vm-baseline-100-and-main-and-the-cpu-fixes-perfdyno-cpu).
 - **Dyno:** idle, nobody watching, the agent costs about 0.9–1.1% of one core and 30 MB (2026-10-30, release, load 21–61),
   the same with its threads at `UTILITY` as before; the finder is about 4% slower at `UTILITY` on a busy machine. Earlier:
   2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).
@@ -167,6 +172,14 @@ One line each. The dated records are in the app files.
 ## Shared-crate results
 
 Results of shared crates (rule 48: shared code records here), newest first.
+
+### 2026-11-03, paddock-widgets: grid engine, 32 placements (feat/widgets-grid)
+
+- **What:** `cargo bench -p paddock-widgets` (`crates/paddock-widgets/benches/grid.rs`): ADR 0044 §7 budgets, a 32-widget board of 3 by 4 cells; each line is the fastest of 15 batches (the machine is shared).
+- **Machine and load:** Mac mini, release build, run through the plock queue (load about 4 to 20), single thread.
+- **Before** (first version, mean of 200 runs): a drop 4.3 us (budget 50); the derived 6- and 1-column arrangements plus the moves of all 32 placements 1,538 us against the ADR's 200 us budget: 320 gestures were each applied to a clone of the board.
+- **After** (rule 51, cheaper): a drop 2.4 us; a nudge 2.4 us; both derived arrangements 4.0 us; the moves of all 32 placements 58.6 us; the whole view computation 63.2 us (budget 200). What changed: ids are `Arc<str>` (a board clone allocates nothing); one validation and one room check for all placements; a gesture that has somewhere to go is known to change the arrangement when no push can run past the last row (the proptest `moves_match_applying_every_gesture` checks the shortcut against applying each of the ten gestures, 1,000 random boards), so only End is applied to be answered; a drop settles with indices instead of looking ids up. Intermediate steps on the way: 236 us with the slice-based probes alone, 225 us with the index-based settle.
+- **After the lone-half rule** (2026-11-04, derive widens a half-width widget alone in its rows to the whole row; M-series Mac, `cargo bench -p paddock-widgets --bench grid`): both derived arrangements 4.4 us (was 4.0); the whole view computation 64.6 us (budget 200); a drop 2.4 us; the moves of all 32 placements 61.2 us.
 
 ### 2026-10-29, paddock-chromium: Browser.close exit time under load (fix/flaky-browser-close)
 

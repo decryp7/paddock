@@ -1,83 +1,150 @@
-//! The accept loop: authenticate every connection (token and version in `dyno-ipc`, then the user and the program
-//! in [`crate::auth`]), then serve its calls through the [`Dispatcher`]. A connection that fails any check is dropped
-//! without an answer and recorded in the audit log.
+//! The accept loop of the system endpoint (ADR 0027 §2). Every connection: the OS says who the caller is
+//! ([`paddock_ipc::caller_of`], from the kernel's credentials or the caller's own token, never from a process id), an
+//! unreadable identity is refused and audited, and then each request is checked ([`crate::auth::authorize`]) and takes a
+//! slot of its account's allowance ([`AccountLimits`]: more is refused as busy at once) before the [`Dispatcher`] runs
+//! it. The request handlers are the dispatcher's; this file owns the connection, the identity and the limits.
 
-use crate::auth::{ImageOf, Policy};
-use crate::dispatch::Dispatcher;
-use dyno_core::helper_wire::{codes, HelperMessage};
-use dyno_ipc::{Handler, Host, IpcError, Peer, PeerOptions, RemoteError};
+use crate::auth::{authorize, scope, weight};
+use crate::dispatch::{Ctx, Dispatcher};
+use crate::policy::HelperPolicy;
+use dyno_core::helper_wire::{codes, CallerView, HelperMessage, HelperUser, MAX_FRAME};
+use paddock_ipc::endpoint::Listener;
+use paddock_ipc::{
+    caller_of, AccountId, AccountLimits, AdminRule, BodyHandler, BodyOptions, BodyPeer, Caller, Connection, FrameLimit, RemoteError,
+};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How long one connection may stay open.
 pub const SESSION_MAX: Duration = Duration::from_secs(120);
-/// Connections served at once (the agent opens one per call).
-pub const MAX_SESSIONS: usize = 4;
+/// Connections served at once, in all (the per-account allowance is separate and smaller).
+pub const MAX_SESSIONS: usize = 16;
 /// Consecutive accept failures after which the daemon gives up (the service manager restarts it).
 const MAX_ACCEPT_FAILURES: u32 = 50;
 
 /// The listening daemon.
 pub struct Daemon {
-    /// The authenticated endpoint.
-    pub host: Host,
-    /// Who may call.
-    pub policy: Policy,
-    /// How to tell which program a process is.
-    pub images: Arc<dyn ImageOf>,
+    /// The system endpoint.
+    pub listener: Listener,
+    /// The account that turned the helper on.
+    pub owner: HelperUser,
+    /// Which Unix groups administer the machine.
+    pub admin_rule: AdminRule,
+    /// What an account may run at once.
+    pub limits: AccountLimits,
     /// What to do with requests.
     pub dispatcher: Arc<Dispatcher>,
+    /// The policy in force (replaced when the policy file changes).
+    pub policy: Arc<Mutex<HelperPolicy>>,
     /// Set to end the loop (service stop, uninstall).
     pub stop: Arc<AtomicBool>,
 }
 
 struct Session {
     dispatcher: Arc<Dispatcher>,
-    peer: Option<u32>,
+    caller: Caller,
+    owner: HelperUser,
+    limits: AccountLimits,
+    policy: Arc<Mutex<HelperPolicy>>,
 }
 
-impl Handler<HelperMessage> for Session {
+impl BodyHandler<HelperMessage> for Session {
     fn handle(&self, body: HelperMessage) -> Result<HelperMessage, RemoteError> {
-        match body {
-            HelperMessage::Request(r) => self.dispatcher.handle(self.peer, r).map(HelperMessage::Reply),
-            HelperMessage::Reply(_) => Err(RemoteError::new(codes::REFUSED, "The helper only answers requests.")),
-        }
+        let HelperMessage::Request(request) = body else {
+            return Err(RemoteError::new(codes::REFUSED, "The helper only answers requests."));
+        };
+        let pid = self.caller.audit().pid_for_log();
+        let access = match authorize(&self.caller, &self.owner, &request) {
+            Ok(access) => access,
+            Err(refusal) => {
+                log::warn!(account = self.caller.account().to_string().as_str(), reason = refusal.to_string().as_str(); "Helper: a request was refused");
+                self.dispatcher.record_refused_caller(pid, &refusal.to_string());
+                return Err(RemoteError::new(
+                    codes::REFUSED,
+                    "This request is for the owner of the helper or an administrator.",
+                ));
+            }
+        };
+        let _slot = self.limits.try_acquire(self.caller.account(), weight(&request)).map_err(|busy| {
+            log::warn!(account = self.caller.account().to_string().as_str(), reason = busy.to_string().as_str(); "Helper: a request was turned away as busy");
+            RemoteError::new(paddock_ipc::codes::BUSY, busy.to_string())
+        })?;
+        let policy = *self.policy.lock().unwrap_or_else(|p| p.into_inner());
+        let uid = match self.caller.account() {
+            AccountId::Uid(uid) => Some(*uid),
+            AccountId::Sid(_) => None,
+        };
+        let ctx = Ctx {
+            pid,
+            uid,
+            account: Some(match self.caller.account() {
+                AccountId::Uid(uid) => HelperUser::Uid(*uid),
+                AccountId::Sid(sid) => HelperUser::Sid(sid.clone()),
+            }),
+            access,
+            view: CallerView {
+                scope: scope(&self.caller, &self.owner, &policy),
+                tools: vec![],
+            },
+        };
+        self.dispatcher.handle_for(&ctx, request).map(HelperMessage::Reply)
     }
 }
 
 impl Daemon {
     /// Serves until `stop` is set. Returns an error only when the endpoint itself keeps failing.
+    ///
+    /// # Errors
+    /// The accept failures, in words.
     pub fn run(mut self) -> Result<(), String> {
         let active = Arc::new(AtomicUsize::new(0));
         let mut failures = 0u32;
         while !self.stop.load(Ordering::SeqCst) {
-            match self.host.accept(Duration::from_millis(500)) {
-                Ok(conn) => {
+            match self.listener.accept(Duration::from_millis(500)) {
+                Ok((stream, _pid)) => {
                     failures = 0;
-                    let (uid, pid) = (conn.peer_uid(), conn.peer_pid());
-                    if let Err(refusal) = self.policy.check(uid, pid, &*self.images) {
-                        self.dispatcher.record_refused_caller(pid, &refusal.to_string());
-                        continue;
-                    }
+                    // The identity is read from the OS here; the pid the accept reported is for the log line only.
+                    let caller = match caller_of(&stream, &self.admin_rule) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            log::warn!(error = e.to_string().as_str(); "Helper: a caller could not be identified and was refused");
+                            self.dispatcher.record_refused_caller(None, &e.to_string());
+                            continue;
+                        }
+                    };
+                    log::info!(
+                        account = caller.account().to_string().as_str(),
+                        admin = caller.is_admin(),
+                        pid = caller.audit().pid_for_log().unwrap_or(0);
+                        "Helper: a connection was accepted"
+                    );
                     if active.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
                         active.fetch_sub(1, Ordering::SeqCst);
+                        log::warn!("Helper: too many connections, one was dropped");
                         continue;
                     }
-                    let (dispatcher, session_count) = (self.dispatcher.clone(), active.clone());
+                    let session = Session {
+                        dispatcher: self.dispatcher.clone(),
+                        caller,
+                        owner: self.owner.clone(),
+                        limits: self.limits.clone(),
+                        policy: self.policy.clone(),
+                    };
+                    let count = active.clone();
                     let spawned = std::thread::Builder::new().name("helper-session".into()).spawn(move || {
-                        if let Ok(peer) = Peer::start(conn, PeerOptions::new().serve(Session { dispatcher, peer: pid }).workers(1)) {
+                        let conn = Connection::raw(stream, FrameLimit::new(MAX_FRAME));
+                        if let Ok(peer) = BodyPeer::start(conn, BodyOptions::new("a caller").serve(session)) {
                             peer.wait_closed(Some(SESSION_MAX));
                             peer.close();
                         }
-                        session_count.fetch_sub(1, Ordering::SeqCst);
+                        count.fetch_sub(1, Ordering::SeqCst);
                     });
                     if spawned.is_err() {
                         active.fetch_sub(1, Ordering::SeqCst);
                     }
                 }
-                Err(IpcError::Timeout(_)) => failures = 0,
-                // A client that failed the token, the version or the protocol is simply dropped.
-                Err(IpcError::Auth(_) | IpcError::Version { .. } | IpcError::Protocol(_) | IpcError::Closed) => failures = 0,
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock => failures = 0,
                 Err(e) => {
                     failures += 1;
                     if failures >= MAX_ACCEPT_FAILURES {
@@ -91,16 +158,18 @@ impl Daemon {
     }
 }
 
-#[cfg(test)]
+// Unix only: they drive the endpoint as the test's own account; the Windows identity is exercised on the VM matrix.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::audit::AuditLog;
     use crate::dispatch::Parts;
     use dyno_core::helper::HelperHost;
-    use dyno_core::helper_wire::{HelperInfo, HelperReply, HelperRequest, HelperUser};
+    use dyno_core::helper_wire::{HelperInfo, HelperReply, HelperRequest};
     use dyno_core::ports::{PlatformError, ProcessTraffic};
-    use dyno_ipc::{Client, Token};
-    use std::path::PathBuf;
+    use paddock_ipc::endpoint::Stream;
+    use paddock_ipc::IpcError;
+    use paddock_jobs::time::SystemClock;
 
     struct NoTraffic;
     impl ProcessTraffic for NoTraffic {
@@ -109,16 +178,15 @@ mod tests {
         }
     }
 
-    struct Pretend(PathBuf);
-    impl ImageOf for Pretend {
-        fn image(&self, _: u32) -> Option<PathBuf> {
-            Some(self.0.clone())
+    struct NoItems;
+    impl dyno_core::btm::LoginItemsReader for NoItems {
+        fn read(&self, _: u32) -> Result<dyno_core::btm::LoginItemsReply, PlatformError> {
+            Err(PlatformError::Unsupported("none".into()))
         }
     }
 
     struct Rig {
         name: String,
-        token: Token,
         dispatcher: Arc<Dispatcher>,
         stop: Arc<AtomicBool>,
         daemon: Option<std::thread::JoinHandle<Result<(), String>>>,
@@ -126,36 +194,45 @@ mod tests {
     }
 
     impl Rig {
-        fn start(user: HelperUser, program: &str) -> Rig {
+        fn start(owner: HelperUser, max_total: usize) -> Rig {
             let dir = tempfile::tempdir().unwrap();
-            let host = Host::listen().unwrap();
-            let (name, token) = (host.name().to_string(), host.token().clone());
+            let listener = Listener::bind().unwrap();
+            let name = listener.name().to_string();
             let dispatcher = Arc::new(Dispatcher::new(Parts {
                 info: HelperInfo {
                     version: "1.0.0".into(),
                     api: 1,
                     host: HelperHost::Windows,
-                    agent_exe: "/x".into(),
+                    agent_exe: String::new(),
                 },
                 traffic: Box::new(NoTraffic),
                 audit: AuditLog::new(dir.path().join("audit.jsonl")),
                 clock: Box::new(|| 42),
                 on_uninstall: Box::new(|| {}),
+                login_items: Box::new(NoItems),
+                holders: Box::new(dyno_core::helper_holders::NoHolders),
+                extras: Box::new(dyno_core::helper_extras::NoExtras),
+                counters: Box::new(dyno_core::helper_counters::NoCounters),
+                memory: Box::new(dyno_core::helper_memory::NoMemory),
+                processes: Box::new(dyno_core::helper_processes::NoProcesses),
+                smart: Box::new(crate::tools::NotHere("none")),
+                tools: Box::new(crate::tools::NotHere("none")),
+                wakes: Box::new(dyno_core::wake::NoWakes),
+                wol: Box::new(dyno_core::wake::NoWakes),
+                log_tail: Box::new(|_| vec![]),
             }));
             let stop = Arc::new(AtomicBool::new(false));
             let daemon = Daemon {
-                host,
-                policy: Policy {
-                    user,
-                    agent_exe: PathBuf::from("/opt/dyno/dyno-agent"),
-                },
-                images: Arc::new(Pretend(PathBuf::from(program))),
+                listener,
+                owner,
+                admin_rule: AdminRule::default(),
+                limits: AccountLimits::with_max_total(max_total, Arc::new(SystemClock)),
                 dispatcher: dispatcher.clone(),
+                policy: Arc::new(Mutex::new(HelperPolicy::default())),
                 stop: stop.clone(),
             };
             Rig {
                 name,
-                token,
                 dispatcher,
                 stop,
                 daemon: Some(std::thread::spawn(move || daemon.run())),
@@ -164,8 +241,9 @@ mod tests {
         }
 
         fn call(&self, request: HelperRequest) -> Result<HelperReply, IpcError> {
-            let conn = Client::connect(&self.name, &self.token)?;
-            let peer = Peer::<HelperMessage>::start(conn, PeerOptions::new())?;
+            let stream = Stream::connect(&self.name, Duration::from_secs(5)).map_err(|e| IpcError::Closed(e.to_string()))?;
+            let conn = Connection::raw(stream, FrameLimit::new(MAX_FRAME));
+            let peer = BodyPeer::<HelperMessage>::start(conn, BodyOptions::new("the helper"))?;
             let answer = peer.call(HelperMessage::Request(request), Duration::from_secs(5));
             peer.close();
             match answer? {
@@ -180,18 +258,7 @@ mod tests {
         }
     }
 
-    /// A user that is "us" on Unix (any user on Windows, where the pipe's list decides).
-    fn this_user() -> HelperUser {
-        #[cfg(unix)]
-        {
-            HelperUser::Uid(own_uid())
-        }
-        #[cfg(not(unix))]
-        {
-            HelperUser::Sid("S-1-5-21-1-2-3-1001".into())
-        }
-    }
-
+    /// The account running the tests, as the helper's owner (a Unix uid; on Windows the SID is read by the caller's token).
     #[cfg(unix)]
     fn own_uid() -> u32 {
         use std::os::unix::fs::MetadataExt;
@@ -199,63 +266,126 @@ mod tests {
         std::fs::metadata(f.path()).unwrap().uid()
     }
 
+    #[cfg(unix)]
     #[test]
-    fn the_authorised_user_with_the_agent_program_gets_its_requests_answered_in_process() {
-        let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
-        assert!(matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(i) if i.version == "1.0.0"));
-        assert!(matches!(rig.call(HelperRequest::Traffic).unwrap_err(), IpcError::Remote(e) if e.code == codes::UNSUPPORTED));
-        rig.stop();
-    }
-
-    #[test]
-    fn another_program_is_dropped_and_recorded_without_an_answer() {
-        let rig = Rig::start(this_user(), "/tmp/evil/dyno-agent");
-        let err = rig.call(HelperRequest::Info).unwrap_err();
+    fn the_owner_is_answered_by_the_os_identity_not_by_a_secret() {
+        let rig = Rig::start(HelperUser::Uid(own_uid()), 4);
         assert!(
-            matches!(err, IpcError::Closed | IpcError::Io { .. } | IpcError::Timeout(_)),
-            "{err:?}"
+            matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(i, v) if v.scope == dyno_core::helper_policy::Visibility::Full && i.version == "1.0.0")
         );
-        let log = match rig.dispatcher.handle(None, HelperRequest::Audit(5)).unwrap() {
-            HelperReply::Entries(e) => e,
-            other => panic!("{other:?}"),
-        };
-        assert!(log[0].detail.contains("not the Dyno agent"), "{log:?}");
+        assert!(matches!(rig.call(HelperRequest::Traffic).unwrap_err(), IpcError::Remote(e) if e.code == codes::UNSUPPORTED));
         rig.stop();
     }
 
     #[cfg(unix)]
     #[test]
-    fn another_user_is_dropped() {
-        let rig = Rig::start(HelperUser::Uid(own_uid().wrapping_add(1)), "/opt/dyno/dyno-agent");
-        assert!(rig.call(HelperRequest::Info).is_err());
+    fn another_account_gets_who_the_helper_is_and_a_recorded_refusal_for_the_rest() {
+        let rig = Rig::start(HelperUser::Uid(own_uid().wrapping_add(1)), 4);
+        // The test runs as a normal user here; as root it would be an administrator and everything would be allowed.
+        if own_uid() == 0 {
+            rig.stop();
+            return;
+        }
+        assert!(
+            matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(_, v) if v.scope == dyno_core::helper_policy::Visibility::Own(dyno_core::helper_policy::OthersPolicy::Total))
+        );
+        // Readings are for everyone (scoped); the audit log and removal are not.
+        let e = rig.call(HelperRequest::Traffic).unwrap_err();
+        assert!(matches!(&e, IpcError::Remote(r) if r.code == codes::UNSUPPORTED), "{e:?}");
+        let e = rig.call(HelperRequest::Audit(5)).unwrap_err();
+        assert!(matches!(&e, IpcError::Remote(r) if r.code == codes::REFUSED), "{e:?}");
+        let e = rig.call(HelperRequest::Uninstall).unwrap_err();
+        assert!(matches!(&e, IpcError::Remote(r) if r.code == codes::REFUSED), "{e:?}");
         let log = match rig.dispatcher.handle(None, HelperRequest::Audit(5)).unwrap() {
             HelperReply::Entries(e) => e,
             other => panic!("{other:?}"),
         };
-        assert!(log[0].detail.contains("is not the user the helper serves"));
+        assert!(log[0].detail.contains("owner or an administrator"), "{log:?}");
         rig.stop();
     }
 
+    /// One valid request of every kind (defaults at their caps), so a test can send each to the endpoint.
+    #[cfg(unix)]
+    fn sample(kind: dyno_core::helper_policy::RequestKind) -> HelperRequest {
+        use dyno_core::helper_policy::RequestKind as K;
+        use dyno_core::helper_requests::*;
+        match kind {
+            K::Info => HelperRequest::Info,
+            K::Processes => HelperRequest::Processes(ProcessQuery::default()),
+            K::Traffic => HelperRequest::Traffic,
+            K::SocketOwners => HelperRequest::SocketOwners,
+            K::FileHolders => HelperRequest::FileHolders { dev: 1, ino: 2 },
+            K::LoginItems => HelperRequest::LoginItems,
+            K::Counters => HelperRequest::Counters(CounterQuery {
+                ids: vec![CounterId::Thermal],
+                class: RequestClass::User,
+            }),
+            K::MemoryModules => HelperRequest::MemoryModules,
+            K::Smart => HelperRequest::Smart(SmartQuery::default()),
+            K::InstallTool => HelperRequest::InstallTool {
+                tool: ToolKind::Smartmontools,
+                bytes: vec![1],
+            },
+            K::Firewall => HelperRequest::Firewall,
+            K::Extras => HelperRequest::Extras(ExtrasKind::WakeRequests),
+            K::Audit => HelperRequest::Audit(1),
+            K::LogTail => HelperRequest::LogTail(1),
+            K::Uninstall => HelperRequest::Uninstall,
+            K::ScheduleWake => HelperRequest::ScheduleWake {
+                tag: dyno_core::wake::WakeTag::parse("t").unwrap(),
+                at_utc: 1,
+            },
+            K::CancelWake => HelperRequest::CancelWake {
+                tag: dyno_core::wake::WakeTag::parse("t").unwrap(),
+            },
+            K::ListWakes => HelperRequest::ListWakes,
+            K::WolState => HelperRequest::WolState {
+                ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
+            },
+        }
+    }
+
+    /// The socket is mode 0666, so any local account connects. What makes that safe: the account is read from the kernel's credentials
+    /// of the connection (before a single frame is parsed), and every request is checked against the standing table before it is
+    /// handled. A different uid gets exactly what the table allows: refused where it says Denied, and handled (here: "not available
+    /// yet" or a validation answer, never a refusal) everywhere else.
+    #[cfg(unix)]
     #[test]
-    fn a_wrong_token_never_reaches_the_dispatcher() {
-        let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
-        let got = Client::connect(&rig.name, &Token::from_bytes([9; 32]));
-        assert!(matches!(got, Err(IpcError::Auth(_))), "{:?}", got.as_ref().err());
-        // The daemon is still serving.
-        assert!(rig.call(HelperRequest::Info).is_ok());
+    fn a_different_account_gets_exactly_what_the_standing_table_allows() {
+        use dyno_core::helper_policy::{access, Access, RequestKind, Standing};
+        if own_uid() == 0 {
+            return; // root is an administrator: the table would allow everything
+        }
+        let rig = Rig::start(HelperUser::Uid(own_uid().wrapping_add(1)), 8);
+        for kind in RequestKind::ALL {
+            let answer = rig.call(sample(kind));
+            let refused = matches!(&answer, Err(IpcError::Remote(r)) if r.code == codes::REFUSED);
+            assert_eq!(refused, access(kind, Standing::Other) == Access::Denied, "{kind:?}: {answer:?}");
+        }
         rig.stop();
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_reply_sent_as_a_request_is_refused() {
-        let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
-        let conn = Client::connect(&rig.name, &rig.token).unwrap();
-        let peer = Peer::<HelperMessage>::start(conn, PeerOptions::new()).unwrap();
+        let rig = Rig::start(HelperUser::Uid(own_uid()), 4);
+        let stream = Stream::connect(&rig.name, Duration::from_secs(5)).unwrap();
+        let peer = BodyPeer::<HelperMessage>::start(Connection::raw(stream, FrameLimit::new(MAX_FRAME)), BodyOptions::new("x")).unwrap();
         let e = peer
             .call(HelperMessage::Reply(HelperReply::Bye), Duration::from_secs(5))
             .unwrap_err();
         assert!(matches!(e, IpcError::Remote(r) if r.code == codes::REFUSED));
         peer.close();
+        rig.stop();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_account_over_its_allowance_is_turned_away_as_busy_and_the_next_request_is_served() {
+        // Zero slots in all: every request is busy, which proves the limit sits in front of the handlers.
+        let rig = Rig::start(HelperUser::Uid(own_uid()), 0);
+        let e = rig.call(HelperRequest::Info).unwrap_err();
+        assert!(matches!(&e, IpcError::Remote(r) if r.code == paddock_ipc::codes::BUSY), "{e:?}");
         rig.stop();
     }
 }

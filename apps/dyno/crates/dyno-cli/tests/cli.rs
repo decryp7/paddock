@@ -210,3 +210,112 @@ fn commands_that_used_to_change_something_are_gone() {
         assert!(out.is_empty());
     }
 }
+
+#[test]
+fn awake_holds_shows_and_lets_go_through_the_agent_and_never_touches_this_machine() {
+    // The fake platform's power port records the hold and calls no OS (ER-14).
+    let h = Harness::start();
+    let (code, out, _) = h.dyno("awake");
+    assert_eq!((code, out.as_str()), (0, "Not keeping the computer awake.\n"));
+    let (code, out, err) = h.dyno("awake on --for 30m --display");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "Keeping the computer awake for 30 min, display kept on (fake#1).\n");
+    assert!(h.dyno("awake status").1.starts_with("Keeping the computer awake for 30 min"));
+    let (_, json, _) = h.dyno("awake status --json");
+    assert!(json.contains("\"holding\"") && json.contains("\"osRef\": \"fake#1\""), "{json}");
+    let (code, out, _) = h.dyno("awake on --until 23:59");
+    assert_eq!(code, 0);
+    assert!(out.starts_with("Keeping the computer awake until 23:59"), "{out}");
+    let (code, out, _) = h.dyno("awake off");
+    assert_eq!((code, out.as_str()), (0, "Not keeping the computer awake.\n"));
+}
+
+#[test]
+fn awake_shows_the_agents_refusal_with_what_to_fix() {
+    let h = Harness::start();
+    let (code, out, err) = h.dyno("awake on --for 99999m");
+    assert_eq!(code, 1);
+    assert!(out.is_empty());
+    assert!(err.contains("Keep awake for 1 minute up to 7 days."), "{err}");
+}
+
+#[test]
+fn awake_while_busy_uses_the_limits_from_settings_and_a_program_needs_a_running_pid() {
+    let h = Harness::start();
+    let (code, out, err) = h.dyno("awake on --busy cpu,network");
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("Keeping the computer awake while the computer is busy"), "{out}");
+    let (code, _, err) = h.dyno("awake on --while-pid 999999");
+    assert_eq!(code, 1);
+    assert!(err.contains("not running"), "{err}");
+}
+
+#[test]
+fn idle_says_the_rules_are_off_and_cancel_is_harmless() {
+    let h = Harness::start();
+    assert_eq!(h.dyno("idle").1, "Sleep and shut down rules are off.\n");
+    let (code, out, _) = h.dyno("idle cancel");
+    assert_eq!((code, out.as_str()), (0, "Sleep and shut down rules are off.\n"));
+    let (code, _, err) = h.dyno("idle snooze 0");
+    assert_eq!(code, 2, "{err}");
+}
+
+#[test]
+fn wake_schedule_lists_adds_and_cancels_through_the_agent_and_sets_nothing_real() {
+    // The fake platform's wake timer records and sets nothing (ER-14).
+    let h = Harness::start();
+    let (code, _, err) = h.dyno("wake-schedule add Morning --at 07:30 --stay 30m");
+    assert_eq!(code, 1);
+    assert!(err.contains("turned off in Settings"), "{err}");
+    let c = dyno_agent::cli::connect(&h.dirs).unwrap().0;
+    let dyno_core::protocol::Reply::Settings(s) = dyno_agent::cli::ask(&c, dyno_core::protocol::Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    let mut s = *s;
+    s.power.wake.enabled = true;
+    dyno_agent::cli::ask(&c, dyno_core::protocol::Request::SaveSettings { settings: Box::new(s) }).unwrap();
+    let (code, out, err) = h.dyno("wake-schedule add Morning --at 07:30 --stay 30m --repeat weekdays");
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Morning") && out.contains("07:30") && out.contains("armed"), "{out}");
+    assert!(h.dyno("wake-schedule list").1.contains("Morning"));
+    let (code, _, err) = h.dyno("wake-schedule add Bad --at 07:30");
+    assert_eq!(code, 1);
+    assert!(err.contains("what happens"), "{err}");
+    let (code, out, _) = h.dyno("wake-schedule cancel morning");
+    assert_eq!(code, 0);
+    assert!(out.contains("No scheduled wakes."), "{out}");
+    assert!(h.dyno("wake-schedule cancel Morning").2.contains("No schedule is called"));
+}
+
+#[test]
+fn wake_finds_the_computer_by_name_or_address_and_says_how_it_ended_without_sending_anything_real() {
+    use dyno_agent::cli::{ask, connect};
+    use dyno_core::protocol::Request;
+    use dyno_core::wol::{SecureOnEdit, WolDeviceInput};
+    // The fake platform's sockets only record (ER-14); its fake clock makes the test wake's 120 s instant.
+    let h = Harness::start();
+    let c = connect(&h.dirs).unwrap().0;
+    ask(
+        &c,
+        Request::WolSave {
+            device: WolDeviceInput {
+                id: None,
+                name: "Media PC".into(),
+                mac: "02:00:5e:10:00:01".into(),
+                last_ip: Some("192.0.2.40".into()),
+                interface: None,
+                secure_on: SecureOnEdit::Keep,
+            },
+        },
+    )
+    .unwrap();
+    let (code, out, err) = h.dyno("wake media pc");
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("Wake packets sent."), "{out}");
+    let (code, out, _) = h.dyno("wake 02:00:5e:10:00:01 --test");
+    assert_eq!(code, 0);
+    assert!(out.starts_with("No answer in 120 s"), "{out}");
+    let (code, _, err) = h.dyno("wake Printer");
+    assert_eq!(code, 1);
+    assert!(err.contains("No saved computer is called \"Printer\""), "{err}");
+}

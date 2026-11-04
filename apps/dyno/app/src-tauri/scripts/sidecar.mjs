@@ -1,4 +1,4 @@
-// Builds dyno-agent and the dyno command (crate dyno-cli) and puts them where Tauri's `externalBin` expects them:
+// Builds dyno-agent, the dyno command (crate dyno-cli) and the benchmark runner dyno-bench (ADR 0030) and puts them where Tauri's `externalBin` expects them:
 // app/src-tauri/binaries/<name>-<target triple>[.exe]. Run by `beforeBuildCommand` / `beforeDevCommand`
 // (tauri.conf.json); `--dev` builds the debug profile. Honours CARGO_TARGET_DIR, a build.target-dir in the cargo configuration (CI's .cargo/ci.toml) and TAURI_ENV_TARGET_TRIPLE.
 import { execFileSync } from 'node:child_process';
@@ -13,8 +13,9 @@ const host = /host: (\S+)/.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8
 const triple = process.env.TAURI_ENV_TARGET_TRIPLE || host;
 if (!triple) throw new Error('cannot tell the target triple (rustc -vV)');
 const profile = dev ? 'dev' : 'dist';
-// [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`.
-const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli']];
+// [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`. The helper (ADR 0027) ships next to the agent on every
+// OS: the program the one OS prompt runs to install it (macOS, Windows), `/usr/bin/dyno-helper` in the .deb; the AppImage never uses it.
+const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli'], ['dyno-bench', 'dyno-bench'], ['dyno-bench-gpu', 'dyno-bench-gpu'], ['dyno-helper', 'dyno-helper']];
 const args = ['build', ...sidecars.flatMap(([, pkg]) => ['-p', pkg]), '--profile', profile];
 if (triple !== host) args.push('--target', triple);
 execFileSync('cargo', args, { cwd: root, stdio: 'inherit' });

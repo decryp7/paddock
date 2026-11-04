@@ -81,6 +81,9 @@ pub struct MemoryCap {
     pub every: Duration,
     /// Another way to measure; `None` uses [`usage::tree_memory`].
     pub sampler: Option<Sampler>,
+    /// Windows: also give the child's job object a hard per-process commit limit of `limit` (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`),
+    /// so an allocation past it fails in the child at once and a polling watcher cannot be outrun. Ignored elsewhere.
+    pub hard_commit: bool,
 }
 
 impl MemoryCap {
@@ -92,7 +95,15 @@ impl MemoryCap {
             listener: None,
             every: Duration::from_millis(200),
             sampler: None,
+            hard_commit: false,
         }
+    }
+
+    /// Also enforce `limit` as a hard commit limit of the job object (Windows; see [`MemoryCap::hard_commit`]).
+    #[must_use]
+    pub fn hard_commit(mut self) -> MemoryCap {
+        self.hard_commit = true;
+        self
     }
 
     /// Tells `listener` what the watcher sees.
@@ -256,7 +267,26 @@ impl Supervised {
         // Not reaped yet, so the pid is still this child's.
         let process = identify(pid);
         #[cfg(windows)]
-        let job = crate::job::Job::assign(&child).ok().map(Arc::new);
+        let job = {
+            let hard = cap.as_ref().filter(|c| c.hard_commit).map(|c| c.limit);
+            match crate::job::Job::assign(&child, hard) {
+                Ok(job) => Some(Arc::new(job)),
+                // A hard limit that cannot be set must not become a child without one: the launch fails.
+                Err(e) if hard.is_some() => {
+                    let mut child = child;
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    log::error!(
+                        "The hard memory limit of child {pid} could not be set in its job object, so it was not started: {e}"
+                    );
+                    return Err(std::io::Error::new(
+                        e.kind(),
+                        format!("cannot set the hard memory limit in the child's job object: {e}"),
+                    ));
+                }
+                Err(_) => None,
+            }
+        };
         let shared = Arc::new(Shared::default());
         if process.is_none() {
             log::warn!(
@@ -884,10 +914,24 @@ mod tests {
         let nice = |pid: u32| unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
         let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
         let pid = s.id().unwrap();
-        // The child starts at our level; make it lower than the target first.
-        unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, 15) };
+        // The child starts at our level; make it lower than the target first. Under a niced runner (plock's `nice -n 19`) we
+        // are already lower than 15 and an unprivileged process cannot raise a child's priority, so start from our own level
+        // when that is lower.
+        let level = nice(0).max(15);
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, level) };
         assert!(s.lower_priority(), "already below the target");
-        assert_eq!(nice(pid), 15, "never raised");
+        assert_eq!(nice(pid), level, "never raised");
         s.kill();
+    }
+}
+
+#[cfg(test)]
+mod hard_commit_tests {
+    use super::*;
+
+    #[test]
+    fn a_cap_is_soft_until_asked_to_be_a_hard_commit_limit() {
+        assert!(!MemoryCap::new(1 << 20, "x").hard_commit);
+        assert!(MemoryCap::new(1 << 20, "x").hard_commit().hard_commit);
     }
 }

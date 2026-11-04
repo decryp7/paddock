@@ -16,11 +16,12 @@ import {
 import { answered, DIALOG_EVENTS, DISMISSED, loadPart, type DialogDef, type DialogModality, type DialogOutcome } from '@decryp7/paddock-ui/shell';
 import { DeniedCommands } from './denied';
 import { DialogFrame, type FrameState } from './dialog-frame';
-import { DIALOG_IO, type DialogMeasure } from './io';
+import { DIALOG_IO } from './io';
 import { contentInjector, errorText, isRecord, mountContent } from './mount';
 import { followDialogInputs } from './retarget';
 import { encodeOutcome } from './outcome';
 import { DIALOG_ROUTE } from './route';
+import { SizeLoop } from './size-loop';
 import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
 
 /**
@@ -55,7 +56,7 @@ import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
         [declaredWidth]="def?.width ?? 0"
         (answered)="answer($event.value)"
         (dismissed)="dismiss()"
-        (refit)="fit($event)"
+        (refit)="refit()"
       >
         @if (denied(); as d) {
           <p class="pd-denied" role="alert" data-testid="dialog-denied">{{ d.message }}</p>
@@ -86,6 +87,9 @@ export class DialogShell implements AfterViewInit {
   private contentInjector_: Injector | null = null;
   private closing = false;
   private readied = false;
+  /** This page load (`DialogStart.epoch`) and the loop that sizes the window (ADR 0043 §2). */
+  private epoch = 1;
+  private loop: SizeLoop | null = null;
 
   protected readonly title = signal('');
   protected readonly modality = signal<DialogModality>(this.def?.modality ?? 'modeless');
@@ -115,6 +119,25 @@ export class DialogShell implements AfterViewInit {
       gone = true;
       off?.();
     });
+    // Rust's events (ADR 0043 §3, §4): the size mode changed (a user resize made it manual), and the scale changed so the text
+    // may re-wrap: measure again.
+    this.listenTo(DIALOG_EVENTS.sizeMode, (p) => {
+      if (typeof document !== 'undefined' && isRecord(p) && typeof p['mode'] === 'string') document.documentElement.dataset['sizeMode'] = p['mode'];
+    });
+    this.listenTo(DIALOG_EVENTS.remeasure, () => this.refit());
+  }
+
+  private listenTo(event: string, handler: (payload: unknown) => void): void {
+    let off: (() => void) | null = null;
+    let gone = false;
+    this.io.listen(event, handler).then(
+      (u) => (gone ? u() : (off = u)),
+      () => undefined,
+    );
+    this.destroyRef.onDestroy(() => {
+      gone = true;
+      off?.();
+    });
   }
 
   /**
@@ -137,6 +160,7 @@ export class DialogShell implements AfterViewInit {
       if (!def) throw new Error($localize`:@@pd.dialogs.unknown:This dialog is not known to this version of the app: ${this.id || '(none)'}:dialog:`);
       const [start, part] = await Promise.all([this.io.take(), loadPart(def, this.environment, `dialog ${def.id}`)]);
       if (part.injector !== this.environment) this.destroyRef.onDestroy(() => part.injector.destroy());
+      this.epoch = start.epoch;
       this.title.set(start.title);
       if (typeof document !== 'undefined') document.title = start.title;
       const input = isRecord(start.input) ? start.input : {};
@@ -155,7 +179,10 @@ export class DialogShell implements AfterViewInit {
     await this.ready(frame);
   }
 
-  /** The ready handshake (ADR 0026 §4.2): the content and the fonts are there; measured now, without waiting for a frame. */
+  /**
+   * The start (ADR 0043 §2): the content and the fonts are there; the frame is measured now, without waiting for a frame,
+   * by the same loop that sizes the window afterwards. The window is shown at the measure the ready names.
+   */
   private async ready(frame: DialogFrame): Promise<void> {
     const fonts = typeof document !== 'undefined' ? document.fonts?.ready : undefined;
     await (fonts ?? Promise.resolve()).catch(() => undefined);
@@ -167,44 +194,67 @@ export class DialogShell implements AfterViewInit {
     frame.render();
     frame.describe();
     frame.focusFirst();
-    let measure = frame.measure();
+    const loop = (this.loop = new SizeLoop(
+      this.epoch,
+      () => frame.measure(),
+      (epoch, seq, measure) => this.io.measure(epoch, seq, measure),
+      (message) => {
+        console.warn(`[paddock-dialogs] dialog window ${this.id}: ${message}`);
+        this.io.log?.('warn', `dialog window ${this.id}: ${message}`);
+      },
+      (seq) => {
+        if (typeof document !== 'undefined') document.documentElement.dataset['fitSeq'] = String(seq);
+        this.followUp();
+      },
+    ));
+    loop.run('trigger');
     if (typeof document !== 'undefined' && document.fonts?.status === 'loading') {
       await document.fonts.ready.catch(() => undefined);
-      measure = frame.measure();
+      loop.run('trigger');
     }
     this.readied = true;
-    await this.io.ready(measure).catch(() => undefined);
-    // The content may have changed while the window system answered (a dialog that loads its data): that is read at the
-    // same pinned width the measure was taken at, and sent as a refit. Left to `watch`, whose baseline is read after the
-    // pin is released, it would be taken as already fitted and the window would keep its first, empty size.
-    const after = frame.measure();
-    if (after.content.height !== measure.content.height || after.minContent.height !== measure.minContent.height) {
-      console.debug(`[paddock-dialogs] dialog window ${this.id}: content changed during the ready handshake, refit ${measure.content.height} -> ${after.content.height} px`);
-      this.fit(after);
-    }
+    await this.io.ready(this.epoch, loop.seq).catch(() => undefined);
+    // The content may have changed while the window system answered (a dialog that loads its data): the same loop reads it,
+    // at the same pinned width, against the last measure it SENT; left to the watch (whose baseline would be read after
+    // the pin is released) the window would keep its first, empty size.
+    loop.run('trigger');
     // Shown at its size now: the window's own width rules again.
     frame.pinWidth(null);
     frame.watch();
   }
 
+  /** The page's layout changed (content, settings, fonts, `requestFit`, a remeasure): the loop measures again. */
+  protected refit(): void {
+    if (this.readied && !this.closing) this.loop?.run('trigger');
+  }
+
+  /** After a send Rust resizes the window and the page re-lays out: one more look, a frame later (a visible window has frames). */
+  private followUp(): void {
+    if (typeof requestAnimationFrame !== 'function') return;
+    // `data-fit-pending`: follow-ups scheduled and not yet run. A check waits for it to reach 0 (a condition), never for frames:
+    // a window the OS does not paint (an occluded WebKit one) may not get a frame for seconds.
+    const pending = (by: number) => {
+      if (typeof document !== 'undefined') document.documentElement.dataset['fitPending'] = String(Math.max(0, Number(document.documentElement.dataset['fitPending'] ?? '0') + by));
+    };
+    pending(1);
+    requestAnimationFrame(() => {
+      pending(-1);
+      if (!this.closing) this.loop?.run('follow-up');
+    });
+  }
+
   /**
-   * The window is settled when the handshake is through and the content has nothing in flight (its stores and jobs hold
-   * a pending task while they load): the last size the content reached is then sent at once, without a frame wait, and
+   * The window is settled when the start is through and the content has nothing in flight (its stores and jobs hold a
+   * pending task while they load): the last size the content reached is then sent at once, without a frame wait, and
    * `data-fit-settled` is set. A check that reads the window's size (the browser build's e2e) waits for it, so it never
    * measures a content that is still loading (File hash's result arriving after the first measure).
    */
   private async settle(): Promise<void> {
     if (!this.readied) return;
-    const frame = this.frame();
     await this.app.whenStable();
     if (this.closing) return;
-    frame.flushFit();
+    this.loop?.run('trigger');
     if (typeof document !== 'undefined') document.documentElement.dataset['fitSettled'] = 'true';
-  }
-
-  /** A refit after the ready handshake (the frame coalesces them to one per frame). */
-  protected fit(measure: DialogMeasure): void {
-    if (this.readied && !this.closing) void this.io.fit(measure).catch(() => undefined);
   }
 
   /** A title the content knows only now: the heading, the page title and (where the window system can) the OS title bar. */

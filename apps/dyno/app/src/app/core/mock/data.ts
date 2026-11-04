@@ -23,6 +23,7 @@ export function healthReasons(): HealthReason[] {
       detail: '210 GB free of 953 GB, and build output fills about 5 GB a day: full in about 41 days. 63 GB can be freed safely.',
       impact: 8,
       severity: 'warning',
+      since: null,
     },
     {
       id: 'uptime',
@@ -30,6 +31,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
       impact: 6,
       severity: 'warning',
+      since: null,
     },
     {
       id: 'startup-apps',
@@ -37,6 +39,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'Teams, VirtualBox and Spotify have high impact: the desktop takes 48 s to settle after sign-in.',
       impact: 4,
       severity: 'info',
+      since: null,
     },
     {
       id: 'battery-wear',
@@ -44,6 +47,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'Full charge holds 87% of the design capacity after 412 cycles. Normal for a two-year-old laptop.',
       impact: 2,
       severity: 'info',
+      since: null,
     },
   ];
 }
@@ -180,9 +184,9 @@ export function demoSettings(): Settings {
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000 },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
-    alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
+    alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10, trayAlertPercent: 90 },
     // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
-    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 },
+    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' } },
     jobs: { workers: 'auto' },
     webApi: { enabled: false, port: 7878, lan: false },
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },
@@ -202,6 +206,7 @@ export function demoSettings(): Settings {
       ],
     },
     backup: { alertWhenStale: true, staleAfterHours: 48, overrides: [] },
+    power: { keepAwake: { enabled: true, display: false, graceSecs: 120, cpuPct: 50, netBytesPerS: 512_000, diskBytesPerS: 5_242_880, trayItem: false }, energy: { enabled: true, wattsOn: null, wattsSleep: null, tariffPerKwh: null, currency: null, co2GPerKwh: null }, idle: { enabled: false, action: 'sleep', afterSecs: 1800, countdownSecs: 60, acOnly: true, exceptions: { audio: true, fullScreen: true, otherStayAwake: true, cpuPct: 50, diskBytesPerS: 5_242_880, netBytesPerS: 512_000, programs: [] } }, timed: { enabled: false, entries: [] }, wol: { enabled: true, discovery: true, directedBroadcast: true, testTimeoutSecs: 120 }, wake: { enabled: false } },
   };
 }
 

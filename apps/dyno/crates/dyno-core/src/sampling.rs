@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 
 /// Dyno's CPU budget, percent of the machine.
 pub const CPU_BUDGET: f32 = 1.0;
+/// The system interval when nobody watches: history needs a point every 5 s.
+pub const UNWATCHED_SYSTEM_MS: u32 = 2_000;
+/// The process table's interval when no window shows it (nobody watching, or only the menu bar icons).
+pub const UNWATCHED_PROCESS_MS: u32 = 10_000;
 
 /// What the sampler should do now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,11 +38,13 @@ pub fn intervals(s: Sampling, load: Load) -> Intervals {
     let mut system = s.interval_ms.clamp(500, 10_000);
     let mut process = s.process_interval_ms.clamp(1_000, 30_000).max(system);
     match load.watching {
-        Some(_) => {}
+        Some(LiveDetail::Summary | LiveDetail::Processes) => {}
+        // Only the menu bar icons: they draw the system sample at the user's pace, and nothing shows the process table.
+        Some(LiveDetail::Tray) => process = process.max(UNWATCHED_PROCESS_MS),
         // Nobody watching: history needs a point every 5 s and the process table every 10 s.
         None => {
-            system = system.max(2_000);
-            process = process.max(10_000);
+            system = system.max(UNWATCHED_SYSTEM_MS);
+            process = process.max(UNWATCHED_PROCESS_MS);
         }
     }
     if load.on_battery {
@@ -77,6 +83,41 @@ mod tests {
                 process_ms: 2_000
             }
         );
+    }
+
+    // With the window closed the app still subscribed at the summary level (the tray needs numbers), so the agent read
+    // the whole process table every 2 s for nobody: 0.72-0.74% of one core against 0.38-0.39% unwatched (VM bench,
+    // docs/benchmarks.md 2026-11-03). The tray level keeps the system pace and reads processes at the unwatched pace.
+    #[test]
+    fn the_tray_alone_keeps_the_system_pace_and_reads_processes_unwatched() {
+        let tray = intervals(
+            Sampling::default(),
+            Load {
+                watching: Some(LiveDetail::Tray),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            tray,
+            Intervals {
+                system_ms: Sampling::default().interval_ms,
+                process_ms: UNWATCHED_PROCESS_MS
+            }
+        );
+        let summary = intervals(
+            Sampling::default(),
+            Load {
+                watching: Some(LiveDetail::Summary),
+                ..Default::default()
+            },
+        );
+        assert!(summary.process_ms < tray.process_ms);
+    }
+
+    #[test]
+    fn ranks_order_the_details() {
+        assert!(LiveDetail::Tray.rank() < LiveDetail::Summary.rank());
+        assert!(LiveDetail::Summary.rank() < LiveDetail::Processes.rank());
     }
 
     #[test]

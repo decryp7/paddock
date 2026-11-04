@@ -233,7 +233,7 @@ describe('DiskMapStore', () => {
     await store.scan({ volume: { id: '/' } });
     await advance();
     await store.rescan();
-    expect(spy).toHaveBeenLastCalledWith({ volume: { id: '/' } });
+    expect(spy).toHaveBeenLastCalledWith({ volume: { id: '/' } }, store.status()!.scan);
     const status: DiskScanStatus = store.status()!;
     expect(status.seq).toBeGreaterThan(0);
   });
@@ -430,5 +430,199 @@ describe('DiskMapStore', () => {
     store.volumesChanged([]);
     expect(store.selectedVolumeId()).toBeNull();
     void push;
+  });
+
+  describe('saved maps (ADR 0029)', () => {
+    const DAY = 86_400_000;
+    const saved = (target: { volume: { id: string } } = { volume: { id: '/' } }) => ({ savedMaps: [{ target, ageMs: 3 * DAY, changedBytes: 5_000_000_000 }] });
+
+    it('adopts the saved map at once, with its age, its origin and the net change', async () => {
+      const { store } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      const s = store.status()!;
+      expect(store.outcome()).toBe('done');
+      expect(s.origin).toEqual({ saved: { savedAt: NOW - 3 * DAY } });
+      expect(s.scannedAt).toBe(NOW - 3 * DAY);
+      expect(s.changedBytes).toBe(5_000_000_000);
+      expect(store.rows().map((r) => r.node.name)).toContain('Users');
+    });
+
+    it('keeps the saved map on screen during a Rescan and swaps to the new one when it is done', async () => {
+      const { store } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      const old = store.status()!;
+      expect(await store.rescan()).toBe(true);
+      expect(store.refreshing()).toEqual({ scan: expect.any(Number), of: old.scan });
+      expect(store.status()!.scan).toBe(old.scan);
+      expect(store.refreshingThis()).toBe(true);
+      expect(store.refreshStatus()!.state).toBe('running');
+      expect(store.refreshStatus()!.replaces).toBe(old.scan);
+      expect(store.rows().map((r) => r.node.name)).toContain('Users');
+      await advance();
+      expect(store.refreshing()).toBeNull();
+      expect(store.status()!.scan).not.toBe(old.scan);
+      expect(store.status()!.origin).toBe('live');
+      expect(store.outcome()).toBe('done');
+      expect(store.refreshFailure()).toBeNull();
+    });
+
+    it('keeps the saved map when the Rescan is cancelled', async () => {
+      const { store } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      const old = store.status()!;
+      await store.rescan();
+      const pass = store.refreshing()!.scan;
+      await store.cancel();
+      expect(store.kept().find((k) => k.scan === pass)!.state).toBe('cancelled');
+      expect(store.refreshing()).toBeNull();
+      expect(store.status()!.scan).toBe(old.scan);
+      expect(store.refreshFailure()).toBeNull();
+      expect(store.rows().length).toBeGreaterThan(0);
+    });
+
+    it('keeps the saved map and says so when the Rescan fails', async () => {
+      const { store } = setup(saved({ volume: { id: '/Volumes/Media' } }));
+      await store.loadVolumes();
+      await store.selectVolume('/Volumes/Media');
+      await store.restore();
+      const old = store.status()!;
+      expect(old.target).toEqual({ volume: { id: '/Volumes/Media' } });
+      await store.rescan();
+      await advance();
+      expect(store.refreshing()).toBeNull();
+      expect(store.refreshFailure()?.state).toEqual({ failed: { failure: { volumeUnreachable: { detail: 'nas.local stopped answering' } } } });
+      expect(store.status()!.scan).toBe(old.scan);
+      expect(store.outcome()).toBe('done');
+    });
+
+    it('shows the growing tree on request, and goes back to the map when that Rescan is cancelled', async () => {
+      const { store } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      const old = store.status()!;
+      await store.rescan();
+      const pass = store.refreshing()!.scan;
+      await store.showProgress();
+      expect(store.status()!.scan).toBe(pass);
+      expect(store.refreshingThis()).toBe(false);
+      await store.cancel();
+      expect(store.status()!.scan).toBe(old.scan);
+      expect(store.refreshing()).toBeNull();
+    });
+
+    it('stays on the growing tree when that Rescan finishes', async () => {
+      const { store } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      await store.rescan();
+      const pass = store.refreshing()!.scan;
+      await store.showProgress();
+      await advance();
+      expect(store.status()!.scan).toBe(pass);
+      expect(store.outcome()).toBe('done');
+      expect(store.refreshing()).toBeNull();
+    });
+
+    it('does not start a second Rescan while one runs', async () => {
+      const { store, mock } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      await store.rescan();
+      const spy = vi.spyOn(mock, 'startDiskScan');
+      expect(await store.rescan()).toBe(false);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('a partial map is replaced at once by a Rescan, as before', async () => {
+      const { store } = setup();
+      await store.loadVolumes();
+      await store.scan({ volume: { id: '/' } });
+      await store.cancel();
+      const partial = store.status()!;
+      expect(store.outcome()).toBe('cancelled');
+      await store.rescan();
+      expect(store.refreshing()).toBeNull();
+      expect(store.status()!.scan).not.toBe(partial.scan);
+      expect(store.outcome()).toBe('running');
+    });
+
+    it('adopts a Rescan that was running when the window opened: the map it replaces, with its strip', async () => {
+      const { store, mock } = setup(saved());
+      const old = (await mock.diskScans())[0]!;
+      await mock.startDiskScan(old.target, old.scan);
+      await store.loadVolumes();
+      await store.restore();
+      expect(store.status()!.scan).toBe(old.scan);
+      expect(store.refreshing()?.of).toBe(old.scan);
+    });
+
+    it('refreshes a saved map at the first look only when the setting says so and the map is old enough', async () => {
+      const refreshing = async (when: 'off' | 'olderThanDay' | 'olderThanWeek', ageDays: number) => {
+        TestBed.resetTestingModule();
+        const { store, mock } = setup({ savedMaps: [{ target: { volume: { id: '/' } }, ageMs: ageDays * DAY, changedBytes: null }] });
+        const settings = await mock.settings();
+        await mock.saveSettings({ ...settings, disk: { ...settings.disk, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: when } } });
+        await store.loadVolumes();
+        await store.restore();
+        const started = await store.refreshOnOpen(NOW);
+        return { started, refreshing: store.refreshing() !== null };
+      };
+      expect(await refreshing('off', 30)).toEqual({ started: false, refreshing: false });
+      expect(await refreshing('olderThanDay', 0.5)).toEqual({ started: false, refreshing: false });
+      expect(await refreshing('olderThanDay', 2)).toEqual({ started: true, refreshing: true });
+      expect(await refreshing('olderThanWeek', 3)).toEqual({ started: false, refreshing: false });
+      expect(await refreshing('olderThanWeek', 8)).toEqual({ started: true, refreshing: true });
+    });
+
+    it('looks once: a second visit to the page does not refresh again, and a map of this run is never refreshed on open', async () => {
+      const { store, mock } = setup(saved());
+      const settings = await mock.settings();
+      await mock.saveSettings({ ...settings, disk: { ...settings.disk, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'olderThanDay' } } });
+      await store.loadVolumes();
+      await store.restore();
+      expect(await store.refreshOnOpen(NOW)).toBe(true);
+      await store.cancel();
+      expect(await store.refreshOnOpen(NOW)).toBe(false);
+      TestBed.resetTestingModule();
+      const fresh = setup().store;
+      await fresh.loadVolumes();
+      await fresh.scan({ volume: { id: '/' } });
+      await advance();
+      expect(await fresh.refreshOnOpen(NOW)).toBe(false);
+    });
+
+    it('refreshes nothing when the setting cannot be read', async () => {
+      const { store, mock } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      vi.spyOn(mock, 'settings').mockRejectedValueOnce({ code: 'internal', message: 'No.' });
+      expect(await store.refreshOnOpen(NOW)).toBe(false);
+      expect(store.refreshing()).toBeNull();
+    });
+
+    it('forgets the saved map: the page is cleared and the engine no longer lists it', async () => {
+      const { store, mock } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      expect(await store.forgetSaved()).toBe(true);
+      expect(store.status()).toBeNull();
+      expect(store.kept()).toEqual([]);
+      expect(await mock.diskScans()).toEqual([]);
+    });
+
+    it('reports a forget that was refused and keeps the map', async () => {
+      const { store, mock } = setup(saved());
+      await store.loadVolumes();
+      await store.restore();
+      vi.spyOn(mock, 'forgetSavedDiskMap').mockRejectedValueOnce({ code: 'internal', message: 'Not now.' });
+      expect(await store.forgetSaved()).toBe(false);
+      expect(store.startError()?.message).toBe('Not now.');
+      expect(store.status()).not.toBeNull();
+      expect(await store.forgetSaved()).toBe(true);
+      expect(await store.forgetSaved()).toBe(false);
+    });
   });
 });

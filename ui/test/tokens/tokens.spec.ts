@@ -87,6 +87,24 @@ describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
     expect(contrast(col(v, '--pd-border-control'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(3);
   });
 
+  it('the widget grid\'s grips, snapping guides and placeholder are 3:1 (WCAG 1.4.11, ADR 0044)', () => {
+    // Grips: --pd-text-muted on the widget surface.
+    expect(contrast(col(v, '--pd-text-muted'), col(v, '--pd-surface-1'))).toBeGreaterThanOrEqual(3);
+    expect(contrast(col(v, '--pd-text-muted'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(3);
+    // Snapping guides (--pd-snap-guide: the accent at 70 %) meet the window background, behind the widgets.
+    expect(v['--pd-snap-guide'] ?? '').toContain('70%');
+    const a = col(v, '--pd-accent');
+    const bg = col(v, '--pd-bg');
+    const guide: Rgba = { r: a.r * 0.7 + bg.r * 0.3, g: a.g * 0.7 + bg.g * 0.3, b: a.b * 0.7 + bg.b * 0.3, a: 1 };
+    expect(contrast(guide, bg)).toBeGreaterThanOrEqual(3);
+    // The placeholder's dashed outline (the accent) on the background and on its own tint.
+    expect(contrast(a, bg)).toBeGreaterThanOrEqual(3);
+    const tint: Rgba = { r: a.r * 0.14 + bg.r * 0.86, g: a.g * 0.14 + bg.g * 0.86, b: a.b * 0.14 + bg.b * 0.86, a: 1 };
+    expect(contrast(a, tint)).toBeGreaterThanOrEqual(3);
+    // The focus ring on the widget surface.
+    expect(contrast(col(v, '--pd-focus-ring'), col(v, '--pd-surface-1'))).toBeGreaterThanOrEqual(3);
+  });
+
   it('white on the danger fill is AA', () => {
     expect(contrast(col(v, '--pd-on-danger'), col(v, '--pd-danger-fill'))).toBeGreaterThanOrEqual(4.5);
   });

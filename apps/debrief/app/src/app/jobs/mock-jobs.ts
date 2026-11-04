@@ -86,6 +86,8 @@ export class MockJobs implements JobsBackend {
   /** Outcomes of jobs that ended without staying in the list: the engine keeps finished jobs, so a late `wait` still hears them. */
   private readonly forgotten = new Map<number, JobOutcome>();
   private ticker: ReturnType<typeof setInterval> | null = null;
+  /** Set by `dispose`: a job still running on a replaced instance ends quietly (no notification, ticker or next job). */
+  private disposed = false;
 
   /** Kinds still held (`options.hold`), and the finishes waiting for the release. */
   private readonly holding: Set<JobKind>;
@@ -174,8 +176,9 @@ export class MockJobs implements JobsBackend {
     }
     const finished = this.entries.filter((x) => x.info.finishedAt !== null);
     if (finished.length > HISTORY_CAP) this.entries = this.entries.filter((x) => x !== finished[0]);
-    if (attention) this.notify(e, state);
+    if (attention && !this.disposed) this.notify(e, state);
     for (const w of waiters) w(this.outcome(e));
+    if (this.disposed) return;
     this.pump();
     this.emit();
   }
@@ -425,6 +428,7 @@ export class MockJobs implements JobsBackend {
 
   /** Stops the progress ticker and forgets listeners and waiters (an instance replaced by `resetMockJobs`). */
   dispose(): void {
+    this.disposed = true;
     if (this.ticker) clearInterval(this.ticker);
     this.ticker = null;
     this.handlers.clear();

@@ -3,11 +3,17 @@ import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdWidgetChooser, PdWidgetOption } from '@decryp7/paddock-ui/widgets';
-import type { Edit, MenuBarItem, MenuBarKind, Metric, Placement } from '../../core/generated/widgets';
+import type { Edit, MenuBarItem, MenuBarKind, Metric, NumberFormat, Placement } from '../../core/generated/widgets';
 import { Notifier } from '../../shared/notifier';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { optionLabel } from '../widgets/option-label';
 import { WidgetChoicesStore } from '../../state/widget-choices';
+
+/** The two ways a number draws (the engine's `NumberFormat`). */
+const FORMAT_OPTIONS: PdSelectOption[] = [
+  { value: 'stacked', label: 'Label over value' },
+  { value: 'line', label: 'One line' },
+];
 
 const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
 
@@ -29,10 +35,16 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
             @if (kind === 'number') {
               <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
               <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
+              <pd-select class="format" [options]="formatOptions" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
             }
           </ng-template>
         }
       </pd-widget-chooser>
+      @if (v.layout.placements.length > 4) {
+        <p class="note" role="note">
+          {{ overflowNote }}
+        </p>
+      }
       }
     } @else {
       <p class="faint" role="status">Reading the menu bar items…</p>
@@ -44,6 +56,8 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     /* A number row also holds its label and unit: the metric picker gives way so the description keeps its width. */
     .narrow { width: 9.5rem; flex: none; }
     .faint { color: var(--text-3); }
+    .format { width: 9rem; flex: none; }
+    .note { color: var(--text-2); font-size: var(--fs-sm); margin-block-start: var(--sp-3); }
   `,
 })
 export class MenuBarItems implements OnInit {
@@ -52,6 +66,10 @@ export class MenuBarItems implements OnInit {
   protected readonly view = this.layouts.menuBar;
   /** The type witness of the option templates (`pdWidgetOptionOf`). */
   protected readonly sample: MenuBarItem | null = null;
+  protected readonly formatOptions = FORMAT_OPTIONS;
+  /** Said once there are more than four items: what each system does with items that do not fit. */
+  protected readonly overflowNote =
+    'More than four items may not all fit. On a Mac the menu bar hides the items that do not fit, without a sign, when the active app\'s menus need the room or a notch is in the way; the stacked number is the narrowest format. On Windows 11 icons you have not pinned to the taskbar go to the overflow flyout (the chevron); each keeps its place there.';
   protected readonly choices = inject(WidgetChoicesStore);
   protected readonly widgetFor = (kind: MenuBarKind): MenuBarItem => this.choices.menuBarDefault(kind);
   protected readonly kinds = computed(() => this.view()?.catalogue.kinds.map((k) => k.kind) ?? []);
@@ -60,6 +78,15 @@ export class MenuBarItems implements OnInit {
   ngOnInit(): void {
     void this.layouts.use('menuBar');
     void this.choices.load();
+  }
+
+  protected format(p: Placement<MenuBarItem>): NumberFormat {
+    return typeof p.widget === 'object' && 'number' in p.widget ? p.widget.number.format : 'stacked';
+  }
+
+  protected setFormat(p: Placement<MenuBarItem>, value: string): void {
+    const format: NumberFormat = value === 'line' ? 'line' : 'stacked';
+    this.editRow(p.id, (now) => (typeof now.widget === 'object' && 'number' in now.widget ? { number: { ...now.widget.number, format } } : null));
   }
 
   protected metricName(p: Placement<MenuBarItem>): string {

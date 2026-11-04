@@ -28,13 +28,20 @@ import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/m
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
-import type { Edit, KindInfo, LayoutView, Placement, Preset } from '../generated/widgets';
+import type { Edit, KindInfo, LayoutView, Cells, Placement as GenericPlacement, Preset as GenericPreset, Span } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
 /** The family's undo toast class (the safe area above the status bar is in `_material.scss`). */
 const UNDO_SNACK_CLASS = 'pd-undo-snack';
 const UNDO_SECONDS = 8;
+type Placement<W> = GenericPlacement<W, Span>;
+type Preset<W> = GenericPreset<W, Span>;
 let nextId = 0;
+
+/** The spans a flow kind allows (a grid kind has none: the chooser is for flow surfaces). */
+function spansOf(info: KindInfo<unknown>): readonly number[] {
+  return 'spans' in info.size ? info.size.spans.spans : [];
+}
 
 /** A move target: where a row goes. */
 type Move = 'up' | 'down' | 'top' | 'bottom';
@@ -66,6 +73,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         @for (note of view().notes; track $index) {
           <p class="pd-wc-limit pd-wc-note" role="status"><pd-status-glyph status="info" [size]="16" />{{ note.message }}</p>
         }
+        @if (mode() === 'edit') {
         <div class="pd-wc-label">
           <span [id]="ids + '-shown'">Shown in the {{ noun() }}</span>
           <span class="pd-wc-count">{{ placements().length }} of {{ surface().maxPlacements }}</span>
@@ -95,9 +103,9 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                 @if (optionFor(p); as opt) {
                   <ng-container *ngTemplateOutlet="opt.template; context: { $implicit: p }" />
                 }
-                @if (info && info.spans.length > 1) {
+                @if (info && spansOf(info).length > 1) {
                   <mat-button-toggle-group class="pd-wc-toggle" [hideSingleSelectionIndicator]="true" [value]="p.span" [attr.aria-label]="titleOf(p) + ' width'" (change)="resize(p, $event.value)">
-                    @for (s of info.spans; track s) {
+                    @for (s of spansOf(info); track s) {
                       <mat-button-toggle [value]="s">{{ spanLabel(s) }}</mat-button-toggle>
                     }
                   </mat-button-toggle-group>
@@ -122,6 +130,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         </mat-menu>
         <p class="pd-wc-hint" [id]="ids + '-hint'"><pd-glyph name="keyboard" [size]="16" /><span class="pd-wc-hint-text">Drag a widget, or focus its handle and hold {{ mac ? 'Option' : 'Alt' }} with the arrow keys, Home or End to move it.</span></p>
 
+        }
+
         <div class="pd-wc-label"><span>Add a widget</span></div>
         @if (atLimit()) {
           <p class="pd-wc-limit" role="status"><pd-status-glyph status="info" [size]="16" />The {{ noun() }} holds {{ surface().maxPlacements }} widgets. Remove one to add another.</p>
@@ -144,7 +154,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
           }
         </ul>
         </div>
-        @if (hasPresets()) {
+        @if (mode() === 'edit' && hasPresets()) {
           <div class="pd-wc-label">
             <span [id]="ids + '-presets'">Presets</span>
             <span class="pd-wc-count">{{ userPresets().length }} of {{ surface().maxUserPresets }} saved</span>
@@ -183,7 +193,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
             }
           }
         }
-        @if (editable()) {
+        @if (editable() && mode() === 'edit') {
           <div class="pd-wc-foot"><button matButton="text" type="button" (click)="reset()">Reset to defaults</button></div>
         }
       </div>
@@ -262,7 +272,9 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private readonly snackBar = inject(MatSnackBar);
 
   /** The engine's view of the surface: layout, catalogue, notes, `canUndo` and `editable`. */
-  readonly view = input.required<LayoutView<S, W, K>>();
+  readonly view = input.required<LayoutView<S, W, Span, K> | LayoutView<S, W, Cells, K>>();
+  /** `edit`: the Shown list, the add list and presets (flow surfaces). `add`: only the add list, for the side sheet of a grid surface (ADR 0044 §5: the grid is the editor). */
+  readonly mode = input<'edit' | 'add'>('edit');
   /** A new widget value of a kind, with its default options (`Edit.add`). */
   readonly widgetFor = input.required<(kind: K) => W>();
   /** The kind (wire name) of a widget value; see `defaultKindOf`. */
@@ -274,20 +286,22 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
   /** The app's per-kind option controls. */
+  /* v8 ignore start: the compiler generates this query's accessor; the specs read the query through its consumers */
   readonly options = contentChildren<PdWidgetOption<W>>(PdWidgetOption);
+  /* v8 ignore stop */
   /** An edit for the engine. */
   readonly edit = output<Edit<W>>();
 
   protected readonly ids = `pd-wc-${nextId++}`;
-  protected readonly placements = computed(() => this.view().layout.placements);
+  protected readonly placements = computed(() => this.view().layout.placements as Placement<W>[]);
   protected readonly surface = computed(() => this.view().catalogue.surface);
   /** What the surface is called in the texts, from the catalogue ("popup"). */
   protected readonly noun = computed(() => this.surface().noun);
   protected readonly kinds = computed(() => this.view().catalogue.kinds);
   protected readonly editable = computed(() => this.view().editable);
   protected readonly atLimit = computed(() => this.placements().length >= this.surface().maxPlacements);
-  protected readonly userPresets = computed(() => this.view().layout.presets);
-  protected readonly presets = computed(() => [...this.view().builtinPresets, ...this.userPresets()]);
+  protected readonly userPresets = computed(() => this.view().layout.presets as Preset<W>[]);
+  protected readonly presets = computed(() => [...(this.view().builtinPresets as Preset<W>[]), ...this.userPresets()]);
   protected readonly hasPresets = computed(() => this.surface().maxUserPresets > 0 || this.presets().length > 0);
   protected readonly presetName = signal('');
   protected readonly canSave = computed(() => this.presetName().trim() !== '' && this.userPresets().length < this.surface().maxUserPresets);
@@ -361,6 +375,8 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private query(selector: string): HTMLElement | null {
     return this.host.nativeElement.querySelector<HTMLElement>(selector);
   }
+
+  protected readonly spansOf = spansOf;
 
   protected infoOf(p: Placement<W>): KindInfo<K> | undefined {
     const kind = this.kindOf()(p.widget);

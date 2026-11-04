@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-plugin-package` | the `.paddockplugin` archive, the plugin manifest model (permissions, contributions, namespaces), Ed25519 signing, keys, trust levels and store, installed-binary verification (ADR 0001, plan X51) | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-view` | the declarative view model plugins return (ADR 0002, plan X51): `ViewDoc`, nodes, actions, patches, JSON + postcard, the limits validator, generated TypeScript | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-api` | what an out-of-process plugin links (ADR 0001, plan X51): platform protocol 2.0 (`PlatformRequest`, `HostCall`), `Plugin` and `Contributions` (tools with checked schemas, settings, views, MCP tools), the `Extension` mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files, `serve` | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-power` | power (Dyno ADR 0032, D3): `KeepAwake` guard over the OS's own sleep-prevention object (macOS `IOPMAssertion`, Windows power request, Linux logind inhibitor; the OS releases it when the process ends), `PowerEvent` sleep and wake notifications, `FakePower`/`FakeEvents` for tests; real adapters in `native.rs` run only in VMs (ER-14) | Dyno; Debrief, Sighter, Pitwall and Pitcrew plausibly (rule of three open); built |
 | `paddock-plugin-host` | what an app links to run plugins (ADR 0001, plan X51): installed `.paddockplugin` packages (verified before every start), grants (default deny) and the pure `sandbox_for` mapping, a `Supervisor` per plugin (restart with back-off, quarantine through `paddock-guard`), guarded `Remote<C>` proxies, grant-checked host files, outputs and elevated operations, status for the UI | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-test` | testing plugins (ADR 0001, plan X51): `FakeHost` (a plugin in this process over a real IPC pair), the conformance checks every plugin runs, golden helpers, and `paddock-plugin-fixture`, the sample plugin the host's tests start as a process | yes (every plugin, the host's tests); built |
 | `cargo-paddock-plugin` | the plugin author's tool (ADR 0001, plan X51): `cargo paddock-plugin new / build / pack / keygen / sign / verify / run / test` on `paddock-cli` conventions; a project that depends on `paddock-plugin-api` alone, a deterministic optionally Ed25519-signed `.paddockplugin`, verification against trusted keys, and the built program started against `FakeHost` for the conformance checks (from Debrief `cargo-debrief-plugin`) | yes (every plugin author, plugin CI); built |
@@ -131,7 +132,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `Egress::check_host`/`check_host_with` (the door for connections that are not HTTP; `PublicAccess::Deny` leaves this computer and private networks only), a slim build (`default-features = false`: address classes, `Lookup`, `check_host`, no ureq or rustls), `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
-| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with one level of undo, the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
+| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with 20-step undo and redo, grid surfaces (ADR 0044: rectangles, gravity, swap and push, key gestures, derived narrow arrangements, previews), the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `paddock-chromium` | the one Chromium driver: discovery (tests only `CHROMIUM_TEST_PATH`), one command-line builder with the start page last, `Sandbox::decide`, supervised launch with a time limit on an injected clock and a memory cap, DevTools client, pages, readiness and challenge rules, AI cue, the pinned Chrome for Testing runtime, a fake browser for tests (plan X14) | yes (Debrief, Spotter; Sighter later); built |
@@ -276,7 +277,7 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   command is a compile error, and the table's rules (ids, a modal required choice, widths, heights, duplicates) are
   checked when the `static` is built. `Contracts::from_tables(&[...])` builds the run-time contracts;
   `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`,
-  `dialog_ready`, `dialog_fit`, `notifications_post`, `notifications_list`), the tables' `base` and the dialog's own list.
+  `dialog_ready`, `dialog_measure`, `notifications_post`, `notifications_list`), the tables' `base` and the dialog's own list.
   `Kind::policy()` is the kind table of ADR 0026 §1 (default width and height, viewer floor 680x560 and grows only,
   `fits`, what each kind remembers), generated into `shell/generated/dialog-kinds.ts`; `ts::contracts_module` writes
   each owner's `dialog-contracts.ts` (`DIALOG_CONTRACTS`, `DialogId`, `DialogCommandOf`, `DIALOG_BASE`), checked by a
@@ -291,15 +292,15 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
   forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
   watchdog marked its page unresponsive).
-- `window`: the wire `Measure { content, minContent, viewportHeight?, devicePixelRatio? }` (TS `DialogMeasureWire`; the page reports CSS px: `devicePixelRatio` is its `window.devicePixelRatio`, 0.25..=8, and the fit converts content, minimum and viewport to logical px with the webview zoom `zoom_of` = ratio / window scale factor, 1 when either is missing; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window; the delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry and reused by later fits), `plan_fit` (the cap is 75 % of the work
+- `window`: the wire `Measure { content, minContent, viewportHeight?, devicePixelRatio?, overflow }` (TS `DialogMeasureWire`; the page reports CSS px: `devicePixelRatio` is its `window.devicePixelRatio`, 0.25..=8, and the fit converts content, minimum and viewport to logical px with the webview zoom `zoom_of` = ratio / window scale factor, 1 when either is missing; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window; the delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry and reused by later fits), `plan_fit` (the cap is 75 % of the work
   area less the window's own outer-minus-inner decorations and limits the preferred size only, never below `minContent`,
   which becomes the OS minimum; decisions and forms shrink and grow, a viewer only grows, a tool keeps its size) and
   **`show_mechanism(os)`, the one place the way of keeping a window unseen is chosen** (`ReadyThenShow`: hidden,
   shown on `dialog_ready`, method d of the 1.1-0 spike, measured on macOS, Linux and Windows).
 - `tauri` feature: `open` (window by kind, created **hidden** at the placed size on the dialog shell's surface colour,
   no title-bar buttons, owned or independent per OS, `WindowHooks` for the app's webview settings), the commands
-  `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_ready { measure }` (sizes, then shows and focuses the
-  pending window), `dialog_fit { measure }` (refits), `on_window_event` (close request, move/resize, scale-factor change
+  `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_measure { epoch, seq, measure }` (the one way a window is sized: the size state of `size.rs` decides, on the main thread),
+  `dialog_ready { epoch, seq }` (shows and focuses the pending window once that measure is applied and its `Resized` arrived), `on_window_event` (close request, move/resize, scale-factor change
   refits from the last measure, destroyed dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
   `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` and `paddock://dialog-inputs` (to the
   dialog; the opener's page sends the second with `emitTo` when it opens an open dialog again with new inputs). The lifecycle: a window is pending until `dialog_ready`, or until `Dialogs::show_deadline` (1 s;
@@ -315,7 +316,7 @@ paddock_commands::command_table! {
     Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_ready,
-    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_measure,
     // ... the app's commands
 }
 tauri::Builder::default()
@@ -610,8 +611,14 @@ feature (the commands stay in the app, which owns where settings live).
   `NewerLayout`), a damaged or oversized one is replaced by the first edit; each invalid, unknown,
   duplicate or surplus entry is dropped on its own with a count (at most twice the limit is looked at). `Stored<C>` is
   the same as a `#[serde(default)]` settings field.
-- `Edit` (add, remove, move, resize, replace, apply/save/delete preset, reset, undo) and `apply::<C>(&layout, edit)`,
-  a pure `Layout -> Result<Layout, WidgetError>`; remove, apply preset and reset keep one undo level.
+- `Edit` (add, remove, move, resize, replace, arrange, apply/save/delete preset, reset, undo, redo) and
+  `apply::<C>(&layout, edit)`, a pure `Layout -> Result<Layout, WidgetError>`; every placement edit is an undo step (20).
+- Two arrangements (ADR 0044): `Catalogue::Place` is `Span` (flow: popup, menu bar) or `Cells` (grid: rectangles of
+  cells, `SizeRule` per kind, gravity, swap and push on a drop, `Edit::Arrange(GridGesture)`; `grid::arrange`, `derive`,
+  `moves`). `Stored` has a revision (`edit_at`, `preview`: `WidgetError::Stale`), `Catalogue::upgrade` and
+  `spans_to_cells` bring version 1 span layouts up (`Read::upgraded`, `Read::legacy`), and `Previews` answers the
+  webview's preview requests from the last relayed view, in the app's own process.
+- Golden cases for the UI's mock backend: `ui/projects/paddock-ui/widgets/generated/grid-cases.json`.
 - `info`, `view` -> `LayoutView` for the chooser; `WidgetState` (ready, working, empty, error), `PlacementState`,
   `SurfaceValues` for values. The `ts` feature derives `TS` for apps' own catalogue types.
 - Generated TypeScript: `ui/projects/paddock-ui/widgets/generated/widgets.ts`

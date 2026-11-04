@@ -87,7 +87,7 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
   console.error = (...args: unknown[]) => void errors.push(describeArgs(args));
   const ipc = recordIpc({ answers: options.answers });
   const io = new FakeDialogIo();
-  io.start = { dialogId: def.id, title: def.title?.text ?? def.id, kind: def.kind, modality: def.modality, requiredChoice: def.requiredChoice === true, input: options.inputs?.[def.id] ?? {} };
+  io.start = { dialogId: def.id, title: def.title?.text ?? def.id, kind: def.kind, modality: def.modality, requiredChoice: def.requiredChoice === true, input: options.inputs?.[def.id] ?? {}, epoch: 1 };
   try {
     TestBed.resetTestingModule();
     const providers = typeof options.providers === 'function' ? options.providers() : options.providers;
@@ -120,7 +120,7 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     for (const c of [...new Set(ipc.sent)].filter((x) => !commandCovered(allowed, x))) problems.push(`sends ${c}, which its contract does not declare`);
 
     // The ready handshake (ADR 0026 §4.2): sent once, whatever the kind; Rust sizes the window by the kind.
-    if (io.readied === null) problems.push('never sent the ready handshake');
+    if (io.readied === null || io.readySeq === null) problems.push('never sent the ready handshake');
     else if (io.readied.minContent.height > io.readied.content.height || io.readied.minContent.width <= 0) problems.push(`sent a ready measure whose minimum exceeds its content: ${safeJson(io.readied)}`);
 
     // The declared actions (ADR 0026 §2): the layout's problems, and Enter never on a destructive action, on every OS.

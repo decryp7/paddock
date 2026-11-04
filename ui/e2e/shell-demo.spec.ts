@@ -506,16 +506,18 @@ test.describe('dialogs (plan S6)', () => {
     });
   }
 
-  for (const [id] of Object.entries(CONTRACTS).filter(([, c]) => c.kind === 'decision')) {
+  for (const [id, contract] of Object.entries(CONTRACTS).filter(([, c]) => c.kind === 'decision')) {
     test(`the ${id} decision is fitted once to its content: no scrollbar and no gap`, async ({ app, page }) => {
       const d = app.dialogs;
-      await page.setViewportSize({ width: 480, height: 700 });
+      // The window is as wide as its contract says (Rust keeps the width of a `Height` window); at another width the content
+      // would wrap differently and the loop would rightly measure again (ADR 0043 §2).
+      await page.setViewportSize({ width: contract.width, height: 700 });
       await d.openWindow(id);
       await expect(d.shell.getByTestId('dialog-loading')).toHaveCount(0);
       await expect.poll(() => d.fitHistory()).not.toEqual([]);
       const history = await d.fitHistory();
       expect(history, `fitted more than once: ${history.join(' -> ')}`).toHaveLength(1);
-      await page.setViewportSize({ width: 480, height: history[0] as number });
+      await page.setViewportSize({ width: contract.width, height: history[0] as number });
       const m = await d.shell.locator('main').evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
       expect(m.scroll).toBeLessThanOrEqual(m.client);
     });

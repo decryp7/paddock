@@ -7,10 +7,33 @@ function decimals(s: string): number {
   return i < 0 ? 0 : s.length - i - 1;
 }
 
+/** How long a glide takes. */
+export const GLIDE_MS = 300;
+/** How many values a glide shows, the last being the target: about 20 per second instead of one per display frame. */
+export const GLIDE_STEPS = 6;
+
+/**
+ * The texts a glide from `from` to `target` shows, one per step, eased out and printed with `decimals` decimals; the last
+ * is `text` itself. Pure, so the steps are tested without a clock.
+ */
+export function glideSteps(from: number, target: number, text: string, decimals: number, steps = GLIDE_STEPS): string[] {
+  const out: string[] = [];
+  for (let i = 1; i < steps; i++) {
+    const eased = 1 - (1 - i / steps) ** 3;
+    out.push((from + (target - from) * eased).toFixed(decimals));
+  }
+  out.push(text);
+  return out;
+}
+
 /**
  * A number that glides to its new value (about 300 ms, ease-out) instead of jumping, so live values read smoothly.
  * Text that is not a number (`Normal`, `—`) and reduced motion set it at once. The full value is always in the DOM
  * as text, so screen readers and copy get the real number.
+ *
+ * The glide takes {@link GLIDE_STEPS} steps on a timer, not one per animation frame: each step repaints the page, and a
+ * dashboard of live numbers that glided every second kept the web view painting about 18 frames a second
+ * (docs/benchmarks.md, 2026-11-03).
  */
 @Component({
   selector: 'dy-animated-number',
@@ -23,7 +46,7 @@ export class AnimatedNumber {
   readonly value = input.required<string>();
   protected readonly shown = signal('');
   private current: number | null = null;
-  private frame = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -35,8 +58,8 @@ export class AnimatedNumber {
   }
 
   private cancel(): void {
-    if (this.frame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.frame);
-    this.frame = 0;
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
   }
 
   private go(text: string): void {
@@ -44,18 +67,15 @@ export class AnimatedNumber {
     const target = Number(text.replace(/,/g, ''));
     const from = this.current;
     this.current = Number.isFinite(target) ? target : null;
-    if (!Number.isFinite(target) || from === null || from === target || prefersReducedMotion() || typeof requestAnimationFrame !== 'function') {
+    if (!Number.isFinite(target) || from === null || from === target || prefersReducedMotion()) {
       this.shown.set(text);
       return;
     }
-    const d = decimals(text);
-    const start = performance.now();
-    const step = (now: number): void => {
-      const t = Math.min(1, (now - start) / 300);
-      const eased = 1 - (1 - t) ** 3;
-      this.shown.set(t >= 1 ? text : (from + (target - from) * eased).toFixed(d));
-      this.frame = t >= 1 ? 0 : requestAnimationFrame(step);
+    const steps = glideSteps(from, target, text, decimals(text));
+    const next = (i: number): void => {
+      this.shown.set(steps[i] ?? text);
+      this.timer = i + 1 < steps.length ? setTimeout(() => next(i + 1), GLIDE_MS / GLIDE_STEPS) : null;
     };
-    this.frame = requestAnimationFrame(step);
+    this.timer = setTimeout(() => next(0), GLIDE_MS / GLIDE_STEPS);
   }
 }

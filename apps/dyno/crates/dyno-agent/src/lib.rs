@@ -1,4 +1,4 @@
-//! Dyno's background agent: samples the machine, keeps the history, answers the app over dyno-ipc and
+//! Dyno's background agent: samples the machine, keeps the history, answers the app over `paddock-ipc` and
 //! is installed as a per-user service (ADR 0002, 0008, 0010). It runs without the window, so history never stops.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -6,6 +6,10 @@ pub mod agent;
 pub mod alarms;
 pub mod baselines;
 pub mod bench;
+pub mod bench_child;
+pub mod bench_disk_target;
+pub mod bench_scratch;
+pub mod cache;
 pub mod cli;
 pub mod counters;
 pub mod diagnostics;
@@ -14,10 +18,20 @@ pub mod disk;
 pub mod extras;
 pub mod filehash;
 pub mod files;
+pub mod firewall;
+pub mod geo_db;
+pub mod geo_fetch;
 pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
+pub mod helper_centre;
+pub mod helper_link;
+pub mod helper_os;
+pub mod helper_peer;
+pub mod home_ip;
 pub mod instance;
+pub mod intel_centre;
+pub mod intel_fetch;
 pub mod inventory;
 pub mod issues;
 pub mod jobs;
@@ -26,13 +40,21 @@ pub mod netwatch;
 pub mod network;
 pub mod paths;
 pub mod popover;
+pub mod power;
 pub mod recorder;
+pub mod region;
 pub mod rollup;
 pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
+pub mod tool_download;
+pub mod tool_own_copy;
+pub mod tool_pins;
 pub mod unusual;
+pub mod wakes;
+pub mod wire;
+pub mod wol;
 
 use agent::Shared;
 use std::sync::Arc;
@@ -189,9 +211,15 @@ impl Running {
                 .name("dyno-network".into())
                 .spawn(move || {
                     dyno_platform::priority::lower_current_thread();
+                    // The match index of the user's lists is built once at start, as a job.
+                    let _ = s.jobs.start(&s, dyno_core::jobs::JobSpec::RebuildIntel);
                     // Slow and cheap: only so that a new listener is noticed (and logged) when nobody has the page open.
                     while !s.stopped() {
                         s.network.tick(&s);
+                        // Monthly location databases and list subscriptions that are due (each is a job; a busy one is skipped).
+                        for spec in s.intel.due() {
+                            let _ = s.jobs.start(&s, spec);
+                        }
                         let mut waited = std::time::Duration::ZERO;
                         while waited < network::BACKGROUND_EVERY && !s.stopped() {
                             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -254,6 +282,20 @@ impl Running {
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
+                .name("dyno-power".into())
+                .spawn(move || power::run(&s))
+                .map_err(|e| format!("could not start the power watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-wakes".into())
+                .spawn(move || wakes::run(&s))
+                .map_err(|e| format!("could not start the scheduled-wake watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
                 .name("dyno-server".into())
                 // Not lowered: it answers the app's requests (rule 52; every other agent thread is).
                 .spawn(move || server::serve(&s, host))
@@ -278,6 +320,8 @@ impl Running {
         for t in self.threads {
             let _ = t.join();
         }
+        // A benchmark in progress is cancelled and its child (and Linux unit) ended before the agent goes.
+        self.shared.bench.shutdown(std::time::Duration::from_secs(5));
         drop(self.instance);
     }
 }

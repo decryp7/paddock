@@ -110,6 +110,9 @@ pub struct MediaTraits {
     pub rotational: Option<bool>,
     /// The bus, "USB" or "Thunderbolt".
     pub bus: Option<String>,
+    /// What tells this disk from another mounted at the same place later: the volume UUID (macOS, Linux) or the volume GUID
+    /// path (Windows). `None` where the OS gives none (network shares), which is never read as a different disk.
+    pub identity: Option<String>,
 }
 
 /// File systems that are not storage a person manages: pseudo, memory and loop file systems.

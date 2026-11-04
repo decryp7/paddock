@@ -3,6 +3,7 @@
 - Status: Accepted (2026-10-28, after an independent review). The user answered its four open questions the same day
   (button order native per OS, three width steps, Dyno is monitoring-only, `unexercised` commands under a ratchet),
   recorded below
+- Amended by ADR 0043 (§1's height column and §4.2, §4.3, §4.5: `dialog_measure` and `dialog_ready { epoch, seq }`; forms and viewers remember only their offset).
 - Date: 2026-10-28
 - Related: rule 17 (every dialog is a real OS window), rules 39, 40, 42, 43; ADR 0008 (long operations), ADR 0009
   (dialog kinds and declared contracts; this ADR amends its §2 and §3), ADR 0012 (app shell), ADR 0016 (dialog window

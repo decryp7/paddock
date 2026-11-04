@@ -56,7 +56,9 @@ changes here, every app's copy is updated in the same change.
 ## User interface
 17. **Every dialog is a real OS window** (owned by and centred on the main window, remembered size/position, Escape/Enter);
     modality is explicit per dialog (modal for confirmations, credentials, unsaved changes, pickers that feed the next step;
-    modeless for tools kept open beside the work). Menus, dropdowns, autocomplete and tooltips stay in-app.
+    modeless for tools kept open beside the work). A dialog window is sized by its kind's size mode (ADR 0043): decisions, forms and
+    viewers follow their content (a viewer only grows), a tool keeps the size it was given; a user resize makes it manual for that
+    opening. Menus, dropdowns, autocomplete and tooltips stay in-app.
 18. **Panes lay out by container queries;** paths and file names truncate in the middle with the full value in a tooltip;
     no horizontal scroll at any width ≥ 320 px.
 19. **A control that repairs X never depends on X;** every "X is not running" message has a working Repair button; never

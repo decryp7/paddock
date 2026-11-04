@@ -6,6 +6,7 @@ use crate::dto::CommandError;
 use crate::link::AgentLink;
 use crate::shell::Shell;
 use dyno_core::protocol::{Reply, Request};
+use paddock_widgets::{PreviewRequest, Previews};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, State, Webview};
@@ -49,22 +50,63 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
 }
 
+/// The previews' copy of a dashboard view the agent sent, so a drag is answered here and never by the agent (ADR 0044 §6).
+fn record_view(previews: &Previews, reply: &Reply) {
+    if let Reply::WidgetLayout(view) = reply {
+        if let dyno_core::widgets::SurfaceView::Dashboard(view) = view.as_ref() {
+            if !previews.record::<dyno_core::widgets::DashboardCatalogue>(view) {
+                log::warn!(
+                    "The dashboard view could not be recorded for previews (revision {}).",
+                    view.revision
+                );
+            }
+        }
+    }
+}
+
 /// One surface's widget layout (the chooser, the dashboard): the agent's view of it.
 #[tauri::command]
-pub async fn widget_layout(link: State<'_, Arc<AgentLink>>, surface: dyno_core::widgets::DynoSurface) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::WidgetLayout { surface })?))
-        .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+pub async fn widget_layout(
+    link: State<'_, Arc<AgentLink>>,
+    previews: State<'_, Arc<Previews>>,
+    surface: dyno_core::widgets::DynoSurface,
+) -> Result<Value, CommandError> {
+    let (link, previews) = (link.inner().clone(), previews.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let reply = link.call(Request::WidgetLayout { surface })?;
+        record_view(&previews, &reply);
+        to_json(reply)
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
 /// An edit of one surface's widget layout. The agent validates the whole result and saves it; a refused edit answers why.
+/// `base_revision` is the revision of the view the edit was computed on: a layout edited meanwhile refuses it.
 #[tauri::command]
-pub async fn edit_widget_layout(link: State<'_, Arc<AgentLink>>, edit: dyno_core::widgets::SurfaceEdit) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::EditWidgetLayout { edit })?))
-        .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+pub async fn edit_widget_layout(
+    link: State<'_, Arc<AgentLink>>,
+    previews: State<'_, Arc<Previews>>,
+    edit: dyno_core::widgets::SurfaceEdit,
+    base_revision: Option<u64>,
+) -> Result<Value, CommandError> {
+    let (link, previews) = (link.inner().clone(), previews.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let reply = link.call(Request::EditWidgetLayout { edit, base_revision })?;
+        record_view(&previews, &reply);
+        to_json(reply)
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// What an arrangement gesture on the dashboard would give (a drag or a resize in edit mode): the view of the result,
+/// computed here, in the app's process, from the last view the agent sent. Nothing is applied or saved. A revision that
+/// is not the recorded one is refused as stale and the webview reloads the view.
+#[tauri::command]
+pub async fn preview_widget_layout(previews: State<'_, Arc<Previews>>, request: PreviewRequest) -> Result<Value, CommandError> {
+    let reply = previews.preview(&request).map_err(|e| CommandError::bad(e.to_string()))?;
+    serde_json::to_value(reply).map_err(|e| CommandError::internal(format!("The preview could not be written: {e}")))
 }
 
 /// The tray popup has opened and asks for its first paint: it counts as visible from now and its slow widgets are asked for
@@ -301,6 +343,7 @@ fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), Command
         } => &query.folder,
         Request::StartDiskScan {
             target: dyno_core::disk::scan::DiskTarget::Folder { path },
+            ..
         } => path,
         _ => return Ok(()),
     };
@@ -383,6 +426,46 @@ pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
         let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveDiagnostics { path })?;
+        reply
+            .into_json()
+            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// "Export" on the Benchmarks page: the OS save dialog (so the path is one the person chose, never one the webview supplied), then
+/// the agent writes the chosen runs there as JSON or CSV. `null` when they cancel.
+#[tauri::command]
+pub async fn save_benchmarks(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    format: dyno_core::bench::export::ExportFormat,
+    ids: Vec<String>,
+) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use dyno_core::bench::export::ExportFormat;
+        use tauri_plugin_dialog::DialogExt;
+        let (name, filter) = match format {
+            ExportFormat::Json => ("dyno-benchmarks.json", ("JSON", "json")),
+            ExportFormat::Csv => ("dyno-benchmarks.csv", ("Spreadsheet (CSV)", "csv")),
+        };
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Save the benchmark results")
+            .set_file_name(name)
+            .add_filter(filter.0, &[filter.1])
+            .blocking_save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+        let path = utf8_path(&path)?;
+        let reply = link.call(Request::SaveBenchmarks { path, format, ids })?;
         reply
             .into_json()
             .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))

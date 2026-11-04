@@ -149,4 +149,32 @@ describe('NetworkPage', () => {
     expect(el.querySelector('[aria-label="Listening ports"]')).not.toBeNull();
     expect([...el.querySelectorAll('[role="columnheader"]')].map((h) => h.textContent!.trim())).toEqual(expect.arrayContaining(['Program', 'Service', 'Address', 'Protocol', 'Since']));
   });
+
+  it('names the country of public peers and filters the connections to one country with a way back', async () => {
+    const { el, rows, settle, store } = await open();
+    expect(el.querySelectorAll('.cc').length).toBeGreaterThan(0);
+    expect(el.querySelector('[data-testid="country-filter"]')).toBeNull();
+    await store.setQuery({ country: 'IE' });
+    await settle();
+    expect(el.querySelector('[data-testid="country-filter"]')!.textContent).toContain('IE');
+    const items = rows().filter((r) => !r.hasAttribute('aria-expanded'));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((r) => r.textContent!.includes('IE'))).toBe(true);
+    (el.querySelector('[data-testid="country-filter"] button') as HTMLElement).click();
+    await settle();
+    expect(el.querySelector('[data-testid="country-filter"]')).toBeNull();
+  });
+
+  it('marks a flagged connection in its row with the word and names the lists, and counts programs of what the filter shows', async () => {
+    const { el, settle, store } = await open();
+    const flagged = [...el.querySelectorAll<HTMLElement>('.flagged')];
+    expect(flagged.length).toBe(1);
+    expect(flagged[0]!.textContent).toContain('flagged');
+    expect(flagged[0]!.title).toBe('Flagged by Work blocklist');
+    await store.setQuery({ country: 'IE' });
+    await settle();
+    const summary = el.querySelector('.summary')!.textContent!;
+    const programs = new Set(store.snapshot()!.connections.map((c) => (c.owner.kind === 'process' ? c.owner.name : 'unknown'))).size;
+    expect(summary).toContain(`${programs} programs`);
+  });
 });

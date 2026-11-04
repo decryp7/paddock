@@ -147,14 +147,11 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'widgets-edit',
     path: '/#/',
-    // The chooser with its whole add list and presets, and the first widgets under it.
+    // The dashboard in edit mode: the edit bar and the widgets with their menus and grips.
     maxContent: 3800,
     ready: async (page) => {
-      await page.getByRole('button', { name: 'Customize dashboard' }).click();
-      const region = page.getByRole('region', { name: 'Customize the dashboard' });
-      await expect(region).toBeVisible();
-      // The chooser draws once the widget choices have arrived.
-      await expect(region.locator('pd-widget-chooser')).toBeVisible();
+      await page.getByRole('button', { name: 'Edit layout' }).click();
+      await expect(page.getByText('Editing layout')).toBeVisible();
       await page.clock.runFor(2_000);
     },
   },

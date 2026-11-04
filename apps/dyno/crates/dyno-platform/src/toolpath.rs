@@ -9,7 +9,7 @@
 //! Limits: a `PATH` that the user only builds in an interactive rc file (`.zshrc`) is not seen by a non-interactive login
 //! shell; the well-known folders below and the per-tool override cover that.
 
-use crate::issues::ToolRunner;
+use crate::runner::{Tool, ToolOutput, ToolRunner};
 use dyno_core::ports::PlatformError;
 use dyno_core::toolpath::{compose, join, parse_env, parse_marked, ENV_ALLOWLIST, ENV_MARKER, MARKER};
 use std::path::{Path, PathBuf};
@@ -226,7 +226,8 @@ impl<'a> PathRunner<'a> {
 }
 
 impl ToolRunner for PathRunner<'_> {
-    fn run(&self, program: &str, args: &[String], timeout: Duration) -> Result<String, PlatformError> {
+    fn run_tool(&self, t: &Tool, timeout: Duration) -> Result<ToolOutput, PlatformError> {
+        let (program, args) = (t.program.as_str(), &t.args);
         let found = if program.contains(['/', '\\']) {
             PathBuf::from(program)
         } else {
@@ -243,7 +244,20 @@ impl ToolRunner for PathRunner<'_> {
                 cmd.env(name, value);
             }
         }
-        crate::process::output_text(cmd, timeout)
+        let out = crate::process::run_with_timeout(cmd, timeout)?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        Ok(ToolOutput {
+            ok: out.status.success(),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            error: stderr
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .chars()
+                .take(200)
+                .collect(),
+        })
     }
 }
 

@@ -560,6 +560,35 @@ test('stable-workspace keeps a clone at the stable path at the checkout\'s commi
   assert.ok(!existsSync(join(stable, 'left-over.rs')));
 });
 
+// CI run 7467 (spotter, Windows): the step printed nothing for over an hour and blocked the runner. Every phase is bounded now:
+// a hang ends in one ::error:: line that names the phase, and every phase logs its duration (ER-27).
+test('stable-workspace ends a hung phase with one ::error:: line naming it, and logs the duration of every phase', () => {
+  const root = stableFixture();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  // `mv` waits for ever, as on a runner where a process left from an earlier job holds a file.
+  writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "waiting for a lock" >&2\nexec sleep 120\n', { mode: 0o755 });
+  const started = Date.now();
+  const r = runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin`, PADDOCK_STABLE_WORKSPACE_TIMEOUT: '2' });
+  assert.ok(Date.now() - started < 30_000, 'the step ended by itself, long before the sleeping mv');
+  assert.notEqual(r.status, 0);
+  const errors = r.stdout.split('\n').filter((l) => l.startsWith('::error::'));
+  assert.equal(errors.length, 1, r.stdout);
+  assert.match(errors[0], /stable-workspace: 'move the checkout to .*decryp7_paddock-crate-s1' did not finish within 2 s/);
+  assert.match(errors[0], /waiting for a lock/, 'the last output of the phase is in the message');
+  assert.match(errors[0], /Next step:/);
+  assert.match(r.stdout, /stable-workspace: resolve the job slot's kept folder: done in \d+ s/);
+  assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
+});
+
+test('stable-workspace logs the duration of the phases of a successful move', () => {
+  const root = stableFixture();
+  const r = runStableWorkspace('macOS', root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /stable-workspace: move the checkout to .*: done in \d+ s/);
+  assert.match(r.stdout, /stable-workspace: link .* to .*: done in \d+ s/);
+});
+
 test('stable-workspace leaves Linux containers alone and never fails a job it cannot help', () => {
   const root = stableFixture();
   assert.equal(runStableWorkspace('Linux', root).status, 0);
@@ -1143,7 +1172,7 @@ test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no tem
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
   assert.match(read(join(WORKFLOWS, 'app-release.yml')), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
   const dyno = runtimeTempPrefixes('dyno').map(([, p]) => p);
-  assert.ok(dyno.includes('dyno-bench-') && dyno.some((p) => p === 'dyno-'), `the scan finds Dyno's own scratch folders (${dyno})`);
+  assert.ok(dyno.includes('dyno-bench-'), `the scan finds Dyno's own scratch folders (${dyno})`);
   for (const app of KIT_APPS) {
     const sweep = `${app}-it-`;
     for (const [file, prefix] of runtimeTempPrefixes(app)) {

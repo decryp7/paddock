@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import { DEFAULT_POWER } from '../power/power-model';
+import type { WakeSettings, WolSettings, EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -14,6 +15,10 @@ import { scrollToSection } from './scroll-to-section';
 import { tauriIpc } from '../../shell/ipc';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
+import { HelperCard } from './helper-card';
+import { OnlineData } from '../lists/online-data';
+import { IntelStore } from '../../state/intel.store';
+import { ToolCard } from './tool-card';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
@@ -24,7 +29,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets, OnlineData, HelperCard, ToolCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -54,6 +59,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <mat-slide-toggle [checked]="d.launchAtLogin" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
               </div>
             </section>
+
+            <dy-helper-card />
+
+            <dy-tool-card />
 
             <section class="card" aria-label="Measuring">
               <h2>Measuring and history</h2>
@@ -91,6 +100,11 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <h3 id="popup-widgets">Popup widgets</h3>
               <p class="sub">What the popup shows when you click the icon, and in what order. The preview follows your choices.</p>
               <dy-popup-widgets />
+            </section>
+
+            <section class="card" aria-label="Network ▸ Online data" id="online-data">
+              <h2>Network ▸ Online data</h2>
+              <dy-online-data />
             </section>
 
             <section class="card" aria-label="IP lookup">
@@ -134,6 +148,27 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
             </section>
 
+            <section class="card" aria-label="Saved disk maps" id="saved-maps">
+              <h2>Saved disk maps</h2>
+              <p class="sub">A finished scan is kept on this computer so the disk map opens on it at once, with its age, after a restart. Nothing is refreshed unless you press Rescan, or choose below.</p>
+              <div class="row">
+                <div class="lbl"><strong>Keep disk maps</strong><small>Off forgets every saved map, and the saved counter list and software list too, and keeps none. They are stored in the system cache folder and never leave this computer. On macOS Dyno marks them out of Time Machine backups; on Windows and Linux they sit in the cache folder, which backup tools usually skip, but Dyno does not enforce it.</small></div>
+                <mat-slide-toggle [checked]="savedMaps().enabled !== false" aria-label="Keep disk maps" (change)="setSavedMaps({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="savedMaps().enabled === false">
+                <div class="lbl"><strong>Space for saved maps</strong><small>All saved maps together; the least recently shown go first (64 to 8,192 MB).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="64" max="8192" step="64" [disabled]="savedMaps().enabled === false" aria-label="Space for saved maps" [errorStateMatcher]="savedMaxMatcher" [ngModel]="savedMaps().maxMb" (ngModelChange)="setSavedMaps({ maxMb: +$event })" /><span matTextSuffix>MB</span>@if (diskErrors().savedMaxMb; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+              <div class="row" [class.off]="savedMaps().enabled === false">
+                <div class="lbl"><strong>Refresh when opened</strong><small>Scanning a volume is the heaviest thing Dyno does, so it never refreshes by itself unless you choose. It starts at the first look at the page, never in the background.</small></div>
+                <pd-select [options]="refreshChoices" [value]="savedMaps().refreshOnOpen ?? 'off'" ariaLabel="Refresh when opened" (valueChange)="setSavedMaps({ refreshOnOpen: refreshFrom($event) })" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Forget saved maps</strong><small>Deletes the saved maps now. The next scan is kept again if saving is on.</small></div>
+                <button type="button" matButton="outlined" [disabled]="forgetting()" (click)="forgetSavedMaps()">Forget saved maps</button>
+              </div>
+            </section>
+
             <section class="card" aria-label="Parallelism and cost" id="parallelism">
               <h2>Parallelism and cost</h2>
               <p class="sub">How much of this computer Dyno's long reads may use at once. More threads finish sooner and use more of the disk; Auto picks by the kind of volume.</p>
@@ -172,6 +207,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Overheating</strong><small>Alert when a sensor passes this temperature.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="60" max="120" [disabled]="!d.alerts.enabled" aria-label="Overheating temperature" [ngModel]="d.alerts.overheatCelsius" (ngModelChange)="setAlerts({ overheatCelsius: +$event })" /><span matTextSuffix>°C</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!d.alerts.enabled">
+                <div class="lbl"><strong>Menu-bar alert level</strong><small>A menu-bar item shows an alert at this load when none of your alert rules covers it. Items with a rule follow the rule.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="50" max="100" [disabled]="!d.alerts.enabled" aria-label="Menu-bar alert level" [ngModel]="d.alerts.trayAlertPercent" (ngModelChange)="setAlerts({ trayAlertPercent: +$event })" /><span matTextSuffix>%</span></mat-form-field>
               </div>
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Long high CPU</strong><small>Alert when one app keeps the CPU busy this long.</small></div>
@@ -240,6 +279,86 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 </div>
               }
             </section>
+
+            <section class="card" aria-label="Power" id="power">
+              <h2>Power</h2>
+              <p class="sub">Dyno can keep your computer awake when you ask, from the Power page or the tray. It never changes your power settings, and it lets go when it stops. It can also wake other computers on your network (Wake-on-LAN) when you click Wake.</p>
+              <div class="row">
+                <div class="lbl"><strong>Allow keep awake</strong><small>Off ends a hold in progress and turns the Power page's options off. Dyno holds only after you ask.</small></div>
+                <mat-slide-toggle [checked]="power().enabled" aria-label="Allow keep awake" (change)="setPower({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Keep the display on too</strong><small>The default for a new hold; you can change it each time.</small></div>
+                <mat-slide-toggle [checked]="power().display" [disabled]="!power().enabled" aria-label="Keep the display on too" (change)="setPower({ display: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Busy means CPU above</strong><small>For "while busy" holds (1 to 100 percent).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="100" [disabled]="!power().enabled" aria-label="CPU percent that counts as busy" [ngModel]="power().cpuPct" (ngModelChange)="setPower({ cpuPct: +$event })" /><span matTextSuffix>%</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Busy means network above</strong><small>Both directions added.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" [disabled]="!power().enabled" aria-label="Network kilobytes per second that count as busy" [ngModel]="kb(power().netBytesPerS)" (ngModelChange)="setPower({ netBytesPerS: +$event * 1024 })" /><span matTextSuffix>KB/s</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Busy means disk above</strong><small>Reads and writes added.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" [disabled]="!power().enabled" aria-label="Disk megabytes per second that count as busy" [ngModel]="mb(power().diskBytesPerS)" (ngModelChange)="setPower({ diskBytesPerS: +$event * 1048576 })" /><span matTextSuffix>MB/s</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Let go after it was quiet for</strong><small>How long none of the busy conditions may hold before a "while busy" hold ends (10 seconds to 1 hour).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10" max="3600" [disabled]="!power().enabled" aria-label="Seconds of quiet before a busy hold ends" [ngModel]="power().graceSecs" (ngModelChange)="setPower({ graceSecs: +$event })" /><span matTextSuffix>seconds</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!power().enabled">
+                <div class="lbl"><strong>Show Keep awake in the tray menu</strong><small>A submenu with the usual durations and a line saying how long is left.</small></div>
+                <mat-slide-toggle [checked]="power().trayItem" [disabled]="!power().enabled" aria-label="Show Keep awake in the tray menu" (change)="setPower({ trayItem: $event.checked })" />
+              </div>
+              <h3 class="sub-h">Energy</h3>
+              <div class="row">
+                <div class="lbl"><strong>Note when this computer is on or asleep</strong><small>Dyno records its own starts, stops, sleeps and wakes for the Energy tab. Off stops recording.</small></div>
+                <mat-slide-toggle [checked]="energy().enabled" aria-label="Note when this computer is on or asleep" (change)="setEnergy({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Watts when on</strong><small>Look at the power brick or a plug meter. Empty: no energy figures.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="10000" [disabled]="!energy().enabled" aria-label="Watts when the computer is on" [ngModel]="energy().wattsOn" (ngModelChange)="setEnergy({ wattsOn: num($event) })" /><span matTextSuffix>W</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Watts when asleep</strong><small>Empty: time asleep counts as 0 W.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="10000" [disabled]="!energy().enabled" aria-label="Watts when the computer is asleep" [ngModel]="energy().wattsSleep" (ngModelChange)="setEnergy({ wattsSleep: num($event) })" /><span matTextSuffix>W</span></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Price of one kWh</strong><small>Shows a cost. Empty: no cost.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="1000" step="0.01" [disabled]="!energy().enabled" aria-label="Price of one kilowatt hour" [ngModel]="energy().tariffPerKwh" (ngModelChange)="setEnergy({ tariffPerKwh: num($event) })" /></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>Currency</strong><small>Shown before the cost, for example S$ or EUR.</small></div>
+                <mat-form-field class="num-in"><input matInput maxlength="8" [disabled]="!energy().enabled" aria-label="Currency" [ngModel]="energy().currency ?? ''" (ngModelChange)="setEnergy({ currency: $event ? $event : null })" /></mat-form-field>
+              </div>
+              <div class="row" [class.off]="!energy().enabled">
+                <div class="lbl"><strong>CO₂ per kWh</strong><small>Your grid's figure. Empty: no CO₂.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="2000" [disabled]="!energy().enabled" aria-label="Grams of CO2 per kilowatt hour" [ngModel]="energy().co2GPerKwh" (ngModelChange)="setEnergy({ co2GPerKwh: num($event) })" /><span matTextSuffix>g</span></mat-form-field>
+              </div>
+              <h3 class="sub-h">Wake-on-LAN</h3>
+              <div class="row">
+                <div class="lbl"><strong>Allow Wake-on-LAN</strong><small>Wake packets go out only when you click Wake or Test wake (or an AI client you allowed asks to). Off hides the list and the tray's Wake menu.</small></div>
+                <mat-slide-toggle [checked]="wol().enabled" aria-label="Allow Wake-on-LAN" (change)="setWol({ enabled: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!wol().enabled">
+                <div class="lbl"><strong>Add from network</strong><small>Lets Dyno read your system's list of neighbours so you can pick a computer instead of typing its address. Nothing is saved until you choose it.</small></div>
+                <mat-slide-toggle [checked]="wol().discovery" [disabled]="!wol().enabled" aria-label="Add from network" (change)="setWol({ discovery: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!wol().enabled">
+                <div class="lbl"><strong>Also send to each network's own broadcast address</strong><small>Reaches computers on a network that drops the general broadcast. Turn off if a router complains.</small></div>
+                <mat-slide-toggle [checked]="wol().directedBroadcast" [disabled]="!wol().enabled" aria-label="Also send to each network's own broadcast address" (change)="setWol({ directedBroadcast: $event.checked })" />
+              </div>
+              <div class="row" [class.off]="!wol().enabled">
+                <div class="lbl"><strong>Test wake waits up to</strong><small>How long to wait for the computer to answer (10 to 600 seconds).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10" max="600" [disabled]="!wol().enabled" aria-label="Seconds a test wake waits for an answer" [ngModel]="wol().testTimeoutSecs" (ngModelChange)="setWol({ testTimeoutSecs: +$event })" /><span matTextSuffix>seconds</span></mat-form-field>
+              </div>
+              <h3 class="sub-h">Scheduled wake</h3>
+              <div class="row">
+                <div class="lbl"><strong>Allow scheduled wake</strong><small>Lets Dyno set a wake of this computer at the times you choose on the Power page's Schedule tab, and act then. It cannot wake a computer that is shut down. On macOS and Linux it needs the administrator helper.</small></div>
+                <mat-slide-toggle [checked]="wake().enabled" aria-label="Allow scheduled wake" (change)="setWake({ enabled: $event.checked })" />
+              </div>
+            </section>
           </div>
         }
       </dy-async>
@@ -284,6 +403,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { width: 148px; }
     .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
+    .sub-h { margin-top: var(--sp-5); }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
     .checks { display: flex; gap: var(--sp-3); flex-wrap: wrap; justify-content: flex-end; }
     .check { display: inline-flex; align-items: center; gap: 6px; }
@@ -297,6 +417,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 })
 export class SettingsPage implements OnInit {
   protected readonly store = inject(SettingsStore);
+  private readonly intel = inject(IntelStore);
   private readonly backend = inject(BACKEND);
   private readonly notifier = inject(Notifier);
   protected readonly draft = signal<Settings | null>(null);
@@ -316,6 +437,7 @@ export class SettingsPage implements OnInit {
       finderFiles: bad(d.finderFiles, 1_000, 5_000_000, 'Files looked at'),
       finderDepth: bad(d.finderDepth, 1, 256, 'Folder depth'),
       finderHashGib: bad(d.finderHashGib, 1, 4096, 'Content compared'),
+      savedMaxMb: bad(d.savedMaps?.maxMb, 64, 8192, 'Space for saved maps'),
     };
   });
   protected readonly scanFoldersMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().scanFolders };
@@ -323,6 +445,32 @@ export class SettingsPage implements OnInit {
   protected readonly finderFilesMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderFiles };
   protected readonly finderDepthMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderDepth };
   protected readonly finderHashMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderHashGib };
+  protected readonly savedMaxMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().savedMaxMb };
+  protected readonly savedMaps = computed<SavedMapsSettings>(() => this.disk().savedMaps ?? {});
+  protected readonly refreshChoices: PdSelectOption[] = [
+    { value: 'off', label: 'Never (only when I press Rescan)' },
+    { value: 'olderThanDay', label: 'When the map is more than a day old' },
+    { value: 'olderThanWeek', label: 'When the map is more than 7 days old' },
+  ];
+  protected readonly forgetting = signal(false);
+  protected refreshFrom(v: string): RefreshOnOpen {
+    return v === 'olderThanDay' || v === 'olderThanWeek' ? v : 'off';
+  }
+  protected setSavedMaps(p: SavedMapsSettings): void {
+    this.setDisk({ savedMaps: { ...this.savedMaps(), ...p } });
+  }
+  /** Deletes the saved disk maps now (an engine command; it does not wait for Save). */
+  protected async forgetSavedMaps(): Promise<void> {
+    this.forgetting.set(true);
+    try {
+      await this.backend.forgetSavedDiskMaps();
+      this.notifier.show('Saved disk maps forgotten');
+    } catch (e) {
+      this.notifier.show(toCommandError(e).message, 'bad');
+    } finally {
+      this.forgetting.set(false);
+    }
+  }
   protected readonly diskProblem = computed(() => Object.values(this.diskErrors()).find((e) => e !== null) ?? null);
   protected readonly jobs = computed<JobSettings>(() => this.draft()?.jobs ?? {});
   protected readonly readThreadChoices = threadChoices(16);
@@ -382,6 +530,7 @@ export class SettingsPage implements OnInit {
   ngOnInit(): void {
     void this.store.load();
     void this.store.loadPlugins();
+    void this.intel.load();
   }
 
   protected set(patch: Partial<Settings>): void {
@@ -413,6 +562,32 @@ export class SettingsPage implements OnInit {
   /** What the person typed in each folder box (kept as typed, so a new line is not swallowed while they type). */
   private readonly rawOverrides = signal<Partial<Record<BackupTool, string>>>({});
   protected readonly backupProblem = computed(() => validateBackup(this.backup()));
+  protected readonly power = computed<KeepAwakeSettings>(() => this.draft()?.power?.keepAwake ?? DEFAULT_POWER.keepAwake);
+  protected setPower(p: Partial<KeepAwakeSettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), keepAwake: { ...this.power(), ...p } } } : d));
+  }
+  protected readonly energy = computed<EnergySettings>(() => this.draft()?.power?.energy ?? DEFAULT_POWER.energy);
+  protected setEnergy(p: Partial<EnergySettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), energy: { ...this.energy(), ...p } } } : d));
+  }
+  /** A number box's value, or null when it is empty (an unset figure is not 0). */
+  protected num(v: unknown): number | null {
+    return v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
+  }
+  protected readonly wake = computed<WakeSettings>(() => this.draft()?.power?.wake ?? DEFAULT_POWER.wake);
+  protected setWake(p: Partial<WakeSettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), wake: { ...this.wake(), ...p } } } : d));
+  }
+  protected readonly wol = computed<WolSettings>(() => this.draft()?.power?.wol ?? DEFAULT_POWER.wol);
+  protected setWol(p: Partial<WolSettings>): void {
+    this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), wol: { ...this.wol(), ...p } } } : d));
+  }
+  protected kb(bytes: number): number {
+    return Math.round(bytes / 1024);
+  }
+  protected mb(bytes: number): number {
+    return Math.round(bytes / 1048576);
+  }
   protected setBackup(p: Partial<BackupSettings>): void {
     this.draft.update((d) => (d ? { ...d, backup: { ...this.backup(), ...p } } : d));
   }

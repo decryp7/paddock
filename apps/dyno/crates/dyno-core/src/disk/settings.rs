@@ -11,6 +11,57 @@ const GIB: u64 = 1024 * MIB;
 /// The most threads that read folders at once, whatever the setting says.
 pub const MAX_READ_THREADS: u8 = 16;
 
+/// When the disk map refreshes a saved map by itself (`disk.savedMaps.refreshOnOpen`): never by default. Scanning a volume is the
+/// heaviest thing Dyno does and it is a monitor; the page shows the net change in used space instead and the person decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RefreshOnOpen {
+    /// Only when the person presses Rescan.
+    #[default]
+    Off,
+    /// At the first look at the page, when the saved map is more than a day old.
+    OlderThanDay,
+    /// At the first look at the page, when the saved map is more than seven days old.
+    OlderThanWeek,
+}
+
+/// `disk.savedMaps`: the disk maps kept in the cache for the next time (ADR 0029).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SavedMapsSettings {
+    /// Whether finished scans are kept (`disk.savedMaps.enabled`). Turning it off forgets every saved map.
+    pub enabled: bool,
+    /// The most all saved maps may take on disk, in MB (`disk.savedMaps.maxMb`); 64 to 8,192.
+    pub max_mb: u32,
+    /// Whether a saved map is refreshed at the first look at the page (`disk.savedMaps.refreshOnOpen`).
+    pub refresh_on_open: RefreshOnOpen,
+}
+
+impl Default for SavedMapsSettings {
+    fn default() -> Self {
+        SavedMapsSettings {
+            enabled: true,
+            max_mb: 1024,
+            refresh_on_open: RefreshOnOpen::Off,
+        }
+    }
+}
+
+impl SavedMapsSettings {
+    /// The values clamped into their allowed range.
+    pub fn clamped(self) -> SavedMapsSettings {
+        SavedMapsSettings {
+            max_mb: self.max_mb.clamp(64, 8_192),
+            ..self
+        }
+    }
+
+    /// The cap on the packed size of all saved maps, in bytes.
+    pub fn max_bytes(self) -> u64 {
+        u64::from(self.clamped().max_mb) * MIB
+    }
+}
+
 /// `Settings.disk`. Every key is optional and merged over the defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -28,6 +79,8 @@ pub struct DiskSettings {
     pub finder_depth: u32,
     /// The file finder stops comparing contents after reading this many GiB (`disk.finderHashGib`); 1 to 4,096.
     pub finder_hash_gib: u32,
+    /// The disk maps kept for the next time (`disk.savedMaps`).
+    pub saved_maps: SavedMapsSettings,
 }
 
 impl Default for DiskSettings {
@@ -40,6 +93,7 @@ impl Default for DiskSettings {
             finder_files: u32::try_from(MAX_SCANNED).unwrap_or(500_000),
             finder_depth: MAX_DEPTH,
             finder_hash_gib: u32::try_from(MAX_HASH_BYTES / GIB).unwrap_or(64),
+            saved_maps: SavedMapsSettings::default(),
         }
     }
 }
@@ -54,6 +108,7 @@ impl DiskSettings {
             finder_files: self.finder_files.clamp(1_000, 5_000_000),
             finder_depth: self.finder_depth.clamp(1, 256),
             finder_hash_gib: self.finder_hash_gib.clamp(1, 4_096),
+            saved_maps: self.saved_maps.clamped(),
         }
     }
 
@@ -108,6 +163,40 @@ mod tests {
         }
         .limits();
         assert_eq!((high.max_nodes, high.notable_bytes), (HARD_MAX_NODES, 1024 * MIB));
+    }
+
+    #[test]
+    fn saved_maps_default_on_with_a_gigabyte_and_no_refresh_by_itself() {
+        let d = DiskSettings::default().saved_maps;
+        assert_eq!((d.enabled, d.max_mb, d.refresh_on_open), (true, 1024, RefreshOnOpen::Off));
+        assert_eq!(d.max_bytes(), 1024 * MIB);
+        let json = serde_json::to_value(DiskSettings::default()).unwrap();
+        assert_eq!(
+            json["savedMaps"],
+            serde_json::json!({"enabled": true, "maxMb": 1024, "refreshOnOpen": "off"})
+        );
+        let s: DiskSettings = serde_json::from_str(r#"{"savedMaps":{"refreshOnOpen":"olderThanWeek"}}"#).unwrap();
+        assert_eq!(
+            (s.saved_maps.enabled, s.saved_maps.max_mb, s.saved_maps.refresh_on_open),
+            (true, 1024, RefreshOnOpen::OlderThanWeek)
+        );
+        let s: DiskSettings = serde_json::from_str(r#"{"savedMaps":{"refreshOnOpen":"olderThanDay","enabled":false}}"#).unwrap();
+        assert!(!s.saved_maps.enabled);
+    }
+
+    #[test]
+    fn the_saved_maps_limit_is_held_to_64_mb_to_8_gb() {
+        let wild = |mb| DiskSettings {
+            saved_maps: SavedMapsSettings {
+                max_mb: mb,
+                ..SavedMapsSettings::default()
+            },
+            ..DiskSettings::default()
+        };
+        assert_eq!(wild(0).clamped().saved_maps.max_mb, 64);
+        assert_eq!(wild(u32::MAX).clamped().saved_maps.max_mb, 8_192);
+        assert_eq!(wild(500).clamped().saved_maps.max_mb, 500);
+        assert_eq!(wild(u32::MAX).saved_maps.max_bytes(), 8_192 * MIB);
     }
 
     #[test]

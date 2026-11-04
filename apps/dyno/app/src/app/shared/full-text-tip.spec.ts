@@ -9,13 +9,15 @@ class Host {
   text = 'a-very-long-process-name.exe';
 }
 
-function setup(scrollWidth: number, clientWidth: number) {
+function setup(scrollWidth: number, clientWidth: number, scrollHeight = 20, clientHeight = 20) {
   const f = TestBed.createComponent(Host);
   f.detectChanges();
   const de = f.debugElement.query(By.css('.t'));
   const el = de.nativeElement as HTMLElement;
   Object.defineProperty(el, 'scrollWidth', { value: scrollWidth });
   Object.defineProperty(el, 'clientWidth', { value: clientWidth });
+  Object.defineProperty(el, 'scrollHeight', { value: scrollHeight });
+  Object.defineProperty(el, 'clientHeight', { value: clientHeight });
   return { el, tip: de.injector.get(MatTooltip) };
 }
 
@@ -30,6 +32,12 @@ describe('FullTextTip', () => {
     expect(tip.message).toBe('a-very-long-process-name.exe');
     el.dispatchEvent(new MouseEvent('mouseleave'));
     expect(tip.message).toBe('');
+  });
+
+  it('offers the full text for a line clamp that cuts a wrapped line off at the bottom', () => {
+    const { el, tip } = setup(100, 100, 40, 32);
+    el.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(tip.message).toBe('a-very-long-process-name.exe');
   });
 
   it('offers nothing for text that fits', () => {

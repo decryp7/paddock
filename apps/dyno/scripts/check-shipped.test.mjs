@@ -1,14 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { SHIPPED, SHIPPED_DIRS, cratesIn, elevationOffences, forbiddenIn, tree } from './check-shipped.mjs';
+import { SHIPPED, SHIPPED_DIRS, cratesIn, elevationOffences, forbiddenIn, startedByAgent, tree } from './check-shipped.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 
 test('no shipped binary depends on the helper', () => {
   for (const pkg of SHIPPED) assert.deepEqual(forbiddenIn(tree(root, pkg)), [], `${pkg} must not depend on dyno-helper`);
+});
+
+test('every executable the agent starts is bundled', () => {
+  const conf = JSON.parse(readFileSync(join(root, 'app/src-tauri/tauri.conf.json'), 'utf8'));
+  const bundled = conf.bundle.externalBin.map((p) => p.split('/').pop());
+  const started = startedByAgent(root);
+  assert.ok(started.length > 0, 'the agent starts at least the benchmark runner');
+  for (const exe of started) assert.ok(bundled.includes(exe), `${exe} is started by dyno-agent but not in bundle.externalBin`);
 });
 
 test('no source of a shipped crate asks for administrator rights', () => {

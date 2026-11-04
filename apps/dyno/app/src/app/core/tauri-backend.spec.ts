@@ -39,8 +39,11 @@ describe('TauriBackend: request shapes', () => {
     ['history now', (b) => b.history('hour', null), { history: { range: 'hour', end: null } }],
     ['activity', (b) => b.activity(30), { activity: { limit: 30 } }],
     ['diskVolumes', (b) => b.diskVolumes(), 'diskVolumes'],
-    ['startDiskScan of a volume', (b) => b.startDiskScan({ volume: { id: '/' } }), { startDiskScan: { target: { volume: { id: '/' } } } }],
-    ['startDiskScan of a folder', (b) => b.startDiskScan({ folder: { path: '/x' } }), { startDiskScan: { target: { folder: { path: '/x' } } } }],
+    ['startDiskScan of a volume', (b) => b.startDiskScan({ volume: { id: '/' } }), { startDiskScan: { target: { volume: { id: '/' } }, replaces: null } }],
+    ['startDiskScan replacing a kept scan', (b) => b.startDiskScan({ volume: { id: '/' } }, 5), { startDiskScan: { target: { volume: { id: '/' } }, replaces: 5 } }],
+    ['forgetSavedDiskMap', (b) => b.forgetSavedDiskMap(7), { forgetSavedDiskMap: { scan: 7 } }],
+    ['forgetSavedDiskMaps', (b) => b.forgetSavedDiskMaps(), 'forgetSavedDiskMaps'],
+    ['startDiskScan of a folder', (b) => b.startDiskScan({ folder: { path: '/x' } }), { startDiskScan: { target: { folder: { path: '/x' } }, replaces: null } }],
     ['cancelDiskScan', (b) => b.cancelDiskScan(7), { cancelDiskScan: { scan: 7 } }],
     ['diskScans', (b) => b.diskScans(), 'diskScans'],
     ['diskChildren', (b) => b.diskChildren({ scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 }), { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 } }],
@@ -64,6 +67,8 @@ describe('TauriBackend: request shapes', () => {
     ['startJob bootAnalysis', (b) => started(b, 'bootAnalysis'), { startJob: { spec: 'bootAnalysis' } }],
     ['startJob appUsage', (b) => started(b, 'appUsage'), { startJob: { spec: 'appUsage' } }],
     ['startJob softwareInventory', (b) => started(b, 'softwareInventory'), { startJob: { spec: 'softwareInventory' } }],
+    ['startJob helper turnOn', (b) => started(b, { helper: { action: 'turnOn' } }), { startJob: { spec: { helper: { action: 'turnOn' } } } }],
+    ['helperStatus', (b) => b.helperStatus(), 'helperStatus'],
     ['jobResult', (b) => b.jobResult(4), { jobResult: { id: 4 } }],
     ['maintenance', (b) => b.maintenance(), 'maintenance'],
     ['backup', (b) => b.backup(), 'backup'],
@@ -271,5 +276,19 @@ describe('TauriBackend: push channels', () => {
     expect(stops[0]).toHaveBeenCalled();
     emit(event, { id: 2 });
     expect(l).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TauriBackend: widget layouts on the grid', () => {
+  it('sends the revision with an edit and asks the app, not the agent, for a preview', async () => {
+    const { backend, invoke } = fake();
+    const edit = { dashboard: 'undo' } as never;
+    await backend.editWidgetLayout(edit, 7);
+    expect(invoke).toHaveBeenLastCalledWith('edit_widget_layout', { edit, baseRevision: 7 });
+    await backend.editWidgetLayout(edit);
+    expect(invoke).toHaveBeenLastCalledWith('edit_widget_layout', { edit, baseRevision: null });
+    const request = { surface: 'dashboard', revision: 7, gesture: { toFirst: { id: 'cpu' } }, seq: 3 } as never;
+    await backend.previewWidgetLayout(request);
+    expect(invoke).toHaveBeenLastCalledWith('preview_widget_layout', { request });
   });
 });

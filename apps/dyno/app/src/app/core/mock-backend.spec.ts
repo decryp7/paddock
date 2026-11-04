@@ -1,7 +1,8 @@
 import { readValue } from './measured';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import type { Alert, BackupReport, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
-import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
+import { SPARK_CAPACITY, appendSeries, type Series } from '../state/live.store';
+import { LIVE_BACKLOG, MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
@@ -22,6 +23,12 @@ const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('proc
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('reads jobstepms as a whole number of milliseconds and ignores anything else', () => {
+    expect(mockOptionsFromUrl('?jobstepms=600000').jobStepMs).toBe(600000);
+    expect(mockOptionsFromUrl('?jobstepms=0').jobStepMs).toBe(0);
+    for (const bad of ['-1', '2.5', 'slow', '']) expect(mockOptionsFromUrl(`?jobstepms=${bad}`)).not.toHaveProperty('jobStepMs');
+  });
+
   it('reads jobsteps as a whole number from 1 to 100 and ignores anything else', () => {
     expect(mockOptionsFromUrl('?jobsteps=6').jobSteps).toBe(6);
     for (const bad of ['0', '101', '2.5', 'many', '']) expect(mockOptionsFromUrl(`?jobsteps=${bad}`)).not.toHaveProperty('jobSteps');
@@ -130,6 +137,25 @@ describe('OS differences', () => {
 });
 
 describe('live data', () => {
+  it('opens a summary subscriber with a full minute of wandering samples, the same every time for one clock', async () => {
+    const collect = async (): Promise<Series> => {
+      const b = make();
+      const got: Parameters<typeof appendSeries>[1][] = [];
+      const stop = b.onLive('summary', (u) => got.push(u));
+      await new Promise((r) => setTimeout(r, 5));
+      stop();
+      return got.reduce<Series>((s, u) => appendSeries(s, u), { cpu: [], memory: [], diskRead: [], diskWrite: [], diskBusy: [], netRx: [], netTx: [], gpu: [] });
+    };
+    expect(LIVE_BACKLOG + 1).toBe(SPARK_CAPACITY);
+    const a = await collect();
+    for (const key of ['cpu', 'memory', 'diskRead', 'diskWrite', 'netRx', 'netTx'] as const) {
+      expect(a[key].length, key).toBe(SPARK_CAPACITY);
+      expect(new Set(a[key]).size, `${key} wanders`).toBeGreaterThan(5);
+    }
+    expect(a.gpu.length).toBe(SPARK_CAPACITY);
+    expect(await collect()).toEqual(a);
+  });
+
   it('is deterministic for a frozen clock and includes processes only on request', () => {
     const a = make().liveUpdate('summary');
     expect(a).toEqual(make().liveUpdate('summary'));
@@ -169,7 +195,7 @@ describe('live data', () => {
       vi.useRealTimers();
     }
   });
-  it('onLive delivers a first update asynchronously, then on the timer; unsubscribing stops both', () => {
+  it('onLive delivers the last minute and the current update asynchronously, then one a second on the timer; unsubscribing stops both', () => {
     vi.useFakeTimers();
     try {
       const b = make();
@@ -177,12 +203,13 @@ describe('live data', () => {
       const stop = b.onLive('summary', l);
       expect(l).not.toHaveBeenCalled();
       vi.advanceTimersByTime(0);
-      expect(l).toHaveBeenCalledTimes(1);
+      const first = LIVE_BACKLOG + 1;
+      expect(l).toHaveBeenCalledTimes(first);
       vi.advanceTimersByTime(2000);
-      expect(l).toHaveBeenCalledTimes(3);
+      expect(l).toHaveBeenCalledTimes(first + 2);
       stop();
       vi.advanceTimersByTime(5000);
-      expect(l).toHaveBeenCalledTimes(3);
+      expect(l).toHaveBeenCalledTimes(first + 2);
       expect(vi.getTimerCount()).toBe(0);
       const gone = vi.fn();
       b.onLive('summary', gone)();
@@ -659,6 +686,14 @@ describe('mock extras and backup health', () => {
 });
 
 describe('hardware: throttling, lifespan and baselines', () => {
+  it('keeps the Overview memory graph at the four rows of Disk activity, not stretched to the CPU beside it', async () => {
+    const view = await make().widgetLayout('dashboard');
+    if (!('dashboard' in view)) throw new Error('not the dashboard');
+    const h = (metric: string) => view.dashboard.layout.placements.find((p) => p.widget.kind === 'graph' && p.widget.metric === metric)?.h;
+    expect(h('memory')).toBe(4);
+    expect(h('memory')).toBe(h('diskActivity'));
+  });
+
   it('answers the throttling overview: fine now, a few episodes in the last 30 days', async () => {
     const t = await make().throttling();
     expect(t.reading.verdict).toBe('fine');
@@ -692,5 +727,39 @@ describe('hardware: throttling, lifespan and baselines', () => {
     const b = make();
     expect((await b.weeklyReport(0)).hardware.length).toBe(2);
     expect((await b.weeklyReport(5)).hardware).toEqual([]);
+  });
+});
+
+describe('MockBackend: the helper', () => {
+  it('reads the state it starts in from ?helper= and ignores anything else', async () => {
+    expect(mockOptionsFromUrl('?helper=foreign').helper).toBe('foreign');
+    expect(mockOptionsFromUrl('?helper=root')).not.toHaveProperty('helper');
+    expect((await make().helperStatus()).state).toBe('off');
+    for (const [variant, state] of [['silent', 'notRunning'], ['foreign', 'foreign'], ['outdated', 'outdated'], ['ready', 'ready'], ['notIncluded', 'notIncluded']] as const) {
+      expect((await make({ helper: variant }).helperStatus()).state, variant).toBe(state);
+    }
+  });
+
+  it('turning on ends ready, turning off ends off, and the helper job runs its phases with an uncancellable prompt', async () => {
+    const b = make({ jobSteps: 4 });
+    b.jobStepMs = 1;
+    const id = await b.startJob({ helper: { action: 'turnOn' } });
+    const seen = new Set<string>();
+    for (let i = 0; i < 400 && b.jobStatuses().find((j) => j.id === id)!.state !== 'done'; i++) {
+      const s = b.jobStatuses().find((j) => j.id === id)! as SuJobSnapshot & { phase?: { id: string } | null; cancellable: boolean };
+      if (s.phase) seen.add(s.phase.id);
+      if (s.phase?.id === 'prompt') expect(s.cancellable).toBe(false);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect([...seen]).toContain('prompt');
+    expect((await b.jobResult(id)) as JobOutput).toMatchObject({ helper: { state: 'ready' } });
+    expect((await b.helperStatus()).state).toBe('ready');
+    expect(await runJob(make({ helper: 'ready' }), { helper: { action: 'turnOff' } })).toMatchObject({ helper: { state: 'off' } });
+  });
+
+  it('a declined prompt fails the job with the engine\'s words and changes nothing', async () => {
+    const b = make({ fail: new Set(['helperJob']) });
+    await expect(runJob(b, { helper: { action: 'turnOn' } })).rejects.toMatchObject({ message: expect.stringContaining('declined') });
+    expect((await b.helperStatus()).state).toBe('off');
   });
 });

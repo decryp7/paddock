@@ -91,6 +91,11 @@ async function openState(page: Page, state: State): Promise<void> {
     await page.mouse.move(0, 0);
   }
   await page.evaluate(() => document.fonts.ready);
+  // A pd-table draws its columns for a default width (1024) until its ResizeObserver has told it the real one, and WebKit can be slow to
+  // deliver that (a header measured meanwhile "needs 912px, has 634px"): wait until every drawn table has fitted its columns to its width.
+  await page.waitForFunction(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('pd-table')).every((t) => !t.clientWidth || t.getAttribute('data-fit-width') === String(Math.round(t.getBoundingClientRect().width))),
+  );
 }
 
 test.describe('rows never clip their content, and text that is cut says so with an ellipsis', () => {

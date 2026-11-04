@@ -13,7 +13,7 @@ use crate::dto::AgentStatus;
 use crate::logging;
 use dyno_agent::discovery::Discovery;
 use dyno_core::protocol::{Message, Request};
-use dyno_ipc::Peer;
+use paddock_ipc::BodyPeer;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
@@ -34,7 +34,7 @@ enum Notice {
     Stalled(Option<Stall>),
 }
 
-type Peers = Arc<Mutex<HashMap<PeerId, Arc<Peer<Message>>>>>;
+type Peers = Arc<Mutex<HashMap<PeerId, Arc<BodyPeer<Message>>>>>;
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())

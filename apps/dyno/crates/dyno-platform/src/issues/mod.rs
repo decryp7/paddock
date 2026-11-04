@@ -8,59 +8,13 @@ pub mod linux;
 pub mod macos;
 pub mod windows;
 
-use dyno_core::issues::{days_from_civil, IssueSource, ReadControl};
-use dyno_core::ports::PlatformError;
+use dyno_core::issues::{days_from_civil, IssueSource};
 use dyno_core::time::{Timestamp, DAY, HOUR, MINUTE, SECOND};
 use std::time::Duration;
 
-/// Runs an external program and returns its standard output. A seam: tests script it, the OS version spawns the tool with
-/// a timeout and no console window.
-pub trait ToolRunner: Send + Sync {
-    /// Runs `program` with `args`; a non-zero exit is an error carrying the start of the tool's error output.
-    fn run(&self, program: &str, args: &[String], timeout: Duration) -> Result<String, PlatformError>;
-    /// Like [`run`](Self::run) with the output handed over line by line as it arrives, and the tool stopped at once when
-    /// `control` is cancelled. The default runs the tool to the end and hands over its lines (no streaming, no early stop).
-    fn run_lines(
-        &self,
-        program: &str,
-        args: &[String],
-        timeout: Duration,
-        control: &dyn ReadControl,
-        on_line: &mut dyn FnMut(&str),
-    ) -> Result<(), PlatformError> {
-        let _ = control;
-        self.run(program, args, timeout)?.lines().for_each(on_line);
-        Ok(())
-    }
-}
-
-/// Spawns the real tool.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct OsRunner;
-
-impl ToolRunner for OsRunner {
-    fn run(&self, program: &str, args: &[String], timeout: Duration) -> Result<String, PlatformError> {
-        let mut cmd = crate::process::command(program);
-        cmd.args(args);
-        crate::process::output_text(cmd, timeout)
-    }
-
-    fn run_lines(
-        &self,
-        program: &str,
-        args: &[String],
-        timeout: Duration,
-        control: &dyn ReadControl,
-        on_line: &mut dyn FnMut(&str),
-    ) -> Result<(), PlatformError> {
-        // A heavy read of a log must not slow the user's work: lower priority the family's way (not through nice(1), which strips
-        // DYLD_* on macOS).
-        let mut cmd = crate::process::command(program);
-        cmd.args(args);
-        paddock_proc::lower_priority(&mut cmd);
-        crate::process::run_streaming_lowered(cmd, timeout, control, on_line)
-    }
-}
+/// The real runner (the old name of [`crate::runner::SystemRunner`]).
+pub use crate::runner::SystemRunner as OsRunner;
+pub use crate::runner::ToolRunner;
 
 /// The readers that make sense on this OS.
 pub fn os_sources() -> Vec<Box<dyn IssueSource>> {
@@ -150,6 +104,7 @@ pub fn parse_timestamp(text: &str) -> Option<Timestamp> {
 #[cfg(test)]
 pub(crate) mod testing {
     use super::*;
+    use dyno_core::ports::PlatformError;
     use std::sync::Mutex;
 
     /// Answers each call with the next scripted result and records the calls (program and arguments).
@@ -168,14 +123,19 @@ pub(crate) mod testing {
     }
 
     impl ToolRunner for Scripted {
-        fn run(&self, program: &str, args: &[String], timeout: Duration) -> Result<String, PlatformError> {
-            self.calls.lock().unwrap().push((program.into(), args.to_vec(), timeout));
+        fn run_tool(&self, tool: &crate::runner::Tool, timeout: Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+            self.calls.lock().unwrap().push((tool.program.clone(), tool.args.clone(), timeout));
             let mut a = self.answers.lock().unwrap();
-            if a.is_empty() {
+            let next = if a.is_empty() {
                 Err(PlatformError::Failed("no scripted answer".into()))
             } else {
                 a.remove(0)
-            }
+            };
+            next.map(|stdout| crate::runner::ToolOutput {
+                ok: true,
+                stdout,
+                error: String::new(),
+            })
         }
     }
 }
@@ -183,6 +143,7 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dyno_core::ports::PlatformError;
 
     #[test]
     fn timestamps_with_zones_parse_to_utc() {

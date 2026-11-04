@@ -56,7 +56,38 @@ pub fn battery_capacity() -> Box<dyn BatteryCapacitySource> {
     }
 }
 
+/// The SSD wear reader that tries Dyno's own copy of smartctl first (`<tools>/smartmontools-*/smartctl`, newest name first), then
+/// the usual places on the PATH and in Homebrew.
+pub fn disk_wear_with_own_tools(tools: &Path) -> Box<dyn DiskWearSource> {
+    Box::new(SmartctlWear::new(system_smartctl()).with_own_tools(tools.to_path_buf()))
+}
+
 fn smartctl_candidates() -> Vec<PathBuf> {
+    smartctl_candidates_with(None)
+}
+
+/// The places to look for smartctl: Dyno's own copies under `own_tools` first, then the system's.
+fn smartctl_candidates_with(own_tools: Option<&Path>) -> Vec<PathBuf> {
+    own_copies(own_tools).into_iter().chain(system_smartctl()).collect()
+}
+
+/// Dyno's own copies of smartctl (`<tools>/smartmontools-*/smartctl`), newest name first.
+fn own_copies(own_tools: Option<&Path>) -> Vec<PathBuf> {
+    let mut own: Vec<PathBuf> = own_tools
+        .and_then(|t| std::fs::read_dir(t).ok())
+        .map(|d| {
+            d.flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("smartmontools-"))
+                .map(|e| e.path().join(if cfg!(windows) { "smartctl.exe" } else { "smartctl" }))
+                .collect()
+        })
+        .unwrap_or_default();
+    own.sort();
+    own.reverse();
+    own
+}
+
+fn system_smartctl() -> Vec<PathBuf> {
     [
         "/opt/homebrew/sbin/smartctl",
         "/opt/homebrew/bin/smartctl",
@@ -182,12 +213,23 @@ impl ThrottleSignals for NoThrottleSignals {
 /// help; the privileged helper (WP-01) will read it for the user later.
 pub struct SmartctlWear {
     candidates: Vec<PathBuf>,
+    /// Dyno's own tools folder, looked at on every read so a copy installed later is found without a restart.
+    own_tools: Option<PathBuf>,
 }
 
 impl SmartctlWear {
     /// A reader that looks for `smartctl` at these paths.
     pub fn new(candidates: Vec<PathBuf>) -> SmartctlWear {
-        SmartctlWear { candidates }
+        SmartctlWear {
+            candidates,
+            own_tools: None,
+        }
+    }
+
+    /// Also looks for Dyno's own copies under this folder, before the other places, on every read.
+    pub fn with_own_tools(mut self, tools: PathBuf) -> SmartctlWear {
+        self.own_tools = Some(tools);
+        self
     }
 
     fn run(&self, program: &Path, args: &[&str]) -> Result<String, String> {
@@ -202,7 +244,8 @@ impl SmartctlWear {
 
 impl DiskWearSource for SmartctlWear {
     fn read(&mut self) -> Reading<Vec<DiskWear>> {
-        let Some(program) = self.candidates.iter().find(|p| p.is_file()) else {
+        let own = own_copies(self.own_tools.as_deref());
+        let Some(program) = own.iter().chain(self.candidates.iter()).find(|p| p.is_file()) else {
             return Reading::unavailable(
                 "Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools).",
             );
@@ -456,6 +499,45 @@ mod tests {
             Reading::unavailable(NO_BATTERY)
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dynos_own_copy_is_tried_before_the_system_places_and_the_newest_first() {
+        let dir = temp("own-tools");
+        for v in ["smartmontools-7.4", "smartmontools-7.5"] {
+            std::fs::create_dir_all(dir.join(v)).unwrap();
+        }
+        std::fs::create_dir_all(dir.join("other-tool")).unwrap();
+        let c = smartctl_candidates_with(Some(&dir));
+        let name = |i: usize| c[i].parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(
+            (name(0), name(1)),
+            ("smartmontools-7.5".to_string(), "smartmontools-7.4".to_string())
+        );
+        assert!(c.iter().all(|p| !p.to_string_lossy().contains("other-tool")));
+        assert_eq!(&c[2..], &smartctl_candidates()[..], "then the system places, unchanged");
+        assert_eq!(smartctl_candidates_with(Some(&dir.join("missing"))), smartctl_candidates());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_installed_after_the_reader_was_made_is_found_without_a_restart() {
+        let work = temp("late-tools");
+        let tool = fake_smartctl(
+            &work,
+            r#"{"devices":[{"name":"/dev/nvme0"}]}"#,
+            crate::parse::hardware::tests_nvme(),
+        );
+        let tools = temp("late-own");
+        let mut reader = SmartctlWear::new(vec![PathBuf::from("/dyno/missing")]).with_own_tools(tools.clone());
+        assert!(reader.read().value().is_none(), "nothing installed yet");
+        let folder = tools.join("smartmontools-7.5");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::copy(&tool, folder.join("smartctl")).unwrap();
+        assert_eq!(reader.read().value().unwrap()[0].percent_used, Some(3.0));
+        let _ = std::fs::remove_dir_all(work);
+        let _ = std::fs::remove_dir_all(tools);
     }
 
     #[cfg(unix)]

@@ -16,12 +16,22 @@ pub mod link;
 pub mod logging;
 pub mod login;
 pub mod login_item;
+pub mod mcp;
 pub mod popover;
+pub mod power_menu;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
 pub mod tray;
+pub mod tray_away;
+pub mod tray_identity;
+pub mod tray_look;
 pub mod tray_model;
+#[cfg(target_os = "macos")]
+pub mod tray_position;
+#[cfg(target_os = "macos")]
+pub mod tray_text;
+pub mod wol_menu;
 
 use link::{AgentLink, ProcessLauncher};
 use paddock_shell::{AppIdentity, Builder};
@@ -53,6 +63,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | TRAY | DIALOG] => commands::dyno,
     /// "Save bundle...": the OS save dialog, then the agent writes the redacted diagnostics zip.
     Mutation [MAIN] => commands::save_diagnostics,
+    /// "Export" on the Benchmarks page: the OS save dialog, then the agent writes the chosen runs as JSON or CSV.
+    Mutation [MAIN] => commands::save_benchmarks,
     /// "Export" on the Reports page: the OS save dialog, then the agent writes the week's report.
     Mutation [MAIN] => commands::save_report,
     /// "Export for Debrief" on the Issues page.
@@ -67,6 +79,8 @@ paddock_commands::command_table! {
     Query [MAIN | TRAY | DIALOG] => commands::widget_layout,
     /// Edits one surface's widget layout in the agent; answers the new layout, or why it was refused.
     Mutation [MAIN | DIALOG] => commands::edit_widget_layout,
+    /// What an arrangement gesture on the dashboard would give, answered in this process from the last view the agent sent; applies nothing.
+    Query [MAIN] => commands::preview_widget_layout,
     /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`); the Settings window's preview reads it too.
     Query [MAIN | TRAY | DIALOG] => commands::popover_values,
     /// A button of a widget: open a page, retry, start the backup check, restart the agent.
@@ -130,6 +144,24 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     if diagnostics_wanted(&place) {
         builder = builder.diagnostics(|_app| diagnostics_setup());
     }
+    // AI access (ADR 0007, 0032 D7): Dyno's four tools, off until the user allows them in Settings > AI access. The tools ask the agent
+    // through the shell's link; a test place keeps the settings in its folder and the keys in memory (ER-14).
+    let mcp_dir = test_dir.clone();
+    builder = builder.mcp(move |app, emit| {
+        let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
+        let dirs = match &mcp_dir {
+            Some(dir) => paddock_env::AppDirs::resolve(
+                &id,
+                paddock_env::Os::current(),
+                &paddock_env::MapVars::new().with(&id.home_var(), dir),
+                None,
+                true,
+            )?,
+            None => paddock_env::AppDirs::for_app(&id)?,
+        };
+        let calls = Arc::new(mcp::ShellCalls(app.clone()));
+        Ok(mcp::control(&dirs, APP_NAME, VERSION, mcp_dir.is_none(), emit, calls))
+    });
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {
         Place::Installed => builder,
@@ -241,7 +273,12 @@ pub fn app<R: Runtime>(
     shell
         .tray(move |app| {
             tauri::Manager::manage(app, tray::popovers());
-            tray::tray(tray_backend)
+            tray::tray(tray_backend).on_action(|app, id| {
+                if let Some(shell) = tauri::Manager::try_state::<Arc<shell::ShellOf<R>>>(app) {
+                    shell.power_menu_chosen(id);
+                    shell.wol_menu_chosen(id);
+                }
+            })
         })
         .launch(launch)
         .add_to(builder)
@@ -305,7 +342,13 @@ fn agent_setup<R: Runtime>(
         dyno_agent::logging::arch(),
         logging::uptime_ms()
     ));
-    let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels);
+    let events = shell::ShellOf::new(
+        app.clone(),
+        hub.clone(),
+        pixels,
+        shell::saved_items(&dirs.settings()),
+        Arc::new(paddock_jobs::SystemClock),
+    );
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {
@@ -315,6 +358,9 @@ fn agent_setup<R: Runtime>(
     app.manage(events.clone());
     app.manage(link.clone());
     app.manage(commands::PickedFolders::default());
+    app.manage(Arc::new(
+        paddock_widgets::Previews::new().grid::<dyno_core::widgets::DashboardCatalogue>(),
+    ));
     link.spawn()?;
     if !installed {
         return Ok(());
@@ -402,7 +448,8 @@ pub fn run() {
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         Some(vec![paddock_window::launch::HIDDEN_FLAG]),
     ));
-    let items = shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements);
+    // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
+    let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -413,6 +460,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if matches!(_event, tauri::RunEvent::Ready) {
                 on_ready(_handle, asked_hidden);
+            }
+            // The icons are removed on the way out (AppKit may drop their positions then): keep a copy while they are still there.
+            #[cfg(target_os = "macos")]
+            if matches!(_event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                tray::save_positions(_handle);
             }
         }),
         Err(e) => {

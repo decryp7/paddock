@@ -80,6 +80,10 @@ on:
         description: "The app's CHANGELOG.md. With no earlier tag of the app, the notes are this file's section of the tagged version instead of git-cliff's whole history (the monorepo's shared paths reach back years). Empty: git-cliff always."
         type: string
         default: ""
+      notes-from-changelog:
+        description: "With first-release-changelog: take the CHANGELOG section of the tagged version for every release, not only the first (an app whose history is squashed landing commits). A missing, Unreleased or empty section fails the run."
+        type: boolean
+        default: false
       prepare:
         description: "A command run at `root` after `npm ci`, before the build (an app whose UI imports the shared library: npm run build -w ui). Empty: none."
         type: string
@@ -224,6 +228,7 @@ jobs:
           FIRST_CHANGELOG: ${{ inputs.first-release-changelog }}
           TAG: ${{ github.ref_name }}
           PREFIX: ${{ inputs.tag-prefix }}
+          NOTES_FROM_CHANGELOG: ${{ inputs.notes-from-changelog }}
         run: |
           bash .paddock/conformance/ci/first-release-notes.sh || exit 1
 
@@ -338,6 +343,7 @@ jobs:
           PATHS: ${{ inputs.cliff-paths }}
           PREFIX: ${{ inputs.tag-prefix }}
           FIRST_CHANGELOG: ${{ inputs.first-release-changelog }}
+          NOTES_FROM_CHANGELOG: ${{ inputs.notes-from-changelog }}
           TAG: ${{ github.ref_name }}
         run: |
           # The first release of an app has no earlier tag: its notes are the CHANGELOG section of that version.

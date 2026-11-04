@@ -19,6 +19,7 @@ pub struct Systemd {
     unit_path: PathBuf,
     target: Target,
     sys: Box<dyn System>,
+    packaged: bool,
 }
 
 impl Systemd {
@@ -34,7 +35,17 @@ impl Systemd {
             unit_path,
             target,
             sys,
+            packaged: false,
         }
+    }
+
+    /// The unit is shipped by a package (a `.deb` puts it in `/usr/lib/systemd/system`, disabled): registering only
+    /// enables and starts it, unregistering only disables and stops it, and the file is never written or removed
+    /// (dpkg owns it).
+    #[must_use]
+    pub fn packaged(mut self) -> Self {
+        self.packaged = true;
+        self
     }
 
     /// The text this copy registers.
@@ -146,11 +157,15 @@ impl Backend for Systemd {
             points_here: program.as_ref().map(|p| *p == self.target.exe_text()),
             program,
             program_exists,
-            definition_current: Some(text == self.definition()),
+            definition_current: (!self.packaged).then(|| text == self.definition()),
         }
     }
 
     fn register(&mut self) -> Result<(), RegisterError> {
+        if self.packaged {
+            let unit = self.spec.unit_file_name();
+            return self.checked(&["enable", "--now", &unit]);
+        }
         let text = self.definition();
         if let Err(e) = self.sys.write(&self.unit_path, &text) {
             return Err(if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -171,6 +186,9 @@ impl Backend for Systemd {
         let unit = self.spec.unit_file_name();
         // A unit that is already stopped, disabled or unknown is fine: the point is that it is gone afterwards.
         let _ = self.ctl(&["disable", "--now", &unit]);
+        if self.packaged {
+            return Ok(());
+        }
         match self.sys.remove(&self.unit_path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

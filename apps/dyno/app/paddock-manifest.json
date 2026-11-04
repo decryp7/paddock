@@ -118,11 +118,15 @@
     "dy.diagnostics",
     "dy.disk-map",
     "dy.extras",
+    "dy.firewall",
     "dy.health",
     "dy.inventory",
     "dy.issues",
     "dy.lifespan",
+    "dy.lists",
+    "dy.map",
     "dy.network",
+    "dy.power",
     "dy.processes",
     "dy.recorder",
     "dy.reports",
@@ -134,7 +138,8 @@
   ],
   "settingsPages": [
     "dy.general",
-    "pd.appearance"
+    "pd.appearance",
+    "pd.mcp"
   ],
   "settingsForms": [
     "pd.appearance"
@@ -206,6 +211,27 @@
       "height": null,
       "commands": []
     },
+    "pd.mcp.key": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": [
+        "mcp_get",
+        "mcp_issue_key"
+      ]
+    },
+    "pd.mcp.revoke": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
+    },
     "pd.report-problem": {
       "kind": "form",
       "modality": "modeless",
@@ -228,8 +254,14 @@
       "width": 880,
       "height": 700,
       "commands": [
+        "dialog_open",
         "dyno",
         "edit_widget_layout",
+        "mcp_audit",
+        "mcp_audit_clear",
+        "mcp_get",
+        "mcp_revoke_key",
+        "mcp_save",
         "popover_preview",
         "popover_snapshot",
         "settings_*",
@@ -304,11 +336,15 @@
     "dy.page.diagnostics": "Diagnostics",
     "dy.page.disk-map": "Disk map",
     "dy.page.extras": "Extras",
+    "dy.page.firewall": "Firewall",
     "dy.page.health": "Health",
     "dy.page.inventory": "Inventory",
     "dy.page.issues": "Issues",
     "dy.page.lifespan": "Lifespan",
+    "dy.page.lists": "IP lists",
+    "dy.page.map": "Connections map",
     "dy.page.network": "Network",
+    "dy.page.power": "Power",
     "dy.page.processes": "Processes",
     "dy.page.recorder": "Flight recorder",
     "dy.page.reports": "Reports",
@@ -328,7 +364,10 @@
     "pd.category.help": "Help",
     "pd.confirm.title": "Confirm",
     "pd.diag.title": "Report a problem",
+    "pd.mcp.key.title": "Add a client",
+    "pd.mcp.revoke.title": "Revoke key",
     "pd.settings.appearance": "Appearance",
+    "pd.settings.mcp": "AI access (MCP)",
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",

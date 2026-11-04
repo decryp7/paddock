@@ -55,7 +55,7 @@ layers, both postcard:
 | Debrief and its plugins (protocol 1.1) | `debrief-ipc` + `debrief-plugin-api` | `apps/debrief/crates/debrief-plugin-api/src/protocol.rs:30`; moves to the platform in Debrief 1.2 (ADR 0003, packages PH1 to PH4) |
 | Debrief and its store worker | `debrief-ipc` | ADR 0017 §8 |
 | Debrief and its AI worker | `debrief-ipc`, `WorkerRequest` (`apps/debrief/crates/debrief-ai/src/worker/frames.rs:56`) | postcard frames, not JSON-RPC (section 13) |
-| Dyno and its agent | `dyno-ipc` | Dyno 1.0 ships its own copy; it adopts the platform with tier 3 (ADR 0003, "Who uses what") |
+| Dyno, its agent, its plugins and its helper | `paddock-ipc` (`BodyPeer`: one postcard enum as the body) | Dyno 1.0 shipped its own copy (`dyno-ipc`); it moved to `paddock-ipc` after 1.0 (ADR 0027 WP-1b) |
 | App and a companion it did not start (agent, service) | `paddock-ipc::link` | discovery file, reconnect with back-off (`link/mod.rs:1`) |
 
 `debrief-ipc` and `paddock-ipc` share the frame layout and frame version 2, but they are **not wire compatible**: Debrief's

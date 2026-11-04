@@ -15,7 +15,9 @@ path = "src/main.rs"
 # Only the protocol and the IPC: the CLI never links the platform adapters or the agent (ADR 0014).
 [dependencies]
 dyno-core.workspace = true
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
+# The wake job's status, followed to its end by `dyno wake`.
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 serde.workspace = true
 serde_json.workspace = true
 

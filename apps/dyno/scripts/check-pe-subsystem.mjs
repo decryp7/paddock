@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 export const GUI = 2;
 export const CONSOLE = 3;
 /** What the release ships: the agent has no console window, the command line has one. */
-export const SHIPPED_SUBSYSTEMS = ['dyno-agent.exe=2', 'dyno.exe=3'];
+export const SHIPPED_SUBSYSTEMS = ['dyno-agent.exe=2', 'dyno.exe=3', 'dyno-bench.exe=3', 'dyno-bench-gpu.exe=3'];
 
 /** The specs for the arguments: `--dir <folder>` is the release's list in that folder. */
 export function specsFor(args) {

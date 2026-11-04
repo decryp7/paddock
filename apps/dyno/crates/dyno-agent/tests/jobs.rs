@@ -13,9 +13,9 @@ use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{ErrorCode, Message, Reply, Request};
 use dyno_core::time::Timestamp;
-use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
-use dyno_platform::issues::ToolRunner;
+use dyno_platform::runner::ToolRunner;
+use paddock_ipc::{BodyOptions, BodyPeer};
 use paddock_jobs::wire::{WireSnapshot, WireState};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -78,9 +78,17 @@ impl IssueSource for Slow {
 struct SlowTool(Arc<Gate>);
 
 impl ToolRunner for SlowTool {
-    fn run(&self, _program: &str, _args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
-        self.0.pass();
-        Err(PlatformError::Unsupported("scripted".into()))
+    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
+        let (_program, _args) = (tool.program.as_str(), &tool.args);
+        let answer: Result<String, PlatformError> = {
+            self.0.pass();
+            Err(PlatformError::Unsupported("scripted".into()))
+        };
+        answer.map(|stdout| dyno_platform::runner::ToolOutput {
+            ok: true,
+            stdout,
+            error: String::new(),
+        })
     }
 }
 
@@ -106,7 +114,7 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
@@ -123,21 +131,21 @@ impl Drop for Harness {
     }
 }
 
-fn start(peer: &Peer<Message>, spec: JobSpec) -> Result<WireSnapshot, String> {
+fn start(peer: &BodyPeer<Message>, spec: JobSpec) -> Result<WireSnapshot, String> {
     match ask(peer, Request::StartJob { spec })? {
         Reply::Job(s) => Ok(*s),
         other => panic!("{other:?}"),
     }
 }
 
-fn status(peer: &Peer<Message>, id: u64) -> WireSnapshot {
+fn status(peer: &BodyPeer<Message>, id: u64) -> WireSnapshot {
     let Reply::Jobs(all) = ask(peer, Request::Jobs).unwrap() else {
         panic!("jobs")
     };
     all.into_iter().find(|s| s.id == id).expect("the job is listed")
 }
 
-fn wait_final(peer: &Peer<Message>, id: u64) -> WireSnapshot {
+fn wait_final(peer: &BodyPeer<Message>, id: u64) -> WireSnapshot {
     for _ in 0..2000 {
         let s = status(peer, id);
         if s.is_terminal() {
@@ -582,11 +590,11 @@ fn a_backup_check_waits_for_the_one_that_is_running_and_cancel_wakes_the_wait() 
 fn every_status_of_a_job_is_pushed_to_a_connected_app_in_order_and_the_end_is_never_dropped() {
     let h = Harness::start(vec![]);
     let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
-    let conn = dyno_ipc::Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+    let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
-    let peer = Peer::start(
+    let peer = BodyPeer::start(
         conn,
-        dyno_ipc::PeerOptions::new().on_push(move |m| {
+        BodyOptions::new("the agent").on_push(move |m| {
             if let Message::Job(j) = m {
                 let _ = tx.send(*j);
             }

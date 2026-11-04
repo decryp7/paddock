@@ -565,8 +565,8 @@ mod tests {
         let calls = std::sync::Arc::new(runner);
         struct Shared(std::sync::Arc<Scripted>);
         impl ToolRunner for Shared {
-            fn run(&self, p: &str, a: &[String], t: std::time::Duration) -> Result<String, PlatformError> {
-                self.0.run(p, a, t)
+            fn run_tool(&self, tool: &crate::runner::Tool, t: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                self.0.run_tool(tool, t)
             }
         }
         let log = MacLog::new(Box::new(Shared(calls.clone())));
@@ -607,8 +607,12 @@ mod tests {
             .collect::<String>();
         struct One(String);
         impl ToolRunner for One {
-            fn run(&self, _: &str, _: &[String], _: std::time::Duration) -> Result<String, PlatformError> {
-                Ok(self.0.clone())
+            fn run_tool(&self, _: &crate::runner::Tool, _: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                Ok(crate::runner::ToolOutput {
+                    ok: true,
+                    stdout: self.0.clone(),
+                    error: String::new(),
+                })
             }
         }
         let control = Count(Default::default(), AtomicU64::new(0));
