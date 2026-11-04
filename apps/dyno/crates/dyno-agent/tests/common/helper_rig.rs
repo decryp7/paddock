@@ -162,22 +162,6 @@ impl ProcessTraffic for Traffic {
             .collect())
     }
 }
-struct Sweeps(Vec<RawProcess>);
-impl ProcessSweeper for Sweeps {
-    fn sweep(&self) -> Result<Sweep, PlatformError> {
-        Ok(Sweep {
-            processes: self.0.clone(),
-            homes: Vec::new(),
-            taken_at: 1,
-        })
-    }
-}
-struct NoFirewall;
-impl dyno_core::firewall::FirewallReader for NoFirewall {
-    fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
-        Err(PlatformError::Unsupported("The rig has no firewall.".into()))
-    }
-}
 struct Items;
 impl LoginItemsReader for Items {
     fn read(&self, _: u32) -> Result<LoginItemsReply, PlatformError> {
@@ -266,7 +250,6 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         smart: Box::new(Smart(readers.smart)),
         firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),
-        firewall: Box::new(NoFirewall),
         wakes: Box::new(dyno_core::wake::NoWakes),
         wol: Box::new(Wol(readers.wol)),
         log_tail: Box::new(move |n| readers.log[readers.log.len().saturating_sub(n)..].to_vec()),

@@ -6,5 +6,5 @@ pub mod extras;
 pub mod holders;
 pub mod memory;
 pub mod processes;
-pub mod wol;
 pub mod traffic;
+pub mod wol;
