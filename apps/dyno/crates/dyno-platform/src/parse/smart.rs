@@ -91,10 +91,13 @@ pub fn parse_disk(device: &str, json: &str, exit: Option<i32>) -> Result<SmartDi
         ));
     }
     let text = |s: &str| s.trim().chars().take(MAX_SMART_TEXT).collect::<String>();
+    // The wear reading comes from the one shared parser (rule 55), so the helper's and the agent's readings cannot drift.
+    let wear = parse_smartctl_ssd(json);
     let model = v["model_name"]
         .as_str()
         .map(text)
         .filter(|m| !m.is_empty())
+        .or_else(|| wear.as_ref().map(|w| text(&w.name)))
         .unwrap_or_else(|| "Unknown disk".into());
     let int = |x: &Value| x.as_i64();
     let temperature_c = int(&v["temperature"]["current"])
@@ -117,6 +120,9 @@ pub fn parse_disk(device: &str, json: &str, exit: Option<i32>) -> Result<SmartDi
         power_on_hours: v["power_on_time"]["hours"].as_u64().or_else(|| nvme["power_on_hours"].as_u64()),
         unsafe_shutdowns: nvme["unsafe_shutdowns"].as_u64(),
         passed,
+        wear_id: wear.as_ref().map(|w| w.id.clone()),
+        bytes_written: wear.as_ref().and_then(|w| w.bytes_written),
+        rated_bytes: wear.as_ref().and_then(|w| w.rated_bytes),
     })
 }
 
@@ -145,8 +151,10 @@ mod tests {
             ("APPLE SSD EXAMPLE", Some(38), Some(3), Some(0), Some(7), Some(true))
         );
         assert_eq!((d.capacity, d.power_on_hours), (Some(500_000_000_000), Some(321)));
+        // No WWN ever; the serial only inside the wear id (the history key).
         let all = format!("{d:?}");
-        assert!(!all.contains("ZZ99SERIAL") && !all.contains("naa"), "{all}");
+        assert!(!all.contains("naa"), "{all}");
+        assert_eq!(d.wear_id.as_deref(), Some("APPLE SSD EXAMPLE ZZ99SERIAL"));
     }
 
     #[test]
@@ -180,7 +188,7 @@ mod tests {
 "temperature":{"current":31},"power_on_time":{"hours":9},"ata_smart_attributes":{"table":[{"id":177,"name":"Wear_Leveling_Count","value":97,"raw":{"value":3}}]}}"#;
         let d = parse_disk("sda", ata, Some(0)).unwrap();
         assert_eq!((d.percent_used, d.temperature_c, d.media_errors), (Some(3), Some(31), None));
-        assert!(!format!("{d:?}").contains("S1\""));
+        assert_eq!(d.wear_id.as_deref(), Some("SATA EXAMPLE S1"));
     }
 
     #[test]
@@ -200,5 +208,38 @@ mod tests {
         assert_eq!(all[2].kind, None);
         assert_eq!(parse_scan(scan, 1).len(), 1);
         assert!(parse_scan("garbage", 32).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod same_reading {
+    use super::*;
+
+    /// Invented smartctl JSON (never a user's): an NVMe disk with a serial, bytes written and a power-on count.
+    const NVME: &str = r#"{"smartctl":{"exit_status":4},"model_name":"EXAMPLE NVME 1TB","serial_number":"EX123456","user_capacity":{"bytes":1000204886016},
+"smart_status":{"passed":true},"power_on_time":{"hours":4321},
+"nvme_smart_health_information_log":{"temperature":41,"percentage_used":7,"data_units_written":166000000,"media_errors":0,"power_on_hours":4321,"unsafe_shutdowns":5}}"#;
+    /// A SATA disk with the wear attributes and no model name.
+    const SATA: &str = r#"{"smartctl":{"exit_status":0},"serial_number":"EXS1","device":{"name":"/dev/sdb"},"smart_status":{"passed":true},
+"power_on_time":{"hours":9},"ata_smart_attributes":{"table":[{"id":177,"name":"Wear_Leveling_Count","value":97,"raw":{"value":3}}]}}"#;
+
+    #[test]
+    fn the_helper_path_and_the_agents_own_path_make_the_same_wear_reading_with_the_same_id() {
+        for json in [NVME, SATA] {
+            let local = parse_smartctl_ssd(json).expect("an SSD");
+            let through_helper = parse_disk("/dev/x", json, None).unwrap().to_wear().expect("an SSD");
+            assert_eq!(through_helper, local, "one reading, whichever path made it");
+            assert_eq!(through_helper.id, local.id, "the history continues across both paths");
+        }
+        let nvme = parse_disk("/dev/x", NVME, None).unwrap().to_wear().unwrap();
+        assert_eq!(nvme.id, "EXAMPLE NVME 1TB EX123456");
+        assert!(nvme.bytes_written.is_some(), "Written so far survives the helper path");
+    }
+
+    #[test]
+    fn a_hard_disk_has_no_wear_reading_on_either_path() {
+        let hdd = r#"{"smartctl":{"exit_status":0},"model_name":"EXAMPLE HDD","rotation_rate":7200,"smart_status":{"passed":true},"ata_smart_attributes":{"table":[]}}"#;
+        assert!(parse_smartctl_ssd(hdd).is_none());
+        assert!(parse_disk("/dev/y", hdd, None).unwrap().to_wear().is_none());
     }
 }

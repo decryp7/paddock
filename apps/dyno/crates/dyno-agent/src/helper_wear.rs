@@ -67,21 +67,6 @@ impl HelperFirstWear {
     }
 }
 
-/// One disk of the helper's reply as the wear reading. The helper's reply carries no serial, so the id is the model and device.
-pub fn wear_of(d: &SmartDisk) -> Option<DiskWear> {
-    // A disk with no wear figure (a hard disk, a drive without counters) has nothing to forecast.
-    d.percent_used?;
-    Some(DiskWear {
-        id: format!("{} {}", d.model, d.device),
-        name: d.model.clone(),
-        capacity: d.capacity,
-        percent_used: d.percent_used.map(f32::from),
-        bytes_written: None,
-        rated_bytes: None,
-        power_on_hours: d.power_on_hours,
-    })
-}
-
 impl DiskWearSource for HelperFirstWear {
     fn read(&mut self) -> Reading<Vec<DiskWear>> {
         match self.link.read_smart() {
@@ -91,7 +76,7 @@ impl DiskWearSource for HelperFirstWear {
                 self.local(&format!("the helper could not read SMART: {e}"))
             }
             Some(Ok(reply)) => {
-                let wear: Vec<DiskWear> = reply.disks.iter().filter_map(wear_of).collect();
+                let wear: Vec<DiskWear> = reply.disks.iter().filter_map(SmartDisk::to_wear).collect();
                 log::info!(
                     target: "dyno::hardware",
                     "SSD wear: the helper read {} disk(s), {} with wear counters, {} skipped, {} not visited",
@@ -152,6 +137,9 @@ mod tests {
             power_on_hours: Some(1200),
             unsafe_shutdowns: Some(2),
             passed: Some(true),
+            wear_id: Some("EXAMPLE NVME EX1".into()),
+            bytes_written: Some(84_800_000_000_000),
+            rated_bytes: None,
         }
     }
 
@@ -173,8 +161,8 @@ mod tests {
         let got = r.read();
         let w = &got.value().expect("available")[0];
         assert_eq!(
-            (w.name.as_str(), w.percent_used, w.power_on_hours, w.capacity),
-            ("EXAMPLE NVME", Some(4.0), Some(1200), Some(1_000_000_000_000))
+            (w.id.as_str(), w.percent_used, w.power_on_hours, w.bytes_written),
+            ("EXAMPLE NVME EX1", Some(4.0), Some(1200), Some(84_800_000_000_000))
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
@@ -191,13 +179,7 @@ mod tests {
                     reason: "x".into(),
                 }],
             )))),
-            Link(Some(Ok(reply(
-                vec![SmartDisk {
-                    percent_used: None,
-                    ..nvme()
-                }],
-                vec![],
-            )))),
+            Link(Some(Ok(reply(vec![SmartDisk { wear_id: None, ..nvme() }], vec![])))),
         ] {
             let calls = Arc::new(AtomicU32::new(0));
             let mut r = HelperFirstWear::new(Box::new(link), Box::new(Counting(calls.clone())));
