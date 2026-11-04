@@ -76,7 +76,7 @@ describe('HelperStore', () => {
       const { store, mock } = setup('silent');
       const spy = vi.spyOn(mock, 'helperStatus');
       states.forEach((v) => spy.mockResolvedValueOnce(mockHelperStatus(v, 'windows')));
-      spy.mockResolvedValue(mockHelperStatus(states[states.length - 1], 'windows'));
+      spy.mockResolvedValue(mockHelperStatus(states.at(-1) ?? 'silent', 'windows'));
       return { store, spy };
     };
 

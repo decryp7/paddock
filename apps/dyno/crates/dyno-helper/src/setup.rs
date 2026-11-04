@@ -56,6 +56,7 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     if !crate::sys::is_elevated() {
         return Err("Installing the helper needs administrator rights; turn it on from Dyno (Settings > Helper).".into());
     }
+    audit_run("install", &format!("for {}", owner.to_arg()));
     let source = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .map_err(|e| format!("This program's own path cannot be read: {e}"))?;
@@ -73,6 +74,19 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     let report = install_in_place(os_of(host), &roots, &source, &mut files, &system).map_err(|e| e.to_string())?;
     register_event_source(os_of(host), system().as_mut());
     Ok(report)
+}
+
+/// Says in the log and the Event Log that an elevated `install` or `uninstall` is running, and from which program: a service
+/// that vanishes after a restart is only explained by knowing who asked for its removal or replacement (ER-27).
+fn audit_run(verb: &str, what: &str) {
+    let exe = std::env::current_exe().map_or_else(|_| "?".into(), |p| p.display().to_string());
+    let text = format!(
+        "The Dyno helper's elevated {verb} {what} is running from {exe} (process {}).",
+        std::process::id()
+    );
+    log::warn!("{text}");
+    #[cfg(windows)]
+    crate::eventlog::report(log::Level::Info, &text);
 }
 
 /// Windows: registers the Event Log source "Dyno helper", where the service writes why it did not start (ER-27). A failure
@@ -112,6 +126,7 @@ pub fn uninstall() -> Result<Report, String> {
     if !crate::sys::is_elevated() {
         return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
     }
+    audit_run("uninstall", "");
     let report =
         uninstall_in_place(os_of(this_host()), &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())?;
     // The program and the registration are gone: what the helper wrote next to them goes too (its log of the removal is the

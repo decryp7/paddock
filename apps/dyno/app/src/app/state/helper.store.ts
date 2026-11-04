@@ -32,7 +32,7 @@ export const HELPER_POLL_LIMIT_MS = 180_000;
  */
 export function nextHelperPoll(status: HelperStatus | null, step: number, waited: number): number | null {
   if (status?.state !== 'notRunning') return null;
-  const wait = HELPER_POLL_STEPS_MS[Math.min(step, HELPER_POLL_STEPS_MS.length - 1)];
+  const wait = HELPER_POLL_STEPS_MS[Math.min(step, HELPER_POLL_STEPS_MS.length - 1)] ?? HELPER_POLL_LIMIT_MS;
   return waited + wait > HELPER_POLL_LIMIT_MS ? null : wait;
 }
 
