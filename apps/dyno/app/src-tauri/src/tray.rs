@@ -371,9 +371,17 @@ impl NativeIcon {
         }
     }
 
+    /// Sets the tip (Windows: at most 127 UTF-16 units, cut by `item_tooltip`; macOS: the status item button's tool tip; Linux:
+    /// the status notifier's tool tip, which many hosts do not show). A refusal is logged: the tip is sent only when its text
+    /// changed, so this is one line per change, not per tick.
     fn set_tooltip(&self, main: &MainToken, text: &str) {
         main.assert_main();
-        let _ = self.icon.set_tooltip(Some(text.to_string()));
+        if let Err(e) = self.icon.set_tooltip(Some(text.to_string())) {
+            logging::info(&format!(
+                "tray icon {}: the tooltip \"{text}\" was refused: {e}",
+                self.icon.id().as_ref()
+            ));
+        }
     }
 
     /// Gives the icon its stable OS identity (ADR 0028) and returns what the log says about it. Windows took its GUID when the
@@ -750,6 +758,8 @@ mod tests {
         drawn: usize,
         pictures: usize,
         saved: usize,
+        /// The tooltip the platform call got, per icon, in order.
+        tips: Vec<(String, String)>,
     }
 
     impl FakeOps {
@@ -762,6 +772,8 @@ mod tests {
         fn make(&mut self, spec: &ItemSpec, initial: Option<&Frame>) -> Result<(), String> {
             self.here();
             assert!(initial.is_some(), "every new icon starts with its unavailable frame");
+            self.tips
+                .push((spec.id.clone(), initial.map(|f| f.tooltip.clone()).unwrap_or_default()));
             assert!(self.live.insert(spec.id.clone()), "{} made twice", spec.id);
             self.made += 1;
             Ok(())
@@ -771,8 +783,11 @@ mod tests {
             assert!(self.live.remove(id), "{id} removed but not there");
             self.removed += 1;
         }
-        fn draw(&mut self, id: &str, _: &Frame, picture: bool, tooltip: bool) -> Result<(), String> {
+        fn draw(&mut self, id: &str, frame: &Frame, picture: bool, tooltip: bool) -> Result<(), String> {
             self.here();
+            if tooltip {
+                self.tips.push((id.to_string(), frame.tooltip.clone()));
+            }
             assert!(self.live.contains(id), "{id} drawn but not there");
             assert!(picture || tooltip, "{id} drawn with nothing to draw");
             self.drawn += 1;
@@ -814,6 +829,7 @@ mod tests {
                 drawn: 0,
                 pictures: 0,
                 saved: 0,
+                tips: Vec::new(),
             };
             for cmd in rx {
                 apply(&mut ops, &state, cmd).unwrap();
@@ -864,6 +880,7 @@ mod tests {
             drawn: 0,
             pictures: 0,
             saved: 0,
+            tips: Vec::new(),
         };
         let specs = items(1);
         let initial = frames(&specs);
@@ -897,6 +914,64 @@ mod tests {
         );
     }
 
+    // The wiring: the text a live frame carries reaches the platform call for that icon (the metric's name and reading, not the app
+    // name the icon was built with), and an unchanged text is not sent again.
+    #[test]
+    fn each_icon_gets_its_own_metric_tooltip_from_the_frame() {
+        let state = TrayState::default();
+        let mut ops = FakeOps {
+            owner: std::thread::current().id(),
+            live: BTreeSet::new(),
+            made: 0,
+            removed: 0,
+            drawn: 0,
+            pictures: 0,
+            saved: 0,
+            tips: Vec::new(),
+        };
+        let specs = vec![
+            ItemSpec::new("cpu", Metric::CpuTotal, crate::tray_model::Glyph::Number),
+            ItemSpec::new("mem", Metric::Memory, crate::tray_model::Glyph::Number),
+        ];
+        let initial = frames(&specs);
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Sync {
+                specs,
+                initial: initial.clone(),
+            },
+        )
+        .unwrap();
+        for (item, mut frame) in initial {
+            frame.tooltip = format!("{} 34%", if item == "cpu" { "CPU" } else { "Memory" });
+            for _ in 0..2 {
+                apply(
+                    &mut ops,
+                    &state,
+                    TrayCommand::Paint {
+                        item: item.clone(),
+                        frame: frame.clone(),
+                    },
+                )
+                .unwrap();
+            }
+        }
+        let sent = |id: &str| -> Vec<String> { ops.tips.iter().filter(|(i, _)| i == id).map(|(_, t)| t.clone()).collect() };
+        assert_eq!(sent("cpu").last().map(String::as_str), Some("CPU 34%"));
+        assert_eq!(sent("mem").last().map(String::as_str), Some("Memory 34%"));
+        assert_eq!(
+            sent("cpu").len(),
+            2,
+            "made with the unavailable tip, then one live tip; the repeat is not sent"
+        );
+        assert!(
+            sent("cpu")[0].starts_with("CPU"),
+            "the first tip names the metric too: {:?}",
+            sent("cpu")
+        );
+    }
+
     // A frame with nothing new returns before drawing; the every-30th position save must still happen on its count.
     #[test]
     fn the_position_is_saved_on_its_count_even_when_nothing_is_drawn() {
@@ -909,6 +984,7 @@ mod tests {
             drawn: 0,
             pictures: 0,
             saved: 0,
+            tips: Vec::new(),
         };
         let specs = items(1);
         let initial = frames(&specs);
