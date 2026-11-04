@@ -177,15 +177,72 @@ export function judgeStateFile(content, procs, spec, bundleDir) {
   return { present: true, pid, live, stale: !live };
 }
 
-/** The step list of a run to Markdown: a table of pass/fail per step, then each step's evidence. */
+/**
+ * Classifies one failing step as `product` or `check`, with the evidence for the choice (ADR 0054 §1.5):
+ * - `check`: no positive control was declared, the control failed, the probe could not run, or the reader found no element of the
+ *   expected kind;
+ * - `product`: the control passed, the probe ran and read a state that differs from the declaration.
+ * @param {{control?: {ok:boolean, detail:string, raw?:string}|null, probe?: {ran:boolean, error?:string, foundElement?:boolean, raw?:string}, mismatch:string}} f
+ * @returns {{class:'product'|'check', reason:string, evidence:string[], fix?:string}}
+ */
+export function classifyFailure({ control, probe = { ran: true }, mismatch }) {
+  const raw = [`probe: ${probe.raw ?? '(no raw output)'}`, `control: ${control ? `${control.ok ? 'passed' : 'FAILED'}: ${control.detail}${control.raw ? ` (${control.raw})` : ''}` : 'none declared'}`];
+  if (!control) return { class: 'check', reason: 'no positive control is declared for this check, so a failure cannot be told from a bug in the check', evidence: raw, fix: 'declare a positive control for this check (lifecycle.mjs defineCheck)' };
+  if (!control.ok) return { class: 'check', reason: `the positive control failed (${control.detail}): the probe or judge cannot read a state known to pass`, evidence: raw, fix: 'fix the probe or the judge of this check; the product was not judged' };
+  if (!probe.ran) return { class: 'check', reason: `the probe could not run${probe.error ? `: ${probe.error}` : ''}`, evidence: raw, fix: 'fix how the probe is started or reached in the guest' };
+  if (probe.foundElement === false) return { class: 'check', reason: 'the reader found no element of the expected kind (wrong window, label or page)', evidence: raw, fix: 'fix the reader\'s selector or the page handle it holds' };
+  return { class: 'product', reason: mismatch, evidence: raw };
+}
+
+/**
+ * A step judged with a positive control. `status` is `pass`, `fail` (class product) or `broken` (class check); a broken step never
+ * counts as a product FAIL and never lets the gate pass.
+ * @param {string} title
+ * @param {{control: {ok:boolean, detail:string, raw?:string}|null, probe?: object, checks: {ok:boolean, detail:string}[], pass?: string}} s
+ */
+export function controlledStep(title, { control, probe = { ran: true }, checks, pass = '' }) {
+  const bad = checks.filter((c) => !c.ok);
+  if (!bad.length && control?.ok && probe.ran !== false) return { title, status: 'pass', summary: pass, checks, control, class: null, evidence: [] };
+  const c = classifyFailure({ control, probe, mismatch: bad.map((b) => b.detail).join('; ') || 'the probe read a state that differs from the declaration' });
+  return { title, status: c.class === 'check' ? 'broken' : 'fail', class: c.class, summary: `${c.class === 'check' ? 'CHECK BROKEN: ' : ''}${c.reason}`.slice(0, 240), checks, control, evidence: c.evidence, fix: c.fix };
+}
+
+/**
+ * Applies a reader control to steps that failed without one (the older start checks): a `fail` whose control passed stays a product
+ * FAIL with the control as evidence; a `fail` whose control failed becomes `broken`.
+ */
+export function withReaderControl(step, control) {
+  if (step.status !== 'fail' || step.class) return step;
+  const c = classifyFailure({ control, probe: { ran: true, raw: (step.checks ?? []).filter((x) => !x.ok).map((x) => x.detail).join('; ') }, mismatch: step.summary });
+  return { ...step, status: c.class === 'check' ? 'broken' : 'fail', class: c.class, summary: c.class === 'check' ? `CHECK BROKEN: ${c.reason}` : step.summary, control, evidence: [...(step.evidence ?? []), ...c.evidence], fix: c.fix };
+}
+
+/**
+ * The verdict of a run. `product` FAILs and `check` errors (broken steps) both block a tag, and are reported apart.
+ * @returns {{result:'PASS'|'FAIL'|'CHECK BROKEN'|'FAIL and CHECK BROKEN', product:string[], check:string[], blocksTag:boolean}}
+ */
+export function verdict(steps) {
+  const product = steps.filter((s) => s.status === 'fail').map((s) => s.title);
+  const check = steps.filter((s) => s.status === 'broken').map((s) => s.title);
+  const result = product.length && check.length ? 'FAIL and CHECK BROKEN' : product.length ? 'FAIL' : check.length ? 'CHECK BROKEN' : 'PASS';
+  return { result, product, check, blocksTag: product.length > 0 || check.length > 0 };
+}
+
+/** The step list of a run to Markdown: the broker's stamp, the verdict, a table of pass/fail per step, then each step's class and evidence. */
 export function renderResult(run) {
-  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO' })[s] ?? s.toUpperCase();
+  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', broken: 'CHECK BROKEN', skip: 'SKIP', manual: 'MANUAL', info: 'INFO' })[s] ?? s.toUpperCase();
+  const v = verdict(run.steps);
   const lines = [
     `# VM start check: ${run.app} ${run.version ?? ''}`.trimEnd(),
     '',
-    `- Result: **${run.steps.some((s) => s.status === 'fail') ? 'FAIL' : 'PASS'}**${run.steps.some((s) => s.status === 'manual') ? ' (manual steps are listed below and are not part of this verdict)' : ''}`,
+    `- Result: **${v.result}**${run.steps.some((s) => s.status === 'manual') ? ' (manual steps are listed below and are not part of this verdict)' : ''}`,
+    ...(v.product.length ? [`- Product FAILs (${v.product.length}): ${v.product.join('; ')}`] : []),
+    ...(v.check.length ? [`- Check errors (${v.check.length}), not product failures; they block a tag until the check is fixed: ${v.check.join('; ')}`] : []),
     `- Installer: ${run.installer}`,
     `- Guest: ${run.guest}`,
+    ...(run.lease ? [`- Broker lease: ${run.lease}`] : []),
+    ...(run.vm ? [`- VM: ${run.vm}${run.snapshot ? `, snapshot ${run.snapshot}` : ''}`] : []),
+    ...(run.command ? [`- Runner command: \`${run.command}\``] : []),
     `- Started: ${run.started}`,
     `- Tool: scripts/vm-smoke (commit ${run.commit ?? 'unknown'})`,
     '',
@@ -196,6 +253,8 @@ export function renderResult(run) {
   lines.push('');
   run.steps.forEach((s, i) => {
     lines.push(`## ${i + 1}. ${s.title}: ${mark(s.status)}`, '');
+    if (s.class) lines.push(`- Class: **${s.class}**${s.fix ? `; check to fix: ${s.fix}` : ''}`);
+    if (s.control) lines.push(`- Positive control: ${s.control.ok ? 'passed' : 'FAILED'}: ${s.control.detail}`);
     for (const c of s.checks ?? []) lines.push(`- ${c.ok ? 'ok' : 'FAIL'}: ${c.detail}`);
     if (s.evidence?.length) lines.push('', '```', ...s.evidence, '```');
     lines.push('');

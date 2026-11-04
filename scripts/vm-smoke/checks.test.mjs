@@ -47,7 +47,7 @@ function fakeGuest({ bug = null } = {}) {
     calls.push(cmd);
     const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
     if (cmd.startsWith('printf %s "$HOME"')) return ok('/Users/admin');
-    if (cmd.startsWith('ps -axww')) return ok(procs.map((p) => `${p.pid} ${p.ppid} ${fmt(clock - p.born)} ${lst(p.born)} ${p.command}`).join('\n'));
+    if (cmd.startsWith('ps -axww')) return ok([...procs.map((p) => `${p.pid} ${p.ppid} ${fmt(clock - p.born)} ${lst(p.born)} ${p.command}`), `9999 1 00:00 ${lst(clock)} ps -axww -o pid=,ppid=,etime=,lstart=,command=`].join('\n')); // ps lists itself: the reader control
     if (cmd.includes('agent.json') && cmd.startsWith('cat')) return agentJson ? ok(agentJson) : { code: 1, stdout: '', stderr: '' };
     if (cmd.startsWith('rm -f') && cmd.includes('agent.json')) { agentJson = null; return ok(); }
     if (cmd.startsWith('open -a')) { if (bug !== 'no-start') startApp(); return ok(); }
@@ -217,4 +217,15 @@ test('the agent as the app\'s launchd job (ADR 0026): launchd is a legal parent 
   const stays = await run('job-stays');
   assert.equal(stays.quit.status, 'fail');
   assert.match(stays.quit.summary, /STILL LOADED after Quit/);
+});
+
+test('a guest whose ps cannot list itself makes a failing step CHECK BROKEN, not a product FAIL', async () => {
+  const { guest } = fakeGuest({ bug: 'no-start' });
+  const blind = { ...guest, exec: async (cmd, o) => (cmd.startsWith('ps -axww') ? { code: 0, stdout: '', stderr: '' } : guest.exec(cmd, o)) };
+  const c = new Check(blind, config, { bundleDir: B, intervalMs: 1000 });
+  c.version = '1.0.0';
+  c.install = async () => ({ title: 'Install', status: 'pass', summary: 'ok' });
+  const r = await runAll(c, { stagedDmg: '/x.dmg', manual: [] });
+  assert.ok(r.steps.some((s) => s.status === 'broken' && s.class === 'check'), JSON.stringify(r.steps.map((s) => [s.title, s.status])));
+  assert.ok(!r.steps.some((s) => s.status === 'fail'));
 });

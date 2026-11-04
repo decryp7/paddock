@@ -1,7 +1,7 @@
 // The start check itself, against a `guest` (the Tart VM in run.mjs, a fake in checks.test.mjs). Every wait is a poll on state with a
 // guard for a truly stuck step; the verdicts come from judge.mjs. The guest is a throw-away clone: the only processes the check ends
 // are the app's own leftovers, and only after re-checking their identity in the same guest command (rule 53).
-import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
+import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, withReaderControl } from './judge.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -43,6 +43,15 @@ export class Check {
     }
     this.trace.push({ at: this.g.now(), procs });
     return procs;
+  }
+
+  /** Positive control for the process reader (ADR 0054 §1.5): `ps` must list itself with a pid and a start time, or a failing step is the check's bug. */
+  async readerControl() {
+    const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,lstart=,command=');
+    const rows = parsePs(r.stdout);
+    const self = rows.find((p) => /(^|\/)ps( |$)/.test(p.command));
+    const ok = r.code === 0 && Boolean(self?.lstart);
+    return { ok, detail: ok ? `ps lists itself (pid ${self.pid}, started ${self.lstart})` : 'ps did not list itself with a start time', raw: `exit ${r.code}, ${rows.length} rows` };
   }
 
   async readFile(p) {
@@ -302,9 +311,11 @@ export class Check {
 /** The full sequence. Returns the steps; the caller renders and decides the exit code. */
 export async function runAll(check, { stagedDmg, manual }) {
   const steps = [];
-  const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
+  // A failing step is a product FAIL only if the reader could read a state known to pass (the control), else CHECK BROKEN.
+  const control = await check.readerControl();
+  const push = (s0) => { const s = withReaderControl(s0, control); steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
   const install = push(await check.install(stagedDmg));
-  if (install.status === 'fail') return { steps, version: check.version };
+  if (install.status === 'fail' || install.status === 'broken') return { steps, version: check.version };
   push(await check.startAndJudge({ title: 'Cold start (disk cache dropped)', pre: async () => { await check.g.exec('sudo purge'); } }));
   push(await check.secondLaunch());
   push(await check.quit('Quit with a window open'));
