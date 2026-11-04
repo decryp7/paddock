@@ -43,16 +43,25 @@ export const ToolStore = signalStore(
       async install(): Promise<void> {
         if (store.running()) return;
         patchState(store, { running: true, jobId: null, actionError: null, cancelled: false });
+        let finished = false;
         run = starter.run({ installTool: { tool: 'smartmontools' } }, (jobId) => patchState(store, { jobId }));
         try {
           const out = await run.result;
           if (out === null) patchState(store, { cancelled: true });
+          else finished = true;
         } catch (e) {
           patchState(store, { actionError: toCommandError(e).message });
         } finally {
           run = null;
           patchState(store, { running: false, jobId: null });
           await load();
+          // The job said done; if the card still does not see the tool, say so and why: never a silent "Not installed" (ER-27).
+          const offer = store.offer();
+          if (finished && store.error() === null && offer !== null && !(typeof offer.state === 'object' && 'installed' in offer.state)) {
+            patchState(store, {
+              actionError: `The install finished, but Dyno cannot see ${offer.name} yet (the helper did not list it). Press Check again; if it stays like this, update the helper in Settings and send the log.`,
+            });
+          }
         }
       },
       async cancel(): Promise<void> {

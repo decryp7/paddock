@@ -10,7 +10,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::smart::{SmartReader, ToolInstaller};
 use dyno_platform::runner::{SystemRunner, Tool, ToolOutput, ToolRunner};
 use dyno_platform::smart_reader::SmartctlReader;
-use dyno_platform::tool_install::{install, InstallPorts, InstallRoots};
+use dyno_platform::tool_install::{install, smartctl_path, InstallPorts, InstallRoots, PINS};
 use paddock_jobs::time::Clock;
 use std::io::Write;
 use std::path::PathBuf;
@@ -48,6 +48,23 @@ impl ToolInstaller for PinnedInstaller {
         };
         let mut ports = self.ports.lock().unwrap_or_else(|p| p.into_inner());
         install(ports.as_mut(), &self.clock, self.host, tool, bytes, &self.roots).map_err(PlatformError::from)
+    }
+
+    fn installed(&self) -> Vec<ToolStatus> {
+        let tools = std::path::Path::new(&self.roots.tools);
+        PINS.iter()
+            .filter(|p| p.host == self.host)
+            .filter(|p| {
+                let path = smartctl_path(tools, p.version);
+                let found = path.is_file();
+                log::info!(Smartctl = path.to_string_lossy().as_ref(), Found = found; "Helper: looked for an installed tool");
+                found
+            })
+            .map(|p| ToolStatus {
+                tool: p.tool,
+                installed: Some(p.version.to_string()),
+            })
+            .collect()
     }
 }
 
@@ -94,6 +111,15 @@ impl InstallPorts for FsPorts {
     fn clear_staging(&mut self) {
         let _ = std::fs::remove_dir_all(&self.staging);
     }
+
+    fn remove_dir(&mut self, path: &str) {
+        // `path` is the pin's own folder under the helper's tools folder, built by `install`; never a caller's text.
+        if let Err(e) = std::fs::remove_dir_all(path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(Error = e.to_string().as_str(); "InstallTool: an older install folder could not be removed");
+            }
+        }
+    }
 }
 
 /// The smartctl reader of this system: the helper's own copy on Windows (`InstallTool` put it there), the distribution's on
@@ -101,7 +127,8 @@ impl InstallPorts for FsPorts {
 pub fn smart_reader(host: HelperHost, tools_dir: &std::path::Path, clock: Arc<dyn Clock>) -> Box<dyn SmartReader> {
     match host {
         HelperHost::Windows => {
-            let path = tools_dir.join("smartmontools-7.5").join("bin").join("smartctl.exe");
+            let version = dyno_platform::tool_install::pin_for(ToolKind::Smartmontools, host).map_or("", |p| p.version);
+            let path = smartctl_path(tools_dir, version);
             Box::new(SmartctlReader::new(
                 path.to_string_lossy().into_owned(),
                 Box::new(SystemRunner),
@@ -186,6 +213,10 @@ impl ToolInstaller for NotHere {
     fn install(&self, _tool: ToolKind, _bytes: &[u8]) -> Result<ToolStatus, PlatformError> {
         Err(PlatformError::Unsupported(self.0.into()))
     }
+
+    fn installed(&self) -> Vec<ToolStatus> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]
@@ -210,6 +241,7 @@ mod tests {
             true
         }
         fn clear_staging(&mut self) {}
+        fn remove_dir(&mut self, _: &str) {}
     }
 
     fn roots() -> InstallRoots {
@@ -229,6 +261,31 @@ mod tests {
             linux.install(ToolKind::Smartmontools, b"x").unwrap_err(),
             PlatformError::Unsupported(_)
         ));
+    }
+
+    #[test]
+    fn the_tools_list_comes_from_the_tools_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tools");
+        let roots = InstallRoots {
+            staging: dir.path().join("staging").to_string_lossy().into_owned(),
+            tools: tools.to_string_lossy().into_owned(),
+        };
+        let i = PinnedInstaller::new(HelperHost::Windows, roots, Box::new(Fake), Arc::new(FakeClock::default()));
+        assert!(i.installed().is_empty(), "nothing in the folder is nothing installed");
+        std::fs::create_dir_all(tools.join("smartmontools-7.5").join("bin")).unwrap();
+        assert!(i.installed().is_empty(), "a folder without smartctl.exe is not an install");
+        let expected = smartctl_path(&tools, "7.5");
+        std::fs::create_dir_all(expected.parent().unwrap()).unwrap();
+        std::fs::write(&expected, b"x").unwrap();
+        assert_eq!(
+            i.installed(),
+            vec![ToolStatus {
+                tool: ToolKind::Smartmontools,
+                installed: Some("7.5".into())
+            }]
+        );
+        assert!(NotHere("x").installed().is_empty());
     }
 
     #[test]

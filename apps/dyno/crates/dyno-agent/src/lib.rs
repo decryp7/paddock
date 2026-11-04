@@ -28,6 +28,7 @@ pub mod helper_centre;
 pub mod helper_link;
 pub mod helper_os;
 pub mod helper_peer;
+pub mod helper_wear;
 pub mod home_ip;
 pub mod instance;
 pub mod intel_centre;

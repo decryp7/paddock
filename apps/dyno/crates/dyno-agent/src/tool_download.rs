@@ -11,6 +11,7 @@ use crate::tool_pins::ToolPin;
 use dyno_core::helper_requests::ToolKind;
 use dyno_core::helper_wire::ToolStatus;
 use dyno_core::ports::PlatformError;
+use dyno_core::tool_offer::{InstalledTool, ToolSource};
 use paddock_download::{Config, DownloadError, Downloader, Integrity, Request, Sha256Digest};
 use paddock_jobs::{JobContext, JobError, Phase};
 use paddock_net::{Egress, Policy, Reach, SystemLookup};
@@ -189,7 +190,7 @@ pub fn offer(shared: &crate::agent::Shared) -> dyno_core::tool_offer::ToolOffer 
         source_url: p.source_url.clone(),
     });
     let ready = shared.helper.status().state == HelperState::Ready;
-    let installed = if ready {
+    let from_helper = if ready {
         shared
             .helper
             .link()
@@ -197,10 +198,36 @@ pub fn offer(shared: &crate::agent::Shared) -> dyno_core::tool_offer::ToolOffer 
             .into_iter()
             .find(|t| t.tool == ToolKind::Smartmontools)
             .and_then(|t| t.installed)
+            .map(|version| InstalledTool {
+                version,
+                source: ToolSource::Helper,
+            })
     } else {
         None
     };
-    dyno_core::tool_offer::smartmontools_offer(host, pin, ready, installed)
+    // The helper's copy is what a ready helper reads with; without one, the copy this account can run (Dyno's own, or a
+    // person's own install) is what the local reader uses, so the card names that one.
+    let installed = from_helper.or_else(|| local_copy(&shared.dirs.tools()));
+    let offer = dyno_core::tool_offer::smartmontools_offer(host, pin, ready, installed);
+    log::info!(
+        target: "dyno::tools",
+        "Tool offer: helper ready {ready}, state {:?}, source {:?}",
+        offer.state,
+        offer.source
+    );
+    offer
+}
+
+/// The smartctl this computer would read with on its own, and which kind of copy it is.
+fn local_copy(own_tools: &std::path::Path) -> Option<InstalledTool> {
+    let path = dyno_platform::hardware::locate_smartctl(own_tools)?;
+    let version = dyno_platform::hardware::smartctl_version(&path).unwrap_or_else(|| "unknown".to_string());
+    let source = if path.starts_with(own_tools) {
+        ToolSource::Dyno
+    } else {
+        ToolSource::Own(path.to_string_lossy().into_owned())
+    };
+    Some(InstalledTool { version, source })
 }
 
 /// The job body of `InstallTool`: the pin of this system, the real door, the staging folder under the cache folder, the helper.
@@ -234,12 +261,54 @@ pub fn install(shared: &Arc<crate::agent::Shared>, ctx: &JobContext, tool: ToolK
     }
     let downloader = ToolDownloader::real(&pin, Arc::new(paddock_jobs::time::SystemClock))?;
     let staging = shared.dirs.tool_staging();
-    Ok(downloader.run(ctx, &pin, &staging, shared.helper.link())?)
+    let helper_version = shared.helper.status().version.unwrap_or_else(|| "unknown".into());
+    log::info!(target: "dyno::tools", "Installing {tool:?} through the helper (helper version {helper_version})");
+    let status = downloader.run(ctx, &pin, &staging, shared.helper.link())?;
+    // The helper said it installed the tool; its own list must show it, or the card would go back to "Not installed" with no
+    // message (an older helper answers an empty list).
+    ensure_listed(&shared.helper.link().tools(), tool, &helper_version)?;
+    log::info!(target: "dyno::tools", "Installed {tool:?} through the helper (helper version {helper_version}); reading disk health again");
+    // The wear reader looks again now (through the helper), not at its next slow cycle (hours away).
+    crate::hardware::request_reread(shared, Duration::ZERO);
+    Ok(status)
+}
+
+/// Fails with the reason when the helper's list does not show `tool` after an install.
+pub fn ensure_listed(tools: &[ToolStatus], tool: ToolKind, helper_version: &str) -> Result<(), JobError> {
+    if tools.iter().any(|t| t.tool == tool && t.installed.is_some()) {
+        return Ok(());
+    }
+    log::warn!(target: "dyno::tools", "The helper (version {helper_version}) installed {tool:?} but does not list it");
+    Err(JobError::Failed(format!(
+        "The helper (version {helper_version}) says it installed the tool but does not list it. Turn the helper off and on again in Settings to update it, then try again; send the log if it persists."
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_helper_that_installed_but_does_not_list_the_tool_is_an_error_with_the_next_step() {
+        let listed = [ToolStatus {
+            tool: ToolKind::Smartmontools,
+            installed: Some("7.5".into()),
+        }];
+        assert!(ensure_listed(&listed, ToolKind::Smartmontools, "1.0.0").is_ok());
+        for empty in [
+            &[][..],
+            &[ToolStatus {
+                tool: ToolKind::Smartmontools,
+                installed: None,
+            }][..],
+        ] {
+            let e = ensure_listed(empty, ToolKind::Smartmontools, "1.0.0").unwrap_err().to_string();
+            assert!(
+                e.contains("1.0.0") && e.contains("does not list it") && e.contains("try again"),
+                "{e}"
+            );
+        }
+    }
     use dyno_core::helper::HelperHost;
     use paddock_jobs::time::FakeClock;
     use paddock_jobs::{EventSink, JobRegistry, JobSnapshot};

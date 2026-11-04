@@ -19,6 +19,27 @@ pub enum OfferState {
     NotHere(String),
 }
 
+/// Which copy of the tool Dyno uses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolSource {
+    /// The copy the helper installed (read through the helper).
+    Helper,
+    /// Dyno's own copy in its tools folder.
+    Dyno,
+    /// A copy the person installed themselves, at this path.
+    Own(String),
+}
+
+/// A tool that is installed, with the copy Dyno uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledTool {
+    /// The version.
+    pub version: String,
+    /// Which copy.
+    pub source: ToolSource,
+}
+
 /// What the Settings card shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +60,8 @@ pub struct ToolOffer {
     pub source_url: String,
     /// What the card can do.
     pub state: OfferState,
+    /// Which copy Dyno uses, when it is installed.
+    pub source: Option<ToolSource>,
 }
 
 /// What the pin says about the file (absent where the tool has no download for this system).
@@ -59,8 +82,8 @@ pub struct PinFacts {
 const NAME: &str = "smartmontools";
 const SOURCE: &str = "https://www.smartmontools.org";
 
-/// The offer for smartmontools on `host`. `helper_ready` is whether the helper answers; `installed` is the version it holds.
-pub fn smartmontools_offer(host: HelperHost, pin: Option<PinFacts>, helper_ready: bool, installed: Option<String>) -> ToolOffer {
+/// The offer for smartmontools on `host`. `helper_ready` is whether the helper answers; `installed` is the copy Dyno uses (the helper's, Dyno's own or the person's).
+pub fn smartmontools_offer(host: HelperHost, pin: Option<PinFacts>, helper_ready: bool, installed: Option<InstalledTool>) -> ToolOffer {
     let base = |state: OfferState, pin: Option<PinFacts>| {
         let (version, size, from, licence, source_url) = pin.map_or(
             (String::new(), 0, String::new(), "GPL-2.0-or-later".to_string(), SOURCE.to_string()),
@@ -75,10 +98,14 @@ pub fn smartmontools_offer(host: HelperHost, pin: Option<PinFacts>, helper_ready
             licence,
             source_url,
             state,
+            source: None,
         }
     };
-    if let Some(v) = installed {
-        return base(OfferState::Installed(v), pin);
+    if let Some(t) = installed {
+        return ToolOffer {
+            source: Some(t.source),
+            ..base(OfferState::Installed(t.version), pin)
+        };
     }
     match (host, pin) {
         (HelperHost::Windows, Some(p)) if helper_ready => base(OfferState::Available, Some(p)),
@@ -125,10 +152,24 @@ mod tests {
     #[test]
     fn an_installed_tool_shows_its_version_on_every_system() {
         for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
-            assert_eq!(
-                smartmontools_offer(host, pin(), true, Some("7.5".into())).state,
-                OfferState::Installed("7.5".into())
-            );
+            let o = smartmontools_offer(host, pin(), true, Some(installed("7.5", ToolSource::Helper)));
+            assert_eq!(o.state, OfferState::Installed("7.5".into()));
+            assert_eq!(o.source, Some(ToolSource::Helper));
+        }
+    }
+
+    #[test]
+    fn a_users_own_install_is_installed_too_and_says_where_it_is_even_without_the_helper() {
+        let own = installed("7.5", ToolSource::Own(r"C:\Program Files\smartmontools\bin\smartctl.exe".into()));
+        let o = smartmontools_offer(HelperHost::Windows, pin(), false, Some(own));
+        assert_eq!(o.state, OfferState::Installed("7.5".into()));
+        assert!(matches!(o.source, Some(ToolSource::Own(p)) if p.contains("Program Files")));
+    }
+
+    fn installed(version: &str, source: ToolSource) -> InstalledTool {
+        InstalledTool {
+            version: version.into(),
+            source,
         }
     }
 

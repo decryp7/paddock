@@ -36,6 +36,7 @@ pub mod readability;
 pub mod runner;
 pub mod sensors;
 pub mod smart_reader;
+pub mod smartctl_search;
 pub mod tool_install;
 pub mod toolpath;
 #[cfg(unix)]

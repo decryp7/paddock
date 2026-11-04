@@ -51,6 +51,7 @@ use serde::{Deserialize, Serialize};
 ///   `Reply::{Wol, WolCandidates, WolReadiness}`, `Message::WolChanged`, `JobSpec::WolWake` and `JobOutput::Wol` are new;
 /// - scheduled wake (ADR 0032 section 5): `Request::{PowerWakes, PowerSetWake, PowerCancelWake}`, `Reply::PowerWakes` and
 ///   `Message::WakesChanged` are new;
+/// - disk-health tool: `ToolOffer` gained `source` (which copy of smartmontools Dyno uses); the helper's `Info` now lists its tools;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
 pub const PROTOCOL_VERSION: u32 = 4;
@@ -1657,6 +1658,15 @@ mod tests {
                 None,
                 false,
                 None,
+            ))),
+            Reply::ToolOffer(Box::new(crate::tool_offer::smartmontools_offer(
+                crate::helper::HelperHost::Windows,
+                None,
+                false,
+                Some(crate::tool_offer::InstalledTool {
+                    version: "7.5".into(),
+                    source: crate::tool_offer::ToolSource::Own("C:\\Example\\smartctl.exe".into()),
+                }),
             ))),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));

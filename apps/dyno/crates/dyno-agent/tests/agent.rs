@@ -1460,3 +1460,41 @@ mod widget_layouts {
         assert!(ask_for(&[]).is_empty());
     }
 }
+
+#[test]
+fn asking_for_the_tool_offer_reads_the_disks_again_at_once_and_not_more_than_every_30_seconds() {
+    use dyno_core::hardware::DiskWear;
+    use dyno_core::metrics::Reading;
+    use dyno_core::ports::DiskWearSource;
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    struct Counting(Arc<AtomicU32>);
+    impl DiskWearSource for Counting {
+        fn read(&mut self) -> Reading<Vec<DiskWear>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Reading::unavailable("counted")
+        }
+    }
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let reads = Arc::new(AtomicU32::new(0));
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(Counting(reads.clone())),
+        Box::new(FakeBattery(Reading::unavailable("none"))),
+    );
+    let before = reads.load(Ordering::SeqCst);
+    assert!(matches!(ask(&peer, Request::ToolOffer).unwrap(), Reply::ToolOffer(_)));
+    // The re-read runs on its own thread: wait on the condition, bounded.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while reads.load(Ordering::SeqCst) == before && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1, "\"Check again\" reads the disks again");
+    // Asked again at once: no second read (rate limit), and never two at the same time.
+    assert!(matches!(ask(&peer, Request::ToolOffer).unwrap(), Reply::ToolOffer(_)));
+    assert!(!dyno_agent::hardware::request_reread(&s, std::time::Duration::from_secs(30)));
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1);
+}

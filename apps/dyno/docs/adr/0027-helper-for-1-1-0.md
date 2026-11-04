@@ -279,13 +279,14 @@ from `17bae21b1` stays.
   phases) and **streams the bytes** to `InstallTool` over the connection (about 1.5 MB, under the 4 MB frame; the helper refuses
   more than the pinned size). The helper writes them create-new into `tools/.staging/`, hashing while it writes (rule 15), and
   checks size and SHA-256, then:
-  - Windows: runs the copy as `/S /SO <components> /D=%ProgramFiles%\Dyno Helper\tools\smartmontools-7.5` with `TEMP`/`TMP`
+  - Windows: runs the copy as `/S /SO <components> /D=%ProgramData%\Dyno\Helper\tools\smartmontools-7.5` (the helper's data folder, `HelperPaths::data_dir` + `tools`; the program itself is under `%ProgramFiles%\Dyno Helper`) with `TEMP`/`TMP`
     pointing into the staging folder (0022's P1-3). The installer's own options are
     `[/S] [/SO component,...] [/D=INSTDIR]` (`os_win32/installer.nsi`, tag `RELEASE_7_5`, read 2026-11-03); components chosen so
     no `smartd` service, no Start-menu entries and no uninstaller registry key are written: `/SO x64,smartctl,drivedb` (WP-0,
     measured: writes only `bin\smartctl.exe`, `bin\drivedb.h`, `bin\update-smart-drivedb.ps1`; no registry, service, menu or
     PATH change). WP-0 also found NVMe SMART readable on Windows **without** administrator rights, but the user decided (O2,
-    2026-11-03) that the Windows install always goes through the helper: one mechanism for NVMe and SATA.
+    2026-11-03) that the Windows install always goes through the helper: one mechanism for NVMe and SATA. **Amended 2026-11-04 (user): helper first,
+    unelevated fallback** (see `0027-amendments.md`).
   - macOS: `hdiutil attach -readonly -nobrowse -mountrandom <staging>`, `pkgutil --expand-full` of the package inside into
     staging, copy `smartctl` and `drivedb.h` into `tools/smartmontools-7.5/`, detach. Nothing is installed system-wide. If WP-0
     shows `smartctl` reads SMART on macOS without root (it does: WP-0 point 2), the agent instead runs it from its own `paddock-runtime` store and the
