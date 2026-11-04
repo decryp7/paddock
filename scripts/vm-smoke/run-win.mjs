@@ -109,8 +109,13 @@ async function main(argv) {
       log(`vmx: VNC on port ${VNC_PORT} for this run`);
     }
     log('start (headless, bounded 10 min)'); lease.start();
-    if (vm(['ip'], 60_000).code !== 0) throw new Error('the VM started but has no address yet');
-    const ip = vm(['ip'], 30_000).stdout.trim().split('\n')[0];
+    // The broker returns when the hypervisor reports the guest running; SSH and the DHCP lease come a little later (bounded 5 min).
+    let ip = '';
+    for (let i = 0; i < 100 && !ip; i++) {
+      if (vm(['ssh', 'exit 0'], 20_000).code === 0) ip = vm(['ip'], 30_000).stdout.trim().split('\n')[0];
+      else await sleep(3000);
+    }
+    if (!ip) throw new Error('SSH did not answer within 5 minutes of the start (the guest is running; see the VM log)');
     log(`guest ${ip}; waiting for the console session (bounded 6 min)`);
     let session = false;
     for (let i = 0; i < 90 && !session; i++) {

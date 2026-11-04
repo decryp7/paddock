@@ -657,6 +657,20 @@ fn host_load(runner: &dyn Runner) -> Option<f64> {
         .find_map(|w| w.trim_matches(|c| c == '{' || c == '}').parse::<f64>().ok())
 }
 
+/// Runs the preflight; when the only problem is lock folders VMware has not removed yet (a guest that was just powered off), waits a
+/// few seconds and looks again, so a stop followed at once by a revert is not refused for a lock that is about to go.
+fn preflight_settled(clock: &mut dyn Clock, mut look: impl FnMut() -> Result<Preflight, String>) -> Result<Preflight, String> {
+    let mut p = look()?;
+    for _ in 0..6 {
+        if p.ok() || !p.problems.iter().all(|m| m.starts_with("leftover lock folders")) {
+            break;
+        }
+        clock.sleep(Duration::from_secs(5));
+        p = look()?;
+    }
+    Ok(p)
+}
+
 /// The command with its dependencies passed in.
 pub fn run_with(cmd: &VmCommand, env: &Env, runner: &dyn Runner, clock: &mut dyn Clock, err: &mut dyn Write) -> Result<Report, CliError> {
     let store = LeaseStore::new(&env.state);
@@ -860,7 +874,7 @@ pub fn run_with(cmd: &VmCommand, env: &Env, runner: &dyn Runner, clock: &mut dyn
                 return Err(CliError::refused(format!("{} is a base image and is never started", l.vm)));
             }
             g.repair_disk_name(&mut journal, lease).map_err(CliError::failure)?;
-            let p = g.preflight(Intent::Change, true).map_err(CliError::failure)?;
+            let p = preflight_settled(clock, || g.preflight(Intent::Change, true)).map_err(CliError::failure)?;
             journal.line(
                 lease,
                 &format!("preflight: {}", if p.ok() { "passed".to_string() } else { p.problems.join("; ") }),
@@ -924,9 +938,7 @@ pub fn run_with(cmd: &VmCommand, env: &Env, runner: &dyn Runner, clock: &mut dyn
                     l.vm
                 )));
             }
-            let p = g
-                .preflight(Intent::Change, !matches!(g.kind, Kind::Tart))
-                .map_err(CliError::failure)?;
+            let p = preflight_settled(clock, || g.preflight(Intent::Change, !matches!(g.kind, Kind::Tart))).map_err(CliError::failure)?;
             // A Tart revert replaces the clone, so it may run (the adapter stops it); a Fusion revert needs a guest that is off.
             let blocking: Vec<&String> = p
                 .problems
@@ -1168,6 +1180,34 @@ mod tests {
         fn snapshots(&self) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
+    }
+
+    #[test]
+    fn a_lock_that_is_about_to_go_is_waited_for_but_other_problems_are_not() {
+        let lock = || Preflight {
+            problems: vec!["leftover lock folders with no running guest: x.lck".into()],
+            notes: vec![],
+        };
+        let mut clock = FakeClock::new();
+        let mut looks = 0;
+        let p = preflight_settled(&mut clock, || {
+            looks += 1;
+            Ok(if looks < 3 { lock() } else { Preflight::default() })
+        })
+        .unwrap();
+        assert!(p.ok() && looks == 3 && clock.elapsed() == Duration::from_secs(10));
+        // A lock that never goes is reported after the bounded wait.
+        let mut clock = FakeClock::new();
+        assert!(!preflight_settled(&mut clock, || Ok(lock())).unwrap().ok());
+        assert_eq!(clock.elapsed(), Duration::from_secs(30));
+        // Anything else is reported at once.
+        let mut clock = FakeClock::new();
+        let other = || Preflight {
+            problems: vec!["the guest is already running".into()],
+            notes: vec![],
+        };
+        assert!(!preflight_settled(&mut clock, || Ok(other())).unwrap().ok());
+        assert_eq!(clock.elapsed(), Duration::ZERO);
     }
 
     #[test]
