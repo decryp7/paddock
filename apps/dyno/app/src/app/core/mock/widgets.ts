@@ -721,7 +721,7 @@ function accepted(kind: DashboardKind): Metric[] {
 }
 
 /** What the choosers offer (the engine's `widget_choices`, imitated). */
-export function mockWidgetChoices(): WidgetChoices {
+export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = { formats: ['stacked', 'line'], labelInIcon: true, note: null }): WidgetChoices {
   const title = (m: Metric) => METRIC_TITLES.find(([x]) => x === m)?.[1] ?? String(m);
   const choice = (metric: Metric) => ({ metric, title: title(metric) });
   return {
@@ -736,6 +736,7 @@ export function mockWidgetChoices(): WidgetChoices {
       return { kind, default: (kind === 'number' ? { number: { metric, unit: '%', label: '', format: 'stacked' } } : { [kind]: { metric } }) as MenuBarItem };
     }),
     menuBarMetrics: METRIC_TITLES.map(([m]) => choice(m)),
+    number: numberSupport,
   };
 }
 

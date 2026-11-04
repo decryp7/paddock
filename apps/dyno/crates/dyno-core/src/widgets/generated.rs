@@ -72,6 +72,7 @@ fn types() -> String {
         MenuBarItem::decl(),
         MenuBarKind::decl(),
         crate::widgets::menu_bar::NumberFormat::decl(),
+        crate::widgets::number_support::NumberSupport::decl(),
         // What the popup's widgets show.
         crate::widgets::dashboard::ValueTone::decl(),
         crate::counters::CounterUnit::decl(),

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
+import { mockWidgetChoices } from '../../core/mock/widgets';
 import { provideIcons } from '../../shared/icons';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
@@ -171,5 +172,46 @@ describe('dy-menu-bar-items', () => {
     const choices = TestBed.inject(WidgetChoicesStore);
     expect(choices.menuBarDefault('ring')).toEqual({ ring: { metric: 'cpuTotal' } });
     expect(choices.menuBarMetrics().map((m) => m.title)).toContain('Network down');
+  });
+});
+
+describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
+  it('says the limit the engine holds, once, and the counter agrees', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    const limit = TestBed.inject(WidgetLayouts).menuBar()!.catalogue.surface.maxPlacements;
+    expect(el.querySelector('p.sub')?.textContent).toContain(`Add up to ${limit},`);
+    expect(el.querySelector('.pd-wc-count')?.textContent?.trim()).toBe(`4 of ${limit}`);
+    expect(el.textContent).not.toMatch(/up to four/i);
+  });
+
+  it('offers both formats where the tray draws both', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    const trigger = el.querySelector<HTMLElement>('mat-select[aria-label^="Format of"]')!;
+    expect(trigger.getAttribute('aria-disabled')).not.toBe('true');
+    expect(el.querySelector('p.note[role="note"]')).toBeNull();
+  });
+
+  it('disables the format choice and gives the engine\'s reason where the tray cannot draw it', async () => {
+    const why = 'Tray icons are 16 px here, too small for a label above the number. The label shows in the tooltip.';
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+    vi.spyOn(mock, 'widgetChoices').mockResolvedValue(mockWidgetChoices({ formats: ['stacked'], labelInIcon: false, note: why }));
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+    const f = TestBed.createComponent(MenuBarItems);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    expect(el.querySelector('mat-select[aria-label^="Format of"]')!.getAttribute('aria-disabled')).toBe('true');
+    expect(el.querySelector('p.note[role="note"]')?.textContent?.trim()).toBe(why);
   });
 });
