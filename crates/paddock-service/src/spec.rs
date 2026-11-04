@@ -78,6 +78,7 @@ pub struct ServiceSpec {
     memory_high_mb: Option<u32>,
     docs_url: Option<String>,
     hardening: Option<Hardening>,
+    windows_start: WindowsStart,
 }
 
 impl ServiceSpec {
@@ -104,6 +105,7 @@ impl ServiceSpec {
                 memory_high_mb: None,
                 docs_url: None,
                 hardening: None,
+                windows_start: WindowsStart::Delayed,
             },
         }
     }
@@ -184,6 +186,30 @@ impl ServiceSpec {
     /// What a privileged service gives up (Windows token privileges, who may start it, the systemd sandbox).
     pub fn hardening(&self) -> Option<&Hardening> {
         self.hardening.as_ref()
+    }
+    /// When the Service Control Manager starts a Windows service after boot.
+    pub fn windows_start(&self) -> WindowsStart {
+        self.windows_start
+    }
+}
+
+/// When Windows starts an automatic service after boot (`sc create start=`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowsStart {
+    /// `delayed-auto`: a minute or two after the boot, when the load of the start-up has eased (the default).
+    #[default]
+    Delayed,
+    /// `auto`: with the boot itself, for a service people wait for at log-in (a helper the app expects).
+    Auto,
+}
+
+impl WindowsStart {
+    /// The word `sc.exe` takes.
+    pub fn sc_word(self) -> &'static str {
+        match self {
+            WindowsStart::Delayed => "delayed-auto",
+            WindowsStart::Auto => "auto",
+        }
     }
 }
 
@@ -268,6 +294,12 @@ impl SpecBuilder {
     /// What a privileged service gives up ([`Hardening`]); only for [`Kind::SystemService`].
     pub fn hardening(mut self, hardening: Hardening) -> Self {
         self.spec.hardening = Some(hardening);
+        self
+    }
+
+    /// When Windows starts the service after boot ([`WindowsStart::Delayed`] unless this is called).
+    pub fn windows_start(mut self, start: WindowsStart) -> Self {
+        self.spec.windows_start = start;
         self
     }
 

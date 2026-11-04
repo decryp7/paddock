@@ -19,7 +19,7 @@ use paddock_service::privileged::{
     assess as assess_installed, backend_for, layout, run_elevated, Assessment, BundledHelper, ElevationError, InstallError,
     InstalledHelper, Installer, Layout, ProtectedFiles, Report, Roots,
 };
-use paddock_service::spec::{Kind, Restart, ServiceSpec};
+use paddock_service::spec::{Kind, Restart, ServiceSpec, WindowsStart};
 use paddock_service::{Elevator, ServiceError, System};
 use std::path::{Path, PathBuf};
 
@@ -73,6 +73,8 @@ pub fn spec() -> ServiceSpec {
         .restart(Restart::OnFailure)
         .docs_url("https://dev.decryptology.net/decryp7/dyno")
         .hardening(hardening)
+        // Not delayed: a delayed start leaves the helper down for a minute or two after every boot (the card said Repair).
+        .windows_start(WindowsStart::Auto)
         .build()
         .unwrap_or_else(|e| unreachable!("the helper's constant spec is valid: {e}"))
 }
