@@ -17,6 +17,17 @@ use std::sync::Arc;
 pub struct Slot {
     report: BackupReport,
     checking: bool,
+    /// Where the helper stood ([`ExtrasCentre::helper_epoch`]) when the report was made: a report made while it was Off is read
+    /// again once it changed (Windows VM check 22).
+    helper_epoch: u64,
+}
+
+/// Whether the page's poll should start a check: nothing was ever checked, or the helper changed since the report was made
+/// (and no check runs).
+fn wants_check(x: &ExtrasCentre) -> bool {
+    let epoch = x.helper_epoch();
+    let slot = lock(&x.backup);
+    !slot.checking && (slot.report.checked_at.is_none() || slot.helper_epoch != epoch)
 }
 
 /// Finds backup tools through the login-shell `PATH` and the user's per-tool folders.
@@ -64,12 +75,22 @@ impl BackupEnv for Env<'_> {
 pub fn report(shared: &Arc<Shared>) -> BackupReport {
     let x = &shared.extras;
     let start = {
-        let mut slot = lock(&x.backup);
-        let want = slot.report.checked_at.is_none() && !slot.checking;
+        let want = wants_check(x);
         if want {
-            slot.checking = true;
+            let mut slot = lock(&x.backup);
+            // Another poll may have started it between the two locks.
+            if slot.checking {
+                false
+            } else {
+                if slot.report.checked_at.is_some() {
+                    log::info!(target: "dyno_agent::backup", "backup report is {} s old and the helper changed since (epoch {} to {}): checking again", slot.report.checked_at.map_or(0, |t| now().0.saturating_sub(t.0) / 1000), slot.helper_epoch, x.helper_epoch());
+                }
+                slot.checking = true;
+                true
+            }
+        } else {
+            false
         }
-        want
     };
     if start {
         let spawned = first_check(shared.clone(), |s| {
@@ -173,6 +194,8 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
     };
     let resolver = lock(&x.resolver).clone();
     let t = now();
+    let epoch = x.helper_epoch();
+    let began = std::time::Instant::now();
     let env = Env {
         resolver: &resolver,
         settings: &settings,
@@ -218,7 +241,13 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
     if settings.alert_when_stale {
         raise_alarms(shared, &statuses, t);
     }
+    log::info!(
+        target: "dyno_agent::backup",
+        "backup check done: {} tools, read via {:?}, helper epoch {}, {} ms",
+        statuses.len(), via, epoch, began.elapsed().as_millis()
+    );
     let mut slot = lock(&x.backup);
+    slot.helper_epoch = epoch;
     slot.report = BackupReport {
         statuses,
         checked_at: Some(t),
@@ -349,6 +378,27 @@ mod tests {
         let (status, via) = status(true, vec![Ok(HelperReply::Extras(answer))]).expect("the helper reading");
         assert_ne!(status.state, BackupState::CannotCheck, "{status:?}");
         assert_eq!(via, ReadVia::Helper);
+    }
+
+    /// Windows VM check 22 (2026-11-04): the report was made while the helper was Off ("Checked 7 min ago", "Turn on Administrator
+    /// readings"), the helper was then turned on, and the page kept showing the old report: no chip, no versions.
+    #[test]
+    fn a_report_made_before_the_helper_changed_is_checked_again() {
+        let x = ExtrasCentre::new(false);
+        x.use_backup_tools(Arc::new(Refusing));
+        let c = centre(&Net::new(true, vec![]), &FakeClock::new());
+        x.use_helper(Arc::new(crate::helper_first::CentrePort(c.clone())));
+        assert!(wants_check(&x), "nothing was ever checked");
+        {
+            let mut slot = lock(&x.backup);
+            slot.report.checked_at = Some(Timestamp(1));
+            slot.helper_epoch = x.helper_epoch();
+        }
+        assert!(!wants_check(&x), "the same helper standing is not read again");
+        c.forget_ready();
+        assert!(wants_check(&x), "the helper was turned on or off since the report");
+        lock(&x.backup).checking = true;
+        assert!(!wants_check(&x), "a check that runs is waited for");
     }
 
     #[test]

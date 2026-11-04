@@ -10,7 +10,8 @@
 //!   echo of our own `set_size` is never mistaken for the user.
 //! * Only [`SizeState::on_user_resize_started`] (the OS says "the user is resizing": `WM_SIZING`, live resize), or an
 //!   unexplained `Resized` on a platform that has no such signal, makes the window [`SizeMode::Manual`] for the rest of
-//!   the opening. A move never does.
+//!   the opening, as does the OS saying the window is snapped ([`SizeState::on_snapped`], which a snap that changes no size
+//!   needs). A move never does.
 //! * The window is shown once the measure named by `dialog_ready` has been applied and its `Resized` has arrived, or at
 //!   the show deadline.
 
@@ -360,6 +361,12 @@ impl SizeState {
         plan
     }
 
+    /// The OS says the window is arranged (an Aero snap, `IsWindowArranged`): the size is the user's for this opening, even
+    /// when the snap changed no size and so sent no `Resized` (a viewer floor wider than half the screen at 150 %, VM check 7).
+    pub fn on_snapped(&mut self) -> Plan {
+        self.on_user_resize_started()
+    }
+
     /// The window moved, perhaps to another monitor (`env` is the new one): the clamp is made again; the mode never
     /// changes.
     pub fn on_moved(&mut self, env: Env) -> Plan {
@@ -606,6 +613,20 @@ mod tests {
         // The excuse is for that one resize: the next unexplained one is the user's.
         let snap = s.on_resized(700, 800);
         assert_eq!(snap.mode_change, Some(SizeMode::Manual));
+    }
+
+    #[test]
+    fn a_snap_that_changes_no_size_is_still_the_user() {
+        // Windows at 150 %: the viewer floor (680 logical = 1020 physical) is wider than half the screen, so Win+Left moves the
+        // window and sends no Resized at all (VM check 7, 2026-11-04). The OS says "arranged"; the size is the user's.
+        let mut s = state(Kind::Viewer, 1.5, true);
+        let p = s.on_measure(1, 1, measured(300.0));
+        apply(&mut s, &p);
+        assert_ne!(s.mode(), SizeMode::Manual);
+        let snap = s.on_snapped();
+        assert_eq!(snap.mode_change, Some(SizeMode::Manual));
+        assert_eq!(s.mode(), SizeMode::Manual);
+        assert_eq!(s.on_snapped().mode_change, None, "said once");
     }
 
     #[test]
