@@ -164,10 +164,14 @@ Accepted by the user on 2026-11-04 with ADR 0012:
   quarantined. The others are not: the no-retry rule applies to the culprit, whose failure is deterministic. The worker also reports
   its peak memory after each batch.
 - **Rules.** The worker runs the structural review rules (ADR 0007) on the tree it has just parsed and returns their results with the
-  facts (ADR 0012 D9). A crash or stall in a rule is handled as in "Crash and stall policy" above.
-- **Pool size.** The Auto default for parse workers becomes `min(cores − 1, memory budget / per-worker peak, 8)` (ADR 0012 D7), with
-  the per-worker peak measured at start and updated from the reports. The 1 GiB cap per worker stays.
-- **The shortcut becomes the manifest** (ADR 0012 D1): equal size, mtime, ctime and file id mean unchanged; the racy rule stays.
+  facts (ADR 0012 D9). A crash or stall during the rules replays the file without rules in a fresh worker, keeps its facts, and
+  quarantines only the pair (file content, rule pack); a crash in the grammar quarantines the file as in "Crash and stall policy".
+- **Pool size and caps.** The Auto default for parse workers becomes `min(cores − 1, worker share / per-worker peak, 8)` (ADR 0012
+  D7), with the per-worker peak measured at start and updated from the reports. The pool shrinks by one worker when the host plus its
+  workers exceed the memory budget, and grows again below 80% of it. The per-worker memory cap becomes `min(1 GiB, worker share / 2)`.
+- **I/O threads.** The read pass's Auto default is chosen per volume (SSD 4, rotational 1 to 2, network 2; ADR 0012 D7).
+- **The shortcut becomes the manifest** (ADR 0012 D1): equal size, modification time, change time and file id mean unchanged; the
+  racy rule stays, and remote and FAT volumes check content by default.
 - **Phases.** "Reading code" is followed by "Building the graph" (the snapshot of ADR 0012 D5). That phase has its own scale and is
   cancellable, because the previous snapshot stays in place until the rename.
 - **The watcher** is unchanged: debounced runs, one at a time. A run is now the manifest comparison, reads for changed stat only,

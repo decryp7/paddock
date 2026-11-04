@@ -114,15 +114,21 @@ small generated workspaces.
 
 Accepted by the user on 2026-11-04 with ADR 0012, which replaces these parts of this ADR:
 
-- **Schema.** Schema v1's per-row fact tables (`symbols`, `imports`, `calls`, `chunks`) are replaced by schema v2 (ADR 0012 D4):
-  the manifest, `generation_files` (path, `FileId` and fact key per generation), the per-content fact blobs (`facts` appended in
-  insertion order, `fact_keys` as a narrow index; benchmark B9 may move the blobs into Arrow IPC segment files) and quarantine. The
-  rebuild rule of this ADR stays: a schema v1 file is moved aside and rebuilt, with no migration before v1.
-- **Change plan.** `plan_changes` keeps its rules (unchanged, modified, renamed by content key, added, deleted; a rename keeps the
-  `FileId`). Its input is now the `ChangeSet` of the manifest (ADR 0012 D1), whose stat adds ctime and the file id to size and mtime.
+- **Schema and files.** Schema v1's per-row fact tables (`symbols`, `imports`, `calls`, `chunks`) are replaced by schema v2 (ADR
+  0012 D4): a per-folder catalog (manifest, generations, `generation_files` with path, `FileId` and fact key, leases, quarantine)
+  that attaches one fact store per repository identity (`facts` appended in insertion order, `fact_keys` as a narrow index; benchmark
+  B9 may move the blobs into Arrow IPC segment files behind the `FactStore` port). The rebuild rule of this ADR stays: a schema v1 file
+  is moved aside and rebuilt, with no migration before v1.
+- **Content keys.** The fact cache is keyed by a BLAKE3 hash of the raw bytes (ADR 0012 D3). `Fingerprint` (normalised SHA-256) now
+  serves rename detection only and is computed lazily, for added files only when unmatched deleted files remain to pair.
+- **Change plan.** `plan_changes` keeps its rules (unchanged, modified, renamed by `Fingerprint`, added, deleted; a rename keeps the
+  `FileId`). Its input is now the `ChangeSet` of the manifest (ADR 0012 D1), whose stat adds the change time and the file id to size
+  and modification time, and whose paths are compared by `path_key` (case-folded on case-insensitive volumes, so a case-only rename is
+  a rename).
 - **"All of a run's changes are one transaction".** Now only the swap of the generation's path-to-fact-key map is one transaction.
-  The fact blobs are content-addressed and are written as they arrive, in transactions of about 1,000. A crash or a cancel before
-  the swap leaves the previous generation readable, plus unreferenced blobs that the sweep job removes. "Build new data, then swap"
+  The fact blobs are content-addressed and are written as they arrive, in transactions of about 50 ms of work, under the run's lease.
+  A crash or a cancel before the swap leaves the previous generation readable, plus blobs that the sweep removes once the run's
+  lease is stale (ADR 0012 D6a). "Build new data, then swap"
   still holds.
 - **`symbols_in_file` and search** read the derived snapshot (ADR 0012 D5) instead of SQLite tables. The `LIKE` search over
   `lower()` goes away; names are found through the snapshot's FST.

@@ -169,4 +169,6 @@ worktree comparison or the blob ids of the working tree. The index loaders stay 
 never run, `git init` is never run in a user's folder, and no shadow repository is kept. The research note behind ADR 0012 measured
 and rejected a Git fast path: read-only status on a stale index re-hashes every file on every call, and a shadow repository is a
 second compressed copy of the code. `History` stays what this ADR made it: log, blame, read at a revision and changed files between
-revisions, for the history views and review.
+revisions, for the history views and review. One new read, within this ADR's rules: ADR 0012 D4 derives a repository's identity from
+its root commits (the parentless commits reachable from `HEAD`) and the `origin` remote's URL, read as data through the isolated gix
+open, bounded by the same walk budget, so worktrees and clones of one repository share a fact store.
