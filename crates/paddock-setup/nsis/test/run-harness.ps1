@@ -61,6 +61,23 @@ Check 'F uninstall removed the folder' (-not (Test-Path $a)) (Get-ChildItem $a -
 Check 'F uninstall calls' (($lines -match '^same-folder') -and ($lines -match '^stop-all') -and ($lines -match 'clean-run --dir .* --scope all')) ($lines -join '|')
 Check 'F uninstall removed the key' (-not (Test-Path $key)) 'key still there'
 
+# H: the uninstaller without paddock-setup.exe next to it (deleted by hand): the uninstall still works, says what it skipped,
+# and treats an in-place run as a reinstall by comparing the folders itself
+$h = Join-Path $base 'h'
+$r = Run $installer "/S /D=$h" @{}
+Remove-Item "$h\paddock-setup.exe"
+$r = Run "$h\uninstall.exe" "/S _?=$h" @{ PADDOCK_STUB_EXIT_SAME_FOLDER = '1' }
+Check 'H no setup: in-place uninstall exit 0' ($r.Code -eq 0) "code $($r.Code)"
+Check 'H no setup: says it skipped the steps' ($r.Lines -match '^NOTE paddock-setup.exe is missing') ($r.Lines -join '|')
+Check 'H no setup: no call reached the missing program' (-not ($r.Lines -match '^(stop-all|clean-run|same-folder)')) ($r.Lines -join '|')
+Check 'H no setup: the in-place run is an update by its own folder compare' ($r.Lines -match '^NOTE reinstall: treated as an update') ($r.Lines -join '|')
+$r = Run $installer "/S /D=$h" @{}
+Remove-Item "$h\paddock-setup.exe"
+$r = Run "$h\uninstall.exe" "/S" @{}
+WaitGone $h
+Check 'H no setup: a real uninstall removes the folder' (-not (Test-Path $h)) (Get-ChildItem $h -Name -ErrorAction SilentlyContinue)
+Remove-Item $key -ErrorAction SilentlyContinue
+
 # B: check-dir refused
 $b = Join-Path $base 'b'
 $r = Run $installer "/S /D=$b" @{ PADDOCK_STUB_EXIT_CHECK_DIR = '3' }

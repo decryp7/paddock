@@ -5,7 +5,6 @@
 //! it, and [`check_app`] (run by a test over every app that includes the shared installer include) fails when the generated
 //! file, the include copy or the exclusions are stale.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// A program that is in the bundle but must not be stopped (Dyno: `dyno-helper.exe`, which runs from its own protected folder).
@@ -27,36 +26,56 @@ pub struct PerMachineConfig {
     /// The exclusions.
     #[serde(default)]
     pub stop_exclusions: Vec<StopExclusion>,
+    /// The adoption's statement, per program of the stop list, that a forced end loses no more than its last unfinished write.
+    #[serde(default)]
+    pub survives_forced_end: Vec<Survival>,
+}
+
+/// One statement that a program survives a forced end, with what was checked.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Survival {
+    /// The installed file name.
+    pub image: String,
+    /// What was checked.
+    pub why: String,
 }
 
 /// Why the list cannot be made.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum PerMachineError {
     /// A configuration file is not valid JSON.
-    Json(String),
+    #[error("{file} is not valid JSON: {source}")]
+    Json {
+        /// The file.
+        file: String,
+        /// The parser's error.
+        #[source]
+        source: std::sync::Arc<serde_json::Error>,
+    },
     /// `mainBinaryName` is missing or empty.
+    #[error("tauri.conf.json has no mainBinaryName")]
     NoMainBinary,
     /// A name cannot be put in the installer's command line safely.
+    #[error("`{0}` cannot be a program file name in the stop list")]
     BadName(String),
     /// An exclusion has no reason.
+    #[error("the exclusion of `{0}` has no reason")]
     NoReason(String),
     /// An exclusion names a program that is not in the bundle (a stale exclusion).
+    #[error("the exclusion `{0}` is not in the bundle (stale)")]
     UnknownExclusion(String),
+    /// A program in the stop list has no statement that it survives a forced end.
+    #[error("`{0}` is in the stop list but has no entry in survivesForcedEnd (ADR 0053 section 3)")]
+    NoSurvivalStatement(String),
 }
 
-impl fmt::Display for PerMachineError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PerMachineError::Json(e) => write!(f, "a configuration file is not valid JSON: {e}"),
-            PerMachineError::NoMainBinary => f.write_str("tauri.conf.json has no mainBinaryName"),
-            PerMachineError::BadName(n) => write!(f, "`{n}` cannot be a program file name in the stop list"),
-            PerMachineError::NoReason(n) => write!(f, "the exclusion of `{n}` has no reason"),
-            PerMachineError::UnknownExclusion(n) => write!(f, "the exclusion `{n}` is not in the bundle (stale)"),
-        }
+impl PartialEq for PerMachineError {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_string() == other.to_string()
     }
 }
 
-impl std::error::Error for PerMachineError {}
+impl Eq for PerMachineError {}
 
 fn valid_name(n: &str) -> bool {
     !n.is_empty()
@@ -110,8 +129,31 @@ pub fn generated_nsh(images: &[String]) -> String {
     )
 }
 
-fn parse(text: &str) -> Result<serde_json::Value, PerMachineError> {
-    serde_json::from_str(text).map_err(|e| PerMachineError::Json(e.to_string()))
+fn json_error(file: &str, e: serde_json::Error) -> PerMachineError {
+    PerMachineError::Json { file: file.to_owned(), source: std::sync::Arc::new(e) }
+}
+
+fn parse(text: &str, file: &str) -> Result<serde_json::Value, PerMachineError> {
+    serde_json::from_str(text).map_err(|e| json_error(file, e))
+}
+
+fn config_of(per_machine_json: Option<&str>) -> Result<PerMachineConfig, PerMachineError> {
+    match per_machine_json {
+        Some(t) => serde_json::from_str(t).map_err(|e| json_error("per-machine.json", e)),
+        None => Ok(PerMachineConfig::default()),
+    }
+}
+
+/// Every program of the stop list has a statement that it survives a forced end (ADR 0053 section 3: each adopting app says so).
+pub fn check_survival(images: &[String], per_machine_json: Option<&str>) -> Result<(), PerMachineError> {
+    let config = config_of(per_machine_json)?;
+    for image in images {
+        let said = config.survives_forced_end.iter().any(|s| s.image.eq_ignore_ascii_case(image) && !s.why.trim().is_empty());
+        if !said {
+            return Err(PerMachineError::NoSurvivalStatement(image.clone()));
+        }
+    }
+    Ok(())
 }
 
 /// The generated file for an app from its Tauri configuration (`tauri.conf.json`, then the Windows overlay, whose
@@ -121,8 +163,8 @@ pub fn generated_from_config(
     windows_conf: Option<&str>,
     per_machine_json: Option<&str>,
 ) -> Result<String, PerMachineError> {
-    let base = parse(tauri_conf)?;
-    let overlay = windows_conf.map(parse).transpose()?;
+    let base = parse(tauri_conf, "tauri.conf.json")?;
+    let overlay = windows_conf.map(|t| parse(t, "tauri.windows.conf.json")).transpose()?;
     let main = base.get("mainBinaryName").and_then(|v| v.as_str()).unwrap_or_default();
     let ext = |v: &serde_json::Value| -> Option<Vec<String>> {
         v.pointer("/bundle/externalBin")
@@ -130,10 +172,7 @@ pub fn generated_from_config(
             .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect())
     };
     let external = overlay.as_ref().and_then(ext).or_else(|| ext(&base)).unwrap_or_default();
-    let config: PerMachineConfig = match per_machine_json {
-        Some(t) => serde_json::from_str(t).map_err(|e| PerMachineError::Json(e.to_string()))?,
-        None => PerMachineConfig::default(),
-    };
+    let config = config_of(per_machine_json)?;
     Ok(generated_nsh(&stop_images(main, &external, &config.stop_exclusions)?))
 }
 
@@ -158,6 +197,14 @@ pub fn check_app(src_tauri: &Path, canonical_include: &Path) -> Vec<String> {
     match generated {
         Err(e) => stale.push(format!("{}: {e}", src_tauri.display())),
         Ok(text) => {
+            let images: Vec<String> = text
+                .lines()
+                .find_map(|l| l.strip_prefix("!define PADDOCK_STOP_IMAGES \""))
+                .map(|l| l.trim_end_matches('"').split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            if let Err(e) = check_survival(&images, read(&windows.join("per-machine.json")).as_deref()) {
+                stale.push(format!("{}: {e}", windows.join("per-machine.json").display()));
+            }
             if read(&windows.join(GENERATED_FILE)).as_deref() != Some(text.as_str()) {
                 stale.push(format!("{} is stale (PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine)", windows.join(GENERATED_FILE).display()));
             }
@@ -165,7 +212,12 @@ pub fn check_app(src_tauri: &Path, canonical_include: &Path) -> Vec<String> {
     }
     match (read(canonical_include), read(&windows.join(INCLUDE_FILE))) {
         (Some(a), Some(b)) if a == b => {}
-        _ => stale.push(format!("{} differs from {}", windows.join(INCLUDE_FILE).display(), canonical_include.display())),
+        (Some(_), Some(_)) => stale.push(format!("{} differs from {}", windows.join(INCLUDE_FILE).display(), canonical_include.display())),
+        _ => stale.push(format!(
+            "{} or {} is missing or unreadable",
+            windows.join(INCLUDE_FILE).display(),
+            canonical_include.display()
+        )),
     }
     stale
 }

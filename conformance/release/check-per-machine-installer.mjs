@@ -60,6 +60,23 @@ export function findInstallers(dir) {
   return out.sort();
 }
 
+/** The trusted comment of a minisign signature file's text (the file is base64 of the four-line signature), or null. */
+export function trustedCommentOf(text) {
+  const t = Buffer.from(String(text).trim(), 'base64').toString('utf8');
+  return /^trusted comment: (.*)$/m.exec(t)?.[1]?.trimEnd() ?? null;
+}
+
+/** paddock-setup accepts an update only when the signed trusted comment names `<productName>_<version>_<arch>-setup.exe`. */
+export function checkSignatureName({ sig, file, product, version }) {
+  const comment = trustedCommentOf(sig);
+  if (comment === null) return [`${file}.sig is unreadable (no trusted comment)`];
+  const m = /^(.+)_(.+)_([^_]+)-setup\.exe$/.exec(file);
+  if (!m || m[1] !== product || m[2] !== version) return [`the file name ${file} is not ${product}_${version}_<arch>-setup.exe`];
+  const named = /(?:^|\t)file:(\S+)/.exec(comment)?.[1];
+  if (named === undefined) return [`${file}.sig's trusted comment has no file: name (${comment})`];
+  return named === file ? [] : [`${file}.sig's trusted comment names ${named}, expected ${file}: every update would be refused`];
+}
+
 /** What is wrong with one installer, one sentence each with the next step. */
 export function checkInstaller({ bytes, files, expectVersion, name }) {
   const f = [];
@@ -73,7 +90,11 @@ export function checkInstaller({ bytes, files, expectVersion, name }) {
 
 function main(argv) {
   const o = {};
-  for (let i = 0; i < argv.length; i += 2) o[argv[i].replace(/^--/, '')] = argv[i + 1];
+  for (let i = 0; i < argv.length; i++) {
+    const k = argv[i].replace(/^--/, '');
+    if (k === 'no-sig') o[k] = true;
+    else o[k] = argv[++i];
+  }
   if (!o.dir || !o.conf) {
     console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>]');
     return 2;
@@ -91,7 +112,13 @@ function main(argv) {
     const name = path.split(/[\\/]/).pop();
     const listing = spawnSync('7z', ['l', '-slt', path], { encoding: 'utf8' });
     const files = listing.status === 0 ? listedFiles(listing.stdout) : null;
-    const problems = checkInstaller({ bytes: readFileSync(path), files, expectVersion, name });
+    const problems = [];
+    try {
+      problems.push(...checkSignatureName({ sig: readFileSync(`${path}.sig`, 'utf8'), file: name, product: conf.productName, version: conf.version }));
+    } catch {
+      if (!o['no-sig']) problems.push(`${name}.sig is missing: the release is signed by the bundle step`);
+    }
+    problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name }));
     if (process.platform === 'win32' && files) {
       const tmp = mkdtempSync(join(tmpdir(), 'pm-gate-'));
       const ex = spawnSync('7z', ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8' });

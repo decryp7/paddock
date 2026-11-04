@@ -9,10 +9,20 @@
 !include "${__FILEDIR__}\paddock-per-machine.generated.nsh"
 !include "${__FILEDIR__}\paddock-per-machine.nsh"
 
+; Graceful first where Dyno has a way: the agent of the account running the installer is asked to stop (it flushes its history)
+; before the include ends every user's programs by handle. Other users' agents have no such door across sessions and are
+; ended by handle; they survive that (windows/per-machine.json, "survivesForcedEnd").
+!macro _DYNO_GRACEFUL_STOP
+  IfFileExists "$INSTDIR\dyno-agent.exe" 0 +3
+    nsExec::ExecToLog '"$INSTDIR\dyno-agent.exe" stop'
+    Pop $0
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro PADDOCK_INSTALLING
   !insertmacro PADDOCK_CHECK_DIR
   !insertmacro PADDOCK_GUARD_PER_USER
+  !insertmacro _DYNO_GRACEFUL_STOP
   !insertmacro PADDOCK_STOP_ALL
 !macroend
 
@@ -25,6 +35,7 @@
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro PADDOCK_INSTALLING
   !insertmacro PADDOCK_REINSTALL_AS_UPDATE
+  !insertmacro _DYNO_GRACEFUL_STOP
   !insertmacro PADDOCK_STOP_ALL
   ; The administrator readings (Dyno ADR 0027): when the helper's service is there, the bundled helper's `uninstall` removes
   ; the service, the protected copy in Program Files and the helper's data. The bundled copy does it, not the installed one:

@@ -1,6 +1,6 @@
 //! The Windows adapter of [`Machine`](super::Machine): Restart Manager, the process table, `SeDebugPrivilege` and process
 //! handles. Thin native glue: every decision lives in [`stop_all`](super::stop_all) and is tested over a fake; this file is
-//! exercised by the real-process tests in `tests/it/installed_windows.rs` on the Windows VM (ER-14: only children the test started).
+//! exercised by the real-process tests in `windows_tests.rs` on the Windows VM (ER-14: only children the test started).
 
 use super::{Bounds, Candidate, Held, Machine, OpenFailure, Request, RmProcess, StopError, StopReport};
 use crate::{ProcessId, StartTime};
@@ -9,7 +9,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, ERROR_SUCCESS, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+    HWND, LPARAM, CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, ERROR_SUCCESS, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
     WAIT_OBJECT_0,
 };
 use windows_sys::Win32::Security::{
@@ -20,6 +20,7 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostMessageW, WM_CLOSE};
 use windows_sys::Win32::System::RestartManager::{
     CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmEndSession, RmGetList, RmRegisterResources, RmStartSession,
 };
@@ -42,9 +43,12 @@ fn from_wide(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..end])
 }
 
-/// The real machine.
+/// The real machine. It remembers whether `SeDebugPrivilege` was already enabled when it was asked to enable it, and puts the
+/// token back in that state (an elevated shell may have it on).
 #[derive(Debug, Default)]
-pub struct WindowsMachine;
+pub struct WindowsMachine {
+    was_enabled: bool,
+}
 
 /// A Restart Manager session over some files, ended on drop.
 struct RmSession(u32);
@@ -124,7 +128,8 @@ impl Drop for RmSession {
     }
 }
 
-/// The program's file name of `pid`, read through a handle (needs the privilege for another user's process).
+/// The program's file name of `pid`, read by opening the pid again (needs the privilege for another user's process); the
+/// caller holds no handle on it, so only a name that is compared against listed images is taken from here, never an identity.
 fn image_name_of(pid: u32) -> Option<String> {
     // SAFETY: plain values; the handle is closed below.
     let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
@@ -167,7 +172,34 @@ impl Drop for HeldProcess {
     }
 }
 
-fn token_privilege(enable: bool) -> Result<(), StopError> {
+/// Whether the token holds `luid` enabled now. (`AdjustTokenPrivileges` reports the previous state only for a privilege it
+/// changed, so asking it is no way to learn whether one was already on.)
+fn privilege_is_enabled(token: HANDLE, luid: &windows_sys::Win32::Foundation::LUID) -> bool {
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenPrivileges};
+    let mut needed = 0u32;
+    // SAFETY: a size query: no buffer.
+    unsafe { GetTokenInformation(token, TokenPrivileges, std::ptr::null_mut(), 0, &raw mut needed) };
+    if needed == 0 {
+        return false;
+    }
+    let mut buf = vec![0u8; needed as usize];
+    // SAFETY: `buf` has `needed` writable bytes.
+    if unsafe { GetTokenInformation(token, TokenPrivileges, buf.as_mut_ptr().cast(), needed, &raw mut needed) } == 0 {
+        return false;
+    }
+    // SAFETY: the buffer starts with a TOKEN_PRIVILEGES header followed by `PrivilegeCount` entries (unaligned reads).
+    unsafe {
+        let count = std::ptr::read_unaligned(buf.as_ptr().cast::<u32>()) as usize;
+        let first = buf.as_ptr().add(4).cast::<LUID_AND_ATTRIBUTES>();
+        (0..count).any(|i| {
+            let e = std::ptr::read_unaligned(first.add(i));
+            e.Luid.LowPart == luid.LowPart && e.Luid.HighPart == luid.HighPart && e.Attributes & SE_PRIVILEGE_ENABLED != 0
+        })
+    }
+}
+
+/// Sets `SeDebugPrivilege` in this process's token on or off; returns whether it was enabled before.
+fn token_privilege(enable: bool) -> Result<bool, StopError> {
     let mut token: HANDLE = std::ptr::null_mut();
     // SAFETY: the current-process pseudo handle and a valid out-pointer.
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &raw mut token) } == 0 {
@@ -183,6 +215,7 @@ fn token_privilege(enable: bool) -> Result<(), StopError> {
             PrivilegeCount: 1,
             Privileges: [LUID_AND_ATTRIBUTES { Luid: luid, Attributes: if enable { SE_PRIVILEGE_ENABLED } else { 0 } }],
         };
+        let was_enabled = privilege_is_enabled(token, &luid);
         // SAFETY: `tp` is one fully initialised privilege entry; the token has TOKEN_ADJUST_PRIVILEGES.
         let ok = unsafe { AdjustTokenPrivileges(token, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut()) };
         let last = unsafe { GetLastError() };
@@ -192,7 +225,7 @@ fn token_privilege(enable: bool) -> Result<(), StopError> {
             // Succeeded, but the token does not hold the privilege (a policy removed it).
             Err(StopError::Privilege(ERROR_NOT_ALL_ASSIGNED))
         } else {
-            Ok(())
+            Ok(was_enabled)
         }
     };
     // SAFETY: the token handle was opened above.
@@ -230,11 +263,15 @@ impl Machine for WindowsMachine {
     }
 
     fn enable_privilege(&mut self) -> Result<(), StopError> {
-        token_privilege(true)
+        self.was_enabled = token_privilege(true)?;
+        Ok(())
     }
 
     fn drop_privilege(&mut self) {
-        if let Err(e) = token_privilege(false) {
+        // Back to the state it was in: a token that had it enabled keeps it.
+        if !self.was_enabled
+            && let Err(e) = token_privilege(false)
+        {
             log::warn!("SeDebugPrivilege could not be disabled again: {e}");
         }
     }
@@ -248,9 +285,11 @@ impl Machine for WindowsMachine {
             return Err(if code == ERROR_INVALID_PARAMETER { OpenFailure::Gone } else { OpenFailure::Denied(code) });
         }
         let Some(started) = crate::sys::creation_time(handle) else {
+            // The error code first: CloseHandle may overwrite it.
+            let code = unsafe { GetLastError() };
             // SAFETY: opened above.
             unsafe { CloseHandle(handle) };
-            return Err(OpenFailure::Denied(unsafe { GetLastError() }));
+            return Err(OpenFailure::Denied(code));
         };
         let mut buf = [0u16; 1024];
         let mut len = buf.len() as u32;
@@ -261,6 +300,29 @@ impl Machine for WindowsMachine {
         // SAFETY: a valid out-pointer.
         let session = (unsafe { ProcessIdToSessionId(pid, &raw mut session) } != 0).then_some(session);
         Ok(HeldProcess { handle, id: ProcessId::new(pid, started), image, session })
+    }
+
+    fn request_close(&mut self, held: &HeldProcess) -> bool {
+        struct Ask {
+            pid: u32,
+            asked: bool,
+        }
+        unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> i32 {
+            // SAFETY: `lparam` is the address of the `Ask` on the caller's stack, alive for the whole enumeration.
+            let ask = unsafe { &mut *(lparam as *mut Ask) };
+            let mut pid = 0u32;
+            // SAFETY: a window handle from the enumeration and a valid out-pointer.
+            unsafe { GetWindowThreadProcessId(hwnd, &raw mut pid) };
+            // SAFETY: as above; a message posted to a window that vanished is ignored by the system.
+            if pid == ask.pid && unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) } != 0 {
+                ask.asked = true;
+            }
+            1
+        }
+        let mut ask = Ask { pid: held.id.pid(), asked: false };
+        // SAFETY: the callback only touches `ask`, which outlives the call.
+        unsafe { EnumWindows(Some(each), &raw mut ask as LPARAM) };
+        ask.asked
     }
 
     fn terminate(&mut self, held: &HeldProcess) -> Result<(), StopError> {
@@ -278,12 +340,23 @@ impl Machine for WindowsMachine {
     }
 }
 
+/// The session of this process.
+fn own_session_id() -> Option<u32> {
+    let mut id = 0u32;
+    // SAFETY: a valid out-pointer.
+    (unsafe { ProcessIdToSessionId(std::process::id(), &raw mut id) } != 0).then_some(id)
+}
+
 /// Stops every listed program that runs from `dir` in any session, as this process (which it never ends), with the real
 /// Windows machine. `images` are file names in `dir`; the calling program's own file is left out of the Restart Manager
 /// registration.
 pub fn stop_all_here(dir: &Path, images: &[String], bounds: &Bounds) -> StopReport {
+    // One canonical folder (long names, no 8.3 form, no verbatim prefix needed by the callers): the folder of a running
+    // program is read from its handle in that form, and the two are compared by components.
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let own = ProcessId::of(std::process::id()).unwrap_or_else(|| ProcessId::new(std::process::id(), StartTime::from_micros(0)));
     let own_image = std::env::current_exe().ok();
-    let req = Request { dir, images, own, own_image: own_image.as_deref() };
-    super::stop_all(&mut WindowsMachine, &req, bounds)
+    let own_session = own_session_id();
+    let req = Request { dir: &dir, images, own, own_image: own_image.as_deref(), own_session };
+    super::stop_all(&mut WindowsMachine::default(), &req, bounds)
 }

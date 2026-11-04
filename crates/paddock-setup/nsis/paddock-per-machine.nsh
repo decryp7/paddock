@@ -11,9 +11,16 @@
 ;   NSIS_HOOK_PREUNINSTALL    PADDOCK_INSTALLING, PADDOCK_REINSTALL_AS_UPDATE, PADDOCK_STOP_ALL, <app steps>,
 ;                             PADDOCK_CLEAN_RUN_VALUES, PADDOCK_REMOVE_PROGRAM_FILES
 ;
-; Every macro uses only $0 to $5 and $R8, $R9 (the template's pages use $R0 to $R7 and do not run in a section).
-; The installer and the uninstaller both run paddock-setup.exe from $PLUGINSDIR, never from $INSTDIR: Restart Manager and the
-; fallback in stop-all then cannot end the running stop-all, and the uninstaller can delete $INSTDIR\paddock-setup.exe.
+; Registers: the macros use $0 to $5 and $R3 to $R5, $R8 and $R9, and nothing else (the template's pages use $R0 to $R7 but do
+; not run inside a section; its CheckIfAppIsRunning uses $R0 to $R3 and runs after these macros). The test harness also uses
+; $R6 and $R7. $PaddockHaveSetup (1 or 0) says whether paddock-setup.exe was available to this run.
+;
+; Where paddock-setup.exe runs from: the installer extracts its embedded copy to $PLUGINSDIR; the uninstaller cannot `File`, so
+; it copies the installed one to $PLUGINSDIR. Both run it from there, never from $INSTDIR: stop-all then never has to end its own
+; process, and the uninstaller can delete $INSTDIR\paddock-setup.exe. When the installed copy is missing, the uninstaller says so
+; in the details ("NOTE paddock-setup.exe is missing ...") and skips the steps that need it: the in-place check compares
+; $EXEDIR with $INSTDIR itself, programs are asked to close through Restart Manager (best effort: it ends nothing while another
+; session holds a file), the start-at-login clean-up is skipped, and the uninstall goes on.
 ;
 ; Command line contract with paddock-setup.exe (exit 0 = done unless stated):
 ;   check-dir --dir <dir>                                       3 = refused
@@ -27,16 +34,27 @@
 ;   clean-staging --dir <dir>
 ;   hold-installing                                             stays running until the installer exits
 ; Any other non-zero code is a failure of the tool itself (the details and $INSTDIR\updates\setup.log say why).
-; stop-all ends every session's listed programs itself, by handle (Restart Manager's shutdown does nothing while another
-; session holds a file, measured in S0); the template's CheckIfAppIsRunning, which uses RmShutdown and aborts on any
-; non-zero code, therefore finds nothing running. The app that .onInstSuccess starts with RunAsUser gets the desktop
+; The mechanism: stop-all ends every session's listed programs itself, by handle (graceful first in the caller's own session;
+; Restart Manager's shutdown does nothing while another session holds a file, measured in S0). Its exit code 11 is the one
+; answer to "does a listed program still run"; the include does no listing of its own, because Restart Manager also lists
+; system components that only map the files (the x86 emulation cache on Arm). The template's CheckIfAppIsRunning, which uses
+; RmShutdown and aborts on any non-zero code, therefore finds nothing running. The app that .onInstSuccess starts with RunAsUser gets the desktop
 ; user's own TEMP and TMP, so nothing is restored here.
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_INCLUDE_VERSION "1"
+; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
+!ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
+  VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
+!endif
 ; makensis resolves a relative !include from its working folder, not from the including file: name everything by this file's folder.
 !define /redef PADDOCK_SETUP_DIR "${__FILEDIR__}"
+
+!if /FileExists "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
+!else
+  !error "paddock-setup.exe is not next to paddock-per-machine.nsh (${PADDOCK_SETUP_DIR}): the bundle step stages it (ADR 0053 S7) before the installer is built"
+!endif
 
 !include LogicLib.nsh
 !include FileFunc.nsh
@@ -56,23 +74,30 @@
 
 !define PADDOCK_SETUP "$PLUGINSDIR\paddock-setup.exe"
 
-; The page's folder check (ADR 2.2): the answer of check-dir, extracting the embedded copy first.
-Function .onVerifyInstDir
-  InitPluginsDir
-  IfFileExists "$PLUGINSDIR\paddock-setup.exe" +2 0
-    File "/oname=$PLUGINSDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
-  nsExec::Exec '"$PLUGINSDIR\paddock-setup.exe" check-dir --dir "$INSTDIR"'
-  Pop $0
-  StrCmp $0 "0" +2 0
-    Abort
-FunctionEnd
+Var PaddockHaveSetup
 
-; Runs paddock-setup.exe with the arguments and leaves its exit code in $0 (the details show the line and the code).
+; A path for a command line inside quotes: a trailing backslash (a drive root) would escape the closing quote, so it is doubled.
+!macro _PADDOCK_ARG _OUT _IN
+  StrCpy ${_OUT} "${_IN}"
+  StrCpy $R9 ${_OUT} 1 -1
+  ${If} $R9 == "\"
+    StrCpy ${_OUT} "${_OUT}\"
+  ${EndIf}
+!macroend
+
+; Runs paddock-setup.exe with the arguments and leaves its exit code in $0 (the details show the line and the code); with the
+; folders as $R5 ($INSTDIR) and $R4 ($EXEDIR), already safe inside quotes. Without the program, $0 is "nosetup" and nothing runs.
 !macro _PADDOCK_RUN _ARGS
-  DetailPrint 'paddock-setup ${_ARGS}'
-  nsExec::ExecToLog '"${PADDOCK_SETUP}" ${_ARGS}'
-  Pop $0
-  DetailPrint "paddock-setup exit code: $0"
+  !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
+  !insertmacro _PADDOCK_ARG $R4 "$EXEDIR"
+  ${If} $PaddockHaveSetup == 1
+    DetailPrint 'paddock-setup ${_ARGS}'
+    nsExec::ExecToLog '"${PADDOCK_SETUP}" ${_ARGS}'
+    Pop $0
+    DetailPrint "paddock-setup exit code: $0"
+  ${Else}
+    StrCpy $0 "nosetup"
+  ${EndIf}
 !macroend
 
 ; Registers "$INSTDIR\<image>" for every comma-separated name (at compile time) with the Restart Manager session $R8.
@@ -99,24 +124,32 @@ FunctionEnd
 !macroend
 
 ; The created mutex is held until the process exits (ADR 4.1 step 4). Installer: extract the embedded paddock-setup.exe.
-; Uninstaller: copy the installed one. Both run it from $PLUGINSDIR. Must be the first macro of PREINSTALL / PREUNINSTALL.
+; Uninstaller: copy the installed one (see the header). Both run it from $PLUGINSDIR. Must be the first macro of PREINSTALL /
+; PREUNINSTALL.
 !macro PADDOCK_INSTALLING
   InitPluginsDir
+  StrCpy $PaddockHaveSetup 0
   !ifndef __UNINSTALL__
     File "/oname=$PLUGINSDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
+    StrCpy $PaddockHaveSetup 1
   !else
     ClearErrors
     CopyFiles /SILENT "$INSTDIR\paddock-setup.exe" "$PLUGINSDIR\paddock-setup.exe"
-    ${If} ${Errors}
-      DetailPrint "paddock-setup.exe could not be copied from $INSTDIR; its steps are skipped"
+    ${IfNot} ${Errors}
+      StrCpy $PaddockHaveSetup 1
+    ${Else}
+      DetailPrint "NOTE paddock-setup.exe is missing from $INSTDIR: its steps are skipped (see the include's header for the fallbacks)"
+      !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing from the uninstaller's folder: steps skipped"
     ${EndIf}
   !endif
-  Exec '"${PADDOCK_SETUP}" hold-installing'
+  ${If} $PaddockHaveSetup == 1
+    Exec '"${PADDOCK_SETUP}" hold-installing'
+  ${EndIf}
 !macroend
 
 ; Refuses a folder outside Program Files (ADR 2.2). First check of PREINSTALL, after PADDOCK_INSTALLING.
 !macro PADDOCK_CHECK_DIR
-  !insertmacro _PADDOCK_RUN 'check-dir --dir "$INSTDIR"'
+  !insertmacro _PADDOCK_RUN 'check-dir --dir "$R5"'
   ${If} $0 != 0
     !insertmacro PADDOCK_ABORT "Install ${PRODUCTNAME} in Program Files. The folder $INSTDIR is not allowed." ${PADDOCK_LEVEL_BAD_DIR} ""
   ${EndIf}
@@ -139,8 +172,9 @@ FunctionEnd
       ${EndIf}
     ${EndIf}
     ClearErrors
+    !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
     DetailPrint "paddock-setup guard"
-    nsExec::ExecToStack '"${PADDOCK_SETUP}" guard --product "${PRODUCTNAME}" --main "${MAINBINARYNAME}.exe" --dir "$INSTDIR"$2'
+    nsExec::ExecToStack '"${PADDOCK_SETUP}" guard --product "${PRODUCTNAME}" --main "${MAINBINARYNAME}.exe" --dir "$R5"$2'
     Pop $0
     Pop $1
     DetailPrint "paddock-setup exit code: $0"
@@ -177,59 +211,72 @@ FunctionEnd
   ${Loop}
 !macroend
 
-; Stops every listed program in every session by handle (ADR 3), then a last Restart Manager listing over the same files
-; here in the include, so a program that is still there is found before the template's own CheckIfAppIsRunning (which
-; would call RmShutdown and abort) and its first File.
+; Stops every listed program in every session by handle (ADR 3). Exit code 11 of stop-all is the answer to "still running".
+; In an uninstaller without paddock-setup.exe: Restart Manager is asked to close them (best effort, no abort) and the uninstall
+; goes on; the template's own check of the main binary is the safety net there.
 !macro PADDOCK_STOP_ALL
-  !insertmacro _PADDOCK_RUN 'stop-all --dir "$INSTDIR" --images "${PADDOCK_STOP_IMAGES}"'
-  ${If} $0 == 11
-    !insertmacro PADDOCK_ABORT "${PRODUCTNAME} could not be closed for every signed-in user. Ask them to quit ${PRODUCTNAME}, then run this installer again." ${PADDOCK_LEVEL_STILL_RUNNING} "$INSTDIR\${MAINBINARYNAME}.exe"
-  ${ElseIf} $0 != 0
-    !insertmacro PADDOCK_ABORT "${PRODUCTNAME} could not be closed (code $0). The reason is in $INSTDIR\updates\setup.log" ${PADDOCK_LEVEL_TOOL_FAILED} "$INSTDIR\${MAINBINARYNAME}.exe"
-  ${EndIf}
-  ; The last RmGetList.
-  !insertmacro RestartManager_StartSession $R8
-  ${If} $R8 != ""
-    !define _PADDOCK_LIST "${PADDOCK_STOP_IMAGES},"
-    !insertmacro _PADDOCK_REGISTER_STEP
-    !ifdef _PADDOCK_LIST
-      !undef _PADDOCK_LIST
-    !endif
-    System::Call 'RSTRTMGR::RmGetList(i $R8, *i .r1, *i .r2, p 0, *i .r3) i .r0'
-    !insertmacro RestartManager_EndSession $R8
-    DetailPrint "last Restart Manager listing: code $0, processes $1"
-    ; ERROR_SUCCESS: nothing uses the files; ERROR_MORE_DATA (234): something does.
-    ${If} $0 == 234
+  ${If} $PaddockHaveSetup == 1
+    !insertmacro _PADDOCK_RUN 'stop-all --dir "$R5" --images "${PADDOCK_STOP_IMAGES}"'
+    ${If} $0 == 11
       !insertmacro PADDOCK_ABORT "${PRODUCTNAME} could not be closed for every signed-in user. Ask them to quit ${PRODUCTNAME}, then run this installer again." ${PADDOCK_LEVEL_STILL_RUNNING} "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${ElseIf} $0 != 0
+      !insertmacro PADDOCK_ABORT "${PRODUCTNAME} could not be closed (code $0). The reason is in $INSTDIR\updates\setup.log" ${PADDOCK_LEVEL_TOOL_FAILED} "$INSTDIR\${MAINBINARYNAME}.exe"
     ${EndIf}
   ${Else}
-    DetailPrint "last Restart Manager listing: no session (code), skipped"
+    DetailPrint "NOTE paddock-setup.exe is missing: programs are asked to close through Restart Manager only"
+    !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing: Restart Manager fallback"
+    !insertmacro RestartManager_StartSession $R8
+    ${If} $R8 != ""
+      !define _PADDOCK_LIST "${PADDOCK_STOP_IMAGES},"
+      !insertmacro _PADDOCK_REGISTER_STEP
+      !ifdef _PADDOCK_LIST
+        !undef _PADDOCK_LIST
+      !endif
+      System::Call 'RSTRTMGR::RmShutdown(i $R8, i ${RmForceShutdown}, p 0) i .r0'
+      DetailPrint "Restart Manager shutdown: code $0"
+      !insertmacro RestartManager_EndSession $R8
+    ${EndIf}
   ${EndIf}
 !macroend
 
 ; A manual upgrade or a same-version "Uninstall" runs the old uninstaller in place (_?=): that is a reinstall, not an
 ; uninstall (ADR 2.4). First check of PREUNINSTALL after PADDOCK_INSTALLING; the template reads $UpdateMode after the hook.
+; Without paddock-setup.exe the two folders are compared here (the same answer for the common case; NSIS compares without case).
 !macro PADDOCK_REINSTALL_AS_UPDATE
-  !insertmacro _PADDOCK_RUN 'same-folder --a "$EXEDIR" --b "$INSTDIR"'
-  ${If} $0 == 0
-    StrCpy $UpdateMode 1
-    DetailPrint "reinstall: treated as an update"
+  ${If} $PaddockHaveSetup == 1
+    !insertmacro _PADDOCK_RUN 'same-folder --a "$R4" --b "$R5"'
+    ${If} $0 == 0
+      StrCpy $UpdateMode 1
+      DetailPrint "reinstall: treated as an update"
+      !insertmacro _PADDOCK_TEST_LOG "NOTE reinstall: treated as an update"
+    ${EndIf}
+  ${Else}
+    ${If} $EXEDIR == $INSTDIR
+      StrCpy $UpdateMode 1
+      DetailPrint "reinstall: treated as an update (folders compared by the installer itself)"
+      !insertmacro _PADDOCK_TEST_LOG "NOTE reinstall: treated as an update"
+    ${EndIf}
   ${EndIf}
 !macroend
 
 ; Run values naming a program in $INSTDIR (ADR 6.3): HKLM on install and uninstall; every loaded user's value on a real uninstall.
+; Skipped, and said so, without paddock-setup.exe.
 !macro PADDOCK_CLEAN_RUN_VALUES
-  !ifndef __UNINSTALL__
-    !insertmacro _PADDOCK_RUN 'clean-run --dir "$INSTDIR" --scope machine'
-  !else
-    ${If} $UpdateMode = 1
-      !insertmacro _PADDOCK_RUN 'clean-run --dir "$INSTDIR" --scope machine'
-    ${Else}
-      !insertmacro _PADDOCK_RUN 'clean-run --dir "$INSTDIR" --scope all'
+  ${If} $PaddockHaveSetup == 1
+    !ifndef __UNINSTALL__
+      !insertmacro _PADDOCK_RUN 'clean-run --dir "$R5" --scope machine'
+    !else
+      ${If} $UpdateMode = 1
+        !insertmacro _PADDOCK_RUN 'clean-run --dir "$R5" --scope machine'
+      ${Else}
+        !insertmacro _PADDOCK_RUN 'clean-run --dir "$R5" --scope all'
+      ${EndIf}
+    !endif
+    ${If} $0 != 0
+      DetailPrint "start-at-login values could not be cleaned (code $0); the install continues"
     ${EndIf}
-  !endif
-  ${If} $0 != 0
-    DetailPrint "start-at-login values could not be cleaned (code $0); the install continues"
+  ${Else}
+    DetailPrint "NOTE paddock-setup.exe is missing: start-at-login values were not cleaned"
   ${EndIf}
 !macroend
 
@@ -294,7 +341,7 @@ FunctionEnd
 
 ; Last in POSTINSTALL: delete the staged update that is not in use (the next apply-update removes the rest).
 !macro PADDOCK_FINISH_INSTALL
-  !insertmacro _PADDOCK_RUN 'clean-staging --dir "$INSTDIR"'
+  !insertmacro _PADDOCK_RUN 'clean-staging --dir "$R5"'
 !macroend
 
 ; Last in PREUNINSTALL: the template's RMDir "$INSTDIR" is not recursive, so what the include added goes first. A reinstall

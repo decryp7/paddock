@@ -1,9 +1,31 @@
 {
-  "$comment": "Programs of the bundle that the per-machine installer must not stop (family ADR 0053 section 2.1); each needs a reason.",
+  "$comment": "Per-machine installer facts for Dyno (family ADR 0053 section 2.1 and 3). stopExclusions: programs of the bundle that stop-all must not end, each with a reason. survivesForcedEnd: the adoption's statement that every program in the stop list survives a forced end without losing more than its last unfinished write; each entry names what was checked.",
   "stopExclusions": [
     {
       "image": "dyno-helper.exe",
-      "reason": "The service runs from its own protected folder, Dyno Helper in Program Files; a dyno-helper.exe running from the install folder is an elevated install or removal of a few seconds that must not be cut short, so the last Restart Manager listing reports it instead."
+      "reason": "The helper service runs from its own protected folder, Dyno Helper in Program Files, which an update or uninstall of the install folder must not touch. A dyno-helper.exe that runs from the install folder is an elevated install or removal of a few seconds, and ending it halfway could leave the service half registered. It is left alone and not reported: if it still runs when the files are replaced, the installer's file copy reports a locked file."
+    }
+  ],
+  "survivesForcedEnd": [
+    {
+      "image": "dyno-app.exe",
+      "why": "The app window keeps no data of its own; its settings are written by paddock-settings through a temporary file and a rename (crates/paddock-settings/src/file.rs:226), so a forced end leaves the old file whole."
+    },
+    {
+      "image": "dyno-agent.exe",
+      "why": "The history store and the cache are SQLite in WAL mode with synchronous NORMAL (dyno-agent/src/store.rs:61-62, cache/db.rs:343-344): a forced end loses at most the last unflushed transactions and leaves a consistent database. Its other files are written to a temporary name, synced and renamed (dyno-agent/src/files.rs:25-36); discovery and instance files are hints that the next start rewrites (rule 53)."
+    },
+    {
+      "image": "dyno.exe",
+      "why": "The command line client reads from the agent and writes nothing but its own output."
+    },
+    {
+      "image": "dyno-bench.exe",
+      "why": "A benchmark run keeps its result in memory until it is finished; a forced end loses that run only, and its scratch files are removed by the next run (dyno-agent/src/bench_scratch.rs)."
+    },
+    {
+      "image": "dyno-bench-gpu.exe",
+      "why": "As dyno-bench.exe: the result is reported when the run ends; a forced end loses that run only."
     }
   ]
 }

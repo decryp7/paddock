@@ -32,6 +32,8 @@ pub const EXIT_STILL_RUNNING: i32 = 11;
 /// How long each step may take. These are an installer's bounds, not a UI's (ER-19 is about the app's own jobs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bounds {
+    /// How long a program in the caller's own session gets to close by itself after it was asked to (a graceful stop).
+    pub graceful: Duration,
     /// Waiting for one terminated process to exit.
     pub end_each: Duration,
     /// All the fallback's waits together.
@@ -41,6 +43,7 @@ pub struct Bounds {
 impl Default for Bounds {
     fn default() -> Bounds {
         Bounds {
+            graceful: Duration::from_secs(3),
             end_each: Duration::from_secs(5),
             end_total: Duration::from_secs(20),
         }
@@ -58,6 +61,9 @@ pub struct Request<'a> {
     pub own: ProcessId,
     /// The calling process's own program file, left out of the Restart Manager registration.
     pub own_image: Option<&'a Path>,
+    /// The session of the calling process: only programs in it can be asked to close (window messages do not cross
+    /// sessions); the others are ended by handle.
+    pub own_session: Option<u32>,
 }
 
 /// Why a step failed. Every variant carries the Windows error code so the log names the cause.
@@ -138,6 +144,11 @@ pub trait Machine {
     fn drop_privilege(&mut self);
     /// Opens `pid` to read its image and start time (`for_end` false) or to end it (`for_end` true).
     fn open(&mut self, pid: u32, for_end: bool) -> Result<Self::Held, OpenFailure>;
+    /// Asks the held process to close by itself (`WM_CLOSE` to its windows); true when something was asked, so the caller
+    /// waits only for a program that has a window. The default asks nothing.
+    fn request_close(&mut self, _held: &Self::Held) -> bool {
+        false
+    }
     /// Terminates the held process.
     fn terminate(&mut self, held: &Self::Held) -> Result<(), StopError>;
     /// Waits on the held process's handle for it to exit; true when it did within `bound`.
@@ -166,6 +177,8 @@ pub struct Action {
     pub session: Option<u32>,
     /// The outcome.
     pub outcome: Outcome,
+    /// It closed by itself when asked, before any forced end.
+    pub graceful: bool,
 }
 
 /// What `stop_all` found and did.
@@ -201,8 +214,11 @@ pub fn is_directly_in(file: &Path, dir: &Path) -> bool {
     !d.is_empty() && f.len() == d.len() + 1 && f[..d.len()] == d[..]
 }
 
+/// `dir\image` with a backslash, whatever the host: Restart Manager takes ordinary paths, so a verbatim prefix
+/// (`\\?\`, as a canonical path carries) is dropped.
 fn join_win(dir: &Path, image: &str) -> PathBuf {
     let d = dir.to_string_lossy();
+    let d = d.strip_prefix(r"\\?\").unwrap_or(&d);
     PathBuf::from(format!("{}\\{image}", d.trim_end_matches(['\\', '/'])))
 }
 
@@ -315,7 +331,7 @@ fn end_by_handle<M: Machine>(
     c: &Candidate,
     spent: &mut Duration,
 ) -> Action {
-    let mut action = Action { image: c.image.clone(), id: None, session: None, outcome: Outcome::Ended };
+    let mut action = Action { image: c.image.clone(), id: None, session: None, outcome: Outcome::Ended, graceful: false };
     let held = match machine.open(c.pid, false) {
         Ok(h) => h,
         Err(OpenFailure::Gone) => {
@@ -339,6 +355,16 @@ fn end_by_handle<M: Machine>(
             return action;
         }
         Some(_) => {}
+    }
+    // Graceful first, where it can work: a program in the caller's own session is asked to close (window messages do not
+    // cross sessions) and given a moment; what is left, and every other session's programs, are ended by handle.
+    if req.own_session.is_some()
+        && held.session() == req.own_session
+        && machine.request_close(&held)
+        && machine.wait_exit(&held, bounds.graceful)
+    {
+        action.graceful = true;
+        return action;
     }
     let end = match machine.open(c.pid, true) {
         Ok(h) => h,

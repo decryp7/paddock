@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -49,4 +49,18 @@ test('the gate names every way an installer fails it, with the next step', () =>
   assert.match(bad.join('\n'), /include version 0.*expected 1/);
   const none = checkInstaller({ bytes: Buffer.from('MZ'), files: null, expectVersion: '1', name: 'a-setup.exe' });
   assert.match(none.join('\n'), /could not be listed/);
+});
+
+const sig = (comment) => Buffer.from(`untrusted comment: signature from tauri secret key\nRUQxxxx\ntrusted comment: ${comment}\nRUQyyyy\n`).toString('base64');
+
+test('the signature names the installer as paddock-setup expects (product_version_arch-setup.exe)', () => {
+  assert.equal(trustedCommentOf(sig('timestamp:1\tfile:Dyno_1.1.0_x64-setup.exe')), 'timestamp:1\tfile:Dyno_1.1.0_x64-setup.exe');
+  assert.equal(trustedCommentOf('not base64 !!'), null);
+  const ok = (comment, file = 'Dyno_1.1.0_x64-setup.exe') => checkSignatureName({ sig: sig(comment), file, product: 'Dyno', version: '1.1.0' });
+  assert.deepEqual(ok('timestamp:1\tfile:Dyno_1.1.0_x64-setup.exe'), []);
+  assert.deepEqual(ok('timestamp:1\tfile:Dyno_1.1.0_arm64-setup.exe', 'Dyno_1.1.0_arm64-setup.exe'), []);
+  assert.match(ok('timestamp:1\tfile:Dyno_1.1.1_x64-setup.exe').join(), /names Dyno_1.1.1_x64-setup.exe, expected Dyno_1.1.0_x64-setup.exe/);
+  assert.match(ok('timestamp:1').join(), /no file: name/);
+  assert.match(checkSignatureName({ sig: 'garbage!', file: 'Dyno_1.1.0_x64-setup.exe', product: 'Dyno', version: '1.1.0' }).join(), /unreadable/);
+  assert.match(ok('timestamp:1\tfile:Dyno_1.1.0_x64-setup.exe', 'Other_1.1.0_x64-setup.exe').join(), /file name Other_1.1.0_x64-setup.exe is not Dyno_1.1.0_/);
 });

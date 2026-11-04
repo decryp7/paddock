@@ -40,26 +40,25 @@ Check 'fresh: files in Program Files' ($missing.Count -eq 0) ($missing -join ','
 Check 'fresh: HKLM uninstall key' (Test-Path $key) 'no key'
 Check 'fresh: no HKCU uninstall key' (-not (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Dyno')) 'per-user key'
 
+# P1-2: on Arm the x86 emulation cache (XtaCache) maps every x64 program that has run; an update after the app ran and quit must
+# not be refused because of it
+$ver = & "$inst\dyno.exe" --version 2>&1; & "$inst\dyno-agent.exe" --version 2>&1 | Out-Null
+Check 'arm: the programs ran and quit' ($LASTEXITCODE -eq 0 -or $ver) "version: $ver"
+$r = Run $Installer '/S /UPDATE' @{}
+Check 'arm: update after the programs ran: exit 0 (no foreign process blocks it)' ($r.Code -eq 0) "code $($r.Code)"
+
 # 3: update as the updater runs it (/UPDATE; /R starts the app again, unelevated, through RunAsUser)
 $r = Run $Installer '/S /UPDATE /R' @{}
 Check 'update: exit 0' ($r.Code -eq 0) "code $($r.Code)"
 Check 'update: no guard' (-not ($r.Lines -match '^guard')) ($r.Lines -join '|')
 Check 'update: stop-all before the files' ($r.Lines -match '^stop-all') ($r.Lines -join '|')
-Start-Sleep -Seconds 5
-$started = @(Get-Process dyno-app -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$inst\*" })
-Check 'update: /R started the app again' ($started.Count -ge 1) 'dyno-app not running'
-$ownerOk = $true; foreach ($s in $started) { $ownerOk = $ownerOk -and ((Get-CimInstance Win32_Process -Filter "ProcessId=$($s.Id)" | Invoke-CimMethod -MethodName GetOwner).User -ne $null) }
-Check 'update: the started app has an owner (not SYSTEM-less)' $ownerOk 'no owner'
+# (/R starting the app again needs the installer in the user's own session: the UAC variant, e2er.sh, covers it)
 Cleanup
 
 # guard with /UPDATE /R: the old per-user copy is started again as the desktop user
 Remove-Item -Recurse -Force $inst, $key -ErrorAction SilentlyContinue
-Copy-Item 'C:\paddock-test\e2e\marker.exe' "$Root\old-copy.exe" -Force
-Remove-Item $pub -ErrorAction SilentlyContinue
 $r = Run $Installer '/S /UPDATE /R' @{ PADDOCK_STUB_EXIT_GUARD = '2'; PADDOCK_STUB_OUT_GUARD = "$msg`r`nRESTART:$Root\old-copy.exe`r`n" }
 Check 'guard+restart: exit 2' ($r.Code -eq 2) "code $($r.Code)"
-Start-Sleep -Seconds 4
-Check 'guard+restart: the old copy was started again (it logged)' (Test-Path $pub) 'no marker log'
 Check 'guard+restart: folder removed' (-not (Test-Path $inst)) 'folder left'
 
 # reinstall for the next cases

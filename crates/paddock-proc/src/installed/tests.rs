@@ -33,6 +33,10 @@ struct Proc {
     rm_lists_anyway: bool,
     /// The second open (to end) finds it gone.
     gone_on_end: bool,
+    /// It has a window: a close request reaches something.
+    has_window: bool,
+    /// It closes by itself when asked.
+    closes_on_request: bool,
     /// The second open (to end) is refused.
     denied_on_end: bool,
 }
@@ -57,6 +61,8 @@ fn proc(pid: u32, session: u32, image: &str) -> Proc {
         hidden_from_table: false,
         rm_lists_anyway: false,
         gone_on_end: false,
+        has_window: false,
+        closes_on_request: false,
         denied_on_end: false,
     }
 }
@@ -173,6 +179,20 @@ impl Machine for Fake {
         Ok(FakeHeld { id, image: (!p.no_image).then(|| p.image.clone()), session: p.session })
     }
 
+    fn request_close(&mut self, held: &FakeHeld) -> bool {
+        self.events.push(format!("close:{}", held.id.pid()));
+        let mut asked = false;
+        for p in &mut self.procs {
+            if p.id.pid() == held.id.pid() && p.has_window {
+                asked = true;
+                if p.closes_on_request {
+                    p.alive = false;
+                }
+            }
+        }
+        asked
+    }
+
     fn terminate(&mut self, held: &FakeHeld) -> Result<(), StopError> {
         self.events.push(format!("terminate:{}", held.id.pid()));
         assert!(self.privilege_on, "terminate runs with the privilege enabled");
@@ -219,7 +239,7 @@ fn init_log() {
 fn run(f: &mut Fake) -> StopReport {
     init_log();
     let imgs = images();
-    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: None };
+    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: None, own_session: None };
     stop_all(f, &req, &Bounds::default())
 }
 
@@ -314,7 +334,7 @@ fn the_own_image_is_left_out_of_the_registration() {
     let mut f = Fake::new(vec![]);
     let imgs = images();
     let own_image = PathBuf::from(r"C:\Program Files\Dyno\paddock-setup.exe");
-    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: Some(&own_image) };
+    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: Some(&own_image), own_session: None };
     stop_all(&mut f, &req, &Bounds::default());
     assert_eq!(f.registered[0].len(), 2);
     assert!(f.registered[0].iter().all(|p| !p.to_string_lossy().to_lowercase().ends_with("paddock-setup.exe")));
@@ -432,8 +452,8 @@ fn an_unreadable_process_table_still_reports_what_restart_manager_sees() {
 fn the_end_wait_is_bounded_by_what_is_left_of_the_total() {
     let mut f = Fake::new(vec![dyno(10, 1), dyno(11, 2)]);
     let imgs = images();
-    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: None };
-    let bounds = Bounds { end_each: Duration::from_secs(5), end_total: Duration::ZERO };
+    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: None, own_session: None };
+    let bounds = Bounds { end_each: Duration::from_secs(5), end_total: Duration::ZERO, ..Bounds::default() };
     let r = stop_all(&mut f, &req, &bounds);
     assert_eq!(r.exit_code(), 0, "{r:?}");
     assert_eq!(Bounds::default().end_total, Duration::from_secs(20));
@@ -483,4 +503,66 @@ fn a_process_gone_or_refused_at_the_second_open_is_handled() {
     assert!(matches!(&r.actions[1].outcome, Outcome::Failed(w) if w.contains("to end")), "{r:?}");
     assert_eq!(f.count("terminate"), 0);
     assert!(!f.privilege_on);
+}
+
+fn run_in_session(f: &mut Fake, own_session: u32) -> StopReport {
+    init_log();
+    let imgs = images();
+    let req = Request { dir: Path::new(DIR), images: &imgs, own: id(9000), own_image: None, own_session: Some(own_session) };
+    stop_all(f, &req, &Bounds::default())
+}
+
+#[test]
+fn a_program_in_the_callers_session_that_closes_when_asked_is_not_terminated() {
+    let mut p = dyno(10, 1);
+    p.has_window = true;
+    p.closes_on_request = true;
+    let mut f = Fake::new(vec![p]);
+    let r = run_in_session(&mut f, 1);
+    assert_eq!(r.exit_code(), 0, "{r:?}");
+    assert!(r.actions[0].graceful && r.actions[0].outcome == Outcome::Ended, "{r:?}");
+    assert_eq!(f.count("terminate"), 0, "{:?}", f.events);
+}
+
+#[test]
+fn a_program_that_ignores_the_request_is_terminated_after_the_wait() {
+    let mut p = dyno(10, 1);
+    p.has_window = true;
+    let mut f = Fake::new(vec![p]);
+    let r = run_in_session(&mut f, 1);
+    assert_eq!(r.exit_code(), 0, "{r:?}");
+    assert!(!r.actions[0].graceful, "{r:?}");
+    let close = f.events.iter().position(|e| e == "close:10").expect("asked first");
+    let wait = f.events.iter().position(|e| e == "wait:10").expect("waited");
+    let term = f.events.iter().position(|e| e == "terminate:10").expect("then forced");
+    assert!(close < wait && wait < term, "{:?}", f.events);
+}
+
+#[test]
+fn another_sessions_program_is_never_asked() {
+    let mut p = dyno(10, 2);
+    p.has_window = true;
+    let mut f = Fake::new(vec![p]);
+    let r = run_in_session(&mut f, 1);
+    assert_eq!(r.exit_code(), 0, "{r:?}");
+    assert_eq!(f.count("close"), 0, "{:?}", f.events);
+    assert_eq!(f.count("terminate:10"), 1);
+}
+
+#[test]
+fn a_program_without_a_window_is_not_waited_for_before_the_forced_end() {
+    let mut f = Fake::new(vec![dyno(10, 1)]);
+    let r = run_in_session(&mut f, 1);
+    assert_eq!(r.exit_code(), 0, "{r:?}");
+    let term = f.events.iter().position(|e| e == "terminate:10").unwrap();
+    assert!(f.events[..term].iter().all(|e| !e.starts_with("wait")), "{:?}", f.events);
+}
+
+#[test]
+fn a_verbatim_folder_is_registered_with_ordinary_paths() {
+    let mut f = Fake::new(vec![]);
+    let imgs = images();
+    let req = Request { dir: Path::new(r"\\?\C:\Program Files\Dyno\"), images: &imgs, own: id(9000), own_image: None, own_session: None };
+    stop_all(&mut f, &req, &Bounds::default());
+    assert!(f.registered[0].iter().any(|p| p == Path::new(r"C:\Program Files\Dyno\Dyno.exe")), "{:?}", f.registered);
 }
