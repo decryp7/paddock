@@ -104,6 +104,28 @@ pub fn apply_first_run(
     Ok(FirstRun::Applied)
 }
 
+/// Whether the first run registers start at login, read from the settings file the app already has before any agent runs: a
+/// missing file is a fresh install (the default, on); a file that says `false` is the user's choice (an upgrade from 1.0.0).
+pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
+    let (settings, _) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    settings.unwrap_or_default().launch_at_login
+}
+
+/// The first run, decided before the link starts any agent (bug 7538-1): registering the agent service after the app has
+/// started and connected to an agent of its own ends that agent and waits for the service's (launchd's or systemd's
+/// restart throttle), so a fresh install showed three agent processes in its first 20 s. Registered first, the link sees a
+/// supervising service and starts none of its own.
+pub fn apply_first_run_at_start(
+    settings_file: &std::path::Path,
+    marker: &paddock_service::login::FirstRunMarker,
+    sys: &mut dyn paddock_service::System,
+    location: Result<(), String>,
+    service: &mut dyn AgentService,
+    autostart: &mut dyn Autostart,
+) -> Result<FirstRun, String> {
+    apply_first_run(marker, sys, first_run_wanted(settings_file), location, service, autostart)
+}
+
 /// Removes the old route's `Dyno.plist` from `launch_agents` (only a file of exactly that shape) and, because its
 /// existence means the switch was on, registers the app's new entry through `autostart` so the switch never says on with
 /// nothing registered. An unstable `location` removes the file but registers nothing (the user is told at the next toggle).
@@ -715,6 +737,45 @@ mod tests {
         let (r, log) = first_run(&m, &sys, true, false);
         assert_eq!(r, Ok(FirstRun::Skipped));
         assert!(log.is_empty());
+    }
+
+    fn at_start(settings_text: Option<&str>) -> (Result<FirstRun, String>, Vec<String>, bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        if let Some(t) = settings_text {
+            std::fs::write(&file, t).unwrap();
+        }
+        let sys = paddock_service::testing::FakeSystem::new();
+        let m = marker();
+        let calls = Calls::default();
+        let mut s = FakeService {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        let r = apply_first_run_at_start(&file, &m, &mut sys.clone(), Ok(()), &mut s, &mut a);
+        let log = calls.0.lock().unwrap().clone();
+        (r, log, m.is_set(&mut sys.clone()))
+    }
+
+    /// Bug 7538-1: the registration runs before the link starts an agent, from the settings file (no agent to ask yet).
+    #[test]
+    fn the_first_run_before_any_agent_registers_on_a_fresh_install() {
+        let (r, log, set) = at_start(None);
+        assert_eq!(r, Ok(FirstRun::Applied));
+        assert_eq!(log, vec!["service install".to_string(), "autostart true".to_string()]);
+        assert!(set);
+    }
+
+    #[test]
+    fn the_first_run_before_any_agent_keeps_an_explicit_off_from_an_upgrade() {
+        let (r, log, set) = at_start(Some(r#"{"launchAtLogin":false}"#));
+        assert_eq!(r, Ok(FirstRun::Skipped));
+        assert!(log.is_empty(), "nothing registered: {log:?}");
+        assert!(set, "recorded, so the later first sight of the settings is not a first run");
     }
 
     #[test]
