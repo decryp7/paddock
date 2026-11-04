@@ -18,7 +18,7 @@ const result = (title, checks, evidence = [], pass = '') => {
 };
 const settingsPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes('pd.settings'));
 
-async function openSettings(browser) {
+export async function openSettings(browser) {
   let s = settingsPage(browser);
   if (!s) {
     const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
@@ -34,7 +34,7 @@ async function openSettings(browser) {
   return s;
 }
 
-const cardText = (s, heading) => s.evaluate((n) => { const h = [...document.querySelectorAll('h1,h2,h3,h4')].find((e) => e.textContent.trim().startsWith(n)); const c = h?.closest('section,article,div[class*=card],pd-card') ?? h?.parentElement?.parentElement; return (c?.innerText ?? '').replace(/\s+/g, ' '); }, heading);
+export const cardText = (s, heading) => s.evaluate((n) => { const h = [...document.querySelectorAll('h1,h2,h3,h4')].find((e) => e.textContent.trim().startsWith(n)); const c = h?.closest('section,article,div[class*=card],pd-card') ?? h?.parentElement?.parentElement; return (c?.innerText ?? '').replace(/\s+/g, ' '); }, heading);
 
 /** Turn on: the UAC credential prompt (the test account is a standard user) is answered over VNC with a per-run password for paddock-admin. */
 export async function helperOn(browser, { vnc = new Vnc() } = {}) {

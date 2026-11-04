@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { renderResult } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
 import { helperSteps } from './win-helper.mjs';
+import { runRebootPhase } from './win-reboot.mjs';
 import { copyFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +33,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true; else if (a === '--scale') o.scale = Number(v());
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true; else if (a === '--scale') o.scale = Number(v()); else if (a === '--reboot-check') o.reboot = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Windows suite');
@@ -128,7 +129,7 @@ async function main(argv) {
     if (scp(exe, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe`).code !== 0) throw new Error('copying the installer failed');
     if (scp(join(HERE, 'win-suite.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-suite.ps1`).code !== 0) throw new Error('copying win-suite.ps1 failed');
     log('running the suite in the interactive session (bounded 40 min)');
-    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui ? ' -KeepRunning' : ''}${o.only ? ` -Only ${o.only}` : ''}'; schtasks /run /tn VmCheck`);
+    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot ? ' -KeepRunning' : ''}${o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
     let done = false;
     const answered = new Set();
     for (let i = 0; i < 480 && !done; i++) {
@@ -154,6 +155,15 @@ async function main(argv) {
       log('UI phase: snap check, screenshot check on the WebView2 DOM, Quit (bounded)');
       process.env.PADDOCK_WIN_SHOTS = join(out, `${new Date().toISOString().replace(/[:.]/g, '-')}-win-dom-shots`);
       uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [] });
+    }
+    if (o.reboot && done) {
+      scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
+      const waitConsole = async () => { for (let i = 0; i < 90; i++) { if (vm(['ssh', 'if ((query user) -match "console\\s+\\d+\\s+Active") {exit 0} else {exit 1}'], 30_000).code === 0) return true; await sleep(4000); } return false; };
+      const launchDyno = () => {
+        ssh(`Set-Content C:\\paddock-test\\vmcheck\\launch.ps1 '$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"; Start-Process "$env:LOCALAPPDATA\\Dyno\\dyno-app.exe"'; schtasks /create /tn DynoLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch.ps1" | Out-Null; schtasks /run /tn DynoLaunch | Out-Null`);
+      };
+      log('restart check: helper on, record, real restart, record again without Repair');
+      uiSteps = await runRebootPhase({ vm, waitConsole, launchDyno, log });
     }
     const dest = join(scratch, 'out');
     mkdirSync(dest);
