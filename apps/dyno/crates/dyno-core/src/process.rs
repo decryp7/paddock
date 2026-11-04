@@ -389,6 +389,32 @@ impl Locker {
     }
 }
 
+/// The answer to "what is locking this file?": the programs, and what the reader could not list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LockerList {
+    /// The programs that hold the file.
+    pub lockers: Vec<Locker>,
+    /// How many more programs of other accounts hold it but are not listed (the helper counts them where the person's settings
+    /// say not to name them), so an empty list is never read as "nothing has it".
+    #[serde(default)]
+    pub not_listed: u32,
+    /// The search stopped at its limit: more may hold the file.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl LockerList {
+    /// A complete list: nothing is left out.
+    pub fn of(lockers: Vec<Locker>) -> LockerList {
+        LockerList {
+            lockers,
+            not_listed: 0,
+            truncated: false,
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod fixtures {
     use super::*;

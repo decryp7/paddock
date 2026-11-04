@@ -23,7 +23,7 @@ import type {
   HistoryRange,
   LiveDetail,
   LiveUpdate,
-  Locker,
+  LockerList,
   PluginInfo,
   ProcessDetails,
   ProcessRef,
@@ -273,7 +273,7 @@ export class TauriBackend implements DynoBackend {
     return this.request({ processDetails: { target } });
   }
 
-  lockers(path: string): Promise<Locker[]> {
+  lockers(path: string): Promise<LockerList> {
     return this.request({ lockers: { path } });
   }
 

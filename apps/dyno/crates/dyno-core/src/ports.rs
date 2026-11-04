@@ -89,6 +89,10 @@ pub trait ProcessSource: Send {
 pub trait FileLocks: Send {
     /// The processes that hold `path` open (Restart Manager on Windows, `lsof` on macOS).
     fn lockers(&mut self, path: &Path) -> Result<Vec<Locker>, PlatformError>;
+    /// The same with what the reader could not list. A reader that always lists everything keeps this default.
+    fn lockers_with_more(&mut self, path: &Path) -> Result<crate::process::LockerList, PlatformError> {
+        self.lockers(path).map(crate::process::LockerList::of)
+    }
 }
 
 /// The startup manager's view of the OS.

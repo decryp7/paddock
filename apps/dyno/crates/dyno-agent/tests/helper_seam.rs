@@ -125,9 +125,14 @@ impl Rig {
     }
 
     fn network(&self) -> dyno_core::network::NetworkSnapshot {
+        self.network_asking(false)
+    }
+
+    fn network_asking(&self, retry_helper: bool) -> dyno_core::network::NetworkSnapshot {
         let peer = connect(&self.dirs).unwrap().0;
         let query = dyno_core::network::NetworkQuery {
             show_loopback: true,
+            retry_helper,
             ..Default::default()
         };
         let Reply::Network(n) = ask_within(&peer, Request::Network { query }, SLOW).unwrap() else {
@@ -150,6 +155,11 @@ impl Rig {
 
     #[cfg(unix)]
     fn lockers(&self, path: &std::path::Path) -> Result<Vec<dyno_core::process::Locker>, String> {
+        self.locker_list(path).map(|l| l.lockers)
+    }
+
+    #[cfg(unix)]
+    fn locker_list(&self, path: &std::path::Path) -> Result<dyno_core::process::LockerList, String> {
         let peer = connect(&self.dirs).unwrap().0;
         match ask_within(
             &peer,
@@ -394,4 +404,67 @@ fn without_the_helper_what_holds_this_file_is_the_agents_own_answer_marked_local
     });
     let got = rig.lockers(&file).unwrap();
     assert_eq!((got.len(), got[0].via.clone()), (1, ReadVia::Local));
+}
+
+#[cfg(unix)]
+#[test]
+fn another_accounts_holder_is_counted_not_named_for_a_caller_who_may_not_see_it() {
+    use std::os::unix::fs::MetadataExt;
+    struct OtherHolds((u64, u64));
+    impl dyno_core::helper_holders::HolderSource for OtherHolds {
+        fn sockets(&self) -> Result<dyno_core::helper_holders::HolderScan, dyno_core::ports::PlatformError> {
+            Ok(Default::default())
+        }
+        fn file(&self, dev: u64, ino: u64) -> Result<dyno_core::helper_holders::HolderScan, dyno_core::ports::PlatformError> {
+            let hit = (dev, ino) == self.0;
+            Ok(dyno_core::helper_holders::HolderScan {
+                holders: if hit {
+                    vec![Holders::raw(
+                        7002,
+                        dyno_core::helper_processes::RawOwner::Account {
+                            id: dyno_core::helper_wire::HelperUser::parse("uid:1999").unwrap(),
+                            name: Some("someone".into()),
+                        },
+                        &[],
+                    )]
+                } else {
+                    vec![]
+                },
+                truncated: false,
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("held.log");
+    std::fs::write(&file, "x").unwrap();
+    let m = std::fs::metadata(&file).unwrap();
+    let rig = Rig::start_with(
+        Caller::Other,
+        HelperHost::Linux,
+        true,
+        Box::new(OtherHolds((m.dev(), m.ino()))),
+        |_| {},
+    );
+    let got = rig.locker_list(&file).unwrap();
+    assert_eq!(
+        (got.lockers.len(), got.not_listed),
+        (0, 1),
+        "counted, not named, and not read as 'nothing holds it'"
+    );
+}
+
+#[test]
+fn try_again_on_the_owners_asks_the_helper_for_the_map_now() {
+    let rig = Rig::start_with(Caller::Owner, HelperHost::Linux, true, Box::new(no_holders()), |f| {
+        f.add_process(dyno_platform::fake::process(7001, "prog7001", 0.0));
+        f.with(|s| s.sockets.push(hidden_listener(5432, 900)));
+    });
+    rig.network_when(|n| n.owners_via == ReadVia::Helper);
+    let asked = || rig.served.lock().unwrap().iter().filter(|k| *k == "SocketOwners").count();
+    let before = asked();
+    // Inside the ten seconds the kept map is used; a person's retry reads it again.
+    rig.network();
+    assert_eq!(asked(), before, "the poll reuses the kept map");
+    assert_eq!(rig.network_asking(true).owners_via, ReadVia::Helper);
+    assert_eq!(asked(), before + 1, "Try again reads the helper's map at once");
 }

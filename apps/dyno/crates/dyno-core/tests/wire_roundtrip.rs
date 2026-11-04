@@ -809,7 +809,7 @@ fn reply_samples() -> Vec<Reply> {
         Reply::Details(zero()),
         Reply::Activity(zero()),
         Reply::Activities(vec![]),
-        Reply::Lockers(vec![]),
+        Reply::Lockers(dyno_core::process::LockerList::default()),
         Reply::Snapshot(zero()),
         Reply::Snapshots(vec![]),
         Reply::Diff(zero()),

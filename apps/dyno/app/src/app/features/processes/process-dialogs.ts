@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { CommandError, Locker } from '../../core/api.types';
+import type { CommandError, LockerList } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
 import { ReadingSource } from '../../core/reading-source';
@@ -26,13 +26,19 @@ import { MatInput } from '@angular/material/input';
       @if (!results() && !error() && !busy()) {
         <p class="empty" data-testid="lockers-empty">Enter a path and choose Find.</p>
       }
-      @if (results(); as list) {
-        @if (list.length === 0) {
+      @if (results(); as found) {
+        @if (found.lockers.length === 0 && found.notListed === 0 && !found.truncated) {
           <p class="none"><dy-icon name="check" /> Nothing has it open right now.</p>
         }
-        @if (list[0]; as first) { <dy-reading-source [via]="first.via" /> }
+        @if (found.lockers[0]; as first) { <dy-reading-source [via]="first.via" [canRetry]="true" (retry)="find()" /> }
+        @if (found.notListed > 0) {
+          <p class="more" data-testid="lockers-not-listed"><dy-icon name="info" /> {{ found.notListed }} more {{ found.notListed === 1 ? 'program' : 'programs' }} of other accounts {{ found.notListed === 1 ? 'holds' : 'hold' }} it and {{ found.notListed === 1 ? 'is' : 'are' }} not listed.</p>
+        }
+        @if (found.truncated) {
+          <p class="more" data-testid="lockers-truncated"><dy-icon name="info" /> The search stopped at its limit, so more programs may hold it.</p>
+        }
         <ul>
-          @for (l of list; track l.process.pid) {
+          @for (l of found.lockers; track l.process.pid) {
             <li>
               <div class="txt"><strong>{{ l.name }}</strong><small>{{ l.kind ?? 'Holds it open' }}</small></div>
             </li>
@@ -48,6 +54,7 @@ import { MatInput } from '@angular/material/input';
     .err { display: flex; gap: var(--sp-2); color: var(--bad); }
     .err small { display: block; color: var(--text-2); }
     .empty { color: var(--text-3); }
+    .more { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-2); }
     .none { display: flex; align-items: center; gap: var(--sp-2); color: var(--ok); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
     li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); }
@@ -59,7 +66,7 @@ export class LockersDialog {
   private readonly store = inject(ProcessesStore);
   protected readonly path = signal('');
   protected readonly busy = signal(false);
-  protected readonly results = signal<Locker[] | null>(null);
+  protected readonly results = signal<LockerList | null>(null);
   protected readonly error = signal<CommandError | null>(null);
   protected readonly hint = computed(() => {
     const e = this.error();

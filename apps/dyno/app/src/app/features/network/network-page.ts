@@ -84,7 +84,7 @@ function readCollapsed(): Set<string> {
 
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5">
         @if (store.snapshot(); as s) {
-          <dy-reading-source [via]="s.ownersVia" />
+          <dy-reading-source [via]="s.ownersVia" [canRetry]="true" (retry)="store.retryHelper()" />
           @if (s.unknownOwners > 0 && !noteDismissed()) {
             <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without administrator rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }

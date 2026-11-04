@@ -299,10 +299,10 @@ describe('process actions', () => {
   it('lockers match by path and validate it', async () => {
     const b = make();
     await expect(b.lockers('  ')).rejects.toMatchObject({ code: 'badRequest' });
-    expect((await b.lockers('/Users/alex/dev/dyno/target')).map((l) => l.name)).toContain('rustc');
-    expect((await b.lockers('/x/Chrome/Cookies'))[0]!.name).toBe('Google Chrome');
-    expect((await b.lockers('/var/some.log'))[0]!.name).toBe('dyno-agent');
-    expect(await b.lockers('/nothing/here')).toEqual([]);
+    expect((await b.lockers('/Users/alex/dev/dyno/target')).lockers.map((l) => l.name)).toContain('rustc');
+    expect((await b.lockers('/x/Chrome/Cookies')).lockers[0]!.name).toBe('Google Chrome');
+    expect((await b.lockers('/var/some.log')).lockers[0]!.name).toBe('dyno-agent');
+    expect(await b.lockers('/nothing/here')).toEqual({ lockers: [], notListed: 0, truncated: false });
   });
   it('openLocation fails for processes without a file', async () => {
     const b = make();

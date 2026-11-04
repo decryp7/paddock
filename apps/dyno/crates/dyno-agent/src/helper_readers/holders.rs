@@ -14,7 +14,7 @@ use dyno_core::helper_processes::OwnerKind;
 use dyno_core::metrics::Reading;
 use dyno_core::network::SocketRow;
 use dyno_core::ports::{FileLocks, PlatformError};
-use dyno_core::process::{Locker, ProcessRef};
+use dyno_core::process::{Locker, LockerList, ProcessRef};
 use dyno_core::read_via::ReadVia;
 use dyno_core::time::{Timestamp, SECOND};
 use std::collections::{HashMap, HashSet};
@@ -83,6 +83,12 @@ impl SocketOwnerStep {
     /// A step that reads the parents from this computer's process table.
     pub fn for_this_os(seam: HelperFirst<SocketOwnerReading>) -> SocketOwnerStep {
         SocketOwnerStep::new(seam, Box::new(os_parents))
+    }
+
+    /// A person asked to try again: the helper is asked at the next fill, whatever was kept or left alone.
+    pub fn retry_now(&mut self) {
+        self.map = None;
+        self.seam.retry_now();
     }
 
     /// `rows` with the programs of the sockets the kernel hid from this account filled in from the helper, and where they came
@@ -214,7 +220,7 @@ struct FileHolderReading {
 }
 
 impl HelperReading for FileHolderReading {
-    type Value = Vec<Locker>;
+    type Value = LockerList;
 
     fn name(&self) -> &'static str {
         "file holders"
@@ -225,14 +231,22 @@ impl HelperReading for FileHolderReading {
         ReadClass::Bulk
     }
 
-    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Vec<Locker>, CallError> {
-        let FileHolders { holders, .. } = calls.file_holders(self.dev, self.ino)?;
-        Ok(holders.iter().map(locker_of).collect())
+    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<LockerList, CallError> {
+        let FileHolders {
+            holders,
+            others,
+            truncated,
+        } = calls.file_holders(self.dev, self.ino)?;
+        Ok(LockerList {
+            lockers: holders.iter().map(locker_of).collect(),
+            not_listed: others,
+            truncated,
+        })
     }
 
-    fn local(&mut self) -> Reading<Vec<Locker>> {
+    fn local(&mut self) -> Reading<LockerList> {
         self.refused = None;
-        match self.local.lockers(&self.path) {
+        match self.local.lockers_with_more(&self.path) {
             Ok(v) => Reading::Available(v),
             Err(e) => {
                 let why = e.to_string();
@@ -266,18 +280,24 @@ impl HelperLocks {
 
 impl FileLocks for HelperLocks {
     fn lockers(&mut self, path: &Path) -> Result<Vec<Locker>, PlatformError> {
+        self.lockers_with_more(path).map(|l| l.lockers)
+    }
+
+    fn lockers_with_more(&mut self, path: &Path) -> Result<LockerList, PlatformError> {
+        // A person pressed Find: a helper left alone after a failure is asked again now.
+        self.seam.retry_now();
         let reading = self.seam.reading_mut();
         let (dev, ino) = match device_and_inode(path) {
             Ok(id) => id,
             // A path that is gone or unreadable is the agent's own reader's to report.
-            Err(_) => return reading.local.lockers(path),
+            Err(_) => return reading.local.lockers_with_more(path),
         };
         reading.path = path.to_path_buf();
         (reading.dev, reading.ino) = (dev, ino);
         let got = self.seam.read();
         match got.value {
             Reading::Available(mut found) => {
-                for l in &mut found {
+                for l in &mut found.lockers {
                     l.via = got.via.clone();
                 }
                 Ok(found)
@@ -391,6 +411,19 @@ mod tests {
     }
 
     #[test]
+    fn a_person_asking_to_try_again_reads_the_helper_map_again_at_once() {
+        let (mut s, _) = step(true, vec![Ok(owners(&[(900, 7001)])), Ok(owners(&[(900, 7002)]))]);
+        let t0 = Instant::now();
+        assert_eq!(s.fill(vec![row(5432, None, Some(900))], t0).0[0].pid, Some(7001));
+        s.retry_now();
+        assert_eq!(
+            s.fill(vec![row(5432, None, Some(900))], t0).0[0].pid,
+            Some(7002),
+            "no waiting for the ten seconds"
+        );
+    }
+
+    #[test]
     fn workers_that_inherited_a_listener_fold_into_their_master() {
         let net = Net::new(true, vec![Ok(owners(&[(900, 7001), (900, 7002), (900, 7003)]))]);
         let c = centre(&net, &FakeClock::new());
@@ -440,6 +473,21 @@ mod tests {
         assert_eq!((got[0].process.pid, got[0].via.clone()), (4321, ReadVia::Helper));
         assert_eq!(got[0].process.started, Some(Timestamp(1_700_000_000 * SECOND)));
         assert!(got[0].kind.as_deref().unwrap().contains("Another account"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn programs_the_helper_counts_but_does_not_name_are_carried_so_an_empty_list_is_not_read_as_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("held.log");
+        std::fs::write(&file, "x").unwrap();
+        let reply = HelperReply::FileHolders(FileHolders {
+            holders: vec![],
+            others: 3,
+            truncated: true,
+        });
+        let got = locks(true, Ok(vec![]), vec![Ok(reply)]).lockers_with_more(&file).unwrap();
+        assert_eq!((got.lockers.len(), got.not_listed, got.truncated), (0, 3, true));
     }
 
     #[cfg(unix)]

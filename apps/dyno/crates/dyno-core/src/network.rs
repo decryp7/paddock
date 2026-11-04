@@ -201,8 +201,7 @@ impl<'de> Deserialize<'de> for Owner {
     }
 }
 
-const UNKNOWN_REASON: &str =
-    "The OS did not say which program owns this. It may belong to another user or the system; Dyno does not run with administrator rights.";
+const UNKNOWN_REASON: &str = "The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on Administrator readings in Settings and Dyno's helper names it.";
 
 fn owner_of(pid: Option<u32>, names: &HashMap<u32, (&str, Option<&str>)>) -> Owner {
     match pid {
@@ -295,6 +294,9 @@ pub struct NetworkQuery {
     /// Only connections to this country (ISO code, from the location database): what a click on the map asks for.
     #[serde(default)]
     pub country: Option<String>,
+    /// A person pressed "Try again" on the owners' source line: ask the helper now even if it was left alone after a failure.
+    #[serde(default)]
+    pub retry_helper: bool,
 }
 
 impl NetworkQuery {
@@ -610,6 +612,18 @@ impl Tracker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_unnamed_owner_points_at_the_helper_and_the_turn_on_step() {
+        let Owner::Unknown { reason } = owner_of(None, &HashMap::new()) else {
+            panic!("an owner nobody named is unknown")
+        };
+        assert!(
+            reason.contains("Administrator readings in Settings") && reason.contains("helper"),
+            "{reason}"
+        );
+        assert!(!reason.contains("does not run with administrator rights"), "{reason}");
+    }
+
     use super::*;
     use crate::process::RunState;
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -690,7 +704,7 @@ mod tests {
         assert_eq!(snap.listeners.iter().map(|l| l.port).collect::<Vec<_>>(), vec![22, 8080, 8080]);
         assert_eq!(snap.connections.len(), 2, "the loopback connection is hidden");
         assert!(snap.connections.iter().all(|c| c.lookup_ok), "both remaining peers are public");
-        assert!(matches!(&snap.listeners[0].owner, Owner::Unknown { reason } if reason.contains("another user")));
+        assert!(matches!(&snap.listeners[0].owner, Owner::Unknown { reason } if reason.contains("another account")));
         assert!(matches!(&snap.listeners[1].owner, Owner::Process { name, .. } if name == "Server"));
         assert!(matches!(&snap.connections[0].owner, Owner::Unknown { reason } if reason.contains("999")));
         assert_eq!(snap.unknown_owners, 2, "the unnamed listener and the gone pid are counted");
