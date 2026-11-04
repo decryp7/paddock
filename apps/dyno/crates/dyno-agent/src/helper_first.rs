@@ -24,6 +24,7 @@ use dyno_core::metrics::Reading;
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::read_via::{sentence, NextStep, ReadVia, NEEDS_ADMIN};
 use dyno_core::smart::SmartReply;
+use dyno_core::wake::{IfName, WolReply};
 use paddock_jobs::time::Clock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -77,6 +78,10 @@ pub trait HelperCalls: Send + Sync {
     fn login_items(&self) -> Result<LoginItemsReply, CallError>;
     /// SMART health of the disks the helper's own scan finds.
     fn smart(&self, query: SmartQuery) -> Result<SmartReply, CallError>;
+    /// The last lines of the helper's own log (owner and administrators only), oldest first.
+    fn log_tail(&self, lines: u32) -> Result<Vec<String>, CallError>;
+    /// The Wake-on-LAN modes of one interface (Linux), modes only.
+    fn wol_state(&self, ifname: IfName) -> Result<WolReply, CallError>;
 }
 
 /// The helper link with the wait of a [`ReadClass`].
@@ -119,6 +124,12 @@ impl<T: HelperTransport> HelperCalls for Bounded<T> {
     }
     fn smart(&self, query: SmartQuery) -> Result<SmartReply, CallError> {
         self.link.smart_in(query, self.wait)
+    }
+    fn log_tail(&self, lines: u32) -> Result<Vec<String>, CallError> {
+        self.link.log_tail_in(lines, self.wait)
+    }
+    fn wol_state(&self, ifname: IfName) -> Result<WolReply, CallError> {
+        self.link.wol_state_in(ifname, self.wait)
     }
 }
 

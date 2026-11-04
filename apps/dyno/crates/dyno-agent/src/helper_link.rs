@@ -19,6 +19,7 @@ use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::PlatformError;
 use dyno_core::read_via::ReadVia;
 use dyno_core::smart::SmartReply;
+use dyno_core::wake::{IfName, WolReply};
 use paddock_jobs::time::Clock;
 use std::sync::Arc;
 use std::time::Duration;
@@ -411,9 +412,22 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// The helper's own log lines for the diagnostics bundle.
     pub fn log_tail(&self, lines: u32) -> Result<Vec<String>, PlatformError> {
-        match self.call("logTail", HelperRequest::LogTail(lines)).map_err(to_platform)? {
+        self.log_tail_in(lines, Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::log_tail`] that waits as `wait` says.
+    pub fn log_tail_in(&self, lines: u32, wait: Wait) -> Result<Vec<String>, CallError> {
+        match self.ask(wait, "logTail", HelperRequest::LogTail(lines))? {
             HelperReply::Log(l) => Ok(l),
-            _ => Err(unexpected("LogTail")),
+            _ => Err(unexpected("LogTail").into()),
+        }
+    }
+
+    /// The Wake-on-LAN modes of a network interface (Linux), read by the helper; modes only.
+    pub fn wol_state_in(&self, ifname: IfName, wait: Wait) -> Result<WolReply, CallError> {
+        match self.ask(wait, "wolState", HelperRequest::WolState { ifname })? {
+            HelperReply::Wol(w) => Ok(w),
+            _ => Err(unexpected("WolState").into()),
         }
     }
 

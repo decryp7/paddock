@@ -3,3 +3,4 @@
 
 pub mod counters;
 pub mod memory;
+pub mod wol;

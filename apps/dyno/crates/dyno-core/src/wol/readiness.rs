@@ -2,6 +2,7 @@
 //! Every item is Ok, a Problem with the fix, or "can't tell" with the reason; Dyno never guesses, and the firmware (BIOS/UEFI)
 //! setting is always "can't tell". The parsers take the text of `pmset -g`, `powercfg /a`, `reg query` and `sysfs`.
 
+use crate::wake::{WolMode, WolReply};
 use serde::{Deserialize, Serialize};
 
 /// What an item is about.
@@ -205,6 +206,33 @@ pub fn linux_wakeup_item(name: &str, text: &str) -> ReadinessItem {
     }
 }
 
+/// Adds the card's own Wake-on-LAN mode, read by the helper (`WolState`), to a Linux card's finding. Only a card that may wake the
+/// computer (`power/wakeup` enabled) is refined: a disabled card or one that does not say stays as it was, since its mode does not
+/// change the advice. Modes only; the helper sends no password or address.
+pub fn with_modes(item: ReadinessItem, modes: &WolReply) -> ReadinessItem {
+    if item.kind != ReadinessKind::NicWake || !matches!(item.state, ItemState::Ok { .. }) {
+        return item;
+    }
+    let card = item.subject.clone().unwrap_or_default();
+    let magic = |m: &[WolMode]| m.iter().any(|m| matches!(m, WolMode::Magic | WolMode::MagicSecure));
+    let state = if magic(&modes.enabled) {
+        ok("The card may wake the computer and is set to wake for magic packets, which is what Dyno sends.")
+    } else if magic(&modes.supported) {
+        problem(
+            "The card may wake the computer but is not set to wake for magic packets.",
+            &format!("Turn it on with `ethtool -s {card} wol g`."),
+        )
+    } else if modes.supported.is_empty() {
+        cant_tell("The card reports no Wake-on-LAN modes.")
+    } else {
+        problem(
+            "The card does not support waking for magic packets, which is what Dyno sends.",
+            "Use a wired card that supports Wake-on-LAN with magic packets.",
+        )
+    };
+    ReadinessItem { state, ..item }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +287,39 @@ mod tests {
     fn firmware_is_always_cant_tell() {
         assert!(matches!(firmware_item().state, ItemState::CantTell { .. }));
         assert_eq!(sleep_mode_item(cant_tell("r")).kind, ReadinessKind::SleepMode);
+    }
+
+    fn reply(enabled: &[WolMode], supported: &[WolMode]) -> WolReply {
+        WolReply {
+            enabled: enabled.to_vec(),
+            supported: supported.to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_card_that_may_wake_the_computer_is_judged_by_its_own_mode() {
+        use WolMode::*;
+        let enabled = linux_wakeup_item("eth0", "enabled");
+        let set = with_modes(enabled.clone(), &reply(&[Magic], &[Magic, Unicast]));
+        assert!(matches!(&set.state, ItemState::Ok { note } if note.contains("magic")), "{set:?}");
+        let off = with_modes(enabled.clone(), &reply(&[], &[Magic, Phy]));
+        assert!(
+            matches!(&off.state, ItemState::Problem { fix, .. } if fix.contains("ethtool -s eth0 wol g")),
+            "{off:?}"
+        );
+        let cannot = with_modes(enabled.clone(), &reply(&[], &[Phy]));
+        assert!(matches!(cannot.state, ItemState::Problem { .. }));
+        let none = with_modes(enabled, &reply(&[], &[]));
+        assert!(matches!(none.state, ItemState::CantTell { .. }));
+        assert_eq!(set.subject.as_deref(), Some("eth0"));
+    }
+
+    #[test]
+    fn a_card_not_allowed_to_wake_the_computer_keeps_its_finding() {
+        let disabled = linux_wakeup_item("eth0", "disabled");
+        assert_eq!(with_modes(disabled.clone(), &reply(&[WolMode::Magic], &[WolMode::Magic])), disabled);
+        let unknown = linux_wakeup_item("eth0", "");
+        assert_eq!(with_modes(unknown.clone(), &reply(&[], &[])), unknown);
+        assert_eq!(with_modes(firmware_item(), &reply(&[], &[])), firmware_item());
     }
 }

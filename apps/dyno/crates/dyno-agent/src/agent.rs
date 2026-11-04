@@ -300,6 +300,8 @@ pub struct Shared {
     pub helper: Arc<crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>>,
     /// The memory layout: the helper first, then this computer (the seam's second instance, plan section 8.3).
     pub memory: Mutex<crate::helper_first::HelperFirst<crate::helper_readers::memory::MemoryModules>>,
+    /// The helper's own log for the diagnostics bundle (plan section 7.1).
+    pub helper_log: Mutex<crate::helper_first::HelperFirst<crate::diagnostics::HelperLog>>,
     /// Temperatures, fans and CPU energy from the helper (macOS; plan section 2.7).
     pub climate: Arc<crate::helper_readers::counters::HelperClimate>,
     /// Logical cores (for validating affinity and normalising overhead).
@@ -578,12 +580,20 @@ impl Shared {
                 power_marker,
             )),
             wakes: crate::wakes::WakeCentre::new(wol.wake_timer.clone(), Arc::new(crate::wakes::SharedHelper::new(me.clone()))),
-            wol: crate::wol::WolCentre::new(wol),
+            wol: crate::wol::WolCentre::new({
+                let mut wol = wol;
+                // Linux: each card that may wake the computer is judged by its own mode, read by the helper (plan section 7.1).
+                if host == dyno_core::helper::HelperHost::Linux && helper_first {
+                    wol.readiness = Arc::new(crate::helper_readers::wol::HelperReadiness::new(wol.readiness.clone(), port(me)));
+                }
+                wol
+            }),
             helper: Arc::new(helper_centre),
             memory: Mutex::new(crate::helper_first::HelperFirst::new(
                 crate::helper_readers::memory::MemoryModules::new(host, local_memory),
                 port(me),
             )),
+            helper_log: Mutex::new(crate::helper_first::HelperFirst::new(crate::diagnostics::HelperLog, port(me))),
             climate: Arc::new(crate::helper_readers::counters::HelperClimate::new(
                 port(me),
                 helper_first && host == dyno_core::helper::HelperHost::Macos,
