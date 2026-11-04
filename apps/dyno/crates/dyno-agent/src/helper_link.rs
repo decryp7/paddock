@@ -15,7 +15,7 @@ use dyno_core::helper_wire::{
     assess, platform_error, HelperReply, HelperRequest, HelperState, HelperStatus, Probe, ToolStatus, HELPER_MISSING,
 };
 use dyno_core::inventory::MemoryLayout;
-use dyno_core::network_traffic::TrafficCounter;
+use dyno_core::network_traffic::TrafficAnswer;
 use dyno_core::ports::PlatformError;
 use dyno_core::read_via::ReadVia;
 use dyno_core::smart::SmartReply;
@@ -287,14 +287,14 @@ impl<T: HelperTransport> HelperLink<T> {
     }
 
     /// Per-program traffic counters (Windows), scoped to the caller.
-    pub fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+    pub fn traffic(&self) -> Result<TrafficAnswer, PlatformError> {
         self.traffic_in(Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::traffic`] that waits as `wait` says.
-    pub fn traffic_in(&self, wait: Wait) -> Result<Vec<TrafficCounter>, CallError> {
+    pub fn traffic_in(&self, wait: Wait) -> Result<TrafficAnswer, CallError> {
         match self.ask(wait, "traffic", HelperRequest::Traffic)? {
-            HelperReply::Counters(c) => Ok(c),
+            HelperReply::Traffic(a) => Ok(a),
             _ => Err(unexpected("Traffic").into()),
         }
     }

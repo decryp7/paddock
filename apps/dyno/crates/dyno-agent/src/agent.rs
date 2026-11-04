@@ -540,7 +540,16 @@ impl Shared {
             issues: crate::issues::IssueCentre::new(issues),
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
-            network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
+            // Windows reads per-program traffic through the helper first (its counters need administrator rights).
+            network: crate::network::NetCentre::new(
+                network.sockets,
+                network.dns,
+                if host == dyno_core::helper::HelperHost::Windows {
+                    Box::new(crate::helper_readers::traffic::HelperTraffic::new(network.traffic, port(me)))
+                } else {
+                    network.traffic
+                },
+            ),
             hardware: crate::hardware::HardwareCentre::new(
                 hardware.signals,
                 if helper_first {

@@ -13,7 +13,7 @@ use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
 use dyno_core::helper_processes::{build_page, ProcessSweeper};
 use dyno_core::helper_requests::ExtrasKind;
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest, HelperUser};
-use dyno_core::network_traffic::MAX_COUNTERS;
+use dyno_core::network_traffic::{traffic_answer, MAX_COUNTERS};
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use dyno_core::smart::{SmartReader, ToolInstaller};
 use dyno_core::wake::{plan_schedule, WakeScheduler, WolReader};
@@ -284,9 +284,20 @@ impl Dispatcher {
             HelperRequest::LogTail(n) => Ok(HelperReply::Log((self.log_tail)(HelperRequest::log_len(n)))),
             HelperRequest::Audit(n) => Ok(HelperReply::Entries(self.audit.tail(HelperRequest::audit_len(n)))),
             HelperRequest::Traffic => {
+                // Scoped to the caller before anything leaves (plan decision D6, security): a standard account sees its own
+                // programs and the system's, never another account's program names or process ids. Without an account to scope
+                // to, or without the sweep that says whose a process is, nothing is answered.
+                let who = self.account_of(ctx)?;
                 let mut counters = self.traffic.counters().map_err(|e| remote(&e))?;
                 counters.truncate(MAX_COUNTERS);
-                Ok(HelperReply::Counters(counters))
+                let sweep = self.processes.sweep().map_err(|e| remote(&e))?;
+                let all = counters.len();
+                let a = traffic_answer(counters, &sweep, &who, ctx.view.scope);
+                log::info!(
+                    read = all, shown = a.counters.len(), others = a.others.map_or(0, |o| o.programs);
+                    "Helper: traffic answered"
+                );
+                Ok(HelperReply::Traffic(a))
             }
             HelperRequest::Firewall => {
                 let started = std::time::Instant::now();
@@ -401,6 +412,16 @@ mod tests {
         wakes: Box<dyn dyno_core::wake::WakeScheduler>,
         wol: Box<dyn dyno_core::wake::WolReader>,
     ) -> Rig {
+        rig_parts(host, traffic, wakes, wol, Box::new(dyno_core::helper_processes::NoProcesses))
+    }
+
+    fn rig_parts(
+        host: HelperHost,
+        traffic: Result<Vec<TrafficCounter>, PlatformError>,
+        wakes: Box<dyn dyno_core::wake::WakeScheduler>,
+        wol: Box<dyn dyno_core::wake::WolReader>,
+        processes: Box<dyn ProcessSweeper>,
+    ) -> Rig {
         let dir = tempfile::tempdir().unwrap();
         let gone = Arc::new(AtomicBool::new(false));
         let flag = gone.clone();
@@ -420,7 +441,7 @@ mod tests {
             extras: Box::new(dyno_core::helper_extras::NoExtras),
             counters: Box::new(dyno_core::helper_counters::NoCounters),
             memory: Box::new(dyno_core::helper_memory::NoMemory),
-            processes: Box::new(dyno_core::helper_processes::NoProcesses),
+            processes,
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
             firewall: Box::new(crate::tools::NotHere("none")),
@@ -447,24 +468,165 @@ mod tests {
         }
     }
 
-    #[test]
-    fn traffic_is_bounded_and_a_system_without_it_says_so() {
-        let many: Vec<TrafficCounter> = (0..MAX_COUNTERS as u32 + 10)
-            .map(|pid| TrafficCounter {
-                pid,
-                name: "p".into(),
-                bytes_in: 1,
-                bytes_out: 2,
-            })
-            .collect();
-        let r = rig(HelperHost::Windows, Ok(many));
-        match r.d.handle(None, HelperRequest::Traffic).unwrap() {
-            HelperReply::Counters(c) => assert_eq!(c.len(), MAX_COUNTERS),
+    use dyno_core::helper_policy::{OthersPolicy as Others, Visibility as Vis};
+    use dyno_core::helper_processes::{ProcState, RawOwner, RawProcess, Sweep};
+
+    struct Sweeps(Result<Sweep, PlatformError>);
+    impl ProcessSweeper for Sweeps {
+        fn sweep(&self) -> Result<Sweep, PlatformError> {
+            self.0.clone()
+        }
+    }
+
+    fn process(pid: u32, owner: RawOwner) -> RawProcess {
+        RawProcess {
+            pid,
+            started: Some(1),
+            parent: Some(1),
+            name: format!("p{pid}"),
+            path: None,
+            owner,
+            state: ProcState::Running,
+            threads: Some(1),
+            cpu_time_ms: Some(1),
+            memory_bytes: Some(1),
+            disk_read_bytes: Some(0),
+            disk_written_bytes: Some(0),
+        }
+    }
+
+    fn account(uid: u32) -> RawOwner {
+        RawOwner::Account {
+            id: HelperUser::Uid(uid),
+            name: Some(format!("user{uid}")),
+        }
+    }
+
+    fn counter(pid: u32, name: &str) -> TrafficCounter {
+        TrafficCounter {
+            pid,
+            name: name.into(),
+            bytes_in: 10,
+            bytes_out: 20,
+        }
+    }
+
+    /// Pid 10 is the caller's (uid 1000), 20 and 21 are another account's (uid 2000), 30 is the system's; 40 is in no sweep.
+    fn scoped_rig() -> Rig {
+        let sweep = Sweep {
+            processes: vec![
+                process(10, account(1_000)),
+                process(20, account(2_000)),
+                process(21, account(2_000)),
+                process(30, RawOwner::System),
+            ],
+            homes: vec![],
+            taken_at: 1,
+        };
+        let counters = vec![
+            counter(10, "mine"),
+            counter(20, "theirs"),
+            counter(21, "theirs-too"),
+            counter(30, "system"),
+            counter(40, "gone"),
+        ];
+        rig_parts(
+            HelperHost::Windows,
+            Ok(counters),
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(Sweeps(Ok(sweep))),
+        )
+    }
+
+    fn as_account(uid: u32, scope: Vis) -> Ctx {
+        let mut ctx = Ctx::anonymous(Some(7));
+        ctx.uid = Some(uid);
+        ctx.account = Some(HelperUser::Uid(uid));
+        ctx.view.scope = scope;
+        ctx
+    }
+
+    fn traffic_for(r: &Rig, ctx: &Ctx) -> dyno_core::network_traffic::TrafficAnswer {
+        match r.d.handle_for(ctx, HelperRequest::Traffic).unwrap() {
+            HelperReply::Traffic(a) => a,
             other => panic!("{other:?}"),
         }
+    }
+
+    fn pids(a: &dyno_core::network_traffic::TrafficAnswer) -> Vec<u32> {
+        a.counters.iter().map(|c| c.pid).collect()
+    }
+
+    #[test]
+    fn traffic_is_scoped_to_the_caller() {
+        let r = scoped_rig();
+        // A standard account, default policy: its own and the system's by name; the other account's programs (and the one no
+        // sweep knows) as one total with no name or process id in it.
+        let a = traffic_for(&r, &as_account(1_000, Vis::Own(Others::Total)));
+        assert_eq!(pids(&a), vec![10, 30]);
+        let o = a.others.expect("the others' total");
+        assert_eq!((o.programs, o.bytes_in, o.bytes_out), (3, 30, 60));
+        let wire = format!("{a:?}");
+        assert!(!wire.contains("theirs") && !wire.contains("gone"), "{wire}");
+    }
+
+    #[test]
+    fn traffic_follows_the_policy_for_other_accounts() {
+        let r = scoped_rig();
+        let hidden = traffic_for(&r, &as_account(1_000, Vis::Own(Others::Hidden)));
+        assert_eq!((pids(&hidden), hidden.others), (vec![10, 30], None));
+        let detail = traffic_for(&r, &as_account(1_000, Vis::Own(Others::Detail)));
+        assert_eq!((pids(&detail), detail.others), (vec![10, 20, 21, 30, 40], None));
+        let full = traffic_for(&r, &as_account(1_000, Vis::Full));
+        assert_eq!(pids(&full), vec![10, 20, 21, 30, 40]);
+        // The other account sees its own programs, not the first account's.
+        let theirs = traffic_for(&r, &as_account(2_000, Vis::Own(Others::Total)));
+        assert_eq!(pids(&theirs), vec![20, 21, 30]);
+    }
+
+    #[test]
+    fn traffic_is_not_answered_when_it_cannot_be_scoped() {
+        let r = scoped_rig();
+        // No account: nothing to scope to.
+        assert_eq!(r.d.handle(None, HelperRequest::Traffic).unwrap_err().code, codes::UNSUPPORTED);
+        // No sweep: whose a program is cannot be told, so nothing is sent.
+        let blind = rig_parts(
+            HelperHost::Windows,
+            Ok(vec![counter(10, "mine")]),
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(Sweeps(Err(PlatformError::Failed("the process list could not be read".into())))),
+        );
+        assert!(blind.d.handle_for(&as_account(1_000, Vis::Full), HelperRequest::Traffic).is_err());
+    }
+
+    #[test]
+    fn traffic_is_bounded_and_a_system_without_it_says_so() {
+        let many: Vec<TrafficCounter> = (0..MAX_COUNTERS as u32 + 10).map(|pid| counter(pid, "p")).collect();
+        let sweep = Sweep {
+            processes: (0..MAX_COUNTERS as u32 + 10).map(|pid| process(pid, account(1_000))).collect(),
+            homes: vec![],
+            taken_at: 1,
+        };
+        let r = rig_parts(
+            HelperHost::Windows,
+            Ok(many),
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(dyno_core::wake::NoWakes),
+            Box::new(Sweeps(Ok(sweep))),
+        );
+        assert_eq!(
+            traffic_for(&r, &as_account(1_000, Vis::Own(Others::Total))).counters.len(),
+            MAX_COUNTERS
+        );
         let unsupported = rig(HelperHost::Linux, Err(PlatformError::Unsupported("no".into())));
         assert_eq!(
-            unsupported.d.handle(None, HelperRequest::Traffic).unwrap_err().code,
+            unsupported
+                .d
+                .handle_for(&as_account(1_000, Vis::Full), HelperRequest::Traffic)
+                .unwrap_err()
+                .code,
             codes::UNSUPPORTED
         );
     }

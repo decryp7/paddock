@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import type { ReadVia } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Lookups } from '../lookup/lookups';
@@ -10,9 +11,10 @@ import { NetworkPage } from './network-page';
 
 const NOW = 1_700_000_000_000;
 
-async function open() {
+async function open(tweak: (mock: MockBackend) => void = () => undefined) {
   localStorage.clear();
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+  tweak(mock);
   TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(NetworkPage);
   const settle = async () => {
@@ -49,6 +51,31 @@ describe('NetworkPage', () => {
     expect(item.getAttribute('aria-level')).toBe('2');
     // One tab stop for the grid.
     expect(rows().filter((r) => r.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('per-program traffic: who read it, and other accounts as one total with no names', async () => {
+    const real = MockBackend.prototype.network;
+    const via: ReadVia = { needsHelper: { reason: 'Traffic per program needs administrator rights on Windows.', next: { openSettings: 'helper' } } };
+    const note = 'Traffic per program needs administrator rights on Windows. Turn on Administrator readings in Settings so the helper can read this.';
+    const needs = await open((mock) => {
+      vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real.call(mock, q)), traffic: [], trafficNote: note, trafficVia: via }));
+    });
+    expect(needs.el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('administrator rights on Windows');
+    expect(needs.el.querySelector('[data-testid="reading-source-turn-on"]')?.textContent).toContain('Turn on administrator readings');
+    expect(needs.el.querySelector('.traffic-note')).toBeNull();
+    TestBed.resetTestingModule();
+    const helper = await open((mock) => {
+      vi.spyOn(mock, 'network').mockImplementation(async (q) => ({
+        ...(await real.call(mock, q)),
+        trafficNote: null,
+        trafficVia: 'helper',
+        trafficOthers: { programs: 2, bytesIn: 2048, bytesOut: 1024 },
+      }));
+    });
+    expect(helper.el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
+    const others = helper.el.querySelector('[data-testid="traffic-others"]')?.textContent ?? '';
+    expect(others).toContain('Other users: 2 programs');
+    expect(others).toMatch(/2(\.0+)? KB/);
   });
 
   it('folds a program with its chevron and with Left, unfolds it with Right, keeps the choice and the focus', async () => {

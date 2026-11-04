@@ -165,7 +165,7 @@ fn tag_helper_request(v: &HelperRequest) -> &'static str {
 fn tag_helper_reply(v: &HelperReply) -> &'static str {
     match v {
         HelperReply::About(..) => "About",
-        HelperReply::Counters(_) => "Counters",
+        HelperReply::Traffic(_) => "Traffic",
         HelperReply::Entries(_) => "Entries",
         HelperReply::Bye => "Bye",
         HelperReply::Firewall(_) => "Firewall",
@@ -501,7 +501,7 @@ fn helper_request_samples() -> Vec<HelperRequest> {
 fn helper_reply_samples() -> Vec<HelperReply> {
     vec![
         HelperReply::About(zero(), zero()),
-        HelperReply::Counters(vec![]),
+        HelperReply::Traffic(zero()),
         HelperReply::Entries(vec![]),
         HelperReply::Bye,
         HelperReply::Firewall(zero()),

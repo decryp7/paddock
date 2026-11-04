@@ -12,7 +12,7 @@ use crate::helper_policy::{RequestKind, Visibility};
 use crate::helper_requests::{
     validate_tool_bytes, CounterQuery, ExtrasKind, ProcessQuery, RequestError, SmartQuery, ToolKind, MAX_LOG_REPLY,
 };
-use crate::network_traffic::TrafficCounter;
+use crate::network_traffic::TrafficAnswer;
 use crate::smart::SmartReply;
 use crate::wake::{IfName, WakeEntry, WakeTag, WolReply};
 use serde::{Deserialize, Serialize};
@@ -162,8 +162,8 @@ impl HelperRequest {
 pub enum HelperReply {
     /// Answer to `Info`: who the helper is, and what this caller sees of it.
     About(HelperInfo, CallerView),
-    /// Answer to `Traffic`.
-    Counters(Vec<TrafficCounter>),
+    /// Answer to `Traffic`, scoped to the caller: its own programs and the system's, and other accounts' as the policy says.
+    Traffic(TrafficAnswer),
     /// Answer to `Audit`.
     Entries(Vec<AuditEntry>),
     /// Answer to `Firewall`, already reduced to what the caller may have.
@@ -583,12 +583,19 @@ mod tests {
             HelperMessage::Request(HelperRequest::Traffic),
             HelperMessage::Request(HelperRequest::Uninstall),
             HelperMessage::Request(HelperRequest::Audit(5)),
-            HelperMessage::Reply(HelperReply::Counters(vec![TrafficCounter {
-                pid: 4,
-                name: "x".into(),
-                bytes_in: 1,
-                bytes_out: 2,
-            }])),
+            HelperMessage::Reply(HelperReply::Traffic(TrafficAnswer {
+                counters: vec![crate::network_traffic::TrafficCounter {
+                    pid: 4,
+                    name: "x".into(),
+                    bytes_in: 1,
+                    bytes_out: 2,
+                }],
+                others: Some(crate::network_traffic::OthersTraffic {
+                    programs: 3,
+                    bytes_in: 4,
+                    bytes_out: 5,
+                }),
+            })),
             HelperMessage::Reply(HelperReply::About(
                 info("1", 1),
                 CallerView {

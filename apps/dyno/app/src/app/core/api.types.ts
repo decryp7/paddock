@@ -1418,6 +1418,13 @@ export interface NetworkQuery {
   country: string | null;
 }
 
+/** Other accounts' programs as one total (bytes since each program started). */
+export interface OthersTraffic {
+  programs: number;
+  bytesIn: number;
+  bytesOut: number;
+}
+
 export interface NetworkSnapshot {
   at: Timestamp;
   listeners: ListenerRow[];
@@ -1431,6 +1438,8 @@ export interface NetworkSnapshot {
   trafficNote?: string | null;
   /** Who read the per-program traffic. */
   trafficVia: ReadVia;
+  /** What other accounts' programs moved together, for a caller the helper scopes to its own programs (no names). */
+  trafficOthers?: OthersTraffic | null;
   /** Who read the socket owners. */
   ownersVia: ReadVia;
 }

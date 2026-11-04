@@ -2,3 +2,4 @@
 //! module and one `pub mod` line here.
 
 pub mod memory;
+pub mod traffic;

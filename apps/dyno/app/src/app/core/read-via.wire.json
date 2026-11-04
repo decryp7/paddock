@@ -99,6 +99,7 @@
     },
     "traffic": [],
     "trafficNote": null,
+    "trafficOthers": null,
     "trafficVia": "helper",
     "truncated": 0,
     "unknownOwners": 0
