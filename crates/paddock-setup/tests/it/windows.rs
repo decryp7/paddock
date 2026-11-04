@@ -6,6 +6,7 @@
 //! `PADDOCK_SETUP_PRODUCT=PaddockSetupTest`, `PADDOCK_SETUP_MAIN=paddock-setup.exe`, `PADDOCK_SETUP_VERSION=0.1.0` and
 //! `PADDOCK_SETUP_UPDATE_KEY` = the text of `paddock-updater/tests/fixtures/key.pub`;
 //! `PADDOCK_SETUP_EXE_NEWER` is the same build with `PADDOCK_SETUP_VERSION=9.9.9` (for the downgrade refusal).
+//! `PADDOCK_SETUP_EXE_STOP` is a build with the `proc-stop` feature on a tree that has `paddock_proc::installed`.
 //! The success path needs a program that really is signed: `PADDOCK_SETUP_EXE_E2E` is a 0.1.0 build with a throw-away
 //! test key, `PADDOCK_SETUP_E2E_INSTALLER` the `fake_installer` example signed for 9.9.9 with that key and
 //! `PADDOCK_SETUP_E2E_SIGNATURE` the file with its signature text (made by the script that runs these tests).
@@ -56,10 +57,20 @@ impl Site {
 
 impl Drop for Site {
     fn drop(&mut self) {
-        let _ = Command::new("cmd")
-            .args(["/c", "rmdir", "/s", "/q"])
-            .arg(&self.0)
-            .status();
+        // Windows Defender may still be scanning a program that was just started; remove with a bounded retry.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while self.0.exists() && std::time::Instant::now() < deadline {
+            let _ = Command::new("cmd")
+                .args(["/c", "rmdir", "/s", "/q"])
+                .arg(&self.0)
+                .output();
+            if self.0.exists() {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+        if self.0.exists() {
+            eprintln!("could not remove the test folder {}", self.0.display());
+        }
     }
 }
 
@@ -132,7 +143,7 @@ fn the_binary_carries_the_update_description_in_its_version_resource() {
 }
 
 #[test]
-fn same_folder_ignores_case_and_a_trailing_backslash_and_follows_a_junction_by_its_final_name() {
+fn same_folder_ignores_case_a_trailing_backslash_and_short_names_but_not_a_junction() {
     let a = scratch("same-a");
     let upper = a.to_string_lossy().to_uppercase();
     let with_slash = format!("{}\\", a.display());
@@ -191,14 +202,20 @@ fn same_folder_ignores_case_and_a_trailing_backslash_and_follows_a_junction_by_i
     );
     // An 8.3 short name names the same folder.
     let long = scratch("a-folder-with-a-long-name");
-    let short = Command::new("cmd")
-        .args(["/c", "for", "%I", "in"])
-        .arg(format!("(\"{}\")", long.display()))
-        .args(["do", "@echo", "%~sI"])
+    let ps = format!(
+        "(New-Object -ComObject Scripting.FileSystemObject).GetFolder('{}').ShortPath",
+        long.display()
+    );
+    let short = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps])
         .output()
         .unwrap();
     let short = String::from_utf8_lossy(&short.stdout).trim().to_string();
-    if !short.is_empty() && !short.eq_ignore_ascii_case(&long.to_string_lossy()) {
+    assert!(
+        !short.is_empty() && !short.eq_ignore_ascii_case(&long.to_string_lossy()),
+        "the test folder has no 8.3 name: {short}"
+    );
+    {
         assert_eq!(
             run(
                 &p,
@@ -209,7 +226,7 @@ fn same_folder_ignores_case_and_a_trailing_backslash_and_follows_a_junction_by_i
             "{short}"
         );
     }
-    // A junction and its target are different final names only when asked about the link's own folder; the target is the same.
+    // A junction is opened without following it, so it is not the same folder as its target.
     let link = a.join("link");
     junction(&link, &b);
     assert_eq!(
@@ -224,7 +241,7 @@ fn same_folder_ignores_case_and_a_trailing_backslash_and_follows_a_junction_by_i
             ]
         )
         .0,
-        0
+        1
     );
     let _ = std::fs::remove_dir_all(a);
     let _ = std::fs::remove_dir_all(b);
@@ -660,4 +677,116 @@ fn apply_update_starts_the_signed_installer_with_fixed_arguments_and_a_protected
         log.contains("handed off: the installer was started"),
         "{log}"
     );
+}
+
+/// `stop-all` over the real stopper (a build with the `proc-stop` feature, `PADDOCK_SETUP_EXE_STOP`): a listed program that
+/// runs from the folder is ended; a program with the same file name from another folder is not.
+#[test]
+fn stop_all_ends_a_listed_program_from_the_folder_and_leaves_a_namesake_alone() {
+    let site = Site::with_exe("stopall", "PADDOCK_SETUP_EXE_STOP");
+    let other = Site::new("stopall-other");
+    let ping = PathBuf::from(std::env::var("SystemRoot").expect("SystemRoot"))
+        .join("System32")
+        .join("PING.EXE");
+    let mine = site.0.join("paddocktarget.exe");
+    let theirs = other.0.join("paddocktarget.exe");
+    std::fs::copy(&ping, &mine).unwrap();
+    std::fs::copy(&ping, &theirs).unwrap();
+    // `ping -t` runs until it is ended; both children are made and ended by this test only.
+    let mut child_mine = Command::new(&mine)
+        .args(["-t", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("start the listed program");
+    let mut child_theirs = Command::new(&theirs)
+        .args(["-t", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("start the namesake");
+    let (code, _) = run(
+        &site.setup(),
+        &[
+            "stop-all",
+            "--dir",
+            &site.0.to_string_lossy(),
+            "--images",
+            "paddocktarget.exe",
+        ],
+    );
+    let mine_ended = child_mine.try_wait().unwrap().is_some();
+    let theirs_running = child_theirs.try_wait().unwrap().is_none();
+    let _ = child_mine.kill();
+    let _ = child_theirs.kill();
+    let _ = child_mine.wait();
+    let _ = child_theirs.wait();
+    let log = site.log();
+    assert_eq!((code, mine_ended, theirs_running), (0, true, true), "{log}");
+    assert!(
+        log.contains("phase=process image=paddocktarget.exe pid="),
+        "{log}"
+    );
+    assert!(log.contains("phase=exit code=0"), "{log}");
+}
+
+/// `guard`: a per-user uninstall key in the installer account's hive blocks a fresh install (exit 2, the message on the
+/// first stdout line); without the key, or when an HKLM key exists, it does not.
+#[test]
+fn guard_blocks_on_the_installer_accounts_uninstall_key_only() {
+    const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\PaddockSetupTest";
+    let site = Site::new("guard");
+    let dir = site.0.to_string_lossy().into_owned();
+    let args = [
+        "guard",
+        "--product",
+        "PaddockSetupTest",
+        "--main",
+        "paddock-setup.exe",
+        "--dir",
+        dir.as_str(),
+    ];
+    let p = exe("PADDOCK_SETUP_EXE");
+    assert_eq!(run(&p, &args).0, 0, "no key: nothing blocks");
+    assert!(reg(&[
+        "add",
+        KEY,
+        "/v",
+        "UninstallString",
+        "/t",
+        "REG_SZ",
+        "/d",
+        r#""C:\Nowhere\PaddockSetupTest\uninstall.exe""#,
+        "/f"
+    ]));
+    let (code, out) = run(&p, &args);
+    let mut with_restart = args.to_vec();
+    with_restart.extend(["--update", "--restart"]);
+    let (code2, out2) = run(&p, &with_restart);
+    reg(&["delete", KEY, "/f"]);
+    assert_eq!(code, 2, "{out}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "Uninstall the older PaddockSetupTest first (Settings > Apps), then run this installer again."
+        ]
+    );
+    assert_eq!(code2, 2);
+    assert!(
+        out2.lines()
+            .next()
+            .unwrap()
+            .ends_with("Then start PaddockSetupTest again."),
+        "{out2}"
+    );
+    assert!(
+        !out2.contains("RESTART:"),
+        "the program is not there, so nothing is started"
+    );
+    assert!(
+        site.log()
+            .contains("phase=guard hit role=installer key=yes file=no (blocks)"),
+        "{}",
+        site.log()
+    );
+    assert_eq!(run(&p, &args).0, 0, "the key is gone again");
 }

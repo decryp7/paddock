@@ -117,19 +117,20 @@ fn run(command: Command) -> Exit {
             match guard::decide(&machine, &product, &main, update, restart, log) {
                 guard::Decision::NotFresh | guard::Decision::Proceed => Exit::Ok,
                 guard::Decision::Blocked { message, restart } => {
-                    say(&message);
-                    if let Some(program) = restart {
-                        let started = facts::desktop_token()
-                            .is_some_and(|t| spawn_as_desktop_user(&t, &program));
-                        log.line(
-                            "guard",
-                            if started {
-                                "the older copy was started again"
-                            } else {
-                                "the older copy could not be started again"
-                            },
-                        );
+                    // The include reads stdout (nsExec): the message on the first line, then, when the older copy is to be
+                    // started again as the desktop user (the include's PADDOCK_ABORT does that), a last `RESTART:<path>`
+                    // line (`guard::blocked_output`).
+                    for line in guard::blocked_output(&message, restart.as_deref()) {
+                        say(&line);
                     }
+                    log.line(
+                        "guard",
+                        if restart.is_some() {
+                            "blocked; the include is told to start the older copy again"
+                        } else {
+                            "blocked"
+                        },
+                    );
                     Exit::Blocked
                 }
             }
@@ -381,53 +382,5 @@ impl stop::StopPort for StopAdapter {
             });
         }
         Ok(out)
-    }
-}
-
-/// Starts `program` with the desktop user's token (`CreateProcessWithTokenW`, unelevated).
-fn spawn_as_desktop_user(token: &handle::Owned, program: &str) -> bool {
-    use windows_sys::Win32::System::Environment::{
-        CreateEnvironmentBlock, DestroyEnvironmentBlock,
-    };
-    use windows_sys::Win32::System::Threading::{
-        CreateProcessWithTokenW, PROCESS_INFORMATION, STARTUPINFOW,
-    };
-    let wide = wide::to_wide(program);
-    let mut cmd = wide::to_wide(&format!("\"{program}\""));
-    let dir = std::path::Path::new(program)
-        .parent()
-        .map(|p| wide::to_wide(&p.to_string_lossy()));
-    // SAFETY: zeroed structures of the right type; the strings live through the call.
-    unsafe {
-        let mut si: STARTUPINFOW = std::mem::zeroed();
-        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-        // The desktop user's own environment (their TEMP, not the installer account's), as RunAsUser gives it.
-        let mut env: *mut core::ffi::c_void = std::ptr::null_mut();
-        let have_env = CreateEnvironmentBlock(&mut env, token.0, 0) != 0;
-        let ok = CreateProcessWithTokenW(
-            token.0,
-            0,
-            wide.as_ptr(),
-            cmd.as_mut_ptr(),
-            if have_env { 0x0000_0400 } else { 0 }, // CREATE_UNICODE_ENVIRONMENT
-            if have_env {
-                env.cast_const()
-            } else {
-                std::ptr::null()
-            },
-            dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
-            &si,
-            &mut pi,
-        );
-        if have_env {
-            DestroyEnvironmentBlock(env);
-        }
-        if ok == 0 {
-            return false;
-        }
-        drop(handle::Owned(pi.hProcess));
-        drop(handle::Owned(pi.hThread));
-        true
     }
 }

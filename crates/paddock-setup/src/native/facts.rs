@@ -6,7 +6,7 @@ use super::wide::to_wide;
 use crate::checkdir::{DirFacts, DirInspect, UpdatesInspect, components};
 use crate::guard::{InstallFacts, UninstallEntry, expand_local_app_data};
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, HANDLE};
-use windows_sys::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
+use windows_sys::Win32::Security::TOKEN_QUERY;
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO, FileBasicInfo,
     GetFileAttributesW, GetFileInformationByHandleEx, INVALID_FILE_ATTRIBUTES,
@@ -46,27 +46,6 @@ fn shell_process_token(access: u32) -> Option<Owned> {
 /// The desktop user's SID: the owner of the installer session's shell process.
 pub fn desktop_user() -> Option<String> {
     handle::token_user_sid(&shell_process_token(TOKEN_QUERY)?)
-}
-
-/// A duplicate of the shell process's token (to start a program as the desktop user), `None` when it cannot be had.
-pub fn desktop_token() -> Option<Owned> {
-    use windows_sys::Win32::Security::{
-        DuplicateTokenEx, SecurityImpersonation, TOKEN_ALL_ACCESS, TokenPrimary,
-    };
-    let src = shell_process_token(TOKEN_DUPLICATE | TOKEN_QUERY)?;
-    let mut dup: HANDLE = std::ptr::null_mut();
-    // SAFETY: a valid source token and out pointer.
-    let ok = unsafe {
-        DuplicateTokenEx(
-            src.0,
-            TOKEN_ALL_ACCESS,
-            std::ptr::null(),
-            SecurityImpersonation,
-            TokenPrimary,
-            &mut dup,
-        )
-    };
-    (ok != 0).then(|| Owned(dup))
 }
 
 /// Registry and file facts of this machine.

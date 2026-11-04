@@ -223,6 +223,15 @@ pub fn decide(
     }
 }
 
+/// The lines `guard` prints when it blocks, which the installer include reads from stdout: the message first (the console
+/// code page cannot show U+203A, so the arrow is `>` here), then, when the older copy is to be started again as the
+/// desktop user, a last line `RESTART:<full path>`.
+pub fn blocked_output(message: &str, restart: Option<&str>) -> Vec<String> {
+    let mut lines = vec![message.replace('\u{203a}', ">")];
+    lines.extend(restart.map(|program| format!("RESTART:{program}")));
+    lines
+}
+
 /// One account, for the app's own start-up probe.
 pub trait AccountProbe {
     /// The uninstall key in this account's `HKCU`.
@@ -626,6 +635,22 @@ mod tests {
             panic!()
         };
         assert_eq!(restart.as_deref(), Some(format!(r"{d2}\dyno.exe").as_str()));
+    }
+
+    #[test]
+    fn blocked_output_is_the_message_then_the_restart_line() {
+        let msg = "Uninstall the older Dyno first (Settings \u{203a} Apps), then run this installer again.";
+        assert_eq!(
+            blocked_output(msg, None),
+            ["Uninstall the older Dyno first (Settings > Apps), then run this installer again."]
+        );
+        assert_eq!(
+            blocked_output(msg, Some(r"C:\Users\x\AppData\Local\Dyno\dyno.exe")),
+            [
+                "Uninstall the older Dyno first (Settings > Apps), then run this installer again.",
+                r"RESTART:C:\Users\x\AppData\Local\Dyno\dyno.exe"
+            ]
+        );
     }
 
     struct Probe {
