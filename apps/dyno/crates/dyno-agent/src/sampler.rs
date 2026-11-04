@@ -4,7 +4,6 @@
 use crate::agent::{lock, now, Shared, RECENT_SAMPLES};
 use dyno_core::grouping::{group, AppGroup};
 use dyno_core::metrics::{derive_pressure, MemoryPressure, PowerSource, SystemSample};
-use dyno_core::others;
 use dyno_core::ports::{ProcessSource, SystemSensors};
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Overhead, TimelineEvent, TimelineEventKind};
@@ -28,6 +27,9 @@ pub struct Sampler {
     own_memory: u64,
     ticks: u64,
     last_pinned: Option<Instant>,
+    /// Where the process table came from (the helper's part of it), kept between the ticks that read it.
+    provenance: dyno_core::others::ProcessProvenance,
+    last_watching: Option<LiveDetail>,
 }
 
 impl Sampler {
@@ -41,6 +43,8 @@ impl Sampler {
             own_memory: 0,
             ticks: 0,
             last_pinned: None,
+            provenance: Default::default(),
+            last_watching: None,
         }
     }
 
@@ -82,6 +86,11 @@ impl Sampler {
             )
         };
         let watching = shared.watching();
+        // A process page opened (or opened again after "Try again"): the helper is asked at once, not after its quiet window.
+        if watching == Some(LiveDetail::Processes) && self.last_watching != Some(LiveDetail::Processes) {
+            self.processes.retry_helper();
+        }
+        self.last_watching = watching;
         let iv = intervals(
             settings,
             Load {
@@ -107,6 +116,7 @@ impl Sampler {
         let table = process_due.then(|| {
             self.last_processes = Some(Instant::now());
             let procs = self.processes.processes();
+            self.provenance = self.processes.provenance();
             let groups = group(&procs);
             self.measure_self(&procs, shared.cores);
             (procs, groups)
@@ -217,7 +227,7 @@ impl Sampler {
             .value()
             .copied()
             .unwrap_or_else(|| derive_pressure(&sample.memory));
-        let (listed, other_users) = others::split(&core.latest.processes, GROUP_OTHER_USERS);
+        let (listed, other_users) = self.provenance.split(&core.latest.processes, GROUP_OTHER_USERS);
         let listed_groups = if other_users.is_some() {
             group(&listed)
         } else {
@@ -232,8 +242,12 @@ impl Sampler {
             processes: Some(listed),
             groups: Some(listed_groups),
             other_users,
-            // The process list and temperatures are read here today; WP-PROC and WP-CNT set where they came from.
-            via: dyno_core::read_via::LiveVia::default(),
+            // The temperatures are WP-CNT's; the process list and the "Other users" total say who read them.
+            via: dyno_core::read_via::LiveVia {
+                processes: self.provenance.processes.clone(),
+                others: self.provenance.others.clone(),
+                ..Default::default()
+            },
         };
         core.latest.live = Some(live.clone());
         drop_pressure_unused(pressure);

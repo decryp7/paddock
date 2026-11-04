@@ -47,6 +47,7 @@ impl Caller {
     fn ctx(self, request: &HelperRequest) -> Ctx {
         let standing = self.standing();
         let mut ctx = Ctx::anonymous(Some(4242));
+        ctx.account = Some(owner());
         ctx.access = access(request.kind(), standing);
         ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
         ctx
@@ -63,6 +64,8 @@ pub struct Readers {
     pub smart: SmartReply,
     /// The firewall as `pf` or `nft` reports it.
     pub firewall: dyno_core::firewall::FirewallSource,
+    /// The machine's processes as the OS reads them (the helper scopes them to the caller).
+    pub processes: Vec<dyno_core::helper_processes::RawProcess>,
 }
 
 impl Default for Readers {
@@ -79,6 +82,7 @@ impl Default for Readers {
                 not_visited: 0,
             },
             firewall: dyno_core::firewall::FirewallSource::new(dyno_core::firewall::RuleSource::Nftables),
+            processes: Vec::new(),
         }
     }
 }
@@ -117,6 +121,16 @@ impl dyno_core::firewall::FirewallReader for Firewall {
         Ok(self.0.clone())
     }
 }
+struct Sweeps(Vec<dyno_core::helper_processes::RawProcess>);
+impl dyno_core::helper_processes::ProcessSweeper for Sweeps {
+    fn sweep(&self) -> Result<dyno_core::helper_processes::Sweep, PlatformError> {
+        Ok(dyno_core::helper_processes::Sweep {
+            processes: self.0.clone(),
+            homes: Vec::new(),
+            taken_at: 1_000,
+        })
+    }
+}
 struct Tools;
 impl ToolInstaller for Tools {
     fn install(&self, tool: ToolKind, _: &[u8]) -> Result<ToolStatus, PlatformError> {
@@ -147,7 +161,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         extras: Box::new(dyno_core::helper_extras::NoExtras),
         counters: Box::new(dyno_core::helper_counters::NoCounters),
         memory: Box::new(Memory(readers.memory)),
-        processes: Box::new(dyno_core::helper_processes::NoProcesses),
+        processes: Box::new(Sweeps(readers.processes)),
         smart: Box::new(Smart(readers.smart)),
         firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),

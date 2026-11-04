@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { AppGroup, CommandError, Locker, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
+import type { AppGroup, CommandError, LiveVia, Locker, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { type Row, type Sort, type ViewMode, buildRows, collapseAllKeys, expandAllKeys } from '../features/processes/process-rows';
@@ -9,6 +9,8 @@ interface ProcessesState {
   processes: ProcessSample[];
   groups: AppGroup[];
   otherUsers: OtherUsers | null;
+  /** Who read the process list and the "Other users" total (the engine's word). */
+  via: LiveVia | null;
   connected: boolean;
   mode: ViewMode;
   sort: Sort;
@@ -29,6 +31,7 @@ export const ProcessesStore = signalStore(
     processes: [],
     groups: [],
     otherUsers: null,
+    via: null,
     connected: false,
     mode: 'groups',
     sort: { key: 'cpu', dir: 'desc' },
@@ -51,7 +54,7 @@ export const ProcessesStore = signalStore(
       start(): void {
         if (stop) return;
         stop = backend.onLive('processes', (u) => {
-          if (u.processes) patchState(store, { processes: u.processes, groups: u.groups ?? [], otherUsers: u.otherUsers, connected: true });
+          if (u.processes) patchState(store, { processes: u.processes, groups: u.groups ?? [], otherUsers: u.otherUsers, via: u.via ?? null, connected: true });
         });
       },
       stop(): void {

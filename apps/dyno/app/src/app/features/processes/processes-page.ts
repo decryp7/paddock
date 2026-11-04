@@ -9,6 +9,7 @@ import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../
 import { bar } from '../../shared/heat';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
+import { ReadingSource } from '../../core/reading-source';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
@@ -27,7 +28,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, TreeActions],
+  imports: [ReadingSource, FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -37,7 +38,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
           <p class="num">{{ summary() }}</p>
         </div>
         <pd-segmented-control label="View" [options]="modeSegs()" [value]="store.mode()" (valueChange)="pickMode($event)" />
-        <dy-search-field label="Filter processes" placeholder="Filter by name, user or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
+        <dy-search-field label="Filter processes" placeholder="Filter by name, account or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
         <dy-tree-actions what="processes" [disabled]="store.mode() === 'flat'" (expandAll)="store.expandAll()" (collapseAll)="store.collapseAll()" />
         <button type="button" matButton="outlined" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
       </header>
@@ -52,9 +53,11 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 
       @if (store.otherUsers(); as o) {
         <p class="note" data-testid="other-users-note">
-          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this computer. It adds up only the values Dyno can read.
+          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this computer.
+          @if (store.via()?.others === 'helper') { It is counted by the administrator helper. } @else { It adds up only the values Dyno can read. }
         </p>
       }
+      <div class="source" data-testid="processes-source"><dy-reading-source [via]="store.via()?.processes" [canRetry]="true" (retry)="retry()" /></div>
 
       <div class="body" [class.open]="!!store.selected()">
         <section class="table card" #frame>
@@ -141,6 +144,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
     :host { display: block; height: 100%; }
     .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
     .wrap { height: 100%; display: flex; flex-direction: column; padding: var(--sp-5) var(--sp-6) var(--sp-4); gap: var(--sp-3); min-height: 0; }
+    .source { display: contents; }
     .head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
     .titles { flex: 1; min-width: 200px; display: grid; gap: 2px; }
     .titles p { color: var(--text-3); }
@@ -207,7 +211,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
     { key: 'cpu', sortStart: 'desc', header: 'CPU', value: (r) => r.cpu, align: 'end', width: '84px' },
     { key: 'memory', sortStart: 'desc', header: 'Memory', value: (r) => r.memory, align: 'end', width: '96px' },
     { key: 'disk', sortStart: 'desc', header: 'Disk', value: (r) => r.disk, align: 'end', width: '96px' },
-    { key: 'user', header: 'User', value: (r) => r.user, width: '130px', hideBelow: 760 },
+    { key: 'user', header: 'Account', value: (r) => r.user, width: '130px', hideBelow: 760 },
     { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 680 },
   ];
   /** Apps, processes and their children: the table indents, folds and says the levels. */

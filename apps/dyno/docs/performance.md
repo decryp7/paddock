@@ -436,3 +436,23 @@ see [Disk test, first real run](#disk-test-first-real-run-2026-11-03-adr-0030-wp
   geometry 494 Mtri/s, 1.9 s in all. The fill figure is probably high: the off-screen target is discarded after each pass, which a
   tile-based GPU may skip writing back; the label says "fill rate", not "memory bandwidth". **Not measured:** the five-repetition run,
   discrete GPUs, DX12, Vulkan, the size of the bundle with wgpu (WP-B6 asks for it).
+
+## Processes of every account through the helper (2026-11-04, helper-wiring WP-PROC)
+
+The process list is a Live reading: the helper's sweep runs on its own worker every 5 s (`SWEEP_PERIOD`, paused 20 s after the
+sampler last took the list), never on the sampling thread (ER-17). The sampling thread only merges the latest finished sweep into
+its table. Pages: up to 16 of 1,024 entries (`MAX_SWEEP` 16,384). The helper reads the machine once per page request, so a machine
+with fewer than 1,025 processes costs one sweep per period.
+
+- **Commit:** `dyno/wp-proc` (the commit that adds this block)
+- **Machine:** Mac mini M4 Pro, 14 cores, macOS 27.2, 1-minute load 3 to 8 from other agents (indications only)
+- **Build:** release
+- **Real sweep, `measure_a_real_sweep`** (`cargo test -p dyno-agent --release --test helper_processes -- --ignored --nocapture`;
+  `SystemSweeper` then `build_page` for one page, three rounds, about 910 processes): sweep 42 to 51 ms, scoping and paging 8 ms.
+- **Merge at the cap, `measure_merge_cost`** (`--lib --release -- --ignored --nocapture`; 16,384 helper entries with rates against
+  an earlier sweep, merged with 8,192 local rows): rates 1.7 ms on the worker, merge 1.0 ms on the sampling thread.
+
+Per sampling tick the sampler thread therefore pays about 1 ms at the largest allowed sweep, and no IPC. The worker pays about 50 ms
+every 5 s on a machine like this one, 0.5 to 1 % of one core. **Not measured:** the Windows and Linux VMs (the VM rows of the
+plan), a machine with several thousand processes, and the wire time of a 1,024-entry page (the IPC rig measures the encoding, not
+the pipe). The period is a constant, not yet a Setting with an "Auto" default (the settings schema is not this package's file).

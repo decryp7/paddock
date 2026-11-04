@@ -75,6 +75,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <pd-select [options]="processChoices" [value]="d.sampling.processIntervalMs + ''" ariaLabel="Process sampling interval" (valueChange)="setSampling({ processIntervalMs: +$event })" />
               </div>
               <div class="row">
+                <div class="lbl"><strong>Other accounts' processes</strong><small>How often the administrator helper reads every account's processes. Auto is every 5 seconds, or as often as the process list when that is slower.</small></div>
+                <pd-select [options]="sweepChoices" [value]="d.sampling.helperSweepMs === null ? 'auto' : d.sampling.helperSweepMs + ''" ariaLabel="Helper process reading interval" (valueChange)="setSampling({ helperSweepMs: $event === 'auto' ? null : +$event })" />
+              </div>
+              <div class="row">
                 <div class="lbl"><strong>Keep raw samples</strong><small>Hours of one-sample-per-tick history, stored in the agent's local database.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="1" max="72" aria-label="Hours of raw samples" [ngModel]="d.retention.rawHours" (ngModelChange)="setRetention({ rawHours: +$event })" /><span matTextSuffix>hours</span></mat-form-field>
               </div>
@@ -491,6 +495,7 @@ export class SettingsPage implements OnInit {
   protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
   protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
   protected readonly systemChoices = [500, 1000, 2000, 5000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
+  protected readonly sweepChoices: PdSelectOption[] = [{ value: 'auto', label: 'Auto' }, ...[2000, 5000, 10000, 30000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }))];
   protected readonly processChoices = [1000, 2000, 5000, 10000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
   protected readonly siteChoices: PdSelectOption[] = [...LOOKUP_PRESETS.map((p) => ({ value: p.id, label: `${p.name} — ${p.about}` })), { value: 'custom', label: 'Custom' }];
   protected readonly hint = computed(() => {

@@ -806,7 +806,8 @@ export interface SavedReport {
 export interface Settings {
   version: number;
   launchAtLogin: boolean;
-  sampling: { intervalMs: number; processIntervalMs: number };
+  /** `helperSweepMs` is how often the helper reads every account's processes; `null` is Auto (5 s, never faster than the process table). */
+  sampling: { intervalMs: number; processIntervalMs: number; helperSweepMs: number | null };
   retention: { rawHours: number; minuteDays: number; quarterHourDays: number; hourDays: number };
   alerts: {
     enabled: boolean;

@@ -83,6 +83,13 @@ pub trait ProcessSource: Send {
     fn processes(&mut self) -> Vec<ProcessSample>;
     /// The details of one process (slow: command line, modules, connections, signature).
     fn details(&mut self, target: ProcessRef) -> Result<ProcessDetails, PlatformError>;
+    /// Where the last [`ProcessSource::processes`] answer came from and what the helper added to it. A source that reads only
+    /// on this computer keeps the default.
+    fn provenance(&self) -> crate::others::ProcessProvenance {
+        crate::others::ProcessProvenance::default()
+    }
+    /// A person asked to try the helper again (the process page was opened again): the next read asks it at once.
+    fn retry_helper(&mut self) {}
 }
 
 /// "What is locking this file?"
