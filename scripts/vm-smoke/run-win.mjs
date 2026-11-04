@@ -140,6 +140,7 @@ async function main(argv) {
     if (o.ui && done) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       log('UI phase: snap check, screenshot check on the WebView2 DOM, Quit (bounded)');
+      process.env.PADDOCK_WIN_SHOTS = join(out, `${new Date().toISOString().replace(/[:.]/g, '-')}-win-dom-shots`);
       uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [] });
     }
     const dest = join(scratch, 'out');
