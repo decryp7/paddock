@@ -338,6 +338,12 @@ pub struct NetworkSnapshot {
     pub traffic: Vec<crate::network_traffic::TrafficRow>,
     /// Why `traffic` is empty (one plain sentence), or `None` when it is available.
     pub traffic_note: Option<String>,
+    /// Who read the per-program traffic.
+    #[serde(default)]
+    pub traffic_via: crate::read_via::ReadVia,
+    /// Who read the socket owners.
+    #[serde(default)]
+    pub owners_via: crate::read_via::ReadVia,
 }
 
 /// Builds the view: names owners from `processes`, applies `query`, sorts (listeners by port, connections by program) and
@@ -453,6 +459,8 @@ pub fn build_with_geo(
         note: None,
         traffic: Vec::new(),
         traffic_note: None,
+        traffic_via: crate::read_via::ReadVia::Local,
+        owners_via: crate::read_via::ReadVia::Local,
     }
 }
 

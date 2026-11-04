@@ -193,10 +193,25 @@ export interface ProcessDetails {
   startupSource: string | null;
 }
 
+/** What to do about a reading that could not be given (the engine's `NextStep`). */
+export type NextStep = 'retry' | 'updateHelper' | 'updateApp' | 'showLog' | { openSettings: string } | { none: { why: string } };
+
+/** Who read a reading (the engine's `ReadVia`): the helper, this computer with the person's rights, or nobody, with the reason. */
+export type ReadVia = 'helper' | 'local' | { needsHelper: { reason: string; next: NextStep } } | { unavailable: { reason: string } };
+
+/** Where the parts of one live push came from. */
+export interface LiveVia {
+  processes: ReadVia;
+  others: ReadVia;
+  temperatures: ReadVia;
+}
+
 export interface Locker {
   process: ProcessRef;
   name: string;
   kind: string | null;
+  /** Who read it. Always sent; `local` for a reading that never needed the helper. */
+  via: ReadVia;
 }
 
 /** One application with all its processes. */
@@ -269,6 +284,8 @@ export interface LiveUpdate {
   groups: AppGroup[] | null;
   /** Other users' processes, folded into one row (`processes` and `groups` leave them out); null when there are none. */
   otherUsers: OtherUsers | null;
+  /** Who read the processes, the "Other users" total and the temperatures. */
+  via: LiveVia;
 }
 
 /** `tray` is the shell's own level with no window open (the menu bar icons); a window asks for `summary` or `processes`. */
@@ -952,6 +969,8 @@ export interface SystemInventory {
   memory: MemoryLayout;
   disks: DiskInfo[];
   hints: Hint[];
+  /** Who read the memory layout. */
+  memoryVia: ReadVia;
 }
 
 // ---------------------------------------------------------------------------------------------------------- alarms
@@ -1410,6 +1429,10 @@ export interface NetworkSnapshot {
   traffic?: TrafficRow[];
   /** Why `traffic` is empty (shown as a one-line note), or null when it is available. */
   trafficNote?: string | null;
+  /** Who read the per-program traffic. */
+  trafficVia: ReadVia;
+  /** Who read the socket owners. */
+  ownersVia: ReadVia;
 }
 
 /** What one program sent and received in the last interval. */
@@ -1849,6 +1872,8 @@ export interface StartupOverview {
   signedCount: number;
   /** What could not be read (the list is then partial). */
   unavailable: string[];
+  /** Who read the login items and background tasks (macOS). */
+  btmVia: ReadVia;
 }
 
 export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved';
@@ -1898,6 +1923,8 @@ export interface SleepReport {
   wakes: WakeEvent[];
   blockersUnavailable: string | null;
   wakesUnavailable: string | null;
+  /** Who read the blockers. */
+  blockersVia: ReadVia;
 }
 
 export interface BootStep {
@@ -2141,6 +2168,8 @@ export interface BackupReport {
   checkedAt: Timestamp | null;
   checking: boolean;
   loginPathUsed: boolean;
+  /** Who read the Windows Backup versions. */
+  via: ReadVia;
 }
 
 /** Folders to look in before the PATH for one tool installed somewhere unusual. */
@@ -2317,6 +2346,8 @@ export interface FirewallSource {
   truncated: number;
   rulesHidden: boolean;
   note: string | null;
+  /** Who read it. Always sent; `local` for a reading that never needed the helper. */
+  via: ReadVia;
 }
 
 /** The firewall of this computer. */

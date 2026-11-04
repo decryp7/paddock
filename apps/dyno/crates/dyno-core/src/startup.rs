@@ -221,6 +221,17 @@ pub struct StartupOverview {
     /// says so instead of presenting it as everything.
     #[serde(default)]
     pub unavailable: Vec<String>,
+    /// Who read the login items and background tasks (macOS).
+    #[serde(default)]
+    pub btm_via: crate::read_via::ReadVia,
+}
+
+impl StartupOverview {
+    /// The same overview with the login items read by `via`.
+    pub fn with_btm_via(mut self, via: crate::read_via::ReadVia) -> StartupOverview {
+        self.btm_via = via;
+        self
+    }
 }
 
 /// Applies `filter` to `entries`.
@@ -247,6 +258,7 @@ pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::os
         os_count,
         signed_count,
         unavailable: Vec::new(),
+        btm_via: crate::read_via::ReadVia::Local,
     }
 }
 

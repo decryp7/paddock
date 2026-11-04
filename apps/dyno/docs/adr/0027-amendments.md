@@ -37,3 +37,19 @@ decided, amending O2 (**amended 2026-11-04 (user): helper first, unelevated fall
   continues: `SmartDisk` gained `wear_id` (`DiskWear::id`, model and serial; the one place a serial travels, still no WWN),
   `bytes_written` and `rated_bytes`, filled by the same parser (`parse_smartctl_ssd`, rule 55); `SmartDisk::to_wear()` makes the
   `DiskWear`. `HELPER_API` is 4. Test: `the_helper_path_and_the_agents_own_path_make_the_same_wear_reading_with_the_same_id`.
+
+## 2026-11-04 (helper wiring, WP-0): the fallback policy is one seam for every reading
+
+The user's decision D1 (helper first, then this computer, for every reading) is implemented once, in `dyno-agent/src/helper_first.rs`
+(rule 55), and Smart is its first instance:
+
+- `HelperFirst<R: HelperReading>`: helper ready, then the helper's answer; else (or when the helper errors, or its answer holds
+  nothing useful) the agent's own reader; else an honest needs-admin reason with the next step. It returns `Sourced { value, via }`.
+- `ReadyGate`: `HelperCentre::status()` costs two IPC calls (`Info`, `Audit`), so readiness is kept for 5 s and dropped at once when
+  a call finds the helper unreachable or a job changes the helper (`HelperCentre::ready`, `forget_ready`).
+- `via: ReadVia` (`dyno-core/src/read_via.rs`) on the reply types of the readings; the UI shows it with `dy-reading-source`.
+  App-agent protocol 4 is unreleased, so the fields were appended without a bump.
+- `Shared.helper` is over `Box<dyn HelperTransport>`, so tests serve a real helper `Dispatcher` (`tests/common/helper_rig.rs`).
+- `SmartLink`, `SharedSmart` and `HelperFirstWear::new` are gone: `helper_first_wear(port, local)` builds the Smart instance.
+  `READ_LOCALLY_WHEN_HELPER_OFF` is unchanged. The memory modules (Linux) are the second instance.
+- D6 (helper `Traffic` scoped to the caller, administrators see all) is WP-TRF's: the seam only carries the helper's answer.

@@ -2,7 +2,8 @@
 //! cached, never in the sampling loop. The slow part (the memory slot table) runs without holding the core lock.
 
 use crate::agent::{lock, Shared};
-use dyno_core::inventory::{CpuInfo, DiskInfo, SystemInventory};
+use dyno_core::inventory::{CpuInfo, DiskInfo, MemoryLayout, SystemInventory};
+use dyno_core::metrics::Reading;
 use std::sync::Arc;
 
 /// Starts reading the inventory in the background so the first request is instant. Failure to spawn is harmless:
@@ -60,8 +61,20 @@ pub fn get(shared: &Shared) -> SystemInventory {
         )
     };
     let total = if total > 0 { total } else { os_total_memory() };
-    let memory = dyno_platform::inventory::read_memory_layout(total);
-    let inv = SystemInventory::new(os_name(), sysinfo::System::host_name(), cpu_info(), memory, disks);
+    let (memory, via) = {
+        let mut seam = lock(&shared.memory);
+        seam.reading_mut().set_total(total);
+        let got = seam.read();
+        let layout = match got.value {
+            Reading::Available(l) => l,
+            Reading::Unavailable(reason) => MemoryLayout::TotalOnly {
+                total,
+                reason: dyno_core::inventory::Unavailable::failed(reason),
+            },
+        };
+        (layout, got.via)
+    };
+    let inv = SystemInventory::new(os_name(), sysinfo::System::host_name(), cpu_info(), memory, disks).with_memory_via(via);
     lock(&shared.core).inventory = Some(inv.clone());
     inv
 }

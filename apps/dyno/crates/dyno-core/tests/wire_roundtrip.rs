@@ -930,6 +930,7 @@ fn message_samples() -> Vec<Message> {
             processes: None,
             groups: Some(vec![]),
             other_users: None,
+            via: Default::default(),
         })),
         Message::Alert(zero()),
         Message::Activity(zero()),

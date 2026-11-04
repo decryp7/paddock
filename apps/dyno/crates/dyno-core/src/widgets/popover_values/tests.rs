@@ -62,6 +62,7 @@ fn live() -> LiveUpdate {
         processes: None,
         groups: None,
         other_users: None,
+        via: Default::default(),
     }
 }
 

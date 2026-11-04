@@ -151,7 +151,7 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('Video call in progress');
     expect(el.textContent).toContain('42 min 17 s');
     expect(rowsOf(el, 'Recent wakes').length).toBe(5);
-    const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: 'pmset is not available here.', wakesUnavailable: null };
+    const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: 'pmset is not available here.', wakesUnavailable: null, blockersVia: 'local' };
     returns(mock, { sleep: report });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);

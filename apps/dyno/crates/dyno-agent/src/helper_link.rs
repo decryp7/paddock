@@ -6,10 +6,16 @@
 use dyno_core::btm::{LoginItemsLink, LoginItemsReply};
 use dyno_core::firewall::{FirewallReader, FirewallSource};
 use dyno_core::helper::HelperHost;
-use dyno_core::helper_requests::{SmartQuery, ToolKind};
+use dyno_core::helper_counters::CounterAnswer;
+use dyno_core::helper_extras::ExtrasAnswer;
+use dyno_core::helper_holders::{FileHolders, SocketOwners};
+use dyno_core::helper_processes::ProcessPage;
+use dyno_core::helper_requests::{CounterQuery, ExtrasKind, ProcessQuery, SmartQuery, ToolKind};
 use dyno_core::helper_wire::{
     assess, platform_error, HelperReply, HelperRequest, HelperState, HelperStatus, Probe, ToolStatus, HELPER_MISSING,
 };
+use dyno_core::inventory::MemoryLayout;
+use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::PlatformError;
 use dyno_core::smart::SmartReply;
 use paddock_jobs::time::Clock;
@@ -42,10 +48,21 @@ pub trait HelperTransport: Send + Sync {
     fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError>;
 }
 
+/// A boxed transport is a transport: the agent's `Shared.helper` is over `Box<dyn HelperTransport>`, so real-engine tests can
+/// serve a real helper dispatcher (`tests/common/helper_rig.rs`) where the real agent has the system connection.
+impl HelperTransport for Box<dyn HelperTransport> {
+    fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
+        (**self).call(request)
+    }
+}
+
 /// The helper as the agent uses it.
 pub struct HelperLink<T: HelperTransport> {
     transport: T,
     clock: Arc<dyn Clock>,
+    /// How many calls found the helper unreachable (absent, silent or foreign). The readiness cache drops its answer when
+    /// this moves ([`crate::helper_first::ReadyGate`]).
+    faults: std::sync::atomic::AtomicU64,
     /// The state last logged at info, so a poll that finds the same state logs at debug (one line per change, not per poll).
     last_state: std::sync::Mutex<Option<HelperState>>,
 }
@@ -74,6 +91,7 @@ impl<T: HelperTransport> HelperLink<T> {
         HelperLink {
             transport,
             clock,
+            faults: std::sync::atomic::AtomicU64::new(0),
             last_state: std::sync::Mutex::new(None),
         }
     }
@@ -86,10 +104,21 @@ impl<T: HelperTransport> HelperLink<T> {
             Ok(_) => log::debug!(Request = kind, Ms = ms; "Helper call answered"),
             Err(TransportError::Remote { code, .. }) => log::warn!(Request = kind, Ms = ms, Code = code.as_str(); "Helper call refused"),
             Err(e) => {
+                self.faults.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 log::warn!(Request = kind, Ms = ms, State = format!("{e:?}").split(['(', ' ']).next().unwrap_or(""); "Helper not reachable")
             }
         }
         out
+    }
+
+    /// How many calls so far found the helper unreachable.
+    pub fn faults(&self) -> u64 {
+        self.faults.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The clock that times the calls (the readiness cache uses the same one).
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.clock.clone()
     }
 
     /// What Settings shows: `Info`, then the audit entries when it answered. `supported` is `Err(reason)` where the helper
@@ -167,6 +196,73 @@ impl<T: HelperTransport> HelperLink<T> {
         }
     }
 
+    /// One page of the process list, scoped to the caller by the helper.
+    pub fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, PlatformError> {
+        match self.call("processes", HelperRequest::Processes(query)).map_err(to_platform)? {
+            HelperReply::Processes(p) => Ok(p),
+            _ => Err(unexpected("Processes")),
+        }
+    }
+
+    /// Per-program traffic counters (Windows), scoped to the caller.
+    pub fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+        match self.call("traffic", HelperRequest::Traffic).map_err(to_platform)? {
+            HelperReply::Counters(c) => Ok(c),
+            _ => Err(unexpected("Traffic")),
+        }
+    }
+
+    /// Socket inode to owning program (Linux), scoped to the caller.
+    pub fn socket_owners(&self) -> Result<SocketOwners, PlatformError> {
+        match self.call("socketOwners", HelperRequest::SocketOwners).map_err(to_platform)? {
+            HelperReply::SocketOwners(o) => Ok(o),
+            _ => Err(unexpected("SocketOwners")),
+        }
+    }
+
+    /// The programs holding the file with this device and inode (Linux). The helper never opens the file.
+    pub fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, PlatformError> {
+        match self
+            .call("fileHolders", HelperRequest::FileHolders { dev, ino })
+            .map_err(to_platform)?
+        {
+            HelperReply::FileHolders(h) => Ok(h),
+            _ => Err(unexpected("FileHolders")),
+        }
+    }
+
+    /// Thermal, energy and fan readings.
+    pub fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, PlatformError> {
+        match self.call("counters", HelperRequest::Counters(query)).map_err(to_platform)? {
+            HelperReply::CounterValues(v) => Ok(v),
+            _ => Err(unexpected("Counters")),
+        }
+    }
+
+    /// Memory modules from the DMI table (Linux).
+    pub fn memory(&self) -> Result<MemoryLayout, PlatformError> {
+        match self.call("memory", HelperRequest::MemoryModules).map_err(to_platform)? {
+            HelperReply::Memory(m) => Ok(m),
+            _ => Err(unexpected("MemoryModules")),
+        }
+    }
+
+    /// Wake requests or Windows Backup versions.
+    pub fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError> {
+        match self.call("extras", HelperRequest::Extras(kind)).map_err(to_platform)? {
+            HelperReply::Extras(e) => Ok(e),
+            _ => Err(unexpected("Extras")),
+        }
+    }
+
+    /// The login items of the caller's account plus system-wide ones (macOS).
+    pub fn login_items_now(&self) -> Result<LoginItemsReply, PlatformError> {
+        match self.call("loginItems", HelperRequest::LoginItems).map_err(to_platform)? {
+            HelperReply::LoginItems(r) => Ok(r),
+            _ => Err(unexpected("LoginItems")),
+        }
+    }
+
     /// SMART health of the disks the helper's own scan finds.
     pub fn smart(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
         match self.call("smart", HelperRequest::Smart(query)).map_err(to_platform)? {
@@ -213,10 +309,7 @@ where
     T: 'static,
 {
     fn login_items(&mut self) -> Result<LoginItemsReply, PlatformError> {
-        match self.call("loginItems", HelperRequest::LoginItems).map_err(to_platform)? {
-            HelperReply::LoginItems(r) => Ok(r),
-            _ => Err(unexpected("LoginItems")),
-        }
+        self.login_items_now()
     }
 }
 

@@ -77,6 +77,8 @@ export function mockNetwork(q: NetworkQuery, at: number): NetworkSnapshot {
     truncated: 0,
     unknownOwners: LISTENERS.filter((l) => l.owner.kind === 'unknown').length,
     note: null,
+    trafficVia: 'local',
+    ownersVia: 'local',
     traffic: mockTraffic(at),
     trafficNote: null,
   };

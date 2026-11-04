@@ -2,11 +2,12 @@
 //! job with phases (ER-17/18/19). The OS prompt and the install are behind [`HelperInstaller`]; the helper's answers behind the
 //! [`HelperLink`]; waiting behind a pause, so tests drive all of it with fakes and never touch the machine (ER-14).
 
+use crate::helper_first::{ReadyGate, READY_TTL};
 use crate::helper_link::{HelperLink, HelperTransport};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_wire::{HelperAction, HelperState, HelperStatus};
 use paddock_jobs::{JobContext, JobError, Phase};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How many times the job asks whether the started helper answers, and how long it pauses between asks (about a minute).
@@ -29,7 +30,8 @@ pub trait HelperInstaller: Send {
 
 /// The helper's state and the actions on it.
 pub struct HelperCentre<T: HelperTransport> {
-    link: HelperLink<T>,
+    link: Arc<HelperLink<T>>,
+    gate: ReadyGate,
     host: HelperHost,
     supported: Result<(), String>,
     version: String,
@@ -47,7 +49,8 @@ impl<T: HelperTransport> HelperCentre<T> {
         installer: Box<dyn HelperInstaller>,
     ) -> Self {
         HelperCentre {
-            link,
+            gate: ReadyGate::new(link.clock(), READY_TTL),
+            link: Arc::new(link),
             host,
             supported,
             version: version.to_string(),
@@ -72,6 +75,23 @@ impl<T: HelperTransport> HelperCentre<T> {
         &self.link
     }
 
+    /// The helper link, shared (for the readings' port).
+    pub fn link_arc(&self) -> Arc<HelperLink<T>> {
+        self.link.clone()
+    }
+
+    /// Whether the helper is ready, as a reader that runs every tick may ask: `status()` costs two IPC calls, so the answer is
+    /// kept for 5 s and dropped at once when a call finds the helper unreachable or a job changes it.
+    pub fn ready(&self) -> bool {
+        self.gate
+            .is_ready(|| self.link.faults(), || self.status().state == HelperState::Ready)
+    }
+
+    /// Drops the kept readiness answer (the helper was turned on, off, repaired or updated).
+    pub fn forget_ready(&self) {
+        self.gate.forget();
+    }
+
     /// What Settings shows.
     pub fn status(&self) -> HelperStatus {
         self.link.status(self.host, self.supported.clone(), &self.version)
@@ -80,6 +100,14 @@ impl<T: HelperTransport> HelperCentre<T> {
     /// Runs `action` as the body of a job. Each phase says what is happening; Cancel works until the prompt is open, and the
     /// prompt phase says so; nothing here has a deadline the UI imposes.
     pub fn run(&self, ctx: &JobContext, action: HelperAction) -> Result<HelperStatus, JobError> {
+        self.gate.forget();
+        let out = self.run_action(ctx, action);
+        // The helper may have changed whatever the outcome (a prompt answered, then a failure): the next reader asks again.
+        self.gate.forget();
+        out
+    }
+
+    fn run_action(&self, ctx: &JobContext, action: HelperAction) -> Result<HelperStatus, JobError> {
         ctx.phase(Phase::discovering("check", "Checking the helper"));
         ctx.check()?;
         let before = self.status();

@@ -295,7 +295,9 @@ pub struct Shared {
     /// Scheduled wake: the schedules, their OS wakes and what happens at their time (ADR 0032 section 5).
     pub wakes: crate::wakes::WakeCentre,
     /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
-    pub helper: crate::helper_centre::HelperCentre<crate::helper_peer::PeerTransport>,
+    pub helper: crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>,
+    /// The memory layout: the helper first, then this computer (the seam's second instance, plan section 8.3).
+    pub memory: Mutex<crate::helper_first::HelperFirst<crate::helper_readers::memory::MemoryModules>>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -344,6 +346,15 @@ impl crate::bench::BenchEnv for AgentBenchEnv {
     }
 }
 
+/// The helper and the readers that stand in for the machine's own, for a run that serves the helper from somewhere else (the
+/// real-engine rig, `tests/common/helper_rig.rs`). The real agent passes none: it uses the system connection and the platform.
+pub struct HelperWiring {
+    /// The helper's state and actions over the rig's transport.
+    pub centre: crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>,
+    /// What this computer reads of its memory without the helper.
+    pub local_memory: crate::helper_readers::memory::LocalMemory,
+}
+
 impl Shared {
     /// Builds the state: opens the store (moving a damaged one aside), loads settings (falling back to
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
@@ -359,6 +370,19 @@ impl Shared {
         details: Box<dyn ProcessSource>,
         reveal: Reveal,
         disk_ports: crate::disk::DiskPorts,
+    ) -> Result<Built, String> {
+        Shared::build_with_helper(dirs, platform, details, reveal, disk_ports, None)
+    }
+
+    /// [`Shared::build_with`] with the helper given (`None`: the system's). Readings are composed over the helper when it is the
+    /// real one for this data folder or a given one; a test agent with neither never asks a helper (ER-14).
+    pub fn build_with_helper(
+        dirs: Dirs,
+        platform: Platform,
+        details: Box<dyn ProcessSource>,
+        reveal: Reveal,
+        disk_ports: crate::disk::DiskPorts,
+        wiring: Option<HelperWiring>,
     ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
@@ -456,6 +480,15 @@ impl Shared {
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
         let own_tools = dirs.tools();
+        let helper_first = own_folder || wiring.is_some();
+        let (helper_centre, local_memory) = match wiring {
+            Some(w) => (w.centre, w.local_memory),
+            None => (
+                crate::helper_os::centre(),
+                Box::new(dyno_platform::inventory::read_memory_layout) as crate::helper_readers::memory::LocalMemory,
+            ),
+        };
+        let host = helper_centre.host();
         let Platform {
             sensors,
             processes,
@@ -472,6 +505,14 @@ impl Shared {
             power,
             wol,
         } = platform;
+        // The readings' port: the helper of this agent, or none where a test agent must not touch the machine (ER-14).
+        let port = |me: &std::sync::Weak<Shared>| -> Box<dyn crate::helper_first::HelperPort> {
+            if helper_first {
+                Box::new(crate::helper_first::SharedPort(me.clone()))
+            } else {
+                Box::new(crate::helper_first::OffPort)
+            }
+        };
         let shared = Arc::new_cyclic(|me| Shared {
             firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
             intel: crate::intel_centre::IntelCentre::new(dirs.clone(), Arc::new(paddock_jobs::time::SystemClock)),
@@ -499,10 +540,10 @@ impl Shared {
             network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
             hardware: crate::hardware::HardwareCentre::new(
                 hardware.signals,
-                if own_folder {
+                if helper_first {
                     // The real machine: the helper first, then the local reader (which also finds a person's own install).
-                    Box::new(crate::helper_wear::HelperFirstWear::new(
-                        Box::new(crate::helper_wear::SharedSmart(me.clone())),
+                    Box::new(crate::helper_wear::helper_first_wear(
+                        port(me),
                         dyno_platform::hardware::disk_wear_with_own_tools(&own_tools),
                     ))
                 } else {
@@ -530,7 +571,11 @@ impl Shared {
             )),
             wakes: crate::wakes::WakeCentre::new(wol.wake_timer.clone(), Arc::new(crate::wakes::SharedHelper::new(me.clone()))),
             wol: crate::wol::WolCentre::new(wol),
-            helper: crate::helper_os::centre(),
+            helper: helper_centre,
+            memory: Mutex::new(crate::helper_first::HelperFirst::new(
+                crate::helper_readers::memory::MemoryModules::new(host, local_memory),
+                port(me),
+            )),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

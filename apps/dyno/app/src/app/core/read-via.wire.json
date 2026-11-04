@@ -1,0 +1,69 @@
+{
+  "backup": {
+    "checkedAt": null,
+    "checking": false,
+    "loginPathUsed": false,
+    "statuses": [],
+    "via": {
+      "unavailable": {
+        "reason": "No versions."
+      }
+    }
+  },
+  "firewall": {
+    "defaultIn": null,
+    "defaultOut": null,
+    "note": null,
+    "ruleCount": 0,
+    "rules": [],
+    "rulesHidden": false,
+    "source": "pf",
+    "states": [],
+    "switches": [],
+    "truncated": 0,
+    "via": "helper"
+  },
+  "network": {
+    "at": 0,
+    "connections": [],
+    "listeners": [],
+    "note": null,
+    "ownersVia": {
+      "needsHelper": {
+        "next": {
+          "openSettings": "helper"
+        },
+        "reason": "Other accounts' processes are not readable without the helper. Turn on Administrator readings in Settings so the helper can read this."
+      }
+    },
+    "traffic": [],
+    "trafficNote": null,
+    "trafficVia": "helper",
+    "truncated": 0,
+    "unknownOwners": 0
+  },
+  "sleep": {
+    "blockers": [],
+    "blockersUnavailable": null,
+    "blockersVia": "helper",
+    "wakes": [],
+    "wakesUnavailable": null
+  },
+  "variants": [
+    "helper",
+    "local",
+    {
+      "needsHelper": {
+        "next": {
+          "openSettings": "helper"
+        },
+        "reason": "Other accounts' processes are not readable without the helper. Turn on Administrator readings in Settings so the helper can read this."
+      }
+    },
+    {
+      "unavailable": {
+        "reason": "This virtual machine has no sensors."
+      }
+    }
+  ]
+}

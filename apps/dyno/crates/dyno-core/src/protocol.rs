@@ -54,6 +54,9 @@ use serde::{Deserialize, Serialize};
 /// - disk-health tool: `ToolOffer` gained `source` (which copy of smartmontools Dyno uses); the helper's `Info` now lists its tools;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
+/// - helper wiring (unreleased, so no bump): the reply types of the readings the helper can give carry a `via: ReadVia` (`read_via`):
+///   `FirewallSource`, `StartupOverview.btm_via`, `NetworkSnapshot.{traffic_via, owners_via}`, `Locker`, `SystemInventory.memory_via`,
+///   `SleepReport.blockers_via`, `BackupReport` and `LiveUpdate.via`.
 pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
@@ -689,6 +692,9 @@ pub struct LiveUpdate {
     /// Other users' processes folded into one row; `processes` and `groups` leave them out. `None` when there are none
     /// or the grouping is off.
     pub other_users: Option<OtherUsers>,
+    /// Who read the processes, the "Other users" total and the temperatures. Appended to protocol 4 (unreleased: no bump).
+    #[serde(default)]
+    pub via: crate::read_via::LiveVia,
 }
 
 /// A marker on the history timeline.
@@ -1436,6 +1442,7 @@ mod tests {
             processes: None,
             groups: Some(vec![]),
             other_users: None,
+            via: Default::default(),
         };
         for m in [
             Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),

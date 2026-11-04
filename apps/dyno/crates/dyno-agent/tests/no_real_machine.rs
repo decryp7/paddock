@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-const NEEDLES: [&str; 15] = [
+const NEEDLES: [&str; 24] = [
     "OsVolumes",
     "DiskPorts::os",
     "start_os",
@@ -24,6 +24,16 @@ const NEEDLES: [&str; 15] = [
     "OsProber",
     "OsUdp",
     "KeyringSecrets",
+    // The helper's production readers (helper-wiring plan section 4.2): the rig serves fakes, so no test builds these.
+    "SystemMemory",
+    "tools::smart_reader",
+    "tools::process_sweeper",
+    "tools::holder_source",
+    "tools::extras_reader",
+    "tools::counter_reader",
+    "tools::wake_scheduler",
+    "tools::wol_reader",
+    "tools::installer",
 ];
 
 /// Where the real ones are defined or chosen: the production code of exactly these files.

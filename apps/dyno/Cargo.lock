@@ -1281,6 +1281,7 @@ name = "dyno-agent"
 version = "1.1.0"
 dependencies = [
  "dyno-core",
+ "dyno-helper",
  "dyno-helper-service",
  "dyno-platform",
  "dyno-plugin-host",
@@ -1301,6 +1302,7 @@ dependencies = [
  "paddock-service",
  "paddock-widgets",
  "plist",
+ "postcard",
  "proptest",
  "rusqlite",
  "serde",

@@ -118,6 +118,9 @@ pub struct BackupReport {
     pub checking: bool,
     /// The `PATH` came from the user's login shell (false: the process's own, or an override).
     pub login_path_used: bool,
+    /// Who read the Windows Backup versions (the other tools never need the helper).
+    #[serde(default)]
+    pub via: crate::read_via::ReadVia,
 }
 
 /// The settings.

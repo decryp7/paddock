@@ -2,120 +2,94 @@
 //! unelevated fallback). With the helper on, every disk is read through it (it holds the rights Windows withholds); with it off or
 //! unable, the local reader uses any smartmontools on the PC (Dyno's own, or the person's own install) for the disks the OS allows
 //! without administrator rights and names the others.
+//!
+//! This is the first instance of the common seam ([`crate::helper_first`]); the policy lives there.
 
+use crate::helper_first::{HelperCalls, HelperFirst, HelperReading};
 use dyno_core::hardware::DiskWear;
 use dyno_core::helper_requests::SmartQuery;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::{DiskWearSource, PlatformError};
-use dyno_core::smart::{SmartDisk, SmartReply};
+use dyno_core::smart::SmartDisk;
 
 /// The product choice behind the fallback: when the helper is off or cannot read, still read what this account may.
 /// `false` would make the helper the only way to read SMART (the earlier decision O2); every other line stays the same.
 pub const READ_LOCALLY_WHEN_HELPER_OFF: bool = true;
 
-/// The helper, as far as SMART is concerned.
-pub trait SmartLink: Send {
-    /// What the helper reads, or `None` when the helper is not ready (off, absent, not answering).
-    fn read_smart(&self) -> Option<Result<SmartReply, PlatformError>>;
+/// The wear reading: the helper's `Smart` request, or the agent's own reader.
+pub struct SmartWear {
+    local: Box<dyn DiskWearSource>,
 }
 
-/// The helper of a running agent, read through its `Smart` request when it is ready.
-pub struct SharedSmart(pub std::sync::Weak<crate::agent::Shared>);
-
-impl SmartLink for SharedSmart {
-    fn read_smart(&self) -> Option<Result<SmartReply, PlatformError>> {
-        use dyno_core::helper_wire::HelperState;
-        let shared = self.0.upgrade()?;
-        if shared.helper.status().state != HelperState::Ready {
-            return None;
-        }
-        Some(shared.helper.link().smart(SmartQuery::default()))
+impl SmartWear {
+    /// The reading with `local` as the agent's own reader.
+    pub fn new(local: Box<dyn DiskWearSource>) -> SmartWear {
+        SmartWear { local }
     }
 }
 
-/// Reads through the helper when it is ready, else (or when it reads nothing) through `fallback`.
-pub struct HelperFirstWear {
-    link: Box<dyn SmartLink>,
-    fallback: Box<dyn DiskWearSource>,
-    fallback_enabled: bool,
+/// SSD wear through the seam.
+pub type HelperFirstWear = HelperFirst<SmartWear>;
+
+/// A wear reader over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says.
+pub fn helper_first_wear(port: Box<dyn crate::helper_first::HelperPort>, local: Box<dyn DiskWearSource>) -> HelperFirstWear {
+    HelperFirst::new(SmartWear::new(local), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
 }
 
-impl HelperFirstWear {
-    /// A reader over `link` with a local `fallback`.
-    pub fn new(link: Box<dyn SmartLink>, fallback: Box<dyn DiskWearSource>) -> HelperFirstWear {
-        HelperFirstWear {
-            link,
-            fallback,
-            fallback_enabled: READ_LOCALLY_WHEN_HELPER_OFF,
-        }
+impl HelperReading for SmartWear {
+    type Value = Vec<DiskWear>;
+
+    fn name(&self) -> &'static str {
+        "SSD wear"
     }
 
-    /// Chooses whether the local fallback is used (tests, and the seam for the product choice).
-    pub fn with_fallback(mut self, on: bool) -> HelperFirstWear {
-        self.fallback_enabled = on;
-        self
+    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Vec<DiskWear>, PlatformError> {
+        let reply = calls.smart(SmartQuery::default())?;
+        // The helper's reply carries the id the history is kept under, so the history continues across both paths.
+        let wear: Vec<DiskWear> = reply.disks.iter().filter_map(SmartDisk::to_wear).collect();
+        log::info!(
+            target: "dyno::hardware",
+            "SSD wear: the helper read {} disk(s), {} with wear counters, {} skipped, {} not visited",
+            reply.disks.len(),
+            wear.len(),
+            reply.skipped.len(),
+            reply.not_visited
+        );
+        for s in &reply.skipped {
+            log::info!(target: "dyno::hardware", "SSD wear: the helper skipped {}: {}", s.device, s.reason);
+        }
+        if wear.is_empty() {
+            // Nothing to forecast from this answer: the agent's own reader gets its turn.
+            return Err(PlatformError::Failed(reply.skipped.first().map_or_else(
+                || "the helper found no SSD with wear counters.".to_string(),
+                |s| format!("the helper skipped {}: {}", s.device, s.reason),
+            )));
+        }
+        Ok(wear)
     }
 
-    fn local(&mut self, why: &str) -> Reading<Vec<DiskWear>> {
-        if !self.fallback_enabled {
-            return Reading::unavailable(format!(
-                "{why} Turn on Administrator readings (Settings) so the helper can read the disks."
-            ));
-        }
-        log::info!(target: "dyno::hardware", "SSD wear: reading on this computer instead ({why})");
-        self.fallback.read()
+    fn local(&mut self) -> Reading<Vec<DiskWear>> {
+        self.local.read()
     }
 }
 
 impl DiskWearSource for HelperFirstWear {
     fn read(&mut self) -> Reading<Vec<DiskWear>> {
-        match self.link.read_smart() {
-            None => self.local("the helper is not on"),
-            Some(Err(e)) => {
-                log::warn!(target: "dyno::hardware", "SSD wear: the helper could not read SMART: {e}");
-                self.local(&format!("the helper could not read SMART: {e}"))
-            }
-            Some(Ok(reply)) => {
-                let wear: Vec<DiskWear> = reply.disks.iter().filter_map(SmartDisk::to_wear).collect();
-                log::info!(
-                    target: "dyno::hardware",
-                    "SSD wear: the helper read {} disk(s), {} with wear counters, {} skipped, {} not visited",
-                    reply.disks.len(),
-                    wear.len(),
-                    reply.skipped.len(),
-                    reply.not_visited
-                );
-                for s in &reply.skipped {
-                    log::info!(target: "dyno::hardware", "SSD wear: the helper skipped {}: {}", s.device, s.reason);
-                }
-                if wear.is_empty() {
-                    let why = reply.skipped.first().map_or_else(
-                        || "the helper found no SSD with wear counters.".to_string(),
-                        |s| format!("the helper skipped {}: {}", s.device, s.reason),
-                    );
-                    self.local(&why)
-                } else {
-                    Reading::Available(wear)
-                }
-            }
-        }
+        HelperFirst::read(self).value
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::smart::SmartSkip;
+    use crate::helper_first::testkit::{centre, port, Net};
+    use dyno_core::helper_wire::HelperReply;
+    use dyno_core::read_via::ReadVia;
+    use dyno_core::smart::{SmartReply, SmartSkip};
     use dyno_platform::hardware::FakeWear;
+    use paddock_jobs::time::FakeClock;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
-
-    struct Link(Option<Result<SmartReply, PlatformError>>);
-    impl SmartLink for Link {
-        fn read_smart(&self) -> Option<Result<SmartReply, PlatformError>> {
-            self.0.clone()
-        }
-    }
 
     /// A fallback that counts how often it is asked.
     struct Counting(Arc<AtomicU32>);
@@ -143,22 +117,24 @@ mod tests {
         }
     }
 
-    fn reply(disks: Vec<SmartDisk>, skipped: Vec<SmartSkip>) -> SmartReply {
-        SmartReply {
+    fn reply(disks: Vec<SmartDisk>, skipped: Vec<SmartSkip>) -> HelperReply {
+        HelperReply::Smart(SmartReply {
             disks,
             skipped,
             not_visited: 0,
-        }
+        })
+    }
+
+    fn wear(up: bool, answers: Vec<Result<HelperReply, crate::helper_link::TransportError>>) -> (HelperFirstWear, Arc<AtomicU32>) {
+        let calls = Arc::new(AtomicU32::new(0));
+        let c = centre(&Net::new(up, answers), &FakeClock::new());
+        (helper_first_wear(port(&c), Box::new(Counting(calls.clone()))), calls)
     }
 
     #[test]
     fn a_ready_helper_with_one_nvme_disk_makes_the_wear_reading_available_without_asking_the_local_reader() {
-        let calls = Arc::new(AtomicU32::new(0));
-        let mut r = HelperFirstWear::new(
-            Box::new(Link(Some(Ok(reply(vec![nvme()], vec![]))))),
-            Box::new(Counting(calls.clone())),
-        );
-        let got = r.read();
+        let (mut r, calls) = wear(true, vec![Ok(reply(vec![nvme()], vec![]))]);
+        let got = DiskWearSource::read(&mut r);
         let w = &got.value().expect("available")[0];
         assert_eq!(
             (w.id.as_str(), w.percent_used, w.power_on_hours, w.bytes_written),
@@ -169,32 +145,47 @@ mod tests {
 
     #[test]
     fn without_the_helper_or_when_it_reads_nothing_the_local_reader_is_used() {
-        for link in [
-            Link(None),
-            Link(Some(Err(PlatformError::Unsupported("On macOS Dyno reads SMART itself.".into())))),
-            Link(Some(Ok(reply(
-                vec![],
-                vec![SmartSkip {
-                    device: "/dev/sda".into(),
-                    reason: "x".into(),
-                }],
-            )))),
-            Link(Some(Ok(reply(vec![SmartDisk { wear_id: None, ..nvme() }], vec![])))),
-        ] {
-            let calls = Arc::new(AtomicU32::new(0));
-            let mut r = HelperFirstWear::new(Box::new(link), Box::new(Counting(calls.clone())));
-            assert!(r.read().value().is_none());
+        use crate::helper_link::TransportError;
+        let skip = SmartSkip {
+            device: "/dev/sda".into(),
+            reason: "x".into(),
+        };
+        let cases: Vec<(bool, Vec<Result<HelperReply, TransportError>>)> = vec![
+            (false, vec![]),
+            (
+                true,
+                vec![Err(TransportError::Remote {
+                    code: "unsupported".into(),
+                    message: "On macOS Dyno reads SMART itself.".into(),
+                })],
+            ),
+            (true, vec![Ok(reply(vec![], vec![skip]))]),
+            (true, vec![Ok(reply(vec![SmartDisk { wear_id: None, ..nvme() }], vec![]))]),
+        ];
+        for (up, answers) in cases {
+            let (mut r, calls) = wear(up, answers);
+            assert!(DiskWearSource::read(&mut r).value().is_none());
             assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
     }
 
     #[test]
     fn the_local_fallback_can_be_switched_off_and_then_the_answer_says_what_to_turn_on() {
-        let calls = Arc::new(AtomicU32::new(0));
-        let mut r = HelperFirstWear::new(Box::new(Link(None)), Box::new(Counting(calls.clone()))).with_fallback(false);
-        assert!(matches!(r.read(), Reading::Unavailable(m) if m.contains("Administrator readings")));
+        let (r, calls) = wear(false, vec![]);
+        let mut r = r.with_fallback(false);
+        assert!(matches!(DiskWearSource::read(&mut r), Reading::Unavailable(m) if m.contains("Administrator readings")));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let mut ok = HelperFirstWear::new(Box::new(Link(None)), Box::new(FakeWear(Reading::Available(vec![])))).with_fallback(true);
-        assert!(ok.read().value().is_some());
+        let c = centre(&Net::new(false, vec![]), &FakeClock::new());
+        let mut ok = helper_first_wear(port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
+        assert!(DiskWearSource::read(&mut ok).value().is_some());
+    }
+
+    #[test]
+    fn the_source_says_which_path_read_it() {
+        let (mut r, _) = wear(true, vec![Ok(reply(vec![nvme()], vec![]))]);
+        assert_eq!(HelperFirst::read(&mut r).via, ReadVia::Helper);
+        let c = centre(&Net::new(false, vec![]), &FakeClock::new());
+        let mut local = helper_first_wear(port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
+        assert_eq!(HelperFirst::read(&mut local).via, ReadVia::Local);
     }
 }

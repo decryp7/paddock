@@ -297,9 +297,18 @@ pub struct SystemInventory {
     pub disks: Vec<DiskInfo>,
     /// Upgrade hints derived from the memory layout.
     pub hints: Vec<Hint>,
+    /// Who read the memory layout.
+    #[serde(default)]
+    pub memory_via: crate::read_via::ReadVia,
 }
 
 impl SystemInventory {
+    /// The same inventory with the memory read by `via`.
+    pub fn with_memory_via(mut self, via: crate::read_via::ReadVia) -> SystemInventory {
+        self.memory_via = via;
+        self
+    }
+
     /// Assembles the inventory and derives the hints.
     pub fn new(os: String, host_name: Option<String>, cpu: CpuInfo, memory: MemoryLayout, disks: Vec<DiskInfo>) -> SystemInventory {
         let hints = memory.hints();
@@ -310,6 +319,7 @@ impl SystemInventory {
             memory,
             disks,
             hints,
+            memory_via: crate::read_via::ReadVia::Local,
         }
     }
 }

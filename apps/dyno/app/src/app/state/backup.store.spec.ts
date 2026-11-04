@@ -12,7 +12,7 @@ function setup(options: ConstructorParameters<typeof MockBackend>[0] = {}) {
   TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, jobsProviders(jobs)] });
   return { mock, store: TestBed.inject(BackupStore) };
 }
-const report = (checking: boolean): BackupReport => ({ statuses: [], checkedAt: checking ? null : NOW, checking, loginPathUsed: true });
+const report = (checking: boolean): BackupReport => ({ statuses: [], checkedAt: checking ? null : NOW, checking, loginPathUsed: true, via: 'local' });
 
 describe('BackupStore', () => {
   afterEach(() => vi.useRealTimers());

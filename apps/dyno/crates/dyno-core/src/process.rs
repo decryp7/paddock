@@ -366,6 +366,27 @@ pub struct Locker {
     pub name: String,
     /// What kind of program it is (e.g. "Service", "Application", "Explorer"), when known.
     pub kind: Option<String>,
+    /// Who read it.
+    #[serde(default)]
+    pub via: crate::read_via::ReadVia,
+}
+
+impl Locker {
+    /// A locker read on this computer.
+    pub fn new(process: ProcessRef, name: String, kind: Option<String>) -> Locker {
+        Locker {
+            process,
+            name,
+            kind,
+            via: crate::read_via::ReadVia::Local,
+        }
+    }
+
+    /// The same locker, read by `via`.
+    pub fn with_via(mut self, via: crate::read_via::ReadVia) -> Locker {
+        self.via = via;
+        self
+    }
 }
 
 #[cfg(test)]
