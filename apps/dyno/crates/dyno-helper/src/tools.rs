@@ -393,6 +393,9 @@ mod tests {
             .contains("Another tool"));
     }
 
+    // Unix only: `trusting()` is a Unix-style fake trust port rooted at `/`, which no Windows temporary folder is below; the
+    // Windows lock of a staging folder is tested by the real trust port in `protect`.
+    #[cfg(unix)]
     #[test]
     fn the_real_staging_folder_creates_new_files_only_and_is_emptied() {
         let dir = tempfile::tempdir().unwrap();
@@ -411,6 +414,9 @@ mod tests {
         assert!(!staging.exists());
     }
 
+    // Unix only: `trusting()` is a Unix-style fake trust port rooted at `/`, which no Windows temporary folder is below; the
+    // Windows lock of a staging folder is tested by the real trust port in `protect`.
+    #[cfg(unix)]
     #[test]
     fn a_second_install_works_when_the_first_left_its_package_behind() {
         // The VM: the first install's staging could not be cleared (its installer still held the file), and the next attempt
