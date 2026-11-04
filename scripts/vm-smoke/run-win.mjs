@@ -14,7 +14,7 @@ import { renderResult } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
 import { helperSteps } from './win-helper.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
-import { stripVnc, withVnc, fixDiskName } from './vmx-edit.mjs';
+import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -93,6 +93,13 @@ async function main(argv) {
     if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
     started = true;
     { const cur = readFileSync(VMX, 'utf8'); const fixed = fixDiskName(cur, readdirSync(dirname(VMX))); if (fixed !== cur) { writeFileSync(VMX, fixed); log('vmx named a missing redo log: pointed at the newest existing one'); } }
+    {
+      // Preflight, logged: the vmx parses, no key twice, the disk it names exists; stale lock folders are only reported (VMware clears its own on a start; never deleted here).
+      const dir = dirname(VMX); const files = readdirSync(dir); const c = vmxCheck(readFileSync(VMX, 'utf8'), files);
+      const locks = files.filter((f) => f.endsWith('.lck'));
+      log(`vmx check: ${c.lines} lines, ${c.duplicates.length ? `DUPLICATE keys ${c.duplicates.join(', ')}` : 'no duplicate keys'}, disk ${c.disk} ${c.diskExists ? 'exists' : 'MISSING'}; ${locks.length} lock folder(s) present${locks.length ? ` (${locks.join(', ')})` : ''}, left alone`);
+      if (c.duplicates.length || !c.diskExists) throw new Error('the vmx is not usable (duplicate keys or a missing disk); not starting the VM');
+    }
     log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
     if (o.vnc) {
       // VNC for the UAC consent (secure desktop). Only between revert and start, on the CURRENT vmx: only the RemoteDisplay.vnc.* lines are added and removed.

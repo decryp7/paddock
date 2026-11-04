@@ -16,3 +16,18 @@ export function fixDiskName(text, existing) {
   const newest = existing.filter((f) => REDO.test(f)).sort().at(-1);
   return newest ? text.replace(DISK, `$1${newest}$3`) : text;
 }
+
+/** What a start needs from the vmx: parses (key = "value" lines), no key twice, the named disk exists. Returns { lines, duplicates, disk, diskExists }. */
+export function vmxCheck(text, existing) {
+  const keys = new Map();
+  let lines = 0;
+  for (const l of text.split('\n')) {
+    const m = /^([A-Za-z0-9_.:]+)\s*=\s*".*"\s*$/.exec(l);
+    if (!m) continue;
+    lines++;
+    keys.set(m[1], (keys.get(m[1]) ?? 0) + 1);
+  }
+  const duplicates = [...keys].filter(([, n]) => n > 1).map(([k]) => k);
+  const disk = DISK.exec(text)?.[2] ?? null;
+  return { lines, duplicates, disk, diskExists: disk !== null && existing.includes(disk) };
+}
