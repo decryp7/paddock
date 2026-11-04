@@ -2,7 +2,9 @@
 //! answer is a recording, not a hand-written guess). Each file in `tests/recorded/` starts with `#!` lines that say where,
 //! when and with which command it was recorded; the rest is the tool's raw output.
 
-use crate::backend::{Backend, Job, LastExit, Systemd, Target};
+use crate::backend::{
+    Backend, Job, LastExit, Systemd, Target, UnitFileState, UnitOrigin, WindowsService,
+};
 use crate::port::Output;
 use crate::spec::{Kind, ServiceSpec};
 use crate::testing::FakeSystem;
@@ -90,4 +92,79 @@ fn systemd_255_a_running_unit_has_no_exit_yet() {
     );
     let look = b.inspect();
     assert_eq!((look.job, look.last_exit), (Job::Running, None));
+}
+
+// ------------------------------------------------------------------------------------------------------ Windows 11
+
+const HELPER_EXE: &str = r"C:\Program Files\Dyno Helper\dyno-helper.exe";
+
+fn helper_service(sys: &FakeSystem) -> WindowsService {
+    sys.put_program(HELPER_EXE);
+    let spec = ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    WindowsService::new(spec, Target::exe(HELPER_EXE), Box::new(sys.clone()))
+}
+
+fn scm_answers(sys: &FakeSystem, query: &str) {
+    sys.answer("sc query", Output::ok(&recorded(query)));
+    sys.answer(
+        "sc qc",
+        Output::ok(&recorded("windows-11-sc-qc-helper.txt")),
+    );
+}
+
+#[test]
+fn windows_11_a_service_that_has_never_started_since_boot_has_no_last_exit() {
+    let sys = FakeSystem::new();
+    let mut b = helper_service(&sys);
+    scm_answers(&sys, "windows-11-sc-query-never-started.txt");
+    let look = b.inspect();
+    assert_eq!((look.job, look.last_exit), (Job::NotRunning, None));
+}
+
+#[test]
+fn windows_11_a_service_that_stopped_with_its_own_exit_code_is_failed_with_that_code() {
+    let sys = FakeSystem::new();
+    let mut b = helper_service(&sys);
+    scm_answers(&sys, "windows-11-sc-query-service-specific-3.txt");
+    let look = b.inspect();
+    assert_eq!(look.job, Job::Failed(LastExit::ServiceSpecific(3)));
+    assert_eq!(
+        look.points_here,
+        Some(true),
+        "the quoted path with --service is the program"
+    );
+    let unit = look.unit.unwrap();
+    assert_eq!(
+        (
+            unit.origin,
+            unit.enabled,
+            unit.path.to_string_lossy().into_owned()
+        ),
+        (
+            UnitOrigin::ServiceManager,
+            UnitFileState::Enabled,
+            HELPER_EXE.to_string()
+        )
+    );
+}
+
+#[test]
+fn windows_11_a_running_a_stopping_and_a_cleanly_stopped_service() {
+    let sys = FakeSystem::new();
+    let mut b = helper_service(&sys);
+    scm_answers(&sys, "windows-11-sc-query-running.txt");
+    let look = b.inspect();
+    assert_eq!((look.job, look.last_exit), (Job::Running, None));
+    // STOP_PENDING is neither running nor a failure.
+    scm_answers(&sys, "windows-11-sc-query-stop-pending.txt");
+    assert_eq!(b.inspect().job, Job::NotRunning);
+    scm_answers(&sys, "windows-11-sc-query-stopped-clean.txt");
+    let look = b.inspect();
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::NotRunning, Some(LastExit::Win32(0)))
+    );
 }

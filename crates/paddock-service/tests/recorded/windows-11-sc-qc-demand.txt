@@ -1,0 +1,16 @@
+#! recorded 2026-11-04 on the Windows 11 Arm test VM (VMware Fusion, build 10.0.26300, en-GB), as paddock-admin over SSH
+#! command: sc.exe qc PaddockFixtureNever
+#! state: the same service's configuration
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: PaddockFixtureNever
+        TYPE               : 10  WIN32_OWN_PROCESS 
+        START_TYPE         : 3   DEMAND_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : C:\Windows\System32\notepad.exe
+        LOAD_ORDER_GROUP   : 
+        TAG                : 0
+        DISPLAY_NAME       : PaddockFixtureNever
+        DEPENDENCIES       : 
+        SERVICE_START_NAME : LocalSystem
+
