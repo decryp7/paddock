@@ -97,7 +97,14 @@ impl TrustPort for FakePort {
         self.calls.push(format!("rename_aside {path}"));
         let key = self.key(path);
         let sep = self.sep();
-        let aside = format!("{path}.untrusted-1");
+        let taken = self
+            .nodes
+            .keys()
+            .filter(|k| {
+                k.starts_with(&format!("{key}.untrusted-")) && !k[key.len() + 11..].contains(sep)
+            })
+            .count();
+        let aside = format!("{path}.untrusted-{}", taken + 1);
         let aside_key = self.key(&aside);
         let moved: Vec<String> = self
             .nodes
@@ -112,6 +119,34 @@ impl TrustPort for FakePort {
             }
         }
         Ok(aside)
+    }
+    fn sweep_aside(&mut self, parent: &str, name: &str, keep: usize) -> io::Result<Vec<String>> {
+        self.calls
+            .push(format!("sweep_aside {parent} {name} {keep}"));
+        let pkey = self.key(parent);
+        let sep = self.sep();
+        let prefix = format!("{pkey}{sep}{}.untrusted-", name.to_lowercase());
+        let mut asides: Vec<(u64, String)> = self
+            .nodes
+            .iter()
+            .filter_map(|(k, node)| {
+                let rest = k.strip_prefix(&prefix)?;
+                let n: u64 = rest.parse().ok()?;
+                let trusted = match &node.security {
+                    Security::Windows(d) => is_trusted_sid(&d.owner),
+                    Security::Unix { owner, .. } => *owner == 0,
+                };
+                (node.kind == FileKind::Dir && trusted).then(|| (n, k.clone()))
+            })
+            .collect();
+        asides.sort_by_key(|a| std::cmp::Reverse(a.0));
+        let mut removed = Vec::new();
+        for (_, key) in asides.into_iter().skip(keep) {
+            let tree = format!("{key}{sep}");
+            self.nodes.retain(|k, _| *k != key && !k.starts_with(&tree));
+            removed.push(key);
+        }
+        Ok(removed)
     }
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
         self.calls.push(format!("remove_tree {path}"));

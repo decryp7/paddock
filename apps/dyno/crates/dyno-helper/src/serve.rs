@@ -91,6 +91,8 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
     let config = startup::load_config(&mut files, &paths.config)?;
     let loaded = policy::load(&mut files, &paths.policy);
     let audit = AuditLog::new(paths.audit.clone());
+    // Stopped with the log before the data folder is removed, so no audited request writes after that.
+    crate::logfile::register_gate(audit.gate());
     if let Some(note) = &loaded.note {
         log::info!(note = note.as_str(); "Helper: policy file");
         if loaded.policy == HelperPolicy::default() && note.contains("ignored") {

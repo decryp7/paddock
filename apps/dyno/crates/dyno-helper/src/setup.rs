@@ -108,6 +108,17 @@ const OWN_DIRS: [&str; 2] = ["tools", "staging"];
 /// # Errors
 /// What could not be removed.
 pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
+    remove_data_folder_with(paths, &crate::logfile::quiesce_installed)
+}
+
+/// [`remove_data_folder`] with the step that stops the helper's own log writing, which runs before anything is removed: a log
+/// line from another thread would otherwise recreate `helper.log` between the unlink and the folder's removal and leave the
+/// folder behind.
+///
+/// # Errors
+/// What could not be removed.
+pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> Result<String, String> {
+    quiesce_log();
     let dir = &paths.data_dir;
     let meta = match std::fs::symlink_metadata(dir) {
         Ok(m) => m,
@@ -263,6 +274,62 @@ mod tests {
         assert_eq!(os_of(HelperHost::Macos), Os::MacOs);
         assert_eq!(os_of(HelperHost::Windows), Os::Windows);
         assert_eq!(os_of(HelperHost::Linux), Os::Linux);
+    }
+
+    #[test]
+    fn a_thread_logging_while_the_data_folder_is_removed_cannot_leave_the_folder_behind() {
+        // Another thread's log line recreating helper.log between the unlink and the folder's removal left the folder behind
+        // at Turn off. The removal stops the log first.
+        use log::{Level, Log, Record};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        for round in 0..40 {
+            let dir = tempfile::tempdir().unwrap();
+            let mut paths = paths_in(dir.path());
+            paths.log = paths.data_dir.join("helper.log");
+            std::fs::create_dir_all(&paths.data_dir).unwrap();
+            std::fs::write(paths.data_dir.join("config.json"), b"x").unwrap();
+            let logger = Arc::new(crate::logfile::HelperLog::new(paths.log.clone()).with(1 << 20, || 7));
+            let gate = logger.gate();
+            let stop = Arc::new(AtomicBool::new(false));
+            // A failing assertion must not leave the logging thread running.
+            struct StopOnDrop(Arc<AtomicBool>);
+            impl Drop for StopOnDrop {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+            let _stop_on_exit = StopOnDrop(stop.clone());
+            let worker = {
+                let (logger, stop) = (logger.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::SeqCst) {
+                        logger.log(&Record::builder().args(format_args!("a line")).level(Level::Info).build());
+                    }
+                })
+            };
+            // The thread is writing when the removal starts.
+            let waited = std::time::Instant::now();
+            while !paths.log.exists() {
+                assert!(waited.elapsed().as_secs() < 20, "the logging thread never wrote its file");
+                std::thread::yield_now();
+            }
+            let note = remove_data_folder_with(&paths, &|| gate.quiesce()).unwrap();
+            stop.store(true, Ordering::SeqCst);
+            worker.join().unwrap();
+            assert_eq!(note, "removed", "round {round}");
+            assert!(!paths.data_dir.exists(), "round {round}: the folder is gone");
+        }
+    }
+
+    #[test]
+    fn a_foreign_file_still_keeps_the_folder_in_place_with_the_log_quiesced() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        std::fs::write(paths.data_dir.join("notes.txt"), b"someone else's").unwrap();
+        let note = remove_data_folder_with(&paths, &|| {}).unwrap();
+        assert!(note.contains("left in place"), "{note}");
     }
 
     #[test]

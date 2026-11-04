@@ -531,7 +531,7 @@ fn write_attributes_and_extended_attributes_count_inside_the_root_but_not_on_anc
 fn a_tree_is_untrusted_when_any_entry_below_the_folder_is_a_link_or_a_users() {
     let user = "S-1-5-21-1-2-3-1001";
     let mut p = windows_machine(|_| locked());
-    verify_tree(&mut p, TOOLS, 100).unwrap();
+    verify_tree(&mut p, TOOLS, None, 100).unwrap();
     // A user-owned entry deep in the tree.
     let mut owned = locked();
     if let Security::Windows(d) = &mut owned.security {
@@ -541,7 +541,7 @@ fn a_tree_is_untrusted_when_any_entry_below_the_folder_is_a_link_or_a_users() {
         "C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5\\bin",
         owned,
     );
-    let e = verify_tree(&mut p, TOOLS, 100).unwrap_err();
+    let e = verify_tree(&mut p, TOOLS, None, 100).unwrap_err();
     assert!(
         e.path.ends_with("\\bin") && matches!(e.reason, Reason::UntrustedOwner(_)),
         "{e}"
@@ -555,7 +555,7 @@ fn a_tree_is_untrusted_when_any_entry_below_the_folder_is_a_link_or_a_users() {
         junction,
     );
     assert_eq!(
-        verify_tree(&mut p, TOOLS, 100).unwrap_err().reason,
+        verify_tree(&mut p, TOOLS, None, 100).unwrap_err().reason,
         Reason::Link
     );
     // An entry that lets Users write next to smartctl.exe (DLL planting).
@@ -572,13 +572,13 @@ fn a_tree_is_untrusted_when_any_entry_below_the_folder_is_a_link_or_a_users() {
         writable,
     );
     assert!(matches!(
-        verify_tree(&mut p, TOOLS, 100).unwrap_err().reason,
+        verify_tree(&mut p, TOOLS, None, 100).unwrap_err().reason,
         Reason::Grants { .. }
     ));
     // Bounded.
     let mut p = windows_machine(|_| locked());
     assert!(matches!(
-        verify_tree(&mut p, TOOLS, 2).unwrap_err().reason,
+        verify_tree(&mut p, TOOLS, None, 2).unwrap_err().reason,
         Reason::Unreadable(_)
     ));
 }
@@ -654,6 +654,24 @@ fn the_fake_port_models_create_lock_rename_remove_and_walk() {
             .keys()
             .any(|k| k.starts_with(&format!("{}\\", p.key(&aside))))
     );
+    // Moved-aside folders are numbered and the oldest beyond the newest `keep` go, with what is in them.
+    p.put("C:\\ProgramData\\Old", locked());
+    p.put("C:\\ProgramData\\Old\\inside", locked());
+    p.rename_aside("C:\\ProgramData\\Old").unwrap();
+    p.put("C:\\ProgramData\\Old", locked());
+    let second = p.rename_aside("C:\\ProgramData\\Old").unwrap();
+    assert!(second.ends_with(".untrusted-2"), "{second}");
+    let removed = p.sweep_aside("C:\\ProgramData", "Old", 1).unwrap();
+    assert_eq!(
+        removed,
+        vec!["c:\\programdata\\old.untrusted-1".to_string()]
+    );
+    assert!(
+        !p.nodes
+            .keys()
+            .any(|k| k.starts_with("c:\\programdata\\old.untrusted-1"))
+    );
+    assert!(p.nodes.contains_key("c:\\programdata\\old.untrusted-2"));
     // Unix flavour.
     let mut u = FakePort {
         style: Style::Unix,
@@ -715,6 +733,9 @@ fn a_junction_on_the_way_is_named_a_link_even_when_what_is_behind_it_cannot_be_e
         fn rename_aside(&mut self, p: &str) -> io::Result<String> {
             self.0.rename_aside(p)
         }
+        fn sweep_aside(&mut self, p: &str, n: &str, keep: usize) -> io::Result<Vec<String>> {
+            self.0.sweep_aside(p, n, keep)
+        }
         fn remove_tree(&mut self, p: &str) -> io::Result<()> {
             self.0.remove_tree(p)
         }
@@ -731,4 +752,66 @@ fn a_junction_on_the_way_is_named_a_link_even_when_what_is_behind_it_cannot_be_e
     let e = verify_chain(&mut p, path, FileKind::File, Some(TOOLS), false).unwrap_err();
     assert_eq!(e.reason, Reason::Link, "{e}");
     assert!(e.path.ends_with("smartmontools-7.5"), "{e}");
+}
+
+#[test]
+fn a_tree_check_can_leave_out_the_way_on_to_a_folder_judged_on_its_own() {
+    let user = "S-1-5-21-1-2-3-1001";
+    let mut p = windows_machine(|_| locked());
+    let mut owned = locked();
+    if let Security::Windows(d) = &mut owned.security {
+        d.owner = user.into();
+    }
+    p.put("C:\\ProgramData\\Dyno\\Helper\\tools", owned);
+    assert!(verify_tree(&mut p, "C:\\ProgramData\\Dyno", None, 100).is_err());
+    verify_tree(
+        &mut p,
+        "C:\\ProgramData\\Dyno",
+        Some("C:\\ProgramData\\Dyno\\Helper"),
+        100,
+    )
+    .unwrap();
+    assert_eq!(
+        child_of(
+            "C:\\ProgramData\\Dyno",
+            "C:\\ProgramData\\Dyno\\Helper\\tools\\x",
+            Style::Windows
+        )
+        .unwrap(),
+        "C:\\ProgramData\\Dyno\\Helper"
+    );
+    assert_eq!(
+        child_of(
+            "C:\\ProgramData\\Dyno",
+            "C:\\ProgramData\\Dyno\\Helper",
+            Style::Windows
+        )
+        .unwrap(),
+        "C:\\ProgramData\\Dyno\\Helper"
+    );
+    assert!(child_of("C:\\ProgramData\\Dyno", "C:\\Other\\x", Style::Windows).is_none());
+}
+
+#[test]
+fn what_a_moved_aside_folder_holds_is_never_checked_but_the_folder_itself_is() {
+    let user = "S-1-5-21-1-2-3-1001";
+    let mut p = windows_machine(|_| locked());
+    let mut foreign = locked();
+    if let Security::Windows(d) = &mut foreign.security {
+        d.owner = user.into();
+    }
+    // The helper's own moved-aside folder (locked, trusted owner) holding the foreign tree.
+    p.put("C:\\ProgramData\\Dyno\\Evil.untrusted-5-0", locked());
+    p.put(
+        "C:\\ProgramData\\Dyno\\Evil.untrusted-5-0\\deep",
+        foreign.clone(),
+    );
+    verify_tree(&mut p, "C:\\ProgramData\\Dyno", None, 100).unwrap();
+    // A look-alike a user made is not trusted-owned, so it fails as the entry it is.
+    p.put("C:\\ProgramData\\Dyno\\Look.untrusted-1-1", foreign);
+    let e = verify_tree(&mut p, "C:\\ProgramData\\Dyno", None, 100).unwrap_err();
+    assert!(
+        e.path.ends_with("look.untrusted-1-1") && matches!(e.reason, Reason::UntrustedOwner(_)),
+        "{e}"
+    );
 }

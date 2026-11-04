@@ -161,6 +161,10 @@ pub trait TrustPort: Send {
     /// Renames the entry next to itself to a name that is free, never following it, and returns the new path. Nothing in it
     /// is read or run again.
     fn rename_aside(&mut self, path: &str) -> io::Result<String>;
+    /// Removes the oldest `<name>.untrusted-<secs>-<n>` entries in `parent` (exactly the folders [`rename_aside`](Self::rename_aside)
+    /// makes for `name`) beyond the newest `keep`, and returns the names removed. Only a real folder (never a link) owned by
+    /// SYSTEM, Administrators or root counts; anything else with a similar name is left alone.
+    fn sweep_aside(&mut self, parent: &str, name: &str, keep: usize) -> io::Result<Vec<String>>;
     /// Removes a folder tree without following any link or reparse point: a link inside is removed, never its target.
     fn remove_tree(&mut self, path: &str) -> io::Result<()>;
 }
@@ -558,10 +562,16 @@ pub fn verify_container(port: &mut dyn TrustPort, dir: &str) -> Result<(), Untru
 
 /// Checks everything below `dir` (a folder already shown to be protected) without following a link: no link or reparse
 /// point, and every entry owned and guarded as the inside rule says. One entry that fails makes the whole folder untrusted.
+/// `skip` is a path below `dir` (and what is in it) that is left out: the way on to a folder that is judged on its own.
 ///
 /// # Errors
 /// The first entry that is not protected.
-pub fn verify_tree(port: &mut dyn TrustPort, dir: &str, limit: usize) -> Result<(), Untrusted> {
+pub fn verify_tree(
+    port: &mut dyn TrustPort,
+    dir: &str,
+    skip: Option<&str>,
+    limit: usize,
+) -> Result<(), Untrusted> {
     let style = port.style();
     let top = port
         .node(dir)
@@ -576,6 +586,9 @@ pub fn verify_tree(port: &mut dyn TrustPort, dir: &str, limit: usize) -> Result<
         by_path.insert(norm(path, style), node);
     }
     for (path, node) in &entries {
+        if skip.is_some_and(|s| is_within(path, s, style)) || inside_aside(path, dir, style) {
+            continue;
+        }
         if node.kind == FileKind::Symlink {
             return Err(fail(path, Reason::Link));
         }
@@ -602,6 +615,44 @@ pub fn verify_tree(port: &mut dyn TrustPort, dir: &str, limit: usize) -> Result<
         }
     }
     Ok(())
+}
+
+/// Whether `path` is *inside* a folder the helper moved aside below `dir` (`<name>.untrusted-<secs>-<n>`): what such a folder
+/// holds is the foreign tree it was moved for and is never read. The moved-aside folder itself is still checked (a user cannot
+/// make a folder the trusted set owns, so a look-alike they made fails there).
+fn inside_aside(path: &str, dir: &str, style: Style) -> bool {
+    let sep = if style == Style::Windows { '\\' } else { '/' };
+    let norm_path = path.replace('/', &sep.to_string());
+    let rel = norm_path
+        .get(dir.trim_end_matches(['\\', '/']).len()..)
+        .unwrap_or("");
+    let comps: Vec<&str> = rel.split(sep).filter(|c| !c.is_empty()).collect();
+    let Some((_, ancestors)) = comps.split_last() else {
+        return false;
+    };
+    ancestors.iter().any(|c| {
+        c.to_lowercase()
+            .rsplit_once(".untrusted-")
+            .is_some_and(|(_, suffix)| {
+                let parts: Vec<&str> = suffix.split('-').collect();
+                (1..=2).contains(&parts.len())
+                    && parts
+                        .iter()
+                        .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+            })
+    })
+}
+
+/// The entry of `dir` that holds `path` (`dir\\a\\b` gives `dir\\a` for `dir\\a\\b\\c`); `None` when `path` is not below `dir`.
+pub fn child_of(dir: &str, path: &str, style: Style) -> Option<String> {
+    let mut cur = path.to_string();
+    loop {
+        let parent = parent_of(&cur, style)?;
+        if norm(&parent, style) == norm(dir, style) {
+            return Some(cur);
+        }
+        cur = parent;
+    }
 }
 
 /// The folders strictly between `base` and `dir`, from the one under `base` down to `dir`'s parent. `None` when `dir` is

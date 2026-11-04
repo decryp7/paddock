@@ -15,7 +15,8 @@ use dyno_core::ports::PlatformError;
 use dyno_platform::runner::{Tool, ToolOutput, ToolRunner};
 use paddock_service::privileged::files::FileKind;
 use paddock_service::privileged::trust::{
-    between, is_within, require_same_path, verify_chain, verify_container, verify_tree, Reason, TrustPort, Untrusted,
+    between, child_of, is_within, parent_of, require_same_path, verify_chain, verify_container, verify_tree, Reason, Style, TrustPort,
+    Untrusted,
 };
 use paddock_service::privileged::trust_real::{HeldImage, RealTrust};
 use std::io;
@@ -145,8 +146,10 @@ impl TrustGuard {
     ///
     /// 1. **Nothing changes unless the way is trusted.** `base` and everything above it must pass the ancestor rule, or this
     ///    returns at once: no folder is made, no ACL set, nothing removed.
-    /// 2. Each folder between `base` and `dir` is made with its protected descriptor given at creation (create-new); one that
-    ///    is already there and fails the ancestor rule is moved aside (never followed or read) and made again.
+    /// 2. Each folder between `base` and `dir` is made with its protected descriptor given at creation (create-new) and locked
+    ///    once it passes the ancestor rule. One that is already there and fails it is moved aside (never followed or read)
+    ///    and made again by a repair or install (`Purge`), and only refused at service start (`Refuse`); at most two
+    ///    moved-aside folders are kept.
     /// 3. A `dir` that exists and is not protected (a user made it, or it is loose, or anything in it is not the helper's)
     ///    holds nothing the helper can trust: with [`OnUntrusted::Purge`] it is removed (links inside are removed, never
     ///    followed) and made again; with [`OnUntrusted::Refuse`] it is left and refused.
@@ -182,26 +185,52 @@ impl TrustGuard {
             // A repair cannot fix a system folder, so it does not send the user back to Repair.
             OnUntrusted::Purge => could_not("the system folder above it", &u.describe()),
         })?;
-        // 2. Each folder between the base and `dir`.
+        // 2. Each folder between the base and `dir`: made if missing; one that fails the ancestor rule is moved aside by a
+        //    repair or install and only refused at start; once it passes, it is locked too, so Users cannot pre-create what
+        //    goes in it (a user-made `Helper` next to the helper's own).
         for folder in &between {
+            // The way on towards `dir` is judged on its own (by the next step); the rest of this folder is checked now.
+            let toward = child_of(folder, path, style);
             match port.node(folder).map_err(|e| could_not("examine", &e))? {
                 None => port.create_dir(folder).map_err(|e| could_not("create", &e))?,
                 Some(_) => {
                     if let Err(found) = verify_chain(port.as_mut(), folder, FileKind::Dir, None, false) {
+                        if on_untrusted == OnUntrusted::Refuse {
+                            return Err(Unusable::HelperFolderNotProtected(found));
+                        }
                         log::warn!(Dir = folder.as_str(), Found = found.to_string().as_str(); "Helper: a folder on the way is not trusted; moved aside");
-                        let aside = port.rename_aside(folder).map_err(|e| could_not("move aside", &e))?;
-                        log::warn!(Dir = folder.as_str(), Aside = aside.as_str(); "Helper: the untrusted folder was moved aside and is never read");
+                        Self::move_aside(port.as_mut(), folder, style)?;
                         port.create_dir(folder).map_err(|e| could_not("create", &e))?;
+                    } else if let Err(mut found) = verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE) {
+                        // Locking sets this folder alone; whatever is in it was not changed by that and must be the
+                        // helper's already. A foreign entry (or one whose security is not the helper's) is moved aside
+                        // by a repair or install, one entry at a time until the folder is clean, and only refused at start.
+                        if on_untrusted == OnUntrusted::Refuse {
+                            return Err(Unusable::HelperFolderNotProtected(found));
+                        }
+                        for moved in 0..=MAX_MOVED_ENTRIES {
+                            if moved == MAX_MOVED_ENTRIES {
+                                return Err(could_not("too many foreign entries", &found.describe()));
+                            }
+                            let entry = child_of(folder, &found.path, style).ok_or_else(|| could_not("examine", &found.describe()))?;
+                            log::warn!(Dir = folder.as_str(), Entry = entry.as_str(), Found = found.to_string().as_str(); "Helper: a foreign entry in a folder on the way; moved aside");
+                            Self::move_aside(port.as_mut(), &entry, style)?;
+                            match verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE) {
+                                Ok(()) => break,
+                                Err(next) => found = next,
+                            }
+                        }
                     }
                 }
             }
+            port.lock_dir(folder).map_err(|e| could_not("lock", &e))?;
         }
         // 3. The folder itself.
         match port.node(path).map_err(|e| could_not("examine", &e))? {
             None => port.create_dir(path).map_err(|e| could_not("create", &e))?,
             Some(_) => {
                 let found = verify_chain(port.as_mut(), path, FileKind::Dir, Some(path), false)
-                    .and_then(|()| verify_tree(port.as_mut(), path, MAX_TREE))
+                    .and_then(|()| verify_tree(port.as_mut(), path, None, MAX_TREE))
                     .err();
                 if let Some(found) = found.filter(|f| is_within(&f.path, path, style)) {
                     log::warn!(Dir = path, Found = found.to_string().as_str(), Purge = on_untrusted == OnUntrusted::Purge; "Helper: an existing folder is not protected");
@@ -219,11 +248,46 @@ impl TrustGuard {
         // 4. Owner and DACL on the folder itself, then the whole check.
         port.lock_dir(path).map_err(|e| could_not("lock", &e))?;
         verify_chain(port.as_mut(), path, FileKind::Dir, Some(path), false)
-            .and_then(|()| verify_tree(port.as_mut(), path, MAX_TREE))
+            .and_then(|()| verify_tree(port.as_mut(), path, None, MAX_TREE))
             .map_err(|u| match on_untrusted {
                 OnUntrusted::Refuse => Unusable::HelperFolderNotProtected(u),
                 OnUntrusted::Purge => could_not("verify after the lock", &u.describe()),
             })
+    }
+
+    /// Moves `entry` aside (never read, followed or deleted), makes the moved folder the trusted set's alone so it can be
+    /// swept later, and keeps only the newest [`MAX_ASIDE`] of the helper's own moved-aside folders next to it.
+    fn move_aside(port: &mut dyn TrustPort, entry: &str, style: Style) -> Result<(), Unusable> {
+        let could_not = |what: &str, e: &dyn std::fmt::Display| Unusable::CouldNotLock {
+            path: entry.to_string(),
+            why: format!("{what}: {e}"),
+        };
+        let aside = port.rename_aside(entry).map_err(|e| could_not("move aside", &e))?;
+        log::warn!(Dir = entry, Aside = aside.as_str(); "Helper: the untrusted folder was moved aside and is never read");
+        // A planted file or a junction or link is no folder to keep (and cannot be locked): it is removed by its name, never
+        // through the link, so that the folder it was in can be verified and the repair can finish.
+        let kind = port.node(&aside).map_err(|e| could_not("examine", &e))?.map(|n| n.kind);
+        if kind != Some(FileKind::Dir) {
+            port.remove_tree(&aside).map_err(|e| could_not("remove", &e))?;
+            log::warn!(Aside = aside.as_str(); "Helper: a moved-aside entry that is not a folder was removed by its name");
+            return Ok(());
+        }
+        // Best effort: if the owner cannot be given to the trusted set the folder is simply never swept.
+        if let Err(e) = port.lock_dir(&aside) {
+            log::warn!(Aside = aside.as_str(), Error = e.to_string().as_str(); "Helper: a moved-aside folder could not be locked; it is kept");
+        }
+        if let (Some(parent), Some(name)) = (parent_of(entry, style), entry.rsplit(['\\', '/']).next()) {
+            match port.sweep_aside(&parent, name, MAX_ASIDE) {
+                Ok(gone) if !gone.is_empty() => {
+                    log::info!(Parent = parent.as_str(), Removed = gone.len(), Kept = MAX_ASIDE; "Helper: older moved-aside folders were removed");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!(Parent = parent.as_str(), Error = e.to_string().as_str(); "Helper: older moved-aside folders could not be removed");
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Empties `dir` (links removed, never followed) and locks it again: the staging folder of one install, so what an earlier
@@ -310,6 +374,12 @@ impl TrustGuard {
         Ok(held)
     }
 }
+
+/// The most foreign entries one repair moves out of a folder on the way before it gives up.
+const MAX_MOVED_ENTRIES: usize = 64;
+
+/// How many moved-aside `*.untrusted-<n>` folders are kept next to the one they replaced (the newest).
+const MAX_ASIDE: usize = 2;
 
 /// The most entries below a helper folder that are examined (a folder with more is untrusted).
 const MAX_TREE: usize = 10_000;

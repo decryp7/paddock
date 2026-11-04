@@ -6,7 +6,7 @@ use log::{Level, Log, Metadata, Record};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The log is rotated once (to `helper.log.1`) when it grows past this.
 pub const MAX_LOG_BYTES: u64 = 1024 * 1024;
@@ -15,14 +15,86 @@ const TAIL_WINDOW: u64 = 128 * 1024;
 /// The longest line `tail` returns.
 const MAX_LINE: usize = 400;
 
-/// Lets the deferred log open its file once the data folder is verified.
+/// Opens `path` for appending, creating it (0600 on Unix), never through a link: `O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`,
+/// and the result must be a regular file. Used by the helper log and the audit log.
+pub(crate) fn open_append_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the file is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+/// What the log and its gate share: whether the file may be written, and the lock an append holds while it writes.
+#[derive(Debug)]
+pub(crate) struct GateState {
+    /// Until armed (and again once quiesced) the log writes to standard error and touches no file.
+    pub(crate) armed: AtomicBool,
+    pub(crate) lock: Mutex<()>,
+}
+
+impl GateState {
+    pub(crate) fn open() -> Arc<GateState> {
+        Arc::new(GateState {
+            armed: AtomicBool::new(true),
+            lock: Mutex::new(()),
+        })
+    }
+}
+
+/// Lets the deferred log open its file once the data folder is verified, and stops it before the folder is removed.
 #[derive(Debug, Clone)]
-pub struct LogGate(Arc<AtomicBool>);
+pub struct LogGate(pub(crate) Arc<GateState>);
 
 impl LogGate {
     /// From now on the log is written to its file.
     pub fn arm(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.0.armed.store(true, Ordering::SeqCst);
+    }
+
+    /// Stops the file: lines go to standard error from now on, and when this returns no append is writing or about to write
+    /// (one in flight has finished). Used before the data folder is removed, so a line from another thread cannot recreate
+    /// `helper.log` between the unlink and the folder's removal.
+    pub fn quiesce(&self) {
+        self.0.armed.store(false, Ordering::SeqCst);
+        drop(self.0.lock.lock().unwrap_or_else(|p| p.into_inner()));
+    }
+}
+
+/// The gate of the installed logger, for code that removes the data folder.
+static INSTALLED: OnceLock<LogGate> = OnceLock::new();
+
+/// The gates of the other files the helper writes in the data folder (the audit log), registered by the daemon.
+static EXTRA: Mutex<Vec<LogGate>> = Mutex::new(Vec::new());
+
+/// Adds a gate that [`quiesce_installed`] stops too.
+pub fn register_gate(gate: LogGate) {
+    EXTRA.lock().unwrap_or_else(|p| p.into_inner()).push(gate);
+}
+
+/// Stops the installed logger's file (see [`LogGate::quiesce`]); nothing to do when no file logger is installed.
+pub fn quiesce_installed() {
+    if let Some(gate) = INSTALLED.get() {
+        gate.quiesce();
+    }
+    for gate in EXTRA.lock().unwrap_or_else(|p| p.into_inner()).iter() {
+        gate.quiesce();
     }
 }
 
@@ -30,10 +102,9 @@ impl LogGate {
 pub struct HelperLog {
     path: PathBuf,
     /// Until armed the log writes to standard error and touches no file: the data folder is not yet known to be protected.
-    armed: Arc<AtomicBool>,
+    state: Arc<GateState>,
     max_bytes: u64,
     now: fn() -> i64,
-    lock: Mutex<()>,
 }
 
 fn unix_now() -> i64 {
@@ -62,10 +133,9 @@ impl HelperLog {
     pub fn new(path: PathBuf) -> Self {
         HelperLog {
             path,
-            armed: Arc::new(AtomicBool::new(true)),
+            state: GateState::open(),
             max_bytes: MAX_LOG_BYTES,
             now: unix_now,
-            lock: Mutex::new(()),
         }
     }
 
@@ -81,47 +151,37 @@ impl HelperLog {
     /// in it is opened, created or rotated before that).
     #[must_use]
     pub fn deferred(self) -> Self {
-        self.armed.store(false, Ordering::SeqCst);
+        self.state.armed.store(false, Ordering::SeqCst);
         self
+    }
+
+    /// The gate of this log (to stop its file before the data folder is removed).
+    pub fn gate(&self) -> LogGate {
+        LogGate(self.state.clone())
     }
 
     /// Makes this the process's logger at Info level. A second install is ignored. The gate arms the file.
     pub fn install(self) -> LogGate {
-        let gate = LogGate(self.armed.clone());
+        let gate = LogGate(self.state.clone());
         if log::set_boxed_logger(Box::new(self)).is_ok() {
             log::set_max_level(log::LevelFilter::Info);
+            let _ = INSTALLED.set(gate.clone());
         }
         gate
     }
 
     fn append(&self, line: &str) -> std::io::Result<()> {
-        let _guard = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = self.state.lock.lock().unwrap_or_else(|p| p.into_inner());
+        // Checked under the lock: after `quiesce` returns, nothing is written (a line that raced it is dropped).
+        if !self.state.armed.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() >= self.max_bytes) {
             let mut old = self.path.clone().into_os_string();
             old.push(".1");
             let _ = std::fs::rename(&self.path, old);
         }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        // Never through a link: the log is opened without following one and must be a regular file.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-            options.custom_flags(OPEN_REPARSE_POINT);
-        }
-        let mut file = options.open(&self.path)?;
-        if !file.metadata()?.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "the log is not a regular file",
-            ));
-        }
+        let mut file = open_append_no_follow(&self.path)?;
         writeln!(file, "{line}")
     }
 }
@@ -138,7 +198,7 @@ impl Log for HelperLog {
         let mut pairs = Pairs(String::new());
         let _ = record.key_values().visit(&mut pairs);
         let line = format_line((self.now)(), record.level(), &record.args().to_string(), &pairs.0);
-        if !self.armed.load(Ordering::SeqCst) {
+        if !self.state.armed.load(Ordering::SeqCst) {
             eprintln!("{line}");
             return;
         }
@@ -178,11 +238,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_quiesced_log_writes_nothing_more_to_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.log");
+        let log = HelperLog::new(path.clone()).with(1000, || 7);
+        let write = |text: &str| log.log(&Record::builder().args(format_args!("{text}")).level(Level::Info).build());
+        write("before");
+        log.gate().quiesce();
+        std::fs::remove_file(&path).unwrap();
+        write("after");
+        assert!(!path.exists(), "no line recreates the file once quiesced");
+        log.gate().arm();
+        write("armed again");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("armed again"));
+        // No logger installed in a test run: nothing to stop, nothing breaks.
+        quiesce_installed();
+    }
+
+    #[test]
     fn a_deferred_log_touches_no_file_until_it_is_armed_and_never_follows_a_link() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helper.log");
         let log = HelperLog::new(path.clone()).with(1000, || 7).deferred();
-        let gate = LogGate(log.armed.clone());
+        let gate = LogGate(log.state.clone());
         let write = |log: &HelperLog, text: &str| {
             log.log(&Record::builder().args(format_args!("{text}")).level(Level::Info).build());
         };

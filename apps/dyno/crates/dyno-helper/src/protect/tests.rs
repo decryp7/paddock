@@ -35,6 +35,9 @@ impl TrustPort for Shared {
     fn rename_aside(&mut self, p: &str) -> io::Result<String> {
         self.0.lock().unwrap().rename_aside(p)
     }
+    fn sweep_aside(&mut self, p: &str, name: &str, keep: usize) -> io::Result<Vec<String>> {
+        self.0.lock().unwrap().sweep_aside(p, name, keep)
+    }
     fn remove_tree(&mut self, p: &str) -> io::Result<()> {
         self.0.lock().unwrap().remove_tree(p)
     }
@@ -171,6 +174,174 @@ fn install_locks_the_data_root_tools_and_staging() {
     );
 }
 
+#[test]
+fn the_folder_between_the_base_and_the_data_root_is_locked_too() {
+    let mut m = windows_machine(|_| locked());
+    for d in [DATA, TOOLS] {
+        m.nodes.remove(&m.key(d));
+    }
+    let (g, machine) = guard(m, HelperHost::Windows, None);
+    g.ensure_root(Path::new(DATA), OnUntrusted::Purge).unwrap();
+    assert!(
+        calls(&machine).contains(&"lock_dir C:\\ProgramData\\Dyno".to_string()),
+        "{:?}",
+        calls(&machine)
+    );
+}
+
+#[test]
+fn an_existing_vendor_folder_that_passes_the_ancestor_rule_is_locked_so_users_cannot_pre_create_helper() {
+    // The unfixed helper left C:\ProgramData\Dyno inheriting Users (CI)(WD,AD,...): fine for an ancestor, but Users could
+    // create Helper in it before the helper does.
+    let mut m = windows_machine(|_| locked());
+    m.put("C:\\ProgramData\\Dyno", inherited_from_program_data());
+    let (g, machine) = guard(m, HelperHost::Windows, None);
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap();
+    assert_eq!(machine.0.lock().unwrap().nodes["c:\\programdata\\dyno"], locked());
+    assert!(calls(&machine).contains(&"lock_dir C:\\ProgramData\\Dyno".to_string()));
+}
+
+fn user_made_dyno() -> FakePort {
+    let user = "S-1-5-21-111-222-333-1001";
+    let mut m = windows_machine(|_| locked());
+    let mut dyno = inherited_from_program_data();
+    if let Security::Windows(sd) = &mut dyno.security {
+        sd.owner = user.into();
+    }
+    m.put("C:\\ProgramData\\Dyno", dyno);
+    m
+}
+
+#[test]
+fn at_service_start_an_untrusted_vendor_folder_is_refused_and_only_a_repair_moves_it_aside() {
+    let (g, machine) = guard(user_made_dyno(), HelperHost::Windows, None);
+    let e = g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap_err().to_string();
+    assert!(e.contains("Repair the helper") && e.contains("Dyno"), "{e}");
+    assert!(calls(&machine).is_empty(), "start only refuses: {:?}", calls(&machine));
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    assert!(calls(&machine).contains(&"rename_aside C:\\ProgramData\\Dyno".to_string()));
+}
+
+#[test]
+fn moved_aside_folders_are_capped_at_two_with_the_oldest_removed() {
+    let mut m = user_made_dyno();
+    for n in 1..=3 {
+        m.put(&format!("C:\\ProgramData\\Dyno.untrusted-{n}"), locked());
+        m.put(&format!("C:\\ProgramData\\Dyno.untrusted-{n}\\Helper"), locked());
+    }
+    // Look-alikes the helper did not make stay: a user's own folder with the name, and another folder's prefix.
+    let mut users = locked();
+    if let Security::Windows(d) = &mut users.security {
+        d.owner = "S-1-5-21-111-222-333-1001".into();
+    }
+    m.put("C:\\ProgramData\\Dyno.untrusted-99", users);
+    m.put("C:\\ProgramData\\Other.untrusted-1", locked());
+    let (g, machine) = guard(m, HelperHost::Windows, None);
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    let nodes = machine.0.lock().unwrap().nodes.clone();
+    assert!(nodes.contains_key("c:\\programdata\\dyno.untrusted-99") && nodes.contains_key("c:\\programdata\\other.untrusted-1"));
+    let mut asides: Vec<&String> = nodes
+        .keys()
+        .filter(|k| k.contains("dyno.untrusted-") && !k.contains("\\helper") && !k.ends_with("-99"))
+        .collect();
+    asides.sort();
+    assert_eq!(asides.len(), 2, "{asides:?}");
+    assert!(
+        asides.iter().all(|k| !k.ends_with("-1") && !k.ends_with("-2")),
+        "the oldest go, the newest stay: {asides:?}"
+    );
+    assert!(
+        !nodes.keys().any(|k| k.starts_with("c:\\programdata\\dyno.untrusted-1\\")),
+        "what was inside goes with it"
+    );
+    assert!(
+        calls(&machine).contains(&"sweep_aside C:\\ProgramData Dyno 2".to_string()),
+        "{:?}",
+        calls(&machine)
+    );
+}
+
+#[test]
+fn a_foreign_entry_in_the_vendor_folder_is_refused_at_start_and_moved_aside_by_a_repair_before_the_lock() {
+    // Locking Dyno sets Dyno alone; an entry in it that a user made (or whose security is not the helper's) was not made
+    // trusted by that, so it must not stay next to the helper's own.
+    let user = "S-1-5-21-111-222-333-1001";
+    let make = || {
+        let mut m = windows_machine(|_| locked());
+        let mut evil = locked();
+        if let Security::Windows(d) = &mut evil.security {
+            d.owner = user.into();
+        }
+        m.put("C:\\ProgramData\\Dyno\\Evil", evil.clone());
+        m.put("C:\\ProgramData\\Dyno\\Evil\\deep", evil);
+        m
+    };
+    let (g, machine) = guard(make(), HelperHost::Windows, None);
+    let e = g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap_err().to_string();
+    assert!(e.to_lowercase().contains("evil") && e.contains("owner"), "{e}");
+    assert!(
+        calls(&machine).is_empty(),
+        "start only refuses, and locks nothing first: {:?}",
+        calls(&machine)
+    );
+    let (g, machine) = guard(make(), HelperHost::Windows, None);
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    // (Entries found by walking come back in the fake's lower case.)
+    let c: Vec<String> = calls(&machine).iter().map(|x| x.to_lowercase()).collect();
+    let aside = c
+        .iter()
+        .position(|x| x == "rename_aside c:\\programdata\\dyno\\evil")
+        .expect("the entry, not Dyno, moved aside");
+    let locked_dyno = c.iter().position(|x| x == "lock_dir c:\\programdata\\dyno").expect("Dyno locked");
+    assert!(aside < locked_dyno, "moved aside before Dyno is locked: {c:?}");
+    assert!(!c.contains(&"rename_aside c:\\programdata\\dyno".to_string()));
+    assert!(c.iter().all(|x| !x.starts_with("remove_tree")), "{c:?}");
+    // The moved-aside folder is made the trusted set's alone, so that a later sweep may remove it.
+    assert!(c.contains(&"lock_dir c:\\programdata\\dyno\\evil.untrusted-1".to_string()), "{c:?}");
+    assert!(c.contains(&"sweep_aside c:\\programdata\\dyno evil 2".to_string()), "{c:?}");
+}
+
+#[test]
+fn a_planted_file_and_a_junction_in_the_vendor_folder_are_removed_by_name_and_the_repair_finishes() {
+    // In an unlocked Dyno a user left a file and a junction. Moved aside they cannot be locked as folders; kept, they would
+    // fail the check forever and Repair could never finish.
+    let user = "S-1-5-21-111-222-333-1001";
+    let make = || {
+        let mut m = windows_machine(|_| locked());
+        m.put("C:\\ProgramData\\Dyno", inherited_from_program_data());
+        let mut planted = file(locked());
+        if let Security::Windows(d) = &mut planted.security {
+            d.owner = user.into();
+        }
+        let mut junction = locked();
+        junction.kind = paddock_service::privileged::files::FileKind::Symlink;
+        m.put("C:\\ProgramData\\Dyno\\planted.txt", planted);
+        m.put("C:\\ProgramData\\Dyno\\junction", junction);
+        // What a junction points at is not under Dyno and must never be touched.
+        m.put("C:\\Users\\Eve\\target", locked());
+        m
+    };
+    let (g, machine) = guard(make(), HelperHost::Windows, None);
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap_err();
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    let c: Vec<String> = calls(&machine).iter().map(|x| x.to_lowercase()).collect();
+    for name in ["planted.txt", "junction"] {
+        let aside = format!("c:\\programdata\\dyno\\{name}.untrusted-1");
+        assert!(c.contains(&format!("rename_aside c:\\programdata\\dyno\\{name}")), "{name}: {c:?}");
+        assert!(
+            c.contains(&format!("remove_tree {aside}")),
+            "{name} removed by its (moved) name: {c:?}"
+        );
+        assert!(!machine.0.lock().unwrap().nodes.contains_key(&aside), "{name} is gone");
+    }
+    let nodes = machine.0.lock().unwrap().nodes.clone();
+    assert!(nodes.contains_key("c:\\users\\eve\\target"), "the junction's target is untouched");
+    // And the folder is locked and passes the whole check now.
+    g.verify_dir(Path::new(TOOLS), Path::new(TOOLS)).unwrap();
+    assert!(c.contains(&"lock_dir c:\\programdata\\dyno".to_string()));
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap();
+}
+
 /// A tree a standard user made before the fix: owned by that user, Users may add things.
 fn user_made_tree() -> FakePort {
     let user = "S-1-5-21-111-222-333-1001";
@@ -216,7 +387,12 @@ fn repair_removes_a_whole_user_made_tree_data_root_first() {
         1,
         "the data root's removal takes the rest: {c:?}"
     );
-    assert!(c[0] == format!("remove_tree {DATA}"), "{c:?}");
+    let first_removal = c.iter().position(|x| x.starts_with("remove_tree")).unwrap();
+    assert_eq!(c[first_removal], format!("remove_tree {DATA}"), "{c:?}");
+    assert!(
+        c[..first_removal].iter().all(|x| x.starts_with("lock_dir")),
+        "only the way is locked before: {c:?}"
+    );
 }
 
 #[test]
@@ -446,6 +622,9 @@ impl TrustPort for Anything {
     }
     fn rename_aside(&mut self, p: &str) -> io::Result<String> {
         Ok(p.to_string())
+    }
+    fn sweep_aside(&mut self, _p: &str, _name: &str, _keep: usize) -> io::Result<Vec<String>> {
+        Ok(Vec::new())
     }
     fn remove_tree(&mut self, p: &str) -> io::Result<()> {
         match std::fs::remove_dir_all(p) {
