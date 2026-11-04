@@ -16,6 +16,7 @@ import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 import { MacGui } from './mac-gui.mjs';
 import { MacIdleChecks } from './mac-idle.mjs';
 import { macDriver, readingSteps } from './helper-readings.mjs';
+import { macRebootCheck } from './mac-reboot.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -41,6 +42,7 @@ export function parseArgs(argv) {
     else if (a === '--base') o.base = take(i++, a);
     else if (a === '--guest') o.guest = take(i++, a);
     else if (a === '--suite') o.suite = take(i++, a);
+    else if (a === '--reboot-check') o.reboot = true;
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
@@ -249,7 +251,8 @@ async function main(argv) {
         const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
         const { loadRules, MacTour } = await import('./mac-tour.mjs');
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });
-        const readings = readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
+        const waitReady = async () => { for (let i = 0; i < 75; i++) { if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0 && (await guest.exec('/usr/local/bin/axdrive windows | grep -c Dock')).stdout.trim() !== '0') return true; await sleepMs(4000); } return false; };
+        const readings = o.reboot ? [macRebootCheck({ waitReady })] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
         return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: readings, helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });

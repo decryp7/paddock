@@ -272,7 +272,7 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
       if (tour) for (const s of await tour.run()) push(s);
     }
     // Extension point: one function per wired helper reading (each `async (ctx) => step`), run while the helper is on.
-    for (const fn of extra) push(await fn({ power, gui, check }));
+    for (const fn of extra) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // a function may return several steps
     if (gui) push(await gui.helperOff());
     if (idle && !helperOnly) push(await idle.run());
   }
