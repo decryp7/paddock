@@ -249,6 +249,10 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox) {
     );
     if let Some(d) = s.state_directory() {
         let _ = writeln!(o, "StateDirectory={d}\nStateDirectoryMode=0700");
+        // `ProtectSystem=strict` leaves `/var/lib` read-only inside the service, so the service cannot remove its own state
+        // folder when it removes itself (rmdir: "Read-only file system"). The `+` step runs outside the sandbox after every
+        // stop; `-` makes a folder that still holds the service's files (a restart) no error: `rmdir` takes only an empty one.
+        let _ = writeln!(o, "ExecStopPost=-+/usr/bin/rmdir /var/lib/{d}");
     }
     if let Some(d) = s.runtime_directory() {
         let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");

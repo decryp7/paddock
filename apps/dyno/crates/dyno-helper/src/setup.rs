@@ -198,7 +198,22 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> R
             }
             Ok("removed".into())
         }
-        Err(_) => Ok(format!("left in place: {} holds something the helper did not write", dir.display())),
+        Err(e) => {
+            // Say what really stopped it: a folder with entries of someone else's, or one that is empty but cannot be removed
+            // (a service sandbox with a read-only parent: the service manager removes it after the stop, see the unit).
+            let remaining = std::fs::read_dir(dir).map_or(0, Iterator::count);
+            if remaining > 0 {
+                Ok(format!(
+                    "left in place: {} holds {remaining} item(s) the helper did not write ({e})",
+                    dir.display()
+                ))
+            } else {
+                Ok(format!(
+                    "left in place: {} is empty but could not be removed from here ({e})",
+                    dir.display()
+                ))
+            }
+        }
     }
 }
 
@@ -390,6 +405,32 @@ mod tests {
             assert_eq!(note, "removed", "round {round}");
             assert!(!paths.data_dir.exists(), "round {round}: the folder is gone");
         }
+    }
+
+    /// VM check 7538: the folder was empty but could not be removed (the service's `/var/lib` is read-only), and the log said it
+    /// "holds something the helper did not write": the error was swallowed and the cause hidden.
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_folder_that_cannot_be_removed_says_the_real_error_not_that_it_holds_something() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        // The parent refuses the removal of an entry (as the service's read-only `/var/lib` does).
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::create_dir(dir.path().join("probe")).is_ok() {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // running as root: a read-only parent does not stop it
+        }
+        let note = remove_data_folder_with(&paths, &|| {});
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let note = note.unwrap();
+        assert!(note.contains("left in place"), "{note}");
+        assert!(!note.contains("holds something"), "the folder is empty: {note}");
+        assert!(
+            note.contains("empty") && note.contains("os error"),
+            "the real error is named: {note}"
+        );
     }
 
     #[test]

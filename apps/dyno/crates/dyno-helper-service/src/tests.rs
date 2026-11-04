@@ -249,6 +249,19 @@ fn package_file(name: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(PACKAGE_DIR).join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
+/// VM check 7538 (Linux, Turn off): `ProtectSystem=strict` leaves `/var/lib` read-only inside the service, so the helper cannot
+/// remove its own `StateDirectory=` (rmdir: "Read-only file system"); the empty folder stayed after Turn off. Only the service
+/// manager can, outside the sandbox: an `ExecStopPost=` with the `+` prefix (full privileges), `-` so a folder that still holds
+/// the helper's files (a restart) is not an error.
+#[test]
+fn the_unit_removes_its_empty_state_folder_after_the_stop_from_outside_the_sandbox() {
+    let unit = paddock_service::render::systemd_unit(&spec(), "/usr/bin/dyno-helper", None);
+    assert!(
+        unit.lines().any(|l| l == "ExecStopPost=-+/usr/bin/rmdir /var/lib/dyno-helper"),
+        "{unit}"
+    );
+}
+
 #[test]
 fn the_shipped_unit_is_exactly_what_the_spec_renders_and_is_not_enabled_by_the_package() {
     let rendered = paddock_service::render::systemd_unit(&spec(), "/usr/bin/dyno-helper", None);

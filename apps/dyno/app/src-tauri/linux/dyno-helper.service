@@ -28,6 +28,7 @@ MemoryDenyWriteExecute=yes
 UMask=0077
 StateDirectory=dyno-helper
 StateDirectoryMode=0700
+ExecStopPost=-+/usr/bin/rmdir /var/lib/dyno-helper
 RuntimeDirectory=dyno-helper
 RuntimeDirectoryMode=0755
 
