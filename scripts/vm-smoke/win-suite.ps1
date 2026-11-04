@@ -113,7 +113,7 @@ $timers = Admin-Run 'powercfg /waketimers'; $states = Admin-Run 'powercfg /a'
 [void]$s.evidence.Add('> powercfg /waketimers'); [void]$s.evidence.AddRange(@($timers -split "`n"))
 $hasSleep = $states -match '(?im)^\s*Standby|S0 Low Power|S3'
 $aval = ($states -split "\r?\n\r?\n")[0]
-$sleepOk = $aval -match '(?i)Standby'
+$sleepOk = $states -match '(?is)sleep states are available on this system:\s*\r?\n\s*(Standby|Hibernate)'
 if ($sleepOk) { Check $s ($timers -match '(?i)dyno') 'powercfg /waketimers lists a Dyno timer' } else { [void]$s.evidence.Add('powercfg /a: no sleep state available in this VM, so Windows lists no wake timers'); $s.summary = 'accepted and cancelled; the OS timer cannot be observed because this VM has no sleep state (the real wake stays on the hardware checklist)' }
 $c = Dyno 'wake-schedule cancel vm-check'; Check $s ($c.code -eq 0) "wake-schedule cancel exit $($c.code)"
 if (-not $sleepOk -and $s.status -eq 'pass') { $s.status = 'skip' }
