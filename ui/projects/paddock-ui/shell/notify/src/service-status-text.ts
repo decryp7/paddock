@@ -61,6 +61,7 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'dy.agent.keeps-failing': () => $localize`:@@pd.health.state.keeps-failing:keeps failing to start`,
   'dy.agent.paused': () => $localize`:@@pd.health.state.paused:paused`,
   'dy.agent.other-holds': () => $localize`:@@pd.health.state.other-holds:held by another agent`,
+  'dy.tray.no-host': () => $localize`:@@pd.health.state.tray-hidden:not shown`,
   'sd.engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.damaged': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.rebuild': () => $localize`:@@pd.health.state.stopped:stopped`,

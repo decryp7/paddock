@@ -890,6 +890,9 @@
       <trans-unit id="pd.health.state.system-silent" datatype="html">
         <source>system not answering</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.tray-hidden" datatype="html">
+        <source>not shown</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.unavailable" datatype="html">
         <source>not available</source>
       </trans-unit>
