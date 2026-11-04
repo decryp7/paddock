@@ -97,9 +97,19 @@ async function main(argv) {
     log('running the suite in the interactive session (bounded 40 min)');
     ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out'; schtasks /run /tn VmCheck`);
     let done = false;
+    const answered = new Set();
     for (let i = 0; i < 480 && !done; i++) {
-      done = clean(ssh(`Test-Path ${GUEST}\\out\\done.txt`, 60_000).stdout).includes('True');
-      if (!done) await sleep(5000);
+      // The suite asks for administrator-only readings (powercfg) through request files; this host has the paddock-admin key.
+      const listing = clean(ssh(`Get-ChildItem ${GUEST}\\out -Name -Filter 'req-*.txt' -ErrorAction SilentlyContinue; if (Test-Path ${GUEST}\\out\\done.txt) { 'DONE' }`, 60_000).stdout);
+      for (const f of listing.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^req-\d+\.txt$/.test(x))) {
+        if (answered.has(f)) continue;
+        answered.add(f);
+        const cmd = clean(ssh(`Get-Content ${GUEST}\\out\\${f}`, 30_000).stdout).trim();
+        if (!/^powercfg \/(requests|waketimers|a)$/.test(cmd)) { ssh(`Set-Content ${GUEST}\\out\\${f.replace('req', 'resp')} 'refused: ${cmd.replace(/'/g, '')}'`, 30_000); continue; }
+        ssh(`${cmd} | Out-String | Set-Content ${GUEST}\\out\\${f.replace('req', 'resp')}`, 60_000, true);
+      }
+      done = listing.includes('DONE');
+      if (!done) await sleep(2000);
     }
     const dest = join(scratch, 'out');
     mkdirSync(dest);

@@ -31,6 +31,21 @@ function Start-App([switch]$Cdp) {
   if ($Cdp) { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$CdpPort" } else { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
   Start-Process (Join-Path $bin 'dyno-app.exe')
 }
+# `powercfg /requests`, `/waketimers` and `/a` need an administrator; the suite runs as the standard user (like a person), so it asks the host
+# (which has the paddock-admin SSH key) through a request file and waits, bounded, for the answer file.
+$script:ar = 0
+function Admin-Run([string]$Cmd) {
+  $script:ar++; $n = $script:ar
+  Set-Content "$Out
+eq-$n.txt" $Cmd
+  $ans = Wait-Until { if (Test-Path "$Out
+esp-$n.txt") { Get-Content "$Out
+esp-$n.txt" -Raw } } 90 1000
+  if ($null -eq $ans) { return "(no answer from the host for: $Cmd)" }
+  return $ans
+}
+# settings.json is read by serde_json: a UTF-8 byte order mark (Set-Content -Encoding UTF8) makes it unreadable and Dyno falls back to defaults.
+function Write-Json($Path, $Obj) { [IO.File]::WriteAllText($Path, ($Obj | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding $false)) }
 function Ready { Wait-Until { (Dyno 'status').code -eq 0 } 120 2000 }
 
 Log "start suite, installer=$Installer"
@@ -47,6 +62,11 @@ Finish $s "installed $ver without an administrator prompt"
 
 # 2. Cold start: one app, one agent, the agent's parent is the app, the discovery file names the live agent.
 $s = New-Step 'Cold start, one instance'
+$sf0 = Join-Path $bin 'settings.json'
+$d0 = if (Test-Path $sf0) { Get-Content $sf0 -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+if (-not $d0.power) { $d0 | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{}) -Force }
+$d0.power | Add-Member -NotePropertyName wake -NotePropertyValue ([pscustomobject]@{ enabled = $true }) -Force
+New-Item -ItemType Directory -Force $bin | Out-Null; Write-Json $sf0 $d0
 Start-App -Cdp
 $ready = Ready
 Check $s ([bool]$ready) $(if ($ready) { 'dyno status answers (the agent is up)' } else { 'no answer from dyno status within 120 s' })
@@ -72,12 +92,12 @@ Finish $s 'single instance: no new process'
 
 # 4. Keep awake for 1 hour: powercfg /requests lists Dyno, then not.
 $s = New-Step 'Keep awake: held by the OS, then released'
-$req = { (powercfg /requests) -join "`n" }
+$req = { Admin-Run 'powercfg /requests' }
 Check $s (-not ((& $req) -match '(?i)dyno')) 'no Dyno request before "on"'
 $on = Dyno 'awake on --for 1h'; Check $s ($on.code -eq 0) "dyno awake on --for 1h exit $($on.code): $($on.text)"
 $held = Wait-Until { $t = & $req; if ($t -match '(?i)dyno') { $t } } 20
 Check $s ([bool]$held) 'powercfg /requests lists a Dyno request'
-[void]$s.evidence.Add('> powercfg /requests'); [void]$s.evidence.AddRange(@((& $req) -split "`n"))
+[void]$s.evidence.Add('> powercfg /requests'); [void]$s.evidence.AddRange(@((& $req) -split "`r?`n"))
 $off = Dyno 'awake off'; Check $s ($off.code -eq 0) "dyno awake off exit $($off.code)"
 $gone = Wait-Until { -not ((& $req) -match '(?i)dyno') } 20
 Check $s ([bool]$gone) 'powercfg /requests no longer lists Dyno after "off"'
@@ -88,7 +108,7 @@ $s = New-Step 'Scheduled wake: set, listed, cancelled'
 $at = (Get-Date).AddMinutes(5).ToString('HH:mm')
 $add = Dyno "wake-schedule add vm-check --at $at --repeat once --stay 10m"
 Check $s ($add.code -eq 0) "wake-schedule add exit $($add.code): $($add.text)"
-$timers = (powercfg /waketimers) -join "`n"; $states = (powercfg /a) -join "`n"
+$timers = Admin-Run 'powercfg /waketimers'; $states = Admin-Run 'powercfg /a'
 [void]$s.evidence.Add('> dyno wake-schedule list'); [void]$s.evidence.AddRange(@((Dyno 'wake-schedule list').text -split "`n"))
 [void]$s.evidence.Add('> powercfg /waketimers'); [void]$s.evidence.AddRange(@($timers -split "`n"))
 $hasSleep = $states -match '(?im)^\s*Standby|S0 Low Power|S3'
@@ -107,8 +127,9 @@ $d = if (Test-Path $sf) { Get-Content $sf -Raw | ConvertFrom-Json } else { [pscu
 if (-not $d.power) { $d | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{}) -Force }
 $rule = [pscustomobject]@{ enabled = $true; action = 'sleep'; afterSecs = 60; countdownSecs = 90; acOnly = $false; exceptions = [pscustomobject]@{ audio = $true; otherStayAwake = $false; fullScreen = $false; cpuPct = $null; diskBytesPerS = $null; netBytesPerS = $null; programs = @() } }
 $d.power | Add-Member -NotePropertyName idle -NotePropertyValue $rule -Force
-$d | ConvertTo-Json -Depth 8 | Set-Content $sf -Encoding UTF8
+Write-Json $sf $d
 Start-App -Cdp; $r = Ready; Check $s ([bool]$r) 'Dyno started with the idle rule'
+[void]$s.evidence.Add('settings.json power section as written: ' + (Get-Content $sf -Raw | ConvertFrom-Json | Select-Object -ExpandProperty power | ConvertTo-Json -Depth 6 -Compress))
 $cd = Wait-Until { $t = (Dyno 'idle').text; if ($t -match 'Counting down to sleep') { $t } } 300 3000
 Check $s ([bool]$cd) $(if ($cd) { 'the countdown appeared after the idle time' } else { 'no countdown within 300 s' })
 [void]$s.evidence.Add('> dyno idle'); if ($cd) { [void]$s.evidence.AddRange(@($cd -split "`n")) }
