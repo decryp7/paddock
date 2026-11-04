@@ -7,11 +7,7 @@
 //! thread per look, connect, ask and connection watch. The connection is watched by waiting for its close, not by polling.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use super::machine::{Command, Event, Generation, Launch, PeerId, Purpose, Seq};

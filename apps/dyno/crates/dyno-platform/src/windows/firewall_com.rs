@@ -3,11 +3,7 @@
 //! rule is still listed); only failing to reach the policy object at all is an error. Nothing is logged but counts.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use crate::parse::firewall::RawWinRule;

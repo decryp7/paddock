@@ -3,11 +3,7 @@
 //! reasons temperatures and fans are not available.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use crate::parse::gpu::busiest_engine;

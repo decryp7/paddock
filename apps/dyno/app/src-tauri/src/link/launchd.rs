@@ -16,11 +16,7 @@
 //! launchd and a fake clock, never the real ones (rule 7).
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use super::ports::{running_or_stopped, Child, Launcher};

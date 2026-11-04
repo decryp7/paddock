@@ -2,11 +2,7 @@
 //! damaged), open the fixed endpoint and serve until stopped.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use crate::audit::AuditLog;

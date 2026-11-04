@@ -4,11 +4,7 @@
 //! come back with no pid and the page says so; Dyno never asks for root for this.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use dyno_core::network::SocketRow;

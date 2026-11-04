@@ -4,11 +4,7 @@
 //! on a cancel event; the thread owns and closes both handles, so a late cancel never touches a recycled handle.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use dyno_core::ports::PlatformError;

@@ -3,11 +3,7 @@
 //! inode that `stat` reports for each descriptor link. The `/proc` root is a parameter so tests use a temporary tree.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use crate::parse::linux_proc::{dev_major_minor, locks, socket_inode};

@@ -3,11 +3,7 @@
 //! its ports: tests give it a fake [`ProcessTraffic`] and a temporary audit log.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use crate::audit::AuditLog;

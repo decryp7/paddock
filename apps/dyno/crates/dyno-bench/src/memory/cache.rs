@@ -3,11 +3,7 @@
 //! `GetLogicalProcessorInformationEx`. `None` when the OS will not say; the test then assumes 32 MiB.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use dyno_core::bench::memory::parse_linux_cache;

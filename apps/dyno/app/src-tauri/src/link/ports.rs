@@ -4,11 +4,7 @@
 //! Nothing here decides anything: a decision is a step of the pure machine. The adapters are thin and run on workers.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use super::machine::{Generation, HintSeen, LockSeen, Look, Seq};

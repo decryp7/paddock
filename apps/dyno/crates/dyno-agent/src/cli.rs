@@ -1,11 +1,7 @@
 //! The `dyno-agent` command line: `run` (the service entry), `status`, `stop`, `service …`, `once` and `bench`.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use crate::discovery::Discovery;

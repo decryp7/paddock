@@ -7,11 +7,7 @@
 //! [`ProcessChild`]; the tests drive a scripted one with a manual clock.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use dyno_core::bench::unit::{self, UnitRecord};

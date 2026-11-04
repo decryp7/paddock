@@ -1,11 +1,7 @@
 //! User activity: time since the last input (GetLastInputInfo) and the foreground window's process.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use dyno_core::ports::UserActivity;

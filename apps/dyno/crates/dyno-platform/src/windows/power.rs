@@ -2,11 +2,7 @@
 //! `EWX_FORCE`: every app gets `WM_QUERYENDSESSION` and one with unsaved work can hold the shutdown until the person acts.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use dyno_core::metrics::Reading;
@@ -112,7 +108,10 @@ fn read_audio() -> windows::core::Result<bool> {
     // SAFETY: COM calls on this thread only; every interface is released when it drops; a repeated initialisation answers S_FALSE.
     unsafe {
         // S_FALSE (already initialised) is success; a different apartment model (RPC_E_CHANGED_MODE) is logged and the calls below say if COM works.
-        paddock_proc::cleanup::logged("initialising COM for the audio reading", CoInitializeEx(None, COINIT_MULTITHREADED).ok());
+        paddock_proc::cleanup::logged(
+            "initialising COM for the audio reading",
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok(),
+        );
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
         let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)?;

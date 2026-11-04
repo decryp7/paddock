@@ -2,11 +2,7 @@
 //! Dyno's own types and freed at once; the API call and the raw reads are the only unsafe code, each with its reason.
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use super::state_of_nl;

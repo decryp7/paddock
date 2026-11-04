@@ -6,11 +6,7 @@
 //! evicts pages after each flush where it can, and says "cached reads possible".
 #![cfg_attr(
     not(test),
-    deny(
-        clippy::let_underscore_must_use,
-        clippy::let_underscore_future,
-        clippy::let_underscore_untyped
-    )
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
 use super::driver::{BlockIo, ALIGN};
