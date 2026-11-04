@@ -1,11 +1,9 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { MatButton } from '@angular/material/button';
-import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
-import { SETTINGS_DIALOG_ID } from '@decryp7/paddock-ui/shell/settings';
-import { SETTINGS_PAGE_ID } from '../../shell/navigate';
 import type { FirewallProfile, FirewallSource, RuleAction, RuleSourceKind } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
+import { ReadingSource } from '../../core/reading-source';
 import { FirewallStore } from '../../state/firewall.store';
 
 const SOURCE_NAME: Record<RuleSourceKind, string> = {
@@ -32,7 +30,7 @@ export function rulesLine(s: FirewallSource): string {
  */
 @Component({
   selector: 'dy-firewall-page',
-  imports: [AsyncState, Icon, MatButton],
+  imports: [AsyncState, Icon, MatButton, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -59,10 +57,12 @@ export function rulesLine(s: FirewallSource): string {
               @if (s.defaultIn || s.defaultOut) {
                 <p class="faint">Default for incoming: {{ action(s.defaultIn) }} · outgoing: {{ action(s.defaultOut) }}</p>
               }
+              <dy-reading-source [via]="s.via" [canRetry]="true" (retry)="store.load()" />
               @if (s.note; as n) {
-                <p class="note" data-testid="source-note"><dy-icon name="info" /> <span>{{ n }}</span>
-                  @if (s.rulesHidden && n.includes('helper')) { <button type="button" matButton="outlined" (click)="openSettings()" data-testid="open-settings">Open settings</button> }
-                </p>
+                @if (s.via === 'local' || s.via === 'helper') { <p class="note" data-testid="source-note"><dy-icon name="info" /> <span>{{ n }}</span></p> }
+              }
+              @if (s.rulesHidden && s.via === 'helper') {
+                <p class="faint num" data-testid="counts-only">{{ countsLine(s) }}</p>
               }
               @if (!s.rulesHidden) {
                 <p class="faint num">{{ line(s) }}</p>
@@ -113,19 +113,16 @@ export function rulesLine(s: FirewallSource): string {
 })
 export class FirewallPage implements OnInit {
   protected readonly store = inject(FirewallStore);
-  private readonly dialogs = inject(DialogService);
   ngOnInit(): void {
     void this.store.load();
   }
   protected name = sourceName;
   protected line = rulesLine;
+  protected countsLine = (s: FirewallSource): string =>
+    `${s.ruleCount.toLocaleString('en-US')} ${s.ruleCount === 1 ? 'rule' : 'rules'}; only the owner or an administrator sees them.`;
   protected profile = (p: FirewallProfile): string => PROFILE[p];
   /** "Firewall" for a system with one switch for everything, the network's name for Windows' three profiles. */
   protected profileWord = (p: FirewallProfile): string => (p === 'all' ? 'Firewall' : PROFILE[p]);
 
-  /** Opens Settings at the Administrator readings card, where the helper is turned on. */
-  protected openSettings(): void {
-    void this.dialogs.open(SETTINGS_DIALOG_ID, { inputs: { page: SETTINGS_PAGE_ID, anchor: { id: 'helper', at: Date.now() } } });
-  }
   protected action = (a: RuleAction | null): string => (a === null ? 'not stated' : a === 'allow' ? 'allow' : 'block');
 }

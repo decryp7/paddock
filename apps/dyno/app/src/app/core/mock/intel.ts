@@ -318,8 +318,8 @@ export class MockIntel {
           rules: [],
           truncated: 0,
           rulesHidden: true,
-          note: 'These rules need the helper. Turn it on in Settings to see them.',
-          via: { needsHelper: { reason: 'The pf rules are readable only by an administrator.', next: { openSettings: 'helper' } } },
+          note: 'The rules of the pf firewall can be read only by an administrator.',
+          via: { needsHelper: { reason: 'The rules of the pf firewall can be read only by an administrator. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } },
         },
       ],
     };

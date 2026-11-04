@@ -13,6 +13,7 @@
 //! composed (`agent.rs`), and put `Sourced::via` on the reply type's `via` field. Nothing else in this file changes.
 
 use dyno_core::btm::LoginItemsReply;
+use dyno_core::firewall::FirewallSource;
 use dyno_core::helper_counters::CounterAnswer;
 use dyno_core::helper_extras::ExtrasAnswer;
 use dyno_core::helper_holders::{FileHolders, SocketOwners};
@@ -77,6 +78,8 @@ pub trait HelperCalls: Send + Sync {
     fn login_items(&self) -> Result<LoginItemsReply, CallError>;
     /// SMART health of the disks the helper's own scan finds.
     fn smart(&self, query: SmartQuery) -> Result<SmartReply, CallError>;
+    /// The firewall as the helper reads it (`pf` on macOS, `nft` on Linux), reduced to what the caller may have.
+    fn firewall(&self) -> Result<FirewallSource, CallError>;
 }
 
 /// The helper link with the wait of a [`ReadClass`].
@@ -119,6 +122,9 @@ impl<T: HelperTransport> HelperCalls for Bounded<T> {
     }
     fn smart(&self, query: SmartQuery) -> Result<SmartReply, CallError> {
         self.link.smart_in(query, self.wait)
+    }
+    fn firewall(&self) -> Result<FirewallSource, CallError> {
+        self.link.firewall_in(self.wait)
     }
 }
 

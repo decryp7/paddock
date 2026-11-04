@@ -61,6 +61,8 @@ pub struct Readers {
     pub traffic: Vec<TrafficCounter>,
     /// The SMART reply.
     pub smart: SmartReply,
+    /// The firewall as `pf` or `nft` reports it.
+    pub firewall: dyno_core::firewall::FirewallSource,
 }
 
 impl Default for Readers {
@@ -76,6 +78,7 @@ impl Default for Readers {
                 skipped: vec![],
                 not_visited: 0,
             },
+            firewall: dyno_core::firewall::FirewallSource::new(dyno_core::firewall::RuleSource::Nftables),
         }
     }
 }
@@ -105,6 +108,12 @@ impl LoginItemsReader for Items {
 struct Smart(SmartReply);
 impl SmartReader for Smart {
     fn read(&self, _: SmartQuery) -> Result<SmartReply, PlatformError> {
+        Ok(self.0.clone())
+    }
+}
+struct Firewall(dyno_core::firewall::FirewallSource);
+impl dyno_core::firewall::FirewallReader for Firewall {
+    fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
         Ok(self.0.clone())
     }
 }
@@ -140,6 +149,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         memory: Box::new(Memory(readers.memory)),
         processes: Box::new(dyno_core::helper_processes::NoProcesses),
         smart: Box::new(Smart(readers.smart)),
+        firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),
         wakes: Box::new(dyno_core::wake::NoWakes),
         wol: Box::new(dyno_core::wake::NoWakes),

@@ -8,8 +8,9 @@ import { FirewallPage, rulesLine, sourceName } from './firewall-page';
 
 const NOW = 1_700_000_000_000;
 
-async function open(fail: string[] = []) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(fail) });
+async function open(fail: string[] | ((m: MockBackend) => void) = []) {
+  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(Array.isArray(fail) ? fail : []) });
+  if (typeof fail === 'function') fail(mock);
   TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(FirewallPage);
   f.detectChanges();
@@ -35,10 +36,26 @@ describe('FirewallPage', () => {
     expect(alf.textContent).toContain('Block');
   });
 
-  it('says a source the helper reads needs the helper, and shows no rules for it', async () => {
+  it('says a source the helper reads needs the helper, with the button, and shows no rules for it', async () => {
     const { el } = await open();
     const pf = el.querySelector('[data-source="pf"]')!;
-    expect(pf.querySelector('[data-testid="source-note"]')!.textContent).toContain('need the helper');
+    expect(pf.querySelector('[data-testid="reading-source-needs"]')!.textContent).toContain('pf firewall');
+    expect(pf.querySelector('[data-testid="reading-source-turn-on"]')).not.toBeNull();
+    expect(pf.querySelector('table')).toBeNull();
+  });
+
+  it('shows the chip and the rules of a source the helper read, and counts only for a caller who may not see them', async () => {
+    const { el } = await open((m) => {
+      const v = m.firewall.bind(m);
+      m.firewall = async () => {
+        const view = await v();
+        view.sources[1] = { ...view.sources[1]!, via: 'helper', ruleCount: 12, rulesHidden: true, note: null };
+        return view;
+      };
+    });
+    const pf = el.querySelector('[data-source="pf"]')!;
+    expect(pf.querySelector('[data-testid="reading-source-helper"]')).not.toBeNull();
+    expect(pf.querySelector('[data-testid="counts-only"]')!.textContent).toContain('12 rules; only the owner or an administrator sees them.');
     expect(pf.querySelector('table')).toBeNull();
   });
 
@@ -49,10 +66,10 @@ describe('FirewallPage', () => {
     expect(rows[0]!.querySelectorAll('.chip')).toHaveLength(3);
   });
 
-  it('is read-only: the only controls are Refresh and a way to the helper setting; none changes a rule', async () => {
+  it('is read-only: the only controls are Refresh and the way to turn on the helper; none changes a rule', async () => {
     const { el } = await open();
     const buttons = [...el.querySelectorAll('button')].map((b) => b.textContent!.trim());
-    expect(buttons).toEqual(['Refresh', 'Open settings']);
+    expect(buttons).toEqual(['Refresh', 'Turn on administrator readings']);
   });
 
   it('shows an error with Retry when the firewall cannot be read, and no Refresh beside it', async () => {
