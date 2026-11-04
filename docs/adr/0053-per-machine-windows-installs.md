@@ -578,3 +578,69 @@ weeks accepted for revision 1's scope; the user chose the full design on 2026-11
 | O6 | Signed-out users' `Run` values at uninstall | **Leave them** |
 | O7 | Spotter per machine from 1.0 | **Yes, after Dyno's VM pass** |
 | O8 | One update feed for the last per-user release and the first per-machine one | **One feed**, with PM-4 as corrected (the per-user copy is started again) |
+
+## Amendment 1 (2026-11-05): stopping, the installer lock, and the trust of `apply-update`
+
+Written after S0's measurements and the independent reviews of `paddock-setup` (branches `feat/paddock-setup-2`,
+`feat/per-machine-stop-and-include`). It replaces §3's order of steps, §4.1 step 4's mutex and the "no argument is trusted"
+detail of §4.2; everything else stands. The user's decision of 2026-11-05 is kept: **one family update key, no per-app keys**.
+
+### §3 (Stopping every session): replaced
+
+Restart Manager cannot end other sessions' programs (S0: `RmShutdown` returns 350 and ends nothing whenever another session
+holds a file; confirmed on the two-user VM run). The stop is, in order:
+
+1. the app's graceful stop where it has one (Dyno: `dyno-agent stop`, and `WM_CLOSE` to windows in the caller's own session,
+   bounded);
+2. then forced end by handle with `SeDebugPrivilege` enabled only around open and terminate, identity and folder checked,
+   bounded;
+3. Restart Manager only as a check afterwards, filtered to the listed images (it also lists system components that map the
+   files, for example `XtaCache` on Arm);
+4. each adopting app states in `windows/per-machine.json` (`survivesForcedEnd`) why each program in its stop list survives a
+   forced end, and C91 requires it.
+
+### §4.1 step 4 (the installer lock and the app's signal): replaced
+
+The named mutex in `Global\` is dropped. Any authenticated account can create objects in `Global\` (only file mappings and
+symbolic links need `SeCreateGlobalPrivilege`), and waiting on a mutex acquires it, so a standard user could squat the name or
+hold the lock and block every later update. The new rule is that **nothing an unprivileged account can open can be held by it,
+and nothing it can make decides anything**:
+
+- **Exclusion between elevated processes** is a mutex and a hand-over event inside a **private namespace** whose boundary
+  descriptor is Administrators (`CreateBoundaryDescriptor`, `AddSIDToBoundaryDescriptor`, `CreatePrivateNamespace`). Only an
+  elevated process can create or open the namespace, so the names cannot be squatted, and the objects grant access to SYSTEM
+  and Administrators only.
+- **Admission** (`apply-update`) looks only at those objects: busy when the lock is held, or when the hand-over event exists and
+  is unset. `apply-update` creates the event unset, starts the installer, gives the lock up and waits (no clock) for the
+  installer's `hold-installing` to take the lock and set the event, or for the installer process to end; so there is no gap in
+  which a second update is admitted. A crashed installer closes its handles and the objects vanish with them. An installer
+  that ends before it holds the lock makes `apply-update` exit 31, and the app's Failed path starts the old version again.
+- **The app's signal** is a manual-reset event `Global\<identifier>.installing`, made unset by `apply-update` (or by
+  `hold-installing` for an install started by hand) and set when the install is over. Authenticated Users get
+  `SYNCHRONIZE | READ_CONTROL` only, so the app can wait on it and read its owner and can hold or change nothing. The app and the
+  installer judge its owner (SYSTEM, Administrators or TrustedInstaller) and ignore a foreign object. **The signal never
+  decides admission**: a standard user's handle can keep a dead install's signal alive, and a squatted signal must not open the
+  gap. A squat costs the app its signal and nothing else.
+- The app waits with a **required bound** (`wait_for_installer(identifier, bound)`); a timeout means "unknown" and the
+  hand-off record settles it at the next start. The 60 s grace rule is dropped.
+
+### §4.2 (the trust of `apply-update`): additions
+
+- **The key is the family's, so the update is bound to the product.** The signed trusted comment's `file:` must start with
+  `<productName>_<signed version>_` and end with `-setup.exe` (Tauri signs `timestamp:<unix>\tfile:<name>\tversion:<v>`; the
+  NSIS installer is named `<productName>_<version>_<arch>-setup.exe`). The version in the prefix comes from the same signed
+  comment that `verify_file` already checked against the announced version, so product `Dyno` does not accept the installer of a
+  product `Dyno_Pro`, and another app's validly signed installer is refused (exit 29). The release gate asserts that every
+  installer's signed comment carries such a name.
+- **Nothing from the caller is opened before it is parsed.** `--file` is a plain local drive-letter path (no UNC, device,
+  namespace or stream path, no `..`); the signature is passed as base64 text (at most 1 KiB), not as a path; a link anywhere
+  above the file is refused before the open.
+- **The staged copy** lives in a per-run folder, is readable by Administrators and SYSTEM only, is refused when it has another
+  hard link, and is removed after every refusal.
+- **"Not newer"** refuses the same version too. The installed side is the main binary's version resource (only
+  `major.minor.patch`), so an announced version with the installed numbers is refused whatever its prerelease part.
+- **What stays (addition).** The check of the folders above the file and the open of the file are separate steps: a user who can
+  create symbolic links and wins a race between the two could still point the open at a share. That leaks the elevated
+  account's network authentication to a server the user names (SMB), and nothing else: the opened handle is still checked to be
+  a regular file on a local fixed disk before a byte is read, and the copy is verified on the protected copy. Opening component
+  by component would close it and is not done now.
