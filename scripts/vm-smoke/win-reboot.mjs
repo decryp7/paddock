@@ -5,6 +5,7 @@
 import { cardText, helperOn, openSettings, ssh } from './win-helper.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
 import { Actor } from './win-act.mjs';
+import { retryOnClosed } from './reconnect.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -92,12 +93,25 @@ async function afterRestartRecord(actor, label) {
 /** `ctx`: { vm(args, ms), waitConsole(), launchDyno(), log }. Returns the steps. */
 export async function runRebootPhase(ctx) {
   const steps = [];
+  try { await runRebootSteps(ctx, steps); } catch (e) { steps.push(result('Windows restart check: aborted', [{ ok: false, detail: String(e.message).split('\n')[0] }], [String(e.stack ?? e.message).slice(0, 1500)])); }
+  return steps;
+}
+
+async function runRebootSteps(ctx, steps) {
   let t = tunnel();
   let browser = await connect();
-  steps.push(await helperOn(browser));
-  const launchDefault = await launchAtLogin(browser);
+  // The window can be replaced while the helper turns on (a closed page): reconnect once and retry.
+  const safe = async (fn) => { const r = await retryOnClosed(fn, browser, async () => { t.close(); t = tunnel(); await sleep(3000); browser = await connect(); return browser; }); browser = r.handle; return r.value; };
+  // The turn-on is not repeated if the window is replaced during it (the second press would be a second UAC): reconnect and judge the state instead.
+  try { steps.push(await helperOn(browser)); } catch (e) {
+    if (!/closed/i.test(String(e.message))) throw e;
+    t.close(); t = tunnel(); await sleep(5000); browser = await connect();
+    const s = snapshot();
+    steps.push(result('Windows: admin helper Turn on (the app window was replaced during the turn-on; reconnected)', [{ ok: s.state === 'RUNNING', detail: `service ${s.state}, start type ${s.start} after reconnecting` }], [`first error: ${String(e.message).split('\n')[0]}`], 'service running after the window was replaced'));
+  }
+  const launchDefault = await safe(launchAtLogin);
   const before = snapshot();
-  const cardBefore = await cardState(browser);
+  const cardBefore = await safe(cardState);
   const actor = new Actor();
   actor.start(); await sleep(6000);
   const trayBefore = await trayRecord(actor);
@@ -111,7 +125,7 @@ export async function runRebootPhase(ctx) {
   await browser.close().catch(() => {});
   t.close();
 
-  if (!(await restartGuest(ctx))) { steps.push(result('Windows restart: the guest did not come back to a GUI session', [{ ok: false, detail: 'no console session after the restart (6 min)' }])); return steps; }
+  if (!(await restartGuest(ctx))) { steps.push(result('Windows restart: the guest did not come back to a GUI session', [{ ok: false, detail: 'no console session after the restart (6 min)' }])); return; }
   const rec1 = await afterRestartRecord(actor, 'default');
   const idle = snapshot();
   const delay = rec1.auto.running ? 'started by something at logon' : 'nothing started Dyno at logon';
@@ -166,5 +180,4 @@ export async function runRebootPhase(ctx) {
       ], rec2.evidence, 'Dyno starts by itself and its tray icons exist'));
     } else steps.push(result('Windows restart (Launch at login on): the guest did not come back', [{ ok: false, detail: 'no console session after the second restart' }]));
   }
-  return steps;
 }
