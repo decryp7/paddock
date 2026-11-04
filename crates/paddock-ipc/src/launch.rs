@@ -211,6 +211,17 @@ impl Drop for Child {
     }
 }
 
+/// The launch error for a bootstrap line that could not be written. A closed pipe means the child is already gone (a child
+/// that exits at once may do so before the line is written, or after it): that is the same outcome as one that exits
+/// before it connects, so both read alike and the OS error stays in the message.
+fn bootstrap_failure(label: &str, e: &io::Error) -> IpcError {
+    if e.kind() == io::ErrorKind::BrokenPipe {
+        IpcError::Spawn(format!("{label} exited before it connected ({e})"))
+    } else {
+        IpcError::Spawn(format!("{label} did not take its bootstrap ({e})"))
+    }
+}
+
 /// Starts the child of `spec`, writes its bootstrap, and waits up to `spec.start_timeout` for it to connect (giving up
 /// at once if it exits). On any failure the child's tree is ended.
 pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcError> {
@@ -272,15 +283,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         s.write_all(line.as_bytes()).and_then(|()| s.flush())
     });
     // On failure `process` is dropped, which ends its tree.
-    // A closed pipe means the child is already gone (a child that exits at once may do so before the line is written).
-    written.map_err(|e| {
-        let what = if e.kind() == io::ErrorKind::BrokenPipe {
-            "exited before it took"
-        } else {
-            "did not take"
-        };
-        IpcError::Spawn(format!("{label} {what} its bootstrap ({e})"))
-    })?;
+    written.map_err(|e| bootstrap_failure(&label, &e))?;
     let conn = host.accept_while(Some(pid), spec.start_timeout, &mut || {
         if process.is_running() {
             Ok(())
@@ -300,4 +303,35 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         peer,
         _host: host,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(e: IpcError) -> String {
+        match e {
+            IpcError::Spawn(m) => m,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_child_that_exits_before_the_bootstrap_reads_like_one_that_exits_before_it_connects() {
+        let pipe = io::Error::from(io::ErrorKind::BrokenPipe);
+        let m = message(bootstrap_failure("plugin \"exit\"", &pipe));
+        assert!(m.contains("exited before it connected"), "{m}");
+        assert!(
+            m.contains(&pipe.to_string()),
+            "the OS error stays in the message: {m}"
+        );
+    }
+
+    #[test]
+    fn another_write_error_is_not_called_an_exit() {
+        let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+        let m = message(bootstrap_failure("p", &denied));
+        assert!(m.contains("did not take its bootstrap"), "{m}");
+        assert!(!m.contains("exited"), "{m}");
+    }
 }
