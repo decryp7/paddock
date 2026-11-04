@@ -89,7 +89,7 @@ fn finish(log: &mut FileSetupLog, exit: Exit) -> Exit {
 fn run(command: Command) -> Exit {
     match command {
         Command::SelfTest => {
-            for line in selftest::report(&BAKED) {
+            for line in selftest::report(&BAKED, crate::STOP_ALL_PRESENT) {
                 say(&line);
             }
             Exit::Ok

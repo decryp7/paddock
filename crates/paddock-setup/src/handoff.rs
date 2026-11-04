@@ -1,39 +1,71 @@
-//! The installer-running signal (ADR 0053 section 4.1 step 4): the named mutex `Global\<identifier>.setup`, held by
-//! `apply-update` and then by the installer include (through `hold-installing`) while an install runs, and how the app reads it.
+//! The installer-running signals (ADR 0053 section 4.1 step 4). Nothing an unprivileged account can open can be *held* by it.
 //!
-//! - **The name can be squatted.** Any authenticated account may create a mutex in the `Global\` namespace (only file
-//!   mappings and symbolic links need `SeCreateGlobalPrivilege`), so a standard user can make the name first. The mutex is
-//!   therefore judged by its **owner**: only an object owned by SYSTEM, Administrators or TrustedInstaller counts as "an
-//!   installer runs" ([`classify`]); an object owned by anyone else is [`MutexProbe::Foreign`], logged, and neither waited on
-//!   nor trusted. `apply-update` and `hold-installing` refuse with [`crate::apply::Refusal::Squatted`] when the name is taken by one.
-//! - The mutex is created with [`MUTEX_SDDL`]: owner Administrators, full access for SYSTEM and Administrators and
-//!   `SYNCHRONIZE | READ_CONTROL` for Authenticated Users, so the standard user's app can `OpenMutex` it for a wait and read
-//!   its owner.
-//! - `WAIT_ABANDONED` on a wait means the holder ended without releasing: the installer has gone.
-//! - **No gap and no clock.** `apply-update` does not release the mutex until the installer's own `hold-installing` holds
-//!   it (a second event, [`handoff_event_name`], signals that; the wait ends early if the installer process ends). The app
-//!   therefore only needs the mutex: [`still_installing`].
+//! - **Exclusion between administrators' processes** is a mutex and a hand-over event inside a **private namespace** whose
+//!   boundary descriptor names Administrators ([`namespace_alias`], [`LOCK_SDDL`]). Only an elevated process can create or open
+//!   that namespace, so the names cannot be squatted by a standard user, and the objects have no access for anyone else.
+//! - **The signal for the app** is a manual-reset event in the `Global\` namespace ([`signal_name`]), created non-signalled by
+//!   `apply-update` (or by `hold-installing` when an install is started by hand) and set when the install is over
+//!   ([`SIGNAL_SDDL`]: Authenticated Users get `SYNCHRONIZE | READ_CONTROL` only). An event has no owner, so waiting on it
+//!   acquires nothing: no standard user can block an update or the app. The name *can* be squatted in `Global\`; the app and
+//!   the installer judge the object's owner ([`signal_state`]) and a squatted signal is ignored (logged), never waited on and
+//!   never a reason to refuse an update: the private mutex still excludes a second install.
+//! - **No release-then-wait gap.** The signal exists from the start of `apply-update` until `hold-installing` ends, because
+//!   `apply-update` closes its handle only after `hold-installing` has opened its own; a second `apply-update` that finds an
+//!   existing, non-signalled, administrator-made signal is refused as busy ([`admit`]) even in the instant the mutex is free.
+//!   A crashed installer closes its handles and the signal vanishes with them.
+//! - The app waits on the signal with a **required bound** (`wait_for_installer`); a wait that times out means "unknown", and
+//!   the hand-off record settles it at the next start.
 
 use paddock_service::privileged::trust::is_trusted_sid;
 
-/// Security descriptor of the mutex and the hand-over event: owner Administrators, SYSTEM and Administrators full access,
-/// Authenticated Users `SYNCHRONIZE | READ_CONTROL` only (to wait, and to read who owns it).
-pub const MUTEX_SDDL: &str = "O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00120000;;;AU)";
+/// Descriptor of the private-namespace objects (the mutex and the hand-over event): owner Administrators, SYSTEM and
+/// Administrators full access, nobody else any.
+pub const LOCK_SDDL: &str = "O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)";
 
-/// The mutex name for an app identifier.
-pub fn mutex_name(identifier: &str) -> String {
-    format!(r"Global\{identifier}.setup")
+/// Descriptor of the app-facing signal: owner Administrators, SYSTEM and Administrators full access, Authenticated Users
+/// `SYNCHRONIZE | READ_CONTROL` only (to wait, and to read who owns it); never `EVENT_MODIFY_STATE`.
+pub const SIGNAL_SDDL: &str = "O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00120000;;;AU)";
+
+/// The private namespace's own descriptor (who may open it): SYSTEM and Administrators.
+pub const NAMESPACE_SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)";
+
+/// The SID the namespace boundary is made of (`BUILTIN\Administrators`).
+pub const BOUNDARY_SID: &str = "S-1-5-32-544";
+
+/// A namespace alias made only of letters, digits, `.` and `_` from the app identifier.
+pub fn namespace_alias(identifier: &str) -> String {
+    let clean: String = identifier
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("PaddockSetup.{clean}")
 }
 
-/// The name of the event `hold-installing` sets once it holds the mutex (`apply-update` waits on it).
-pub fn handoff_event_name(identifier: &str) -> String {
-    format!(r"Global\{identifier}.setup.handoff")
+/// The mutex inside the namespace.
+pub fn lock_name(identifier: &str) -> String {
+    format!(r"{}\lock", namespace_alias(identifier))
 }
 
-/// What a wait on the mutex returned.
+/// The hand-over event inside the namespace: `hold-installing` sets it once it holds the lock.
+pub fn handoff_name(identifier: &str) -> String {
+    format!(r"{}\handoff", namespace_alias(identifier))
+}
+
+/// The app-facing signal.
+pub fn signal_name(identifier: &str) -> String {
+    format!(r"Global\{identifier}.installing")
+}
+
+/// What a wait on a handle returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitOutcome {
-    /// `WAIT_OBJECT_0`: the holder released it.
+    /// `WAIT_OBJECT_0`.
     Released,
     /// `WAIT_ABANDONED`: the holder ended without releasing.
     Abandoned,
@@ -52,27 +84,29 @@ pub enum InstallerState {
     Gone,
 }
 
-/// What looking for the mutex found.
+/// What looking at the signal found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MutexProbe {
+pub enum SignalProbe {
     /// It does not exist.
     Absent,
-    /// It exists and an administrator's process made it.
-    Held,
-    /// It exists but its owner is not SYSTEM, Administrators or TrustedInstaller: a squat.
+    /// It exists but no administrator made it (or its owner could not be read): a squat, to be ignored.
     Foreign,
+    /// An administrator's installer is running (the event is not signalled).
+    Active,
+    /// The install is over (the event is signalled).
+    Finished,
 }
 
-/// The probe for an object that exists and has this owner (`None` when the owner could not be read: not trusted).
-pub fn classify(owner_sid: Option<&str>) -> MutexProbe {
-    if owner_sid.is_some_and(is_trusted_sid) {
-        MutexProbe::Held
-    } else {
-        MutexProbe::Foreign
+/// The probe of an event that exists: who owns it and whether it is signalled.
+pub fn signal_state(owner_sid: Option<&str>, signalled: bool) -> SignalProbe {
+    match (owner_sid.is_some_and(is_trusted_sid), signalled) {
+        (false, _) => SignalProbe::Foreign,
+        (true, false) => SignalProbe::Active,
+        (true, true) => SignalProbe::Finished,
     }
 }
 
-/// The state after a wait on the mutex finished.
+/// The state after a wait on the signal.
 pub fn after_wait(outcome: WaitOutcome) -> InstallerState {
     match outcome {
         WaitOutcome::Released | WaitOutcome::Abandoned => InstallerState::Gone,
@@ -80,11 +114,32 @@ pub fn after_wait(outcome: WaitOutcome) -> InstallerState {
     }
 }
 
-/// The state at the app's start. A foreign object is not an installer.
-pub fn still_installing(probe: MutexProbe) -> InstallerState {
+/// The state at the app's start. A squatted or finished signal is not an installer.
+pub fn still_installing(probe: SignalProbe) -> InstallerState {
     match probe {
-        MutexProbe::Held => InstallerState::Installing,
-        MutexProbe::Absent | MutexProbe::Foreign => InstallerState::Gone,
+        SignalProbe::Active => InstallerState::Installing,
+        SignalProbe::Absent | SignalProbe::Foreign | SignalProbe::Finished => InstallerState::Gone,
+    }
+}
+
+/// Whether a new `apply-update` may go on, from what the lock try-acquire and the signal showed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admit {
+    /// Go on.
+    Go,
+    /// An installer is running (or is about to take the lock).
+    Busy,
+    /// The lock could not be tested.
+    Failed,
+}
+
+/// The decision: the lock must be free (acquired now) and no administrator's signal may be active. A foreign signal is
+/// ignored, so a squat cannot stop updates.
+pub fn admit(lock: WaitOutcome, signal: SignalProbe) -> Admit {
+    match (lock, signal) {
+        (WaitOutcome::Failed, _) => Admit::Failed,
+        (WaitOutcome::TimedOut, _) | (_, SignalProbe::Active) => Admit::Busy,
+        (WaitOutcome::Released | WaitOutcome::Abandoned, _) => Admit::Go,
     }
 }
 
@@ -93,56 +148,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn names_are_global_and_stable() {
+    fn names_are_stable_and_the_lock_is_not_in_global() {
         assert_eq!(
-            mutex_name("com.decryp7.dyno"),
-            r"Global\com.decryp7.dyno.setup"
+            namespace_alias("com.decryp7.dyno"),
+            "PaddockSetup.com.decryp7.dyno"
         );
         assert_eq!(
-            handoff_event_name("com.decryp7.dyno"),
-            r"Global\com.decryp7.dyno.setup.handoff"
+            lock_name("com.decryp7.dyno"),
+            r"PaddockSetup.com.decryp7.dyno\lock"
         );
+        assert_eq!(
+            handoff_name("com.decryp7.dyno"),
+            r"PaddockSetup.com.decryp7.dyno\handoff"
+        );
+        assert_eq!(
+            signal_name("com.decryp7.dyno"),
+            r"Global\com.decryp7.dyno.installing"
+        );
+        assert!(!lock_name("x").starts_with("Global"));
     }
 
     #[test]
-    fn sddl_owns_it_by_administrators_and_gives_authenticated_users_synchronize_only() {
-        assert_eq!(
-            MUTEX_SDDL,
-            "O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00120000;;;AU)"
-        );
-        let au = MUTEX_SDDL.split('(').find(|a| a.ends_with(";AU)")).unwrap();
-        assert!(
-            au.contains("0x00120000"),
-            "SYNCHRONIZE and READ_CONTROL only"
-        );
-        assert!(
-            !MUTEX_SDDL.contains(";WD)") && !MUTEX_SDDL.contains(";BU)"),
-            "no Everyone, no Users"
-        );
+    fn an_alias_cannot_contain_a_separator() {
+        assert_eq!(namespace_alias(r"a\b/c d"), "PaddockSetup.a_b_c_d");
     }
 
     #[test]
-    fn only_an_administrators_object_counts_as_an_installer() {
-        assert_eq!(classify(Some("S-1-5-32-544")), MutexProbe::Held);
-        assert_eq!(classify(Some("S-1-5-18")), MutexProbe::Held);
-        assert_eq!(
-            classify(Some(
-                "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
-            )),
-            MutexProbe::Held
-        );
-        assert_eq!(
-            classify(Some("S-1-5-21-1-2-3-1001")),
-            MutexProbe::Foreign,
-            "a standard user made it"
-        );
-        assert_eq!(classify(Some("S-1-5-32-545")), MutexProbe::Foreign);
-        assert_eq!(classify(Some("S-1-1-0")), MutexProbe::Foreign);
-        assert_eq!(classify(None), MutexProbe::Foreign);
+    fn the_lock_has_no_access_for_anyone_but_system_and_administrators() {
+        assert_eq!(LOCK_SDDL, "O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)");
+        for sddl in [LOCK_SDDL, NAMESPACE_SDDL] {
+            let who: Vec<&str> = sddl
+                .split('(')
+                .skip(1)
+                .map(|a| a.trim_end_matches(')').rsplit(';').next().unwrap())
+                .collect();
+            assert_eq!(who, ["SY", "BA"], "{sddl}");
+        }
     }
 
     #[test]
-    fn abandoned_means_the_installer_is_gone() {
+    fn the_signal_gives_authenticated_users_synchronize_and_read_only() {
+        let au = SIGNAL_SDDL
+            .split('(')
+            .find(|a| a.ends_with(";AU)"))
+            .unwrap();
+        assert!(au.contains("0x00120000"));
+        // EVENT_MODIFY_STATE (0x0002) is the bit that would let them set or reset it.
+        assert_eq!(0x0012_0000u32 & 0x0002, 0);
+        assert!(!SIGNAL_SDDL.contains(";WD)") && !SIGNAL_SDDL.contains(";BU)"));
+        assert!(SIGNAL_SDDL.starts_with("O:BAD:"));
+    }
+
+    #[test]
+    fn the_boundary_is_administrators() {
+        assert_eq!(BOUNDARY_SID, "S-1-5-32-544");
+    }
+
+    #[test]
+    fn only_an_administrators_event_counts_and_its_state_decides() {
+        assert_eq!(
+            signal_state(Some("S-1-5-32-544"), false),
+            SignalProbe::Active
+        );
+        assert_eq!(signal_state(Some("S-1-5-18"), false), SignalProbe::Active);
+        assert_eq!(
+            signal_state(Some("S-1-5-32-544"), true),
+            SignalProbe::Finished
+        );
+        assert_eq!(
+            signal_state(Some("S-1-5-21-1-2-3-1001"), false),
+            SignalProbe::Foreign
+        );
+        assert_eq!(
+            signal_state(Some("S-1-5-21-1-2-3-1001"), true),
+            SignalProbe::Foreign
+        );
+        assert_eq!(signal_state(None, false), SignalProbe::Foreign);
+    }
+
+    #[test]
+    fn waits_map_to_the_state() {
         assert_eq!(after_wait(WaitOutcome::Abandoned), InstallerState::Gone);
         assert_eq!(after_wait(WaitOutcome::Released), InstallerState::Gone);
         assert_eq!(
@@ -153,16 +238,39 @@ mod tests {
     }
 
     #[test]
-    fn a_held_mutex_is_installing_and_a_foreign_one_is_not() {
+    fn only_an_active_signal_is_an_installer() {
         assert_eq!(
-            still_installing(MutexProbe::Held),
+            still_installing(SignalProbe::Active),
             InstallerState::Installing
         );
-        assert_eq!(still_installing(MutexProbe::Absent), InstallerState::Gone);
+        for p in [
+            SignalProbe::Absent,
+            SignalProbe::Foreign,
+            SignalProbe::Finished,
+        ] {
+            assert_eq!(still_installing(p), InstallerState::Gone, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn admission_needs_a_free_lock_and_no_active_signal_and_ignores_a_squat() {
+        use SignalProbe::*;
+        use WaitOutcome::*;
+        assert_eq!(admit(Released, Absent), Admit::Go);
+        assert_eq!(admit(Abandoned, Finished), Admit::Go);
         assert_eq!(
-            still_installing(MutexProbe::Foreign),
-            InstallerState::Gone,
-            "a squatted name must not make the app wait forever"
+            admit(Released, Foreign),
+            Admit::Go,
+            "a squatted signal never stops an update"
         );
+        assert_eq!(admit(TimedOut, Absent), Admit::Busy);
+        assert_eq!(
+            admit(Released, Active),
+            Admit::Busy,
+            "the gap between apply-update and hold-installing"
+        );
+        assert_eq!(admit(TimedOut, Active), Admit::Busy);
+        assert_eq!(admit(Failed, Absent), Admit::Failed);
+        assert_eq!(admit(Failed, Active), Admit::Failed);
     }
 }

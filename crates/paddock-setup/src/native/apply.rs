@@ -10,7 +10,7 @@ use crate::apply::{
     Handover, INSTALLER_ARGS, Layout, Refusal, RunPaths, SourceFacts, UpdatePort, volume_root,
 };
 use crate::checkdir::{RUN_FOLDER_SDDL, STAGED_FILE_SDDL};
-use crate::handoff::WaitOutcome;
+use crate::handoff::{self, Admit};
 use crate::localpath::LocalPath;
 use crate::log::Sink;
 use paddock_updater::signature::{UpdateKey, VerifyError, trusted_comment, verify_file};
@@ -47,9 +47,11 @@ pub struct Real<'a> {
     pub log: Shared<'a>,
     source: Option<File>,
     held: Option<File>,
-    mutex: Option<Owned>,
-    mutex_owned: bool,
-    event: Option<Owned>,
+    namespace: Option<mutex::Namespace>,
+    lock: Option<Owned>,
+    lock_owned: bool,
+    handoff: Option<Owned>,
+    signal: Option<Owned>,
     child: Option<std::process::Child>,
 }
 
@@ -70,9 +72,11 @@ impl<'a> Real<'a> {
             log,
             source: None,
             held: None,
-            mutex: None,
-            mutex_owned: false,
-            event: None,
+            namespace: None,
+            lock: None,
+            lock_owned: false,
+            handoff: None,
+            signal: None,
             child: None,
         }
     }
@@ -121,25 +125,46 @@ impl UpdatePort for Real<'_> {
     }
 
     fn acquire_mutex(&mut self) -> Result<(), Refusal> {
-        let (m, _existed) =
-            mutex::create_mutex(&self.identifier).map_err(|e| squat(&mut self.log, "mutex", e))?;
-        // The name may exist because the app holds a handle to wait on it, or a hand-over is in progress: only an owner counts.
-        match mutex::wait(&m, Some(std::time::Duration::ZERO)) {
-            WaitOutcome::Released | WaitOutcome::Abandoned => {}
-            WaitOutcome::TimedOut => return Err(Refusal::Busy),
-            WaitOutcome::Failed => {
-                return Err(io(
-                    &mut self.log,
-                    "wait for the mutex",
-                    handle::last_error(),
-                ));
+        // The names are in a private namespace only an elevated process can enter: a standard user cannot take them first.
+        let ns = mutex::enter(&self.identifier)
+            .map_err(|e| squat(&mut self.log, "installer namespace", e))?;
+        let (lock, _existed) = mutex::create_lock(&ns, &self.identifier)
+            .map_err(|e| squat(&mut self.log, "installer lock", e))?;
+        let tried = mutex::wait(&lock, Some(std::time::Duration::ZERO));
+        let signal = mutex::signal_probe(&self.identifier);
+        let verdict = handoff::admit(tried, signal);
+        if verdict != Admit::Go
+            && matches!(
+                tried,
+                handoff::WaitOutcome::Released | handoff::WaitOutcome::Abandoned
+            )
+        {
+            // The try-acquire succeeded but another install's signal is active: give the lock back, do not abandon it.
+            // SAFETY: this thread just acquired the mutex by the wait above.
+            unsafe { ReleaseMutex(lock.0) };
+        }
+        match verdict {
+            Admit::Go => {}
+            Admit::Busy => return Err(Refusal::Busy),
+            Admit::Failed => {
+                return Err(io(&mut self.log, "wait for the lock", handle::last_error()));
             }
         }
-        self.mutex = Some(m);
-        self.mutex_owned = true;
-        let event = mutex::create_event(&self.identifier)
+        self.lock_owned = true;
+        let handoff_event = mutex::create_handoff(&ns, &self.identifier)
             .map_err(|e| squat(&mut self.log, "hand-over event", e))?;
-        self.event = Some(event);
+        // A squatted signal never stops an update: the private lock excludes a second install; the app just sees no signal.
+        match mutex::create_signal(&self.identifier) {
+            Ok(event) => self.signal = Some(event),
+            Err(CreateError::Squatted) => self.log.line(
+                "apply-update",
+                "the app-facing installer signal name is taken by a program no administrator made; going on without it",
+            ),
+            Err(CreateError::Os(code)) => self.log.line("apply-update", &format!("the installer signal could not be made (error {code}); going on without it")),
+        }
+        self.handoff = Some(handoff_event);
+        self.lock = Some(lock);
+        self.namespace = Some(ns);
         Ok(())
     }
 
@@ -196,6 +221,24 @@ impl UpdatePort for Real<'_> {
     }
 
     fn open_source(&mut self, path: &LocalPath) -> Result<SourceFacts, Refusal> {
+        // A directory symlink or junction anywhere above the file could point at a share: refuse it before opening.
+        if let Some(parent) = crate::checkdir::ancestors(path.as_str()).last() {
+            match super::facts::any_prefix_is_reparse(parent) {
+                Ok(false) => {}
+                Ok(true) => {
+                    self.log
+                        .line("apply-update", "a folder above the download is a link");
+                    return Err(Refusal::SourceNotLocal);
+                }
+                Err(why) => {
+                    return Err(io(
+                        &mut self.log,
+                        "check the folders above the download",
+                        why,
+                    ));
+                }
+            }
+        }
         let wide = to_wide(path.as_str());
         // SAFETY: NUL-terminated path (already parsed as a plain local path). Identification level: a named-pipe server behind
         // the path can identify the elevated caller, never impersonate it. Reparse points are opened, not followed, and refused.
@@ -379,6 +422,10 @@ impl UpdatePort for Real<'_> {
             .env("TEMP", &run.tmp)
             .env("TMP", &run.tmp)
             .current_dir(&run.tmp)
+            // The installer is not given the caller's console or pipes (an inheriting pipe would keep the caller waiting).
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn();
         match child {
             Ok(c) => {
@@ -393,15 +440,16 @@ impl UpdatePort for Real<'_> {
     }
 
     fn handover(&mut self) -> Handover {
-        // Release the mutex but keep the handle, so the name stays; the installer's hold-installing takes it and sets the event.
-        if let Some(m) = &self.mutex
-            && self.mutex_owned
+        // Give the lock up so that `hold-installing` can take it. The signal stays active (and a second apply-update stays
+        // busy) because this process keeps its handle until the installer has its own.
+        if let Some(l) = &self.lock
+            && self.lock_owned
         {
             // SAFETY: this thread owns the mutex (taken in acquire_mutex).
-            unsafe { ReleaseMutex(m.0) };
-            self.mutex_owned = false;
+            unsafe { ReleaseMutex(l.0) };
+            self.lock_owned = false;
         }
-        let (Some(event), Some(child)) = (&self.event, &self.child) else {
+        let (Some(event), Some(child)) = (&self.handoff, &self.child) else {
             return Handover::InstallerEnded;
         };
         let handles = [event.0, child.as_raw_handle()];
@@ -409,6 +457,7 @@ impl UpdatePort for Real<'_> {
         // SAFETY: both handles are valid for the length of the call.
         let r = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) };
         if r == WAIT_OBJECT_0 {
+            self.signal = None; // the installer's hold-installing has its own handle now
             Handover::InstallerHoldsIt
         } else {
             Handover::InstallerEnded
@@ -430,13 +479,19 @@ impl UpdatePort for Real<'_> {
     fn release(&mut self) {
         self.held = None;
         self.source = None;
-        if let Some(m) = self.mutex.take()
-            && self.mutex_owned
+        if let Some(l) = &self.lock
+            && self.lock_owned
         {
             // SAFETY: this thread owns the mutex.
-            unsafe { ReleaseMutex(m.0) };
-            self.mutex_owned = false;
+            unsafe { ReleaseMutex(l.0) };
+            self.lock_owned = false;
         }
-        self.event = None;
+        // An install that never started (a refusal) or ended early is over: tell anyone waiting on the signal.
+        if let Some(signal) = self.signal.take() {
+            mutex::set(&signal);
+        }
+        self.handoff = None;
+        self.lock = None;
+        self.namespace = None;
     }
 }

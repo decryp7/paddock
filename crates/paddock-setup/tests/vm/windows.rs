@@ -102,6 +102,19 @@ fn run(program: &Path, args: &[&str]) -> (i32, String) {
     )
 }
 
+/// [`run`] with environment variables for the child (the fake installer reads them).
+fn run_env(program: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String) {
+    let out = Command::new(program)
+        .args(args)
+        .envs(env.iter().copied())
+        .output()
+        .expect("run paddock-setup");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
 fn scratch(name: &str) -> PathBuf {
     gate();
     let p = std::env::temp_dir().join(format!("paddock-setup-test-{}-{name}", std::process::id()));
@@ -140,6 +153,12 @@ fn self_test_names_the_baked_values() {
         out.contains("key_fingerprint=") && !out.contains("key_fingerprint=none"),
         "{out}"
     );
+    assert!(
+        out.contains("stop_all=absent"),
+        "a build without paddock_proc::installed says so: {out}"
+    );
+    let (_, stop_out) = run(&exe("PADDOCK_SETUP_EXE_STOP"), &["self-test"]);
+    assert!(stop_out.contains("stop_all=present"), "{stop_out}");
 }
 
 #[test]
@@ -485,7 +504,17 @@ fn sig_text(text: &str) -> String {
 }
 
 fn apply_with(program: &Path, file: &Path, sig: &str, version: &str) -> (i32, String) {
-    run(
+    apply_env(program, file, sig, version, &[])
+}
+
+fn apply_env(
+    program: &Path,
+    file: &Path,
+    sig: &str,
+    version: &str,
+    env: &[(&str, &str)],
+) -> (i32, String) {
+    run_env(
         program,
         &[
             "apply-update",
@@ -502,6 +531,7 @@ fn apply_with(program: &Path, file: &Path, sig: &str, version: &str) -> (i32, St
                 .to_string(),
             "--restart",
         ],
+        env,
     )
 }
 
@@ -731,6 +761,17 @@ fn apply_update_refuses_a_hard_link_a_symlink_a_junction_and_a_file_larger_than_
     let junc = dir.join("junction");
     junction(&junc, &scratch("sources-target"));
     assert_eq!(apply(&site, &junc, &sig, "9.9.9").0, 25, "{}", site.log());
+    // A junction in the middle of the path (it could point at a share): refused before the file is opened.
+    let real = scratch("sources-real");
+    std::fs::copy(&file, real.join("u.exe")).unwrap();
+    let mid = dir.join("mid");
+    junction(&mid, &real);
+    assert_eq!(
+        apply(&site, &mid.join("u.exe"), &sig, "9.9.9").0,
+        23,
+        "{}",
+        site.log()
+    );
     // Larger than announced.
     let (code, _) = run(
         &site.setup(),
@@ -832,7 +873,17 @@ fn acl_identities(path: &Path) -> Vec<String> {
 fn apply_update_starts_the_signed_installer_with_fixed_arguments_and_a_protected_temp() {
     let site = Site::with_exe("e2e", "PADDOCK_SETUP_EXE_E2E");
     let (installer, good, _other) = e2e_files();
-    let (code, out) = apply(&site, &installer, &good, "9.9.9");
+    let holder = site.setup().to_string_lossy().into_owned();
+    let (code, out) = apply_env(
+        &site.setup(),
+        &installer,
+        &good,
+        "9.9.9",
+        &[
+            ("PADDOCK_FAKE_HOLD", &holder),
+            ("PADDOCK_FAKE_SECONDS", "2"),
+        ],
+    );
     assert_eq!(code, 0, "{out}\n{}", site.log());
     let runs: Vec<PathBuf> = std::fs::read_dir(site.updates())
         .unwrap()
@@ -1153,4 +1204,86 @@ fn guard_blocks_on_the_installer_accounts_uninstall_key_only() {
         site.log()
     );
     assert_eq!(run(&p, &args).0, 0, "the key is gone again");
+}
+
+/// An installer that ends without ever running `hold-installing` is its own exit code (31): the app's Failed path relaunches.
+#[test]
+#[ignore = "Windows test VM only: PADDOCK_SETUP_VM=1 (ER-14)"]
+fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_leaves_nothing() {
+    let site = Site::with_exe("ended", "PADDOCK_SETUP_EXE_E2E");
+    let (installer, good, _other) = e2e_files();
+    let (code, out) = apply(&site, &installer, &good, "9.9.9");
+    assert_eq!(code, 31, "{out}\n{}", site.log());
+    assert!(out.contains("stopped before it finished"), "{out}");
+    assert!(
+        site.log()
+            .contains("the installer ended before it held the lock"),
+        "{}",
+        site.log()
+    );
+    assert_eq!(leftovers(&site), Vec::<String>::new());
+}
+
+/// While a hand-off is running a second `apply-update` is busy (21) and run 1's folder is untouched; after it ends a third
+/// one goes through. The standard-user side of the same hand-off is observed by `handoff-user.ps1`.
+#[test]
+#[ignore = "Windows test VM only: PADDOCK_SETUP_VM=1 (ER-14)"]
+fn a_second_update_during_a_hand_off_is_busy_and_does_not_touch_the_first_run() {
+    let site = Site::with_exe("second", "PADDOCK_SETUP_EXE_E2E");
+    let (installer, good, _other) = e2e_files();
+    let holder = site.setup().to_string_lossy().into_owned();
+    let env = [
+        ("PADDOCK_FAKE_HOLD", holder.as_str()),
+        ("PADDOCK_FAKE_SECONDS", "10"),
+    ];
+    let (code, out) = apply_env(&site.setup(), &installer, &good, "9.9.9", &env);
+    assert_eq!(code, 0, "{out}\n{}", site.log());
+    // apply-update returned because hold-installing holds the lock; the fake installer is still alive for about ten seconds.
+    let runs = |site: &Site| -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(site.updates())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("run-"))
+            .collect();
+        v.sort();
+        v
+    };
+    let first = runs(&site);
+    assert_eq!(first.len(), 1, "{first:?}");
+    let (busy, out) = apply_env(&site.setup(), &installer, &good, "9.9.9", &env);
+    assert_eq!(
+        busy,
+        21,
+        "a second update during a hand-off is busy: {out}\n{}",
+        site.log()
+    );
+    assert_eq!(
+        runs(&site),
+        first,
+        "the first run's folder is untouched, and the refused run left none"
+    );
+    assert!(
+        site.updates()
+            .join(&first[0])
+            .join("update-9.9.9.exe")
+            .is_file()
+    );
+    // The first installer ends (its parent, the fake, exits): the lock and the signal go with it, then an update goes through.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut third = (busy, String::new());
+    while third.0 == 21 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        third = apply_env(
+            &site.setup(),
+            &installer,
+            &good,
+            "9.9.9",
+            &[
+                ("PADDOCK_FAKE_HOLD", &holder),
+                ("PADDOCK_FAKE_SECONDS", "1"),
+            ],
+        );
+    }
+    assert_eq!(third.0, 0, "{}\n{}", third.1, site.log());
 }

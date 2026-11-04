@@ -412,7 +412,10 @@ fn dates_and_notes_are_checked_and_bounded() {
 #[test]
 fn the_trusted_comment_of_a_signature_is_readable_and_garbage_has_none() {
     let comment = signature::trusted_comment(&signature("update.bin.sig")).expect("a comment");
-    assert_eq!(comment, "timestamp:1792821970\tfile:p-9.9.9.bin\tversion:9.9.9");
+    assert_eq!(
+        comment,
+        "timestamp:1792821970\tfile:p-9.9.9.bin\tversion:9.9.9"
+    );
     assert_eq!(signature::trusted_comment("not base64!"), None);
     assert_eq!(signature::trusted_comment(""), None);
     assert_eq!(signature::trusted_comment("aGVsbG8="), None);

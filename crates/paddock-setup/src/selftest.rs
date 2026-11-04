@@ -27,7 +27,9 @@ pub fn key_fingerprint(key_text: &str) -> Option<String> {
 }
 
 /// The lines `self-test` prints: `name=value`, one per line.
-pub fn report(b: &crate::Baked) -> Vec<String> {
+/// `stop_all` says whether this build can stop other sessions' programs (`paddock_proc::installed` was in the tree): the
+/// release gate must require `stop_all=present`, because `absent` makes `stop-all` fail at install time.
+pub fn report(b: &crate::Baked, stop_all: bool) -> Vec<String> {
     let or_none = |v: Option<&str>| v.unwrap_or("none").to_string();
     let fingerprint = match b.update_key {
         None => "none".to_string(),
@@ -47,6 +49,7 @@ pub fn report(b: &crate::Baked) -> Vec<String> {
             }
         ),
         format!("key_fingerprint={fingerprint}"),
+        format!("stop_all={}", if stop_all { "present" } else { "absent" }),
     ]
 }
 
@@ -93,14 +96,15 @@ mod tests {
             update_key: None,
         };
         assert_eq!(
-            report(&b),
+            report(&b, false),
             [
                 "setup_version=1",
                 "identifier=com.decryp7.dyno",
                 "product=Dyno",
                 "main=dyno.exe",
                 "update_key=none",
-                "key_fingerprint=none"
+                "key_fingerprint=none",
+                "stop_all=absent"
             ]
         );
         let k: &'static str = Box::leak(key([1, 2, 3, 4, 5, 6, 7, 8]).into_boxed_str());
@@ -108,16 +112,17 @@ mod tests {
             update_key: Some(k),
             ..b
         };
-        let r = report(&b2);
+        let r = report(&b2, true);
         assert_eq!(r[4], "update_key=present");
         assert_eq!(r[5], "key_fingerprint=0807060504030201");
+        assert_eq!(r[6], "stop_all=present");
         let b3 = crate::Baked {
             identifier: None,
             product: None,
             main: None,
             update_key: Some("garbage"),
         };
-        let r3 = report(&b3);
+        let r3 = report(&b3, false);
         assert_eq!(&r3[1..4], ["identifier=none", "product=none", "main=none"]);
         assert_eq!(r3[5], "key_fingerprint=invalid");
     }

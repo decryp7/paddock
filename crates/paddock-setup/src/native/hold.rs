@@ -8,8 +8,6 @@
 
 use super::handle::{self, Owned};
 use super::mutex::{self, CreateError};
-use super::wide::to_wide;
-use crate::handoff::{self, MutexProbe, handoff_event_name};
 use crate::log::Sink;
 use paddock_proc::ProcessId;
 use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, WAIT_ABANDONED, WAIT_OBJECT_0};
@@ -17,12 +15,10 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Threading::{
-    INFINITE, OpenEventW, OpenProcess, ReleaseMutex, SetEvent, WaitForMultipleObjects,
+    INFINITE, OpenProcess, ReleaseMutex, WaitForMultipleObjects,
 };
 
 const SYNCHRONIZE: u32 = 0x0010_0000;
-const READ_CONTROL: u32 = 0x0002_0000;
-const EVENT_MODIFY_STATE: u32 = 0x0002;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
 fn parent_pid() -> Option<u32> {
@@ -44,34 +40,6 @@ fn parent_pid() -> Option<u32> {
         }
         None
     }
-}
-
-/// Sets the hand-over event when an administrator's `apply-update` made one.
-fn signal_handover(identifier: &str, log: &mut dyn Sink) {
-    let name = to_wide(&handoff_event_name(identifier));
-    // SAFETY: NUL-terminated name.
-    let h = unsafe { OpenEventW(EVENT_MODIFY_STATE | READ_CONTROL, 0, name.as_ptr()) };
-    if h.is_null() {
-        log.line(
-            "hold-installing",
-            "no hand-over event: this install was started by hand",
-        );
-        return;
-    }
-    let event = Owned(h);
-    if handoff::classify(handle::owner_sid(&event).as_deref()) != MutexProbe::Held {
-        log.line(
-            "hold-installing",
-            "a hand-over event exists but no administrator made it; not used",
-        );
-        return;
-    }
-    // SAFETY: a valid event handle opened with EVENT_MODIFY_STATE.
-    unsafe { SetEvent(event.0) };
-    log.line(
-        "hold-installing",
-        "told apply-update that the installer holds the lock",
-    );
 }
 
 /// Holds the mutex until the parent exits. `Err` carries the sentence for the log and stderr.
@@ -96,12 +64,28 @@ pub fn hold(identifier: &str, log: &mut dyn Sink) -> Result<(), String> {
     if ProcessId::of(ppid) != Some(parent) {
         return Err("the parent process ended while it was being opened".into());
     }
-    let (m, existed) = mutex::create_mutex(identifier).map_err(|e| match e {
+    let ns = mutex::enter(identifier).map_err(|e| match e {
         CreateError::Squatted => {
-            "the lock name is taken by an object no administrator made".to_string()
+            "the installer namespace could not be entered by this account".to_string()
         }
-        CreateError::Os(code) => format!("the mutex could not be created (error {code})"),
+        CreateError::Os(code) => {
+            format!("the installer namespace could not be made (error {code})")
+        }
     })?;
+    let (lock, existed) = mutex::create_lock(&ns, identifier)
+        .map_err(|e| format!("the lock could not be made ({e:?})"))?;
+    // The app-facing signal: made (or taken over from `apply-update`) before this process waits for the lock, so it is active
+    // without a gap. A squatted name is ignored: the private lock is what excludes a second install.
+    let signal = match mutex::create_signal(identifier) {
+        Ok(event) => Some(event),
+        Err(e) => {
+            log.line(
+                "hold-installing",
+                &format!("no app-facing signal ({e:?}); going on without it"),
+            );
+            None
+        }
+    };
     log.line(
         "hold-installing",
         if existed {
@@ -110,27 +94,46 @@ pub fn hold(identifier: &str, log: &mut dyn Sink) -> Result<(), String> {
             "the lock was made"
         },
     );
-    // Take the lock: wait for the mutex or for the parent to end, whichever is first (no clock).
-    let handles = [m.0, parent_handle.0];
+    // Take the lock: wait for it or for the parent to end, whichever is first (no clock).
+    let handles = [lock.0, parent_handle.0];
     // SAFETY: both handles are valid for the length of the call.
     let r = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) };
+    let ended = |signal: &Option<Owned>| {
+        if let Some(s) = signal {
+            mutex::set(s);
+        }
+    };
     if r != WAIT_OBJECT_0 && r != WAIT_ABANDONED {
         log.line(
             "hold-installing",
             "the installer ended before it could take the lock",
         );
+        ended(&signal);
         return Ok(());
     }
     log.line(
         "hold-installing",
         "holding the lock until the installer ends",
     );
-    signal_handover(identifier, log);
+    match mutex::open_handoff(&ns, identifier) {
+        Some(event) => {
+            mutex::set(&event);
+            log.line(
+                "hold-installing",
+                "told apply-update that the installer holds the lock",
+            );
+        }
+        None => log.line(
+            "hold-installing",
+            "no hand-over event: this install was started by hand",
+        ),
+    }
     // A wait on the parent's handle, not a poll: returns when the installer exits.
     // SAFETY: valid handle.
     unsafe { WaitForMultipleObjects(1, &parent_handle.0, 0, INFINITE) };
+    ended(&signal);
     // SAFETY: owned by this thread.
-    unsafe { ReleaseMutex(m.0) };
+    unsafe { ReleaseMutex(lock.0) };
     log.line("hold-installing", "the installer ended; lock released");
     Ok(())
 }

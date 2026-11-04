@@ -28,6 +28,24 @@ impl StagingFs for UpdatesFolder {
             .collect())
     }
 
+    fn trash(&mut self, entry: &Entry) -> Result<Entry, RemoveError> {
+        // Renaming a folder fails while anything inside it is open (a running installer's image), which finds it without
+        // deleting any part of it.
+        let renamed = Entry {
+            name: format!("{}{}", crate::staging::TRASH_PREFIX, entry.name),
+            is_dir: true,
+        };
+        std::fs::rename(self.dir.join(&entry.name), self.dir.join(&renamed.name))
+            .map(|_| renamed)
+            .map_err(|e| {
+                if in_use(&e) {
+                    RemoveError::InUse
+                } else {
+                    RemoveError::Other(format!("{e}"))
+                }
+            })
+    }
+
     fn remove(&mut self, entry: &Entry) -> Result<(), RemoveError> {
         let path = self.dir.join(&entry.name);
         // A link is removed as a link: `remove_dir_all` does not follow a junction or symlink inside, and a top-level link

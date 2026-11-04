@@ -175,7 +175,7 @@ pub struct RealDirs;
 
 /// Whether any folder from the drive root down to `path` (each opened without following it) is a reparse point. A short
 /// 8.3 name is not one; a junction or symlink in the middle is.
-fn any_prefix_is_reparse(path: &str) -> Result<bool, String> {
+pub(super) fn any_prefix_is_reparse(path: &str) -> Result<bool, String> {
     for prefix in checkdir::prefixes(path) {
         let h = handle::open_for_query(&prefix)
             .map_err(|e| format!("a folder of the path cannot be opened (error {e})"))?;

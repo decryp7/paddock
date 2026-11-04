@@ -155,6 +155,14 @@ pub fn prefixes(full_path: &str) -> Vec<String> {
     out
 }
 
+/// The folders above a file: every prefix of its path except the file itself. The glue refuses a reparse point among them
+/// before the file is opened (a directory symlink or junction in the middle can point at a share).
+pub fn ancestors(file_path: &str) -> Vec<String> {
+    let mut all = prefixes(file_path);
+    all.pop();
+    all
+}
+
 /// What to do about `$INSTDIR\updates`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdatesAction {
@@ -331,6 +339,13 @@ mod tests {
         );
         assert_eq!(prefixes(r"C:\"), [r"C:\"]);
         assert!(prefixes("").is_empty());
+    }
+
+    #[test]
+    fn ancestors_leave_out_the_file_itself() {
+        assert_eq!(ancestors(r"C:\a\b\f.exe"), [r"C:\", r"C:\a", r"C:\a\b"]);
+        assert_eq!(ancestors(r"C:\f.exe"), [r"C:\"]);
+        assert!(ancestors("").is_empty());
     }
 
     #[test]

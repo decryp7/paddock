@@ -69,14 +69,17 @@ pub enum Refusal {
     /// Validly signed, but for another product of the family.
     #[error("the update is signed for another product")]
     WrongProduct,
-    /// The mutex name is taken by an object that no administrator made.
-    #[error("the installer mutex name is taken by a program that is not an administrator's")]
+    /// The lock could not be made safely (its private namespace or mutex failed).
+    #[error("the installer lock could not be made safely")]
     Squatted,
+    /// The installer was started but ended before its `hold-installing` held the lock: it stopped early.
+    #[error("the installer stopped before it finished")]
+    InstallerEnded,
 }
 
 impl Refusal {
     /// Every refusal.
-    pub const ALL: [Refusal; 11] = [
+    pub const ALL: [Refusal; 12] = [
         Refusal::NoKey,
         Refusal::Busy,
         Refusal::InstallDir,
@@ -88,6 +91,7 @@ impl Refusal {
         Refusal::StartFailed,
         Refusal::WrongProduct,
         Refusal::Squatted,
+        Refusal::InstallerEnded,
     ];
 
     /// The exit code (20 and up).
@@ -104,6 +108,7 @@ impl Refusal {
             Refusal::StartFailed => 28,
             Refusal::WrongProduct => 29,
             Refusal::Squatted => 30,
+            Refusal::InstallerEnded => 31,
         }
     }
 
@@ -136,7 +141,10 @@ impl Refusal {
             }
             Refusal::WrongProduct => "The downloaded update is for another app. Download it again.",
             Refusal::Squatted => {
-                "Another program is using this app's installer lock. An administrator can restart the PC and try again."
+                "The installer lock could not be made safely. An administrator can restart the PC and try again."
+            }
+            Refusal::InstallerEnded => {
+                "The installer stopped before it finished. The reason is in setup.log in the install folder's updates folder."
             }
         }
     }
@@ -202,9 +210,15 @@ pub fn bind_product(trusted_comment: &str, product: &str) -> Result<(), Refusal>
         .find_map(|f| f.strip_prefix("file:"))
         .ok_or(Refusal::WrongProduct)?;
     let prefix = format!("{product}_");
+    // After `<product>_` comes the version, so its first character is a digit: product `Dyno` does not match the installer of
+    // a product called `Dyno_Pro` (`Dyno_Pro_1.0.0_x64-setup.exe`).
+    let versioned = file
+        .strip_prefix(&prefix)
+        .and_then(|r| r.chars().next())
+        .is_some_and(|c| c.is_ascii_digit());
     if !product.is_empty()
+        && versioned
         && file.len() > prefix.len() + INSTALLER_SUFFIX.len()
-        && file.starts_with(&prefix)
         && file.ends_with(INSTALLER_SUFFIX)
         && !file.contains(['\\', '/'])
     {
@@ -214,17 +228,13 @@ pub fn bind_product(trusted_comment: &str, product: &str) -> Result<(), Refusal>
     }
 }
 
-/// Whether handing `announced` to a copy whose main binary's version resource says `installed` is a downgrade. The resource
-/// holds only `major.minor.patch`, so a prerelease of the installed version is unknown: an announced release with the same
-/// numbers is allowed (it is the release of an installed prerelease, or the same release again, which is not a downgrade),
-/// an announced prerelease of the same numbers is not, and build metadata never counts.
-pub fn is_downgrade(installed: &Version, announced: &Version) -> bool {
+/// Whether `announced` is **not newer** than `installed` (ADR 0053 sections 4.2 and 7: the same version is refused too).
+/// The installed side is the main binary's version resource, which holds only `major.minor.patch`, so an installed
+/// prerelease cannot be told from its release: an announced version with the **same numbers is refused whatever its
+/// prerelease part** (a user on `1.2.0-rc.1` gets `1.2.0` only by installing it by hand). Build metadata never counts.
+pub fn is_not_newer(installed: &Version, announced: &Version) -> bool {
     let key = |v: &Version| (v.major, v.minor, v.patch);
-    match key(announced).cmp(&key(installed)) {
-        std::cmp::Ordering::Less => true,
-        std::cmp::Ordering::Equal => !announced.pre.is_empty(),
-        std::cmp::Ordering::Greater => false,
-    }
+    key(announced) <= key(installed)
 }
 
 /// A name for one run's folder, unique without a clock comparison: process id and the time the run started.
@@ -393,20 +403,23 @@ pub fn run(
     }
     let result = locked(port, &paths, req, log);
     match result {
-        Ok(()) => {
-            let how = port.handover();
-            log.line(
-                "apply-update",
-                match how {
-                    Handover::InstallerHoldsIt => "handed off: the installer holds the lock",
-                    Handover::InstallerEnded => {
-                        "handed off: the installer ended before it held the lock"
-                    }
-                },
-            );
-            port.release();
-            Ok(())
-        }
+        Ok(()) => match port.handover() {
+            Handover::InstallerHoldsIt => {
+                log.line("apply-update", "handed off: the installer holds the lock");
+                port.release();
+                Ok(())
+            }
+            Handover::InstallerEnded => {
+                // The app's Failed path relaunches the old version on this code; nothing is left behind.
+                log.line(
+                    "apply-update",
+                    "the installer ended before it held the lock",
+                );
+                port.discard(&paths);
+                port.release();
+                refuse(log, Refusal::InstallerEnded)
+            }
+        },
         Err(r) => {
             port.discard(&paths);
             port.release();
@@ -440,7 +453,7 @@ fn locked(
         "signature and signed version verified on the held copy",
     );
     bind_product(&comment, &req.product)?;
-    if is_downgrade(&installed, &req.version) {
+    if is_not_newer(&installed, &req.version) {
         return Err(Refusal::NotNewer);
     }
     port.start(&dest, paths)?;
@@ -592,6 +605,10 @@ mod tests {
                 "other suffix",
             ),
             ("timestamp:1\tfile:Dyno_..\\evil-setup.exe", "a path"),
+            (
+                "timestamp:1\tfile:Dyno_Pro_1.0.0_x64-setup.exe",
+                "a product called Dyno_Pro",
+            ),
             ("timestamp:1", "no file field"),
             ("", "empty"),
             ("timestamp:1\tfile:", "empty name"),
@@ -606,25 +623,31 @@ mod tests {
     }
 
     #[test]
-    fn downgrades_ignore_the_unknown_prerelease_and_build_metadata() {
+    fn the_same_or_an_older_version_is_not_newer_whatever_the_prerelease() {
         let v = |s: &str| Version::parse(s).unwrap();
-        assert!(is_downgrade(&v("1.2.0"), &v("1.1.9")));
-        assert!(is_downgrade(&v("2.0.0"), &v("1.9.9")));
-        assert!(
-            is_downgrade(&v("1.2.0"), &v("1.2.0-rc.1")),
-            "a prerelease of the same numbers is older than the release"
-        );
-        assert!(!is_downgrade(&v("1.2.0"), &v("1.2.1")));
-        assert!(!is_downgrade(&v("1.2.0"), &v("1.3.0-rc.1")));
-        assert!(
-            !is_downgrade(&v("1.2.0"), &v("1.2.0")),
-            "the release over an installed prerelease (the resource has no prerelease)"
-        );
-        assert!(!is_downgrade(&v("1.2.0"), &v("1.2.0+build.7")));
-        assert!(
-            !is_downgrade(&v("1.2.0+build.9"), &v("1.2.0+build.1")),
-            "build metadata does not order"
-        );
+        for (installed, announced) in [
+            ("1.2.0", "1.1.9"),
+            ("2.0.0", "1.9.9"),
+            ("1.2.0", "1.2.0"),
+            ("1.2.0", "1.2.0-rc.1"),
+            ("1.2.0", "1.2.0+build.7"),
+            ("1.2.0+build.9", "1.2.0+build.1"),
+        ] {
+            assert!(
+                is_not_newer(&v(installed), &v(announced)),
+                "{installed} {announced}"
+            );
+        }
+        for (installed, announced) in [
+            ("1.2.0", "1.2.1"),
+            ("1.2.0", "1.3.0-rc.1"),
+            ("1.2.0", "2.0.0"),
+        ] {
+            assert!(
+                !is_not_newer(&v(installed), &v(announced)),
+                "{installed} {announced}"
+            );
+        }
     }
 
     #[test]
@@ -899,16 +922,19 @@ mod tests {
     }
 
     #[test]
-    fn an_installer_that_ends_before_it_holds_the_lock_is_logged_not_waited_for() {
+    fn an_installer_that_ends_before_it_holds_the_lock_is_its_own_refusal_and_leaves_nothing() {
         let mut p = Fake::ok();
         p.handover = Some(Handover::InstallerEnded);
         let (r, log) = go(&mut p);
-        assert_eq!(r, Ok(()));
+        assert_eq!(r, Err(Refusal::InstallerEnded));
+        assert_eq!(Refusal::InstallerEnded.code(), 31);
         assert!(
             log.iter()
                 .any(|l| l.contains("the installer ended before it held the lock")),
             "{log:?}"
         );
+        assert!(p.disk.is_empty() && !p.held);
+        assert_eq!(p.events.last().unwrap(), "release");
     }
 
     #[test]
@@ -1013,8 +1039,12 @@ mod tests {
     }
 
     #[test]
-    fn a_downgrade_is_refused_after_the_signature_passed_and_leaves_nothing() {
-        for installed in [Version::new(1, 2, 1), Version::new(2, 0, 0)] {
+    fn the_same_or_an_older_version_is_refused_after_the_signature_passed_and_leaves_nothing() {
+        for installed in [
+            Version::new(1, 2, 0),
+            Version::new(1, 2, 1),
+            Version::new(2, 0, 0),
+        ] {
             let mut p = Fake::ok();
             p.installed = Some(installed);
             assert_eq!(go(&mut p).0, Err(Refusal::NotNewer));
@@ -1023,14 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn a_release_over_an_installed_release_or_its_prerelease_is_allowed() {
-        let mut p = Fake::ok();
-        p.installed = Some(Version::new(1, 2, 0));
-        assert_eq!(go(&mut p).0, Ok(()));
-    }
-
-    #[test]
-    fn a_prerelease_of_the_installed_version_is_a_downgrade() {
+    fn a_prerelease_with_the_installed_numbers_is_not_newer() {
         let mut p = Fake::ok();
         p.installed = Some(Version::new(1, 2, 0));
         let mut log = Lines::default();

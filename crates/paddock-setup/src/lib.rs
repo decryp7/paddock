@@ -56,6 +56,9 @@ pub struct Baked {
     pub update_key: Option<&'static str>,
 }
 
+/// Whether this build can stop other sessions' programs (`paddock_proc::installed` was in the tree, see build.rs).
+pub const STOP_ALL_PRESENT: bool = cfg!(has_proc_installed);
+
 /// What this build was compiled with.
 pub const BAKED: Baked = Baked {
     identifier: option_env!("PADDOCK_SETUP_IDENTIFIER"),
