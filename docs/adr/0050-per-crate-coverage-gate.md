@@ -21,9 +21,19 @@ left out by one long `--ignore-filename-regex` in `ci.yml`, with the reasons onl
 
 1. **Every crate in `crates/` must reach 99 % of its lines**, measured from the same lcov file, per crate.
 2. **A crate may sit lower only through the register `crates/coverage.toml`**: a `reason` and a `review` date. Its `minimum`
-   is the recorded measured figure (cut to two decimals) and can only ratchet up: a change that lowers a crate's figure fails,
-   even when it is still above 90 %. A figure above the minimum, or a crate that reached 99 %, is a warning that tells you
-   to raise the minimum or remove the entry.
+   is the measured figure (cut to two decimals) and the register is a ratchet, enforced by the gate and not by trust:
+   - a figure under the minimum fails, even when it is still above 90 %;
+   - a figure more than 0.05 above the minimum fails too ("raise the minimum to X"), so minimums always equal the measured
+     figures and only go up;
+   - `check --base <rev>` (CI passes the plan job's base) reads the register at the base (`git show <rev>:crates/coverage.toml`)
+     and fails a lowered minimum, a new `[[crate]]` entry and a new `[[exclude]]` entry, unless a commit of the change
+     (`<rev>..HEAD`) has a trailer `Coverage-lowered: <crate|path> <reason> approved: user`, the same pattern as rule 55's
+     `Copies-date`. The trailer names one crate or path and is only for a lowering the user approved.
+   - `suggest` prints the `[[crate]]` blocks the measured figures give, keeping each entry's reason and date.
+   - **The initial seed** (when the base has no register) is not compared. It is taken from CI, not from a developer
+     machine: platform arms differ (`paddock-menu`'s Tauri tests run on Linux and Windows only), so the figures are measured
+     on Linux with CI's command and the first CI run's `suggest` output confirms them in the landing commit. After the seed
+     only raises are possible.
 3. **The hard floor is 90 % per crate.** No reason allows less; a crate under it fails even with an entry.
 4. **Whole files that cannot run in unit tests are excluded one by one in the same register**, each with a `reason` and, if
    one runs it, the `job` that covers it. The `--ignore-filename-regex` of `ci.yml` is generated from these entries
@@ -47,9 +57,9 @@ the same register and tests.
 
 - A short crate is named in the log and in the summary; a failure in one crate no longer needs the aggregate to be read.
 - The register is the one place that says why a crate or file is below the line, and when to look again.
-- Seeding the register from a macOS measurement can differ from Linux CI by a few lines; the first CI run reconciles the
-  minimums (lowering is not allowed afterwards, so reconcile in the same change that lands the gate).
-- A crate that improves must raise its minimum by hand (the gate says so), otherwise it could drop back unnoticed.
+- The register is seeded from a Linux measurement and confirmed by the first CI run's `suggest` output in the landing commit;
+  after that a lowered figure needs the user's trailer.
+- A crate that improves must raise its minimum in the same change (the gate fails otherwise), so it can never drop back unnoticed.
 
 ## Rejected
 

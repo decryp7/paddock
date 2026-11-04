@@ -3,46 +3,48 @@
 # [[crate]]: a crate that may sit under the default 99 % of lines. `minimum` is the recorded figure (cut to two decimals) and
 #   only goes up: a change that lowers it fails, even above 90 %. `reason` says why the lines cannot be covered; `review` is
 #   the date to look again (a passed date warns). No entry allows less than 90 %. Remove the entry when the crate reaches 99 %.
+#   The ratchet: a figure above the minimum by more than 0.05 fails (raise the minimum), and against the base register a lowered
+#   minimum, a new [[crate]] and a new [[exclude]] fail unless a commit has `Coverage-lowered: <crate|path> <reason> approved: user`.
 # [[exclude]]: a whole file that cannot run in unit tests, `path` relative to crates/, with a `reason` and, if one runs it,
 #   the `job` that covers it. The `--ignore-filename-regex` of the coverage step is generated from these entries
 #   (`node ../scripts/coverage-gate.mjs regex coverage.toml`).
 #
-# Figures were measured with CI's command on a macOS worktree (2026-11-04); the first Linux CI run reconciles them.
-
-[[crate]]
-name = "paddock-commands"
-minimum = 96.82
-reason = "table.rs: the `const fn`s `dialog_count` and `dialog_names` run only while the compiler evaluates the generated tables, where llvm-cov records no execution; the tables' contents are tested."
-review = "2027-02-04"
+# Figures were measured on Linux with CI's command (paddock-gate-arm, 2026-11-04); the first CI run's `suggest` output confirms them.
 
 [[crate]]
 name = "paddock-dialogs"
-minimum = 98.07
-reason = "the tauri adapter's window-system arms (user-resize and scale-change callbacks in tauri/sizing.rs, window events in tauri.rs) that the mock runtime cannot raise; the real-window harness probe.rs (job dialog-window-probe) exercises them."
+minimum = 97.70
+reason = "the tauri adapter's window-system arms that the mock runtime cannot raise (user-resize and scale-change callbacks in tauri/sizing.rs, window events in tauri.rs) and edge/linux.rs, which reads the real display server's monitor and window sizes; the real-window harness probe.rs (job dialog-window-probe) exercises them."
 review = "2027-02-04"
 
 [[crate]]
 name = "paddock-env"
 minimum = 98.75
-reason = "error and warning arms of the versioned store's file handling (a backup that cannot be restored, a path that is not a file, an unreadable listing) and AppDirs fallbacks that tests cannot provoke without breaking the user's folders (ER-14)."
+reason = "what a test cannot provoke on one OS or as root: the Windows-only arm that opens a folder as a file, the macOS and Windows arms of Os::current, a formatter error path, and the write and rename failures of the backup restore and of keeping a damaged file aside, which need an unwritable folder (chmod does not stop root, which CI runs as)."
 review = "2027-02-04"
 
 [[crate]]
 name = "paddock-menu"
-minimum = 90.41
-reason = "tauri.rs builds the native menu bar (Submenu, CheckMenuItem) on a real AppHandle, which the mock runtime does not build (about 100 lines); the model and the spec it builds from are covered."
+minimum = 98.59
+reason = "a few arms of the native menu builder (tauri.rs, native.rs) that the mock runtime's tests do not reach: one item kind and the menu-event closure, which a real app raises."
 review = "2027-02-04"
 
 [[crate]]
 name = "paddock-proc"
-minimum = 97.87
-reason = "OS arms in sys.rs, login.rs and run.rs: setpriority and the macOS memory and task-info calls, ignoring SIGTERM, and the login-shell probe fallbacks; they need real OS state or processes that are ended by force."
+minimum = 97.92
+reason = "OS arms that need foreign processes or OS state: the raw kill and priority calls in sys.rs, process-tree walking arms in tree.rs, the login-shell probe's fallbacks in login.rs, and the error arms of run.rs and instance.rs."
 review = "2027-02-04"
 
 [[crate]]
 name = "paddock-shell"
-minimum = 96.45
+minimum = 96.49
 reason = "builder.rs wires the Tauri Builder (channels, run-event and plugin closures) that only a running app invokes, and logging.rs installs the log into the real app folders."
+review = "2027-02-04"
+
+[[crate]]
+name = "paddock-window"
+minimum = 98.98
+reason = "the tray popover and window-command arms that need a real tray icon, monitor or window system (tauri/popover.rs, tray.rs, commands.rs; rule 7 forbids them on the desktop in tests)."
 review = "2027-02-04"
 
 [[exclude]]
