@@ -19,6 +19,26 @@ pub struct Sampling {
     pub interval_ms: u32,
     /// The process table (1 000–30 000 ms, ≥ `interval_ms`).
     pub process_interval_ms: u32,
+    /// How often the helper reads every account's processes (2 000–60 000 ms); absent is Auto: 5 s, and never faster than the
+    /// process table. Appended for the helper wiring (WP-PROC, rule 51): one optional key, merged over the defaults.
+    pub helper_sweep_ms: Option<u32>,
+}
+
+/// The helper's process sweep period when the setting is Auto.
+pub const AUTO_HELPER_SWEEP_MS: u32 = 5_000;
+/// The helper's process sweep period limits.
+pub const HELPER_SWEEP_RANGE_MS: std::ops::RangeInclusive<u32> = 2_000..=60_000;
+
+impl Sampling {
+    /// The period between the helper's process sweeps: the setting clamped into its range, or Auto (5 s, or the process
+    /// table's interval when that is slower: a sweep nobody would see is not worth its cost).
+    pub fn helper_sweep(self) -> std::time::Duration {
+        let ms = match self.helper_sweep_ms {
+            Some(ms) => ms.clamp(*HELPER_SWEEP_RANGE_MS.start(), *HELPER_SWEEP_RANGE_MS.end()),
+            None => AUTO_HELPER_SWEEP_MS.max(self.process_interval_ms),
+        };
+        std::time::Duration::from_millis(u64::from(ms))
+    }
 }
 
 impl Default for Sampling {
@@ -26,6 +46,7 @@ impl Default for Sampling {
         Sampling {
             interval_ms: 1_000,
             process_interval_ms: 2_000,
+            helper_sweep_ms: None,
         }
     }
 }
@@ -185,6 +206,10 @@ impl Settings {
             .process_interval_ms
             .clamp(1_000, 30_000)
             .max(self.sampling.interval_ms);
+        self.sampling.helper_sweep_ms = self
+            .sampling
+            .helper_sweep_ms
+            .map(|ms| ms.clamp(*HELPER_SWEEP_RANGE_MS.start(), *HELPER_SWEEP_RANGE_MS.end()));
         self.retention = self.retention.clamped();
         self.power = self.power.normalised();
         self.alerts = self.alerts.clamped();
@@ -279,10 +304,12 @@ mod tests {
         s.sampling = Sampling {
             interval_ms: 1,
             process_interval_ms: 999_999,
+            helper_sweep_ms: Some(1),
         };
         s.web_api.port = 80;
         let n = s.normalised();
         assert_eq!((n.sampling.interval_ms, n.sampling.process_interval_ms), (500, 30_000));
+        assert_eq!(n.sampling.helper_sweep_ms, Some(2_000));
         assert_eq!(n.web_api.port, 1024);
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(j["webApi"]["port"], 47_800);
@@ -446,5 +473,35 @@ mod tests {
         s.maintenance.enabled = false;
         s.backup.stale_after_hours = 5000;
         assert!(s.check_extras().is_err());
+    }
+
+    #[test]
+    fn the_helper_sweep_period_is_auto_by_default_and_clamped_when_set() {
+        use std::time::Duration;
+        let d = Sampling::default();
+        assert_eq!((d.helper_sweep_ms, d.helper_sweep()), (None, Duration::from_secs(5)));
+        let slow_table = Sampling {
+            process_interval_ms: 30_000,
+            ..d
+        };
+        assert_eq!(
+            slow_table.helper_sweep(),
+            Duration::from_secs(30),
+            "Auto is never faster than the process table"
+        );
+        let set = |ms| {
+            Sampling {
+                helper_sweep_ms: Some(ms),
+                ..d
+            }
+            .helper_sweep()
+        };
+        assert_eq!(
+            (set(10_000), set(1), set(10_000_000)),
+            (Duration::from_secs(10), Duration::from_secs(2), Duration::from_secs(60))
+        );
+        // A settings file written before the key existed reads as Auto.
+        let old: Sampling = serde_json::from_str(r#"{"intervalMs":1000,"processIntervalMs":2000}"#).unwrap();
+        assert_eq!(old.helper_sweep_ms, None);
     }
 }

@@ -33,6 +33,9 @@ use std::time::Duration;
 
 /// How often the worker sweeps while the list is being read.
 pub const SWEEP_PERIOD: Duration = Duration::from_secs(5);
+/// Where the worker reads its period: the setting (`Sampling::helper_sweep`, Auto by default), read before every wait so a change
+/// applies without a restart.
+pub type SweepPeriod = Arc<dyn Fn() -> Duration + Send + Sync>;
 /// The worker pauses when nothing has asked for the list for this long (nobody waits for it).
 pub const IDLE_AFTER: Duration = Duration::from_secs(20);
 /// A sweep older than this is not merged: the worker is stuck or the helper went away.
@@ -403,6 +406,7 @@ pub struct SweepWorker {
     before: Option<RawSweep>,
     /// The helper epoch of the last sweep: a flip (turned on or off, repaired) drops what was kept.
     epoch: u64,
+    period: SweepPeriod,
 }
 
 impl SweepWorker {
@@ -415,7 +419,14 @@ impl SweepWorker {
             cores,
             before: None,
             epoch: 0,
+            period: Arc::new(|| SWEEP_PERIOD),
         }
+    }
+
+    /// Reads the period between sweeps from `period` (the setting) instead of the fixed default.
+    pub fn with_period(mut self, period: SweepPeriod) -> SweepWorker {
+        self.period = period;
+        self
     }
 
     /// One sweep: asks the helper (or learns that it cannot be asked) and publishes the result. A failed sweep keeps the
@@ -451,14 +462,14 @@ impl SweepWorker {
         }
     }
 
-    /// Sweeps every [`SWEEP_PERIOD`] on `clock` until `cancel`, pausing while nobody takes the list.
+    /// Sweeps every period (the setting; [`SWEEP_PERIOD`] by default) on `clock` until `cancel`, pausing while nobody takes the list.
     pub fn run(mut self, cancel: &CancelToken) {
         let clock = self.store.clock.clone();
         while !cancel.is_cancelled() {
             if self.store.wanted() && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.sweep_once())).is_err() {
                 log::error!(target: "dyno::helper", "Processes of every account: a sweep panicked; continuing");
             }
-            if clock.wait(SWEEP_PERIOD, cancel).is_err() {
+            if clock.wait((self.period)(), cancel).is_err() {
                 break;
             }
         }
@@ -490,10 +501,11 @@ impl HelperFirstProcesses {
         port: Box<dyn HelperPort>,
         clock: Arc<dyn Clock>,
         cores: usize,
+        period: SweepPeriod,
         cancel: CancelToken,
     ) -> HelperFirstProcesses {
         let store = SweepStore::new(clock);
-        let worker = SweepWorker::new(port, store.clone(), cores);
+        let worker = SweepWorker::new(port, store.clone(), cores).with_period(period);
         if let Err(e) = std::thread::Builder::new()
             .name("dyno-process-sweeps".into())
             .spawn(move || worker.run(&cancel))
@@ -865,6 +877,41 @@ mod tests {
         src.retry_helper();
         w.sweep_once();
         assert_eq!(src.processes().len(), 1, "a person asked: it is asked at once");
+    }
+
+    /// A clock that records how long the worker waits and ends the wait at once.
+    struct Recording(FakeClock, Mutex<Vec<Duration>>);
+    impl Clock for Recording {
+        fn monotonic(&self) -> Duration {
+            self.0.monotonic()
+        }
+        fn wall(&self) -> std::time::SystemTime {
+            self.0.wall()
+        }
+        fn wait(&self, d: Duration, _: &CancelToken) -> Result<(), paddock_jobs::Cancelled> {
+            self.1.lock().unwrap().push(d);
+            Err(paddock_jobs::Cancelled(paddock_jobs::CancelReason::User))
+        }
+    }
+
+    #[test]
+    fn the_worker_waits_the_period_the_setting_gives() {
+        let clock = Arc::new(Recording(FakeClock::new(), Mutex::new(vec![])));
+        let c = centre(
+            &Net::new(true, vec![Ok(page(vec![], None, None)), Ok(page(vec![], None, None))]),
+            &FakeClock::new(),
+        );
+        let store = SweepStore::new(clock.clone());
+        let sampling = dyno_core::settings::Sampling {
+            helper_sweep_ms: Some(12_000),
+            ..Default::default()
+        };
+        let w = SweepWorker::new(port(&c), store, 1).with_period(Arc::new(move || sampling.helper_sweep()));
+        w.run(&CancelToken::new());
+        assert_eq!(*clock.1.lock().unwrap(), [Duration::from_secs(12)]);
+        let auto = SweepWorker::new(port(&c), SweepStore::new(clock.clone()), 1);
+        auto.run(&CancelToken::new());
+        assert_eq!(clock.1.lock().unwrap()[1], SWEEP_PERIOD, "without a setting the default stands");
     }
 
     /// Rule 48: what the sampling thread pays per tick for the merge, and the worker per sweep for the rates, at the sweep cap.
