@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=bfe3d480" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=dd44b90a" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -16,7 +16,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=6b8f70f7) and [dark](images/paddock-ecosystem-dark.png?v=668dc836), integrations
+hero [light](images/paddock-ecosystem-light.png?v=55c0a331) and [dark](images/paddock-ecosystem-dark.png?v=75e668c9), integrations
 [light](images/paddock-integrations-light.png?v=3c747334) and [dark](images/paddock-integrations-dark.png?v=bc507980), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
@@ -42,11 +42,12 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 | Pitcrew | **v1.0.1 released** |
 | Debrief | **v1.1.1 released, 1.2.0 in progress** |
 | Pitwall | **v1.0.3 released** |
-| Dyno | In development |
-| Spotter | In development |
+| Dyno | **v1.0.0 released, 1.1.0 in progress** |
+| Spotter | In development, no release yet |
 | Sighter | Planned |
 | Pacenotes (understands code in any language) | Planned |
-| Recce (searches the whole PC) | Planned |
+| Recce (searches the whole PC) | Planned (placeholder page, draft plan) |
+| Scrutineer (tool: code-signing certificates) | Planned (placeholder page, draft plan) |
 
 ## The apps
 
@@ -89,7 +90,7 @@ Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 - Strictly read-only: no tuning, no actions and no advice. Dyno needs its small read-only helper, installed with it, to read what only an administrator may see.
 - Extensible with validated declarative packs, no code.
 
-Status: in development. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
+Status: v1.0.0 released, 1.1.0 in progress (the administrator helper's readings, per-machine Windows installs, OS lifecycle checks). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
 
 ### Spotter
 **Purpose.** Watches for new releases anywhere and tells you the moment one appears.
@@ -134,12 +135,12 @@ Status: **planned**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/bra
 - Answers from a local model, each claim linked to its source; MCP for local AI tools later.
 - Stages: launcher and file name search; content and meaning search; email and SharePoint/OneDrive; answers with sources, MCP, plugins and workflows.
 
-Status: **planned**, after the releases ahead of it. Page (a placeholder): [docs/planned/recce](planned/recce/README.md); the draft plan is on the branch `docs/pc-search-app-plan`.
+Status: **planned**, last in the order of 2026-11-04, after Dyno 1.1.0, Spotter 1.0, Pitwall 1.1, Pitcrew 1.1, Debrief 1.2, Pacenotes and Sighter. Page (a placeholder): [docs/planned/recce](planned/recce/README.md); the draft plan is on the branch `docs/pc-search-app-plan`.
 
 ### Scrutineer (a planned tool)
 **Purpose.** Generates, signs, verifies and installs code-signing certificates. Scrutineering is the technical inspection that certifies a car before it may race.
 
-Status: **planned**; the plan is being written on the branch `docs/code-signing-plan`. Page (a placeholder): [tools/scrutineer](../tools/scrutineer/README.md).
+Status: **planned**; a draft plan is on the branch `docs/code-signing-plan`; Pitwall 1.1 is planned as the first release signed through it. Page (a placeholder): [tools/scrutineer](../tools/scrutineer/README.md).
 
 ## Integration architecture
 

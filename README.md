@@ -3,7 +3,7 @@
 <h1 align="center">Paddock</h1>
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=bfe3d480" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=dd44b90a" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
@@ -16,20 +16,20 @@ anywhere.
 
 ## The apps
 
-All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only its page so far. The old per-app repositories are archived (read-only); their past releases stay downloadable there.
+All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
 | App&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | What it does | Status |
 |---|---|---|
 | <img src="icons/debrief/small/debrief-48.svg?v=08378a3a" width="40" height="40" align="absmiddle" alt=""> **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released, 1.2.0 in progress** |
 | <img src="icons/pitcrew/small/pitcrew-48.svg?v=fc4676ab" width="40" height="40" align="absmiddle" alt=""> **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
 | <img src="icons/pitwall/small/pitwall-48.svg?v=5b597766" width="40" height="40" align="absmiddle" alt=""> **[Pitwall](apps/pitwall/README.md)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** |
-| <img src="icons/dyno/small/dyno-48.svg?v=d7c3c328" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Watches your PC, read-only: live and history, alarms, a disk map and benchmarks. | In development |
-| <img src="icons/spotter/small/spotter-48.svg?v=cc97d9e4" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
+| <img src="icons/dyno/small/dyno-48.svg?v=d7c3c328" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Watches your PC, read-only: live and history, alarms, a disk map and benchmarks. | **v1.0.0 released, 1.1.0 in progress** |
+| <img src="icons/spotter/small/spotter-48.svg?v=cc97d9e4" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development, no release yet |
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
-| **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (placeholder page) |
+| **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (placeholder page, draft plan) |
 
-Planned tool: **[Scrutineer](tools/scrutineer/README.md)** generates, signs, verifies and installs code-signing certificates (placeholder page).
+Planned tool: **[Scrutineer](tools/scrutineer/README.md)** generates, signs, verifies and installs code-signing certificates (placeholder page; plan: branch `docs/code-signing-plan`). Pitwall 1.1 is planned as the first release signed through it.
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
@@ -128,15 +128,16 @@ paddock-jobs = { version = "0.1", registry = "decryp7" }
 
 ## Status and roadmap
 
-Debrief 1.1.1, Pitwall 1.0.3 and Pitcrew 1.0.1 are released. The order of work (2026-10-28):
+Released: Debrief 1.1.1, Dyno 1.0.0, Pitwall 1.0.3 and Pitcrew 1.0.1. Spotter, Pacenotes and Sighter have no release yet.
+The order of work (2026-11-04):
 
-1. CI consolidation.
-2. Dyno 1.0.0 (monitoring only) and Spotter 1.0.0, in parallel.
-3. Pitwall 1.1.
-4. Debrief 1.2.
-5. Pacenotes and Sighter implementation, after Debrief has stabilised.
-
-Pitcrew's next release is paused.
+1. Dyno 1.1.0, in progress: the administrator helper's readings, per-machine Windows installs and OS lifecycle checks.
+2. Spotter 1.0.
+3. Pitwall 1.1, the first release signed through Scrutineer (draft plan).
+4. Pitcrew 1.1.
+5. Debrief 1.2.
+6. Pacenotes and Sighter.
+7. Recce (planned; a placeholder page and a draft plan on `docs/pc-search-app-plan`).
 
 Paddock itself is pre-1.0: a minor bump may change tokens or component APIs, and removed things are deleted rather than
 deprecated.

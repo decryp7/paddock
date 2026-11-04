@@ -23,8 +23,13 @@ const row3 = [
   { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC:', 'read-only monitor.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
+// Planned members: not apps yet (placeholder icons and pages only), drawn in a row of their own below the apps.
+const row4 = [
+  { id: 'recce-placeholder', key: 'recce', name: 'Recce', accent: '#2E9E75', lines: ['One search box for the', 'whole PC: files, mail,', 'answers with sources.'] },
+  { id: 'scrutineer-placeholder', key: 'scrutineer', name: 'Scrutineer', accent: '#A8325E', lines: ['A tool: makes, signs and', 'verifies code-signing', 'certificates.'] },
+];
 const CW = 340, GAP = 215, X0 = 75, CH = 170;
-const R1 = 340, HUB = 650, HUBH = 160, R3 = HUB + HUBH + 140;
+const R1 = 340, HUB = 650, HUBH = 160, R3 = HUB + HUBH + 140, R4 = R3 + CH + 40;
 const cardX = (i) => X0 + i * (CW + GAP);
 const cMid = (r) => r + CH / 2;
 const gapL = (i) => cardX(i) + CW, gapR = (i) => cardX(i + 1); // edges of the gap right of column i
@@ -84,13 +89,13 @@ function card(a, i, y) {
   const x = cardX(i);
   const ico = icon(a.id, x + 22, y + 24, 64);
   const bar = `<rect x="${x + 104}" y="${y + 28}" width="20" height="3" rx="1.5" fill="${a.accent ?? 'var(--link)'}"/>`;
-  const tag = statusChip(STATUS[a.id], x + CW - 18, y + 14);
+  const tag = statusChip(a.key ? STATUS[a.key] : a.id === 'dyno' ? { text: 'v1.0.0', tone: 'ok' } : STATUS[a.id], x + CW - 18, y + 14);
   const badge = a.ci ? `<text class="cinote" x="${x + 104}" y="${y + 153}">${a.ci}</text>` : '';
   const text = a.lines.map((l, k) => `<text class="promise" x="${x + 104}" y="${y + 96 + k * 23}">${l}</text>`).join('');
   return `<g><rect class="card" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="16"/>${ico}${bar}${tag}${badge}` +
     `<text class="name" x="${x + 104}" y="${y + 64}">${a.name}</text>${text}</g>`;
 }
-const cards = [...row1.map((a, i) => card(a, i, R1)), ...row3.map((a, i) => card(a, i, R3))].join('\n');
+const cards = [...row1.map((a, i) => card(a, i, R1)), ...row3.map((a, i) => card(a, i, R3)), ...row4.map((a, i) => card(a, i, R4))].join('\n');
 
 // ---- hand-offs between apps (solid arrows; dashed = later) ----
 const m1 = cMid(R1), m3 = cMid(R3), B1 = R1 + CH, laneTop = B1 + 30;
@@ -145,7 +150,7 @@ ${icon('pitwall', HX + 28, HUB + 40, 80)}
 ${hubCols}</g>`;
 
 // ---- Paddock foundation: header with the kits, then two layers (Workbench on top of the App shell), values, legend ----
-const PX = X0, PW = 3 * CW + 2 * GAP, PY = R3 + CH + 60;
+const PX = X0, PW = 3 * CW + 2 * GAP, PY = R4 + CH + 60;
 const chipRow = (labels, right, y, cls) => {
   const widths = labels.map((t) => Math.round(t.length * 7.9 + 26)), gap = 10, total = widths.reduce((s, w) => s + w, 0) + gap * (labels.length - 1);
   let x = right - total;
@@ -191,7 +196,7 @@ const legend = `<g>
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief and Pacenotes drive Sighter as MCP hosts (Debrief reproduces a bug from a video), Debrief uses Pitwall as its AI engine once paired (its built-in engine is the fallback), Sighter uses Pitwall as its vision model and agent planner, Pitcrew sends Debrief job logs and Dyno sends it issues (both lines pass beside Pitwall, not through it), Dyno sends installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter and Dyno use the shell with pages.</desc>
+<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief and Pacenotes drive Sighter as MCP hosts (Debrief reproduces a bug from a video), Debrief uses Pitwall as its AI engine once paired (its built-in engine is the fallback), Sighter uses Pitwall as its vision model and agent planner, Pitcrew sends Debrief job logs and Dyno sends it issues (both lines pass beside Pitwall, not through it), Dyno sends installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Two planned members, shown with placeholder icons below the apps: Recce (one search box for the whole PC) and the tool Scrutineer (code-signing certificates). Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter and Dyno use the shell with pages.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
