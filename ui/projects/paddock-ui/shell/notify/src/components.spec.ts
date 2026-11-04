@@ -542,11 +542,15 @@ describe('selecting and deleting notifications', () => {
     expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
   });
 
-  it('Delete all is a quiet text button like Mark all read, not a filled or outlined danger button', async () => {
+  it('Delete all is a text button (not outlined, not filled, no danger class), like Mark all read', async () => {
     const { el } = await panel();
-    const del = one(el, '[data-testid=notices-delete-all]');
-    expect(del.classList.contains('pd-ghost')).toBe(true);
-    expect(del.hasAttribute('matbutton') || del.classList.contains('mat-mdc-outlined-button') || del.classList.contains('pd-danger')).toBe(false);
+    for (const id of ['notices-delete-all', 'notices-mark-all']) {
+      const b = one(el, `[data-testid=${id}]`);
+      expect(b.classList.contains('mat-mdc-button'), id).toBe(true);
+      for (const not of ['mat-mdc-outlined-button', 'mat-mdc-unelevated-button', 'mat-mdc-raised-button', 'pd-danger', 'pd-button-danger']) {
+        expect(b.classList.contains(not), `${id} ${not}`).toBe(false);
+      }
+    }
   });
 
   it('deletes everything only after the decision dialog is answered', async () => {

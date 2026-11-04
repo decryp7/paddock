@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `--pd-checkbox-box-size`, and the notification pane's grid layout
+
+- New public CSS custom property `--pd-checkbox-box-size` (18px, in the token sheet; read by the shared checkbox pull in `_material.scss`): the shared rule that pulls a checkbox's box back by half the touch target's overhang reads it instead of a literal 18px. A page never adds its own pull on top (a second shift clipped the AI access page and the notification pane).
+- `@decryp7/paddock-ui/shell/notify`: each notification is a grid `[checkbox][dot][title][time]` with the body and buttons under the title; the box, dot and time stay on the title's first line when it wraps. Select all has its own labelled row in the items' checkbox column. Delete all and Mark all read are text buttons in the muted colour (Delete all is no longer outlined in danger red; the confirmation carries the danger). No class or test id was renamed.
+- `@decryp7/paddock-e2e`: `checkboxLayoutProblems`, `bodyIndentProblems` and `rowPinProblems` check a page's checkbox layout (clipped, covered, off the title line, body not under the title, dot or time off the first line).
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.

@@ -96,6 +96,8 @@
   --pd-content-max: 1440px;
   --pd-form-max: 880px;
   --pd-chart-lane: 14px;
+  // Material draws a checkbox's box 18 px square whatever its touch target; the shared pull in _material.scss and layouts that line up with the box read this.
+  --pd-checkbox-box-size: 18px;
 
   // Density: Standard is the default.
   --pd-row-height: 32px;
