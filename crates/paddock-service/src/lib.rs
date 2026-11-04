@@ -65,6 +65,7 @@ pub mod manager;
 pub mod native;
 pub mod parse;
 pub mod paths;
+pub mod per_machine;
 pub mod plan;
 pub mod port;
 pub mod privileged;
