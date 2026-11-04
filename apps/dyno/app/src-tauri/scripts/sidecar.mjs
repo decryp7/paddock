@@ -32,7 +32,11 @@ for (const [name] of sidecars) {
 
 // Security review F2 (ADR 0027 amendment): on macOS the helper that the one password prompt copies into /Library as root sits in a
 // user-owned bundle, so the release signs its final bytes with the family update key. Tauri re-signs every sidecar ad hoc
-// (`codesign --force -s -`), so the helper is sealed here the same way first: the bytes Tauri then ships are expected to be these.
+// (tauri-bundler macos/app.rs: `codesign --force -s <identity>` on every sidecar copy, plus `--options runtime` only with the hardened
+// runtime, which tauri-bundle.sh turns on only with a real Apple identity), so the helper is sealed here the same way first. Measured
+// 2026-11-04: an ad-hoc `codesign --force -s -` of an already ad-hoc signed dyno-helper under another file name leaves the bytes
+// identical (the identifier comes from the embedded Info.plist), so Tauri ships the bytes signed here. With a Developer ID the
+// bytes would change: check-bundle.sh then fails loudly, and that release signs after the bundle instead.
 // The signature goes to binaries/dyno-helper.minisig (bundled into Contents/Resources by tauri.macos.conf.json) and the hash it
 // covers to binaries/dyno-helper.sha256, which scripts/check-bundle.sh compares with the helper inside the built .app (a mismatch
 // fails the release instead of shipping a helper the install would refuse). Without the signing key (forks, pull requests, dev)
