@@ -1,0 +1,10 @@
+#! recorded 2026-11-04 on OrbStack paddock-gate-arm (Ubuntu 24.04, systemd 255.4-1ubuntu8.18, kernel 7.2.12-orbstack)
+#! command: systemctl show -p FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode,ActiveState paddock-fixture-sigterm
+#! state: a transient unit that is running (sleep 600)
+Result=success
+NRestarts=0
+ExecMainCode=0
+ExecMainStatus=0
+ActiveState=active
+FragmentPath=/run/systemd/transient/paddock-fixture-sigterm.service
+UnitFileState=transient

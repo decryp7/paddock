@@ -1,0 +1,10 @@
+#! recorded 2026-11-04 on the Windows 11 Arm test VM (VMware Fusion, build 10.0.26300, en-GB), as paddock-admin over SSH
+#! command: sc.exe query DynoHelper
+#! state: stopped by its own refusal to start: the data folder was not protected, SERVICE_EXIT_CODE 3 with WIN32_EXIT_CODE 1066
+SERVICE_NAME: DynoHelper 
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 1  STOPPED 
+        WIN32_EXIT_CODE    : 1066  (0x42a)
+        SERVICE_EXIT_CODE  : 3  (0x3)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x0

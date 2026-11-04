@@ -11,7 +11,8 @@
 )]
 
 use super::{
-    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+    Backend, Capabilities, Inspection, Job, LastExit, Mechanism, Registration, Target, UnitFile,
+    UnitFileState, UnitOrigin, UnregisterError, as_written, with_failure,
 };
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
@@ -28,8 +29,28 @@ fn job_of(report: Option<JobReport>) -> Job {
         Some(r) if !r.found => Job::Absent,
         Some(r) if r.stale() => Job::Refused,
         Some(r) if r.running => Job::Running,
-        Some(_) => Job::NotRunning,
+        Some(r) => with_failure(Job::NotRunning, last_exit_of(&r)),
     }
+}
+
+/// How launchd says the job's last process ended: the terminating signal when it names one, else the exit code (`None`
+/// before the first exit).
+fn last_exit_of(report: &JobReport) -> Option<LastExit> {
+    match (report.signal, report.last_exit_code) {
+        (Some(signal), _) => Some(LastExit::Signal(signal)),
+        (None, Some(code)) => Some(LastExit::Code(code)),
+        (None, None) => None,
+    }
+}
+
+/// Everything the report says: the job, how its last process ended and how often launchd restarted it (`runs` minus
+/// the first start).
+fn look_at(report: Option<JobReport>) -> (Job, Option<LastExit>, Option<u32>) {
+    let last_exit = report.as_ref().and_then(last_exit_of);
+    let restarts = report
+        .and_then(|r| r.runs)
+        .map(|runs| runs.saturating_sub(1));
+    (job_of(report), last_exit, restarts)
 }
 
 /// Whether launchd's override database marks the label disabled (`None`: not listed or not readable).
@@ -103,15 +124,21 @@ impl Backend for LaunchdBundled {
             AppServiceStatus::Enabled => Registration::Registered,
         };
         let target = self.target();
+        let (job, last_exit, restarts) = look_at(job_report(self.sys.as_mut(), &target));
         Inspection {
             registration,
-            job: job_of(job_report(self.sys.as_mut(), &target)),
+            job,
+            last_exit,
+            restarts,
             ..Inspection::absent()
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
-        self.app.register()
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
+        self.app.register()?;
+        let after = self.inspect();
+        log::info!(registration:? = after.registration, job:? = after.job; "launchd: bundled agent registered, read back");
+        as_written(after, true)
     }
 
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
@@ -212,12 +239,14 @@ impl Backend for LaunchdFile {
 
     fn inspect(&mut self) -> Inspection {
         let target = self.launchd_target();
-        let job = job_of(job_report(self.sys.as_mut(), &target));
+        let (job, last_exit, restarts) = look_at(job_report(self.sys.as_mut(), &target));
         let text = match self.sys.read(&self.plist) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Inspection {
                     job,
+                    last_exit,
+                    restarts,
                     ..Inspection::absent()
                 };
             }
@@ -228,6 +257,8 @@ impl Backend for LaunchdFile {
                         self.plist.display()
                     )),
                     job,
+                    last_exit,
+                    restarts,
                     ..Inspection::absent()
                 };
             }
@@ -249,10 +280,21 @@ impl Backend for LaunchdFile {
             program,
             program_exists,
             definition_current: Some(text == self.definition()),
+            last_exit,
+            restarts,
+            unit: Some(UnitFile {
+                path: self.plist.clone(),
+                origin: UnitOrigin::Admin,
+                enabled: if off {
+                    UnitFileState::Disabled
+                } else {
+                    UnitFileState::Enabled
+                },
+            }),
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         let text = self.definition();
         if let Err(e) = self.sys.write(&self.plist, &text) {
             return Err(if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -267,7 +309,11 @@ impl Backend for LaunchdFile {
         let domain = launchd_domain(self.spec.kind(), self.uid);
         let plist = self.plist.to_string_lossy().into_owned();
         match self.sys.run(LAUNCHCTL, &["bootstrap", &domain, &plist]) {
-            Ok(o) if o.success() => Ok(()),
+            Ok(o) if o.success() => {
+                let after = self.inspect();
+                log::info!(registration:? = after.registration, job:? = after.job; "launchd: plist bootstrapped, read back");
+                as_written(after, true)
+            }
             Ok(o) if denied(&o.stderr) => Err(RegisterError::NeedsElevation),
             Ok(o) => Err(RegisterError::Other(format!(
                 "launchctl bootstrap: {}",

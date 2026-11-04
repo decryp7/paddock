@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-service`: registrations are read back; `service_main` is the one service entry point (ADR 0054)
+- `Backend::register` and `replace_in_one_step` return the `Inspection` read back after the write; a read-back that disagrees is `RegisterError::NotAsWritten(Inspection)`, never `Ok`. A `LaunchdBundled` registration that reads back "needs approval" is now `RegisterError::NeedsApproval` at `register` (it was found at the next `inspect`). An implementation of `Backend` returns the inspection; a match on `RegisterError` handles `NotAsWritten`.
+- `Inspection` has `last_exit`, `restarts` and `unit`; `Job` has `Failed(LastExit)`. A stop by SIGHUP, SIGINT, SIGPIPE or SIGTERM, systemd's `Result=success` and a Windows service that has not started since boot (1077) are not failures.
+- New `service_main(spec, Hosting, body)` replaces `native::scm::run_as_service` (the session host is `native::host_program`): the OS log (Windows event log under the service's name, the journal, the unified log) is open from the first line, a body's `ServiceExit` error becomes the exit code (`ServiceSpecific` on Windows) with its cause chain in that log, a panic is `PANIC_EXIT_CODE` and its place is logged. `WindowsService` registers and removes the event source; rendered systemd units send standard output and error to the journal.
+
 ### `@decryp7/paddock-ui` tokens: the count ramp `--pd-count-1` to `-5`
 - New CSS custom properties `--pd-count-1` to `--pd-count-5` (fewest to most): a five-step ramp for counts drawn as area fills, defined per accent from `count-dark`/`count-light` in `$accents` (Dyno only so far). `npm run test:tokens` measures it: in normal vision and under protanopia, deuteranopia and tritanopia, neighbours CIEDE2000 >= 10 and 1.3:1 in luminance (the last pair 1.4:1) and every step >= 7 from the warning colour; L* >= 10 per step and the darkest step L* >= 12; step 1 at 3:1 on the page in normal vision; `--pd-text` (the marker colour) >= 15 from every step, its fill or a `--pd-bg` halo 3:1 on every step in every vision (design guide, section 4).
 ### `@decryp7/paddock-ui`: `--pd-checkbox-box-size`, and the notification pane's grid layout

@@ -209,6 +209,12 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
     );
     let _ = writeln!(o, "RestartSec={}", spec.throttle_secs());
     o.push_str("TimeoutStopSec=60\n");
+    // The service's own OS log (ADR 0054 section 2.3): standard error is the journal, under the unit's name.
+    let _ = writeln!(
+        o,
+        "StandardOutput=journal\nStandardError=journal\nSyslogIdentifier={}",
+        spec.unit_name()
+    );
     if spec.low_priority() {
         o.push_str("Nice=10\nCPUWeight=20\nIOSchedulingClass=idle\n");
     }
@@ -413,6 +419,52 @@ pub fn sc_commands(c: &ScmConfig) -> Vec<Vec<String>> {
     calls
 }
 
+/// The registry key that makes the Event Viewer show a service's entries under its own source (the service's name).
+pub fn event_source_key(spec: &ServiceSpec) -> String {
+    format!(
+        r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\{}",
+        spec.name()
+    )
+}
+
+/// The `reg.exe` calls (arguments of each) that register the service's Event Log source at install: the entries use the
+/// generic message table of `EventCreate.exe` (event ids 1 to 1000 print their one text), which is what
+/// [`crate::os_log`]'s event log writer reports with. Run elevated. A failure only means the entries show with Windows'
+/// "description cannot be found" wrapper around the same text.
+pub fn event_source_commands(spec: &ServiceSpec) -> Vec<Vec<String>> {
+    let key = event_source_key(spec);
+    let s = |v: &str| v.to_string();
+    vec![
+        vec![
+            s("add"),
+            key.clone(),
+            s("/v"),
+            s("EventMessageFile"),
+            s("/t"),
+            s("REG_EXPAND_SZ"),
+            s("/d"),
+            s(r"%SystemRoot%\System32\EventCreate.exe"),
+            s("/f"),
+        ],
+        vec![
+            s("add"),
+            key,
+            s("/v"),
+            s("TypesSupported"),
+            s("/t"),
+            s("REG_DWORD"),
+            s("/d"),
+            s("7"),
+            s("/f"),
+        ],
+    ]
+}
+
+/// The `reg.exe` call that removes the source at uninstall.
+pub fn event_source_remove_command(spec: &ServiceSpec) -> Vec<String> {
+    vec!["delete".into(), event_source_key(spec), "/f".into()]
+}
+
 /// The `sc.exe` calls as a script an administrator could run (and the golden file reads).
 pub fn sc_script(c: &ScmConfig) -> String {
     let mut o = format!("REM {GENERATED}\n");
@@ -492,6 +544,46 @@ pub fn nsis_hooks(spec: &ServiceSpec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_event_source_is_registered_with_a_message_file_and_removed_by_its_key_only() {
+        let spec =
+            ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                .build()
+                .unwrap();
+        let key = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\DynoHelper";
+        assert_eq!(event_source_key(&spec), key);
+        let add = event_source_commands(&spec);
+        assert_eq!(add.len(), 2);
+        assert!(
+            add.iter().all(|c| c[0] == "add"
+                && c[1] == key
+                && c.last().map(String::as_str) == Some("/f"))
+        );
+        assert!(add[0].iter().any(|a| a.ends_with("EventCreate.exe")));
+        assert!(
+            add[1].windows(2).any(|w| w == ["/d", "7"]),
+            "error, warning and information"
+        );
+        assert_eq!(event_source_remove_command(&spec), ["delete", key, "/f"]);
+    }
+
+    #[test]
+    fn a_systemd_unit_writes_standard_output_and_error_to_the_journal_under_its_own_identifier() {
+        let spec =
+            ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                .unit("dyno-helper")
+                .kind(Kind::SystemService)
+                .build()
+                .unwrap();
+        let unit = systemd_unit(&spec, "/usr/bin/dyno-helper", None);
+        assert!(
+            unit.contains(
+                "StandardOutput=journal\nStandardError=journal\nSyslogIdentifier=dyno-helper\n"
+            ),
+            "{unit}"
+        );
+    }
     use crate::spec::{ProcessType, ServiceSpec};
 
     fn agent() -> ServiceSpec {
