@@ -6,8 +6,8 @@
 ; paddock-per-machine.generated.nsh (the stop list) and paddock-per-machine.nsh are generated and synced by
 ; `PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine`; paddock-setup.exe is staged next to this file by the bundle step.
 
-!include "paddock-per-machine.generated.nsh"
-!include "paddock-per-machine.nsh"
+!include "${__FILEDIR__}\paddock-per-machine.generated.nsh"
+!include "${__FILEDIR__}\paddock-per-machine.nsh"
 
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro PADDOCK_INSTALLING

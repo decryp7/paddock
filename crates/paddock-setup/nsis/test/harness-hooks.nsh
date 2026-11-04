@@ -1,6 +1,6 @@
 ; The hooks file of the test harness: the same shape as an app's installer-hooks.nsh.
-!include "paddock-per-machine.generated.nsh"
-!include "paddock-per-machine.nsh"
+!include "${__FILEDIR__}\paddock-per-machine.generated.nsh"
+!include "${__FILEDIR__}\paddock-per-machine.nsh"
 
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro PADDOCK_INSTALLING

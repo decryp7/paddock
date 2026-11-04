@@ -2,8 +2,8 @@
 ; Synced into each app's src-tauri/windows/ by paddock_commands::testing::sync_generated; do not edit the copies.
 ;
 ; The app's hooks file (bundle.windows.nsis.installerHooks) includes, in this order,
-;     !include "paddock-per-machine.generated.nsh"   ; !define PADDOCK_STOP_IMAGES "a.exe,b.exe" (ADR section 2.1)
-;     !include "paddock-per-machine.nsh"
+;     !include "${__FILEDIR__}\paddock-per-machine.generated.nsh"   ; !define PADDOCK_STOP_IMAGES "a.exe,b.exe" (ADR section 2.1)
+;     !include "${__FILEDIR__}\paddock-per-machine.nsh"
 ; and calls the macros below from Tauri's four hooks. The app's own steps (service, helper) go between them.
 ;
 ;   NSIS_HOOK_PREINSTALL      PADDOCK_INSTALLING, PADDOCK_CHECK_DIR, PADDOCK_GUARD_PER_USER, <app steps>, PADDOCK_STOP_ALL
@@ -35,13 +35,14 @@
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_INCLUDE_VERSION "1"
+; makensis resolves a relative !include from its working folder, not from the including file: name everything by this file's folder.
 !define /redef PADDOCK_SETUP_DIR "${__FILEDIR__}"
 
 !include LogicLib.nsh
 !include FileFunc.nsh
 !include "Win\RestartManager.nsh"
 !ifndef PADDOCK_STOP_IMAGES
-  !include /NONFATAL "paddock-per-machine.generated.nsh"
+  !include /NONFATAL "${PADDOCK_SETUP_DIR}\paddock-per-machine.generated.nsh"
 !endif
 !ifndef PADDOCK_STOP_IMAGES
   !error "paddock-per-machine.generated.nsh must !define PADDOCK_STOP_IMAGES (comma-separated file names); run paddock_commands::testing::sync_generated"

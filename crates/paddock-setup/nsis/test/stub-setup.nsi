@@ -11,6 +11,9 @@ OutFile "paddock-setup.exe"
 Section
   ${GetParameters} $0
   ReadEnvStr $1 PADDOCK_STUB_LOG
+  ${If} $1 == ""
+    StrCpy $1 "$PROGRAMFILES64\..\Users\Public\paddock-stub.log"
+  ${EndIf}
   ${If} $1 != ""
     FileOpen $2 $1 a
     FileSeek $2 0 END
