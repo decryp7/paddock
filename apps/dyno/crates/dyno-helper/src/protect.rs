@@ -72,6 +72,8 @@ pub enum Unusable {
     HelperFolderNotProtected(Untrusted),
     /// A program is not in a protected place; nothing was run.
     ProgramNotProtected(Untrusted),
+    /// The program is simply not installed (an optional tool that was never downloaded): not a protection failure, nothing to repair.
+    NotInstalled(String),
     /// The helper could not lock or make a folder; Repair already ran, so the next step is by hand.
     CouldNotLock {
         /// The folder.
@@ -85,6 +87,7 @@ impl std::fmt::Display for Unusable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Unusable::HelperFolderNotProtected(u) | Unusable::ProgramNotProtected(u) => u.fmt(f),
+            Unusable::NotInstalled(program) => write!(f, "{program} is not installed."),
             Unusable::CouldNotLock { path, why } => write!(
                 f,
                 "{path} could not be locked: {why}. Remove or fix that folder as an administrator, then try again."
@@ -97,7 +100,10 @@ impl std::error::Error for Unusable {}
 
 impl From<Unusable> for PlatformError {
     fn from(u: Unusable) -> Self {
-        PlatformError::Failed(u.to_string())
+        match u {
+            Unusable::NotInstalled(_) => PlatformError::NotFound(u.to_string()),
+            _ => PlatformError::Failed(u.to_string()),
+        }
     }
 }
 
@@ -352,14 +358,15 @@ impl TrustGuard {
             Unusable::ProgramNotProtected(u)
         };
         let held = self.opener.open(program).map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                // An optional tool that was never installed is not a protection failure (and is not worth a warning).
+                log::info!(Program = program; "Helper: a program is not installed; not run");
+                return Unusable::NotInstalled(program.to_string());
+            }
             log::warn!(Program = program, Error = e.to_string().as_str(); "Helper: a program could not be opened for a checked run; not run");
-            let reason = match e.kind() {
-                io::ErrorKind::NotFound => Reason::Missing,
-                _ => Reason::Unreadable(e.to_string()),
-            };
             Unusable::ProgramNotProtected(Untrusted {
                 path: program.to_string(),
-                reason,
+                reason: Reason::Unreadable(e.to_string()),
             })
         })?;
         let mut port = self.port();
