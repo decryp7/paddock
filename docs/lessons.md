@@ -1357,3 +1357,11 @@ not a reproduction (0 of 60 on the Mac under load): the first line of defence in
 registers a job that has not ended on purpose (it failed first with the same 17 against 16), counts only the ended jobs against `KEPT_FINISHED` and
 asserts the live one is listed. **Lesson:** a count over a shared list names what it counts (`is_terminal`), and a feature that starts work at
 start-up (here the network watcher) invalidates every test that assumed an empty agent: arrange the other work instead of hoping it is done.
+
+## A missing-folder test failed because the CI Mac's temp folder is on an external volume (2026-11-04, Spotter `folder::tests::missing_folders_files_and_shares_explain_themselves`)
+
+Runs 7509 and 7515 (macOS): the test expected `NotFound` for `<tempdir>/nope`, got `Unreachable`. Not the permission problem it looked like: the runner's job
+temp folder sits under `/Volumes/d7sst7/...`, and `is_network_path` treats everything under `/Volumes/` as a mount point, where a missing folder means "not
+mounted" by design. The test now uses a path that is not under a mount point. **Lesson:** a temp folder's location is an environment input: a test of
+path classification must not take its path from `temp_dir()`. (A re-run of an old macOS job after the runner's workdir moved failed differently: "failed to
+read action.yml ... no such file": a stale `hostexecutor` path, so re-dispatch instead of re-running after a runner change.)
