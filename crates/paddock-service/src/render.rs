@@ -216,7 +216,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
         let _ = writeln!(o, "MemoryHigh={mb}M");
     }
     if let Some(sandbox) = sandbox {
-        systemd_sandbox(&mut o, sandbox);
+        systemd_sandbox(&mut o, sandbox, &spec.unit_file_name());
     }
     o.push_str("\n[Install]\n");
     let _ = writeln!(
@@ -233,7 +233,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
 /// The sandbox keys of a system unit (ADR 0027 §1, systemd.exec(5)): the whole file system read-only but the service's
 /// own folders, no home, a private `/tmp`, no new privileges, only the declared capabilities and socket families, no IP
 /// traffic, system calls of a normal service without mounting, nothing writable and executable, files private by default.
-fn systemd_sandbox(o: &mut String, s: &Sandbox) {
+fn systemd_sandbox(o: &mut String, s: &Sandbox, unit: &str) {
     o.push_str(
         "ProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\nNoNewPrivileges=yes\n",
     );
@@ -250,9 +250,15 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox) {
     if let Some(d) = s.state_directory() {
         let _ = writeln!(o, "StateDirectory={d}\nStateDirectoryMode=0700");
         // `ProtectSystem=strict` leaves `/var/lib` read-only inside the service, so the service cannot remove its own state
-        // folder when it removes itself (rmdir: "Read-only file system"). The `+` step runs outside the sandbox after every
-        // stop; `-` makes a folder that still holds the service's files (a restart) no error: `rmdir` takes only an empty one.
-        let _ = writeln!(o, "ExecStopPost=-+/usr/bin/rmdir /var/lib/{d}");
+        // folder when it removes itself (rmdir: "Read-only file system"), and during the stop the service's bind mount of the
+        // folder is still in the host's mount table, so even a `+` stop step gets "busy". A transient unit ordered `After=` this
+        // one starts when the stop is over and the mount is gone; `rmdir` takes only an empty folder (a restart with files in it
+        // keeps them) and `-` keeps a failed `systemd-run` from failing the stop.
+        let _ = writeln!(
+            o,
+            "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=After={} /usr/bin/rmdir /var/lib/{d}",
+            unit
+        );
     }
     if let Some(d) = s.runtime_directory() {
         let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");
