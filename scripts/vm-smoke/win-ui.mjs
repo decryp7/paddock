@@ -52,7 +52,7 @@ export async function quitViaMenu(browser) {
   return result('Windows: Quit (File > Exit) leaves nothing running', checks, [], 'File > Exit ended the app and the agent');
 }
 
-export async function runUiPhase({ log = console.error } = {}) {
+export async function runUiPhase({ log = console.error, extra = [] } = {}) {
   const steps = [];
   const actor = new Actor();
   actor.start();
@@ -63,6 +63,8 @@ export async function runUiPhase({ log = console.error } = {}) {
     const snaps = await snapCheck(actor, { log });
     steps.push(result('Windows: Aero snap announces Manual (form and viewer dialog, Win+Left)', snaps.map((s) => ({ ok: s.ok, detail: `${s.label}: ${s.detail}` })), [], 'both dialogs announced Manual after Win+Left'));
     steps.push(await domScreenCheck(browser));
+    // Extension point: one function per wired helper reading (each `async ({ browser, actor }) => step`), run before Quit.
+    for (const fn of extra) steps.push(await fn({ browser, actor }));
     steps.push(await quitViaMenu(browser));
     await browser.close().catch(() => {});
   } catch (e) {
