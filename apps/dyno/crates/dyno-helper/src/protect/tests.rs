@@ -120,6 +120,28 @@ fn a_protected_tools_folder_runs_the_held_program_by_its_checked_path() {
 }
 
 #[test]
+fn a_tool_that_was_never_installed_is_not_installed_not_a_protection_failure() {
+    struct Gone;
+    impl ImageOpener for Gone {
+        fn open(&self, _: &str) -> io::Result<Held> {
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        }
+    }
+    let shared = Shared(Arc::new(Mutex::new(windows_machine(|_| locked()))));
+    let g = TrustGuard::new(HelperHost::Windows, Box::new(shared), Box::new(Gone), Path::new("C:\\ProgramData"));
+    let e = g.open_checked(SMARTCTL, Some(Path::new(TOOLS))).err().expect("not installed");
+    assert!(matches!(e, Unusable::NotInstalled(_)), "{e:?}");
+    assert!(
+        e.to_string().contains("is not installed") && !e.to_string().contains("protected place"),
+        "{e}"
+    );
+    assert!(
+        matches!(PlatformError::from(e), PlatformError::NotFound(_)),
+        "a missing tool is NotFound, not Failed"
+    );
+}
+
+#[test]
 fn a_junction_in_the_requested_path_is_refused_and_nothing_is_run() {
     // The handle's final path is somewhere else: a junction was re-pointed between the check and the start.
     let elsewhere = "\\\\?\\C:\\Users\\Eve\\tools\\smartmontools-7.5\\bin\\smartctl.exe";

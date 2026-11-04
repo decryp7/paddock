@@ -38,8 +38,9 @@ impl SmartReader for SmartctlReader {
     fn read(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
         let started = self.clock.monotonic();
         let scan_tool = tool(&self.smartctl, &["--scan-open", "-j"]);
-        let scan = self.runner.run_tool(&scan_tool, SCAN_TIMEOUT).inspect_err(|e| {
-            log::warn!(Tool = self.smartctl.as_str(), Error = e.to_string().as_str(); "smartctl scan did not run to completion");
+        let scan = self.runner.run_tool(&scan_tool, SCAN_TIMEOUT).inspect_err(|e| match e {
+            PlatformError::NotFound(_) => log::info!(Tool = self.smartctl.as_str(); "the disk-health tool isn't installed"),
+            _ => log::warn!(Tool = self.smartctl.as_str(), Error = e.to_string().as_str(); "smartctl scan did not run to completion"),
         })?;
         let cap = usize::from(query.max_disks.min(MAX_SMART_DISKS));
         let found = parse_scan(&scan.stdout, usize::from(MAX_SMART_DISKS) + 1 + 4096);
