@@ -16,6 +16,14 @@
 //! and ends that process, and the service's agent, refused until then, takes the data folder. When it is turned off, the app
 //! asks the former service's agent to exit over its connection (never a kill: it did not start it) and starts its own once
 //! the data folder is free. A Windows `Run` entry starts nothing until the next logon, so there the app keeps its own agent.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 pub mod driver;
 #[cfg(any(target_os = "macos", test))]
@@ -323,7 +331,7 @@ impl AgentLink {
                 None => {}
             },
         )?;
-        let _ = self.events.send(Event::Begin);
+        driver::deliver(&self.events, Event::Begin);
         spawn_ticker(
             "dyno-pace",
             self.pace,
@@ -344,7 +352,7 @@ impl AgentLink {
     /// agent holds the data folder). It names the stall shown now, so a Retry for a wait that is over does nothing.
     pub fn retry(&self) {
         let stall = self.transitions.current().stall.map(|(id, _)| id);
-        let _ = self.events.send(Event::Retry { stall });
+        driver::deliver(&self.events, Event::Retry { stall });
     }
 
     /// How to ask the OS about the login service. Without one, no service supervises the agent.
@@ -359,12 +367,12 @@ impl AgentLink {
     /// The login service may have changed (the switch was turned, or a connection was made): the supervisor asks the OS,
     /// then hands the agent over to the service, or takes it back from a service that was removed. Returns at once.
     pub fn refresh_service(&self) {
-        let _ = self.events.send(Event::ServiceChanged);
+        driver::deliver(&self.events, Event::ServiceChanged);
     }
 
     /// Records whether a service keeps the agent alive (decides what quitting does).
     pub fn set_service_installed(&self, installed: bool) {
-        let _ = self.events.send(Event::ServiceInstalled(installed));
+        driver::deliver(&self.events, Event::ServiceInstalled(installed));
     }
 
     /// Whether this app started the agent it talks to.
@@ -463,9 +471,14 @@ impl AgentLink {
     pub fn drop_window(self: &Arc<Self>, window: &str) {
         lock(&self.votes).remove(window);
         let me = self.clone();
-        let _ = std::thread::Builder::new().name("dyno-detail".into()).spawn(move || {
-            let _ = me.sync_detail();
+        let spawned = std::thread::Builder::new().name("dyno-detail".into()).spawn(move || {
+            if let Err(e) = me.sync_detail() {
+                logging::info(&format!("the detail subscription could not be brought up to date: {}", e.message));
+            }
         });
+        if let Err(e) = spawned {
+            logging::info(&format!("the detail thread could not be started: {e}"));
+        }
     }
 
     /// Brings the agent's subscription up to what the windows want. Syncs are serialised (one request at a time, so two
@@ -510,7 +523,7 @@ impl AgentLink {
         if lock(&self.inbox).is_some() {
             return false; // never run: nothing to stop
         }
-        let _ = self.events.send(Event::Quit);
+        driver::deliver(&self.events, Event::Quit);
         let snapshot = self.transitions.wait_until(Snapshot::stopped);
         snapshot.outcome().is_some_and(|o| o.stopped_own)
     }

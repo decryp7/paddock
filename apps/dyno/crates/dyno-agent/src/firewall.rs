@@ -3,6 +3,14 @@
 //! answer through the seam ([`crate::helper_first`]; WP-FW-a), else a source that says why and what to do. Every source says who
 //! read it (`via`), and the **agent** sets that, never the reader: a reply cannot claim to have been read by the helper. Rule
 //! addresses are shown, never logged. A read is kept for a few seconds so a page refresh and the first open do not read twice.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, OffPort, ReadClass};
 use crate::helper_link::CallError;
@@ -124,7 +132,9 @@ impl Inner {
             return 0;
         }
         let port = self.helper_port.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        let _ = port.availability();
+        // The reading refreshes the port's epoch as a side effect; what it says is not needed here, only that it ran.
+        let availability = port.availability();
+        log::trace!(availability:? = availability; "firewall: availability read for the epoch");
         port.epoch()
     }
 
@@ -172,7 +182,7 @@ impl FirewallCentre {
     pub fn for_this_os(clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
         #[cfg(windows)]
         {
-            let _ = clock;
+            let _: std::sync::Arc<dyn paddock_jobs::time::Clock> = clock;
             FirewallCentre::new(
                 HelperHost::Windows,
                 vec![(
@@ -200,7 +210,7 @@ impl FirewallCentre {
         }
         #[cfg(not(any(windows, target_os = "macos")))]
         {
-            let _ = clock;
+            let _: std::sync::Arc<dyn paddock_jobs::time::Clock> = clock;
             FirewallCentre::new(HelperHost::Linux, vec![], vec![RuleSource::Nftables])
         }
     }

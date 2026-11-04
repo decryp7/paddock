@@ -16,6 +16,14 @@
 //! 5. the quit outcome is decided once, from the state at the `Quit` event;
 //! 6. one writer: only the owner thread calls `step`;
 //! 7. a discovery file is a hint: only a connection that answered makes the agent "connected".
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::{backoff, state_after_failures, stop_agent_on_quit, Child, ServiceState, Stall, FAILED_AFTER};
 use crate::dto::{AgentState, AgentStatus};
@@ -1173,7 +1181,7 @@ impl Supervisor {
             self.begin_judging();
         } else if let Some(j) = self.judge.as_mut() {
             // The file named the agent but it did not answer: a tick that did not become ready.
-            let _ = j.observe(&Reading {
+            let _: StartState = j.observe(&Reading {
                 liveness: Liveness::Running,
                 ready: false,
                 progress: 0,

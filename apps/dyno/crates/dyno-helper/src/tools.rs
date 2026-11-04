@@ -1,6 +1,14 @@
 //! The helper's tool side (ADR 0027 §7): the pinned installer over a staging folder, the smartctl reader, and the choice of
 //! both per system. The pure parts (pins, the check, the command line) are `dyno_platform::tool_install`; this file adds the
 //! one-install-at-a-time rule and the real staging folder.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::protect::{GuardedRunner, OnUntrusted, TrustGuard};
 use dyno_core::helper::HelperHost;
@@ -136,7 +144,11 @@ impl InstallPorts for FsPorts {
     }
 
     fn clear_staging(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.staging);
+        match std::fs::remove_dir_all(&self.staging) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => log::warn!(error = e.to_string().as_str(); "Helper: the tool staging folder could not be cleared"),
+        }
     }
 
     fn remove_dir(&mut self, path: &str) -> std::io::Result<()> {

@@ -2,6 +2,14 @@
 //! computer from sleep when it fires. It lives as long as the agent does (the page says so), needs "Allow wake timers" in the power
 //! plan, and on Modern Standby it is not reliable: Dyno cannot tell, and says that. One thread per pending wake waits on its timer and
 //! on a cancel event; the thread owns and closes both handles, so a late cancel never touches a recycled handle.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use dyno_core::ports::PlatformError;
 use dyno_core::wake::{WakeEntry, WakeScheduler, WakeTag};
@@ -54,14 +62,14 @@ impl WakeScheduler for WakeTimers {
             let cancel = match CreateEventW(None, true, false, PCWSTR::null()) {
                 Ok(h) => h,
                 Err(e) => {
-                    let _ = CloseHandle(timer);
+                    paddock_proc::cleanup::logged("closing the timer after CreateEventW failed", CloseHandle(timer));
                     return Err(failed("CreateEventW", e));
                 }
             };
             // SAFETY of the call: `timer` is a valid waitable timer; `due` outlives the call; fResume = true wakes the computer.
             if let Err(e) = SetWaitableTimer(timer, &due, 0, None, None, true) {
-                let _ = CloseHandle(timer);
-                let _ = CloseHandle(cancel);
+                paddock_proc::cleanup::logged("closing the timer after SetWaitableTimer failed", CloseHandle(timer));
+                paddock_proc::cleanup::logged("closing the cancel event after SetWaitableTimer failed", CloseHandle(cancel));
                 return Err(failed("SetWaitableTimer", e));
             }
             (timer, cancel)
@@ -80,8 +88,8 @@ impl WakeScheduler for WakeTimers {
             if let Some(raw) = event {
                 // SAFETY: the handles are still ours; closed exactly once.
                 unsafe {
-                    let _ = CloseHandle(HANDLE(raw as *mut _));
-                    let _ = CloseHandle(HANDLE(timer_raw as *mut _));
+                    paddock_proc::cleanup::logged("closing the cancel event", CloseHandle(HANDLE(raw as *mut _)));
+                    paddock_proc::cleanup::logged("closing the timer", CloseHandle(HANDLE(timer_raw as *mut _)));
                 }
             }
             let mut p = locked(&map);
@@ -93,8 +101,8 @@ impl WakeScheduler for WakeTimers {
             locked(&self.pending).remove(tag.as_str());
             // SAFETY: the thread never started, so the handles are still ours.
             unsafe {
-                let _ = CloseHandle(timer);
-                let _ = CloseHandle(cancel);
+                paddock_proc::cleanup::logged("closing the timer after the thread did not start", CloseHandle(timer));
+                paddock_proc::cleanup::logged("closing the cancel event after the thread did not start", CloseHandle(cancel));
             }
             return Err(PlatformError::Failed(format!("could not start the wake timer's thread: {e}")));
         }
@@ -108,7 +116,7 @@ impl WakeScheduler for WakeTimers {
         if let Some(raw) = *locked(&p.cancel) {
             // SAFETY: the slot still holds the event, so the waiting thread has not closed it (it takes the slot first).
             unsafe {
-                let _ = SetEvent(HANDLE(raw as *mut _));
+                paddock_proc::cleanup::logged("signalling the wake timer's cancel event", SetEvent(HANDLE(raw as *mut _)));
             }
         }
         Ok(true)

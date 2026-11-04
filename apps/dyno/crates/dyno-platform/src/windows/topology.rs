@@ -1,6 +1,14 @@
 //! Performance and efficiency cores on Windows, from `GetLogicalProcessorInformationEx` (`EfficiencyClass`: the
 //! highest class is the performance cores). Read once; only the first processor group (up to 64 logical cores) is
 //! mapped, which is every consumer and workstation CPU.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::parse::cpu_topology::kinds_from_classes;
 use dyno_core::metrics::CoreKind;
@@ -12,6 +20,8 @@ use windows::Win32::System::SystemInformation::{
 pub fn core_kinds(total: usize) -> Vec<CoreKind> {
     let mut len: u32 = 0;
     // SAFETY: a null buffer with a zero length asks for the required size; `len` is valid for writes.
+    // silent: the sizing call fails with ERROR_INSUFFICIENT_BUFFER by design; `len` is checked and the second call is judged
+    #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
     let _ = unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, None, &mut len) };
     if len == 0 || len > 1 << 20 {
         return Vec::new();

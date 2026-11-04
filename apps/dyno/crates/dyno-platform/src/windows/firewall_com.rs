@@ -1,6 +1,14 @@
 //! The `INetFwPolicy2` COM adapter (ADR 0027 WP-9). Every read runs on a fresh thread that enters a multithreaded apartment, so the
 //! caller's apartment never matters; the thread leaves it before it ends. Property reads that fail leave that field out (the
 //! rule is still listed); only failing to reach the policy object at all is an error. Nothing is logged but counts.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::parse::firewall::RawWinRule;
 use crate::windows_firewall::{WinFirewallPort, WinProfile, WinRules};

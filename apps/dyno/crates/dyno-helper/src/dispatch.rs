@@ -1,6 +1,14 @@
 //! What the helper does with a request (ADR 0016 section 4): it answers read-only questions (who it is, its audit
 //! log, per-program traffic) and removes itself on request. It makes no change to the machine's settings. Pure over
 //! its ports: tests give it a fake [`ProcessTraffic`] and a temporary audit log.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
@@ -162,13 +170,15 @@ impl Dispatcher {
 
     /// Records a connection that was turned away (wrong user or program) without answering it.
     pub fn record_refused_caller(&self, peer: Option<u32>, why: &str) {
-        let _ = self.audit.record(&AuditEntry {
+        if let Err(e) = self.audit.record(&AuditEntry {
             at: (self.clock)(),
             peer,
             what: "A connection was refused".into(),
             verdict: AuditVerdict::Refused,
             detail: why.chars().take(300).collect(),
-        });
+        }) {
+            log::error!(why = e.as_str(); "Helper: the audit log could not record a refused connection");
+        }
     }
 
     /// Every tool install is audited, success or not (it changes the machine).
@@ -178,7 +188,7 @@ impl Dispatcher {
         tool: dyno_core::helper_requests::ToolKind,
         outcome: &Result<dyno_core::helper_wire::ToolStatus, PlatformError>,
     ) {
-        let _ = self.audit.record(&AuditEntry {
+        if let Err(why) = self.audit.record(&AuditEntry {
             at: (self.clock)(),
             peer,
             what: format!("Install the tool {tool:?}"),
@@ -192,7 +202,9 @@ impl Dispatcher {
                 .err()
                 .map(|e| e.to_string().chars().take(300).collect())
                 .unwrap_or_default(),
-        });
+        }) {
+            log::error!(why = why.as_str(); "Helper: the audit log could not record a tool install");
+        }
     }
 
     /// Answers one request from the authenticated peer `peer` (its process id).

@@ -1,4 +1,12 @@
 //! The `dyno-agent` command line: `run` (the service entry), `status`, `stop`, `service …`, `once` and `bench`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::discovery::Discovery;
 use crate::paths::Dirs;
@@ -58,7 +66,7 @@ fn end_process(code: i32) -> ! {
 /// the agent runs). Once the agent runs, the main loop stops it cleanly (store closed, lock released, discovery file removed);
 /// this thread only makes sure the process ends if that stop hangs.
 fn spawn_signal_watch() {
-    let _ = std::thread::Builder::new().name("dyno-signal".into()).spawn(|| {
+    let spawned = std::thread::Builder::new().name("dyno-signal".into()).spawn(|| {
         while !SIGNALLED.load(Ordering::SeqCst) {
             // pace: how often the flag is looked at (a signal handler cannot wake a thread).
             std::thread::sleep(Duration::from_millis(100));
@@ -80,6 +88,9 @@ fn spawn_signal_watch() {
             }
         }
     });
+    if let Err(e) = spawned {
+        log::error!(error:% = e; "the signal watch could not start; a TERM during a slow start is only seen once the agent runs");
+    }
 }
 
 const USAGE: &str = "dyno-agent — measures your computer and keeps its history\n\n\
@@ -407,7 +418,7 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     let (updates, reported_cpu, reported_mem) = *crate::agent::lock(&seen);
     drop((peer, listener));
     running.stop();
-    let _ = std::fs::remove_dir_all(&tmp);
+    paddock_proc::cleanup::remove_dir_all(&tmp);
     let report = serde_json::json!({
         "subscriber": who,
         "seconds": started.elapsed().as_secs_f32(),

@@ -1,5 +1,13 @@
 //! Starting the daemon from the files `install` wrote: read the configuration and token (fail closed when either is
 //! damaged), open the fixed endpoint and serve until stopped.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::audit::AuditLog;
 use crate::dispatch::{Dispatcher, Parts};
@@ -96,13 +104,15 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
     if let Some(note) = &loaded.note {
         log::info!(note = note.as_str(); "Helper: policy file");
         if loaded.policy == HelperPolicy::default() && note.contains("ignored") {
-            let _ = audit.record(&dyno_core::helper_wire::AuditEntry {
+            if let Err(why) = audit.record(&dyno_core::helper_wire::AuditEntry {
                 at: now(),
                 peer: None,
                 what: "The policy file was not used".into(),
                 verdict: dyno_core::helper_wire::AuditVerdict::Refused,
                 detail: note.chars().take(300).collect(),
-            });
+            }) {
+                log::error!(why = why.as_str(); "Helper: the audit log could not record that the policy file was not used");
+            }
         }
     }
     let policy_in_force = Arc::new(Mutex::new(loaded.policy));
@@ -177,13 +187,16 @@ fn lock_folders(trust: &crate::protect::TrustGuard, paths: &HelperPaths) -> Resu
 fn removal(paths: HelperPaths, stop: Arc<AtomicBool>) -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(move || {
         let (paths, stop) = (paths.clone(), stop.clone());
-        let _ = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if let Err(e) = crate::setup::uninstall_self(os_of(paths.host)) {
                 log::error!(error = e.as_str(); "Helper: removing itself failed");
             }
             stop.store(true, Ordering::SeqCst);
         });
+        if let Err(e) = spawned {
+            log::error!(error = e.to_string().as_str(); "Helper: the removal thread could not be started; the helper stays");
+        }
     })
 }
 
@@ -230,9 +243,9 @@ fn watch_policy(paths: &HelperPaths, policy: Arc<Mutex<HelperPolicy>>) -> Option
 fn start_orphan_watch(app: Option<std::path::PathBuf>, remove: Arc<dyn Fn() + Send + Sync>) -> Option<orphan::Watch> {
     let watch = orphan::Watch::new(app?, |p| p.exists(), Arc::new(SystemClock), orphan::GRACE, move || remove());
     watch.check();
-    let _ = watch
-        .watch_parent(&paddock_watch::NotifySource)
-        .map_err(|e| log::warn!(error = e.to_string().as_str(); "Helper: the app's folder is checked at start only"));
+    if let Err(e) = watch.watch_parent(&paddock_watch::NotifySource) {
+        log::warn!(error = e.to_string().as_str(); "Helper: the app's folder is checked at start only");
+    }
     Some(watch)
 }
 

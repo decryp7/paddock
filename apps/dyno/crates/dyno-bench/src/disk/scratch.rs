@@ -4,6 +4,14 @@
 //! delete-on-close, which the kernel honours when the process dies. The file system's cache is bypassed (Linux `O_DIRECT`,
 //! Windows no-buffering and write-through, macOS `F_NOCACHE`); where the file system refuses that, the test runs buffered,
 //! evicts pages after each flush where it can, and says "cached reads possible".
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::driver::{BlockIo, ALIGN};
 use super::sys;
@@ -65,11 +73,21 @@ fn open(path: &Path, direct: bool) -> io::Result<File> {
     if direct {
         sys::no_cache(&f)?;
     }
-    let _ = direct;
+    let _: bool = direct;
     Ok(f)
 }
 
 /// Whether an error means "this file system does not do direct I/O" (Linux `EINVAL`, Windows `ERROR_INVALID_PARAMETER`).
+/// Removes the scratch name after a refused attempt: a name that is not there is the goal; any other failure is said on
+/// standard error (the bench prints its result on standard output), so a left-over file can be explained.
+fn remove_scratch(path: &Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => eprintln!("dyno-bench: the scratch file {} could not be removed: {e}", path.display()),
+    }
+}
+
 fn refused_direct(e: &io::Error) -> bool {
     matches!(e.raw_os_error(), Some(22) | Some(87)) || e.kind() == io::ErrorKind::InvalidInput
 }
@@ -85,7 +103,7 @@ impl Scratch {
                 if let Some((mem, off)) = sys::dio_align(&f) {
                     if !sys::align_fits(mem, off) {
                         drop(f);
-                        let _ = std::fs::remove_file(&path);
+                        remove_scratch(&path);
                         return Err(io::Error::from_raw_os_error(22));
                     }
                 }
@@ -93,7 +111,7 @@ impl Scratch {
                 let mut probe = super::driver::AlignedBuf::new(ALIGN, ALIGN);
                 if let Err(e) = write_at(&f, probe.bytes(), 0) {
                     drop(f);
-                    let _ = std::fs::remove_file(&path);
+                    remove_scratch(&path);
                     return Err(e);
                 }
             }
@@ -104,7 +122,7 @@ impl Scratch {
             Err(e) if refused_direct(&e) => {
                 // EINVAL is never "already exists", so a file at this name is the one this attempt made (Linux creates it before it
                 // refuses O_DIRECT on tmpfs).
-                let _ = std::fs::remove_file(&path);
+                remove_scratch(&path);
                 (try_mode(false)?, Mode::Buffered)
             }
             // Anything else (an existing file, no space, no rights) goes to the caller untouched: `create_new` either made the file

@@ -4,6 +4,14 @@
 //!
 //! The text of the unit files is built by pure functions in [`spec`], so it is tested on every OS; the OS commands
 //! run behind [`Runner`] so tests never touch the real launchd, systemd or registry.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 pub mod spec;
 
@@ -162,7 +170,7 @@ impl Service {
                 // spawn the new binary until it is bootstrapped again. Bootstrapping over a job launchd still holds
                 // does nothing, so wait (bounded) until it has dropped it (Paddock rule 24).
                 let target = format!("{}/{LABEL}", self.domain());
-                let _ = self.runner.run("/bin/launchctl", &["bootout", &target]);
+                self.tolerated("/bin/launchctl", &["bootout", &target]);
                 let mut waited = Duration::ZERO;
                 while self.job_loaded(&target) && waited < GONE_WAIT {
                     (self.pause)(GONE_POLL);
@@ -193,25 +201,32 @@ impl Service {
         }
     }
 
+    /// Runs a tool whose failure is tolerated (removing what is not there is the goal); a failure is logged with the tool's
+    /// own words so an uninstall that leaves something behind can be explained.
+    fn tolerated(&mut self, program: &str, args: &[&str]) {
+        match self.runner.run(program, args) {
+            Ok((true, _)) => {}
+            Ok((false, words)) => log::debug!(program = program, words = words.trim(); "service: a tolerated tool call did not succeed"),
+            Err(e) => log::debug!(program = program, error = e.as_str(); "service: a tolerated tool call could not run"),
+        }
+    }
+
     /// Stops and removes the service. Removing what is not installed succeeds.
     pub fn uninstall(&mut self) -> Result<(), String> {
         match self.os {
             Os::Mac => {
-                let _ = self
-                    .runner
-                    .run("/bin/launchctl", &["bootout", &format!("{}/{LABEL}", self.domain())]);
+                let target = format!("{}/{LABEL}", self.domain());
+                self.tolerated("/bin/launchctl", &["bootout", &target]);
                 remove(&self.plist_path())
             }
             Os::Linux => {
-                let _ = self.runner.run("systemctl", &["--user", "disable", "--now", "dyno-agent.service"]);
+                self.tolerated("systemctl", &["--user", "disable", "--now", "dyno-agent.service"]);
                 remove(&self.unit_path())?;
-                let _ = self.runner.run("systemctl", &["--user", "daemon-reload"]);
+                self.tolerated("systemctl", &["--user", "daemon-reload"]);
                 Ok(())
             }
             Os::Windows => {
-                let _ = self
-                    .runner
-                    .run("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE, "/f"]);
+                self.tolerated("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE, "/f"]);
                 self.clear_stale_run_entry().map(|_| ())
             }
         }

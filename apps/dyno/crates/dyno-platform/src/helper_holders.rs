@@ -1,6 +1,14 @@
 //! The helper's reader of who holds which socket or file on Linux (ADR 0027 WP-10): `/proc/<pid>/fd` for every process (root
 //! only, which is why the helper does it) and `/proc/locks`. It never opens the file asked about: it compares the device and
 //! inode that `stat` reports for each descriptor link. The `/proc` root is a parameter so tests use a temporary tree.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::parse::linux_proc::{dev_major_minor, locks, socket_inode};
 use dyno_core::helper::HelperHost;
@@ -47,7 +55,11 @@ impl ProcHolders {
         let dir = self.proc.join(pid.to_string());
         let uid = uid_of(&dir)?;
         let mut comm = String::new();
-        let _ = std::fs::File::open(dir.join("comm")).and_then(|f| f.take(256).read_to_string(&mut comm));
+        // A process that ended meanwhile has no `comm`: the name stays empty and the holder is described by its pid and account.
+        paddock_proc::cleanup::logged(
+            "reading a process name",
+            std::fs::File::open(dir.join("comm")).and_then(|f| f.take(256).read_to_string(&mut comm)),
+        );
         let name = comm.trim();
         let account = users.iter().find(|u| **u.id() == uid).map(|u| u.name().to_string());
         Some(RawHolder {
