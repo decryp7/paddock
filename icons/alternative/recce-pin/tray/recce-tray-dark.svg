@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <title>Recce tray</title>
-  <defs><mask id="rc-pin-tr-dark-32-x-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(0 1)"><path d="M3 23L11 26L11 31L3 29Z" fill="#fff"/><path d="M13 26L19 23L19 29L13 31Z" fill="#fff"/><path d="M21 23L29 26L29 31L21 29Z" fill="#fff"/><path d="M16 27.2L8.38 14A8.8 8.8 0 1 1 23.62 14Z" fill="#000"/><path d="M16 24.4L9.96 12.72A6.8 6.8 0 1 1 22.04 12.72Z" fill="#fff"/><path d="M13.1 9.6a2.9 2.9 0 1 0 5.8 0a2.9 2.9 0 1 0 -5.8 0Z" fill="#000"/></g></mask></defs>
-  <rect x="-4" y="-4" width="40" height="40" fill="#FFFFFF" mask="url(#rc-pin-tr-dark-32-x-g)"/>
-</svg>

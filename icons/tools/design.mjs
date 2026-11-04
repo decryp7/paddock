@@ -24,7 +24,7 @@ export const STRIPE = ['debrief', 'pitwall', 'sighter', 'dyno', 'pitcrew', 'spot
 /** Stripe colour per app: the tile's top colour, lifted where it would sink into the graphite tile. */
 export const STRIPE_COLOUR = app => ({ pitwall: '#8A5AE6', pacenotes: '#C2A845' })[app] ?? PALETTE[app].top;
 
-export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes', paddock: 'Paddock', 'shell-demo': 'Paddock Shell Demo', 'workbench-demo': 'Paddock Workbench Demo', recce: 'Recce' };
+export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes', paddock: 'Paddock', 'shell-demo': 'Paddock Shell Demo', 'workbench-demo': 'Paddock Workbench Demo', recce: 'Recce', scrutineer: 'Scrutineer' };
 
 /** One hue per app. `base` is the identity colour (CVD-checked, see tools/cvd.mjs); top/bottom are the tile gradient. */
 export const PALETTE = {
@@ -36,11 +36,14 @@ export const PALETTE = {
   // 2026-11-03: chroma +10 % at the same lightness (less khaki); a lighter tile drops protanopia against Pitcrew below 11.6.
   pacenotes: { top: '#9C8112', base: '#6F5900', bottom: '#6C5400', deep: '#312500', light: '#C0B491' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
-  // Recce (planned, icon options awaiting the user's pick; not in APPS yet): light jade, dark ink like Spotter and Sighter. The
-  // best tile of an OKLCH grid search against every tile here (alternative/recce-measurements.json): nearest normal 17.9 (shell
-  // demo), protan 11.3 (shell demo; 12.0 against the apps), deutan 13.1 (Pitcrew and Sighter), tritan 15.2 (Sighter). Deutan is
-  // 0.5 under the family's 13.6 and protan 0.3 under 11.6 against the shell demo: no colour keeps all four (best score 0.963).
+  // Placeholders (2026-11-04, tools/placeholder-icons.mjs; the real icons come later; not in APPS). Recce (planned app): light jade,
+  // dark ink like Spotter and Sighter; the best tile of an OKLCH grid search against every tile here, nearest normal 17.9 (shell
+  // demo), protan 11.3 (shell demo; 12.0 against the apps), deutan 13.1 (Pitcrew, Sighter), tritan 15.2: deutan is 0.5 under the
+  // family's 13.6, and no colour keeps all four.
   recce: { top: '#6AD6AF', base: '#53C09A', bottom: '#3CAC87', deep: '#00432C', light: '#B2EDD5' },
+  // Scrutineer (planned tool): deep berry, white ink (9.5:1); the best tile of the same search with Recce added, but well under the
+  // family's minimums (nearest normal 14.4 Pitwall, protan 10.4 Paddock, deutan 11.8 Pitwall, tritan 12.0 Pacenotes): a placeholder.
+  scrutineer: { top: '#A22C8B', base: '#840070', bottom: '#740061', deep: '#38002D', light: '#E5A7D4' },
   // Asphalt graphite: no app hue of its own (the family's hues ride in its stripe). A near-black tile keeps every family CVD
   // minimum unchanged (tools/cvd.mjs); a lighter slate (#333A44 and up) drops tritanopia against Pitwall.
   paddock: { top: '#4A525E', base: '#2B3038', bottom: '#1E2228', deep: '#07080A', light: '#8A94A3', rim: '#FFFFFF' },
@@ -53,7 +56,7 @@ export const PALETTE = {
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF', 'shell-demo': '#1E2530', 'workbench-demo': '#FFFFFF', recce: '#002D1E' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF', 'shell-demo': '#1E2530', 'workbench-demo': '#FFFFFF', recce: '#002D1E', scrutineer: '#FFFFFF' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 
@@ -69,7 +72,8 @@ export const STATUSES = {
   paddock: ['default'],
   'shell-demo': ['default'],
   'workbench-demo': ['default'],
-  recce: ['default', 'busy'],
+  recce: ['default'],
+  scrutineer: ['default'],
 };
 
 /** Light tiles (dark ink): a stronger livery and secondary ink, a softer glyph shadow. */

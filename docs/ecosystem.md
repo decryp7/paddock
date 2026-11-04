@@ -134,7 +134,12 @@ Status: **planned**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/bra
 - Answers from a local model, each claim linked to its source; MCP for local AI tools later.
 - Stages: launcher and file name search; content and meaning search; email and SharePoint/OneDrive; answers with sources, MCP, plugins and workflows.
 
-Status: **planned**, after the releases ahead of it. Page: [docs/planned/recce](planned/recce/README.md); the draft plan is on the branch `docs/pc-search-app-plan`.
+Status: **planned**, after the releases ahead of it. Page (a placeholder): [docs/planned/recce](planned/recce/README.md); the draft plan is on the branch `docs/pc-search-app-plan`.
+
+### Scrutineer (a planned tool)
+**Purpose.** Generates, signs, verifies and installs code-signing certificates. Scrutineering is the technical inspection that certifies a car before it may race.
+
+Status: **planned**; the plan is being written on the branch `docs/code-signing-plan`. Page (a placeholder): [tools/scrutineer](../tools/scrutineer/README.md).
 
 ## Integration architecture
 

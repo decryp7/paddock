@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-2 -2 36 36">
-  <title>Recce tray</title>
-  <defs><mask id="rc-lens-tr-template-36-x-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(1 1)"><path d="M2 13a11 11 0 1 0 22 0a11 11 0 1 0 -22 0Z" fill="#fff"/><path d="M4 13a9 9 0 1 0 18 0a9 9 0 1 0 -18 0Z" fill="#000"/><path d="M10.8 10.8L14 14" transform="scale(2)" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></g></mask></defs>
-  <rect x="-4" y="-4" width="40" height="40" fill="#000000" mask="url(#rc-lens-tr-template-36-x-g)"/>
-</svg>

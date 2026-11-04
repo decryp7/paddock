@@ -14,4 +14,5 @@ export const STATUS = {
   sighter: { text: 'Planned', tone: 'design' },
   pacenotes: { text: 'Planned', tone: 'design' },
   recce: { text: 'Planned', tone: 'design' },
+  scrutineer: { text: 'Planned', tone: 'design' },
 };

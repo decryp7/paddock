@@ -1,6 +1,7 @@
 export default {
-  // No folder under apps/ until the app has code (a folder there needs its paddock.ci.json, scripts/affected.test.mjs).
-  id: 'recce', name: 'Recce', icon: 'recce', home: 'docs/planned/recce', planned: true, status: 'Planned', platforms: 'Windows, macOS and Linux',
+  // PLACEHOLDER art (the user, 2026-11-04): the real icon, hero and page come later. No folder under apps/ until the app has code
+  // (a folder there needs its paddock.ci.json, scripts/affected.test.mjs).
+  id: 'recce', name: 'Recce', icon: 'recce-placeholder', stem: 'recce-placeholder', home: 'docs/planned/recce', planned: true, status: 'Planned', platforms: 'Windows, macOS and Linux',
   accent: { dark: '#57D3A6', light: '#0B7A55', fill: '#0B7A55' },
   headline: ['Know where', 'everything is.'],
   sub: ['One search box over your files, documents, email', 'and SharePoint, by name or by meaning, with', 'answers that cite their sources.'],

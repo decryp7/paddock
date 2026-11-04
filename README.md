@@ -27,7 +27,9 @@ All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is 
 | <img src="icons/spotter/small/spotter-48.svg?v=cc97d9e4" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
-| **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (icon not chosen yet) |
+| **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (placeholder page) |
+
+Planned tool: **[Scrutineer](tools/scrutineer/README.md)** generates, signs, verifies and installs code-signing certificates (placeholder page).
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
