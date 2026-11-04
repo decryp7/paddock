@@ -83,6 +83,25 @@ test.describe('AI access (MCP) (plan X22)', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('every checkbox box lies inside the page column, so the scroll container does not clip it, at every density', async ({ app, page }) => {
+    await openPage(page, app, '');
+    await expect(page.getByTestId('mcp-actions')).toBeVisible();
+    for (const density of ['comfortable', 'standard', 'compact'] as const) {
+      await page.evaluate((d) => document.documentElement.setAttribute('data-density', d), density);
+      const clipped = await page.locator('pd-mcp-page').evaluate((root) => {
+        const bad: string[] = [];
+        for (const box of Array.from(root.querySelectorAll('.mdc-checkbox__background'))) {
+          const r = box.getBoundingClientRect();
+          const c = root.getBoundingClientRect();
+          if (r.width > 0 && r.left < c.left - 0.5) bad.push(`${box.closest('mat-checkbox')?.getAttribute('data-testid')}: box left ${r.left} < content left ${c.left}`);
+        }
+        if (root.querySelectorAll('.mdc-checkbox__background').length < 4) bad.push('fewer than 4 checkboxes found');
+        return bad;
+      });
+      expect(clipped, `density ${density}`).toEqual([]);
+    }
+  });
+
   test('a load error is inline with Retry', async ({ app, page }) => {
     await app.settings.open({ page: 'pd.mcp' }, '?mcp=error');
     const error = page.getByTestId('mcp-error');
