@@ -74,7 +74,7 @@ describe('NetworkPage', () => {
     });
     expect(helper.el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
     const others = helper.el.querySelector('[data-testid="traffic-others"]')?.textContent ?? '';
-    expect(others).toContain('Other users: 2 programs');
+    expect(others).toContain('Other users and ended programs: 2 programs');
     expect(others).toMatch(/2(\.0+)? KB/);
   });
 

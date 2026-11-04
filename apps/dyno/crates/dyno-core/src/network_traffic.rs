@@ -3,7 +3,7 @@
 //! and the time in.
 
 use crate::helper_policy::{OthersPolicy, Visibility};
-use crate::helper_processes::{RawOwner, Sweep};
+use crate::helper_processes::{RawOwner, RawProcess, Sweep, MAX_NAME, MAX_SWEEP};
 use crate::helper_wire::HelperUser;
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,8 @@ pub struct TrafficRow {
 }
 
 /// What the helper tells a caller about other accounts' programs when the policy says "total": how many there are and what they
-/// moved together, never their names or process ids.
+/// moved together, never their names or process ids. Programs that ended while the counters were read, or whose owner could not be
+/// established, are counted here too: the total is "other or ended programs".
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OthersTraffic {
@@ -73,35 +74,63 @@ pub struct TrafficRead {
     pub via: crate::read_via::ReadVia,
 }
 
-/// Who a counter's process belongs to, from the same sweep the process list is built from.
-enum Whose {
-    /// The caller's own, or the system's or a service's: shown in detail.
-    Shown,
-    /// Another account's: shown as the scope says.
+/// Who a counter's process belongs to.
+enum Whose<'a> {
+    /// The caller's own, or the system's or a service's: shown in detail. The process is the one both sweeps saw.
+    Shown(&'a RawProcess),
+    /// Another account's, or not known to be the caller's: shown as the scope says.
     Other,
 }
 
-fn whose(pid: u32, sweep: &Sweep, caller: &HelperUser) -> Whose {
-    let Some(p) = sweep.processes.iter().find(|p| p.pid == pid) else {
-        // A program that has gone, or one the sweep could not see, is not known to be the caller's: fail closed.
+/// The processes of a sweep by pid (at most [`MAX_SWEEP`]; a pid that appears twice keeps the first, which a real sweep never has).
+fn by_pid(sweep: &Sweep) -> HashMap<u32, &RawProcess> {
+    let mut map = HashMap::with_capacity(sweep.processes.len().min(MAX_SWEEP));
+    for p in sweep.processes.iter().take(MAX_SWEEP) {
+        map.entry(p.pid).or_insert(p);
+    }
+    map
+}
+
+/// Whose `pid` is, by identity and not by number alone (rule 53, a pid is reusable): the same process, with the same start time and
+/// the same owner, must be in the sweep taken before the counters were read and in the one taken after. A counter whose process
+/// ended, whose pid was reused in between, or whose start time is unknown is not known to be the caller's.
+fn whose<'a>(pid: u32, before: &HashMap<u32, &RawProcess>, after: &HashMap<u32, &'a RawProcess>, caller: &HelperUser) -> Whose<'a> {
+    let (Some(b), Some(a)) = (before.get(&pid), after.get(&pid)) else {
         return Whose::Other;
     };
-    match &p.owner {
-        RawOwner::System | RawOwner::Service(..) => Whose::Shown,
-        RawOwner::Account { id, .. } if id == caller => Whose::Shown,
+    if b.started.is_none() || b.started != a.started || b.owner != a.owner {
+        return Whose::Other;
+    }
+    match &a.owner {
+        RawOwner::System | RawOwner::Service(..) => Whose::Shown(a),
+        RawOwner::Account { id, .. } if id == caller => Whose::Shown(a),
         RawOwner::Account { .. } | RawOwner::Unknown => Whose::Other,
     }
 }
 
 /// `counters` scoped to `caller` (ADR 0027 section 5, plan decision D6): the caller's own programs and the system's in detail;
 /// other accounts' programs in detail, as one total, or not at all, as `scope` says (the same rule as [`crate::helper_processes::build_page`]).
-/// A counter whose process is not in `sweep` counts as another account's. At most [`MAX_COUNTERS`] are kept.
-pub fn traffic_answer(counters: Vec<TrafficCounter>, sweep: &Sweep, caller: &HelperUser, scope: Visibility) -> TrafficAnswer {
+///
+/// `before` is the sweep taken before the counters were read and `after` the one taken after: a counter is attributed only to a
+/// process that is in both with the same start time and owner (see [`whose`]), and the name shown is the sweep's, never the
+/// counter's. Everything else, including programs that ended while being read, is counted with the other accounts' programs.
+/// At most [`MAX_COUNTERS`] are kept.
+pub fn traffic_answer(
+    counters: Vec<TrafficCounter>,
+    before: &Sweep,
+    after: &Sweep,
+    caller: &HelperUser,
+    scope: Visibility,
+) -> TrafficAnswer {
     let detail_for_others = matches!(scope, Visibility::Full | Visibility::Own(OthersPolicy::Detail));
+    let (before, after) = (by_pid(before), by_pid(after));
     let mut answer = TrafficAnswer::default();
     for c in counters.into_iter().take(MAX_COUNTERS) {
-        match whose(c.pid, sweep, caller) {
-            Whose::Shown => answer.counters.push(c),
+        match whose(c.pid, &before, &after, caller) {
+            Whose::Shown(p) => answer.counters.push(TrafficCounter {
+                name: p.name.chars().take(MAX_NAME).collect(),
+                ..c
+            }),
             Whose::Other if detail_for_others => answer.counters.push(c),
             Whose::Other if scope == Visibility::Own(OthersPolicy::Total) => {
                 let o = answer.others.get_or_insert_with(OthersTraffic::default);
@@ -238,7 +267,7 @@ mod tests {
                 bytes_out: 6,
             },
         ];
-        let a = traffic_answer(counters, &sweep, &me, Visibility::Own(OthersPolicy::Total));
+        let a = traffic_answer(counters, &sweep, &sweep, &me, Visibility::Own(OthersPolicy::Total));
         assert_eq!(a.counters.iter().map(|c| c.pid).collect::<Vec<_>>(), vec![1]);
         assert_eq!(
             a.others,
@@ -315,5 +344,97 @@ mod tests {
         let rows = t.update(Timestamp(1_000), &next);
         assert_eq!(rows.len(), MAX_TRAFFIC_ROWS);
         assert_eq!(rows[0].pid, 99);
+    }
+
+    fn proc(pid: u32, started: Option<i64>, name: &str, owner: RawOwner) -> crate::helper_processes::RawProcess {
+        crate::helper_processes::RawProcess {
+            pid,
+            started,
+            parent: None,
+            name: name.into(),
+            path: None,
+            owner,
+            state: crate::helper_processes::ProcState::Running,
+            threads: None,
+            cpu_time_ms: None,
+            memory_bytes: None,
+            disk_read_bytes: None,
+            disk_written_bytes: None,
+        }
+    }
+
+    fn sweep_of(processes: Vec<crate::helper_processes::RawProcess>) -> Sweep {
+        Sweep {
+            processes,
+            homes: vec![],
+            taken_at: 1,
+        }
+    }
+
+    fn mine(uid: u32) -> RawOwner {
+        RawOwner::Account {
+            id: HelperUser::Uid(uid),
+            name: None,
+        }
+    }
+
+    fn c(pid: u32, name: &str) -> TrafficCounter {
+        TrafficCounter {
+            pid,
+            name: name.into(),
+            bytes_in: 10,
+            bytes_out: 20,
+        }
+    }
+
+    #[test]
+    fn a_pid_reused_between_the_sweeps_is_not_attributed_to_the_caller() {
+        let me = HelperUser::Uid(1_000);
+        // Pid 7 was another account's program in the first sweep and the caller's in the second (the number was reused), pid 8 started
+        // at a different time in the two, pid 9 has no start time, pid 10 is the same process in both.
+        let before = sweep_of(vec![
+            proc(7, Some(100), "theirs.exe", mine(2_000)),
+            proc(8, Some(100), "a.exe", mine(1_000)),
+            proc(9, None, "b.exe", mine(1_000)),
+            proc(10, Some(100), "ok.exe", mine(1_000)),
+        ]);
+        let after = sweep_of(vec![
+            proc(7, Some(200), "mine-now.exe", mine(1_000)),
+            proc(8, Some(300), "a.exe", mine(1_000)),
+            proc(9, None, "b.exe", mine(1_000)),
+            proc(10, Some(100), "ok.exe", mine(1_000)),
+        ]);
+        let counters = vec![c(7, "theirs.exe"), c(8, "a.exe"), c(9, "b.exe"), c(10, "whatever")];
+        let a = traffic_answer(counters, &before, &after, &me, Visibility::Own(OthersPolicy::Total));
+        assert_eq!(a.counters.iter().map(|x| x.pid).collect::<Vec<_>>(), vec![10]);
+        assert_eq!(
+            a.others.map(|o| o.programs),
+            Some(3),
+            "the three unproven counters are in the total, with no name"
+        );
+    }
+
+    #[test]
+    fn the_name_shown_is_the_sweeps_and_not_the_counters() {
+        let me = HelperUser::Uid(1_000);
+        let sweep = sweep_of(vec![proc(10, Some(1), "real.exe", mine(1_000))]);
+        let a = traffic_answer(
+            vec![c(10, "spoofed name")],
+            &sweep,
+            &sweep,
+            &me,
+            Visibility::Own(OthersPolicy::Total),
+        );
+        assert_eq!(a.counters[0].name, "real.exe");
+    }
+
+    #[test]
+    fn a_program_that_ended_while_the_counters_were_read_is_counted_with_the_others() {
+        let me = HelperUser::Uid(1_000);
+        let before = sweep_of(vec![proc(10, Some(1), "gone.exe", mine(1_000))]);
+        let after = sweep_of(vec![]);
+        let a = traffic_answer(vec![c(10, "gone.exe")], &before, &after, &me, Visibility::Own(OthersPolicy::Total));
+        assert!(a.counters.is_empty());
+        assert_eq!(a.others.map(|o| o.programs), Some(1));
     }
 }

@@ -65,7 +65,7 @@ function readCollapsed(): Set<string> {
         <dy-reading-source [via]="s.trafficVia" />
         @if (s.trafficNote; as why) { @if (!sayingWhy(s.trafficVia)) { <p class="faint traffic-note">{{ why }}</p> } }
         @if (s.trafficOthers; as o) {
-          <p class="faint traffic-others num" data-testid="traffic-others">Other users: {{ o.programs }} {{ o.programs === 1 ? 'program' : 'programs' }} · ↓ {{ bytes(o.bytesIn) }} · ↑ {{ bytes(o.bytesOut) }} in total since they started</p>
+          <p class="faint traffic-others num" data-testid="traffic-others">Other users and ended programs: {{ o.programs }} {{ o.programs === 1 ? 'program' : 'programs' }} · ↓ {{ bytes(o.bytesIn) }} · ↑ {{ bytes(o.bytesOut) }} in total since they started</p>
         }
       }
 
