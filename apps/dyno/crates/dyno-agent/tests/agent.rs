@@ -357,6 +357,7 @@ fn the_network_page_shows_the_platforms_sockets_and_nothing_of_the_machine() {
                     remote: None,
                     state: SocketState::Listen,
                     pid: Some(100),
+                    inode: None,
                 });
             });
         },

@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import type { ReadVia } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Lookups } from '../lookup/lookups';
@@ -10,9 +11,13 @@ import { NetworkPage } from './network-page';
 
 const NOW = 1_700_000_000_000;
 
-async function open() {
+async function open(ownersVia?: ReadVia) {
   localStorage.clear();
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+  if (ownersVia) {
+    const real = mock.network.bind(mock);
+    vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real(q)), ownersVia }));
+  }
   TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(NetworkPage);
   const settle = async () => {
@@ -37,6 +42,18 @@ afterEach(() => {
 });
 
 describe('NetworkPage', () => {
+  it('names the helper when it filled the owners, and asks for it when the kernel hides them', async () => {
+    const helper = await open('helper');
+    expect(helper.el.querySelector('[data-testid=reading-source-helper]')?.textContent).toContain('Read by the administrator helper');
+    TestBed.resetTestingModule();
+    const needs = await open({ needsHelper: { reason: 'Some sockets belong to other accounts. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
+    expect(needs.el.querySelector('[data-testid=reading-source-needs]')?.textContent).toContain('belong to other accounts');
+    expect(needs.el.querySelector('[data-testid=reading-source-turn-on]')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const local = await open();
+    expect(local.el.querySelector('dy-reading-source [data-testid^=reading-source]')).toBeNull();
+  });
+
   it('is a tree grid grouped by program: group headings at level 1 spanning the row, sockets one level below', async () => {
     const { el, groups, rows } = await open();
     const grid = el.querySelector('[aria-label="Connections"]')!;

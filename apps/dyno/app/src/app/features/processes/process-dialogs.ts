@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import type { CommandError, Locker } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
+import { ReadingSource } from '../../core/reading-source';
 import { ProcessesStore } from '../../state/processes.store';
 import { MatButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
@@ -11,7 +12,7 @@ import { MatInput } from '@angular/material/input';
 /** "What is locking this file?": the processes that hold a path open, with what they are. */
 @Component({
   selector: 'dy-lockers-dialog',
-  imports: [MatFormField, MatInput, MatButton, FormsModule, Icon],
+  imports: [MatFormField, MatInput, MatButton, FormsModule, Icon, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="lead">Find the programs that hold a file or folder open.</p>
@@ -29,6 +30,7 @@ import { MatInput } from '@angular/material/input';
         @if (list.length === 0) {
           <p class="none"><dy-icon name="check" /> Nothing has it open right now.</p>
         }
+        @if (list[0]; as first) { <dy-reading-source [via]="first.via" /> }
         <ul>
           @for (l of list; track l.process.pid) {
             <li>

@@ -3,6 +3,7 @@
 
 pub mod counters;
 pub mod extras;
+pub mod holders;
 pub mod memory;
 pub mod processes;
 pub mod wol;

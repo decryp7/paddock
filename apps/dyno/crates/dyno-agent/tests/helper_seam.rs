@@ -77,11 +77,23 @@ struct Rig {
 
 impl Rig {
     fn start(caller: Caller, host: HelperHost, up: bool) -> Rig {
+        Rig::start_with(caller, host, up, Box::new(dyno_core::helper_holders::NoHolders), |_| {})
+    }
+
+    fn start_with(
+        caller: Caller,
+        host: HelperHost,
+        up: bool,
+        holders: Box<dyn dyno_core::helper_holders::HolderSource>,
+        seed: impl FnOnce(&Fake),
+    ) -> Rig {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
+        seed(&fake);
         let readers = Readers {
             memory: linux::parse(&dmi_table(), TOTAL),
+            holders,
             ..Readers::default()
         };
         let transport = DispatcherTransport::new(dispatcher(host, readers, tmp.path()), caller);
@@ -110,6 +122,45 @@ impl Rig {
             panic!("inventory")
         };
         *i
+    }
+
+    fn network(&self) -> dyno_core::network::NetworkSnapshot {
+        let peer = connect(&self.dirs).unwrap().0;
+        let query = dyno_core::network::NetworkQuery {
+            show_loopback: true,
+            ..Default::default()
+        };
+        let Reply::Network(n) = ask_within(&peer, Request::Network { query }, SLOW).unwrap() else {
+            panic!("network")
+        };
+        *n
+    }
+
+    /// The network snapshot once `done` holds (the first sample carries the process list the names come from).
+    fn network_when(&self, done: impl Fn(&dyno_core::network::NetworkSnapshot) -> bool) -> dyno_core::network::NetworkSnapshot {
+        let until = std::time::Instant::now() + SLOW;
+        loop {
+            let n = self.network();
+            if done(&n) || std::time::Instant::now() > until {
+                return n;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(unix)]
+    fn lockers(&self, path: &std::path::Path) -> Result<Vec<dyno_core::process::Locker>, String> {
+        let peer = connect(&self.dirs).unwrap().0;
+        match ask_within(
+            &peer,
+            Request::Lockers {
+                path: path.to_string_lossy().into_owned(),
+            },
+            SLOW,
+        )? {
+            Reply::Lockers(l) => Ok(l),
+            other => panic!("{other:?}"),
+        }
     }
 
     fn state(&self) -> HelperState {
@@ -179,4 +230,168 @@ fn a_caller_who_may_not_read_the_audit_log_still_sees_a_ready_helper() {
     let rig = Rig::start(Caller::Other, HelperHost::Linux, true);
     assert_eq!(rig.state(), HelperState::Ready);
     assert_eq!(rig.inventory().memory_via, ReadVia::Helper, "memory is open to any caller");
+}
+
+/// A helper reader of who holds what: one system program holding socket 900, one other account's holding socket 901, and one
+/// system program holding the file with the device and inode it is told; records what it was asked.
+struct Holders {
+    file: std::sync::Arc<std::sync::Mutex<Vec<(u64, u64)>>>,
+    want: Option<(u64, u64)>,
+}
+
+impl Holders {
+    fn raw(pid: u32, owner: dyno_core::helper_processes::RawOwner, sockets: &[u64]) -> dyno_core::helper_holders::RawHolder {
+        dyno_core::helper_holders::RawHolder {
+            pid,
+            started: Some(1_700_000_000),
+            name: format!("prog{pid}"),
+            owner,
+            sockets: sockets.to_vec(),
+        }
+    }
+}
+
+impl dyno_core::helper_holders::HolderSource for Holders {
+    fn sockets(&self) -> Result<dyno_core::helper_holders::HolderScan, dyno_core::ports::PlatformError> {
+        use dyno_core::helper_processes::RawOwner;
+        Ok(dyno_core::helper_holders::HolderScan {
+            holders: vec![
+                Holders::raw(7001, RawOwner::System, &[900]),
+                Holders::raw(
+                    7002,
+                    RawOwner::Account {
+                        id: dyno_core::helper_wire::HelperUser::parse("uid:1999").unwrap(),
+                        name: Some("someone".into()),
+                    },
+                    &[901],
+                ),
+            ],
+            truncated: false,
+        })
+    }
+
+    fn file(&self, dev: u64, ino: u64) -> Result<dyno_core::helper_holders::HolderScan, dyno_core::ports::PlatformError> {
+        self.file.lock().unwrap().push((dev, ino));
+        let hit = self.want == Some((dev, ino));
+        Ok(dyno_core::helper_holders::HolderScan {
+            holders: if hit {
+                vec![Holders::raw(7001, dyno_core::helper_processes::RawOwner::System, &[])]
+            } else {
+                vec![]
+            },
+            truncated: false,
+        })
+    }
+}
+
+fn hidden_listener(port: u16, inode: u64) -> dyno_core::network::SocketRow {
+    dyno_core::network::SocketRow {
+        proto: dyno_core::network::Proto::Tcp,
+        local: std::net::IpAddr::from([10, 1, 2, 3]),
+        local_port: port,
+        remote: None,
+        state: dyno_core::network::SocketState::Listen,
+        pid: None,
+        inode: Some(inode),
+    }
+}
+
+fn no_holders() -> Holders {
+    Holders {
+        file: Default::default(),
+        want: None,
+    }
+}
+
+#[test]
+fn a_socket_the_kernel_hides_gets_its_program_from_the_helper_and_the_page_says_so() {
+    let rig = Rig::start_with(Caller::Owner, HelperHost::Linux, true, Box::new(no_holders()), |f| {
+        f.add_process(dyno_platform::fake::process(7001, "prog7001", 0.0));
+        f.with(|s| s.sockets.push(hidden_listener(5432, 900)));
+    });
+    let n = rig.network_when(|n| {
+        matches!(
+            n.listeners.first().map(|l| &l.owner),
+            Some(dyno_core::network::Owner::Process { .. })
+        )
+    });
+    assert_eq!(n.listeners.len(), 1, "{:?}", n.listeners);
+    assert_eq!(n.listeners[0].port, 5432);
+    assert!(
+        matches!(&n.listeners[0].owner, dyno_core::network::Owner::Process { pid: 7001, .. }),
+        "{:?}",
+        n.listeners[0].owner
+    );
+    assert_eq!(n.owners_via, ReadVia::Helper);
+}
+
+#[test]
+fn without_the_helper_a_hidden_socket_stays_hidden_and_the_source_asks_for_the_helper() {
+    let rig = Rig::start_with(Caller::Owner, HelperHost::Linux, false, Box::new(no_holders()), |f| {
+        f.with(|s| s.sockets.push(hidden_listener(5432, 900)));
+    });
+    let n = rig.network();
+    assert_eq!(n.listeners.len(), 1);
+    assert!(!matches!(&n.listeners[0].owner, dyno_core::network::Owner::Process { .. }));
+    let ReadVia::NeedsHelper { reason, next } = n.owners_via else {
+        panic!("{:?}", n.owners_via)
+    };
+    assert!(reason.contains("hides which program"), "{reason}");
+    assert_eq!(next, NextStep::OpenSettings("helper".into()));
+}
+
+#[test]
+fn another_accounts_socket_stays_hidden_from_a_caller_who_may_not_see_it() {
+    let rig = Rig::start_with(Caller::Other, HelperHost::Linux, true, Box::new(no_holders()), |f| {
+        f.with(|s| s.sockets.push(hidden_listener(5433, 901)));
+    });
+    let n = rig.network();
+    assert!(
+        !matches!(&n.listeners[0].owner, dyno_core::network::Owner::Process { .. }),
+        "scoped by the connection's account"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn what_holds_this_file_is_asked_by_device_and_inode_and_answered_for_every_account() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("held.log");
+    std::fs::write(&file, "x").unwrap();
+    let m = std::fs::metadata(&file).unwrap();
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let holders = Holders {
+        file: asked.clone(),
+        want: Some((m.dev(), m.ino())),
+    };
+    let rig = Rig::start_with(Caller::Owner, HelperHost::Linux, true, Box::new(holders), |_| {});
+    let got = rig.lockers(&file).unwrap();
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [(m.dev(), m.ino())],
+        "only the device and inode crossed, never the path"
+    );
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (got[0].process.pid, got[0].name.as_str(), got[0].via.clone()),
+        (7001, "prog7001", ReadVia::Helper)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn without_the_helper_what_holds_this_file_is_the_agents_own_answer_marked_local() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("held.log");
+    std::fs::write(&file, "x").unwrap();
+    let mine = dyno_core::process::Locker::new(dyno_core::process::ProcessRef { pid: 9, started: None }, "me".into(), None);
+    let canonical = file.clone();
+    let rig = Rig::start_with(Caller::Owner, HelperHost::Linux, false, Box::new(no_holders()), |f| {
+        f.with(|s| {
+            s.lockers.insert(canonical, vec![mine.clone()]);
+        });
+    });
+    let got = rig.lockers(&file).unwrap();
+    assert_eq!((got.len(), got[0].via.clone()), (1, ReadVia::Local));
 }

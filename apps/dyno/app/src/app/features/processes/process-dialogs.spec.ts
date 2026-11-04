@@ -46,6 +46,26 @@ describe('LockersDialog', () => {
       expect(el.textContent).toContain('Nothing has it open right now.');
     });
   });
+  it('names the helper as the source when it read the holders, and shows nothing for a plain local answer', async () => {
+    const backend = new MockBackend({ latencyMs: 0 });
+    const real = backend.lockers.bind(backend);
+    let via: 'helper' | 'local' = 'helper';
+    vi.spyOn(backend, 'lockers').mockImplementation(async (p) => (await real(p)).map((l) => ({ ...l, via })));
+    const { f, el } = setup(LockersDialog, undefined, backend);
+    await typePath(f, el, '/work/target/debug');
+    el.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelector('[data-testid=reading-source-helper]')).not.toBeNull();
+    });
+    via = 'local';
+    el.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelector('[data-testid=reading-source-helper]')).toBeNull();
+      expect(el.querySelectorAll('li').length).toBeGreaterThan(0);
+    });
+  });
   it('shows an error when the lookup fails', async () => {
     const backend = new MockBackend({ latencyMs: 0, fail: new Set(['lockers']) });
     const { f, el } = setup(LockersDialog, undefined, backend);

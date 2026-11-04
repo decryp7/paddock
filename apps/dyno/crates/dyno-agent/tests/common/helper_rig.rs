@@ -50,6 +50,8 @@ impl Caller {
         ctx.account = Some(owner());
         ctx.access = access(request.kind(), standing);
         ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
+        // The connection's account, which the scoped readings (processes, socket owners, file holders) answer for.
+        ctx.account = Some(owner());
         ctx
     }
 }
@@ -66,6 +68,8 @@ pub struct Readers {
     pub firewall: dyno_core::firewall::FirewallSource,
     /// The machine's processes as the OS reads them (the helper scopes them to the caller).
     pub processes: Vec<dyno_core::helper_processes::RawProcess>,
+    /// Who holds which socket or file (Linux); nothing by default.
+    pub holders: Box<dyn dyno_core::helper_holders::HolderSource>,
 }
 
 impl Default for Readers {
@@ -83,6 +87,7 @@ impl Default for Readers {
             },
             firewall: dyno_core::firewall::FirewallSource::new(dyno_core::firewall::RuleSource::Nftables),
             processes: Vec::new(),
+            holders: Box::new(dyno_core::helper_holders::NoHolders),
         }
     }
 }
@@ -157,7 +162,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         audit: AuditLog::new(dir.join("audit.jsonl")),
         clock: Box::new(|| 1_000),
         login_items: Box::new(Items),
-        holders: Box::new(dyno_core::helper_holders::NoHolders),
+        holders: readers.holders,
         extras: Box::new(dyno_core::helper_extras::NoExtras),
         counters: Box::new(dyno_core::helper_counters::NoCounters),
         memory: Box::new(Memory(readers.memory)),
