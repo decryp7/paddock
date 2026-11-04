@@ -38,3 +38,17 @@
   width that is not the image's own (read 2026-11-03).
 - Removal: when tray-icon builds the image before setting it and accepts several representations (an upstream issue on
   tauri-apps/tray-icon, to be filed by the coordinator; link to add here), delete this patch and its edits and call the upstream API.
+
+### tray-icon-windows-tooltip.patch (Windows)
+
+- `src/platform_impl/windows/mod.rs`, `set_tooltip`: the `NIM_MODIFY` names the icon by its GUID (`tooltip_nid` calls `apply_guid`, as
+  `set_icon` and `set_tray_visible` do), and a tip keeps at most 127 UTF-16 units so `szTip` always ends in a zero (upstream copies 128).
+- Why: Dyno adds every icon with a GUID (ADR 0028). A modify without `NIF_GUID` was refused by the shell, so every icon kept the tip it was
+  built with ("Dyno"); Dyno ignored the error then and logs it now.
+- Tests: `tooltip_tests` in the same file. This vendored crate is not a workspace member, so its tests are not built by the app's
+  workspace (`cargo xwin clippy -p tray-icon --all-targets` from `apps/dyno` fails on the dev-dependency `serde_json`; that is not an
+  error in the crate). Build them standalone: copy `vendor/tray-icon` out of the repo, drop the `eframe`, `image`, `tao`, `winit` and gtk
+  dev-dependencies, add `[workspace]`, `cargo xwin test --no-run --lib --target x86_64-pc-windows-msvc`, run the `.exe` on a Windows machine.
+  Run on `paddock-win11-test` (snapshot `gui-session-tools`, 2026-11-04): without `apply_guid` `a_tip_change_names_the_icon_by_its_guid`
+  fails; with it both tests pass.
+- Removal: when upstream tray-icon sets the tip by GUID and caps it at 127 units, delete this patch.

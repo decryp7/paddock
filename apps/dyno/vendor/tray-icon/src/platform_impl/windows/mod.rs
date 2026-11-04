@@ -242,21 +242,9 @@ impl TrayIcon {
 
     pub fn set_tooltip<S: AsRef<str>>(&mut self, tooltip: Option<S>) -> crate::Result<()> {
         unsafe {
-            let mut nid = NOTIFYICONDATAW {
-                uFlags: NIF_TIP,
-                hWnd: self.hwnd,
-                uID: self.internal_id,
-                cbSize: size_of::<NOTIFYICONDATAW>() as u32,
-                ..std::mem::zeroed()
-            };
-            if let Some(tooltip) = &tooltip {
-                let tip = util::encode_wide(tooltip.as_ref());
-                #[allow(clippy::manual_memcpy)]
-                for i in 0..tip.len().min(128) {
-                    nid.szTip[i] = tip[i];
-                }
-            }
-
+            // Paddock patch: the modify names the icon the way it was added (by GUID when it has one); without NIF_GUID the shell
+            // finds no icon for (hWnd, uID) and refuses, and the tip stayed the one given at creation.
+            let nid = tooltip_nid(self.hwnd, self.internal_id, self.guid, tooltip.as_ref().map(|t| t.as_ref()));
             if Shell_NotifyIconW(NIM_MODIFY, &nid) == 0 {
                 return Err(crate::Error::OsError(std::io::Error::last_os_error()));
             }
@@ -631,7 +619,7 @@ unsafe fn register_tray_icon(
         flags |= NIF_TIP;
         let tip = util::encode_wide(tooltip);
         #[allow(clippy::manual_memcpy)]
-        for i in 0..tip.len().min(128) {
+        for i in 0..tip.len().min(127) {
             sz_tip[i] = tip[i];
         }
     }
@@ -659,6 +647,30 @@ unsafe fn register_tray_icon(
     apply_guid(&mut nid, guid);
 
     Shell_NotifyIconW(NIM_ADD, &mut nid as _) == TRUE
+}
+
+/// The `NIM_MODIFY` data that sets (or, with `None`, clears) the tip of an icon.
+///
+/// `szTip` holds 128 UTF-16 units including the terminating zero, so at most 127 of the text are kept; the last unit is never
+/// written, so the shell always finds the zero.
+#[inline]
+unsafe fn tooltip_nid(hwnd: HWND, id: u32, guid: Option<GUID>, tooltip: Option<&str>) -> NOTIFYICONDATAW {
+    let mut nid = NOTIFYICONDATAW {
+        uFlags: NIF_TIP,
+        hWnd: hwnd,
+        uID: id,
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        ..std::mem::zeroed()
+    };
+    if let Some(tooltip) = tooltip {
+        let tip = util::encode_wide(tooltip);
+        #[allow(clippy::manual_memcpy)]
+        for i in 0..tip.len().min(127) {
+            nid.szTip[i] = tip[i];
+        }
+    }
+    apply_guid(&mut nid, guid);
+    nid
 }
 
 #[inline]
@@ -725,5 +737,30 @@ impl From<RECT> for Rect {
                 rect.bottom.saturating_sub(rect.top) as u32,
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tooltip_tests {
+    use super::*;
+
+    // Failing first: the modify carried no NIF_GUID, so an icon added with a GUID never got its tip changed.
+    #[test]
+    fn a_tip_change_names_the_icon_by_its_guid() {
+        let guid = GUID::from_u128(0x1234);
+        let nid = unsafe { tooltip_nid(std::ptr::null_mut(), 7, Some(guid), Some("CPU 34%")) };
+        assert_ne!(nid.uFlags & NIF_GUID, 0);
+        assert_ne!(nid.uFlags & NIF_TIP, 0);
+        assert_eq!((nid.guidItem.data1, nid.guidItem.data2), (guid.data1, guid.data2));
+        let plain = unsafe { tooltip_nid(std::ptr::null_mut(), 7, None, Some("CPU 34%")) };
+        assert_eq!(plain.uFlags & NIF_GUID, 0);
+    }
+
+    #[test]
+    fn a_long_tip_keeps_127_units_and_its_terminating_zero() {
+        let long = "x".repeat(300);
+        let nid = unsafe { tooltip_nid(std::ptr::null_mut(), 7, None, Some(&long)) };
+        assert_eq!(nid.szTip[126], u16::from(b'x'));
+        assert_eq!(nid.szTip[127], 0);
     }
 }
