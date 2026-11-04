@@ -53,6 +53,15 @@ impl Drop for Namespace {
 /// Creates (or, when another elevated process made it, opens) the private namespace of the app. Only a process whose token
 /// has Administrators enabled can do either, which is what keeps a standard user from taking the names first.
 pub fn enter(identifier: &str) -> Result<Namespace, CreateError> {
+    // Create-or-open races with the last holder closing the namespace (it exists for the create, then is gone for the open):
+    // one more try settles it.
+    match enter_once(identifier) {
+        Err(CreateError::Os(_)) => enter_once(identifier),
+        other => other,
+    }
+}
+
+fn enter_once(identifier: &str) -> Result<Namespace, CreateError> {
     let alias = namespace_alias(identifier);
     let wide_alias = to_wide(&alias);
     // SAFETY: NUL-terminated name.
@@ -131,6 +140,18 @@ pub fn create_handoff(_ns: &Namespace, identifier: &str) -> Result<Owned, Create
     let event = Owned(h);
     reset(&event);
     Ok(event)
+}
+
+/// Whether a hand-over event exists in the namespace and is not set: `apply-update` has started an installer that has not
+/// yet taken the lock.
+pub fn handoff_pending(_ns: &Namespace, identifier: &str) -> bool {
+    let name = to_wide(&handoff_name(identifier));
+    // SAFETY: NUL-terminated name.
+    let h = unsafe { OpenEventW(SYNCHRONIZE, 0, name.as_ptr()) };
+    if h.is_null() {
+        return false;
+    }
+    wait(&Owned(h), Some(Duration::ZERO)) == WaitOutcome::TimedOut
 }
 
 /// Opens an existing hand-over event for setting it (`None` when there is none: an install started by hand).

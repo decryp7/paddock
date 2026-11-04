@@ -135,15 +135,15 @@ impl UpdatePort for Real<'_> {
         let (lock, _existed) = mutex::create_lock(&ns, &self.identifier)
             .map_err(|e| squat(&mut self.log, "installer lock", e))?;
         let tried = mutex::wait(&lock, Some(std::time::Duration::ZERO));
-        let signal = mutex::signal_probe(&self.identifier);
-        let verdict = handoff::admit(tried, signal);
+        // Admission looks only at objects inside the private namespace, which no standard user can hold or make.
+        let verdict = handoff::admit(tried, mutex::handoff_pending(&ns, &self.identifier));
         if verdict != Admit::Go
             && matches!(
                 tried,
                 handoff::WaitOutcome::Released | handoff::WaitOutcome::Abandoned
             )
         {
-            // The try-acquire succeeded but another install's signal is active: give the lock back, do not abandon it.
+            // The try-acquire succeeded but a hand-over is pending: give the lock back, do not abandon it.
             // SAFETY: this thread just acquired the mutex by the wait above.
             unsafe { ReleaseMutex(lock.0) };
         }
@@ -509,32 +509,31 @@ impl UpdatePort for Real<'_> {
         self.held = None;
         self.source = None;
         self.child = None;
-        // A program that just ended (or a scanner reading the new file) can hold it for a moment: a bounded number of
-        // tries, then the folder is renamed to `trash-` so the next `clean-staging` removes it.
-        for attempt in 0..10 {
-            match std::fs::remove_dir_all(&run.dir) {
-                Ok(()) => return,
-                Err(e) if attempt == 9 => self.log.line(
-                    "apply-update",
-                    &format!("the run folder could not be removed: {e}"),
-                ),
-                Err(_) => std::thread::sleep(std::time::Duration::from_millis(250)),
-            }
-        }
+        // Rename at once (a program that just ended, or a scanner reading the new file, may still hold something), then
+        // delete best-effort; what is left is `trash-` and the next `clean-staging` removes it. No waiting.
         let dir = Path::new(&run.dir);
-        if let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) {
-            let trash = parent.join(format!(
-                "{}{}",
-                crate::staging::TRASH_PREFIX,
-                name.to_string_lossy()
-            ));
-            let ok = std::fs::rename(dir, trash).is_ok();
+        let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
+            return;
+        };
+        let trash = parent.join(format!(
+            "{}{}",
+            crate::staging::TRASH_PREFIX,
+            name.to_string_lossy()
+        ));
+        let target = match std::fs::rename(dir, &trash) {
+            Ok(()) => trash,
+            Err(e) => {
+                self.log.line(
+                    "apply-update",
+                    &format!("the run folder could not be renamed: {e}"),
+                );
+                dir.to_path_buf()
+            }
+        };
+        if let Err(e) = std::fs::remove_dir_all(&target) {
             self.log.line(
                 "apply-update",
-                &format!(
-                    "the run folder was renamed for the next clean-up: {}",
-                    if ok { "ok" } else { "failed" }
-                ),
+                &format!("the run folder is left for the next clean-up: {e}"),
             );
         }
     }

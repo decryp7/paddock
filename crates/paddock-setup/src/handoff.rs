@@ -9,10 +9,11 @@
 //!   acquires nothing: no standard user can block an update or the app. The name *can* be squatted in `Global\`; the app and
 //!   the installer judge the object's owner ([`signal_state`]) and a squatted signal is ignored (logged), never waited on and
 //!   never a reason to refuse an update: the private mutex still excludes a second install.
-//! - **No release-then-wait gap.** The signal exists from the start of `apply-update` until `hold-installing` ends, because
-//!   `apply-update` closes its handle only after `hold-installing` has opened its own; a second `apply-update` that finds an
-//!   existing, non-signalled, administrator-made signal is refused as busy ([`admit`]) even in the instant the mutex is free.
-//!   A crashed installer closes its handles and the signal vanishes with them.
+//! - **No release-then-wait gap, decided only inside the private namespace** ([`admit`]). `apply-update` keeps the hand-over
+//!   event, which it creates unset, until `hold-installing` has taken the lock and set it, so "the lock is held, or the
+//!   hand-over event exists and is unset" is busy even in the instant the lock is free. The `Global` signal never decides
+//!   admission: a standard user's handle can keep a dead install's signal alive, and a squatted signal must not open the gap.
+//!   A crashed installer closes its handles and the private objects vanish with them.
 //! - The app waits on the signal with a **required bound** (`wait_for_installer`); a wait that times out means "unknown", and
 //!   the hand-off record settles it at the next start.
 
@@ -133,13 +134,15 @@ pub enum Admit {
     Failed,
 }
 
-/// The decision: the lock must be free (acquired now) and no administrator's signal may be active. A foreign signal is
-/// ignored, so a squat cannot stop updates.
-pub fn admit(lock: WaitOutcome, signal: SignalProbe) -> Admit {
-    match (lock, signal) {
+/// The decision, from objects inside the private namespace only (no standard user can hold or make any of them): busy when
+/// the lock is held, or when the hand-over event exists and is not set (`apply-update` is waiting for `hold-installing` to
+/// take the lock: the gap). The `Global` signal never decides: a user handle can keep a dead install's signal alive, and a
+/// squatted one could open the gap.
+pub fn admit(lock: WaitOutcome, handoff_pending: bool) -> Admit {
+    match (lock, handoff_pending) {
         (WaitOutcome::Failed, _) => Admit::Failed,
-        (WaitOutcome::TimedOut, _) | (_, SignalProbe::Active) => Admit::Busy,
-        (WaitOutcome::Released | WaitOutcome::Abandoned, _) => Admit::Go,
+        (WaitOutcome::TimedOut, _) | (_, true) => Admit::Busy,
+        (WaitOutcome::Released | WaitOutcome::Abandoned, false) => Admit::Go,
     }
 }
 
@@ -253,24 +256,22 @@ mod tests {
     }
 
     #[test]
-    fn admission_needs_a_free_lock_and_no_active_signal_and_ignores_a_squat() {
-        use SignalProbe::*;
+    fn admission_is_decided_by_the_private_lock_and_hand_over_event_only() {
         use WaitOutcome::*;
-        assert_eq!(admit(Released, Absent), Admit::Go);
-        assert_eq!(admit(Abandoned, Finished), Admit::Go);
+        assert_eq!(admit(Released, false), Admit::Go);
         assert_eq!(
-            admit(Released, Foreign),
+            admit(Abandoned, false),
             Admit::Go,
-            "a squatted signal never stops an update"
+            "a dead holder's lock is free"
         );
-        assert_eq!(admit(TimedOut, Absent), Admit::Busy);
+        assert_eq!(admit(TimedOut, false), Admit::Busy);
         assert_eq!(
-            admit(Released, Active),
+            admit(Released, true),
             Admit::Busy,
             "the gap between apply-update and hold-installing"
         );
-        assert_eq!(admit(TimedOut, Active), Admit::Busy);
-        assert_eq!(admit(Failed, Absent), Admit::Failed);
-        assert_eq!(admit(Failed, Active), Admit::Failed);
+        assert_eq!(admit(TimedOut, true), Admit::Busy);
+        assert_eq!(admit(Failed, false), Admit::Failed);
+        assert_eq!(admit(Failed, true), Admit::Failed);
     }
 }

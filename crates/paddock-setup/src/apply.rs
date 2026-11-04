@@ -201,23 +201,24 @@ pub fn check_source(facts: &SourceFacts, limit: u64) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// The signed trusted comment must carry `file:<product>_...-setup.exe`: the update key is the family's, so without this a
+/// The signed trusted comment must carry `file:<product>_<version>_...-setup.exe`: the update key is the family's, so without this a
 /// validly signed installer of another app would be accepted for this one. Tauri signs
 /// `timestamp:<unix>\tfile:<name of the signed file>`; the NSIS installer is named `<productName>_<version>_<arch>-setup.exe`.
-pub fn bind_product(trusted_comment: &str, product: &str) -> Result<(), Refusal> {
+pub fn bind_product(
+    trusted_comment: &str,
+    product: &str,
+    version: &Version,
+) -> Result<(), Refusal> {
     let file = trusted_comment
         .split('\t')
         .find_map(|f| f.strip_prefix("file:"))
         .ok_or(Refusal::WrongProduct)?;
-    let prefix = format!("{product}_");
-    // After `<product>_` comes the version, so its first character is a digit: product `Dyno` does not match the installer of
-    // a product called `Dyno_Pro` (`Dyno_Pro_1.0.0_x64-setup.exe`).
-    let versioned = file
-        .strip_prefix(&prefix)
-        .and_then(|r| r.chars().next())
-        .is_some_and(|c| c.is_ascii_digit());
+    // `<product>_<signed version>_`: the version comes from the same signed comment `verify_file` checked against the
+    // announced one, so product `Dyno` does not match the installer of a product called `Dyno_Pro`
+    // (`Dyno_Pro_1.0.0_x64-setup.exe`), and the file name cannot name another version than the one that is installed.
+    let prefix = format!("{product}_{version}_");
     if !product.is_empty()
-        && versioned
+        && file.starts_with(&prefix)
         && file.len() > prefix.len() + INSTALLER_SUFFIX.len()
         && file.ends_with(INSTALLER_SUFFIX)
         && !file.contains(['\\', '/'])
@@ -329,7 +330,8 @@ pub trait UpdatePort {
     /// `$INSTDIR` passes the `check-dir` rule, `updates\` is made or checked and this run's folder and `tmp\` are made with
     /// an Administrators-and-SYSTEM-only descriptor.
     fn prepare_folders(&mut self, run: &RunPaths) -> Result<(), Refusal>;
-    /// Takes `Global\<identifier>.setup`; `Busy` when an administrator's process holds it, `Squatted` when something else made it.
+    /// Enters the private namespace and takes the lock; `Busy` when the lock is held or a hand-over is pending, `Squatted`
+    /// when the namespace or its objects cannot be made safely. The `Global` signal for the app is made too but never decides.
     fn acquire_mutex(&mut self) -> Result<(), Refusal>;
     /// Removes earlier run folders; one with something still in use is kept (that is not a failure).
     fn clean_previous(&mut self, keep: &RunPaths);
@@ -452,7 +454,7 @@ fn locked(
         "apply-update",
         "signature and signed version verified on the held copy",
     );
-    bind_product(&comment, &req.product)?;
+    bind_product(&comment, &req.product, &req.version)?;
     if is_not_newer(&installed, &req.version) {
         return Err(Refusal::NotNewer);
     }
@@ -571,18 +573,23 @@ mod tests {
         assert_eq!(check_source(&f, 1000), Err(Refusal::TooLarge));
     }
 
+    fn v120() -> Version {
+        Version::new(1, 2, 0)
+    }
+
     #[test]
     fn the_signed_file_name_must_belong_to_the_product() {
-        assert_eq!(bind_product(COMMENT, "Dyno"), Ok(()));
+        assert_eq!(bind_product(COMMENT, "Dyno", &v120()), Ok(()));
         assert_eq!(
             bind_product(
                 "timestamp:1\tfile:Dyno_1.2.0_x64-setup.exe\tversion:1.2.0",
-                "Dyno"
+                "Dyno",
+                &v120()
             ),
             Ok(())
         );
         assert_eq!(
-            bind_product("file:Dyno_1.2.0_arm64-setup.exe", "Dyno"),
+            bind_product("file:Dyno_1.2.0_arm64-setup.exe", "Dyno", &v120()),
             Ok(())
         );
         for (comment, why) in [
@@ -609,17 +616,24 @@ mod tests {
                 "timestamp:1\tfile:Dyno_Pro_1.0.0_x64-setup.exe",
                 "a product called Dyno_Pro",
             ),
+            (
+                "timestamp:1\tfile:Dyno_1.3.0_x64-setup.exe",
+                "another version than the signed one",
+            ),
             ("timestamp:1", "no file field"),
             ("", "empty"),
             ("timestamp:1\tfile:", "empty name"),
         ] {
             assert_eq!(
-                bind_product(comment, "Dyno"),
+                bind_product(comment, "Dyno", &v120()),
                 Err(Refusal::WrongProduct),
                 "{why}"
             );
         }
-        assert_eq!(bind_product(COMMENT, ""), Err(Refusal::WrongProduct));
+        assert_eq!(
+            bind_product(COMMENT, "", &v120()),
+            Err(Refusal::WrongProduct)
+        );
     }
 
     #[test]
@@ -1055,6 +1069,7 @@ mod tests {
     #[test]
     fn a_prerelease_with_the_installed_numbers_is_not_newer() {
         let mut p = Fake::ok();
+        p.comment = "timestamp:1\tfile:Dyno_1.2.0-beta.1_x64-setup.exe".into();
         p.installed = Some(Version::new(1, 2, 0));
         let mut log = Lines::default();
         let r = Request {
