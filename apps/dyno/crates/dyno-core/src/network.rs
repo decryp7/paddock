@@ -516,7 +516,7 @@ impl NetEvent {
                 let p = if *proto == Proto::Tcp { "TCP" } else { "UDP" };
                 format!("{p}, {reach}.")
             }
-            NetEvent::NewRemoteHost { host, port, .. } => format!("{host}:{port}"),
+            NetEvent::NewRemoteHost { host, port, .. } => format!("Address {host}:{port}"),
         }
     }
 

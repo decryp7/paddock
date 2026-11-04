@@ -130,6 +130,15 @@ mod tests {
             );
             assert!(!o.detail.is_empty());
         }
-        assert_eq!(observation(&host(), ON).unwrap().detail, "93.184.216.34:443");
+        assert_eq!(observation(&host(), ON).unwrap().detail, "Address 93.184.216.34:443");
+        assert_eq!(
+            observation(&listener(Exposure::AllInterfaces), ON).unwrap().detail,
+            "TCP, on every network interface (reachable from the network)."
+        );
+        assert_eq!(observation(&listener(Exposure::Interface), ON).unwrap().detail, "TCP, on one network interface.");
+        // The title names the program; the detail never does.
+        for e in [listener(Exposure::AllInterfaces), listener(Exposure::Interface), host()] {
+            assert!(!observation(&e, ON).unwrap().detail.contains("node"));
+        }
     }
 }
