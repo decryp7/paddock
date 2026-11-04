@@ -129,6 +129,26 @@ async function runRebootSteps(ctx, steps) {
     { ok: true, detail: `Launch at login after install: ${launchDefault === 'true' ? 'ON' : launchDefault === 'false' ? 'OFF' : launchDefault}` },
     { ok: trayBefore.visible.length + trayBefore.overflow.length > 0, detail: `${trayBefore.visible.length} tray icon(s) visible, ${trayBefore.overflow.length} in the overflow` },
   ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, ...eventsDump(), '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
+  // The 7521 death at app quit: read Processes through the helper, quit Dyno (File > Exit), and see whether the helper is still RUNNING 30 s later.
+  try {
+    const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+    await main.evaluate(() => { location.hash = '#/processes'; }); await sleep(4000);
+    const chip = /Read by the administrator helper/i.test(await main.evaluate(() => document.body.innerText));
+    const pre = snapshot();
+    await main.evaluate(async () => {
+      const items = () => [...document.querySelectorAll('[role=menuitem]')];
+      if (!items().some((e) => e.textContent.trim().startsWith('Exit'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File').click(); await new Promise((r) => setTimeout(r, 600)); }
+      items().find((e) => e.textContent.trim().startsWith('Exit')).click();
+    }).catch(() => {});
+    await sleep(30_000);
+    const post = snapshot();
+    const apps = ssh('(Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Measure-Object).Count');
+    steps.push(result('Windows restart: the helper after Dyno is quit (the 7521 death at app quit)', [
+      { ok: chip, detail: chip ? 'Processes was read through the helper before the quit' : 'Processes did not show the helper chip before the quit' },
+      { ok: pre.state === 'RUNNING', detail: `helper before the quit: ${pre.state}` },
+      { ok: post.state === 'RUNNING', detail: `helper 30 s after the quit: ${post.state} (Dyno processes left: ${apps})` },
+    ], [post.qc, post.q, '--- helper.log tail', post.log, ...eventsDump().map((l) => `[after quit] ${l}`)], 'the helper keeps running after Dyno quits'));
+  } catch (e) { steps.push(result('Windows restart: the helper after Dyno is quit', [{ ok: false, detail: String(e.message).split('\n')[0] }])); }
   await browser.close().catch(() => {});
   t.close();
 
