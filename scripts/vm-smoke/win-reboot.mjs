@@ -91,7 +91,9 @@ const fmtTray = (r) => [`visible taskbar area (UI Automation): ${r.visible.lengt
 async function afterRestartRecord(actor, label) {
   const auto = autoStartRecord();
   actor.start(); await sleep(8000);
-  const tray = await trayRecord(actor);
+  let tray = await trayRecord(actor);
+  // An autostarted app builds its tray icons a little after it starts: poll up to 60 s when it is running and nothing shows yet.
+  for (let i = 0; i < 6 && auto.running && tray.visible.length + tray.overflow.length === 0; i++) { await sleep(10_000); tray = await trayRecord(actor); }
   await actor.send('quit', 5000).catch(() => {});
   const evidence = [`logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, '--- tray', ...fmtTray(tray)];
   return { auto, tray, evidence };
@@ -166,6 +168,8 @@ async function runRebootSteps(ctx, steps) {
   ], fmtTray(rec1.tray), 'recorded'));
 
   // The helper after the restart, with Dyno started by hand and no Repair.
+  // The autostarted Dyno has no DevTools port: end it (the helper must keep running) and start it again with the port, as a user would reopen it.
+  ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3');
   ctx.launchDyno();
   await sleep(25_000);
   t = tunnel();
