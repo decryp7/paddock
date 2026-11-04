@@ -179,6 +179,8 @@ pub struct Core {
     pub counter: u64,
     /// The hardware inventory, read once (at start or on first request).
     pub inventory: Option<dyno_core::inventory::SystemInventory>,
+    /// The helper epoch the cached inventory's helper readings were made at; when it moves they are read again.
+    pub inventory_epoch: u64,
     /// Alarms: the engine and its persistence.
     pub alarms: crate::alarms::AlarmCentre,
     /// The flight recorder.
@@ -295,7 +297,7 @@ pub struct Shared {
     /// Scheduled wake: the schedules, their OS wakes and what happens at their time (ADR 0032 section 5).
     pub wakes: crate::wakes::WakeCentre,
     /// The privileged helper: its state and Turn on / Repair / Update / Turn off (ADR 0027).
-    pub helper: crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>,
+    pub helper: Arc<crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>>,
     /// The memory layout: the helper first, then this computer (the seam's second instance, plan section 8.3).
     pub memory: Mutex<crate::helper_first::HelperFirst<crate::helper_readers::memory::MemoryModules>>,
     /// Logical cores (for validating affinity and normalising overhead).
@@ -455,6 +457,7 @@ impl Shared {
             facts: None,
             counter: 0,
             inventory: None,
+            inventory_epoch: 0,
             alarms,
             recorder: crate::recorder::Recorder::new(),
             crash_loops: Vec::new(),
@@ -571,7 +574,7 @@ impl Shared {
             )),
             wakes: crate::wakes::WakeCentre::new(wol.wake_timer.clone(), Arc::new(crate::wakes::SharedHelper::new(me.clone()))),
             wol: crate::wol::WolCentre::new(wol),
-            helper: helper_centre,
+            helper: Arc::new(helper_centre),
             memory: Mutex::new(crate::helper_first::HelperFirst::new(
                 crate::helper_readers::memory::MemoryModules::new(host, local_memory),
                 port(me),

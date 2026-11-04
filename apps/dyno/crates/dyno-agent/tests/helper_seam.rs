@@ -162,12 +162,16 @@ fn without_the_helper_the_total_is_shown_and_the_source_asks_for_the_helper() {
     let ReadVia::NeedsHelper { reason, next } = inv.memory_via else {
         panic!("{:?}", inv.memory_via)
     };
-    assert!(reason.contains("Administrator readings"), "{reason}");
+    assert!(reason.contains("administrator"), "{reason}");
     assert_eq!(next, NextStep::OpenSettings("helper".into()));
     assert_eq!(rig.state(), HelperState::Off);
     assert!(rig.served.lock().unwrap().is_empty(), "nothing reached an absent helper");
     rig.up.store(true, Ordering::SeqCst);
     assert_eq!(rig.state(), HelperState::Ready);
+    // The inventory was cached while the helper was off; the helper coming up moves the epoch and it is read again.
+    let inv = rig.inventory();
+    assert!(matches!(&inv.memory, MemoryLayout::Slots(a) if a.slots == 4), "{:?}", inv.memory);
+    assert_eq!(inv.memory_via, ReadVia::Helper);
 }
 
 #[test]

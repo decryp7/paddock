@@ -84,7 +84,11 @@ impl PeerTransport {
 
 impl HelperTransport for PeerTransport {
     fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
-        let wait = wait_for(&request);
+        self.call_within(request, None)
+    }
+
+    fn call_within(&self, request: HelperRequest, max: Option<Duration>) -> Result<HelperReply, TransportError> {
+        let wait = max.map_or_else(|| wait_for(&request), |m| m.min(wait_for(&request)));
         let mut reused = true;
         loop {
             let peer = match self.take() {
@@ -120,7 +124,7 @@ impl HelperTransport for PeerTransport {
                 }
                 Err(IpcError::Timeout) => {
                     peer.close();
-                    return Err(TransportError::Silent(format!("no answer within {} s", wait.as_secs())));
+                    return Err(TransportError::Silent(format!("no answer within {} ms", wait.as_millis())));
                 }
                 Err(e) => {
                     peer.close();

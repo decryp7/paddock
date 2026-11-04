@@ -1432,6 +1432,31 @@ mod tests {
     }
 
     #[test]
+    fn a_live_update_carries_where_its_parts_came_from_under_the_field_via() {
+        use crate::read_via::{LiveVia, ReadVia};
+        let live = LiveUpdate {
+            system: sample(1),
+            pressure: MemoryPressure::Normal,
+            top_cpu: vec![],
+            top_memory: vec![],
+            overhead: Overhead::default(),
+            processes: None,
+            groups: None,
+            other_users: None,
+            via: LiveVia {
+                processes: ReadVia::Helper,
+                ..LiveVia::default()
+            },
+        };
+        let json = serde_json::to_value(&live).unwrap();
+        assert_eq!(
+            json["via"],
+            serde_json::json!({ "processes": "helper", "others": "local", "temperatures": "local" })
+        );
+        assert_eq!(round(&Message::Live(Box::new(live.clone()))), Message::Live(Box::new(live)));
+    }
+
+    #[test]
     fn messages_survive_postcard() {
         let live = LiveUpdate {
             system: sample(1),

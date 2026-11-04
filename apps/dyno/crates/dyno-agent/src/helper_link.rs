@@ -17,9 +17,11 @@ use dyno_core::helper_wire::{
 use dyno_core::inventory::MemoryLayout;
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::PlatformError;
+use dyno_core::read_via::ReadVia;
 use dyno_core::smart::SmartReply;
 use paddock_jobs::time::Clock;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// How many audit entries the status asks for.
 const STATUS_AUDIT: u32 = 20;
@@ -46,6 +48,35 @@ pub enum TransportError {
 pub trait HelperTransport: Send + Sync {
     /// Sends `request` and waits for the answer.
     fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError>;
+
+    /// [`HelperTransport::call`] that gives up after `max` when one is given: a live reading must not wait out the long
+    /// default of a request kind. The default ignores `max` (fakes that cannot hang).
+    fn call_within(&self, request: HelperRequest, max: Option<Duration>) -> Result<HelperReply, TransportError> {
+        let _ = max;
+        self.call(request)
+    }
+}
+
+/// How long a call may take: the transport's own default, or the short deadline of a live reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wait {
+    /// The kind's own wait (30 s for an ordinary request, minutes for a slow one).
+    Default,
+    /// [`LIVE_WAIT`].
+    Live,
+}
+
+/// The deadline of a live call: something a person looks at, refreshed every few seconds. A helper that does not answer in this
+/// time is treated as not there for a while (the readiness backoff, [`crate::helper_first::ReadyGate`]).
+pub const LIVE_WAIT: Duration = Duration::from_secs(2);
+
+impl Wait {
+    fn max(self) -> Option<Duration> {
+        match self {
+            Wait::Default => None,
+            Wait::Live => Some(LIVE_WAIT),
+        }
+    }
 }
 
 /// A boxed transport is a transport: the agent's `Shared.helper` is over `Box<dyn HelperTransport>`, so real-engine tests can
@@ -53,6 +84,9 @@ pub trait HelperTransport: Send + Sync {
 impl HelperTransport for Box<dyn HelperTransport> {
     fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
         (**self).call(request)
+    }
+    fn call_within(&self, request: HelperRequest, max: Option<Duration>) -> Result<HelperReply, TransportError> {
+        (**self).call_within(request, max)
     }
 }
 
@@ -97,8 +131,15 @@ impl<T: HelperTransport> HelperLink<T> {
     }
 
     fn call(&self, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
+        self.call_in(Wait::Default, kind, request)
+    }
+
+    fn call_in(&self, wait: Wait, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
         let started = self.clock.monotonic();
-        let out = self.transport.call(request);
+        let out = match wait.max() {
+            None => self.transport.call(request),
+            max => self.transport.call_within(request, max),
+        };
         let ms = self.clock.monotonic().saturating_sub(started).as_millis() as u64;
         match &out {
             Ok(_) => log::debug!(Request = kind, Ms = ms; "Helper call answered"),
@@ -124,10 +165,15 @@ impl<T: HelperTransport> HelperLink<T> {
     /// What Settings shows: `Info`, then the audit entries when it answered. `supported` is `Err(reason)` where the helper
     /// cannot exist (an AppImage, no polkit).
     pub fn status(&self, host: HelperHost, supported: Result<(), String>, our_version: &str) -> HelperStatus {
-        let probe = match self.call("info", HelperRequest::Info) {
+        self.status_in(Wait::Default, host, supported, our_version)
+    }
+
+    /// [`HelperLink::status`] whose calls wait as `wait` says (the readiness probe of the readers is live).
+    pub fn status_in(&self, wait: Wait, host: HelperHost, supported: Result<(), String>, our_version: &str) -> HelperStatus {
+        let probe = match self.call_in(wait, "info", HelperRequest::Info) {
             Ok(HelperReply::About(info, _)) => {
                 // The audit log is for the owner and administrators; a refusal just means an empty list.
-                let recent = match self.call("audit", HelperRequest::Audit(STATUS_AUDIT)) {
+                let recent = match self.call_in(wait, "audit", HelperRequest::Audit(STATUS_AUDIT)) {
                     Ok(HelperReply::Entries(e)) => e,
                     _ => Vec::new(),
                 };
@@ -191,14 +237,23 @@ impl<T: HelperTransport> HelperLink<T> {
     /// The firewall as the helper reads it (`pf` or `nft`), reduced to what this account may have.
     pub fn firewall(&self) -> Result<FirewallSource, PlatformError> {
         match self.call("firewall", HelperRequest::Firewall).map_err(to_platform)? {
-            HelperReply::Firewall(f) => Ok(f),
+            // The helper wrote `via` too (it is part of its wire type); the agent decides who read it.
+            HelperReply::Firewall(f) => Ok(f.with_via(ReadVia::Helper)),
             _ => Err(unexpected("Firewall")),
         }
     }
 
     /// One page of the process list, scoped to the caller by the helper.
     pub fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, PlatformError> {
-        match self.call("processes", HelperRequest::Processes(query)).map_err(to_platform)? {
+        self.processes_in(query, Wait::Default)
+    }
+
+    /// [`HelperLink::processes`] that waits as `wait` says.
+    pub fn processes_in(&self, query: ProcessQuery, wait: Wait) -> Result<ProcessPage, PlatformError> {
+        match self
+            .call_in(wait, "processes", HelperRequest::Processes(query))
+            .map_err(to_platform)?
+        {
             HelperReply::Processes(p) => Ok(p),
             _ => Err(unexpected("Processes")),
         }
@@ -206,7 +261,12 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// Per-program traffic counters (Windows), scoped to the caller.
     pub fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        match self.call("traffic", HelperRequest::Traffic).map_err(to_platform)? {
+        self.traffic_in(Wait::Default)
+    }
+
+    /// [`HelperLink::traffic`] that waits as `wait` says.
+    pub fn traffic_in(&self, wait: Wait) -> Result<Vec<TrafficCounter>, PlatformError> {
+        match self.call_in(wait, "traffic", HelperRequest::Traffic).map_err(to_platform)? {
             HelperReply::Counters(c) => Ok(c),
             _ => Err(unexpected("Traffic")),
         }
@@ -214,7 +274,15 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// Socket inode to owning program (Linux), scoped to the caller.
     pub fn socket_owners(&self) -> Result<SocketOwners, PlatformError> {
-        match self.call("socketOwners", HelperRequest::SocketOwners).map_err(to_platform)? {
+        self.socket_owners_in(Wait::Default)
+    }
+
+    /// [`HelperLink::socket_owners`] that waits as `wait` says.
+    pub fn socket_owners_in(&self, wait: Wait) -> Result<SocketOwners, PlatformError> {
+        match self
+            .call_in(wait, "socketOwners", HelperRequest::SocketOwners)
+            .map_err(to_platform)?
+        {
             HelperReply::SocketOwners(o) => Ok(o),
             _ => Err(unexpected("SocketOwners")),
         }
@@ -222,8 +290,13 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// The programs holding the file with this device and inode (Linux). The helper never opens the file.
     pub fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, PlatformError> {
+        self.file_holders_in(dev, ino, Wait::Default)
+    }
+
+    /// [`HelperLink::file_holders`] that waits as `wait` says.
+    pub fn file_holders_in(&self, dev: u64, ino: u64, wait: Wait) -> Result<FileHolders, PlatformError> {
         match self
-            .call("fileHolders", HelperRequest::FileHolders { dev, ino })
+            .call_in(wait, "fileHolders", HelperRequest::FileHolders { dev, ino })
             .map_err(to_platform)?
         {
             HelperReply::FileHolders(h) => Ok(h),
@@ -233,7 +306,15 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// Thermal, energy and fan readings.
     pub fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, PlatformError> {
-        match self.call("counters", HelperRequest::Counters(query)).map_err(to_platform)? {
+        self.counters_in(query, Wait::Default)
+    }
+
+    /// [`HelperLink::counters`] that waits as `wait` says.
+    pub fn counters_in(&self, query: CounterQuery, wait: Wait) -> Result<Vec<CounterAnswer>, PlatformError> {
+        match self
+            .call_in(wait, "counters", HelperRequest::Counters(query))
+            .map_err(to_platform)?
+        {
             HelperReply::CounterValues(v) => Ok(v),
             _ => Err(unexpected("Counters")),
         }
@@ -241,7 +322,12 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// Memory modules from the DMI table (Linux).
     pub fn memory(&self) -> Result<MemoryLayout, PlatformError> {
-        match self.call("memory", HelperRequest::MemoryModules).map_err(to_platform)? {
+        self.memory_in(Wait::Default)
+    }
+
+    /// [`HelperLink::memory`] that waits as `wait` says.
+    pub fn memory_in(&self, wait: Wait) -> Result<MemoryLayout, PlatformError> {
+        match self.call_in(wait, "memory", HelperRequest::MemoryModules).map_err(to_platform)? {
             HelperReply::Memory(m) => Ok(m),
             _ => Err(unexpected("MemoryModules")),
         }
@@ -249,7 +335,12 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// Wake requests or Windows Backup versions.
     pub fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError> {
-        match self.call("extras", HelperRequest::Extras(kind)).map_err(to_platform)? {
+        self.extras_in(kind, Wait::Default)
+    }
+
+    /// [`HelperLink::extras`] that waits as `wait` says.
+    pub fn extras_in(&self, kind: ExtrasKind, wait: Wait) -> Result<ExtrasAnswer, PlatformError> {
+        match self.call_in(wait, "extras", HelperRequest::Extras(kind)).map_err(to_platform)? {
             HelperReply::Extras(e) => Ok(e),
             _ => Err(unexpected("Extras")),
         }
@@ -257,7 +348,12 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// The login items of the caller's account plus system-wide ones (macOS).
     pub fn login_items_now(&self) -> Result<LoginItemsReply, PlatformError> {
-        match self.call("loginItems", HelperRequest::LoginItems).map_err(to_platform)? {
+        self.login_items_now_in(Wait::Default)
+    }
+
+    /// [`HelperLink::login_items_now`] that waits as `wait` says.
+    pub fn login_items_now_in(&self, wait: Wait) -> Result<LoginItemsReply, PlatformError> {
+        match self.call_in(wait, "loginItems", HelperRequest::LoginItems).map_err(to_platform)? {
             HelperReply::LoginItems(r) => Ok(r),
             _ => Err(unexpected("LoginItems")),
         }
@@ -265,7 +361,12 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// SMART health of the disks the helper's own scan finds.
     pub fn smart(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
-        match self.call("smart", HelperRequest::Smart(query)).map_err(to_platform)? {
+        self.smart_in(query, Wait::Default)
+    }
+
+    /// [`HelperLink::smart`] that waits as `wait` says.
+    pub fn smart_in(&self, query: SmartQuery, wait: Wait) -> Result<SmartReply, PlatformError> {
+        match self.call_in(wait, "smart", HelperRequest::Smart(query)).map_err(to_platform)? {
             HelperReply::Smart(s) => Ok(s),
             _ => Err(unexpected("Smart")),
         }
@@ -325,6 +426,7 @@ mod tests {
     use dyno_core::firewall::RuleSource;
     use dyno_core::helper_policy::Visibility;
     use dyno_core::helper_wire::{codes, CallerView, HelperInfo, HELPER_API, MIN_HELPER_VERSION};
+    use dyno_core::read_via::ReadVia;
     use paddock_jobs::time::FakeClock;
     use std::sync::Mutex;
 
@@ -332,10 +434,15 @@ mod tests {
     struct Script {
         answers: Mutex<Vec<Result<HelperReply, TransportError>>>,
         seen: Mutex<Vec<HelperRequest>>,
+        waits: Mutex<Vec<Option<std::time::Duration>>>,
     }
     impl HelperTransport for Script {
         fn call(&self, request: HelperRequest) -> Result<HelperReply, TransportError> {
+            self.call_within(request, None)
+        }
+        fn call_within(&self, request: HelperRequest, max: Option<std::time::Duration>) -> Result<HelperReply, TransportError> {
             self.seen.lock().unwrap().push(request);
+            self.waits.lock().unwrap().push(max);
             self.answers.lock().unwrap().remove(0)
         }
     }
@@ -345,6 +452,7 @@ mod tests {
             Script {
                 answers: Mutex::new(answers),
                 seen: Mutex::new(Vec::new()),
+                waits: Mutex::new(Vec::new()),
             },
             Arc::new(FakeClock::new()),
         )
@@ -456,7 +564,7 @@ mod tests {
             })),
             Ok(HelperReply::Bye),
         ]);
-        assert_eq!(l.firewall().unwrap(), src);
+        assert_eq!(l.firewall().unwrap(), src.clone().with_via(ReadVia::Helper));
         assert_eq!(
             l.install_tool(ToolKind::Smartmontools, vec![9, 9]).unwrap().installed.as_deref(),
             Some("7.5")
@@ -474,6 +582,24 @@ mod tests {
                 HelperRequest::Uninstall
             ]
         );
+    }
+
+    #[test]
+    fn whatever_the_helper_wrote_in_via_the_agent_says_helper() {
+        // `FirewallSource.via` travels on the helper wire (HELPER_API 5), so the helper could send anything; the agent decides.
+        let lie = FirewallSource::new(RuleSource::Pf).with_via(ReadVia::unavailable("made up"));
+        let l = link(vec![Ok(HelperReply::Firewall(lie))]);
+        assert_eq!(l.firewall().unwrap().via, ReadVia::Helper);
+    }
+
+    #[test]
+    fn a_wait_is_passed_to_the_transport_and_a_plain_call_has_none() {
+        let l = link(vec![Ok(HelperReply::Memory(dyno_core::inventory::MemoryLayout::TotalOnly {
+            total: 1,
+            reason: dyno_core::inventory::Unavailable::failed("x"),
+        }))]);
+        l.memory_in(Wait::Live).unwrap();
+        assert_eq!(*l.transport.waits.lock().unwrap(), [Some(LIVE_WAIT)]);
     }
 
     #[test]

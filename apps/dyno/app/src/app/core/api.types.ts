@@ -197,7 +197,7 @@ export interface ProcessDetails {
 export type NextStep = 'retry' | 'updateHelper' | 'updateApp' | 'showLog' | { openSettings: string } | { none: { why: string } };
 
 /** Who read a reading (the engine's `ReadVia`): the helper, this computer with the person's rights, or nobody, with the reason. */
-export type ReadVia = 'helper' | 'local' | { needsHelper: { reason: string; next: NextStep } } | { unavailable: { reason: string } };
+export type ReadVia = 'helper' | 'local' | { needsHelper: { reason: string; next: NextStep } } | { unavailable: { reason: string; next: NextStep | null } };
 
 /** Where the parts of one live push came from. */
 export interface LiveVia {

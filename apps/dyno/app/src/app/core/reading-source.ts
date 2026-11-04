@@ -10,7 +10,7 @@ export type SourceView =
   | { kind: 'none' }
   | { kind: 'helper'; text: string }
   | { kind: 'hint'; text: string }
-  | { kind: 'needsHelper'; reason: string; settings: boolean }
+  | { kind: 'needsHelper'; reason: string; step: 'turnOn' | 'update' | null }
   | { kind: 'unavailable'; reason: string };
 
 /** The chip's words for a reading the helper read. */
@@ -18,9 +18,13 @@ export const HELPER_CHIP = 'Read by the administrator helper';
 /** The button's words (verb plus object) for a reading that needs the helper. */
 export const TURN_ON_LABEL = 'Turn on administrator readings';
 
-/** Whether `next` leads to Settings > Helper. */
-function opensHelperSettings(next: NextStep): boolean {
-  return typeof next === 'object' && 'openSettings' in next && next.openSettings === 'helper';
+/** The button's words for a reading whose helper is older than this Dyno accepts. */
+export const UPDATE_LABEL = 'Update the helper';
+
+/** What the button does for `next`: turn the helper on, update it (both in Settings > Helper), or nothing. */
+function stepOf(next: NextStep): 'turnOn' | 'update' | null {
+  if (next === 'updateHelper') return 'update';
+  return typeof next === 'object' && 'openSettings' in next && next.openSettings === 'helper' ? 'turnOn' : null;
 }
 
 /**
@@ -30,7 +34,7 @@ function opensHelperSettings(next: NextStep): boolean {
 export function sourceView(via: ReadVia | null | undefined, hint = ''): SourceView {
   if (via === null || via === undefined || via === 'local') return hint ? { kind: 'hint', text: hint } : { kind: 'none' };
   if (via === 'helper') return { kind: 'helper', text: HELPER_CHIP };
-  if ('needsHelper' in via) return { kind: 'needsHelper', reason: via.needsHelper.reason, settings: opensHelperSettings(via.needsHelper.next) };
+  if ('needsHelper' in via) return { kind: 'needsHelper', reason: via.needsHelper.reason, step: stepOf(via.needsHelper.next) };
   return { kind: 'unavailable', reason: via.unavailable.reason };
 }
 
@@ -49,7 +53,7 @@ export function sourceView(via: ReadVia | null | undefined, hint = ''): SourceVi
       @case ('hint') { <p class="note" data-testid="reading-source-hint">{{ text() }}</p> }
       @case ('needsHelper') {
         <p class="note" data-testid="reading-source-needs">{{ text() }}</p>
-        @if (settings()) { <button type="button" matButton="outlined" (click)="openSettings()" data-testid="reading-source-turn-on">{{ label }}</button> }
+        @if (step(); as s) { <button type="button" matButton="outlined" (click)="openSettings()" data-testid="reading-source-turn-on">{{ s === 'update' ? updateLabel : label }}</button> }
       }
       @case ('unavailable') { <p class="note" data-testid="reading-source-unavailable">{{ text() }}</p> }
     }
@@ -68,17 +72,18 @@ export class ReadingSource {
 
   private readonly dialogs = inject(DialogService);
   protected readonly label = TURN_ON_LABEL;
+  protected readonly updateLabel = UPDATE_LABEL;
   protected readonly view = computed(() => sourceView(this.via(), this.hint()));
   protected readonly text = computed(() => {
     const v = this.view();
     return v.kind === 'helper' || v.kind === 'hint' ? v.text : v.kind === 'needsHelper' || v.kind === 'unavailable' ? v.reason : '';
   });
-  protected readonly settings = computed(() => {
+  protected readonly step = computed(() => {
     const v = this.view();
-    return v.kind === 'needsHelper' && v.settings;
+    return v.kind === 'needsHelper' ? v.step : null;
   });
 
-  /** Opens Settings at the Administrator readings card, where the helper is turned on. */
+  /** Opens Settings at the Administrator readings card, where the helper is turned on or updated. */
   protected openSettings(): void {
     void this.dialogs.open(SETTINGS_DIALOG_ID, { inputs: { page: SETTINGS_PAGE_ID, anchor: { id: 'helper', at: Date.now() } } });
   }

@@ -2,9 +2,9 @@ import { TestBed } from '@angular/core/testing';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { SETTINGS_DIALOG_ID } from '@decryp7/paddock-ui/shell/settings';
 import type { ReadVia } from './api.types';
-import { HELPER_CHIP, ReadingSource, TURN_ON_LABEL, sourceView } from './reading-source';
+import { HELPER_CHIP, ReadingSource, TURN_ON_LABEL, UPDATE_LABEL, sourceView } from './reading-source';
 
-const NEEDS: ReadVia = { needsHelper: { reason: "Other accounts' processes are not readable. Turn on Administrator readings in Settings so the helper can read this.", next: { openSettings: 'helper' } } };
+const NEEDS: ReadVia = { needsHelper: { reason: "Other accounts' processes are not readable.", next: { openSettings: 'helper' } } };
 
 function render(via: ReadVia | undefined, hint = '') {
   const open = vi.fn().mockResolvedValue(undefined);
@@ -28,10 +28,11 @@ describe('sourceView', () => {
 
   it('names the helper, and gives a needs-helper reason a Settings step only for Settings > Helper', () => {
     expect(sourceView('helper')).toEqual({ kind: 'helper', text: HELPER_CHIP });
-    expect(sourceView(NEEDS)).toMatchObject({ kind: 'needsHelper', settings: true });
-    expect(sourceView({ needsHelper: { reason: 'x', next: 'retry' } })).toMatchObject({ kind: 'needsHelper', settings: false });
-    expect(sourceView({ needsHelper: { reason: 'x', next: { openSettings: 'general' } } })).toMatchObject({ settings: false });
-    expect(sourceView({ unavailable: { reason: 'No sensors.' } })).toEqual({ kind: 'unavailable', reason: 'No sensors.' });
+    expect(sourceView(NEEDS)).toMatchObject({ kind: 'needsHelper', step: 'turnOn' });
+    expect(sourceView({ needsHelper: { reason: 'x', next: 'retry' } })).toMatchObject({ kind: 'needsHelper', step: null });
+    expect(sourceView({ needsHelper: { reason: 'x', next: { openSettings: 'general' } } })).toMatchObject({ step: null });
+    expect(sourceView({ needsHelper: { reason: 'x', next: 'updateHelper' } })).toMatchObject({ step: 'update' });
+    expect(sourceView({ unavailable: { reason: 'No sensors.', next: null } })).toEqual({ kind: 'unavailable', reason: 'No sensors.' });
   });
 });
 
@@ -48,15 +49,23 @@ describe('dy-reading-source', () => {
 
   it('shows the reason and a verb-plus-object button that opens Settings at the helper card', () => {
     const { el, open } = render(NEEDS);
-    expect(q(el, 'reading-source-needs')?.textContent).toContain('Turn on Administrator readings in Settings');
+    expect(q(el, 'reading-source-needs')?.textContent).toContain('not readable');
     const button = q(el, 'reading-source-turn-on') as HTMLButtonElement;
     expect(button.textContent?.trim()).toBe(TURN_ON_LABEL);
     button.click();
     expect(open).toHaveBeenCalledWith(SETTINGS_DIALOG_ID, { inputs: { page: 'dy.general', anchor: { id: 'helper', at: expect.any(Number) } } });
   });
 
+  it('offers to update an outdated helper in the same place', () => {
+    const { el, open } = render({ needsHelper: { reason: 'The helper is older than this Dyno accepts.', next: 'updateHelper' } });
+    const button = q(el, 'reading-source-turn-on') as HTMLButtonElement;
+    expect(button.textContent?.trim()).toBe(UPDATE_LABEL);
+    button.click();
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
   it('shows only the reason, no button, when neither path can read it', () => {
-    const { el } = render({ unavailable: { reason: 'This virtual machine has no sensors.' } });
+    const { el } = render({ unavailable: { reason: 'This virtual machine has no sensors.', next: null } });
     expect(q(el, 'reading-source-unavailable')?.textContent).toContain('no sensors');
     expect(el.querySelector('button')).toBeNull();
   });

@@ -2,8 +2,8 @@
 //! job with phases (ER-17/18/19). The OS prompt and the install are behind [`HelperInstaller`]; the helper's answers behind the
 //! [`HelperLink`]; waiting behind a pause, so tests drive all of it with fakes and never touch the machine (ER-14).
 
-use crate::helper_first::{ReadyGate, READY_TTL};
-use crate::helper_link::{HelperLink, HelperTransport};
+use crate::helper_first::{Availability, ReadyGate};
+use crate::helper_link::{HelperLink, HelperTransport, Wait};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_wire::{HelperAction, HelperState, HelperStatus};
 use paddock_jobs::{JobContext, JobError, Phase};
@@ -49,7 +49,7 @@ impl<T: HelperTransport> HelperCentre<T> {
         installer: Box<dyn HelperInstaller>,
     ) -> Self {
         HelperCentre {
-            gate: ReadyGate::new(link.clock(), READY_TTL),
+            gate: ReadyGate::new(link.clock()),
             link: Arc::new(link),
             host,
             supported,
@@ -80,21 +80,37 @@ impl<T: HelperTransport> HelperCentre<T> {
         self.link.clone()
     }
 
-    /// Whether the helper is ready, as a reader that runs every tick may ask: `status()` costs two IPC calls, so the answer is
-    /// kept for 5 s and dropped at once when a call finds the helper unreachable or a job changes it.
-    pub fn ready(&self) -> bool {
-        self.gate
-            .is_ready(|| self.link.faults(), || self.status().state == HelperState::Ready)
+    /// How the helper stands, as a reader that runs every tick may ask: `status()` costs two IPC calls, so the answer is kept for
+    /// 5 s (longer while the helper hangs), asked with a short deadline, and dropped at once when a call finds the helper
+    /// unreachable or a job changes it.
+    pub fn availability(&self) -> Availability {
+        self.gate.availability(
+            || self.link.faults(),
+            || Availability::from_status(&self.link.status_in(Wait::Live, self.host, self.supported.clone(), &self.version)),
+        )
     }
 
-    /// Drops the kept readiness answer (the helper was turned on, off, repaired or updated).
+    /// Whether the helper is ready ([`HelperCentre::availability`]).
+    pub fn ready(&self) -> bool {
+        self.availability().is_ready()
+    }
+
+    /// Moves whenever readiness flips or a job changes the helper: what is kept from a helper reading is read again then.
+    pub fn epoch(&self) -> u64 {
+        self.gate.epoch()
+    }
+
+    /// Drops the kept answer (the helper was turned on, off, repaired or updated) and moves the epoch.
     pub fn forget_ready(&self) {
         self.gate.forget();
     }
 
     /// What Settings shows.
     pub fn status(&self) -> HelperStatus {
-        self.link.status(self.host, self.supported.clone(), &self.version)
+        let status = self.link.status(self.host, self.supported.clone(), &self.version);
+        // The readers learn what Settings just learned.
+        self.gate.record(Availability::from_status(&status), self.link.faults());
+        status
     }
 
     /// Runs `action` as the body of a job. Each phase says what is happening; Cancel works until the prompt is open, and the
@@ -393,6 +409,14 @@ mod tests {
             (HelperState::Off, 1),
             "the bundled copy removes the installed one"
         );
+    }
+
+    #[test]
+    fn running_a_job_moves_the_epoch_so_cached_readings_are_read_again() {
+        let (c, _, _) = centre(true, 0, Ok(()));
+        let before = c.epoch();
+        Run::new().job(|ctx| c.run(ctx, HelperAction::TurnOn)).unwrap();
+        assert_ne!(c.epoch(), before);
     }
 
     #[test]
