@@ -47,6 +47,7 @@ impl Caller {
     fn ctx(self, request: &HelperRequest) -> Ctx {
         let standing = self.standing();
         let mut ctx = Ctx::anonymous(Some(4242));
+        ctx.account = Some(owner());
         ctx.access = access(request.kind(), standing);
         ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
         ctx
@@ -61,6 +62,8 @@ pub struct Readers {
     pub traffic: Vec<TrafficCounter>,
     /// The SMART reply.
     pub smart: SmartReply,
+    /// The machine's processes as the OS reads them (the helper scopes them to the caller).
+    pub processes: Vec<dyno_core::helper_processes::RawProcess>,
 }
 
 impl Default for Readers {
@@ -76,6 +79,7 @@ impl Default for Readers {
                 skipped: vec![],
                 not_visited: 0,
             },
+            processes: Vec::new(),
         }
     }
 }
@@ -108,6 +112,16 @@ impl SmartReader for Smart {
         Ok(self.0.clone())
     }
 }
+struct Sweeps(Vec<dyno_core::helper_processes::RawProcess>);
+impl dyno_core::helper_processes::ProcessSweeper for Sweeps {
+    fn sweep(&self) -> Result<dyno_core::helper_processes::Sweep, PlatformError> {
+        Ok(dyno_core::helper_processes::Sweep {
+            processes: self.0.clone(),
+            homes: Vec::new(),
+            taken_at: 1_000,
+        })
+    }
+}
 struct Tools;
 impl ToolInstaller for Tools {
     fn install(&self, tool: ToolKind, _: &[u8]) -> Result<ToolStatus, PlatformError> {
@@ -138,7 +152,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         extras: Box::new(dyno_core::helper_extras::NoExtras),
         counters: Box::new(dyno_core::helper_counters::NoCounters),
         memory: Box::new(Memory(readers.memory)),
-        processes: Box::new(dyno_core::helper_processes::NoProcesses),
+        processes: Box::new(Sweeps(readers.processes)),
         smart: Box::new(Smart(readers.smart)),
         tools: Box::new(Tools),
         wakes: Box::new(dyno_core::wake::NoWakes),
