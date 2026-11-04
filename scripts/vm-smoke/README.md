@@ -96,6 +96,13 @@ or the app's own text, never a screenshot.
 The start check also accepts launchd as the agent's parent when launchd itself reports the job `net.decryptology.dyno.agent.ondemand` with that
 pid (`parentJob` in `apps/dyno/vm-smoke.json`, Dyno ADR 0026), and requires the job to be gone after Quit.
 
+The restart check (`--suite helper --reboot-check`) records, pass or fail, what names a missing menu-bar item's cause: the shown test per
+autosave name (an on-screen Control Center window with that title and a size; on macOS 26 ControlCenter hosts the status items), the app's
+`start signal:` line and every `tray check` line, ControlCenter's pid and start time and its log about Dyno (with any "blocked list" or
+visibility-0 line). `VM_SMOKE_LOGIN_SWITCH=leave` keeps "Start Dyno at login" as the app set it at its first start instead of switching it on in
+the session (default `press`), to compare the two. On Windows, Dyno's tray icons are explorer-owned buttons named after the metrics the app log
+says it created (`win-tray-icons.mjs`); a button of Dyno's own window is never one, and step 5 checks that with Dyno's window open.
+
 The macOS "Allow dyno-agent to find devices on local networks?" prompt (UserNotificationCenter) appears after the first Wake-on-LAN; the suite
 answers Allow and screenshots it. Parsers and steps are tested against fake guests (`node --test scripts/vm-smoke/*.test.mjs`).
 
