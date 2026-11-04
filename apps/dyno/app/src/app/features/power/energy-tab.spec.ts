@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
+import type { EnergyReport, ReadVia } from '../../core/api.types';
 import { provideIcons } from '../../shared/icons';
 import { EnergyTab } from './energy-tab';
 
@@ -58,6 +59,27 @@ describe('dy-energy-tab', () => {
     const last = el.querySelector('tbody tr:last-child th')?.textContent;
     expect(new Date(NOW).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })).toBe(first);
     expect(first).not.toBe(last);
+  });
+
+  const measured = (patch: Partial<EnergyReport>) => async (m: MockBackend) => {
+    const real = m.energyReport.bind(m);
+    vi.spyOn(m, 'energyReport').mockImplementation(async (days) => ({ ...(await real(days)), ...patch }));
+  };
+
+  it('shows the CPU energy the helper measured beside the estimate, with who read it', async () => {
+    const base = (await new MockBackend({ now: () => NOW }).energyReport(7)).totals;
+    const { el } = await render(measured({ totals: { ...base, cpuKwh: 2.5 }, cpuVia: 'helper' }));
+    expect(el.querySelector('[data-testid="cpu-energy"]')?.textContent).toContain('2.50 kWh');
+    expect(el.querySelector('[data-testid="reading-source-helper"]')).not.toBeNull();
+    expect(el.textContent).not.toContain('arrive with the helper');
+  });
+
+  it('shows the helper reason and the button when the CPU energy cannot be measured', async () => {
+    const via: ReadVia = { needsHelper: { reason: 'CPU energy is read by the helper. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } };
+    const { el } = await render(measured({ cpuVia: via }));
+    expect(el.querySelector('[data-testid="cpu-energy"]')).toBeNull();
+    expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('CPU energy is read by the helper');
+    expect(el.querySelector('[data-testid="reading-source-turn-on"]')).not.toBeNull();
   });
 
   it('opens the power settings from the page', async () => {

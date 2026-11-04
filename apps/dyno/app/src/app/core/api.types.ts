@@ -2601,6 +2601,8 @@ export interface EnergyDay {
   kwh: number | null;
   cost: number | null;
   co2Kg: number | null;
+  /** CPU energy the helper measured (the processor's alone, not the machine's); null when nothing was measured. */
+  cpuKwh: number | null;
 }
 
 /** The energy report: the person's own watts times the time Dyno saw, labelled as an estimate. */
@@ -2612,6 +2614,8 @@ export interface EnergyReport {
   sleepEnergyCounted: boolean;
   currency: string | null;
   trackingSince: Timestamp | null;
+  /** Who measured the CPU energy: `local` where this computer is not asked, so nothing shows. */
+  cpuVia: ReadVia;
 }
 
 // ------------------------------------------------------------------------------------------ Wake-on-LAN (ADR 0032 section 3)

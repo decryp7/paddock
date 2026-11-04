@@ -15,6 +15,7 @@ import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
 import type { Cells, DashboardKind, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
+import { ReadingSource } from '../../core/reading-source';
 import { AnimatedNumber } from './animated-number';
 import { HealthHero } from '../dashboard/health-hero';
 import { CpuTile } from '../dashboard/tiles';
@@ -78,7 +79,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
  */
 @Component({
   selector: 'dy-widget',
-  imports: [FullTextTip, MatTooltip, PdSkeleton, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, ReadingSource, PdSkeleton, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.data-kind]': 'kind()', '[style.--wv-rows]': 'rows()' },
   template: `
@@ -95,6 +96,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
         @if (reading().reason; as why) {
           <p class="note"><span>Not available. {{ why }}</span></p>
         }
+        @if (thermal()) { <dy-reading-source [via]="thermalVia()" /> }
       }
       @case ('graph') {
         <div class="hero" [attr.data-tone]="reading().tone"><b><dy-animated-number [value]="reading().text" /></b><small>{{ reading().unit }}</small></div>
@@ -263,6 +265,9 @@ export class WidgetView {
     const values = this.counters.trail()[path] ?? [];
     return values.length > 1 ? { values, values2: null } : null;
   });
+  /** Whether the widget shows a thermal reading, whose source (the helper, or why nobody could read it) the engine reports with each update. */
+  protected readonly thermal = computed(() => this.widget().metric === 'temperature');
+  protected readonly thermalVia = computed(() => this.live.update()?.via?.temperatures);
   protected readonly cores = computed(() => this.live.system()?.cpu.perCore ?? []);
   protected readonly busiest = computed(() => Math.max(0, ...this.cores()));
   protected readonly top = computed(() => {

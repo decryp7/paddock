@@ -87,8 +87,8 @@ describe('the power wire contract with the engine', () => {
   it('the energy reports have the keys the page reads, and unset numbers are null', () => {
     const notSet = wire.energy.notSet as unknown as EnergyReport;
     const priced = wire.energy.priced as unknown as EnergyReport;
-    const keys = ['currency', 'days', 'enabled', 'sleepEnergyCounted', 'source', 'totals', 'trackingSince'];
-    const day = ['co2Kg', 'cost', 'dayStart', 'kwh', 'onSecs', 'sleepSecs', 'unknownSecs'].map((k) => `totals.${k}`);
+    const keys = ['cpuVia', 'currency', 'days', 'enabled', 'sleepEnergyCounted', 'source', 'totals', 'trackingSince'];
+    const day = ['co2Kg', 'cost', 'cpuKwh', 'dayStart', 'kwh', 'onSecs', 'sleepSecs', 'unknownSecs'].map((k) => `totals.${k}`);
     expect(shape(notSet)).toEqual([...keys, ...day].sort());
     expect(notSet.source).toBe('notSet');
     expect(notSet.totals.kwh).toBeNull();

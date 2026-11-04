@@ -232,8 +232,11 @@ impl Sampler {
             processes: Some(listed),
             groups: Some(listed_groups),
             other_users,
-            // The process list and temperatures are read here today; WP-PROC and WP-CNT set where they came from.
-            via: dyno_core::read_via::LiveVia::default(),
+            // The process list is read here today (WP-PROC sets where it came from); the temperatures say who read them (WP-CNT).
+            via: dyno_core::read_via::LiveVia {
+                temperatures: shared.climate.live_via(),
+                ..dyno_core::read_via::LiveVia::default()
+            },
         };
         core.latest.live = Some(live.clone());
         drop_pressure_unused(pressure);

@@ -11,7 +11,7 @@ use dyno_core::alerts::Alerts;
 use dyno_core::facts::SystemFacts;
 use dyno_core::grouping::AppGroup;
 use dyno_core::metrics::SystemSample;
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, UserActivity};
+use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message};
 use dyno_core::settings::Settings;
@@ -300,6 +300,8 @@ pub struct Shared {
     pub helper: Arc<crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>>,
     /// The memory layout: the helper first, then this computer (the seam's second instance, plan section 8.3).
     pub memory: Mutex<crate::helper_first::HelperFirst<crate::helper_readers::memory::MemoryModules>>,
+    /// Temperatures, fans and CPU energy from the helper (macOS; plan section 2.7).
+    pub climate: Arc<crate::helper_readers::counters::HelperClimate>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -479,6 +481,9 @@ impl Shared {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
+        let saved_cpu_energy = crate::helper_readers::counters::parse_saved(
+            core.store.meta(crate::helper_readers::counters::META_KEY).ok().flatten().as_deref(),
+        );
         let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
@@ -579,6 +584,11 @@ impl Shared {
                 crate::helper_readers::memory::MemoryModules::new(host, local_memory),
                 port(me),
             )),
+            climate: Arc::new(crate::helper_readers::counters::HelperClimate::new(
+                port(me),
+                helper_first && host == dyno_core::helper::HelperHost::Macos,
+                saved_cpu_energy,
+            )),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
@@ -589,6 +599,11 @@ impl Shared {
         shared.counters.attach_cache(saved_maps);
         shared.disk.apply_saved_maps(saved_maps_settings);
         shared.bench.attach(Arc::new(AgentBenchEnv(Arc::downgrade(&shared))));
+        let sensors: Box<dyn SystemSensors> = if shared.climate.active() {
+            Box::new(crate::helper_readers::counters::HelperSensors::new(sensors, shared.climate.clone()))
+        } else {
+            sensors
+        };
         Ok((shared, sensors, processes))
     }
 
