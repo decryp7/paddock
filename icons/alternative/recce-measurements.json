@@ -1,0 +1,154 @@
+{
+  "tile": {
+    "top": "#6AD6AF",
+    "base": "#53C09A",
+    "bottom": "#3CAC87",
+    "deep": "#00432C",
+    "light": "#B2EDD5"
+  },
+  "ink": "#002D1E",
+  "options": {
+    "lens": {
+      "label": "A: magnifier on the stage map",
+      "weight": {
+        "width": 0.914,
+        "height": 0.589,
+        "weight": 0.733,
+        "area": 0.29
+      },
+      "weightSimple128": {
+        "width": 0.914,
+        "height": 0.589,
+        "weight": 0.733,
+        "area": 0.288
+      },
+      "coverage16": 19,
+      "coverage24": 20,
+      "glyphKind": "line",
+      "trayCoverage": 19
+    },
+    "pin": {
+      "label": "B: map pin on the stage finish",
+      "weight": {
+        "width": 0.886,
+        "height": 0.665,
+        "weight": 0.768,
+        "area": 0.277
+      },
+      "weightSimple128": {
+        "width": 0.886,
+        "height": 0.665,
+        "weight": 0.768,
+        "area": 0.274
+      },
+      "coverage16": 24,
+      "coverage24": 26,
+      "glyphKind": "filled",
+      "trayCoverage": 27
+    }
+  },
+  "reference": {
+    "paddock": {
+      "width": 0.763,
+      "height": 0.718,
+      "weight": 0.741,
+      "area": 0.301
+    },
+    "spotter": {
+      "width": 0.874,
+      "height": 0.68,
+      "weight": 0.771,
+      "area": 0.329
+    },
+    "sighter": {
+      "width": 0.688,
+      "height": 0.808,
+      "weight": 0.746,
+      "area": 0.328
+    },
+    "pacenotes": {
+      "width": 0.79,
+      "height": 0.695,
+      "weight": 0.741,
+      "area": 0.299
+    }
+  },
+  "cvd": {
+    "familyMinimums": {
+      "normal": 17.7,
+      "protan": 11.6,
+      "deutan": 13.6,
+      "tritan": 10.7
+    },
+    "nearestAll": {
+      "normal": [
+        17.9,
+        "shell-demo"
+      ],
+      "protan": [
+        11.3,
+        "shell-demo"
+      ],
+      "deutan": [
+        13.1,
+        "pitcrew"
+      ],
+      "tritan": [
+        15.2,
+        "sighter"
+      ]
+    },
+    "nearestApps": {
+      "normal": [
+        20.6,
+        "spotter"
+      ],
+      "protan": [
+        12,
+        "spotter"
+      ],
+      "deutan": [
+        13.1,
+        "pitcrew"
+      ],
+      "tritan": [
+        15.2,
+        "sighter"
+      ]
+    },
+    "familyWithRecce": {
+      "normal": {
+        "minDeltaE": 17.7,
+        "closest": "debrief~pitwall"
+      },
+      "protan": {
+        "minDeltaE": 11.6,
+        "closest": "pitwall~dyno"
+      },
+      "deutan": {
+        "minDeltaE": 13.1,
+        "closest": "sighter~recce"
+      },
+      "tritan": {
+        "minDeltaE": 10.7,
+        "closest": "pitcrew~dyno"
+      }
+    }
+  },
+  "contrast": {
+    "flatInkOnBase": 6.72,
+    "flatInkOnTop": 8.5,
+    "mapLitPanelOnBase": 3.54,
+    "mapShadePanelOnBase": 5.57,
+    "gunmetalLitOnBase": 2.06,
+    "gunmetalTopOnBase": 3.15,
+    "routeOnLitPanel": 4.47
+  },
+  "faceSteps": {
+    "tileL": 73.4,
+    "litPanelL": 42.8,
+    "shadePanelL": 31.8,
+    "step": 11,
+    "frontEdgeL": 21.5
+  }
+}

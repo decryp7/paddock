@@ -28,8 +28,27 @@ concept) is kept for reference in `archive/2026-10-flat/`; the sections below on
 | Sighter | Approved (2026-10-23) |
 | Pacenotes | Approved (2026-10-23) |
 | Paddock (umbrella mark) | Reviewed (2026-10-24) |
+| Recce (planned app) | Two options (2026-11-04), awaiting independent review and the user's pick; see below |
 | Paddock Shell Demo (a demo app, not a family member) | New (2026-10-24), awaiting independent review |
 | Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a near-black tile (`#050505`) with its own silhouette (activity-bar dots, a split dock with tabs on the top pane), white ink; family CVD minimums unchanged (review 3 P2-6) |
+
+## Recce options (2026-11-04, awaiting the user's pick)
+
+Recce (planned: PC-wide search) gets a light jade tile `#53C09A` with dark ink `#002D1E` (6.7:1), like Spotter and Sighter. Its object
+is a stage map folded in three, in dark ink with the stage route in jade (the accent); two options in `tools/recce-art.mjs`:
+**A** a magnifier resting on the map's ridges, its lens enlarging the route (flat glyph: the magnifier), and **B** a map pin standing
+on the stage's finish (flat glyph: the pin over the folded map). `node tools/recce-options.mjs` builds each option's full set into
+`alternative/recce-lens/` and `alternative/recce-pin/` (masters, 128 and 60, flat 16 to 40, isometric 32 to 64, `icon.ico`,
+`icon.icns`, trays idle and busy), the sheets `alternative/recce-options-sheet.png` and `alternative/recce-family-sheet.png`, and
+`alternative/recce-measurements.json`. The options are registered under runtime aliases only, so `APPS`, `iso-family.mjs`, the build
+and the tests are unchanged until one is picked.
+
+- **Tile CVD:** no colour keeps all four family minimums against every tile (an OKLCH grid search; best score 0.963 of the minimums).
+  The chosen jade's nearest: normal 17.9, protan 11.3 (the shell demo; 12.0 against the apps), deutan 13.1 (Pitcrew, Sighter),
+  tritan 15.2. Deutan is 0.5 under 13.6; the user decides whether that is accepted (the earlier jade `#4AC59D` study above fell to
+  10.2 protan against the shell demo).
+- **Gunmetal:** the dark-ink ladder's satin metal (L 40 to 72) sits at the tile's lightness, so the ring and the pin head use a darker
+  ramp (L 22 to 56).
 
 ## Demo apps
 

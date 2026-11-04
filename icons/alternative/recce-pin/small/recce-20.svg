@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16">
+  <title>Recce 16px</title>
+  <defs>
+    <linearGradient id="rc-pin-fl20-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6AD6AF"/><stop offset="1" stop-color="#3CAC87"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#rc-pin-fl20-bg)"/>
+  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#00432C" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(0.8)"><defs><mask id="rc-pin-fl20-am" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20"><rect width="20" height="20" fill="#000"/><path d="M2 14L8 16L8 19L2 18Z" fill="#fff"/><path d="M9 16L13 14L13 18L9 19Z" fill="#fff"/><path d="M14 14L18 16L18 19L14 18Z" fill="#fff"/><path d="M10 16.65L5.43 8.59A5.25 5.25 0 1 1 14.57 8.59Z" fill="#000"/><path d="M10 15.25L6.23 7.95A4.25 4.25 0 1 1 13.77 7.95Z" fill="#fff"/><path d="M8.19 6a1.81 1.81 0 1 0 3.63 0a1.81 1.81 0 1 0 -3.63 0Z" fill="#000"/></mask></defs><g transform="translate(0 1)"><rect width="20" height="20" fill="#002D1E" mask="url(#rc-pin-fl20-am)"/></g></g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Recce 24px</title>
+  <defs>
+    <linearGradient id="rc-lens-fl24-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6AD6AF"/><stop offset="1" stop-color="#3CAC87"/></linearGradient>
+    
+  </defs>
+  <path d="M6.25 1H17.75A5.25 5.25 0 0 1 23 6.25V17.75A5.25 5.25 0 0 1 17.75 23H6.25A5.25 5.25 0 0 1 1 17.75V6.25A5.25 5.25 0 0 1 6.25 1Z" fill="url(#rc-lens-fl24-bg)"/>
+  <path d="M6.25 1.25H17.75A5 5 0 0 1 22.75 6.25V17.75A5 5 0 0 1 17.75 22.75H6.25A5 5 0 0 1 1.25 17.75V6.25A5 5 0 0 1 6.25 1.25Z" fill="none" stroke="#00432C" stroke-opacity="0.35" stroke-width="0.5"/>
+  
+<g transform="scale(1)"><defs><mask id="rc-lens-fl24-am" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24"><rect width="24" height="24" fill="#000"/><path d="M1.75 10a8.25 8.25 0 1 0 16.5 0a8.25 8.25 0 1 0 -16.5 0Z" fill="#fff"/><path d="M3.75 10a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z" fill="#000"/><path d="M10.8 10.8L14 14" transform="scale(1.5)" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><g transform="translate(2 2)"><rect width="24" height="24" fill="#002D1E" mask="url(#rc-lens-fl24-am)"/></g></g>
+</svg>

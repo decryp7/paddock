@@ -46,6 +46,7 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 | Spotter | In development |
 | Sighter | Planned |
 | Pacenotes (understands code in any language) | Planned |
+| Recce (searches the whole PC) | Planned |
 
 ## The apps
 
@@ -124,6 +125,16 @@ Status: **planned**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/bra
   then Tests and coverage.
 
 Status: **planned**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pacenotes>
+
+### Recce
+**Purpose.** One search box for the whole PC, "like Spotlight or X1 Search, but powerful": file names, document content, email and attachments, and SharePoint and OneDrive, by name or by meaning, with answers that cite their sources.
+**For.** Anyone who knows they have it somewhere: a document, a mail, a passage, and wants it found as they type.
+- **Works with the family:** Pitwall (optional) runs the local model for answers and re-ranking; Pacenotes shares the document readers; Debrief and Pacenotes share the embeddings crate.
+- A light launcher: apps, files, a calculator and actions from one hotkey.
+- Answers from a local model, each claim linked to its source; MCP for local AI tools later.
+- Stages: launcher and file name search; content and meaning search; email and SharePoint/OneDrive; answers with sources, MCP, plugins and workflows.
+
+Status: **planned**, after the releases ahead of it. Page: [docs/planned/recce](planned/recce/README.md); the draft plan is on the branch `docs/pc-search-app-plan`.
 
 ## Integration architecture
 

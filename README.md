@@ -16,7 +16,7 @@ anywhere.
 
 ## The apps
 
-All seven live in this repository under [`apps/`](apps/). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
+All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only its page so far. The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
 | App&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | What it does | Status |
 |---|---|---|
@@ -27,6 +27,7 @@ All seven live in this repository under [`apps/`](apps/). The old per-app reposi
 | <img src="icons/spotter/small/spotter-48.svg?v=cc97d9e4" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
+| **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (icon not chosen yet) |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 

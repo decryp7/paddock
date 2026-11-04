@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-2 -2 36 36">
+  <title>Recce tray (busy)</title>
+  <defs><mask id="rc-pin-tr-template-36-busy-g" maskUnits="userSpaceOnUse" x="-4" y="-4" width="40" height="40"><rect x="-4" y="-4" width="40" height="40" fill="#000"/><g transform="translate(0 1)"><path d="M3 23L11 26L11 31L3 29Z" fill="#fff"/><path d="M13 26L19 23L19 29L13 31Z" fill="#fff"/><path d="M21 23L29 26L29 31L21 29Z" fill="#fff"/><path d="M16 27.2L8.38 14A8.8 8.8 0 1 1 23.62 14Z" fill="#000"/><path d="M16 24.4L9.96 12.72A6.8 6.8 0 1 1 22.04 12.72Z" fill="#fff"/><path d="M13.1 9.6a2.9 2.9 0 1 0 5.8 0a2.9 2.9 0 1 0 -5.8 0Z" fill="#000"/></g><path d="M9.05 12.5a3.45 3.45 0 1 0 6.9 0a3.45 3.45 0 1 0 -6.9 0Z" transform="scale(2)" fill="#000"/><g transform="scale(2)"><path d="M10.1 12.5a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0Z" fill="none" stroke="#fff" stroke-width="1.1"/></g></mask></defs>
+  <rect x="-4" y="-4" width="40" height="40" fill="#000000" mask="url(#rc-pin-tr-template-36-busy-g)"/>
+</svg>

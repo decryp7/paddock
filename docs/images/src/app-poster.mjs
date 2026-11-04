@@ -1,6 +1,7 @@
 // Marketing art for every Paddock app, from one small data file per app (apps/<app>.mjs). Plain Node, no dependencies.
 //   node docs/images/src/app-poster.mjs <app|all> [--png]
 // Writes into the app's own checkout (sibling directory of paddock, or $PADDOCK_APPS/<app>):
+// (an app with `home` in its data file, a planned app with no folder under apps/ yet, writes into that folder of this repository instead)
 //   docs/images/<app>-hero.svg          1600x900, theme-aware, real screenshot in a window frame (a concept mock for planned apps,
 //                                       an illustration for apps with `illustrated: true` whose screenshots are out of date)
 //   docs/images/<app>-features.svg      four feature panels with zoomed screenshot crops, plus the "Works with" strip
@@ -22,6 +23,8 @@ import { MOCK_CSS } from './mocks.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const paddock = join(here, '../../..');
 const appsRoot = process.env.PADDOCK_APPS || join(paddock, '..');
+/** The app's own folder: `home` (relative to this repository) for a planned app that has no folder under apps/ yet, else apps/<id>. */
+const appHome = (d, id) => (d.home ? join(paddock, d.home) : join(appsRoot, id));
 const FONT = '-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif';
 
 // ---- data --------------------------------------------------------------------------------------------------------------
@@ -265,7 +268,7 @@ const dims = (svg) => { const m = svg.match(/<svg[^>]* width="(\d+)" height="(\d
 
 async function build(id, wantPng) {
   const d = await load(id);
-  const outDir = join(appsRoot, id, 'docs/images');
+  const outDir = join(appHome(d, id), 'docs/images');
   mkdirSync(outDir, { recursive: true });
   const S = shotsFor(d);
   const files = { hero: heroSvg(d, S), features: featuresSvg(d, S), 'how-it-works': howSvg(d), social: socialSvg(d, S), ...(d.tour ? { tour: tourSvg(d, S) } : {}) };
@@ -278,7 +281,7 @@ async function build(id, wantPng) {
     if (k === 'social') { png(p, join(outDir, `${id}-social.png`), w, h, 'dark', 1); png(p, join(outDir, `${id}-social-light.png`), w, h, 'light', 1); }
     else for (const th of ['light', 'dark']) png(p, join(outDir, `${id}-${k}-${th}.png`), w, h, th, 2);
   }
-  if (versionFile(join(appsRoot, id, 'README.md'))) console.log(`versioned image links in ${id}/README.md`);
+  if (versionFile(join(appHome(d, id), 'README.md'))) console.log(`versioned image links in ${id}/README.md`);
 }
 
 const want = process.argv.slice(2).filter((a) => !a.startsWith('--'));

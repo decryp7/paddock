@@ -13,4 +13,5 @@ export const STATUS = {
   dyno: { text: 'In development', tone: 'dev' },
   sighter: { text: 'Planned', tone: 'design' },
   pacenotes: { text: 'Planned', tone: 'design' },
+  recce: { text: 'Planned', tone: 'design' },
 };
