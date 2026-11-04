@@ -24,6 +24,7 @@ const VMX = process.env.PADDOCK_WIN_VMX ?? '/Volumes/d7sst7/vms/paddock-win11-te
 export const VNC_PORT = 5995;
 const GUEST = 'C:\\paddock-test\\vmcheck';
 const VNC_PW = process.env.PADDOCK_VNC_PW ?? Math.random().toString(36).slice(2, 10); // a per-run password, never printed
+process.env.PADDOCK_VNC_PW ??= VNC_PW; // win-vnc.mjs reads it
 const log = (m) => console.error(`vm-smoke(win): ${m}`);
 
 export function parseArgs(argv) {
