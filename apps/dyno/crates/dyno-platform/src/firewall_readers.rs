@@ -97,7 +97,16 @@ impl FirewallReader for PfReader {
     fn read(&self) -> Result<FirewallSource, PlatformError> {
         let hint = "pf can only be read with administrator rights; turn on administrator readings.";
         let info = self.0.run_ok(PFCTL, &["-s", "info"], hint)?;
-        let rules = self.0.run_ok(PFCTL, &["-s", "rules"], hint)?;
+        let mut rules = self.0.run_ok(PFCTL, &["-s", "rules"], hint)?;
+        // The rules macOS and other tools load into anchors (`com.apple/*` and the like) are not in the main set. Best effort: an
+        // older pfctl without wildcard anchors leaves the main rules, and the failure is in the log.
+        match self.0.run_ok(PFCTL, &["-a", "*", "-s", "rules"], hint) {
+            Ok(anchored) => {
+                rules.push('\n');
+                rules.push_str(&anchored);
+            }
+            Err(e) => log::info!(Error = e.to_string().as_str(); "pf anchors not read; main rules only"),
+        }
         let v = pf_view(&info, &rules).map_err(parse_err)?;
         log_view("pf", &v);
         Ok(v)
@@ -184,6 +193,48 @@ mod tests {
         assert_eq!((v.source, v.rule_count, v.switches.len()), (RuleSource::ApplicationFirewall, 1, 2));
         assert_eq!(v.switches[1], (FirewallSwitch::Stealth, false));
         assert_eq!(seen.lock().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn pf_reads_info_rules_and_then_the_anchors_with_fixed_arguments() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let runner = Table(
+            vec![
+                ("-s info", say("Status: Enabled for 0 days 00:10:00")),
+                (
+                    "-a * -s rules",
+                    say("pass in quick proto tcp from any to any port = 2222 keep state\n"),
+                ),
+                ("-s rules", say("block drop in all\n")),
+            ],
+            seen.clone(),
+        );
+        let v = PfReader::new(Box::new(runner), clock()).read().unwrap();
+        assert_eq!(v.rule_count, 2, "the main rule set and the anchors' rules");
+        assert_eq!(v.rules[1].ports.as_deref(), Some("= 2222"));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3);
+        assert!(seen.iter().all(|l| l.starts_with(PFCTL)), "{seen:?}");
+    }
+
+    #[test]
+    fn pf_anchors_that_cannot_be_read_leave_the_main_rules() {
+        let runner = Table(
+            vec![
+                ("-s info", say("Status: Enabled")),
+                (
+                    "-a * -s rules",
+                    Ok(ToolOutput {
+                        ok: false,
+                        stdout: String::new(),
+                        error: "pfctl: wildcard anchors not supported".into(),
+                    }),
+                ),
+                ("-s rules", say("block drop in all\n")),
+            ],
+            Arc::default(),
+        );
+        assert_eq!(PfReader::new(Box::new(runner), clock()).read().unwrap().rule_count, 1);
     }
 
     #[test]
