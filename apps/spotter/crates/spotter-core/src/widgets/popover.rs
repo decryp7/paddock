@@ -1,7 +1,7 @@
 //! The tray popup's catalogue: which widgets it offers, their spans, limits and the defaults.
 
 use super::SpotterSurface;
-use paddock_widgets::{assign_ids, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
+use paddock_widgets::{assign_spans, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
 use serde::{Deserialize, Serialize};
 
 /// A widget of the tray popup. None has options yet; the variants are the kinds.
@@ -47,7 +47,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Watched sites",
         summary: "Your watches and how each one is doing",
         icon: "sp:watches",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -56,7 +56,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Recent changes",
         summary: "The newest releases Spotter found",
         icon: "sp:history",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -65,7 +65,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Next check",
         summary: "Which watch is checked next, and when",
         icon: "sp:clock",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -74,7 +74,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Quiet hours",
         summary: "When notifications wait",
         icon: "sp:moon",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -83,7 +83,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Failures",
         summary: "Watches that could not be checked, with Retry",
         icon: "sp:alert",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -92,7 +92,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Notifications",
         summary: "Whether notifications are on, paused or off",
         icon: "sp:bell",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -139,6 +139,7 @@ pub fn loading_shape() -> Vec<LoadingRows> {
 
 impl Catalogue for PopoverCatalogue {
     type SurfaceId = SpotterSurface;
+    type Place = paddock_widgets::Span;
     type Widget = PopoverWidget;
     const SURFACE_ID: SpotterSurface = SpotterSurface::Popover;
     const SURFACE: Surface = Surface {
@@ -157,7 +158,7 @@ impl Catalogue for PopoverCatalogue {
     }
 
     fn defaults() -> Vec<Placement<PopoverWidget>> {
-        assign_ids([
+        assign_spans([
             (2, PopoverWidget::RecentChanges),
             (2, PopoverWidget::Failures),
             (2, PopoverWidget::NextCheck),

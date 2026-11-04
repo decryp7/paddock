@@ -24,7 +24,7 @@ pub use values::{
 use serde::{Deserialize, Serialize};
 
 /// The popup's layout as the chooser draws it.
-pub type PopoverView = paddock_widgets::LayoutView<SpotterSurface, PopoverWidget, PopoverKind>;
+pub type PopoverView = paddock_widgets::LayoutView<SpotterSurface, PopoverWidget, paddock_widgets::Span, PopoverKind>;
 
 /// Spotter's surfaces, one catalogue each (the shared crate's `SurfaceId`). Only the tray popup so far.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]

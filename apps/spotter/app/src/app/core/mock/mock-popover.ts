@@ -1,4 +1,4 @@
-import type { KindInfo, Placement } from '@decryp7/paddock-ui/widgets';
+import type { KindInfo, KindSize, Placement } from '@decryp7/paddock-ui/widgets';
 import type { CommandError } from '../api.types';
 import type { LoadingRows, PopoverStatus, PopoverWidget } from '../generated/widgets';
 import type { PopoverEdit, PopoverState, PopoverValues, PopoverView } from '../widgets.types';
@@ -41,12 +41,15 @@ function refused(message: string): CommandError {
   return { code: 'badRequest', message, problems: [] };
 }
 
+/** The spans a flow kind allows (the engine's `KindSize::Spans`; a popup kind never has a grid size). */
+const spansOf = (info: KindInfo<PopoverWidget> | undefined): readonly number[] => (info && 'spans' in info.size ? (info.size as Extract<KindSize, { spans: unknown }>).spans.spans : []);
+
 const place = (widget: PopoverWidget, span: number): Placement<PopoverWidget> => ({ id: widget.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`), span, widget });
 
 export class MockPopover {
   /** `shown`: the kinds to start with (a spec that needs particular widgets names them); the default is the fresh-install popup. */
   constructor(shown: readonly PopoverWidget[] = DEFAULT_KINDS) {
-    this.placements = shown.map((kind) => place(kind, DEFAULTS.find(([, k]) => k === kind)?.[0] ?? KINDS.find((i) => i.kind === kind)?.spans[0] ?? 2));
+    this.placements = shown.map((kind) => place(kind, DEFAULTS.find(([, k]) => k === kind)?.[0] ?? spansOf(KINDS.find((i) => i.kind === kind))[0] ?? 2));
   }
 
   private placements: Placement<PopoverWidget>[];
@@ -77,7 +80,7 @@ export class MockPopover {
       if (!info) throw refused('That widget does not exist.');
       if (list.some((p) => p.widget === edit.add.widget)) throw refused(`${info.title} is already shown.`);
       if (list.length >= MAX) throw refused(`At most ${MAX} widgets fit in the popup; remove one first.`);
-      list.splice(Math.min(edit.add.at ?? list.length, list.length), 0, place(edit.add.widget, edit.add.span ?? info.spans[0] ?? 2));
+      list.splice(Math.min(edit.add.at ?? list.length, list.length), 0, place(edit.add.widget, edit.add.span ?? spansOf(info)[0] ?? 2));
       this.placements = list;
       this.previous = null;
     } else if ('remove' in edit) {
@@ -96,7 +99,7 @@ export class MockPopover {
     } else if ('resize' in edit) {
       const i = list.findIndex((p) => p.id === edit.resize.id);
       const p = list[i];
-      if (!p || !KINDS.find((k) => k.kind === p.widget)?.spans.includes(edit.resize.span)) throw refused('That width is not available for this widget.');
+      if (!p || !spansOf(KINDS.find((k) => k.kind === p.widget)).includes(edit.resize.span)) throw refused('That width is not available for this widget.');
       list[i] = { ...p, span: edit.resize.span };
       this.placements = list;
       this.previous = null;
