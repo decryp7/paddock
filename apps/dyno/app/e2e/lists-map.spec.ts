@@ -92,6 +92,24 @@ test.describe('firewall', () => {
   });
 });
 
+test.describe('connections map legend, narrow window', () => {
+  test.use({ viewport: { width: 400, height: 900 } });
+  test('the five steps wrap as one block below the lead text and fit the legend', async ({ page }) => {
+    await page.goto(url('map'));
+    await page.getByTestId('world-map').waitFor();
+    const r = await page.getByTestId('legend').evaluate((legend) => {
+      const box = (el: Element) => el.getBoundingClientRect();
+      const steps = [...legend.querySelectorAll('.key[data-step]')].map(box);
+      const lead = box(legend.querySelector('.lead')!);
+      return { tops: steps.map((b) => Math.round(b.top)), lead: { bottom: lead.bottom }, right: Math.max(...steps.map((b) => b.right)), left: Math.min(...steps.map((b) => b.left)), legend: { left: box(legend).left, right: box(legend).right } };
+    });
+    expect(new Set(r.tops).size, 'all five steps on one line').toBe(1);
+    expect(r.tops[0]!, 'the steps sit below the lead text').toBeGreaterThanOrEqual(Math.floor(r.lead.bottom));
+    expect(r.left).toBeGreaterThanOrEqual(r.legend.left - 0.5);
+    expect(r.right, 'the steps fit the legend').toBeLessThanOrEqual(r.legend.right + 0.5);
+  });
+});
+
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`map contrast, ${scheme}`, () => {
     test.use({ colorScheme: scheme });

@@ -193,8 +193,9 @@ apart area by area. An accent defines it only with measured values (`count-dark`
 one). One hue family; lightness carries the order: L* >= 10 per step, lighter with the count in dark and darker in light,
 the darkest step at L* >= 12. In normal vision and under protanopia, deuteranopia and tritanopia, neighbours are CIEDE2000 >= 10
 and 1.3:1 in luminance apart (the last pair 1.4:1), and every step is CIEDE2000 >= 7 from the warning colour. Step 1 is
-3:1 on the page in normal vision. Markers drawn on the fills use the text colour with a page-colour halo (CIEDE2000 >= 15
-from every step; the fill or the halo is 3:1 on every step in every vision), never the accent, which sits inside the ramp.
+3:1 on the page in normal vision only (under the simulations it is 2.6 to 3.5). Markers drawn on the fills use the text
+colour with a page-colour halo: CIEDE2000 >= 15 from every step in normal vision; fill or halo 3:1 on every step in every
+vision. Never the accent, which sits inside the ramp.
 Five fills are still keyed by a second channel: the legend draws each step's marker size on its fill, and the tooltip
 names the step. A shade-mix of the accent into the land (Dyno 1.1.0's first map) measured only CIEDE2000 1.1 to 4.5
 between neighbours. Diverging: series 1 - neutral - series 2 (never red/green). Event/level colours in
