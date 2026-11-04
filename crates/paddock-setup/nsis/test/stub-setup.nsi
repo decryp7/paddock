@@ -8,9 +8,17 @@ OutFile "paddock-setup.exe"
 !include FileFunc.nsh
 !include LogicLib.nsh
 !insertmacro GetParameters
+; The setting NAME from the environment, else from C:\ProgramData\paddock-stub.ini ([env] NAME=value): an environment
+; does not cross a UAC prompt, the file does.
+!macro GET _VAR _NAME
+  ReadEnvStr ${_VAR} ${_NAME}
+  ${If} ${_VAR} == ""
+    ReadINIStr ${_VAR} "C:\ProgramData\paddock-stub.ini" "env" "${_NAME}"
+  ${EndIf}
+!macroend
 Section
   ${GetParameters} $0
-  ReadEnvStr $1 PADDOCK_STUB_LOG
+  !insertmacro GET $1 PADDOCK_STUB_LOG
   ${If} $1 == ""
     StrCpy $1 "$PROGRAMFILES64\..\Users\Public\paddock-stub.log"
   ${EndIf}
@@ -28,23 +36,30 @@ Section
   StrCpy $R5 $0 13
   StrCpy $3 0
   ${If} $R0 == "check-dir"
-    ReadEnvStr $3 PADDOCK_STUB_EXIT_CHECK_DIR
+    !insertmacro GET $3 PADDOCK_STUB_EXIT_CHECK_DIR
   ${ElseIf} $R1 == "guard"
-    ReadEnvStr $3 PADDOCK_STUB_EXIT_GUARD
-    ReadEnvStr $4 PADDOCK_STUB_OUT_GUARD
+    !insertmacro GET $3 PADDOCK_STUB_EXIT_GUARD
+    !insertmacro GET $4 PADDOCK_STUB_OUT_GUARD
     ${If} $4 != ""
       System::Call 'kernel32::GetStdHandle(i -11)p.r5'
       StrLen $6 $4
       System::Call 'kernel32::WriteFile(p r5, m r4, i r6, *i .r7, p 0)'
     ${EndIf}
+    !insertmacro GET $9 PADDOCK_STUB_RESTART_GUARD
+    ${If} $9 != ""
+      StrCpy $9 "$\r$\nRESTART:$9$\r$\n"
+      System::Call 'kernel32::GetStdHandle(i -11)p.r5'
+      StrLen $6 $9
+      System::Call 'kernel32::WriteFile(p r5, m r9, i r6, *i .r7, p 0)'
+    ${EndIf}
   ${ElseIf} $R2 == "stop-all"
-    ReadEnvStr $3 PADDOCK_STUB_EXIT_STOP_ALL
+    !insertmacro GET $3 PADDOCK_STUB_EXIT_STOP_ALL
   ${ElseIf} $R3 == "same-folder"
-    ReadEnvStr $3 PADDOCK_STUB_EXIT_SAME_FOLDER
+    !insertmacro GET $3 PADDOCK_STUB_EXIT_SAME_FOLDER
   ${ElseIf} $R4 == "clean-run"
-    ReadEnvStr $3 PADDOCK_STUB_EXIT_CLEAN_RUN
+    !insertmacro GET $3 PADDOCK_STUB_EXIT_CLEAN_RUN
   ${ElseIf} $R5 == "clean-staging"
-    ReadEnvStr $3 PADDOCK_STUB_EXIT_CLEAN_STAGING
+    !insertmacro GET $3 PADDOCK_STUB_EXIT_CLEAN_STAGING
   ${EndIf}
   ${If} $3 == ""
     StrCpy $3 0

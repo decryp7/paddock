@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::testchild::{self, Mode};
+use std::os::windows::ffi::OsStrExt;
 use std::process::{Child, Stdio};
 
 const NAMES: [&str; 2] = ["pd-app.exe", "pd-agent.exe"];
@@ -139,4 +140,59 @@ fn the_stopper_survives_clearing_its_own_folder() {
         assert!(lines[0].starts_with("exit 11"), "{text}");
         assert!(victim.0.try_wait().unwrap().is_none());
     }
+}
+
+/// What the template's `CheckIfAppIsRunning` does: a Restart Manager session over the main binary, `RmGetList`, and, when
+/// something is listed, `RmShutdown(RmForceShutdown)`. Returns (the listing's code, the shutdown's code when it was called).
+fn template_check(file: &Path) -> (u32, Option<u32>) {
+    use windows_sys::Win32::System::RestartManager::{RmEndSession, RmGetList, RmRegisterResources, RmShutdown, RmStartSession};
+    let mut h = 0u32;
+    let mut key = [0u16; 33];
+    let name: Vec<u16> = file.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let ptr = name.as_ptr();
+    let (mut needed, mut have, mut reasons) = (0u32, 0u32, 0u32);
+    // SAFETY: valid out-pointers and one NUL-terminated wide file name; the session is ended below.
+    unsafe {
+        assert_eq!(RmStartSession(&raw mut h, 0, key.as_mut_ptr()), 0);
+        assert_eq!(RmRegisterResources(h, 1, &raw const ptr, 0, std::ptr::null(), 0, std::ptr::null()), 0);
+        let list = RmGetList(h, &raw mut needed, &raw mut have, std::ptr::null_mut(), &raw mut reasons);
+        let shutdown = (list == 234).then(|| RmShutdown(h, 1, None));
+        RmEndSession(h);
+        (list, shutdown)
+    }
+}
+
+/// PM-6 (ADR 0053 section 9): programs of the install folder run in two or more sessions of different users; `stop_all`
+/// ends every one of them with this process's privilege disabled beforehand, and the template's Restart Manager check
+/// then finds nothing (code 0). Needs the VM set-up of `scripts` (two signed-in users, victims started in their own
+/// sessions), so it runs only when asked for: `--ignored pm6_two_sessions`, with PM6_DIR and PM6_IMAGES set.
+#[test]
+#[ignore = "needs the two-session VM set-up; run by the PM-6 script with --ignored"]
+fn pm6_two_sessions() {
+    let dir = PathBuf::from(std::env::var("PM6_DIR").expect("PM6_DIR names the install folder"));
+    let imgs: Vec<String> = std::env::var("PM6_IMAGES").expect("PM6_IMAGES is a comma-separated list").split(',').map(str::to_owned).collect();
+    let main = dir.join(&imgs[0]);
+    let mut m = WindowsMachine;
+    m.drop_privilege(); // an elevated SSH or PowerShell session has it enabled; stop_all must enable it itself
+    let before = m.rm_list(&imgs.iter().map(|i| dir.join(i)).collect::<Vec<_>>()).unwrap();
+    let sessions: std::collections::BTreeSet<u32> = before.iter().filter_map(|p| p.session).collect();
+    println!("PM6 before: {} processes in sessions {sessions:?}: {before:?}", before.len());
+    assert!(sessions.len() >= 2, "the set-up must have programs in two sessions: {before:?}");
+    let (list, shutdown) = template_check(&main);
+    println!("PM6 template check before stop_all: RmGetList={list} RmShutdown={shutdown:?}");
+    assert_eq!(list, 234, "something is listed before");
+    assert_ne!(shutdown, Some(0), "Restart Manager alone does not end other sessions' programs (S0): {shutdown:?}");
+    let (own, own_image) = here();
+    let req = Request { dir: &dir, images: &imgs, own, own_image: own_image.as_deref() };
+    let report = stop_all(&mut m, &req, &Bounds::default());
+    println!("PM6 report: {report:?}");
+    assert_eq!(report.exit_code(), 0, "{report:?}");
+    let ended_sessions: std::collections::BTreeSet<u32> =
+        report.actions.iter().filter(|a| a.outcome == Outcome::Ended).filter_map(|a| a.session).collect();
+    assert!(ended_sessions.len() >= 2, "ended in two sessions: {report:?}");
+    let after = m.rm_list(&imgs.iter().map(|i| dir.join(i)).collect::<Vec<_>>()).unwrap();
+    assert!(after.iter().all(|p| p.image.as_deref().is_none_or(|i| !imgs.iter().any(|w| w.eq_ignore_ascii_case(i)))), "{after:?}");
+    let (list, shutdown) = template_check(&main);
+    println!("PM6 template check after stop_all: RmGetList={list} RmShutdown={shutdown:?}");
+    assert_eq!((list, shutdown), (0, None), "the template's check passes");
 }
