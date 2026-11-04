@@ -25,7 +25,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v();
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Windows suite');
@@ -66,7 +66,8 @@ async function main(argv) {
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-win-'));
   let started = false;
   const cleanup = () => {
-    if (started) {
+    if (started && o.keep) log('--keep: the VM is left running with Dyno up (CDP port 9222 in the guest); revert it with: vm-win.sh stop; vm-win.sh revert gui-session-tools');
+    else if (started) {
       log(`reverting the VM to ${SNAPSHOT}`);
       vm(['stop'], 200_000);
       vm(['revert', SNAPSHOT], 300_000);
@@ -95,7 +96,7 @@ async function main(argv) {
     if (scp(exe, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe`).code !== 0) throw new Error('copying the installer failed');
     if (scp(join(HERE, 'win-suite.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-suite.ps1`).code !== 0) throw new Error('copying win-suite.ps1 failed');
     log('running the suite in the interactive session (bounded 40 min)');
-    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out'; schtasks /run /tn VmCheck`);
+    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep ? ' -KeepRunning' : ''}'; schtasks /run /tn VmCheck`);
     let done = false;
     const answered = new Set();
     for (let i = 0; i < 480 && !done; i++) {
@@ -106,7 +107,11 @@ async function main(argv) {
         answered.add(f);
         const cmd = clean(ssh(`Get-Content ${GUEST}\\out\\${f}`, 30_000).stdout).trim();
         if (!/^powercfg \/(requests|waketimers|a)$/.test(cmd)) { ssh(`Set-Content ${GUEST}\\out\\${f.replace('req', 'resp')} 'refused: ${cmd.replace(/'/g, '')}'`, 30_000); continue; }
-        ssh(`${cmd} | Out-String | Set-Content ${GUEST}\\out\\${f.replace('req', 'resp')}`, 60_000, true);
+        // The administrator's answer goes back through the standard user's own shell (base64), so the file is the user's and readable by the suite.
+        const answer = clean(ssh(`${cmd} | Out-String`, 60_000, true).stdout);
+        const b64 = Buffer.from(answer, 'utf8').toString('base64');
+        const w = ssh(`[IO.File]::WriteAllBytes('${GUEST}\\out\\${f.replace('req', 'resp')}', [Convert]::FromBase64String('${b64}'))`, 30_000);
+        log(`answered ${f} (${cmd}): ${answer.split('\n').length} lines, write exit ${w.code}`);
       }
       done = listing.includes('DONE');
       if (!done) await sleep(2000);

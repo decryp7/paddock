@@ -3,7 +3,7 @@
 # and Quit, each judged by the OS (Win32_Process, powercfg), with Dyno's own `dyno` command as the actuator. It writes one JSON file of steps
 # ({title,status,summary,checks:[{ok,detail}],evidence:[]}) that the host renders with the same result format as the macOS check.
 # Every wait polls a condition with a bounded deadline. Usage: win-suite.ps1 -Installer C:\paddock-test\vmcheck\Dyno_x64-setup.exe -Out C:\paddock-test\vmcheck\out
-param([string]$Installer, [string]$Out = 'C:\paddock-test\vmcheck\out', [int]$CdpPort = 9222)
+param([string]$Installer, [string]$Out = 'C:\paddock-test\vmcheck\out', [int]$CdpPort = 9222, [switch]$KeepRunning)
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Out | Out-Null
 $steps = New-Object System.Collections.ArrayList
@@ -136,8 +136,9 @@ Check $s ([bool]$cd) $(if ($cd) { 'the countdown appeared after the idle time' }
 $cn = Dyno 'idle cancel'; $st = Wait-Until { $t = (Dyno 'idle').text; if ($t -notmatch 'Counting down') { $t } } 20 1500
 Check $s ($cn.code -eq 0 -and [bool]$st) "Cancel stopped the countdown: $(($st -split "`n")[0])"
 # new input re-arms the rule
-Add-Type -Namespace W -Name M -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);'
-[void][W.M]::SetCursorPos(300, 300); [void][W.M]::SetCursorPos(310, 310)
+# A cursor set through SetCursorPos is not input (GetLastInputInfo ignores it); mouse_event is, like a real mouse.
+Add-Type -Namespace W -Name M -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, uint d, System.UIntPtr e);'
+[W.M]::mouse_event(1, 5, 5, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 200; [W.M]::mouse_event(1, -5, -5, 0, [UIntPtr]::Zero)
 $cd2 = Wait-Until { $t = (Dyno 'idle').text; if ($t -match 'Counting down to sleep') { $t } } 300 3000
 Check $s ([bool]$cd2) 'after new input the countdown came again'
 $sn = Dyno 'idle snooze 30'; $sz = Wait-Until { $t = (Dyno 'idle').text; if ($t -match 'Snoozed') { $t } } 20 1500
@@ -148,6 +149,7 @@ Dyno 'idle cancel' | Out-Null
 Finish $s 'countdown, Cancel and Snooze worked; no sleep was made (VM)'
 
 # 7. Quit: stop the processes the way the tray's Quit ends them is a UI action (win-cdp.mjs); here the app is closed through its window and the agent must follow.
+if ($KeepRunning) { Start-App -Cdp; 'done' | Set-Content "$Out\done.txt"; exit 0 }
 $s = New-Step 'Quit: nothing of the app is left'
 Get-Process dyno-app -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }
 Start-Sleep -Seconds 5
