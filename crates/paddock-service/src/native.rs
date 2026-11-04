@@ -583,10 +583,8 @@ mod scm {
                     // SAFETY: a valid process handle we own; failure (already gone) is ignored.
                     unsafe {
                         // conformance: pid-kill — a process handle we opened at the start and still hold
-                        paddock_proc::cleanup::logged(
-                            "ending the stop-verb helper",
-                            TerminateProcess(helper.0, 1),
-                        );
+                        let ended = TerminateProcess(helper.0, 1);
+                        paddock_proc::cleanup::logged("ending the stop-verb helper", ended);
                     }
                     return false;
                 }
@@ -598,10 +596,8 @@ mod scm {
             // SAFETY: a valid process handle we own; failure (already gone) is ignored.
             unsafe {
                 // conformance: pid-kill — a process handle we opened at the start and still hold
-                paddock_proc::cleanup::logged(
-                    "ending the hosted program",
-                    TerminateProcess(self.process.0, 1),
-                );
+                let ended = TerminateProcess(self.process.0, 1);
+                paddock_proc::cleanup::logged("ending the hosted program", ended);
             }
         }
     }
