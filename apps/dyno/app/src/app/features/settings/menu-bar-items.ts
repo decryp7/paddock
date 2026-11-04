@@ -68,8 +68,11 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     .narrow { width: 11rem; flex: none; }
     .faint { color: var(--text-3); }
     /* Wide enough for "Label over value" in the trigger and the list, on one line. */
-    /* Room for "Label over value" and at least 8 px before the caret. */
+    /* Room for "Label over value" and at least 8 px before the caret. The field's 16 px padding each side leaves 117 px inside the
+       11.5rem; where the fallback font is wide (DejaVu Sans on Linux: the text is 108 px) the caret touched the text. The row's
+       width is what the description needs, so the padding gives the room: 12 px at the text and 8 px at the caret (+12 px). */
     .format { width: 11.5rem; flex: none; }
+    .format ::ng-deep .mdc-text-field--outlined { padding-inline: var(--pd-space-3) var(--pd-space-2); }
     /* Label and Unit stay together when the chooser wraps the row's controls. */
     .pair { display: flex; gap: var(--pd-space-1); flex: none; }
     .sub { color: var(--text-2); font-size: var(--fs-sm); margin-block: 0 var(--sp-3); }
