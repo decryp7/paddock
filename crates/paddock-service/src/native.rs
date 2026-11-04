@@ -1342,9 +1342,13 @@ mod windows_tests {
     use windows_service::service::{ServiceControlAccept, ServiceExitCode, ServiceState};
 
     #[test]
-    fn an_event_source_opens_and_takes_a_line_of_every_level_and_a_long_one() {
+    fn an_event_source_opens_and_with_the_env_switch_takes_lines_of_every_level_and_a_long_one() {
         let source = format!("PaddockServiceTest{}", std::process::id());
         let log = EventLog::open(&source).expect("the event log opens");
+        // Writing puts entries into the machine's real Application log (ER-14): only when asked for explicitly.
+        if std::env::var_os("PADDOCK_WINDOWS_EVENTLOG_TEST").is_none_or(|v| v != "1") {
+            return;
+        }
         for level in [Level::Error, Level::Warn, Level::Info, Level::Debug] {
             log.write(level, "paddock-service windows test line");
         }

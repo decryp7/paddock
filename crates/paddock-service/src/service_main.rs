@@ -152,9 +152,10 @@ pub fn panic_text(name: &str, location: Option<(&str, u32)>, thread: &str) -> St
 }
 
 /// Makes a panic on any thread leave a trace in the OS log (a service has no console, so on its own it leaves nothing),
-/// then runs the previous hook unless the OS log is standard error too (the default hook would print the panic a second
-/// time). The line goes through the program's logger first (its file log, or its early sink before the file is trusted); the
-/// OS log is written directly only when the early sink did not already carry it. Installed for the life of the process.
+/// then runs the previous hook, which prints the panic's own message (one line, no user content in the OS log) to standard
+/// error. The line goes through the program's logger first (its file log, or its early sink before the file is trusted); the
+/// OS log is written directly only when the early sink did not already carry it and the OS log is not standard error itself
+/// (the previous hook already writes there). Installed for the life of the process.
 fn install_panic_hook(name: &str, os_log: Arc<dyn OsLog>) {
     let previous = std::panic::take_hook();
     let name = name.to_string();
@@ -170,12 +171,10 @@ fn install_panic_hook(name: &str, os_log: Arc<dyn OsLog>) {
         );
         let heard = EARLY_LINES.load(Ordering::SeqCst);
         log::error!("{text}");
-        if EARLY_LINES.load(Ordering::SeqCst) == heard {
+        if EARLY_LINES.load(Ordering::SeqCst) == heard && !os_log.is_standard_error() {
             os_log.write(Level::Error, &text);
         }
-        if !os_log.is_standard_error() {
-            previous(info);
-        }
+        previous(info);
     }));
 }
 
@@ -481,8 +480,8 @@ pub(crate) fn signal_stop(stop: &AtomicBool, tx: &Sender<Control>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use crate::testing::RecordingOsLog;
+    use std::time::Duration;
 
     #[derive(Debug)]
     struct Cause;
@@ -666,7 +665,13 @@ mod tests {
         }
         let once = RecordingOsLog::default();
         let sink = context(&once).early_sink();
-        if log::set_boxed_logger(Box::new(ToSink(sink))).is_ok() {
+        // This is the only test of the crate that installs a logger; a failure here must not skip the check (ER-12).
+        let installed = log::set_boxed_logger(Box::new(ToSink(sink)));
+        assert!(
+            installed.is_ok(),
+            "the test logger could not be installed: {installed:?}"
+        );
+        {
             log::set_max_level(log::LevelFilter::Info);
             let before = std::panic::take_hook();
             install_panic_hook("TestService", Arc::new(once.clone()));

@@ -75,7 +75,7 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), StartErro
 /// see `paddock_service::service_main`: it has no console, and the folder's file cannot be used yet).
 ///
 /// # Errors
-/// Why the helper will not start, with the kind of refusal. The cause is logged before it is returned.
+/// Why the helper will not start, with the kind of refusal (`service_main` writes it, once, to the OS log).
 pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<EarlySink>) -> Result<(), StartError> {
     // Until the data folder is verified the log goes to standard error and no file in the folder is touched.
     let mut log = HelperLog::new(paths.log.clone()).deferred();
@@ -85,9 +85,7 @@ pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<Earl
     let log_gate = log.install();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
     let result = start(paths, stop, &log_gate, early);
-    if let Err(e) = &result {
-        log::error!(exit_code = e.exit_code(), reason = e.message.as_str(); "Helper: will not start");
-    }
+    // A refusal is written once, by `service_main`, with its cause chain, code and next step.
     result
 }
 

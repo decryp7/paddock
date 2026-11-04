@@ -56,7 +56,7 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     if !crate::sys::is_elevated() {
         return Err("Installing the helper needs administrator rights; turn it on from Dyno (Settings > Helper).".into());
     }
-    audit_run("install", &format!("for {}", owner.to_arg()));
+    audit_run("install", "");
     let source = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .map_err(|e| format!("This program's own path cannot be read: {e}"))?;
