@@ -1,0 +1,649 @@
+// Throw-away harness behind docs/research/2026-11-04-fast-ingest.md (rule 48). Not built by any workspace.
+// To run: in a scratch crate outside the repository, put the Cargo.toml below, the first file as src/main.rs and
+// the second as src/kv.rs, then CARGO_BUILD_JOBS=2 cargo build --release, and:
+//   ingest-bench parse <folder> 2 4                              # parse, tags query, hashes, incremental re-parse
+//   ingest-bench graph 1000000 5000000 <scratch>/graph.db        # invented call graph: CSR against SQLite
+//   [KV_SORTED=1] ingest-bench kv <redb|fjall|lmdb|sqlite|sqlite-full> 1000000 <scratch>/kv   # metadata stores
+//
+// [package]
+// name = "ingest-bench"
+// version = "0.0.0"
+// edition = "2021"
+// publish = false
+// 
+// [dependencies]
+// tree-sitter = "=0.27.1"
+// tree-sitter-rust = "=0.24.2"
+// tree-sitter-typescript = "=0.23.2"
+// streaming-iterator = "0.1.9"
+// sha2 = "=0.10.9"
+// blake3 = "1"
+// twox-hash = { version = "2.1", features = ["xxhash3_64"] }
+// rayon = "1.10"
+// rusqlite = { version = "=0.40.2", features = ["bundled"] }
+// libc = "0.2"
+// redb = "2"
+// fjall = "2"
+// heed = "0.22"
+// 
+// [profile.release]
+// debug = false
+// lto = "thin"
+// codegen-units = 4
+
+// ===== src/main.rs =====
+//! Throw-away ingest measurements for the Pacenotes fast-ingest research note (rule 48). Invented graph data; source corpus is
+//! Paddock's own code.
+mod kv;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use rayon::prelude::*;
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor};
+
+fn peak_rss_mb() -> f64 {
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    ru.ru_maxrss as f64 / (1024.0 * 1024.0) // bytes on macOS
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        let name = e.file_name();
+        let n = name.to_string_lossy();
+        let Ok(ft) = e.file_type() else { continue };
+        if ft.is_symlink() {
+            continue;
+        }
+        if ft.is_dir() {
+            if matches!(n.as_ref(), "node_modules" | "target" | "dist" | ".git" | ".angular" | "fixtures") {
+                continue;
+            }
+            walk(&p, out);
+        } else if n.ends_with(".rs") || (n.ends_with(".ts") && !n.ends_with(".d.ts")) {
+            out.push(p);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum L {
+    Rust,
+    Ts,
+}
+
+fn lang(l: L) -> Language {
+    match l {
+        L::Rust => tree_sitter_rust::LANGUAGE.into(),
+        L::Ts => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+    }
+}
+fn tags_src(l: L) -> &'static str {
+    match l {
+        L::Rust => tree_sitter_rust::TAGS_QUERY,
+        L::Ts => tree_sitter_typescript::TAGS_QUERY,
+    }
+}
+
+struct F {
+    lang: L,
+    bytes: Vec<u8>,
+}
+
+fn mbps(bytes: usize, secs: f64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0) / secs
+}
+
+fn parse_all(files: &[&F], with_tags: bool) -> (usize, usize) {
+    // per-thread parser and queries
+    thread_local! {
+        static P: std::cell::RefCell<Option<(Parser, Parser, Query, Query)>> = const { std::cell::RefCell::new(None) };
+    }
+    let mut nodes = 0usize;
+    let mut caps = 0usize;
+    P.with(|cell| {
+        let mut g = cell.borrow_mut();
+        if g.is_none() {
+            let mut pr = Parser::new();
+            pr.set_language(&lang(L::Rust)).unwrap();
+            let mut pt = Parser::new();
+            pt.set_language(&lang(L::Ts)).unwrap();
+            let qr = Query::new(&lang(L::Rust), tags_src(L::Rust)).unwrap();
+            let qt = Query::new(&lang(L::Ts), tags_src(L::Ts)).unwrap();
+            *g = Some((pr, pt, qr, qt));
+        }
+        let (pr, pt, qr, qt) = g.as_mut().unwrap();
+        for f in files {
+            let (p, q) = match f.lang {
+                L::Rust => (&mut *pr, &*qr),
+                L::Ts => (&mut *pt, &*qt),
+            };
+            let tree = p.parse(&f.bytes, None).unwrap();
+            nodes += tree.root_node().descendant_count();
+            if with_tags {
+                let mut cur = QueryCursor::new();
+                let mut m = cur.matches(q, tree.root_node(), f.bytes.as_slice());
+                while let Some(mm) = m.next() {
+                    caps += mm.captures().len();
+                }
+            }
+        }
+    });
+    (nodes, caps)
+}
+
+fn point_at(bytes: &[u8], off: usize) -> Point {
+    let row = bytes[..off].iter().filter(|b| **b == b'\n').count();
+    let col = off - bytes[..off].iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
+    Point { row, column: col }
+}
+
+fn cmd_parse(root: &Path, threads: &[usize]) {
+    let t0 = Instant::now();
+    let mut paths = Vec::new();
+    walk(root, &mut paths);
+    paths.sort();
+    let files: Vec<F> = paths
+        .iter()
+        .filter_map(|p| {
+            let bytes = std::fs::read(p).ok()?;
+            if bytes.len() > 2 * 1024 * 1024 {
+                return None;
+            }
+            let lang = if p.extension().is_some_and(|e| e == "rs") { L::Rust } else { L::Ts };
+            Some(F { lang, bytes })
+        })
+        .collect();
+    let total: usize = files.iter().map(|f| f.bytes.len()).sum();
+    let rs = files.iter().filter(|f| matches!(f.lang, L::Rust)).count();
+    let lines: usize = files.iter().map(|f| f.bytes.iter().filter(|b| **b == b'\n').count()).sum();
+    println!(
+        "corpus: {} files ({} rs, {} ts), {:.1} MiB, {} lines, walk+read {:.0} ms",
+        files.len(),
+        rs,
+        files.len() - rs,
+        total as f64 / 1048576.0,
+        lines,
+        t0.elapsed().as_secs_f64() * 1e3
+    );
+
+    // hashing, 1 thread
+    for (name, f) in [
+        ("sha256", (|b: &[u8]| { use sha2::Digest; sha2::Sha256::digest(b)[0] }) as fn(&[u8]) -> u8),
+        ("blake3", |b: &[u8]| blake3::hash(b).as_bytes()[0]),
+        ("xxh3-64", |b: &[u8]| twox_hash::XxHash3_64::oneshot(b) as u8),
+    ] {
+        let t = Instant::now();
+        let mut acc = 0u8;
+        for _ in 0..3 {
+            for x in &files {
+                acc ^= f(&x.bytes);
+            }
+        }
+        let s = t.elapsed().as_secs_f64() / 3.0;
+        println!("hash {name}: {:.0} MiB/s (1 thread) [{acc}]", mbps(total, s));
+    }
+
+    let refs: Vec<&F> = files.iter().collect();
+    // warm up
+    parse_all(&refs[..refs.len().min(50)], true);
+    for &with_tags in &[false, true] {
+        let t = Instant::now();
+        let (nodes, caps) = parse_all(&refs, with_tags);
+        let s = t.elapsed().as_secs_f64();
+        println!(
+            "1 thread, {}: {:.2} s, {:.1} MiB/s, {:.0} klines/s, {} nodes, {} tag captures",
+            if with_tags { "parse+tags query" } else { "parse only" },
+            s,
+            mbps(total, s),
+            lines as f64 / s / 1e3,
+            nodes,
+            caps
+        );
+    }
+    // per language, parse only
+    for (lname, which) in [("rust", 0), ("typescript", 1)] {
+        let sub: Vec<&F> = files.iter().filter(|f| matches!((f.lang, which), (L::Rust, 0) | (L::Ts, 1))).collect();
+        let b: usize = sub.iter().map(|f| f.bytes.len()).sum();
+        let t = Instant::now();
+        parse_all(&sub, false);
+        let s = t.elapsed().as_secs_f64();
+        println!("  {lname}: {} files {:.1} MiB parse only {:.1} MiB/s", sub.len(), b as f64 / 1048576.0, mbps(b, s));
+    }
+    for &n in threads {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(n).build().unwrap();
+        let t = Instant::now();
+        let (_n, _c) = pool.install(|| {
+            refs.par_chunks(16).map(|c| parse_all(c, true)).reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+        });
+        let s = t.elapsed().as_secs_f64();
+        println!("{n} threads, parse+tags: {:.2} s, {:.1} MiB/s", s, mbps(total, s));
+    }
+
+    // incremental: the 20 largest files, insert a char in the middle
+    let mut big: Vec<&F> = files.iter().collect();
+    big.sort_by_key(|f| std::cmp::Reverse(f.bytes.len()));
+    big.truncate(20);
+    let mut full = 0.0;
+    let mut inc = 0.0;
+    for f in &big {
+        let mut p = Parser::new();
+        p.set_language(&lang(f.lang)).unwrap();
+        let mut tree = p.parse(&f.bytes, None).unwrap();
+        // find a newline near the middle and insert a blank line there
+        let mid = f.bytes.len() / 2;
+        let off = f.bytes[mid..].iter().position(|b| *b == b'\n').map(|i| mid + i + 1).unwrap_or(mid);
+        let mut nb = f.bytes.clone();
+        nb.insert(off, b'\n');
+        let sp = point_at(&f.bytes, off);
+        tree.edit(&InputEdit {
+            start_byte: off,
+            old_end_byte: off,
+            new_end_byte: off + 1,
+            start_position: sp,
+            old_end_position: sp,
+            new_end_position: Point { row: sp.row + 1, column: 0 },
+        });
+        let t = Instant::now();
+        let _t2 = p.parse(&nb, Some(&tree)).unwrap();
+        inc += t.elapsed().as_secs_f64();
+        let t = Instant::now();
+        let _t3 = p.parse(&nb, None).unwrap();
+        full += t.elapsed().as_secs_f64();
+    }
+    let bb: usize = big.iter().map(|f| f.bytes.len()).sum();
+    println!(
+        "incremental, 20 largest files ({:.0} KiB): full re-parse {:.2} ms total, incremental {:.2} ms total ({:.1}x)",
+        bb as f64 / 1024.0,
+        full * 1e3,
+        inc * 1e3,
+        full / inc
+    );
+    println!("peak RSS {:.0} MiB", peak_rss_mb());
+}
+
+/// Deterministic LCG so the graph is the same every run.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+    /// skewed: small ids are called much more often (a few hubs), like real call graphs
+    fn skewed(&mut self, n: u64) -> u64 {
+        let u = (self.next() % 1_000_000) as f64 / 1_000_000.0;
+        ((u * u * u) * n as f64) as u64 % n
+    }
+}
+
+fn cmd_graph(nodes: u32, edges: usize, db: &Path) {
+    let mut rng = Rng(42);
+    let mut e: Vec<(u32, u32)> = (0..edges).map(|_| ((rng.next() % nodes as u64) as u32, rng.skewed(nodes as u64) as u32)).collect();
+    // CSR reverse (callers of dst)
+    let t = Instant::now();
+    e.sort_unstable_by_key(|&(s, d)| (d, s));
+    let mut offs = vec![0u32; nodes as usize + 1];
+    for &(_, d) in &e {
+        offs[d as usize + 1] += 1;
+    }
+    for i in 0..nodes as usize {
+        offs[i + 1] += offs[i];
+    }
+    let srcs: Vec<u32> = e.iter().map(|&(s, _)| s).collect();
+    let build = t.elapsed().as_secs_f64();
+    let csr_bytes = offs.len() * 4 + srcs.len() * 4;
+    println!(
+        "graph: {nodes} nodes, {edges} edges; CSR reverse build {:.0} ms (incl. sort), {:.1} MiB",
+        build * 1e3,
+        csr_bytes as f64 / 1048576.0
+    );
+    let queries: Vec<u32> = (0..1000).map(|_| (rng.next() % nodes as u64) as u32).collect();
+    // direct callers (find references)
+    let t = Instant::now();
+    let mut acc = 0usize;
+    for &q in &queries {
+        acc += (offs[q as usize + 1] - offs[q as usize]) as usize;
+    }
+    println!("CSR direct callers: {:.3} us/query (avg {} hits)", t.elapsed().as_secs_f64() * 1e6 / 1000.0, acc / 1000);
+    // callers 3 levels, BFS with a visited bitmap
+    let t = Instant::now();
+    let mut seen = vec![0u32; nodes as usize];
+    let mut reached = 0usize;
+    for (qi, &q) in queries.iter().enumerate() {
+        let stamp = qi as u32 + 1;
+        let mut frontier = vec![q];
+        seen[q as usize] = stamp;
+        for _ in 0..3 {
+            let mut next = Vec::new();
+            for &n in &frontier {
+                for &s in &srcs[offs[n as usize] as usize..offs[n as usize + 1] as usize] {
+                    if seen[s as usize] != stamp {
+                        seen[s as usize] = stamp;
+                        next.push(s);
+                    }
+                }
+            }
+            reached += next.len();
+            frontier = next;
+        }
+    }
+    println!("CSR callers 3 levels: {:.1} us/query (avg {} reached)", t.elapsed().as_secs_f64() * 1e6 / 1000.0, reached / 1000);
+
+    // SQLite
+    let _ = std::fs::remove_file(db);
+    let c = rusqlite::Connection::open(db).unwrap();
+    c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE edges(src INTEGER NOT NULL, dst INTEGER NOT NULL);")
+        .unwrap();
+    let t = Instant::now();
+    {
+        let tx = c.unchecked_transaction().unwrap();
+        {
+            let mut st = tx.prepare_cached("INSERT INTO edges(src,dst) VALUES (?1,?2)").unwrap();
+            for &(s, d) in &e {
+                st.execute([s, d]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+    let ins = t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    c.execute_batch("CREATE INDEX edges_dst ON edges(dst, src); CREATE INDEX edges_src ON edges(src, dst);").unwrap();
+    let idx = t.elapsed().as_secs_f64();
+    c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    let size = std::fs::metadata(db).map(|m| m.len()).unwrap_or(0);
+    println!(
+        "SQLite insert {:.2} s ({:.0} k rows/s, prepared, one tx), 2 indexes {:.2} s, file {:.1} MiB",
+        ins,
+        edges as f64 / ins / 1e3,
+        idx,
+        size as f64 / 1048576.0
+    );
+    let t = Instant::now();
+    let mut st = c.prepare_cached("SELECT count(*) FROM edges WHERE dst = ?1").unwrap();
+    let mut acc = 0i64;
+    for &q in &queries {
+        acc += st.query_row([q], |r| r.get::<_, i64>(0)).unwrap();
+    }
+    println!("SQLite direct callers: {:.1} us/query (avg {} hits)", t.elapsed().as_secs_f64() * 1e6 / 1000.0, acc / 1000);
+    let mut st = c
+        .prepare_cached(
+            "WITH RECURSIVE r(n, d) AS (SELECT ?1, 0 UNION SELECT e.src, r.d + 1 FROM edges e JOIN r ON e.dst = r.n WHERE r.d < 3)
+             SELECT count(DISTINCT n) - 1 FROM r",
+        )
+        .unwrap();
+    let t = Instant::now();
+    let mut acc = 0i64;
+    let qn = 200;
+    for &q in &queries[..qn] {
+        acc += st.query_row([q], |r| r.get::<_, i64>(0)).unwrap();
+    }
+    println!(
+        "SQLite recursive CTE callers 3 levels: {:.0} us/query (avg {} reached, {qn} queries)",
+        t.elapsed().as_secs_f64() * 1e6 / qn as f64,
+        acc / qn as i64
+    );
+    println!("peak RSS {:.0} MiB", peak_rss_mb());
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    match a.get(1).map(String::as_str) {
+        Some("parse") => {
+            let threads: Vec<usize> = a[3..].iter().map(|s| s.parse().unwrap()).collect();
+            cmd_parse(Path::new(&a[2]), &threads)
+        }
+        Some("graph") => cmd_graph(a[2].parse().unwrap(), a[3].parse().unwrap(), Path::new(&a[4])),
+        Some("kv") => {
+            let n: u64 = a[3].parse().unwrap();
+            let base = Path::new(&a[4]);
+            let d = base.join(&a[2]);
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            let s: std::sync::Arc<dyn kv::Kv> = match a[2].as_str() {
+                "redb" => std::sync::Arc::new(kv::Redb::open(&d)),
+                "fjall" => std::sync::Arc::new(kv::Fjall::open(&d)),
+                "lmdb" => std::sync::Arc::new(kv::Heed::open(&d)),
+                "sqlite" => std::sync::Arc::new(kv::Sqlite::open(&d, "NORMAL")),
+                "sqlite-full" => std::sync::Arc::new(kv::Sqlite::open(&d, "FULL")),
+                _ => panic!("store"),
+            };
+            kv::run(s, &d, n);
+            println!("peak RSS {:.0} MiB", peak_rss_mb());
+        }
+        _ => eprintln!("usage: parse <root> [threads..] | graph <nodes> <edges> <db>"),
+    }
+}
+
+// ===== src/kv.rs =====
+//! Metadata-store micro-benchmark: a file manifest (path key, 64-byte value), invented paths.
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+pub trait Kv: Send + Sync + 'static {
+    fn name(&self) -> &'static str;
+    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]);
+    fn get(&self, k: &[u8]) -> bool;
+}
+
+fn key(i: u64) -> Vec<u8> {
+    if std::env::var_os("KV_SORTED").is_some() {
+        return format!("src/module_{:05}/file_{:09}.rs", i / 256, i).into_bytes();
+    }
+    format!("src/module_{:05}/sub_{:03}/file_{:07}.rs", i % 4096, (i / 7) % 512, i).into_bytes()
+}
+fn val(i: u64) -> [u8; 64] {
+    let mut v = [0u8; 64];
+    v[..8].copy_from_slice(&i.to_le_bytes());
+    v
+}
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+}
+
+fn dir_size(p: &Path) -> u64 {
+    let mut s = 0;
+    if let Ok(rd) = std::fs::read_dir(p) {
+        for e in rd.flatten() {
+            let m = e.metadata().unwrap();
+            s += if m.is_dir() { dir_size(&e.path()) } else { m.len() };
+        }
+    }
+    s
+}
+
+pub fn run(store: Arc<dyn Kv>, dir: &Path, n: u64) {
+    let batch = 10_000u64;
+    // a reader that does point lookups of already-written keys while the bulk load runs
+    let written = Arc::new(AtomicU64::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let reads = Arc::new(AtomicU64::new(0));
+    let (s2, w2, st2, r2) = (store.clone(), written.clone(), stop.clone(), reads.clone());
+    let reader = std::thread::spawn(move || {
+        let mut rng = Rng(7);
+        let mut worst = 0f64;
+        while !st2.load(Ordering::Relaxed) {
+            let w = w2.load(Ordering::Acquire);
+            if w == 0 {
+                std::thread::yield_now();
+                continue;
+            }
+            let t = Instant::now();
+            assert!(s2.get(&key(rng.next() % w)));
+            worst = worst.max(t.elapsed().as_secs_f64());
+            r2.fetch_add(1, Ordering::Relaxed);
+        }
+        worst
+    });
+    let t = Instant::now();
+    let mut i = 0;
+    while i < n {
+        let items: Vec<_> = (i..(i + batch).min(n)).map(|j| (key(j), val(j))).collect();
+        store.put_batch(&items);
+        i += batch;
+        written.store(i.min(n), Ordering::Release);
+    }
+    let load = t.elapsed().as_secs_f64();
+    stop.store(true, Ordering::Relaxed);
+    let worst = reader.join().unwrap();
+    let during = reads.load(Ordering::Relaxed) as f64 / load;
+    // point lookups, quiet
+    let mut rng = Rng(9);
+    let q = 200_000;
+    let t = Instant::now();
+    for _ in 0..q {
+        assert!(store.get(&key(rng.next() % n)));
+    }
+    let look = t.elapsed().as_secs_f64();
+    // watcher-like bursts: 100 commits of 100 random upserts
+    let t = Instant::now();
+    for _ in 0..100 {
+        let items: Vec<_> = (0..100).map(|_| { let j = rng.next() % n; (key(j), val(j + 1)) }).collect();
+        store.put_batch(&items);
+    }
+    let small = t.elapsed().as_secs_f64() / 100.0;
+    println!(
+        "{}{}: bulk load {} rows in batches of {batch}: {:.2} s ({:.0} k rows/s); reads during load {:.0} k/s (worst {:.1} ms); \
+point lookup {:.2} us; 100-row commit {:.2} ms; disk {:.0} MiB",
+        store.name(),
+        if std::env::var_os("KV_SORTED").is_some() { " (keys in insertion order)" } else { " (keys in random order)" },
+        n,
+        load,
+        n as f64 / load / 1e3,
+        during / 1e3,
+        worst * 1e3,
+        look * 1e6 / q as f64,
+        small * 1e3,
+        dir_size(dir) as f64 / 1048576.0
+    );
+}
+
+// ---- redb
+const T: redb::TableDefinition<&[u8], &[u8]> = redb::TableDefinition::new("m");
+pub struct Redb(redb::Database);
+impl Redb {
+    pub fn open(d: &Path) -> Self {
+        Redb(redb::Database::create(d.join("m.redb")).unwrap())
+    }
+}
+impl Kv for Redb {
+    fn name(&self) -> &'static str { "redb 2" }
+    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+        let w = self.0.begin_write().unwrap();
+        {
+            let mut t = w.open_table(T).unwrap();
+            for (k, v) in items {
+                t.insert(k.as_slice(), v.as_slice()).unwrap();
+            }
+        }
+        w.commit().unwrap();
+    }
+    fn get(&self, k: &[u8]) -> bool {
+        let r = self.0.begin_read().unwrap();
+        let t = r.open_table(T).unwrap();
+        t.get(k).unwrap().is_some()
+    }
+}
+
+// ---- fjall
+pub struct Fjall(fjall::Keyspace, fjall::PartitionHandle);
+impl Fjall {
+    pub fn open(d: &Path) -> Self {
+        let ks = fjall::Config::new(d).open().unwrap();
+        let p = ks.open_partition("m", fjall::PartitionCreateOptions::default()).unwrap();
+        Fjall(ks, p)
+    }
+}
+impl Kv for Fjall {
+    fn name(&self) -> &'static str { "fjall 2" }
+    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+        let mut b = self.0.batch();
+        for (k, v) in items {
+            b.insert(&self.1, k.as_slice(), v.as_slice());
+        }
+        b.commit().unwrap();
+        self.0.persist(fjall::PersistMode::SyncAll).unwrap();
+    }
+    fn get(&self, k: &[u8]) -> bool {
+        self.1.get(k).unwrap().is_some()
+    }
+}
+
+// ---- LMDB via heed
+pub struct Heed(heed::Env, heed::Database<heed::types::Bytes, heed::types::Bytes>);
+impl Heed {
+    pub fn open(d: &Path) -> Self {
+        let env = unsafe { heed::EnvOpenOptions::new().map_size(8 << 30).max_dbs(1).open(d).unwrap() };
+        let mut w = env.write_txn().unwrap();
+        let db = env.create_database(&mut w, Some("m")).unwrap();
+        w.commit().unwrap();
+        Heed(env, db)
+    }
+}
+impl Kv for Heed {
+    fn name(&self) -> &'static str { "LMDB (heed 0.22)" }
+    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+        let mut w = self.0.write_txn().unwrap();
+        for (k, v) in items {
+            self.1.put(&mut w, k, v).unwrap();
+        }
+        w.commit().unwrap();
+    }
+    fn get(&self, k: &[u8]) -> bool {
+        let r = self.0.read_txn().unwrap();
+        self.1.get(&r, k).unwrap().is_some()
+    }
+}
+
+// ---- SQLite, WAL; one connection per thread
+pub struct Sqlite(std::path::PathBuf, &'static str);
+thread_local! { static C: std::cell::RefCell<Option<rusqlite::Connection>> = const { std::cell::RefCell::new(None) }; }
+impl Sqlite {
+    pub fn open(d: &Path, sync: &'static str) -> Self {
+        let p = d.join("m.sqlite");
+        let c = rusqlite::Connection::open(&p).unwrap();
+        c.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE m(k BLOB PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID;").unwrap();
+        Sqlite(p, sync)
+    }
+    fn with<R>(&self, f: impl FnOnce(&rusqlite::Connection) -> R) -> R {
+        C.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.is_none() {
+                let conn = rusqlite::Connection::open(&self.0).unwrap();
+                conn.pragma_update(None, "synchronous", self.1).unwrap();
+                if let Ok(kib) = std::env::var("KV_SQLITE_CACHE_KIB") { conn.pragma_update(None, "cache_size", format!("-{kib}")).unwrap(); }
+                *c = Some(conn);
+            }
+            f(c.as_ref().unwrap())
+        })
+    }
+}
+impl Kv for Sqlite {
+    fn name(&self) -> &'static str { if self.1 == "FULL" { "SQLite WAL, synchronous=FULL" } else { "SQLite WAL, synchronous=NORMAL" } }
+    fn put_batch(&self, items: &[(Vec<u8>, [u8; 64])]) {
+        self.with(|c| {
+            let tx = c.unchecked_transaction().unwrap();
+            {
+                let mut st = tx.prepare_cached("INSERT INTO m(k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = excluded.v").unwrap();
+                for (k, v) in items {
+                    st.execute(rusqlite::params![k, &v[..]]).unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        })
+    }
+    fn get(&self, k: &[u8]) -> bool {
+        self.with(|c| {
+            let mut st = c.prepare_cached("SELECT 1 FROM m WHERE k = ?1").unwrap();
+            st.exists([k]).unwrap()
+        })
+    }
+}

@@ -10,6 +10,7 @@ Pacenotes has no code in the tree yet. Its measurements come from the embedding 
 | Benchmark | Measures | Corpus | Budget | CI |
 |---|---|---|---|---|
 | Embedding comparison ([ADR 0001](adr/0001-embeddings.md)) | Model load, chunks/s on 1 and 13 threads, peak RSS, binary size, retrieval quality (recall@5, hit@5) | 19,462 function chunks from 25 Paddock crates (10.9 MB, median 320 characters); 332 labelled queries (300 doc, 32 concept) | Quality bar: concept hit@5 ≥ 0.75 and doc recall@5 +25% over BM25 | No |
+| Fast-ingest micro-benchmarks ([research note](research/2026-11-04-fast-ingest.md)) | tree-sitter parse and tags MiB/s on 1, 2, 4 threads; incremental re-parse; content hashes; CSR vs SQLite for references and callers 3 levels | a Paddock worktree's Rust and TypeScript (6,419 files, 50.9 MiB); an invented call graph | none yet (benchmarks B1 to B8 of the note set them) | No |
 
 ## Budgets
 
@@ -23,6 +24,87 @@ on a 64 GB machine.
 - The harness is not in the tree, so the numbers cannot be reproduced from `main`.
 
 ## Results (newest first)
+
+### 2026-11-04, fast-ingest research: parse, hash and graph micro-benchmarks
+
+Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.md). Indications for a design choice, not budgets.
+
+- **Commit:** branch `docs/pacenotes-fast-ingest` on c1bba3f9f; harness
+  [research/2026-11-04-fast-ingest-bench.rs.txt](research/2026-11-04-fast-ingest-bench.rs.txt) (a scratch crate outside the
+  repository; no workspace builds it)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with other agents (a Dyno release was running)
+- **Load:** parse run: 1-minute load 7.6 at the start and 6.4 at the end (5-minute 17 to 12); graph run: 21.9 at the start and 13.5 at the end; metadata-store runs: 13.6 to 3.9 (random keys), 7.4 to 13.3 (sorted keys); git runs: about 6 to 14, not through the semaphore (read-only, `nice -n 19`). Both
+  through the machine's semaphore at `nice -n 19`
+- **Build:** release, `lto = "thin"`, system allocator; rustc 1.99.1; tree-sitter 0.27.1, tree-sitter-rust 0.24.2,
+  tree-sitter-typescript 0.23.2 (the versions `pacenotes-parse` pins), sha2 0.10.9 (default features), blake3 1.8.7, twox-hash
+  2.1.5, rayon 1.12.0, rusqlite 0.40.2 bundled
+- **Corpus:** parse: every `*.rs` and `*.ts` (not `.d.ts`) of a Paddock worktree, skipping `node_modules`, `target`, `dist`,
+  `.git`, `.angular` and `fixtures`: 6,419 files (2,989 Rust, 3,430 TypeScript), 50.9 MiB, 1,290,893 lines; read into memory
+  first, so no I/O is timed. Graph: invented, 1,000,000 nodes and 5,000,000 call edges from a seeded generator; callees skewed
+  (cube of a uniform draw) so a few hubs have many callers
+- **Command:** `ingest-bench parse <worktree> 2 4`; `ingest-bench graph 1000000 5000000 <scratch>/graph.db`;
+  `[KV_SORTED=1] [KV_SQLITE_CACHE_KIB=65536] ingest-bench kv <redb|fjall|lmdb|sqlite|sqlite-full> 1000000 <scratch>/kv`;
+  git: `/usr/bin/time -p` around `GIT_OPTIONAL_LOCKS=0 git status --porcelain=v2 --untracked-files=all`, `git ls-files -s`,
+  `git ls-tree -r HEAD`, `git diff --name-status [--no-renames] <a> <b>`, a private index (`GIT_INDEX_FILE=<scratch>/x.idx git read-tree
+  HEAD`, then `git update-index -q --refresh`), and a shadow repository (`git -c core.fsmonitor=false --git-dir=<scratch>/shadow.git
+  --work-tree=<worktree> add -A`, then `status`, `gc`)
+- **Runs:** one run each; hashes averaged over 3 passes; graph latencies averaged over 1,000 queries (200 for the recursive CTE)
+- **Numbers, parse and hash:**
+
+  | Measure | Result |
+  |---|---|
+  | tree-sitter parse only, 1 thread | 3.44 s, 14.8 MiB/s, 375k lines/s (Rust 14.0, TypeScript 15.3 MiB/s) |
+  | parse plus the grammar's `TAGS_QUERY`, 1 thread | 4.93 s, 10.3 MiB/s, 262k lines/s, 917,172 captures |
+  | parse plus tags, 2 / 4 threads (one parser per thread, in process) | 17.8 / 36.5 MiB/s (1.7x / 3.5x) |
+  | re-parse after inserting one line in the middle, 20 largest files (1,457 KiB) | full 87.7 ms, incremental with the edited old tree 2.2 ms (39x) |
+  | SHA-256 / BLAKE3 / xxh3-64, 1 thread | 526 / 1,675 / 31,986 MiB/s |
+  | peak RSS of the parse run | 96 MiB |
+
+- **Numbers, graph** (1,000 queries on CSR, 200 for the recursive CTE; the samples differ, so the "reached" averages are not
+  comparable, the per-query times are):
+
+  | Measure | CSR (in memory, mmap-able layout) | SQLite (`edges(src, dst)`, indexes on `(dst, src)` and `(src, dst)`) |
+  |---|---|---|
+  | build | 83 ms (sort included) | insert 1.57 s (3.19M rows/s, prepared, one transaction) + indexes 4.71 s |
+  | size | 22.9 MiB (reverse direction) | 222 MiB file |
+  | direct callers | 0.006 µs (offset pair; count only), avg 8 | 4.1 µs, avg 8 |
+  | callers 3 levels | 7.9 µs (BFS, visited stamp), avg 284 reached | 87 µs (recursive CTE), avg 123 reached |
+  | peak RSS of the run | 74 MiB (both) | |
+
+- **Numbers, metadata stores** (1,000,000 rows: 40-byte path key, 64-byte value; commits of 10,000 with fsync, a second thread
+  doing point lookups during the load; then 200,000 point lookups; then 100 commits of 100 upserts). redb 2.6.4, fjall 2.11.2
+  (`persist(SyncAll)` after each commit), heed 0.22.1 (LMDB, 8 GiB map), SQLite WAL through rusqlite 0.40.2 with one connection
+  per thread:
+
+  | Store | Load, path order | Load, random order | Reads during load (worst) sorted / random | Lookup | 100-row commit | Disk sorted / random | Peak RSS sorted / random |
+  |---|---|---|---|---|---|---|---|
+  | SQLite `NORMAL` | 359k/s, 2.79 s | 9k/s, 111 s; with `cache_size` 64 MB 12k/s, 85.7 s | 305k/s (21 ms) / 120k/s (51 ms); 64 MB cache 407k/s | 2.6 µs | 20 to 22 ms | 122 / 264 MiB (WAL included; 129 MiB after checkpoint) | 11 / 11 MiB; 175 MiB with the 64 MB cache |
+  | SQLite `FULL` | not run | 9k/s, 116 s | 195k/s (45 ms) | 2.8 µs | 15 ms | 243 MiB | 12 MiB |
+  | redb | 122k/s, 8.18 s | 7k/s, 141 s | 1.13M/s (6 ms) / 1.0M/s (9 ms) | 1.1 µs | 63 to 89 ms | 258 / 258 MiB | 312 / 381 MiB |
+  | LMDB | 345k/s, 2.90 s | 15k/s, 65 s | 1.19M/s (0.7 ms) / 1.03M/s (3.6 ms) | 1.1 µs | 69 to 89 ms | 108 / 323 MiB | 114 / 428 MiB |
+  | fjall | 206k/s, 4.85 s | 195k/s, 5.12 s | 461k/s (98 ms) / 379k/s (99 ms) | 5.0 to 6.0 µs | 18 to 40 ms | 45 / 53 MiB | 122 / 149 MiB |
+
+  Compile time of each store crate in this build (cargo `--timings`, 2 jobs, nice 19): redb about 5 s, fjall with `lsm-tree` about
+  5 s, heed with LMDB about 2 s; SQLite's bundled C was built earlier and not timed.
+
+- **Numbers, git change detection** (git 2.56.0; this worktree: 11,867 tracked files; a public open-source checkout on the
+  machine: 27,390 tracked files, 27 submodules, 3,704 commits, its index stat data stale for 27,363 entries):
+
+  | Measure | 11,867 files | 27,390 files |
+  |---|---|---|
+  | `status --porcelain=v2 -uall`, `GIT_OPTIONAL_LOCKS=0` | 0.34 s first, 0.07 to 0.08 s after | 32.8 s first, 5.9 s every later call (stale stat data, index not rewritten) |
+  | the same, `-uno`, submodules ignored | | 5.9 s |
+  | private index: `read-tree HEAD` / first `update-index --refresh` / later refresh / `status -uno` / `status -uall` | | 0.03 s / 5.9 s / 0.03 s / 0.03 s / 0.07 s; index file 3.3 MB |
+  | `ls-files -s` | 0.01 s | 0.01 s |
+  | `ls-tree -r HEAD` | 0.17 s | 0.12 s |
+  | `diff --name-status`, 200 first-parent commits apart (3,368 paths) | 0.82 s with renames, 0.01 s `--no-renames` | |
+  | `diff --name-status`, 2,000 commits apart (11,086 paths) | 0.05 s (rename detection skipped by `renameLimit`), 0.02 s `--no-renames` | |
+  | shadow repository: `add -A` / `status` / `status` after `touch` / `gc` | 34.3 s / 0.06 to 0.07 s / 0.07 s / 15.7 s; 11,158 loose objects, 398 MB, 371 MB after `gc` (486 MiB of tracked files, images included) | |
+
+- **Memory measure:** RSS (`getrusage`), labelled as such; not footprint
+- **Notes:** the parse numbers exclude the worker process, IPC, extraction into facts and SQLite, which the index pays (see
+  2026-10-30 below); C and C++ grammars are not measured. The SQLite numbers use one prepared statement and one transaction, unlike
+  stage 1's per-row `execute`. Raw output was kept in the session's scratch area only.
 
 ### 2026-10-25 (amended 2026-10-28), embedding engines
 
