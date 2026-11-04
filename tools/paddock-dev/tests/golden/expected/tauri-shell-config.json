@@ -1,9 +1,9 @@
 {
  "all": false,
- "crates": false,
+ "crates": true,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -25,6 +25,12 @@
  "why": {
   "app:z": [
    "apps/z/app/src-tauri/tauri.conf.json"
+  ],
+  "conformance": [
+   "C91 reads apps/z/app/src-tauri/tauri.conf.json"
+  ],
+  "crates": [
+   "the per_machine sync test reads apps/z/app/src-tauri/tauri.conf.json"
   ]
  }
 }

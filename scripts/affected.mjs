@@ -287,6 +287,13 @@ const OWNERS = [
 /** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
 export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
 
+/**
+ * What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app: its Tauri configuration, the
+ * Windows installer files (hooks, the exclusions and statements, the generated stop list, the include copy), and the shared
+ * include itself (which every adopting app copies).
+ */
+export const PER_MACHINE_INPUT = /^(apps\/[^/]+\/app\/src-tauri\/(tauri(\.windows)?\.conf\.json|windows\/)|crates\/paddock-setup\/nsis\/paddock-per-machine\.nsh)/;
+
 /** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
 export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
 
@@ -636,6 +643,12 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
     // shell's dialog set), which runs in the conformance job.
     if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
+    // A per-machine app's installer files and configuration are read by conformance C91 and by paddock-service's per_machine
+    // sync test (the generated stop list and the include copy), which runs with the shared crates.
+    if (PER_MACHINE_INPUT.test(f)) {
+      mark('conformance', `C91 reads ${f}`);
+      mark('crates', `the per_machine sync test reads ${f}`);
+    }
     // The notices tool and its cargo-about configuration decide the committed THIRD_PARTY_NOTICES.md of every app with a
     // `notices` block (conformance/src/notices/** is covered by the rule below): they are inputs of those apps.
     if (NOTICES_INPUTS.test(f)) {

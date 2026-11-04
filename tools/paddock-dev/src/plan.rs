@@ -48,6 +48,12 @@ static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^li
 /// The planner and its tests: besides the scripts' owners, this tool's golden test runs them as its oracle.
 static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(\.test)?\.mjs$"));
 
+/// What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app (scripts/affected.mjs
+/// `PER_MACHINE_INPUT`).
+static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
+    re(r"^(apps/[^/]+/app/src-tauri/(tauri(\.windows)?\.conf\.json|windows/)|crates/paddock-setup/nsis/paddock-per-machine\.nsh)")
+});
+
 /// Editor and VCS metadata: marks nothing.
 static META: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [r"(^|/)\.gitignore$", r"^\.editorconfig$", r"(^|/)\.DS_Store$", r"^lefthook\.yml$"]
@@ -226,6 +232,10 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 Some("paddock-dev".to_string()),
                 format!("its golden test compares {f} (tools/paddock-dev/tests/it/golden.rs)"),
             );
+        }
+        if PER_MACHINE_INPUT.is_match(f) {
+            st.mark(Some("conformance".to_string()), format!("C91 reads {f}"));
+            st.mark(Some("crates".to_string()), format!("the per_machine sync test reads {f}"));
         }
         if RUST_INPUTS.iter().any(|r| r.is_match(f)) {
             for p in ["crates", "paddock-dev"] {

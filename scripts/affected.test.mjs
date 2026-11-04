@@ -99,6 +99,28 @@ describe('the graph of this tree', () => {
     assert.ok(!run('apps/shell-demo/README.md').conformance);
   });
 
+  test("a per-machine app's Tauri config, per-machine.json and installer files run C91 and the shared crates' sync test", () => {
+    for (const f of [
+      'apps/dyno/app/src-tauri/tauri.conf.json',
+      'apps/dyno/app/src-tauri/tauri.windows.conf.json',
+      'apps/dyno/app/src-tauri/windows/per-machine.json',
+      'apps/dyno/app/src-tauri/windows/installer-hooks.nsh',
+      'apps/dyno/app/src-tauri/windows/paddock-per-machine.generated.nsh',
+    ]) {
+      const r = run(f);
+      assert.ok(r.conformance, `${f} runs C91`);
+      assert.ok(r.crates, `${f} runs paddock-service's per_machine sync test`);
+      assert.deepEqual(r.apps, ['dyno'], f);
+    }
+    // The shared include itself is read by the same check and test, and every adopting app is marked.
+    const inc = run('crates/paddock-setup/nsis/paddock-per-machine.nsh');
+    assert.ok(inc.conformance && inc.crates);
+    // Other app files do not.
+    const other = run('apps/dyno/app/src-tauri/src/lib.rs');
+    assert.ok(!other.conformance);
+    assert.ok(!run('apps/dyno/app/src-tauri/icons/icon.ico').conformance);
+  });
+
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
     const r = run('eslint/src/preset.cjs');
     assert.ok(r.eslint && r.ui);
