@@ -5,7 +5,8 @@
 //!
 //! This is the first instance of the common seam ([`crate::helper_first`]); the policy lives there.
 
-use crate::helper_first::{HelperCalls, HelperFirst, HelperReading};
+use crate::helper_first::{HelperCalls, HelperFirst, HelperReading, ReadClass};
+use crate::helper_link::CallError;
 use dyno_core::hardware::DiskWear;
 use dyno_core::helper_requests::SmartQuery;
 use dyno_core::metrics::Reading;
@@ -43,7 +44,12 @@ impl HelperReading for SmartWear {
         "SSD wear"
     }
 
-    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Vec<DiskWear>, PlatformError> {
+    fn class(&self) -> ReadClass {
+        // smartctl takes as long as it takes, and the transport gives the kind minutes: never the 2 s of a live reading.
+        ReadClass::Bulk
+    }
+
+    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Vec<DiskWear>, CallError> {
         let reply = calls.smart(SmartQuery::default())?;
         // The helper's reply carries the id the history is kept under, so the history continues across both paths.
         let wear: Vec<DiskWear> = reply.disks.iter().filter_map(SmartDisk::to_wear).collect();
@@ -63,7 +69,8 @@ impl HelperReading for SmartWear {
             return Err(PlatformError::Failed(reply.skipped.first().map_or_else(
                 || "the helper found no SSD with wear counters.".to_string(),
                 |s| format!("the helper skipped {}: {}", s.device, s.reason),
-            )));
+            ))
+            .into());
         }
         Ok(wear)
     }
@@ -178,6 +185,20 @@ mod tests {
         let c = centre(&Net::new(false, vec![]), &FakeClock::new());
         let mut ok = helper_first_wear(port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
         assert!(DiskWearSource::read(&mut ok).value().is_some());
+    }
+
+    #[test]
+    fn a_smart_read_gets_no_live_deadline_because_smartctl_takes_as_long_as_it_takes() {
+        let net = Net::new(true, vec![Ok(reply(vec![nvme()], vec![]))]);
+        let c = centre(&net, &FakeClock::new());
+        let mut r = helper_first_wear(port(&c), Box::new(Counting(Arc::default())));
+        assert_eq!(HelperFirst::read(&mut r).via, ReadVia::Helper);
+        let maxes = net.maxes.lock().unwrap().clone();
+        assert_eq!(maxes.last(), Some(&None), "the Smart call: {maxes:?}");
+        assert!(
+            maxes[..maxes.len() - 1].iter().all(|m| *m == Some(crate::helper_first::LIVE_WAIT)),
+            "the readiness probe stays live"
+        );
     }
 
     #[test]

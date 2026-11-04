@@ -6,6 +6,7 @@
     "statuses": [],
     "via": {
       "unavailable": {
+        "next": null,
         "reason": "No versions."
       }
     }
@@ -23,6 +24,66 @@
     "truncated": 0,
     "via": "helper"
   },
+  "inventory": {
+    "cpu": {
+      "frequencyMhz": 0,
+      "logicalCores": 0,
+      "name": "",
+      "physicalCores": 0
+    },
+    "disks": [],
+    "hints": [
+      {
+        "kind": "unknown",
+        "message": "x",
+        "slot": null
+      }
+    ],
+    "hostName": null,
+    "memory": {
+      "totalOnly": {
+        "reason": {
+          "reason": "x"
+        },
+        "total": 1
+      }
+    },
+    "memoryVia": {
+      "needsHelper": {
+        "next": {
+          "openSettings": "helper"
+        },
+        "reason": "Other accounts' processes are not readable without the helper."
+      }
+    },
+    "os": "os"
+  },
+  "liveVia": {
+    "others": {
+      "needsHelper": {
+        "next": {
+          "openSettings": "helper"
+        },
+        "reason": "Other accounts' processes are not readable without the helper."
+      }
+    },
+    "processes": "helper",
+    "temperatures": {
+      "unavailable": {
+        "next": null,
+        "reason": "macOS reports a pressure level, not temperatures."
+      }
+    }
+  },
+  "locker": {
+    "kind": null,
+    "name": "x",
+    "process": {
+      "pid": 1,
+      "started": null
+    },
+    "via": "helper"
+  },
   "network": {
     "at": 0,
     "connections": [],
@@ -33,7 +94,7 @@
         "next": {
           "openSettings": "helper"
         },
-        "reason": "Other accounts' processes are not readable without the helper. Turn on Administrator readings in Settings so the helper can read this."
+        "reason": "Other accounts' processes are not readable without the helper."
       }
     },
     "traffic": [],
@@ -42,12 +103,34 @@
     "truncated": 0,
     "unknownOwners": 0
   },
+  "nextSteps": [
+    "retry",
+    {
+      "openSettings": "helper"
+    },
+    "updateHelper",
+    "updateApp",
+    "showLog",
+    {
+      "none": {
+        "why": "Nothing can be done."
+      }
+    }
+  ],
   "sleep": {
     "blockers": [],
     "blockersUnavailable": null,
     "blockersVia": "helper",
     "wakes": [],
     "wakesUnavailable": null
+  },
+  "startup": {
+    "btmVia": "helper",
+    "entries": [],
+    "osCount": 0,
+    "signedCount": 0,
+    "total": 0,
+    "unavailable": []
   },
   "variants": [
     "helper",
@@ -57,12 +140,25 @@
         "next": {
           "openSettings": "helper"
         },
-        "reason": "Other accounts' processes are not readable without the helper. Turn on Administrator readings in Settings so the helper can read this."
+        "reason": "Other accounts' processes are not readable without the helper."
       }
     },
     {
       "unavailable": {
+        "next": null,
         "reason": "This virtual machine has no sensors."
+      }
+    },
+    {
+      "unavailable": {
+        "next": "retry",
+        "reason": "The helper did not answer."
+      }
+    },
+    {
+      "needsHelper": {
+        "next": "updateHelper",
+        "reason": "The helper is older than this Dyno."
       }
     }
   ]

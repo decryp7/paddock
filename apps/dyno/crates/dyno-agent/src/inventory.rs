@@ -23,17 +23,28 @@ fn in_background<T: Send + 'static>(state: T, read: impl FnOnce(T) + Send + 'sta
     });
 }
 
-/// The inventory, from the cache when present.
+/// The inventory, from the cache when present. What the helper reads (the memory slots) is read again when the helper epoch moves:
+/// the helper coming up after the first read must not leave "turn it on" on the page.
 pub fn get(shared: &Shared) -> SystemInventory {
-    if let Some(i) = lock(&shared.core).inventory.clone() {
+    let epoch = lock(&shared.memory).epoch();
+    if let Some(i) = fresh(shared, epoch) {
         return i;
     }
     // One reader at a time (the warm-up thread and a request can arrive together), and wait a moment for the first
     // sample so the volumes are known; otherwise the two would cache different answers.
     static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = GATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(i) = lock(&shared.core).inventory.clone() {
+    if let Some(i) = fresh(shared, epoch) {
         return i;
+    }
+    let cached = lock(&shared.core).inventory.clone();
+    if let Some(old) = cached {
+        let (memory, via) = read_memory(shared, old.memory.total());
+        let inv = SystemInventory::new(old.os, old.host_name, old.cpu, memory, old.disks).with_memory_via(via);
+        let mut core = lock(&shared.core);
+        core.inventory = Some(inv.clone());
+        core.inventory_epoch = epoch;
+        return inv;
     }
     for _ in 0..30 {
         if lock(&shared.core).recent.back().is_some() {
@@ -61,22 +72,33 @@ pub fn get(shared: &Shared) -> SystemInventory {
         )
     };
     let total = if total > 0 { total } else { os_total_memory() };
-    let (memory, via) = {
-        let mut seam = lock(&shared.memory);
-        seam.reading_mut().set_total(total);
-        let got = seam.read();
-        let layout = match got.value {
-            Reading::Available(l) => l,
-            Reading::Unavailable(reason) => MemoryLayout::TotalOnly {
-                total,
-                reason: dyno_core::inventory::Unavailable::failed(reason),
-            },
-        };
-        (layout, got.via)
-    };
+    let (memory, via) = read_memory(shared, total);
     let inv = SystemInventory::new(os_name(), sysinfo::System::host_name(), cpu_info(), memory, disks).with_memory_via(via);
-    lock(&shared.core).inventory = Some(inv.clone());
+    let mut core = lock(&shared.core);
+    core.inventory = Some(inv.clone());
+    core.inventory_epoch = epoch;
     inv
+}
+
+/// The cached inventory, when its helper readings were made at `epoch`.
+fn fresh(shared: &Shared, epoch: u64) -> Option<SystemInventory> {
+    let core = lock(&shared.core);
+    core.inventory.clone().filter(|_| core.inventory_epoch == epoch)
+}
+
+/// The memory layout and who read it: the helper first, then this computer.
+fn read_memory(shared: &Shared, total: u64) -> (MemoryLayout, dyno_core::read_via::ReadVia) {
+    let mut seam = lock(&shared.memory);
+    seam.reading_mut().set_total(total);
+    let got = seam.read();
+    let layout = match got.value {
+        Reading::Available(l) => l,
+        Reading::Unavailable(reason) => MemoryLayout::TotalOnly {
+            total,
+            reason: dyno_core::inventory::Unavailable::failed(reason),
+        },
+    };
+    (layout, got.via)
 }
 
 fn os_name() -> String {

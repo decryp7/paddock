@@ -18,7 +18,12 @@ use crate::wake::{IfName, WakeEntry, WakeTag, WolReply};
 use serde::{Deserialize, Serialize};
 
 /// The version of the helper's request set. A different value is refused by the agent with "update the helper".
-pub const HELPER_API: u32 = 4;
+///
+/// Wire history (the helper wire is postcard, so a changed type is a changed wire):
+/// - 4: `SmartDisk` gained `wear_id`, `bytes_written` and `rated_bytes` (the helper's SMART reply carries the full wear reading).
+/// - 5: `FirewallSource` gained `via` (helper-wiring plan, WP-0). The helper writes `Local`; the agent always overwrites it with
+///   `Helper` on a helper reply. 1.1.0 is unreleased, so every dev machine with an older helper must Repair.
+pub const HELPER_API: u32 = 5;
 
 /// The oldest helper build this Dyno accepts as `Ready`. Raised only when a helper fix must reach users (ADR 0027 section 4).
 pub const MIN_HELPER_VERSION: &str = "1.1.0";
