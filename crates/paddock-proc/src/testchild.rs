@@ -65,7 +65,10 @@ impl Mode {
 
 /// A command that re-executes this test binary in `mode`.
 pub fn child(mode: Mode) -> Command {
-    child_of(&std::env::current_exe().expect("the test binary has a path"), mode)
+    child_of(
+        &std::env::current_exe().expect("the test binary has a path"),
+        mode,
+    )
 }
 
 /// A command that runs `exe` (a copy of this test binary, for tests that need a program in a folder of their own) in `mode`.
@@ -153,7 +156,11 @@ fn helper_main() {
                 &images,
                 &crate::installed::Bounds::default(),
             );
-            say(&format!("exit {} actions {}", report.exit_code(), report.actions.len()));
+            say(&format!(
+                "exit {} actions {}",
+                report.exit_code(),
+                report.actions.len()
+            ));
             say("alive");
             sleep_out();
         }

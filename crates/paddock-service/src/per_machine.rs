@@ -81,12 +81,17 @@ fn valid_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 120
         && !n.starts_with(['-', ' ', '.'])
-        && n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '))
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '))
 }
 
 fn exe_name(stem: &str) -> String {
     let base = stem.rsplit(['/', '\\']).next().unwrap_or(stem);
-    if base.to_ascii_lowercase().ends_with(".exe") { base.to_owned() } else { format!("{base}.exe") }
+    if base.to_ascii_lowercase().ends_with(".exe") {
+        base.to_owned()
+    } else {
+        format!("{base}.exe")
+    }
 }
 
 /// The programs to stop: the main binary, then every external binary, without duplicates (case-insensitive), minus the
@@ -130,7 +135,10 @@ pub fn generated_nsh(images: &[String]) -> String {
 }
 
 fn json_error(file: &str, e: serde_json::Error) -> PerMachineError {
-    PerMachineError::Json { file: file.to_owned(), source: std::sync::Arc::new(e) }
+    PerMachineError::Json {
+        file: file.to_owned(),
+        source: std::sync::Arc::new(e),
+    }
 }
 
 fn parse(text: &str, file: &str) -> Result<serde_json::Value, PerMachineError> {
@@ -145,10 +153,16 @@ fn config_of(per_machine_json: Option<&str>) -> Result<PerMachineConfig, PerMach
 }
 
 /// Every program of the stop list has a statement that it survives a forced end (ADR 0053 section 3: each adopting app says so).
-pub fn check_survival(images: &[String], per_machine_json: Option<&str>) -> Result<(), PerMachineError> {
+pub fn check_survival(
+    images: &[String],
+    per_machine_json: Option<&str>,
+) -> Result<(), PerMachineError> {
     let config = config_of(per_machine_json)?;
     for image in images {
-        let said = config.survives_forced_end.iter().any(|s| s.image.eq_ignore_ascii_case(image) && !s.why.trim().is_empty());
+        let said = config
+            .survives_forced_end
+            .iter()
+            .any(|s| s.image.eq_ignore_ascii_case(image) && !s.why.trim().is_empty());
         if !said {
             return Err(PerMachineError::NoSurvivalStatement(image.clone()));
         }
@@ -164,16 +178,33 @@ pub fn generated_from_config(
     per_machine_json: Option<&str>,
 ) -> Result<String, PerMachineError> {
     let base = parse(tauri_conf, "tauri.conf.json")?;
-    let overlay = windows_conf.map(|t| parse(t, "tauri.windows.conf.json")).transpose()?;
-    let main = base.get("mainBinaryName").and_then(|v| v.as_str()).unwrap_or_default();
+    let overlay = windows_conf
+        .map(|t| parse(t, "tauri.windows.conf.json"))
+        .transpose()?;
+    let main = base
+        .get("mainBinaryName")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
     let ext = |v: &serde_json::Value| -> Option<Vec<String>> {
         v.pointer("/bundle/externalBin")
             .and_then(|a| a.as_array())
-            .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(str::to_owned))
+                    .collect()
+            })
     };
-    let external = overlay.as_ref().and_then(ext).or_else(|| ext(&base)).unwrap_or_default();
+    let external = overlay
+        .as_ref()
+        .and_then(ext)
+        .or_else(|| ext(&base))
+        .unwrap_or_default();
     let config = config_of(per_machine_json)?;
-    Ok(generated_nsh(&stop_images(main, &external, &config.stop_exclusions)?))
+    Ok(generated_nsh(&stop_images(
+        main,
+        &external,
+        &config.stop_exclusions,
+    )?))
 }
 
 /// The files of one adopting app that must equal what is generated: the generated list and the copy of the include.
@@ -181,7 +212,9 @@ const GENERATED_FILE: &str = "paddock-per-machine.generated.nsh";
 const INCLUDE_FILE: &str = "paddock-per-machine.nsh";
 
 fn read(p: &Path) -> Option<String> {
-    std::fs::read_to_string(p).ok().map(|t| t.replace("\r\n", "\n"))
+    std::fs::read_to_string(p)
+        .ok()
+        .map(|t| t.replace("\r\n", "\n"))
 }
 
 /// Checks one app's `src-tauri` folder against the canonical include: the hooks file includes the shared include, the
@@ -200,10 +233,20 @@ pub fn check_app(src_tauri: &Path, canonical_include: &Path) -> Vec<String> {
             let images: Vec<String> = text
                 .lines()
                 .find_map(|l| l.strip_prefix("!define PADDOCK_STOP_IMAGES \""))
-                .map(|l| l.trim_end_matches('"').split(',').map(str::to_owned).collect())
+                .map(|l| {
+                    l.trim_end_matches('"')
+                        .split(',')
+                        .map(str::to_owned)
+                        .collect()
+                })
                 .unwrap_or_default();
-            if let Err(e) = check_survival(&images, read(&windows.join("per-machine.json")).as_deref()) {
-                stale.push(format!("{}: {e}", windows.join("per-machine.json").display()));
+            if let Err(e) =
+                check_survival(&images, read(&windows.join("per-machine.json")).as_deref())
+            {
+                stale.push(format!(
+                    "{}: {e}",
+                    windows.join("per-machine.json").display()
+                ));
             }
             if read(&windows.join(GENERATED_FILE)).as_deref() != Some(text.as_str()) {
                 stale.push(format!("{} is stale (PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine)", windows.join(GENERATED_FILE).display()));
@@ -212,7 +255,11 @@ pub fn check_app(src_tauri: &Path, canonical_include: &Path) -> Vec<String> {
     }
     match (read(canonical_include), read(&windows.join(INCLUDE_FILE))) {
         (Some(a), Some(b)) if a == b => {}
-        (Some(_), Some(_)) => stale.push(format!("{} differs from {}", windows.join(INCLUDE_FILE).display(), canonical_include.display())),
+        (Some(_), Some(_)) => stale.push(format!(
+            "{} differs from {}",
+            windows.join(INCLUDE_FILE).display(),
+            canonical_include.display()
+        )),
         _ => stale.push(format!(
             "{} or {} is missing or unreadable",
             windows.join(INCLUDE_FILE).display(),
@@ -240,7 +287,9 @@ pub fn write_app(src_tauri: &Path, canonical_include: &Path) -> Result<(), Strin
 /// Every app folder (`apps/<app>/app/src-tauri`) whose Windows hooks file includes the shared include.
 pub fn adopting_apps(repo_root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let Ok(apps) = std::fs::read_dir(repo_root.join("apps")) else { return out };
+    let Ok(apps) = std::fs::read_dir(repo_root.join("apps")) else {
+        return out;
+    };
     for app in apps.flatten() {
         let src = app.path().join("app").join("src-tauri");
         let hooks = src.join("windows").join("installer-hooks.nsh");

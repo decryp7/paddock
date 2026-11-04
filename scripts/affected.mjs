@@ -294,6 +294,21 @@ export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.to
  */
 export const PER_MACHINE_INPUT = /^(apps\/[^/]+\/app\/src-tauri\/(tauri(\.windows)?\.conf\.json|windows\/)|crates\/paddock-setup\/nsis\/paddock-per-machine\.nsh)/;
 
+/** Whether the app that owns `f` (apps/<app>/app/src-tauri/...) adopts the shared installer include: its hooks include
+ * paddock-per-machine.nsh, or its Windows installer is perMachine. Read from the working tree. */
+export function adoptsPerMachine(root, f) {
+  const m = /^(apps\/[^/]+\/app\/src-tauri)\//.exec(f);
+  if (!m) return false;
+  const read = (p) => {
+    try {
+      return readFileSync(join(root, m[1], p), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  return read('windows/installer-hooks.nsh').includes('paddock-per-machine.nsh') || /"installMode"\s*:\s*"perMachine"/.test(read('tauri.windows.conf.json') + read('tauri.conf.json'));
+}
+
 /** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
 export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
 
@@ -501,7 +516,7 @@ export function giteaTargets(f, gitea) {
  * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
-export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null } = {}) {
+export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null, perMachine = () => false } = {}) {
   const why = new Map();
   const kinds = new Map();
   const appProjects = [...apps.keys()].map((a) => `app:${a}`);
@@ -647,7 +662,8 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     // sync test (the generated stop list and the include copy), which runs with the shared crates.
     if (PER_MACHINE_INPUT.test(f)) {
       mark('conformance', `C91 reads ${f}`);
-      mark('crates', `the per_machine sync test reads ${f}`);
+      // The sync test of paddock-service reads only the apps that adopt the include (and the include itself).
+      if (f.startsWith('crates/') || perMachine(f)) mark('crates', `the per_machine sync test reads ${f}`);
     }
     // The notices tool and its cargo-about configuration decide the committed THIRD_PARTY_NOTICES.md of every app with a
     // `notices` block (conformance/src/notices/** is covered by the rule below): they are inputs of those apps.
@@ -916,7 +932,7 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
       lockAfter = show(head);
     }
   }
-  return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea }) };
+  return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea, perMachine: (f) => adoptsPerMachine(root, f) }) };
 }
 
 /** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */

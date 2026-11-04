@@ -2,14 +2,14 @@
 // The artifact gate of a per-machine installer (family ADR 0053 section 8, ADR 0039): the built NSIS installer must ask for
 // administrator level, contain paddock-setup.exe, and carry the include's version in its version resource, so a build whose hooks
 // never ran the include (or whose bundle step did not stage the program) cannot be released. On Windows the embedded program
-// is also run with `self-test`, which must name the app's identifier.
+// is also run with `self-test`, which must name the app's identifier and say `stop_all=present`.
 //
 //   node conformance/release/check-per-machine-installer.mjs --dir <cargo profile folder holding bundle/nsis> --conf <tauri.conf.json>
 //        [--include crates/paddock-setup/nsis/paddock-per-machine.nsh]
 //
-// Needs 7z (it opens NSIS installers); without it the gate fails, it never passes unchecked.
+// Needs 7-Zip (it opens NSIS installers): on PATH or in C:\\Program Files\\7-Zip; without it the gate fails, it never passes unchecked.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMain } from '../src/util/is-main.mjs';
@@ -40,24 +40,27 @@ export function listedFiles(text) {
     .slice(1);
 }
 
-/** NSIS installers under `dir` (any depth). */
+/** The NSIS installers a build wrote: `*-setup.exe` directly in `<dir>/bundle/nsis` (nowhere else under the folder). */
 export function findInstallers(dir) {
-  const out = [];
-  const walk = (d) => {
-    let names;
-    try {
-      names = readdirSync(d);
-    } catch {
-      return;
-    }
-    for (const n of names) {
-      const p = join(d, n);
-      if (statSync(p).isDirectory()) walk(p);
-      else if (/-setup\.exe$/i.test(n)) out.push(p);
-    }
-  };
-  walk(dir);
-  return out.sort();
+  try {
+    return readdirSync(join(dir, 'bundle', 'nsis'))
+      .filter((n) => /-setup\.exe$/i.test(n))
+      .map((n) => join(dir, 'bundle', 'nsis', n))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+const SEVEN_ZIP_FALLBACK = 'C:\\Program Files\\7-Zip\\7z.exe';
+
+/** The 7z to use: on PATH, then the standard install folder; otherwise one error that says how to get it. */
+export function find7z({ probe = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8', timeout: 20000 }) } = {}) {
+  for (const cmd of ['7z', SEVEN_ZIP_FALLBACK]) {
+    const r = probe(cmd, ['i']);
+    if (!r.error && r.status === 0) return { cmd };
+  }
+  return { error: '7-Zip (7z) was not found on PATH or in C:\\Program Files\\7-Zip: the gate opens the NSIS installer with it. Install 7-Zip on the runner (winget install 7zip.7zip, or the CI image: apt install 7zip), then run the job again.' };
 }
 
 /** The trusted comment of a minisign signature file's text (the file is base64 of the four-line signature), or null. */
@@ -75,6 +78,17 @@ export function checkSignatureName({ sig, file, product, version }) {
   const named = /(?:^|\t)file:(\S+)/.exec(comment)?.[1];
   if (named === undefined) return [`${file}.sig's trusted comment has no file: name (${comment})`];
   return named === file ? [] : [`${file}.sig's trusted comment names ${named}, expected ${file}: every update would be refused`];
+}
+
+/** What the embedded program's `self-test` must say: the app's identifier, and `stop_all=present` (a build without the stopper
+ * would fail `stop-all` at install time). */
+export function checkSelfTest({ stdout, status, identifier, name }) {
+  const out = typeof stdout === 'string' ? stdout : '';
+  if (status !== 0) return [`${name}: paddock-setup.exe self-test did not run or failed (exit ${status ?? 'none'})`];
+  const f = [];
+  if (!out.includes(identifier)) f.push(`${name}: paddock-setup.exe self-test does not name ${identifier} (output: ${out.trim()})`);
+  if (!/^stop_all=present\s*$/m.test(out)) f.push(`${name}: paddock-setup.exe self-test does not say stop_all=present: this build cannot stop other sessions' programs`);
+  return f;
 }
 
 /** What is wrong with one installer, one sentence each with the next step. */
@@ -107,10 +121,15 @@ function main(argv) {
     console.error(`::error::no *-setup.exe under ${o.dir}: nothing to check`);
     return 1;
   }
+  const sevenZip = find7z();
+  if (sevenZip.error) {
+    console.error(`::error::${sevenZip.error}`);
+    return 1;
+  }
   let failed = false;
   for (const path of installers) {
     const name = path.split(/[\\/]/).pop();
-    const listing = spawnSync('7z', ['l', '-slt', path], { encoding: 'utf8' });
+    const listing = spawnSync(sevenZip.cmd, ['l', '-slt', path], { encoding: 'utf8', timeout: 120000 });
     const files = listing.status === 0 ? listedFiles(listing.stdout) : null;
     const problems = [];
     try {
@@ -121,9 +140,10 @@ function main(argv) {
     problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name }));
     if (process.platform === 'win32' && files) {
       const tmp = mkdtempSync(join(tmpdir(), 'pm-gate-'));
-      const ex = spawnSync('7z', ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8' });
-      const run = ex.status === 0 ? spawnSync(join(tmp, 'paddock-setup.exe'), ['self-test'], { encoding: 'utf8' }) : null;
-      if (!run || run.status !== 0 || !run.stdout.includes(conf.identifier)) problems.push(`${name}: paddock-setup.exe self-test does not name ${conf.identifier} (output: ${run?.stdout?.trim() ?? 'did not run'})`);
+      const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
+      const run = ex.status === 0 ? spawnSync(join(tmp, 'paddock-setup.exe'), ['self-test'], { encoding: 'utf8', timeout: 60000 }) : null;
+      rmSync(tmp, { recursive: true, force: true });
+      problems.push(...checkSelfTest({ stdout: run?.stdout, status: run?.status, identifier: conf.identifier, name }));
     }
     for (const p of problems) console.error(`::error::${p}`);
     if (problems.length === 0) console.log(`${name}: administrator level, paddock-setup.exe inside, include version ${expectVersion}`);
@@ -132,4 +152,11 @@ function main(argv) {
   return failed ? 1 : 0;
 }
 
-if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)));
+if (isMain(import.meta.url)) {
+  try {
+    process.exit(main(process.argv.slice(2)));
+  } catch (e) {
+    console.error(`::error::the per-machine installer gate failed to run: ${e.message}. Check --dir, --conf and --include, then run it again.`);
+    process.exit(1);
+  }
+}

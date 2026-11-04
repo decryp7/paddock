@@ -1,5 +1,5 @@
 ﻿; paddock-per-machine.nsh: the shared installer include of every per-machine Windows app (family ADR 0053, section 2).
-; Synced into each app's src-tauri/windows/ by paddock_commands::testing::sync_generated; do not edit the copies.
+; Copied into each app's src-tauri/windows/ by paddock-service's `per_machine` test (PADDOCK_WRITE_TS=1); do not edit the copies.
 ;
 ; The app's hooks file (bundle.windows.nsis.installerHooks) includes, in this order,
 ;     !include "${__FILEDIR__}\paddock-per-machine.generated.nsh"   ; !define PADDOCK_STOP_IMAGES "a.exe,b.exe" (ADR section 2.1)
@@ -31,7 +31,7 @@
 ;   stop-all --dir <dir> --images <a.exe,b.exe,...>             11 = a listed program still runs
 ;   same-folder --a <dir> --b <dir>                             0 = same, 1 = not the same
 ;   clean-run --dir <dir> --scope <machine|all>
-;   clean-staging --dir <dir>
+;   clean-staging --dir <dir> --keep <the installer's own folder, $EXEDIR>   (what runs from there is never touched)
 ;   hold-installing                                             stays running until the installer exits
 ; Any other non-zero code is a failure of the tool itself (the details and $INSTDIR\updates\setup.log say why).
 ; The mechanism: stop-all ends every session's listed programs itself, by handle (graceful first in the caller's own session;
@@ -45,7 +45,9 @@
 !define PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_INCLUDE_VERSION "1"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
-VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
+!ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
+  VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
+!endif
 ; makensis resolves a relative !include from its working folder, not from the including file: name everything by this file's folder.
 !define /redef PADDOCK_SETUP_DIR "${__FILEDIR__}"
 
@@ -61,7 +63,7 @@ VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
   !include /NONFATAL "${PADDOCK_SETUP_DIR}\paddock-per-machine.generated.nsh"
 !endif
 !ifndef PADDOCK_STOP_IMAGES
-  !error "paddock-per-machine.generated.nsh must !define PADDOCK_STOP_IMAGES (comma-separated file names); run paddock_commands::testing::sync_generated"
+  !error "paddock-per-machine.generated.nsh must !define PADDOCK_STOP_IMAGES (comma-separated file names); run PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine"
 !endif
 
 ; Error levels of a refusal ($INSTDIR\updates\setup.log has the detail).
@@ -339,7 +341,7 @@ Var PaddockHaveSetup
 
 ; Last in POSTINSTALL: delete the staged update that is not in use (the next apply-update removes the rest).
 !macro PADDOCK_FINISH_INSTALL
-  !insertmacro _PADDOCK_RUN 'clean-staging --dir "$R5"'
+  !insertmacro _PADDOCK_RUN 'clean-staging --dir "$R5" --keep "$R4"'
 !macroend
 
 ; Last in PREUNINSTALL: the template's RMDir "$INSTDIR" is not recursive, so what the include added goes first. A reinstall

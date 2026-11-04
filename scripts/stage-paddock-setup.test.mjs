@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { executableFrom, parseArgs, setupEnv, stage } from './stage-paddock-setup.mjs';
+import { cleanKey, executableFrom, isRelease, parseArgs, setupEnv, stage } from './stage-paddock-setup.mjs';
 
 const conf = { productName: 'Dyno', identifier: 'net.decryptology.dyno', version: '1.1.0', mainBinaryName: 'dyno-app' };
 
@@ -33,7 +33,7 @@ test('the executable is the bin artifact of paddock-setup in cargo json messages
 });
 
 test('arguments: the app is needed, the target and cargo folder are optional, nothing else is accepted', () => {
-  assert.deepEqual(parseArgs(['--app', 'dyno']), { app: 'dyno', target: undefined, root: undefined });
+  assert.deepEqual(parseArgs(['--app', 'dyno']), { app: 'dyno', target: undefined, root: undefined, requireKey: false });
   assert.deepEqual(parseArgs(['--app', 'dyno', '--target', 'x86_64-pc-windows-msvc']).target, 'x86_64-pc-windows-msvc');
   assert.throws(() => parseArgs([]), /--app/);
   assert.throws(() => parseArgs(['--app', 'dyno', '--bogus']), /unknown/);
@@ -67,4 +67,31 @@ test('staging fails closed without the paddock-setup crate, copies the built pro
   assert.ok(t);
   assert.deepEqual(logs[1].args.slice(-2), ['--target', 'x86_64-pc-windows-msvc']);
   assert.throws(() => stage({ app: 'nope', root, run, env: {} }), /no such app/);
+});
+
+test('the key is stripped of every whitespace like the bundle action does, and a release needs one', () => {
+  assert.equal(cleanKey(' AB \r\nCD\t'), 'ABCD');
+  assert.equal(cleanKey(undefined), '');
+  assert.equal(isRelease({ GITHUB_REF: 'refs/tags/dyno-v1.1.0' }, false), true);
+  assert.equal(isRelease({ GITEA_REF: 'refs/tags/x' }, false), true);
+  assert.equal(isRelease({ GITHUB_REF: 'refs/heads/main' }, false), false);
+  assert.equal(isRelease({}, true), true, '--require-key');
+  assert.deepEqual(parseArgs(['--app', 'dyno', '--require-key']).requireKey, true);
+  const root = mkdtempSync(join(tmpdir(), 'stage-'));
+  const src = join(root, 'apps/dyno/app/src-tauri');
+  mkdirSync(join(src, 'windows'), { recursive: true });
+  mkdirSync(join(root, 'crates/paddock-setup'), { recursive: true });
+  writeFileSync(join(root, 'crates/paddock-setup/Cargo.toml'), '[package]\n');
+  writeFileSync(join(src, 'tauri.conf.json'), JSON.stringify(conf));
+  let seen;
+  const run = (c, a, o) => {
+    seen = o.env.PADDOCK_SETUP_UPDATE_KEY;
+    writeFileSync(join(root, 'b.exe'), 'MZ');
+    return `{"reason":"compiler-artifact","target":{"name":"paddock-setup","kind":["bin"]},"executable":${JSON.stringify(join(root, 'b.exe'))}}\n`;
+  };
+  stage({ app: 'dyno', root, run, env: { TAURI_UPDATER_PUBKEY: 'AB\nCD ' } });
+  assert.equal(seen, 'ABCD');
+  assert.throws(() => stage({ app: 'dyno', root, run, env: { GITHUB_REF: 'refs/tags/dyno-v1.1.0' } }), /no updater public key.*TAURI_UPDATER_PUBKEY/s);
+  assert.throws(() => stage({ app: 'dyno', root, run, env: {}, requireKey: true }), /no updater public key/);
+  assert.doesNotThrow(() => stage({ app: 'dyno', root, run, env: { GITHUB_REF: 'refs/tags/x', TAURI_UPDATER_PUBKEY: 'K' } }));
 });

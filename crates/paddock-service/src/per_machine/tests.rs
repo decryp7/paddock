@@ -5,14 +5,22 @@ fn s(v: &[&str]) -> Vec<String> {
 }
 
 fn ex(image: &str, reason: &str) -> StopExclusion {
-    StopExclusion { image: image.into(), reason: reason.into() }
+    StopExclusion {
+        image: image.into(),
+        reason: reason.into(),
+    }
 }
 
 #[test]
 fn the_list_is_the_main_binary_and_every_sidecar_without_the_exclusions() {
     let list = stop_images(
         "dyno-app",
-        &s(&["binaries/dyno-agent", "binaries/dyno", "binaries/dyno-helper", "binaries/Dyno-Agent"]),
+        &s(&[
+            "binaries/dyno-agent",
+            "binaries/dyno",
+            "binaries/dyno-helper",
+            "binaries/Dyno-Agent",
+        ]),
         &[ex("dyno-helper.exe", "runs from its own protected folder")],
     )
     .unwrap();
@@ -21,19 +29,49 @@ fn the_list_is_the_main_binary_and_every_sidecar_without_the_exclusions() {
 
 #[test]
 fn a_name_with_exe_or_a_backslash_path_is_taken_as_the_file_name() {
-    assert_eq!(stop_images("a", &s(&["bin\\b.exe"]), &[]).unwrap(), s(&["a.exe", "b.exe"]));
+    assert_eq!(
+        stop_images("a", &s(&["bin\\b.exe"]), &[]).unwrap(),
+        s(&["a.exe", "b.exe"])
+    );
 }
 
 #[test]
 fn bad_input_is_refused() {
-    assert_eq!(stop_images(" ", &[], &[]), Err(PerMachineError::NoMainBinary));
-    for bad in ["a,b", "a\"b", "a$b", "-x", "a/../b\\..\\", "a;b", "a/", "", "..", "x y/", "C:\\"] {
+    assert_eq!(
+        stop_images(" ", &[], &[]),
+        Err(PerMachineError::NoMainBinary)
+    );
+    for bad in [
+        "a,b",
+        "a\"b",
+        "a$b",
+        "-x",
+        "a/../b\\..\\",
+        "a;b",
+        "a/",
+        "",
+        "..",
+        "x y/",
+        "C:\\",
+    ] {
         let r = stop_images("m", &s(&[bad]), &[]);
-        assert!(matches!(r, Err(PerMachineError::BadName(_))), "{bad:?} must be refused, not shortened to a name: {r:?}");
+        assert!(
+            matches!(r, Err(PerMachineError::BadName(_))),
+            "{bad:?} must be refused, not shortened to a name: {r:?}"
+        );
     }
-    assert!(matches!(stop_images("a,b", &[], &[]), Err(PerMachineError::BadName(_))));
-    assert!(matches!(stop_images("m", &s(&["x\"y"]), &[]), Err(PerMachineError::BadName(_))));
-    assert!(matches!(stop_images("-m", &[], &[]), Err(PerMachineError::BadName(_))));
+    assert!(matches!(
+        stop_images("a,b", &[], &[]),
+        Err(PerMachineError::BadName(_))
+    ));
+    assert!(matches!(
+        stop_images("m", &s(&["x\"y"]), &[]),
+        Err(PerMachineError::BadName(_))
+    ));
+    assert!(matches!(
+        stop_images("-m", &[], &[]),
+        Err(PerMachineError::BadName(_))
+    ));
     assert_eq!(
         stop_images("m", &[], &[ex("m.exe", "  ")]),
         Err(PerMachineError::NoReason("m.exe".into()))
@@ -68,18 +106,40 @@ fn the_windows_overlay_replaces_the_external_binary_list_like_tauris_merge() {
     assert!(t.contains("\"app.exe,three.exe\""), "{t}");
     let t = generated_from_config(base, Some(r#"{"bundle":{}}"#), None).unwrap();
     assert!(t.contains("\"app.exe,one.exe,two.exe\""), "{t}");
-    let t = generated_from_config(base, None, Some(r#"{"stopExclusions":[{"image":"two.exe","reason":"x"}]}"#)).unwrap();
+    let t = generated_from_config(
+        base,
+        None,
+        Some(r#"{"stopExclusions":[{"image":"two.exe","reason":"x"}]}"#),
+    )
+    .unwrap();
     assert!(t.contains("\"app.exe,one.exe\""), "{t}");
-    assert!(matches!(generated_from_config("{", None, None), Err(PerMachineError::Json { .. })));
-    assert!(matches!(generated_from_config(base, None, Some("{\"bogus\":1}")), Err(PerMachineError::Json { .. })));
-    assert_eq!(generated_from_config("{}", None, None), Err(PerMachineError::NoMainBinary));
+    assert!(matches!(
+        generated_from_config("{", None, None),
+        Err(PerMachineError::Json { .. })
+    ));
+    assert!(matches!(
+        generated_from_config(base, None, Some("{\"bogus\":1}")),
+        Err(PerMachineError::Json { .. })
+    ));
+    assert_eq!(
+        generated_from_config("{}", None, None),
+        Err(PerMachineError::NoMainBinary)
+    );
 }
 
 fn app(tmp: &Path) -> (PathBuf, PathBuf) {
     let src = tmp.join("apps/x/app/src-tauri");
     std::fs::create_dir_all(src.join("windows")).unwrap();
-    std::fs::write(src.join("tauri.conf.json"), r#"{"mainBinaryName":"x","bundle":{"externalBin":["b/y"]}}"#).unwrap();
-    std::fs::write(src.join("windows/installer-hooks.nsh"), "!include \"paddock-per-machine.nsh\"\n").unwrap();
+    std::fs::write(
+        src.join("tauri.conf.json"),
+        r#"{"mainBinaryName":"x","bundle":{"externalBin":["b/y"]}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("windows/installer-hooks.nsh"),
+        "!include \"paddock-per-machine.nsh\"\n",
+    )
+    .unwrap();
     std::fs::write(
         src.join("windows/per-machine.json"),
         r#"{"survivesForcedEnd":[{"image":"x.exe","why":"a"},{"image":"y.exe","why":"b"},{"image":"z.exe","why":"c"}]}"#,
@@ -95,7 +155,12 @@ fn an_adopting_app_is_found_checked_and_regenerated() {
     let tmp = tempfile::tempdir().unwrap();
     let (src, inc) = app(tmp.path());
     std::fs::create_dir_all(tmp.path().join("apps/other/app/src-tauri/windows")).unwrap();
-    std::fs::write(tmp.path().join("apps/other/app/src-tauri/windows/installer-hooks.nsh"), "; own hooks\n").unwrap();
+    std::fs::write(
+        tmp.path()
+            .join("apps/other/app/src-tauri/windows/installer-hooks.nsh"),
+        "; own hooks\n",
+    )
+    .unwrap();
     assert!(adopting_apps(&tmp.path().join("nothing")).is_empty());
     assert_eq!(adopting_apps(tmp.path()), vec![src.clone()]);
     let stale = check_app(&src, &inc);
@@ -104,14 +169,28 @@ fn an_adopting_app_is_found_checked_and_regenerated() {
     assert!(check_app(&src, &inc).is_empty());
     // CRLF checkouts do not count as stale.
     let g = std::fs::read_to_string(src.join("windows/paddock-per-machine.generated.nsh")).unwrap();
-    std::fs::write(src.join("windows/paddock-per-machine.generated.nsh"), g.replace('\n', "\r\n")).unwrap();
+    std::fs::write(
+        src.join("windows/paddock-per-machine.generated.nsh"),
+        g.replace('\n', "\r\n"),
+    )
+    .unwrap();
     assert!(check_app(&src, &inc).is_empty());
     // A new sidecar makes the generated list stale until it is regenerated.
-    std::fs::write(src.join("tauri.conf.json"), r#"{"mainBinaryName":"x","bundle":{"externalBin":["b/y","b/z"]}}"#).unwrap();
+    std::fs::write(
+        src.join("tauri.conf.json"),
+        r#"{"mainBinaryName":"x","bundle":{"externalBin":["b/y","b/z"]}}"#,
+    )
+    .unwrap();
     assert_eq!(check_app(&src, &inc).len(), 1);
     // A missing copy says so.
     std::fs::remove_file(src.join("windows/paddock-per-machine.nsh")).unwrap();
-    assert!(check_app(&src, &inc).iter().any(|m| m.contains("missing or unreadable")), "{:?}", check_app(&src, &inc));
+    assert!(
+        check_app(&src, &inc)
+            .iter()
+            .any(|m| m.contains("missing or unreadable")),
+        "{:?}",
+        check_app(&src, &inc)
+    );
     write_app(&src, &inc).unwrap();
     // An edited include copy is stale.
     write_app(&src, &inc).unwrap();
@@ -120,9 +199,15 @@ fn an_adopting_app_is_found_checked_and_regenerated() {
     // A broken configuration is reported, not panicked on.
     std::fs::write(src.join("tauri.conf.json"), "{").unwrap();
     let broken = check_app(&src, &inc);
-    assert!(broken[0].contains("not valid JSON") && broken[0].contains("tauri.conf.json"), "names the file: {broken:?}");
+    assert!(
+        broken[0].contains("not valid JSON") && broken[0].contains("tauri.conf.json"),
+        "names the file: {broken:?}"
+    );
     let err = generated_from_config("{", None, None).unwrap_err();
-    assert!(std::error::Error::source(&err).is_some(), "keeps its cause: {err:?}");
+    assert!(
+        std::error::Error::source(&err).is_some(),
+        "keeps its cause: {err:?}"
+    );
     assert!(write_app(&src, &inc).is_err());
     std::fs::remove_file(&inc).unwrap();
     std::fs::write(src.join("tauri.conf.json"), r#"{"mainBinaryName":"x"}"#).unwrap();
@@ -146,7 +231,10 @@ fn every_adopting_app_is_in_sync() {
 }
 
 fn canonical_include() -> String {
-    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../paddock-setup/nsis/paddock-per-machine.nsh")).unwrap()
+    std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../paddock-setup/nsis/paddock-per-machine.nsh"),
+    )
+    .unwrap()
 }
 
 /// P1-2: the include does no listing of its own (Restart Manager lists system components that only map the files, such as the
@@ -154,8 +242,14 @@ fn canonical_include() -> String {
 #[test]
 fn the_include_has_no_unfiltered_listing_and_no_check_on_every_keystroke() {
     let t = canonical_include();
-    assert!(!t.contains("RmGetList"), "stop-all's exit 11 decides, not an unfiltered list");
-    assert!(!t.contains(".onVerifyInstDir"), "the refusal is PADDOCK_CHECK_DIR's, with its message");
+    assert!(
+        !t.contains("RmGetList"),
+        "stop-all's exit 11 decides, not an unfiltered list"
+    );
+    assert!(
+        !t.contains(".onVerifyInstDir"),
+        "the refusal is PADDOCK_CHECK_DIR's, with its message"
+    );
 }
 
 /// P1-3: the uninstaller cannot `File` an embedded copy, so a missing paddock-setup.exe is a stated skip with a fallback, not a
@@ -163,17 +257,48 @@ fn the_include_has_no_unfiltered_listing_and_no_check_on_every_keystroke() {
 #[test]
 fn the_include_says_what_it_does_without_paddock_setup() {
     let t = canonical_include();
-    assert!(t.contains("PaddockHaveSetup"), "a flag set when the copy is there");
-    assert!(t.contains("RmShutdown") && t.contains("$EXEDIR == $INSTDIR"), "a Restart Manager and a folder-compare fallback");
+    assert!(
+        t.contains("PaddockHaveSetup"),
+        "a flag set when the copy is there"
+    );
+    assert!(
+        t.contains("RmShutdown") && t.contains("$EXEDIR == $INSTDIR"),
+        "a Restart Manager and a folder-compare fallback"
+    );
 }
 
 #[test]
 fn every_program_of_the_stop_list_needs_a_forced_end_statement() {
-    let cfg = r#"{"survivesForcedEnd":[{"image":"a.exe","why":"WAL"},{"image":"B.exe","why":" "}]}"#;
+    let cfg =
+        r#"{"survivesForcedEnd":[{"image":"a.exe","why":"WAL"},{"image":"B.exe","why":" "}]}"#;
     assert_eq!(check_survival(&s(&["a.exe"]), Some(cfg)), Ok(()));
-    assert_eq!(check_survival(&s(&["A.EXE"]), Some(cfg)), Ok(()), "names compare without case");
-    assert_eq!(check_survival(&s(&["b.exe"]), Some(cfg)), Err(PerMachineError::NoSurvivalStatement("b.exe".into())), "a blank statement is none");
-    assert_eq!(check_survival(&s(&["c.exe"]), Some(cfg)), Err(PerMachineError::NoSurvivalStatement("c.exe".into())));
-    assert_eq!(check_survival(&s(&["c.exe"]), None), Err(PerMachineError::NoSurvivalStatement("c.exe".into())));
-    assert!(matches!(check_survival(&s(&["c.exe"]), Some("{")), Err(PerMachineError::Json { .. })));
+    assert_eq!(
+        check_survival(&s(&["A.EXE"]), Some(cfg)),
+        Ok(()),
+        "names compare without case"
+    );
+    assert_eq!(
+        check_survival(&s(&["b.exe"]), Some(cfg)),
+        Err(PerMachineError::NoSurvivalStatement("b.exe".into())),
+        "a blank statement is none"
+    );
+    assert_eq!(
+        check_survival(&s(&["c.exe"]), Some(cfg)),
+        Err(PerMachineError::NoSurvivalStatement("c.exe".into()))
+    );
+    assert_eq!(
+        check_survival(&s(&["c.exe"]), None),
+        Err(PerMachineError::NoSurvivalStatement("c.exe".into()))
+    );
+    assert!(matches!(
+        check_survival(&s(&["c.exe"]), Some("{")),
+        Err(PerMachineError::Json { .. })
+    ));
+}
+
+/// The staged installer that is running lives in `updates\`; clean-staging must be told to keep its folder.
+#[test]
+fn clean_staging_is_told_the_installers_own_folder() {
+    let t = canonical_include();
+    assert!(t.contains(r#"clean-staging --dir "$R5" --keep "$R4""#));
 }

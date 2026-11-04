@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -37,6 +37,11 @@ test('installers are found under the bundle folder', () => {
   writeFileSync(join(d, 'bundle/nsis/other.txt'), 'x');
   assert.deepEqual(findInstallers(d).map((p) => p.split('/').pop()), ['Dyno_1.1.0_x64-setup.exe']);
   assert.deepEqual(findInstallers(join(d, 'nothing')), []);
+  // Only bundle/nsis: a setup.exe elsewhere under the folder (a dependency's test installer) is not the product's.
+  mkdirSync(join(d, 'deps/x'), { recursive: true });
+  writeFileSync(join(d, 'deps/x/Other_setup.exe'), 'x');
+  writeFileSync(join(d, 'bundle/stray-setup.exe'), 'x');
+  assert.deepEqual(findInstallers(d).map((p) => p.split('/').pop()), ['Dyno_1.1.0_x64-setup.exe']);
 });
 
 test('the gate names every way an installer fails it, with the next step', () => {
@@ -63,4 +68,22 @@ test('the signature names the installer as paddock-setup expects (product_versio
   assert.match(ok('timestamp:1').join(), /no file: name/);
   assert.match(checkSignatureName({ sig: 'garbage!', file: 'Dyno_1.1.0_x64-setup.exe', product: 'Dyno', version: '1.1.0' }).join(), /unreadable/);
   assert.match(ok('timestamp:1\tfile:Dyno_1.1.0_x64-setup.exe', 'Other_1.1.0_x64-setup.exe').join(), /file name Other_1.1.0_x64-setup.exe is not Dyno_1.1.0_/);
+});
+
+test('7z is found on PATH, then in Program Files, else the error says how to install it', () => {
+  const ok = (cmd, args) => ({ status: cmd === '7z' || cmd === 'C:\\Program Files\\7-Zip\\7z.exe' ? 0 : 1 });
+  assert.deepEqual(find7z({ probe: ok }), { cmd: '7z' });
+  assert.deepEqual(find7z({ probe: (c) => ({ status: c === 'C:\\Program Files\\7-Zip\\7z.exe' ? 0 : 1 }) }), { cmd: 'C:\\Program Files\\7-Zip\\7z.exe' });
+  const none = find7z({ probe: () => ({ status: 1, error: new Error('ENOENT') }) });
+  assert.match(none.error, /7-Zip \(7z\) was not found on PATH or in C:\\Program Files\\7-Zip/);
+  assert.match(none.error, /install 7-Zip on the runner|winget install 7zip\.7zip/);
+});
+
+test('self-test names the identifier and says stop-all is present', () => {
+  const out = 'identifier=net.decryptology.dyno\nproduct=Dyno\nstop_all=present\n';
+  assert.deepEqual(checkSelfTest({ stdout: out, status: 0, identifier: 'net.decryptology.dyno', name: 'a-setup.exe' }), []);
+  assert.match(checkSelfTest({ stdout: out.replace('present', 'absent'), status: 0, identifier: 'net.decryptology.dyno', name: 'a-setup.exe' }).join(), /stop_all=present/);
+  assert.match(checkSelfTest({ stdout: out, status: 0, identifier: 'other', name: 'a-setup.exe' }).join(), /does not name other/);
+  assert.match(checkSelfTest({ stdout: '', status: 1, identifier: 'x', name: 'a-setup.exe' }).join(), /self-test/);
+  assert.match(checkSelfTest({ stdout: undefined, status: undefined, identifier: 'x', name: 'n' }).join(), /did not run/);
 });

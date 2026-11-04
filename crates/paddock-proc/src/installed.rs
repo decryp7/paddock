@@ -64,6 +64,9 @@ pub struct Request<'a> {
     /// The session of the calling process: only programs in it can be asked to close (window messages do not cross
     /// sessions); the others are ended by handle.
     pub own_session: Option<u32>,
+    /// Pids of the processes that started this one (the elevated `paddock-setup apply-update` that launched the installer
+    /// is in the install folder and in the list, and its caller waits for its exit code): never ended.
+    pub spare: &'a [u32],
 }
 
 /// Why a step failed. Every variant carries the Windows error code so the log names the cause.
@@ -151,8 +154,8 @@ pub trait Machine {
     }
     /// Terminates the held process.
     fn terminate(&mut self, held: &Self::Held) -> Result<(), StopError>;
-    /// Waits on the held process's handle for it to exit; true when it did within `bound`.
-    fn wait_exit(&mut self, held: &Self::Held, bound: Duration) -> bool;
+    /// Waits on the held process's handle for it to exit, at most `bound`: whether it did, and how long the wait took.
+    fn wait_exit(&mut self, held: &Self::Held, bound: Duration) -> (bool, Duration);
 }
 
 /// What came of one process.
@@ -197,14 +200,21 @@ pub struct StopReport {
 impl StopReport {
     /// 0 when nothing listed runs from the folder, [`EXIT_STILL_RUNNING`] otherwise.
     pub fn exit_code(&self) -> i32 {
-        if self.still_running.is_empty() { 0 } else { EXIT_STILL_RUNNING }
+        if self.still_running.is_empty() {
+            0
+        } else {
+            EXIT_STILL_RUNNING
+        }
     }
 }
 
 fn parts(path: &Path) -> Vec<String> {
     let s = path.to_string_lossy();
     let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
-    s.split(['\\', '/']).filter(|p| !p.is_empty()).map(str::to_lowercase).collect()
+    s.split(['\\', '/'])
+        .filter(|p| !p.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 /// Whether `file` is directly inside `dir`, compared by path components and without case, never by string prefix:
@@ -227,7 +237,9 @@ fn note(report: &mut StopReport, action: Action) {
         "{} {}session {}",
         action.image,
         action.id.map(|i| format!("{i}, ")).unwrap_or_default(),
-        action.session.map_or_else(|| "?".to_owned(), |s| s.to_string())
+        action
+            .session
+            .map_or_else(|| "?".to_owned(), |s| s.to_string())
     );
     match &action.outcome {
         Outcome::Ended => log::info!("stop-all: ended {who}"),
@@ -238,7 +250,11 @@ fn note(report: &mut StopReport, action: Action) {
 }
 
 fn remember(report: &mut StopReport, image: &str) {
-    if !report.still_running.iter().any(|i| i.eq_ignore_ascii_case(image)) {
+    if !report
+        .still_running
+        .iter()
+        .any(|i| i.eq_ignore_ascii_case(image))
+    {
         report.still_running.push(image.to_owned());
     }
 }
@@ -255,13 +271,20 @@ pub fn stop_all<M: Machine>(machine: &mut M, req: &Request<'_>, bounds: &Bounds)
         .map(|i| join_win(req.dir, i))
         .filter(|f| own_image.as_ref().is_none_or(|o| *o != parts(f)))
         .collect();
-    log::info!("stop-all: {} listed programs; ending them by handle", files.len());
+    log::info!(
+        "stop-all: {} listed programs; ending them by handle",
+        files.len()
+    );
 
     let table = machine.processes();
     let candidates: Vec<Candidate> = match table {
         Ok(t) => t
             .into_iter()
-            .filter(|c| c.pid != req.own.pid() && wanted.contains(&c.image.to_lowercase()))
+            .filter(|c| {
+                c.pid != req.own.pid()
+                    && !req.spare.contains(&c.pid)
+                    && wanted.contains(&c.image.to_lowercase())
+            })
             .collect(),
         Err(e) => {
             // Nothing can be ended without the table; the check below names what runs.
@@ -300,13 +323,28 @@ pub fn stop_all<M: Machine>(machine: &mut M, req: &Request<'_>, bounds: &Bounds)
     }
     match listed {
         Ok(rest) => {
-            for p in rest.iter().filter(|p| p.id != req.own) {
-                let counts = p.image.as_deref().is_none_or(|i| wanted.contains(&i.to_lowercase()));
+            for p in rest
+                .iter()
+                .filter(|p| p.id != req.own && !req.spare.contains(&p.id.pid()))
+            {
+                let counts = p
+                    .image
+                    .as_deref()
+                    .is_none_or(|i| wanted.contains(&i.to_lowercase()));
                 if counts {
-                    log::warn!("stop-all: {} (session {:?}, {}) still uses the install folder", p.name, p.session, p.id);
+                    log::warn!(
+                        "stop-all: {} (session {:?}, {}) still uses the install folder",
+                        p.name,
+                        p.session,
+                        p.id
+                    );
                     remember(&mut report, p.image.as_deref().unwrap_or(&p.name));
                 } else {
-                    log::info!("stop-all: {} ({}) maps the files but is not a listed program; ignored", p.name, p.id);
+                    log::info!(
+                        "stop-all: {} ({}) maps the files but is not a listed program; ignored",
+                        p.name,
+                        p.id
+                    );
                 }
             }
         }
@@ -331,7 +369,13 @@ fn end_by_handle<M: Machine>(
     c: &Candidate,
     spent: &mut Duration,
 ) -> Action {
-    let mut action = Action { image: c.image.clone(), id: None, session: None, outcome: Outcome::Ended, graceful: false };
+    let mut action = Action {
+        image: c.image.clone(),
+        id: None,
+        session: None,
+        outcome: Outcome::Ended,
+        graceful: false,
+    };
     let held = match machine.open(c.pid, false) {
         Ok(h) => h,
         Err(OpenFailure::Gone) => {
@@ -361,10 +405,20 @@ fn end_by_handle<M: Machine>(
     if req.own_session.is_some()
         && held.session() == req.own_session
         && machine.request_close(&held)
-        && machine.wait_exit(&held, bounds.graceful)
     {
-        action.graceful = true;
-        return action;
+        // Waiting needs no privilege (SYNCHRONIZE on a handle already held): drop it, and take it again for the forced end.
+        machine.drop_privilege();
+        let bound = bounds.graceful.min(bounds.end_total.saturating_sub(*spent));
+        let (exited, took) = machine.wait_exit(&held, bound);
+        *spent += took;
+        if exited {
+            action.graceful = true;
+            return action;
+        }
+        if let Err(e) = machine.enable_privilege() {
+            action.outcome = Outcome::Failed(format!("it ignored the request to close and {e}"));
+            return action;
+        }
     }
     let end = match machine.open(c.pid, true) {
         Ok(h) => h,
@@ -373,7 +427,8 @@ fn end_by_handle<M: Machine>(
             return action;
         }
         Err(OpenFailure::Denied(code)) => {
-            action.outcome = Outcome::Failed(format!("it could not be opened to end (error {code})"));
+            action.outcome =
+                Outcome::Failed(format!("it could not be opened to end (error {code})"));
             return action;
         }
     };
@@ -385,10 +440,13 @@ fn end_by_handle<M: Machine>(
         action.outcome = Outcome::Failed(e.to_string());
         return action;
     }
-    let bound = bounds.end_each.min(bounds.end_total.saturating_sub(*spent));
-    let t = Instant::now();
-    let exited = machine.wait_exit(&end, bound);
-    *spent += t.elapsed();
+    // A forced end always gets a second to show: the graceful waits may have used the whole total.
+    let bound = bounds
+        .end_each
+        .min(bounds.end_total.saturating_sub(*spent))
+        .max(Duration::from_secs(1));
+    let (exited, took) = machine.wait_exit(&end, bound);
+    *spent += took;
     if !exited {
         action.outcome = Outcome::Failed(format!("it did not exit within {bound:?} of the end"));
     }

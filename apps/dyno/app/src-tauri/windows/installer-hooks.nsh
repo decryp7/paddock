@@ -12,6 +12,10 @@
 ; Graceful first where Dyno has a way: the agent of the account running the installer is asked to stop (it flushes its history)
 ; before the include ends every user's programs by handle. Other users' agents have no such door across sessions and are
 ; ended by handle; they survive that (windows/per-machine.json, "survivesForcedEnd").
+; Two limits, both accepted: `dyno-agent stop` runs with no timeout of its own here (a wedged agent would hold the installer
+; until the installer is closed by hand; the agent's stop is a local request that answers at once or fails), and when a standard
+; user types an administrator's credentials, this elevated process belongs to the administrator, so the agent it reaches is the
+; administrator's, not the one of the user at the keyboard; that one, like everyone else's, is ended by handle in stop-all.
 !macro _DYNO_GRACEFUL_STOP
   IfFileExists "$INSTDIR\dyno-agent.exe" 0 +3
     nsExec::ExecToLog '"$INSTDIR\dyno-agent.exe" stop'
