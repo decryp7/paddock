@@ -68,6 +68,7 @@ function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}) {
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => { stderr += String(e); if (!done) { done = true; clearTimeout(timer); res({ code: 127, stdout, stderr }); } });
     child.on('close', (code, sig) => { children.delete(child); if (!done) { done = true; clearTimeout(timer); res({ code: code ?? (sig ? 143 : 1), stdout, stderr }); } });
+    child.stdin.on('error', () => {}); // a child that exits before reading its stdin (EPIPE) is not an error of ours
     child.stdin.end(input ?? '');
   });
 }
