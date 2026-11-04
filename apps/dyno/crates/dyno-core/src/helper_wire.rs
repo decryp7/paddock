@@ -23,7 +23,10 @@ use serde::{Deserialize, Serialize};
 /// - 4: `SmartDisk` gained `wear_id`, `bytes_written` and `rated_bytes` (the helper's SMART reply carries the full wear reading).
 /// - 5: `FirewallSource` gained `via` (helper-wiring plan, WP-0). The helper writes `Local`; the agent always overwrites it with
 ///   `Helper` on a helper reply. 1.1.0 is unreleased, so every dev machine with an older helper must Repair.
-pub const HELPER_API: u32 = 5;
+/// - 6: `HelperReply::Counters(Vec<TrafficCounter>)` became `Traffic(TrafficAnswer)` (helper-wiring plan, WP-TRF): the helper
+///   scopes the counters to the asking account and adds the other accounts' programs as one total. A helper of API 5 would send a
+///   reply the agent cannot read, so every dev machine with an older helper must Repair.
+pub const HELPER_API: u32 = 6;
 
 /// The oldest helper build this Dyno accepts as `Ready`. Raised only when a helper fix must reach users (ADR 0027 section 4).
 pub const MIN_HELPER_VERSION: &str = "1.1.0";
@@ -615,6 +618,25 @@ mod tests {
             let bytes = postcard::to_stdvec(&m).unwrap();
             assert_eq!(postcard::from_bytes::<HelperMessage>(&bytes).unwrap(), m);
         }
+    }
+
+    /// A changed wire must never keep its API number: the history above names the current one, so a change that bumps the constant
+    /// without saying why (or says why without bumping) fails here.
+    #[test]
+    fn the_wire_history_names_the_current_api() {
+        let source = include_str!("helper_wire.rs");
+        let line = format!("/// - {HELPER_API}: ");
+        assert!(
+            source.contains(&line),
+            "add `{line}<what changed>` to the wire history of HELPER_API"
+        );
+        let newest = source
+            .lines()
+            .filter_map(|l| l.strip_prefix("/// - "))
+            .filter_map(|l| l.split_once(": "))
+            .filter_map(|(n, _)| n.parse::<u32>().ok())
+            .max();
+        assert_eq!(newest, Some(HELPER_API), "the newest history entry is the current API");
     }
 
     #[test]
