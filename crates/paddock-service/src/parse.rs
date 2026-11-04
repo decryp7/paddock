@@ -326,6 +326,9 @@ pub struct UnitShow {
     pub fragment: Option<String>,
     /// `UnitFileState`: `enabled`, `disabled`, `static`, `masked`, ...
     pub unit_file_state: Option<String>,
+    /// `Result`: `success`, `exit-code`, `signal`, `core-dump`, `timeout`, ... The judge of a failure; the `ExecMain*` fields
+    /// are its detail.
+    pub result: Option<String>,
     /// `NRestarts`.
     pub restarts: Option<u32>,
     /// `ExecMainStatus`: the exit status, or the signal number when `ExecMainCode` says killed.
@@ -345,6 +348,7 @@ pub fn parse_systemctl_show(stdout: &str) -> UnitShow {
         match key.trim() {
             "FragmentPath" => show.fragment = Some(value.to_string()),
             "UnitFileState" => show.unit_file_state = Some(value.to_string()),
+            "Result" => show.result = Some(value.to_string()),
             "NRestarts" => show.restarts = value.parse().ok(),
             "ExecMainStatus" => show.exec_main_status = value.parse().ok(),
             "ExecMainCode" => show.exec_main_code = value.parse().ok(),

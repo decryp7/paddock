@@ -604,7 +604,10 @@ fn an_inspection_of_nothing_has_no_exit_restarts_or_unit() {
 #[test]
 fn a_last_exit_knows_whether_it_failed_and_has_words() {
     assert!(!LastExit::Code(0).is_failure() && LastExit::Code(1).is_failure());
-    assert!(LastExit::Signal(9).is_failure());
+    assert!(LastExit::Signal(9).is_failure() && LastExit::Signal(11).is_failure());
+    for clean in [1, 2, 13, 15] {
+        assert!(!LastExit::Signal(clean).is_failure(), "SIGHUP, SIGINT, SIGPIPE and SIGTERM are how a service is asked to stop");
+    }
     assert!(!LastExit::Win32(0).is_failure() && LastExit::Win32(1067).is_failure());
     assert!(
         !LastExit::ServiceSpecific(0).is_failure() && LastExit::ServiceSpecific(7).is_failure()
@@ -728,4 +731,46 @@ fn a_systemd_manager_that_hangs_on_show_leaves_the_new_fields_empty() {
         (look.job, look.last_exit, look.restarts, look.unit),
         (Job::Running, None, None, None)
     );
+}
+
+#[test]
+fn a_systemd_unit_stopped_by_systemctl_stop_with_sigterm_is_not_running_not_failed() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    // `systemctl stop` of a unit that does not catch SIGTERM: the main process ended by signal 15, and systemd says success.
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.answer("systemctl show", show(ETC_UNIT, "enabled", "success", 0, 15, 2));
+    let look = b.inspect();
+    assert_eq!(look.job, Job::NotRunning);
+    assert_eq!(look.last_exit, Some(LastExit::Signal(15)), "the detail stays");
+}
+
+#[test]
+fn a_systemd_result_other_than_success_is_a_failure_and_a_success_result_never_is() {
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.put_file(ETC_UNIT, &b.definition());
+    sys.answer("systemctl is-active", Output::ok("failed\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    // Killed from outside by SIGKILL: Result=signal, a real failure.
+    sys.answer("systemctl show", show(ETC_UNIT, "enabled", "signal", 0, 9, 2));
+    assert_eq!(b.inspect().job, Job::Failed(LastExit::Signal(9)));
+    // A non-zero exit that the unit's SuccessExitStatus accepts is Result=success: not a failure.
+    sys.answer("systemctl show", show(ETC_UNIT, "enabled", "success", 0, 3, 1));
+    assert_eq!(b.inspect().job, Job::NotRunning);
+}
+
+#[test]
+fn a_launchd_job_stopped_by_sigterm_is_not_running_not_failed() {
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print("waiting", 2, "\tlast terminating signal = Terminated: 15\n"),
+    );
+    let look = b.inspect();
+    assert_eq!((look.job, look.last_exit), (Job::NotRunning, Some(LastExit::Signal(15))));
 }

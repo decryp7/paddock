@@ -113,11 +113,12 @@ pub enum LastExit {
 }
 
 impl LastExit {
-    /// Whether the process did not end normally (a non-zero code, any signal).
+    /// Whether the process did not end normally (a non-zero code, a signal other than the ones that ask a service to stop).
     pub fn is_failure(self) -> bool {
         match self {
             LastExit::Code(c) => c != 0,
-            LastExit::Signal(_) => true,
+            // The signals a service is asked to stop with (SIGHUP, SIGINT, SIGPIPE, SIGTERM) are a clean stop.
+            LastExit::Signal(s) => !matches!(s, 1 | 2 | 13 | 15),
             LastExit::Win32(c) | LastExit::ServiceSpecific(c) => c != 0,
         }
     }

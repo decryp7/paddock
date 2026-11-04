@@ -214,7 +214,12 @@ impl Backend for Systemd {
         let program_exists = program.as_ref().map(|p| self.sys.is_program(Path::new(p)));
         let show = self.show();
         let last_exit = show.as_ref().and_then(last_exit_of);
-        let job = with_failure(job, last_exit);
+        // systemd's own `Result` judges: a stop by SIGTERM, or an exit status the unit accepts, is `success`.
+        let failure = match show.as_ref().and_then(|s| s.result.as_deref()) {
+            Some("success") => None,
+            _ => last_exit,
+        };
+        let job = with_failure(job, failure);
         Inspection {
             registration: if off {
                 Registration::SwitchedOff
