@@ -821,3 +821,22 @@ C93 over the shared crates on Dyno's release path has no waiver: E-4 fixes them 
 | D6 | Spotter 1.0 under the lifecycle gate | **Coordinator default (the reviewer's recommendation), user may revise:** yes, the lifecycle run gates `spotter-v1.0.0`; C92 and C93 are not enforced for Spotter before that tag (§8) |
 | D7 | Where registrations are declared | **Coordinator default (the reviewer's recommendation), user may revise:** `wiring.toml`, through the WP-A1 slice A1-s pulled into 1.1.0 |
 | D8 | Real-adapter contract runs for registration ports | **Coordinator default (the reviewer's recommendation), user may revise:** in the lifecycle VM only (ER-14) |
+
+## Amendment 1 (2026-11-04): what L-1a, E-1 and E-2 left for later
+
+Branch `feat/os-registration-readback` (heads `9eb87af5c`, `fd8a8efc9`) implements L-1a, E-1 and E-2. The independent
+re-review approves it with these deferrals, each a dated deviation from the text above:
+
+- **Event-driven waits (§1.1).** Waits stay bounded polls (ADR 0031's patience); `NotifyServiceStatusChangeW` and D-Bus
+  `PropertiesChanged` are deferred. Deviation from §1.1 ("never a poll").
+- **Contract cases.** `Systemd` and `WindowsRun` get their "returned inspection equals a fresh `inspect()`" contract cases
+  (§3.1) **before L-3**; today only the scripted cases of `readback_tests.rs` cover them.
+- **`StillPresent` in `WindowsService` and `LaunchdFile::unregister`.** Deferred. `Installer`'s `Step::ConfirmGone` covers the
+  user path; any other caller of `unregister` must judge `Inspection::withdrawn()` itself. (`Systemd::unregister` has it, RC-2.)
+- **VM steps.** The lifecycle plan's step 4 (a panic gives exit code 1000 and a located Error entry) goes on the release VM
+  checklist; step 6 (a read-back mismatch race) is deferred. The macOS `log show` check of the syslog line is part of the
+  release VM pass. Steps 1 to 3, 5 and 7 ran on the Windows VM, with recorded `sc.exe`, `systemctl show` and `launchctl print`
+  fixtures in `crates/paddock-service/tests/recorded/` (§3.3).
+- **Event 7024.** Windows prints a small service-specific code as Win32 message text, so the event reads as a misleading
+  error text; the code itself is exact in `sc query` (`SERVICE_EXIT_CODE`). A later wire change (a code table the event text
+  can use) is deferred.
