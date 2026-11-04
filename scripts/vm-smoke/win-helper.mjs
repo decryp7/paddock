@@ -180,6 +180,7 @@ export async function repeatInstall(browser) {
 }
 
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
+import { scopingStep } from './win-scoping.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
 
 
@@ -256,6 +257,7 @@ export const helperSteps = [
   ({ browser }) => repeatInstall(browser),
   // WP-VMH: one step per helper reading while the helper is on
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser))),
+  () => scopingStep(),
   () => servedCounts(),
   ({ browser }) => helperOff(browser),
 ];
