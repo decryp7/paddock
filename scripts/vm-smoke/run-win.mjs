@@ -12,6 +12,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderResult } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
+import { helperSteps } from './win-helper.mjs';
 import { copyFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -90,8 +91,10 @@ async function main(argv) {
     log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
     if (o.vnc) {
       // VNC for the UAC consent (secure desktop). Only between revert and start; the vmx is backed up first and restored after every run.
-      vmxBackup = join(scratch, 'paddock-win11-test.vmx.bak');
-      copyFileSync(VMX, vmxBackup);
+      const keepDir = '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-checks/vmx-backup';
+      mkdirSync(keepDir, { recursive: true });
+      vmxBackup = join(keepDir, 'paddock-win11-test.vmx.orig'); // outside the scratch folder, so --keep cannot lose it
+      if (!existsSync(vmxBackup)) copyFileSync(VMX, vmxBackup); // the first copy is the original and is never overwritten
       vm(['stop'], 200_000);
       const text = readFileSync(VMX, 'utf8').split('\n').filter((l) => !/^RemoteDisplay\.vnc\./.test(l)).join('\n');
       writeFileSync(VMX, `${text.trimEnd()}\nRemoteDisplay.vnc.enabled = "TRUE"\nRemoteDisplay.vnc.port = "${VNC_PORT}"\nRemoteDisplay.vnc.password = "${VNC_PW}"\n`);
@@ -136,7 +139,7 @@ async function main(argv) {
     if (o.ui && done) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       log('UI phase: snap check, screenshot check on the WebView2 DOM, Quit (bounded)');
-      uiSteps = await runUiPhase({ log });
+      uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [] });
     }
     const dest = join(scratch, 'out');
     mkdirSync(dest);
@@ -147,7 +150,7 @@ async function main(argv) {
     const steps = (Array.isArray(raw) ? raw : [raw]).map((s) => ({ ...s, checks: s.checks ?? [], evidence: [].concat(s.evidence ?? []).map(String) }));
     if (!done) steps.push({ title: 'Suite finished', status: 'fail', summary: 'the suite did not finish within 40 minutes', checks: [], evidence: [] });
     steps.push(...uiSteps);
-    steps.push({ title: 'Admin helper (UAC consent), tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the UAC consent is on the secure desktop and needs the VM VNC (vncdotool); the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });
+    steps.push({ title: 'Tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });
     const started_ = new Date().toISOString();
     const md = renderResult({ app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps });
     const file = join(out, `${started_.replace(/[:.]/g, '-')}-dyno-win.md`);

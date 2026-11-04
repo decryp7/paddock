@@ -17,7 +17,7 @@ export class Vnc {
   constructor({ port = 5995, password = process.env.PADDOCK_VNC_PW } = {}) { Object.assign(this, { port, password }); }
 
   run(args, timeoutMs = 60_000) {
-    const r = spawnSync(vncdo(), ['-s', `127.0.0.1::${this.port}`, '-p', this.password ?? '', ...args], { encoding: 'utf8', timeout: timeoutMs });
+    const r = spawnSync(vncdo(), ['-s', `127.0.0.1::${this.port}`, '-p', this.password ?? '', '--delay=60', ...args], { encoding: 'utf8', timeout: timeoutMs });
     return { code: r.status ?? 1, stderr: (r.stderr ?? '').replaceAll(this.password ?? '\0', '***') };
   }
 
