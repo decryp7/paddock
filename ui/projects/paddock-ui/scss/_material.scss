@@ -580,6 +580,13 @@ body {
 
 // A projected glyph (pd-glyph, mat-icon, an svg) sits centred on the label with a 4 px gap: the label is a flex row, not a text line
 // (in a line box the 16 px glyph rests on the baseline, about 4 px above the text centre, with no gap).
+// A label never wraps: a button that is squeezed by a long neighbour keeps its label on one line and grows to fit it (the flex item's
+// min-content width is then the whole label); truncation is only ever declared with a full-text tooltip, never by wrapping.
+html .mat-mdc-button-base .mdc-button__label,
+html .mat-button-toggle-label-content {
+  white-space: nowrap;
+}
+
 html .mat-mdc-button-base .mdc-button__label {
   display: inline-flex;
   align-items: center;

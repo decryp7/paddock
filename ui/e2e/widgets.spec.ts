@@ -331,3 +331,49 @@ test('Widgets: the preset name field has 13 px text and the height of its Save b
   expect(Math.round(field!.height)).toBe(Math.round(button!.height));
   expect(await c.locator('.pd-wc-save input').evaluate((e) => getComputedStyle(e).fontSize)).toBe('13px');
 });
+
+test('Widgets: a card whose content does not fit scrolls inside its body, reaches its last item, keeps the head and chains the wheel', async ({ page }) => {
+  await open(page, 'dark');
+  const frame = page.getByTestId('wgt-scroll-cell').locator('.pd-w');
+  const body = frame.locator('.pd-w-body');
+  await expect(body).toHaveCount(1);
+  const m = await body.evaluate((e) => ({ scrolls: e.scrollHeight > e.clientHeight, overflowY: getComputedStyle(e).overflowY, chain: getComputedStyle(e).overscrollBehaviorY, tab: e.tabIndex }));
+  expect(m.scrolls).toBe(true);
+  expect(m.overflowY).toBe('auto');
+  expect(m.chain).toBe('auto');
+  // Keyboard focus can scroll it, and a screen reader hears what it is.
+  expect(m.tab).toBe(0);
+  expect(await body.getAttribute('role')).toBe('group');
+  expect(await body.getAttribute('aria-label')).toBe('What holds it back');
+  // The head stays where it is while the body scrolls, and the last item becomes reachable.
+  const head = frame.locator('.pd-w-head');
+  const before = (await head.boundingBox())!.y - (await frame.boundingBox())!.y;
+  await body.focus();
+  await page.keyboard.press('End');
+  const last = body.getByText('Reason 12 of 12');
+  await expect(last).toBeInViewport();
+  const box = (await last.boundingBox())!;
+  const cellBox = (await frame.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(cellBox.y + cellBox.height);
+  expect((await head.boundingBox())!.y - (await frame.boundingBox())!.y).toBe(before);
+});
+
+test('Widgets: a card whose content fits has no scrollable body and no extra tab stop', async ({ page }) => {
+  await open(page, 'dark');
+  const bodies = page.getByTestId('widgets').locator('.pd-w-body');
+  expect(await bodies.count()).toBeGreaterThan(0);
+  const offenders = await bodies.evaluateAll((els) =>
+    els.filter((e) => e.closest('[data-testid^="wgt-scroll"]') === null && (e.scrollHeight > e.clientHeight + 1 || e.getAttribute('tabindex') !== null)).map((e) => `${e.closest('pd-widget-frame')?.querySelector('.pd-w-title')?.textContent}: ${e.scrollHeight} > ${e.clientHeight}`),
+  );
+  expect(offenders).toEqual([]);
+});
+
+test('Widgets: a popup tile taller than its cap scrolls inside its body and its last item is reachable', async ({ page }) => {
+  await open(page, 'light');
+  const body = page.getByTestId('wgt-scroll-tile').locator('.pd-w-body');
+  const m = await body.evaluate((e) => ({ scrolls: e.scrollHeight > e.clientHeight, overflowY: getComputedStyle(e).overflowY, chain: getComputedStyle(e).overscrollBehaviorY, tab: e.tabIndex }));
+  expect(m).toEqual({ scrolls: true, overflowY: 'auto', chain: 'auto', tab: 0 });
+  await body.focus();
+  await page.keyboard.press('End');
+  await expect(body.getByText('Reason 12 of 12')).toBeInViewport();
+});
