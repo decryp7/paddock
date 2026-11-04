@@ -720,6 +720,7 @@ mod tests {
     fn the_switch_registers_or_removes_both_and_says_what_failed() {
         let d = tempfile::tempdir().unwrap();
         let sys = FakeSystem::new();
+        sys.emulate_run_registry();
         let mut m = manager(&sys, d.path());
         let mut a = Auto(Vec::new(), false);
         let cancel = AtomicBool::new(false);

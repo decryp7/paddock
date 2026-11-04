@@ -10,11 +10,12 @@
 )]
 
 use super::{
-    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+    Backend, Capabilities, Inspection, Job, LastExit, Mechanism, Registration, Target, UnitFile,
+    UnitFileState, UnitOrigin, UnregisterError, as_written, with_failure,
 };
 use crate::parse::{
-    UnitActivity, explain_systemctl, is_switched_off, parse_is_active, systemd_unreachable,
-    unit_program,
+    UnitActivity, UnitShow, explain_systemctl, is_switched_off, parse_is_active,
+    parse_systemctl_show, systemd_unreachable, unit_program,
 };
 use crate::paths::{SYSTEMCTL, systemctl_scope};
 use crate::port::{Output, RegisterError, RunError, System};
@@ -22,6 +23,37 @@ use crate::render::systemd_unit;
 use crate::spec::{Kind, ServiceSpec};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// The properties `inspect` reads besides the unit file and `is-active`.
+const SHOW_PROPERTIES: &str =
+    "FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode";
+
+/// How the unit's main process ended: an exit status, or the signal (`ExecMainCode` 2 killed, 3 dumped); `None` while
+/// it never ended (code 0).
+fn last_exit_of(show: &UnitShow) -> Option<LastExit> {
+    let status = show.exec_main_status?;
+    match show.exec_main_code? {
+        1 => Some(LastExit::Code(status)),
+        2 | 3 => Some(LastExit::Signal(status)),
+        _ => None,
+    }
+}
+
+fn unit_file_of(show: &UnitShow) -> Option<UnitFile> {
+    let path = PathBuf::from(show.fragment.as_deref()?);
+    let enabled = match show.unit_file_state.as_deref() {
+        Some("enabled" | "enabled-runtime") => UnitFileState::Enabled,
+        Some("disabled") => UnitFileState::Disabled,
+        Some("static" | "indirect" | "generated" | "transient") => UnitFileState::Manual,
+        Some("masked" | "masked-runtime") => UnitFileState::Masked,
+        _ => UnitFileState::Other,
+    };
+    Some(UnitFile {
+        origin: UnitOrigin::of_systemd_path(&path),
+        path,
+        enabled,
+    })
+}
 
 /// A systemd unit file.
 pub struct Systemd {
@@ -97,6 +129,29 @@ impl Systemd {
         }
     }
 
+    /// `systemctl show` of the fields ADR 0054 section 1.1 reads; `None` when the manager does not answer (the other
+    /// fields of the inspection do not depend on it).
+    fn show(&mut self) -> Option<UnitShow> {
+        let unit = self.spec.unit_file_name();
+        match self.ctl(&["show", "-p", SHOW_PROPERTIES, &unit]) {
+            Ok(o) if o.success() => Some(parse_systemctl_show(&o.stdout)),
+            Ok(o) => {
+                log::debug!(unit = unit.as_str(), why = o.reason().as_str(); "systemd: show did not succeed");
+                None
+            }
+            Err(e) => {
+                log::debug!(unit = unit.as_str(), error:% = e; "systemd: show could not run");
+                None
+            }
+        }
+    }
+
+    fn read_back(&mut self) -> Result<Inspection, RegisterError> {
+        let after = self.inspect();
+        log::info!(unit = self.spec.unit_file_name().as_str(), registration:? = after.registration, job:? = after.job; "systemd: registered, read back");
+        as_written(after, false)
+    }
+
     fn activity(&mut self) -> Result<UnitActivity, String> {
         let unit = self.spec.unit_file_name();
         match self.ctl(&["is-active", &unit]) {
@@ -157,6 +212,14 @@ impl Backend for Systemd {
             .is_ok_and(|o| is_switched_off(&o.stdout));
         let program = unit_program(&text);
         let program_exists = program.as_ref().map(|p| self.sys.is_program(Path::new(p)));
+        let show = self.show();
+        let last_exit = show.as_ref().and_then(last_exit_of);
+        // systemd's own `Result` judges: a stop by SIGTERM, or an exit status the unit accepts, is `success`.
+        let failure = match show.as_ref().and_then(|s| s.result.as_deref()) {
+            Some("success") => None,
+            _ => last_exit,
+        };
+        let job = with_failure(job, failure);
         Inspection {
             registration: if off {
                 Registration::SwitchedOff
@@ -168,13 +231,17 @@ impl Backend for Systemd {
             program,
             program_exists,
             definition_current: (!self.packaged).then(|| text == self.definition()),
+            last_exit,
+            restarts: show.as_ref().and_then(|s| s.restarts),
+            unit: show.as_ref().and_then(unit_file_of),
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         if self.packaged {
             let unit = self.spec.unit_file_name();
-            return self.checked(&["enable", "--now", &unit]);
+            self.checked(&["enable", "--now", &unit])?;
+            return self.read_back();
         }
         let text = self.definition();
         if let Err(e) = self.sys.write(&self.unit_path, &text) {
@@ -189,7 +256,8 @@ impl Backend for Systemd {
         }
         let unit = self.spec.unit_file_name();
         self.checked(&["daemon-reload"])?;
-        self.checked(&["enable", "--now", &unit])
+        self.checked(&["enable", "--now", &unit])?;
+        self.read_back()
     }
 
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {

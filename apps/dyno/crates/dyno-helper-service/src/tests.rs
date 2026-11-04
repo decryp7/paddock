@@ -134,41 +134,33 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
         "/usr/lib/systemd/system/dyno-helper.service",
         "[Service]\nExecStart=\"/usr/bin/dyno-helper\" \"serve\"\n",
     );
-    // The existing unit is running until `disable --now` removes it: the install now reads the OS back after the removal (ADR 0054 RC-2).
-    let removed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let flag = removed.clone();
-    sys.on("systemctl disable", move |_, _| {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-        Ok(Output::ok(""))
-    });
-    let flag = removed.clone();
-    sys.on("systemctl enable", move |_, _| {
-        flag.store(false, std::sync::atomic::Ordering::SeqCst);
-        Ok(Output::ok(""))
-    });
-    let flag = removed.clone();
+    // A stateful systemd: the unit runs and is enabled until `disable --now`, and again after `enable --now`.
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flag = running.clone();
     sys.on("systemctl is-active", move |_, _| {
-        Ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
-            Output {
-                code: Some(3),
-                stdout: "inactive\n".into(),
-                ..Output::default()
-            }
+        Ok(Output::ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
+            "active\n"
         } else {
-            Output::ok("active\n")
-        })
+            "inactive\n"
+        }))
     });
-    let flag = removed.clone();
+    let flag = running.clone();
     sys.on("systemctl is-enabled", move |_, _| {
-        Ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
-            Output {
-                code: Some(1),
-                stdout: "disabled\n".into(),
-                ..Output::default()
-            }
+        Ok(Output::ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
+            "enabled\n"
         } else {
-            Output::ok("enabled\n")
-        })
+            "disabled\n"
+        }))
+    });
+    let flag = running.clone();
+    sys.on("systemctl enable --now", move |_, _| {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(Output::code(0))
+    });
+    let flag = running.clone();
+    sys.on("systemctl disable --now", move |_, _| {
+        flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(Output::code(0))
     });
     let report = install_in_place(
         Os::Linux,
@@ -183,22 +175,6 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
         sys.commands().contains(&"systemctl enable --now dyno-helper.service".to_string()),
         "{:?}",
         sys.commands()
-    );
-    sys.answer(
-        "systemctl is-enabled",
-        Output {
-            code: Some(1),
-            stdout: "disabled\n".into(),
-            ..Output::default()
-        },
-    );
-    sys.answer(
-        "systemctl is-active",
-        Output {
-            code: Some(3),
-            stdout: "inactive\n".into(),
-            ..Output::default()
-        },
     );
     uninstall_in_place(Os::Linux, &roots(), &mut files, &make_system(&sys)).unwrap();
     assert!(sys.commands().contains(&"systemctl disable --now dyno-helper.service".to_string()));
@@ -229,7 +205,7 @@ fn the_helper_removes_itself_files_first_and_stops_last() {
         .put_dir("/Library/PrivilegedHelperTools", 0, 0o755)
         .put_file(program, b"x", 0, 0o755);
     let report = uninstall_self_in_place(Os::MacOs, &roots(), &mut files, &make_system(&sys)).unwrap();
-    // Remove the program, remove the folder, stop, then confirm the registration is gone (ADR 0054 RC-2).
+    // The program, its folder, the stop and the read-back that the registration is gone (ADR 0054 RC-2).
     assert_eq!(report.phases.len(), 4);
     assert!(files.facts_of(Path::new(program)).is_none());
     let commands = sys.commands();
@@ -320,7 +296,7 @@ fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_h
 }
 
 #[test]
-fn the_windows_uninstaller_asks_for_one_prompt_to_remove_the_service_with_the_bundled_copy() {
+fn the_windows_uninstaller_removes_the_service_with_the_bundled_copy_only_when_not_updating() {
     let hooks = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../app/src-tauri/windows/installer-hooks.nsh"
@@ -338,8 +314,23 @@ fn the_windows_uninstaller_asks_for_one_prompt_to_remove_the_service_with_the_bu
         "only when the service exists"
     );
     assert!(
-        pre_uninstall.contains(r#"ExecShellWait "runas" "$INSTDIR\dyno-helper.exe" "uninstall""#),
+        pre_uninstall.contains(r#"nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" uninstall'"#),
         "the bundled copy removes the installed one (a running program cannot delete itself)"
     );
-    assert_eq!(pre_uninstall.matches("runas").count(), 1, "one prompt");
+    assert_eq!(
+        pre_uninstall.matches("runas").count(),
+        0,
+        "the uninstaller is elevated already: no second prompt"
+    );
+    let guard = pre_uninstall
+        .find("$UpdateMode <> 1")
+        .expect("only when not updating (a manual upgrade keeps the helper)");
+    assert!(
+        guard < pre_uninstall.find("dyno-helper.exe").unwrap(),
+        "the update guard comes first"
+    );
+    assert!(
+        !pre_uninstall.contains("service uninstall"),
+        "the agent has no Windows registration of its own"
+    );
 }

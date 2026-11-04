@@ -109,6 +109,8 @@ jobs:
       bundle-check: apps/dyno/scripts/check-bundle.sh
       # dyno-agent.exe is a GUI-subsystem program (the login entry starts it without a command prompt window); the dyno command is a console one.
       windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:
@@ -159,6 +161,8 @@ jobs:
       bundle-check: apps/dyno/scripts/check-bundle.sh
       # dyno-agent.exe is a GUI-subsystem program (the login entry starts it without a command prompt window); the dyno command is a console one.
       windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:

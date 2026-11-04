@@ -3816,6 +3816,7 @@ dependencies = [
  "sha2 0.10.9",
  "tauri",
  "tempfile",
+ "thiserror 2.0.21",
  "ts-rs",
  "windows",
  "windows-service",
@@ -3836,6 +3837,21 @@ dependencies = [
  "tauri",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "paddock-setup"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "paddock-proc",
+ "paddock-service",
+ "paddock-updater",
+ "paddock-workspace-hack",
+ "semver",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

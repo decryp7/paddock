@@ -1,0 +1,10 @@
+#! recorded 2026-11-04 on the Windows 11 Arm test VM (VMware Fusion, build 10.0.26300, en-GB), as paddock-admin over SSH
+#! command: sc.exe query DynoHelper
+#! state: after a clean stop (exit code 0)
+SERVICE_NAME: DynoHelper 
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 1  STOPPED 
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x0

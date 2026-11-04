@@ -220,6 +220,8 @@ jobs:
       # also measures once from the built app (read-only).
       bundle-check: apps/dyno/scripts/check-bundle.sh
       windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:

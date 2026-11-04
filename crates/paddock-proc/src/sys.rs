@@ -297,7 +297,7 @@ pub fn start_time(pid: u32) -> Option<crate::StartTime> {
 
 /// The creation time of the process behind `h`.
 #[cfg(windows)]
-fn creation_time(h: windows_sys::Win32::Foundation::HANDLE) -> Option<crate::StartTime> {
+pub(crate) fn creation_time(h: windows_sys::Win32::Foundation::HANDLE) -> Option<crate::StartTime> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::GetProcessTimes;
     let mut t = [FILETIME {
