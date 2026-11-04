@@ -17,6 +17,14 @@
 //!   (A POSIX ACL with named entries shows its mask in the group bits, so the mode check covers it.)
 //!
 //! Deny entries are ignored (an allow entry is judged on its own, which only makes the rule stricter).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::files::FileKind;
 use std::fmt;

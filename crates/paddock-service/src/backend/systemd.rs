@@ -1,7 +1,17 @@
 //! Linux: a systemd user unit (`~/.config/systemd/user`, no administrator rights) or a system unit
 //! (`/etc/systemd/system`). Every `systemctl` call has the port's timeout; an unreachable user manager says what to do.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+use super::{
+    Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError,
+};
 use crate::parse::{
     UnitActivity, explain_systemctl, is_switched_off, parse_is_active, systemd_unreachable,
     unit_program,
@@ -182,24 +192,46 @@ impl Backend for Systemd {
         self.checked(&["enable", "--now", &unit])
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         let unit = self.spec.unit_file_name();
-        // A unit that is already stopped, disabled or unknown is fine: the point is that it is gone afterwards.
-        let _ = self.ctl(&["disable", "--now", &unit]);
-        if self.packaged {
-            return Ok(());
-        }
-        match self.sys.remove(&self.unit_path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(format!(
-                    "{} could not be removed: {e}",
-                    self.unit_path.display()
-                ));
+        // `disable --now` is checked (ADR 0054 RC-2): a unit that is already stopped, disabled or unknown is fine, anything
+        // else is remembered and judged against what systemd says afterwards.
+        let tool_failure = match self.ctl(&["disable", "--now", &unit]) {
+            Ok(o) if o.success() || unit_unknown(&o.stderr) => None,
+            Ok(o) if systemd_unreachable(&o.stderr) => {
+                return Err(UnregisterError::Unavailable(explain_systemctl(&o.stderr)));
             }
+            Ok(o) => Some(format!(
+                "systemctl disable --now {unit}: {}",
+                explain_systemctl(&o.stderr)
+            )),
+            Err(e) => Some(format!("systemctl disable --now {unit} {e}")),
+        };
+        if let Some(why) = &tool_failure {
+            log::warn!(unit = unit.as_str(), why = why.as_str(), packaged = self.packaged; "systemd: disable --now failed");
         }
-        self.checked(&["daemon-reload"]).map_err(|e| e.to_string())
+        if !self.packaged {
+            match self.sys.remove(&self.unit_path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(UnregisterError::Failed(format!(
+                        "{} could not be removed: {e}",
+                        self.unit_path.display()
+                    )));
+                }
+            }
+            self.checked(&["daemon-reload"])
+                .map_err(|e| UnregisterError::Failed(e.to_string()))?;
+        }
+        // The read-back decides: a packaged unit stays on disk but must read as disabled and not running.
+        let after = self.inspect();
+        log::info!(unit = unit.as_str(), registration:? = after.registration, job:? = after.job; "systemd: unregistered, read back");
+        match (after.withdrawn(), tool_failure) {
+            (true, _) => Ok(after),
+            (false, Some(why)) => Err(UnregisterError::Failed(why)),
+            (false, None) => Err(UnregisterError::StillPresent(after)),
+        }
     }
 
     fn evict(&mut self) -> Result<(), String> {
@@ -225,4 +257,11 @@ impl Backend for Systemd {
     fn definition(&self) -> Option<String> {
         Some(Self::definition(self))
     }
+}
+
+/// Whether `systemctl`'s refusal only says the unit is not known (nothing to disable, which is the goal).
+fn unit_unknown(stderr: &str) -> bool {
+    ["does not exist", "not loaded", "No such file", "not found"]
+        .iter()
+        .any(|w| stderr.contains(w))
 }

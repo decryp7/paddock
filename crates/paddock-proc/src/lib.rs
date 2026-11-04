@@ -26,6 +26,7 @@
 //! job object, which ends the whole tree by handle, so its helpers end with it even when they left its tree or the app
 //! crashed. Both are backed by a walk of the process table, by identity, for helpers that left the group or the job.
 
+pub mod cleanup;
 mod command;
 pub mod console;
 pub mod hint;

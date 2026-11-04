@@ -2,6 +2,14 @@
 //! (`pcblist_n`, Dyno ADR 0026: no descriptor of another program is touched), Linux `netstat2` (`/proc/net` with the
 //! inode-to-pid map). Read-only. Another user's processes cannot be resolved without elevation on Linux: those sockets
 //! come back with no pid and the page says so; Dyno never asks for root for this.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use dyno_core::network::SocketRow;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -166,19 +174,19 @@ impl ProcessTraffic for OsTraffic {
 
     #[cfg(target_os = "linux")]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let _ = NETTOP_TIMEOUT;
+        let _: Duration = NETTOP_TIMEOUT;
         crate::linux::traffic::LinuxTraffic::new(crate::linux::paths::HostPaths::host()).counters()
     }
 
     #[cfg(windows)]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let _ = NETTOP_TIMEOUT;
+        let _: Duration = NETTOP_TIMEOUT;
         crate::windows::traffic::WinTraffic.counters()
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let _ = NETTOP_TIMEOUT;
+        let _: Duration = NETTOP_TIMEOUT;
         Err(PlatformError::Unsupported(
             "Traffic per program is not available on this system.".into(),
         ))

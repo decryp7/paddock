@@ -1,4 +1,12 @@
 //! The Windows real port (see the parent module). Native glue: only a Windows runner covers it.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use super::{
@@ -114,8 +122,20 @@ mod win {
         // SAFETY: `text` is a NUL-terminated string the call allocated; it is freed right after the copy.
         let s = unsafe { text.to_string() }.map_err(|e| io::Error::other(e.to_string()));
         // SAFETY: allocated by ConvertSidToStringSidW with LocalAlloc.
-        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+        unsafe { local_free(text.0.cast()) };
         s
+    }
+
+    /// Frees a block allocated with `LocalAlloc`. `LocalFree` returns the handle when it fails, which is logged.
+    ///
+    /// # Safety
+    /// `block` was allocated with `LocalAlloc` and is freed once.
+    unsafe fn local_free(block: *mut std::ffi::c_void) {
+        // SAFETY: the caller's contract.
+        let left = unsafe { LocalFree(Some(HLOCAL(block))) };
+        if !left.0.is_null() {
+            log::warn!("LocalFree failed; a security descriptor block stays allocated");
+        }
     }
 
     struct Sd(PSECURITY_DESCRIPTOR);
@@ -123,7 +143,7 @@ mod win {
     impl Drop for Sd {
         fn drop(&mut self) {
             // SAFETY: allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW with LocalAlloc.
-            unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
+            unsafe { local_free(self.0.0) };
         }
     }
 
@@ -218,7 +238,7 @@ mod win {
         if set_owner {
             what |= OWNER_SECURITY_INFORMATION;
         }
-        let _ = (owner, dacl, present);
+        let _kept = (owner, dacl, present);
         // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER for the whole call; `sd` is a valid self-relative
         // descriptor (owner, protected DACL) that outlives it.
         unsafe { SetKernelObjectSecurity(HANDLE(file.as_raw_handle()), what, sd.0) }
@@ -299,7 +319,7 @@ mod win {
             })
         })();
         // SAFETY: allocated by GetSecurityInfo with LocalAlloc.
-        unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+        unsafe { local_free(sd.0) };
         result
     }
 }

@@ -3,6 +3,14 @@
 //! exits or crashes and Windows closes its handles, every process in the job ends: the child and the helpers it started,
 //! even those that left its process tree (an orphan's parent pid no longer leads back to the child, so `taskkill /T`
 //! cannot find it, but the job still holds it). From Dyno's `dyno-ipc` `job.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use std::io;

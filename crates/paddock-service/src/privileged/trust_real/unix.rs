@@ -1,4 +1,12 @@
 //! The Unix real port (see the parent module).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::RealTrust;
 use super::{

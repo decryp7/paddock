@@ -1,5 +1,13 @@
 //! `launchctl` through the [`System`] port: the one reader of a job and the one `bootout`, shared by this crate's backend
 //! and by apps that drive the repair themselves. Tests use [`crate::testing::FakeSystem`], never the real launchd.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::parse::{JobReport, parse_job};
 use crate::paths::LAUNCHCTL;

@@ -1,5 +1,13 @@
 //! The audit log: one JSON line per refusal or removal (ADR 0016). Root-owned and world-readable; it holds summaries,
 //! never file contents or secrets.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::logfile::{open_append_no_follow, GateState, LogGate};
 use dyno_core::helper_wire::{parse_audit_line, AuditEntry};
@@ -60,7 +68,9 @@ impl AuditLog {
             return Ok(());
         }
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > self.max_bytes) {
-            let _ = std::fs::rename(&self.path, self.rotated());
+            if let Err(e) = std::fs::rename(&self.path, self.rotated()) {
+                log::warn!(error = e.to_string().as_str(); "Helper: the audit log could not be rotated; it keeps growing until it can");
+            }
         }
         let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
         let mut f =

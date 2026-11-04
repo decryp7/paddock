@@ -11,6 +11,14 @@
 //! the cancel) is [`IpcError::Timeout`]; one frame over the limit fails that call only ([`IpcError::TooLarge`], or a
 //! `tooLarge` failure the other side receives); a frame that breaks the protocol (garbled, a repeated handshake, more
 //! items than credits, a length beyond any limit) closes the connection and every call on it fails.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::error::{IpcError, RemoteError, codes, panic_message};
 use crate::frame::{self, Frame, FrameError, FrameHead, FrameKind, FrameLimit};
@@ -153,6 +161,8 @@ struct Pending {
 
 impl Pending {
     fn post(&self, event: Event) {
+        // silent: the receiver is gone when the call has ended; the event has no reader then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.tx.send(event);
         self.arrived.cancel();
     }
@@ -267,7 +277,9 @@ impl Peer {
         if let Some(f) = on_push {
             spawn("paddock-ipc-push", move || {
                 while let Ok(body) = push_rx.recv() {
-                    let _ = catch_unwind(AssertUnwindSafe(|| f(body)));
+                    if catch_unwind(AssertUnwindSafe(|| f(body))).is_err() {
+                        paddock_proc::cleanup::report("a push handler", &"the handler panicked");
+                    }
                 }
             })?;
         }
@@ -342,6 +354,8 @@ impl Peer {
             "the connection to {} was closed by this side",
             self.label()
         )));
+        // silent: the writer thread has already ended when its receiver is gone; there is nothing left to shut down
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.inner.out.send(Out::Shutdown);
         self.inner.closer.close();
     }
@@ -407,7 +421,7 @@ impl Peer {
     }
 
     fn cancel(&self, id: u64) {
-        let _ = self.send(&Frame::Cancel { id });
+        paddock_proc::cleanup::logged("sending the cancel of a call", self.send(&Frame::Cancel { id }));
     }
 
     /// The next event of call `id`, waiting at most `timeout` on the peer's clock (`None`: as long as the connection
@@ -432,6 +446,8 @@ impl Peer {
         if let Ok(e) = rx.try_recv() {
             return Ok(Some(e));
         }
+        // silent: Err(Cancelled) is the wake-up; the event channel is read right after
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.inner.opts.clock.wait(t, &arrived);
         // Nothing posted: the time passed (a sender gone without an event cannot happen; it reads as a timeout).
         Ok(rx.try_recv().ok())
@@ -548,15 +564,18 @@ impl Peer {
             Some(p) => p.granted += u64::from(n),
             None => return,
         }
-        let _ = self.send(&Frame::Credit { id, n });
+        paddock_proc::cleanup::logged("returning credit to the peer", self.send(&Frame::Credit { id, n }));
     }
 
     /// Answers a call this side cannot run now with `busy`.
     fn refuse_call(&self, id: u64, message: &str) {
-        let _ = self.send(&Frame::Fail {
-            id,
-            error: RemoteError::new(codes::BUSY, message),
-        });
+        paddock_proc::cleanup::logged(
+            "refusing a call as busy",
+            self.send(&Frame::Fail {
+                id,
+                error: RemoteError::new(codes::BUSY, message),
+            }),
+        );
     }
 
     fn serve_call(&self, handler: &Arc<dyn Handler>, id: u64, credit: u32, body: Vec<u8>) {
@@ -621,10 +640,13 @@ impl Peer {
             // The caller gave up while the call waited: it is answered as cancelled and never runs.
             if lock(&served.state).cancelled {
                 lock(&self.inner.served).remove(&id);
-                let _ = self.send(&Frame::Fail {
-                    id,
-                    error: CallCtx::cancelled_error(),
-                });
+                paddock_proc::cleanup::logged(
+                    "answering a cancelled call",
+                    self.send(&Frame::Fail {
+                        id,
+                        error: CallCtx::cancelled_error(),
+                    }),
+                );
                 continue;
             }
             return Some((id, body, served));
@@ -653,15 +675,18 @@ impl Peer {
         };
         if let Err(IpcError::TooLarge { len, max }) = self.send(&reply) {
             // The answer does not fit in a frame: this call fails, the connection stays.
-            let _ = self.send(&Frame::Fail {
-                id,
-                error: RemoteError::new(
-                    codes::TOO_LARGE,
-                    format!(
-                        "the answer could not be sent: {len} bytes exceed the limit of {max} bytes"
+            paddock_proc::cleanup::logged(
+                "failing a call whose answer is too large",
+                self.send(&Frame::Fail {
+                    id,
+                    error: RemoteError::new(
+                        codes::TOO_LARGE,
+                        format!(
+                            "the answer could not be sent: {len} bytes exceed the limit of {max} bytes"
+                        ),
                     ),
-                ),
-            });
+                }),
+            );
         }
     }
 
@@ -673,15 +698,18 @@ impl Peer {
                 kind: FrameKind::Call,
                 id: Some(id),
             }) => {
-                let _ = self.send(&Frame::Fail {
-                    id,
-                    error: RemoteError::new(
-                        codes::TOO_LARGE,
-                        format!(
-                            "the request of {len} bytes exceeds this side's limit of {max} bytes"
+                paddock_proc::cleanup::logged(
+                    "failing a call whose request is too large",
+                    self.send(&Frame::Fail {
+                        id,
+                        error: RemoteError::new(
+                            codes::TOO_LARGE,
+                            format!(
+                                "the request of {len} bytes exceeds this side's limit of {max} bytes"
+                            ),
                         ),
-                    ),
-                });
+                    }),
+                );
                 Ok(())
             }
             Some(FrameHead {
@@ -800,6 +828,8 @@ impl Peer {
             }
         };
         self.mark_closed(why);
+        // silent: the writer thread has already ended when its receiver is gone; there is nothing left to shut down
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.inner.out.send(Out::Shutdown);
         self.inner.closer.close();
     }

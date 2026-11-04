@@ -2,6 +2,14 @@
 //! behind a small port from `dyno_core::ports`. Observe-only: they read, never change a setting. External tools run
 //! through [`crate::process`] with timeouts; anything missing or refused is an unavailable reading that says why and
 //! what would help. The `Fake*` readers are for tests and for the other OSes' tests.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::parse::hardware::{parse_smartctl_ssd, smartctl_refusal_kind, Refusal};
 use crate::parse::smart::{parse_scan, ScanDevice};
@@ -495,12 +503,12 @@ impl BatteryCapacitySource for WindowsBattery {
             return Reading::unavailable("Dyno could not create a temporary folder for the battery report.");
         }
         let file = dir.join("battery-report.xml");
-        let _ = std::fs::remove_file(&file);
+        paddock_proc::cleanup::remove_file(&file);
         let mut cmd = crate::process::command(windir.join("System32").join("powercfg.exe"));
         cmd.arg("/batteryreport").arg("/xml").arg("/output").arg(&file);
         let ran = crate::process::run_with_timeout(cmd, TOOL_TIMEOUT);
         let text = std::fs::read_to_string(&file);
-        let _ = std::fs::remove_file(&file);
+        paddock_proc::cleanup::remove_file(&file);
         match (ran, text) {
             (Err(e), _) => Reading::unavailable(e.to_string()),
             (Ok(_), Ok(xml)) => {

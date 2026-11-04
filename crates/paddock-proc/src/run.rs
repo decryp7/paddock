@@ -1,5 +1,13 @@
 //! Running a program to completion with a timeout and an output cap. On a timeout, or when the output reaches the cap
 //! and the caller asked to stop there, the whole process tree is ended and reaped, so no helper is left behind.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::identity::ProcessId;
 use crate::tree::kill_tree;
@@ -180,10 +188,14 @@ fn drain(
                 c.truncated = true;
                 if stop_on_cap && !told {
                     told = true;
+                    // silent: the receiver is gone once the run has ended, and nothing waits for the event then
+                    #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
                     let _ = tx.send(Event::Cap);
                 }
             }
         }
+        // silent: the receiver is gone once the run has ended, and nothing waits for the event then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = tx.send(Event::Drained);
     });
     cap
@@ -231,6 +243,8 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
     });
     let waiter = tx.clone();
     std::thread::spawn(move || {
+        // silent: the receiver is gone once the run has ended (the tree was killed), and nothing waits for the event then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = waiter.send(Event::Exit(child.wait()));
     });
     drop(tx);

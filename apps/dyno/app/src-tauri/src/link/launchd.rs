@@ -14,6 +14,14 @@
 //! pid comes from launchd's report of the job and its identity is taken from the live process at once ([`running_or_stopped`]).
 //! Every launchctl call goes through the [`System`] port and every wait through the [`Clock`], so the tests run on a fake
 //! launchd and a fake clock, never the real ones (rule 7).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::ports::{running_or_stopped, Child, Launcher};
 use paddock_jobs::time::{Clock, Deadline};
@@ -193,6 +201,8 @@ impl LaunchdLauncher {
     /// Waits one poll on the clock.
     fn pause(&self) {
         // A token nobody cancels: the wait is a poll interval, bounded by the caller's deadline.
+        // silent: the token is never cancelled, so the wait cannot end early; the caller's deadline bounds the loop
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.clock.wait(POLL, &CancelToken::new());
     }
 

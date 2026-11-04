@@ -2,8 +2,16 @@
 //! session 0) and a Service Control Manager service ([`WindowsService`] inside the elevated `<program> install`,
 //! [`ElevatedWindowsService`] from the app through Windows' own prompt). `reg.exe` and `sc.exe` exit with the Win32
 //! error and print state numbers that do not depend on the display language, so they are read by number.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target, UnregisterError};
 use crate::parse::{
     SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_privileges,
     sc_state, startup_switched_off,
@@ -129,16 +137,19 @@ impl Backend for WindowsRun {
         self.sys.spawn(&exe, &args).map_err(RegisterError::Other)
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         let name = self.spec.name().to_string();
         match self
             .sys
             .run(REG, &["delete", WINDOWS_RUN_KEY, "/v", &name, "/f"])
         {
             // Exit 1: the value is not there, which is the goal.
-            Ok(o) if o.success() || o.code == Some(1) => Ok(()),
-            Ok(o) => Err(format!("reg delete: {}", o.reason())),
-            Err(e) => Err(format!("reg.exe {e}")),
+            Ok(o) if o.success() || o.code == Some(1) => Ok(self.inspect()),
+            Ok(o) => Err(UnregisterError::Failed(format!(
+                "reg delete: {}",
+                o.reason()
+            ))),
+            Err(e) => Err(UnregisterError::Failed(format!("reg.exe {e}"))),
         }
     }
 
@@ -322,22 +333,29 @@ impl Backend for WindowsService {
         }
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         let name = self.spec.name().to_string();
         // A deleted service cannot be started again, and one deleted while a handle is open only goes at the next restart: say
         // who asked, before it happens (ER-27).
         log::warn!(service = name.as_str(), caller = caller_frames().as_str(); "deleting the Windows service (sc stop, sc delete)");
-        let _ = self.sys.run(SC, &["stop", &name]);
+        // The stop is best effort here; the delete below and the read-back after it judge the outcome.
+        match self.sys.run(SC, &["stop", &name]) {
+            Ok(o) if !o.success() => log::debug!(service = name.as_str(), why = o.reason().as_str(); "sc stop before delete did not succeed"),
+            Err(e) => log::debug!(service = name.as_str(), error:% = e; "sc stop before delete could not run"),
+            Ok(_) => {}
+        }
         match self.sys.run(SC, &["delete", &name]) {
             Ok(o)
                 if o.success()
                     || o.code == Some(sc_exit::DOES_NOT_EXIST)
                     || o.code == Some(sc_exit::MARKED_FOR_DELETE) =>
             {
-                Ok(())
+                Ok(self.inspect())
             }
-            Ok(o) => Err(sc_failure("sc delete", &o).to_string()),
-            Err(e) => Err(format!("sc.exe {e}")),
+            Ok(o) => Err(UnregisterError::Failed(
+                sc_failure("sc delete", &o).to_string(),
+            )),
+            Err(e) => Err(UnregisterError::Failed(format!("sc.exe {e}"))),
         }
     }
 
@@ -434,8 +452,10 @@ impl Backend for ElevatedWindowsService {
         self.elevated(Verb::Install)
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
-        self.elevated(Verb::Uninstall).map_err(|e| e.to_string())
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
+        self.elevated(Verb::Uninstall)
+            .map_err(|e| UnregisterError::Failed(e.to_string()))?;
+        Ok(self.inner.inspect())
     }
 
     fn evict(&mut self) -> Result<(), String> {

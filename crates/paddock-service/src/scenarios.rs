@@ -904,6 +904,160 @@ fn a_unit_whose_program_was_moved_or_belongs_to_an_older_copy_is_re_pointed_and_
     );
 }
 
+// ---- ADR 0054 RC-2: the packaged unit's turn-off is judged by what systemd says afterwards, never by an ignored result
+
+const PACKAGED_UNIT: &str = "/usr/lib/systemd/system/pitwall.service";
+
+fn packaged_system_unit(sys: &FakeSystem) -> Systemd {
+    let spec = ServiceSpec::builder(LABEL, "Pitwall", "pitwall-server")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    let b = Systemd::new(
+        spec,
+        PACKAGED_UNIT.into(),
+        Target::exe("/usr/bin/pitwall-server"),
+        Box::new(sys.clone()),
+    )
+    .packaged();
+    sys.put_file(PACKAGED_UNIT, &b.definition());
+    sys.put_program("/usr/bin/pitwall-server");
+    b
+}
+
+#[test]
+fn a_packaged_unit_whose_disable_now_failed_and_is_still_enabled_and_running_is_not_reported_removed() {
+    use crate::backend::Backend as _;
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to disable unit: Access denied\n".into(),
+            ..Output::default()
+        },
+    );
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    assert!(
+        b.unregister().is_err(),
+        "the unit is still enabled and active, so the turn-off did not happen"
+    );
+}
+
+#[test]
+fn a_packaged_unit_that_reads_back_disabled_and_stopped_is_removed_whatever_the_tool_said() {
+    use crate::backend::Backend as _;
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
+    assert!(b.unregister().is_ok());
+    assert!(
+        sys.file(Path::new(PACKAGED_UNIT)).is_some(),
+        "dpkg owns the packaged file; it stays"
+    );
+}
+
+#[test]
+fn a_packaged_unit_whose_disable_now_said_yes_but_reads_back_enabled_is_still_present() {
+    use crate::backend::{Backend as _, Job, Registration, UnregisterError};
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    match b.unregister() {
+        Err(UnregisterError::StillPresent(look)) => {
+            assert_eq!((look.registration, look.job), (Registration::Registered, Job::Running));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_failed_disable_now_is_the_tools_own_words_unless_the_read_back_shows_the_unit_gone() {
+    use crate::backend::{Backend as _, UnregisterError};
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to disable unit: Read-only file system\n".into(),
+            ..Output::default()
+        },
+    );
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    match b.unregister() {
+        Err(UnregisterError::Failed(why)) => assert!(why.contains("Read-only file system"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // The same refusal, but the unit already reads back disabled and stopped: nothing is left to do.
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
+    assert!(b.unregister().is_ok());
+}
+
+#[test]
+fn a_unit_systemd_does_not_know_is_already_gone_and_an_unreachable_manager_says_what_to_do() {
+    use crate::backend::{Backend as _, Registration, UnregisterError};
+    let sys = FakeSystem::new();
+    // Packaged, but the package is gone: no unit file and systemd says it does not exist.
+    let spec = ServiceSpec::builder(LABEL, "Pitwall", "pitwall-server")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    let mut gone = Systemd::new(spec, PACKAGED_UNIT.into(), Target::exe("/p"), Box::new(sys.clone())).packaged();
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to disable unit: Unit file pitwall.service does not exist.\n".into(),
+            ..Output::default()
+        },
+    );
+    let look = gone.unregister().unwrap();
+    assert_eq!(look.registration, Registration::Absent);
+    // No systemd session at all.
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to connect to bus: No medium found\n".into(),
+            ..Output::default()
+        },
+    );
+    assert!(matches!(gone.unregister(), Err(UnregisterError::Unavailable(w)) if w.contains("systemd")));
+    // The tool cannot be started: nothing is left to read back as gone, so the words are the tool's.
+    let sys = FakeSystem::new();
+    let mut present = packaged_system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.on("systemctl disable --now", |_, _| Err(RunError::TimedOut("systemctl".into())));
+    assert!(matches!(present.unregister(), Err(UnregisterError::Failed(w)) if w.contains("disable --now")));
+}
+
+#[test]
+fn every_unregister_error_has_words_and_the_other_backends_return_what_they_read_back() {
+    use crate::backend::{Backend as _, Inspection, Registration, UnregisterError};
+    assert!(UnregisterError::NeedsElevation.to_string().contains("administrator"));
+    assert_eq!(UnregisterError::Failed("x".into()).to_string(), "x");
+    assert_eq!(UnregisterError::Unavailable("y".into()).to_string(), "y");
+    let still = UnregisterError::StillPresent(Inspection {
+        registration: Registration::Registered,
+        ..Inspection::absent()
+    });
+    assert!(still.to_string().contains("Registered"));
+    assert!(Inspection::absent().withdrawn());
+    let sys = FakeSystem::new();
+    let mut run = WindowsRun::new(pitwall(), Target::exe("C:\\p.exe"), Box::new(sys.clone()));
+    assert_eq!(run.unregister().unwrap().registration, Registration::Absent);
+    let mut file = LaunchdFile::new(pitwall(), 501, "/p.plist".into(), Target::exe("/p"), Box::new(sys));
+    assert_eq!(file.unregister().unwrap().registration, Registration::Absent);
+}
+
 // --------------------------------------------------------------------------------------------------------- Windows
 
 const RUN: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";

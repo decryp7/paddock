@@ -2,6 +2,14 @@
 //! (the discovery file, the agent lock, the login service, a connection) that answer a [`machine::Command`] with an event.
 //!
 //! Nothing here decides anything: a decision is a step of the pure machine. The adapters are thin and run on workers.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::machine::{Generation, HintSeen, LockSeen, Look, Seq};
 use super::{plan, Plan, ServiceProbe, Sink};
@@ -181,8 +189,14 @@ impl Launcher for ProcessLauncher {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
                 _ if Instant::now() >= end => {
-                    let _ = child.kill();
-                    break child.wait().ok();
+                    paddock_proc::cleanup::logged("killing the child that did not stop in time", child.kill());
+                    break match child.wait() {
+                        Ok(status) => Some(status),
+                        Err(e) => {
+                            paddock_proc::cleanup::report("reaping the child that did not stop in time", &e);
+                            None
+                        }
+                    };
                 }
                 _ => std::thread::sleep(Duration::from_millis(50)),
             }
@@ -369,6 +383,8 @@ fn ask_watching(
     let (tx, rx) = std::sync::mpsc::channel();
     let ask = probe.clone();
     let spawned = std::thread::Builder::new().name("dyno-service-ask".into()).spawn(move || {
+        // silent: the receiver is gone when the caller stopped waiting for the answer; nobody reads it then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = tx.send(ask());
     });
     if spawned.is_err() {

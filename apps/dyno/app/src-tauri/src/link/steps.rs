@@ -258,6 +258,8 @@ impl std::fmt::Write for Cap {
 pub fn debug_variant_name(value: &dyn std::fmt::Debug) -> String {
     use std::fmt::Write;
     let mut cap = Cap(String::new());
+    // silent: `Cap` refuses past its limit on purpose, to stop the formatting early; what fits is read below
+    #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
     let _ = write!(cap, "{value:?}");
     variant_name(&cap.0).to_string()
 }

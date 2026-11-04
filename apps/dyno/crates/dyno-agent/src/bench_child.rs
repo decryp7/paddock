@@ -5,6 +5,14 @@
 //! ("Running", "Still working", "Not responding") and, at the end, one [`BenchStatus`]. Nothing here ends a child by itself
 //! because it is slow or quiet: only the person's Cancel and a named safety stop do (ER-19). The real child is
 //! [`ProcessChild`]; the tests drive a scripted one with a manual clock.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use dyno_core::bench::unit::{self, UnitRecord};
 use dyno_core::bench::wire::{liveness, parse_line, Line, Liveness, PhaseProgress, WireError, MAX_LINE, MAX_LINES};
@@ -246,6 +254,8 @@ impl ProcessChild {
                         Ok(None) | Err(_) => break,
                         Ok(Some(Err(()))) => {
                             n += 1;
+                            // silent: the receiver is gone when the bench was abandoned; nobody reads the line
+                            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
                             let _ = tx.send(Msg::Line(Err(WireError {
                                 line: n,
                                 reason: format!("longer than {MAX_LINE} bytes"),
@@ -264,9 +274,13 @@ impl ProcessChild {
                         }
                     }
                 }
+                // silent: the receiver is gone when the bench was abandoned; nobody waits for the end
+                #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
                 let _ = tx.send(Msg::Eof);
             })?;
         } else {
+            // silent: the receiver is gone when the bench was abandoned; nobody waits for the end
+            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
             let _ = tx.send(Msg::Eof);
         }
         if let Some(mut err) = stderr_pipe {

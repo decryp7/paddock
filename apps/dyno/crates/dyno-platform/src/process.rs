@@ -1,5 +1,13 @@
 //! Child processes: every external program Dyno runs opens no console window and is bounded by a timeout. This is
 //! the only module that creates [`Command`]s.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use dyno_core::issues::ReadControl;
 use dyno_core::ports::PlatformError;
@@ -37,10 +45,10 @@ fn drain(stream: Option<impl Read + Send + 'static>) -> Drain {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
             let mut limited = out.take(MAX_TOOL_OUTPUT as u64);
-            let _ = limited.read_to_end(&mut buf);
+            paddock_proc::cleanup::logged("reading a tool's output", limited.read_to_end(&mut buf));
             // Keep reading (and dropping) so the child never blocks on a full pipe.
             let mut rest = limited.into_inner();
-            let _ = std::io::copy(&mut rest, &mut std::io::sink());
+            paddock_proc::cleanup::logged("draining a tool's output", std::io::copy(&mut rest, &mut std::io::sink()));
             buf
         })
     })
@@ -208,7 +216,10 @@ fn stream(
                 }
             }
             // Past the cap the rest is read and dropped so the child never blocks on a full pipe.
-            let _ = std::io::copy(&mut lines.into_inner().into_inner(), &mut std::io::sink());
+            paddock_proc::cleanup::logged(
+                "draining a tool's output",
+                std::io::copy(&mut lines.into_inner().into_inner(), &mut std::io::sink()),
+            );
         });
     } else {
         drop(lines_tx);
@@ -233,8 +244,10 @@ fn stream(
         std::thread::sleep(Duration::from_millis(5));
     }
     let status = tool.wait();
+    // silent: the watcher has already ended when its receiver is gone (the tool ended or was stopped); the join below judges it
+    #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
     let _ = done_tx.send(());
-    let _ = watcher.join();
+    paddock_proc::cleanup::join("the tool watcher", watcher);
     if timed_out.load(Ordering::SeqCst) {
         return Err(PlatformError::Timeout(format!(
             "{program} did not finish within {} s.",

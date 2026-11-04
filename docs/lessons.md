@@ -1380,3 +1380,20 @@ and a check that finds empty output from a launchd job prints `launchctl print` 
 ## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
 
 After a restart the Dyno helper card said "installed but did not answer, Repair" until the person ran Repair (UAC), though nothing was damaged. By the code, four things added up: the service was `delayed-auto` (it starts a minute or two after the boot), the agent turned "program present, pipe absent" straight into Silent and Repair, nothing started a stopped service although its security descriptor already lets interactive users start it, and the card read the state once and never again. A start that is merely late, or a service that is merely stopped, is not damage. **Lesson (class: a state that fixes itself is not a fault):** a status that can be transient is polled with a backoff and says "starting", an unelevated start is tried before an elevated repair is offered, and Repair is for a service that stopped with an error, with the service's exit code and reason in the detail. `paddock_service::start::revive` is the one implementation; a refusal at the service's start leaves its reason in the Event Log and in its service-specific exit code (ER-27), because a service that stops silently can only be repaired by guessing.
+## The Linux "Turn off" reported done and nothing proved it: a result dropped at the OS edge, a removal with no read-back (2026-11-04, ADR 0054 RC-2 and E-3/E-4)
+
+The Dyno 1.1.0 review found `Systemd::unregister` running `let _ = self.ctl(&["disable", "--now", ..])` and returning `Ok(())` for a packaged unit
+without looking, and `plan_uninstall_self` (the daemon removing itself after the `Uninstall` request) with no `ConfirmGone`: the app was told `Bye`
+whatever systemd did afterwards. Both are defects in the code and each now has a test that failed first (`cargo nextest run -p paddock-service --lib -E
+'test(packaged_unit) | test(service_removing_itself)'` on `a391ebda5` plus the tests: 7 run, 3 failed). The reported symptom (75 s later still `active`
+and `enabled`, restart counter 1, `/var/lib/dyno-helper` left) was **not reproduced** (ER-28): on the OrbStack `paddock-gate-arm` machine (Ubuntu 24.04,
+systemd 255) the base code with the real hardened unit, the real `dyno-helper serve` and the real `Uninstall` request, and the elevated
+`dyno-helper uninstall`, both left the unit `inactive`/`disabled` with `NRestarts=0` and the data folder gone, and `disable --now` called from inside a
+`ProtectSystem=strict` unit works (PID 1 edits `/etc`, not the caller). Plausible causes still open, each with the observation that rules it out:
+`disable --now` failing on the Tart GNOME image (its journal line from the same run); the daemon exiting non-zero before the removal thread reached
+`disable` (the unit's `Result=` and `ExecMainStatus`); the elevated path taken instead of the daemon's (the app log's "turning the helper off" line).
+The fix makes every one of them visible: `unregister` fails with the tool's words or `StillPresent(inspection)` and logs the read-back, the self-removal
+ends in `ConfirmGone`, and the next lifecycle run (ADR 0054 L7) shows which it was. **Lesson (class: errors discarded at OS edges):** a removal is
+judged by what the OS says afterwards, never by the call's exit status or by a reply sent before the work; C93 (ADR 0054) lists the edge modules
+(`crates/wiring.toml`, `apps/dyno/wiring.toml`) and the `// silent:` hatches that remain are counted. The helper-log race (`68889a16e`, a log thread
+recreating `helper.log` between the unlink and the folder's removal) is on this line and its test passes.

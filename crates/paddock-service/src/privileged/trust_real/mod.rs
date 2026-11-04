@@ -5,6 +5,14 @@
 //! following links, moving aside, removing a tree) are here. The Windows module is native glue (crates/README.md) that only a
 //! Windows runner can cover (its tests run in the crate job's Windows leg and on the Windows test VM); the Unix module is
 //! covered by its own tempdir tests.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use super::files::FileKind;

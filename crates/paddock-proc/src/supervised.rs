@@ -1,6 +1,14 @@
 //! A supervised child: its whole process tree is ended on drop, on [`Supervised::terminate`] and when it exceeds a
 //! memory cap, so nothing leaks. A [`Registry`] knows every supervised tree, so [`end_all`] can end them at shutdown or
 //! in a panic hook even when the owners never get to drop them.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::identity::ProcessId;
 use crate::tree::{self, Terminated, kill_child_tree, kill_tree};
@@ -207,14 +215,17 @@ impl Watcher {
                     }
                 }
             })
+            .map_err(|e| log::error!("the memory watcher thread could not be started, so the cap is not enforced: {e}"))
             .ok();
         Watcher { stop, thread }
     }
 
     fn finish(mut self) {
+        // silent: the watcher thread has already ended when its receiver is gone (it stopped the child itself)
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.stop.send(());
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            crate::cleanup::join("the memory watcher thread", t);
         }
     }
 }
@@ -274,8 +285,8 @@ impl Supervised {
                 // A hard limit that cannot be set must not become a child without one: the launch fails.
                 Err(e) if hard.is_some() => {
                     let mut child = child;
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    crate::cleanup::logged("killing the child whose hard limit failed", child.kill());
+                    crate::cleanup::logged("reaping the child whose hard limit failed", child.wait());
                     log::error!(
                         "The hard memory limit of child {pid} could not be set in its job object, so it was not started: {e}"
                     );
@@ -447,8 +458,8 @@ impl Supervised {
                 }
                 None => {}
             }
-            let _ = c.kill();
-            let _ = c.wait();
+            crate::cleanup::logged("killing the child", c.kill());
+            crate::cleanup::logged("reaping the child", c.wait());
         }
         self.release();
     }
