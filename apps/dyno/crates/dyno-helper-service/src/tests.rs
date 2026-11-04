@@ -134,7 +134,34 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
         "/usr/lib/systemd/system/dyno-helper.service",
         "[Service]\nExecStart=\"/usr/bin/dyno-helper\" \"serve\"\n",
     );
-    sys.answer("systemctl is-active", Output::ok("active\n"));
+    // The existing unit is running until `disable --now` removes it: the install now reads the OS back after the removal (ADR 0054 RC-2).
+    let removed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = removed.clone();
+    sys.on("systemctl disable", move |_, _| {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(Output::ok(""))
+    });
+    let flag = removed.clone();
+    sys.on("systemctl enable", move |_, _| {
+        flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(Output::ok(""))
+    });
+    let flag = removed.clone();
+    sys.on("systemctl is-active", move |_, _| {
+        Ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
+            Output { code: Some(3), stdout: "inactive\n".into(), ..Output::default() }
+        } else {
+            Output::ok("active\n")
+        })
+    });
+    let flag = removed.clone();
+    sys.on("systemctl is-enabled", move |_, _| {
+        Ok(if flag.load(std::sync::atomic::Ordering::SeqCst) {
+            Output { code: Some(1), stdout: "disabled\n".into(), ..Output::default() }
+        } else {
+            Output::ok("enabled\n")
+        })
+    });
     let report = install_in_place(
         Os::Linux,
         &roots(),
@@ -194,7 +221,8 @@ fn the_helper_removes_itself_files_first_and_stops_last() {
         .put_dir("/Library/PrivilegedHelperTools", 0, 0o755)
         .put_file(program, b"x", 0, 0o755);
     let report = uninstall_self_in_place(Os::MacOs, &roots(), &mut files, &make_system(&sys)).unwrap();
-    assert_eq!(report.phases.len(), 3);
+    // Remove the program, remove the folder, stop, then confirm the registration is gone (ADR 0054 RC-2).
+    assert_eq!(report.phases.len(), 4);
     assert!(files.facts_of(Path::new(program)).is_none());
     let commands = sys.commands();
     assert!(
