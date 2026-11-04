@@ -22,7 +22,6 @@ use dyno_core::helper_wire::{HelperState, HelperStatus};
 use dyno_core::inventory::MemoryLayout;
 use dyno_core::metrics::Reading;
 use dyno_core::network_traffic::TrafficCounter;
-use dyno_core::ports::PlatformError;
 use dyno_core::read_via::{sentence, NextStep, ReadVia, NEEDS_ADMIN};
 use dyno_core::smart::SmartReply;
 use paddock_jobs::time::Clock;
@@ -31,7 +30,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 pub use crate::helper_link::LIVE_WAIT;
-use crate::helper_link::{HelperLink, HelperTransport, Wait};
+use crate::helper_link::{CallError, HelperLink, HelperTransport, Wait};
 
 /// How long an answer about the helper is kept (plan section 3.1).
 pub const READY_TTL: Duration = Duration::from_secs(5);
@@ -61,23 +60,23 @@ impl ReadClass {
 /// agent reads with; [`Bounded`] is the real one.
 pub trait HelperCalls: Send + Sync {
     /// One page of the process list, scoped to the caller by the helper.
-    fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, PlatformError>;
+    fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, CallError>;
     /// Per-program traffic counters (Windows), scoped to the caller.
-    fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError>;
+    fn traffic(&self) -> Result<Vec<TrafficCounter>, CallError>;
     /// Socket inode to owning program (Linux).
-    fn socket_owners(&self) -> Result<SocketOwners, PlatformError>;
+    fn socket_owners(&self) -> Result<SocketOwners, CallError>;
     /// The programs holding the file with this device and inode (Linux).
-    fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, PlatformError>;
+    fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, CallError>;
     /// Thermal, energy and fan readings.
-    fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, PlatformError>;
+    fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, CallError>;
     /// Memory modules from the DMI table (Linux).
-    fn memory(&self) -> Result<MemoryLayout, PlatformError>;
+    fn memory(&self) -> Result<MemoryLayout, CallError>;
     /// Wake requests or Windows Backup versions.
-    fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError>;
+    fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, CallError>;
     /// Login items (macOS).
-    fn login_items(&self) -> Result<LoginItemsReply, PlatformError>;
+    fn login_items(&self) -> Result<LoginItemsReply, CallError>;
     /// SMART health of the disks the helper's own scan finds.
-    fn smart(&self, query: SmartQuery) -> Result<SmartReply, PlatformError>;
+    fn smart(&self, query: SmartQuery) -> Result<SmartReply, CallError>;
 }
 
 /// The helper link with the wait of a [`ReadClass`].
@@ -94,31 +93,31 @@ impl<T: HelperTransport> Bounded<T> {
 }
 
 impl<T: HelperTransport> HelperCalls for Bounded<T> {
-    fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, PlatformError> {
+    fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, CallError> {
         self.link.processes_in(query, self.wait)
     }
-    fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+    fn traffic(&self) -> Result<Vec<TrafficCounter>, CallError> {
         self.link.traffic_in(self.wait)
     }
-    fn socket_owners(&self) -> Result<SocketOwners, PlatformError> {
+    fn socket_owners(&self) -> Result<SocketOwners, CallError> {
         self.link.socket_owners_in(self.wait)
     }
-    fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, PlatformError> {
+    fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, CallError> {
         self.link.file_holders_in(dev, ino, self.wait)
     }
-    fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, PlatformError> {
+    fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, CallError> {
         self.link.counters_in(query, self.wait)
     }
-    fn memory(&self) -> Result<MemoryLayout, PlatformError> {
+    fn memory(&self) -> Result<MemoryLayout, CallError> {
         self.link.memory_in(self.wait)
     }
-    fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError> {
+    fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, CallError> {
         self.link.extras_in(kind, self.wait)
     }
-    fn login_items(&self) -> Result<LoginItemsReply, PlatformError> {
+    fn login_items(&self) -> Result<LoginItemsReply, CallError> {
         self.link.login_items_now_in(self.wait)
     }
-    fn smart(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
+    fn smart(&self, query: SmartQuery) -> Result<SmartReply, CallError> {
         self.link.smart_in(query, self.wait)
     }
 }
@@ -229,8 +228,6 @@ pub trait HelperPort: Send + Sync {
     fn epoch(&self) -> u64;
     /// The calls for a reading of `class`, or `None` when the agent is gone (shutting down).
     fn calls(&self, class: ReadClass) -> Option<Arc<dyn HelperCalls>>;
-    /// How many calls so far found the helper unreachable (not merely refusing): a reading whose call raised it earned a strike.
-    fn faults(&self) -> u64;
     /// The clock the strikes are counted on.
     fn now(&self) -> Duration;
 }
@@ -253,9 +250,6 @@ impl HelperPort for OffPort {
     fn calls(&self, _: ReadClass) -> Option<Arc<dyn HelperCalls>> {
         None
     }
-    fn faults(&self) -> u64 {
-        0
-    }
     fn now(&self) -> Duration {
         Duration::ZERO
     }
@@ -273,9 +267,6 @@ impl<T: HelperTransport + 'static> HelperPort for CentrePort<T> {
     }
     fn calls(&self, class: ReadClass) -> Option<Arc<dyn HelperCalls>> {
         Some(Arc::new(Bounded::new(self.0.link_arc(), class)))
-    }
-    fn faults(&self) -> u64 {
-        self.0.link().faults()
     }
     fn now(&self) -> Duration {
         self.0.link().clock().monotonic()
@@ -304,9 +295,6 @@ impl HelperPort for SharedPort {
     }
     fn calls(&self, class: ReadClass) -> Option<Arc<dyn HelperCalls>> {
         Some(Arc::new(Bounded::new(self.centre()?.link_arc(), class)))
-    }
-    fn faults(&self) -> u64 {
-        self.centre().map_or(0, |c| c.link().faults())
     }
     fn now(&self) -> Duration {
         self.centre().map_or(Duration::ZERO, |c| c.link().clock().monotonic())
@@ -433,7 +421,7 @@ pub trait HelperReading: Send {
     ///
     /// # Errors
     /// What the helper refused or could not read, in words.
-    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Self::Value, PlatformError>;
+    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Self::Value, CallError>;
     /// What the agent can read itself; `Reading::Unavailable(reason)` when nothing.
     fn local(&mut self) -> Reading<Self::Value>;
     /// For a local value that is only part of what the helper would give (Linux memory: the total without the slots), the
@@ -494,6 +482,12 @@ impl<R: HelperReading> HelperFirst<R> {
         &mut self.reading
     }
 
+    /// Ends the quiet window of this reading (a person asked to try again), so the next read asks the helper at once.
+    pub fn retry_now(&mut self) {
+        self.strikes = 0;
+        self.quiet_until = None;
+    }
+
     /// The helper epoch, brought up to date: a consumer that keeps this reading re-reads when it differs from the one it kept.
     pub fn epoch(&self) -> u64 {
         // Asking is what notices a flip: the answer is cached, so this is cheap.
@@ -543,7 +537,6 @@ impl<R: HelperReading> HelperFirst<R> {
             );
             return out;
         }
-        let faults = self.port.faults();
         match self.reading.via_helper(&*calls) {
             Ok(v) => {
                 self.strikes = 0;
@@ -555,12 +548,12 @@ impl<R: HelperReading> HelperFirst<R> {
                 }
             }
             Err(e) => {
-                if self.port.faults() > faults {
-                    // The call found the helper unreachable (a refusal would not have): this reading waits before asking again.
+                if e.unreachable {
+                    // This call found the helper unreachable (a refusal would not have): this reading waits before asking again.
                     self.strikes = self.strikes.saturating_add(1);
                     self.quiet_until = Some(self.port.now() + backoff(self.strikes));
                 }
-                let out = self.after_helper_error(&e.to_string());
+                let out = self.after_helper_error(&e.error.to_string());
                 self.note(&format!("the helper could not read it: {e}"), true, started);
                 out
             }
@@ -784,7 +777,6 @@ mod tests {
     use dyno_core::helper_wire::HelperReply;
     use dyno_core::inventory::{MemoryLayout, Unavailable};
     use dyno_core::metrics::Reading;
-    use dyno_core::ports::PlatformError;
     use dyno_core::read_via::{NextStep, NEEDS_ADMIN};
     use paddock_jobs::time::{Clock, FakeClock};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -980,7 +972,7 @@ mod tests {
         fn class(&self) -> ReadClass {
             self.1
         }
-        fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, PlatformError> {
+        fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, CallError> {
             self.0.via_helper(calls)
         }
         fn local(&mut self) -> Reading<MemoryLayout> {
@@ -1001,7 +993,7 @@ mod tests {
         fn class(&self) -> ReadClass {
             ReadClass::Live
         }
-        fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, PlatformError> {
+        fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, CallError> {
             calls.memory()
         }
         fn local(&mut self) -> Reading<MemoryLayout> {
@@ -1204,9 +1196,6 @@ mod tests {
         fn epoch(&self) -> u64 {
             0
         }
-        fn faults(&self) -> u64 {
-            0
-        }
         fn now(&self) -> Duration {
             Duration::ZERO
         }
@@ -1285,5 +1274,54 @@ mod tests {
             ReadVia::Helper,
             "the helper answered a refusal, so it is asked again at once"
         );
+    }
+
+    /// A reading that also asks the helper for something else first, and has that other call fail: the other call's fault is not
+    /// this reading's strike.
+    struct Noisy(Mem);
+    impl HelperReading for Noisy {
+        type Value = MemoryLayout;
+        fn name(&self) -> &'static str {
+            "noisy"
+        }
+        fn class(&self) -> ReadClass {
+            ReadClass::Live
+        }
+        fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, crate::helper_link::CallError> {
+            let _ = calls.traffic();
+            calls.memory()
+        }
+        fn local(&mut self) -> Reading<MemoryLayout> {
+            self.0.local()
+        }
+    }
+
+    #[test]
+    fn another_calls_fault_is_not_this_readings_strike() {
+        // The first call (traffic) finds the helper silent; the reading's own call is refused. Only the reading's own typed error
+        // counts, and a refusal is not a strike, so the next read asks again.
+        let (net, clock) = (
+            Net::new(true, vec![silent(), refused(), refused(), memory_answer()]),
+            FakeClock::new(),
+        );
+        let (r, _) = mem(Reading::Available(total_only(4, "local")), false);
+        let mut f = HelperFirst::new(Noisy(r), port(&centre(&net, &clock)));
+        assert_eq!(f.read().via, ReadVia::Local);
+        clock.advance(S(1));
+        assert_eq!(net.scripted_left(), 2);
+        assert_eq!(f.read().via, ReadVia::Helper, "asked again at once");
+    }
+
+    #[test]
+    fn retry_now_ends_the_quiet_window_of_a_reading() {
+        let (net, clock) = (Net::new(true, vec![silent(), memory_answer()]), FakeClock::new());
+        let (r, _) = mem(Reading::Available(total_only(4, "local")), false);
+        let mut f = HelperFirst::new(r, port(&centre(&net, &clock)));
+        assert_eq!(f.read().via, ReadVia::Local, "the call hung");
+        clock.advance(S(1));
+        assert_eq!(f.read().via, ReadVia::Local, "left alone");
+        assert_eq!(net.scripted_left(), 1);
+        f.retry_now();
+        assert_eq!(f.read().via, ReadVia::Helper, "the person asked: it is asked at once");
     }
 }

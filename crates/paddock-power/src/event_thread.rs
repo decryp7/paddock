@@ -3,11 +3,15 @@
 //! subscription (1) says "stop" first, so nothing more is delivered to the sink, (2) closes the source through the closer it was
 //! given, (3) waits a bounded time for the thread to end, and when it does not, logs it and lets the thread go. The agent's stop
 //! therefore never depends on D-Bus (Dyno ADR 0031 class S).
+//!
+//! The stop flag is checked before each delivery, not atomically with it: an event that has passed the check when the drop begins
+//! is still delivered once, so a sink must tolerate one late event (and must not block, as the port says). Every later event is
+//! dropped.
 
 use crate::{EventSink, PowerEvent, Subscription};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -74,16 +78,24 @@ impl Subscription for EventThread {}
 impl Drop for EventThread {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        // The closer runs on a thread of its own, so the one deadline below covers it too: a close that never returns (D-Bus not
+        // answering) cannot hold the drop. If it hangs, that thread is let go with the events thread.
         if let Some(close) = self.closer.take() {
-            close();
+            let spawned = std::thread::Builder::new()
+                .name("paddock-power-close".into())
+                .spawn(close);
+            if let Err(e) = spawned {
+                log::warn!("the power subscription could not be closed on its own thread: {e}");
+            }
         }
         match self.done.recv_timeout(self.wait) {
-            Ok(()) => {
+            // A thread that panicked dropped its sender without sending: it has ended all the same.
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => {
                 if let Some(t) = self.thread.take() {
                     let _ = t.join();
                 }
             }
-            Err(_) => {
+            Err(RecvTimeoutError::Timeout) => {
                 // Detached: it ends when the OS source does, and by then it delivers nothing.
                 log::warn!(
                     "the power events thread did not end within {} ms of closing its connection; letting it go",
@@ -196,5 +208,42 @@ mod tests {
         tx.send(PowerEvent::Woke).unwrap();
         drop(tx);
         assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_closer_that_never_returns_cannot_hold_the_drop_either() {
+        let (sink, _seen, _arrived) = sink();
+        let (tx, body) = fake_source();
+        let (hold_tx, hold_rx) = channel::<()>();
+        // The closer blocks (D-Bus never answering the close): it runs on a thread of its own, inside the one deadline.
+        let closer: Closer = Box::new(move || {
+            let _ = hold_rx.recv();
+        });
+        let thread =
+            EventThread::start("t", sink, closer, Duration::from_millis(100), body).unwrap();
+        let began = Instant::now();
+        drop(thread);
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "the drop waited {:?}",
+            began.elapsed()
+        );
+        drop(hold_tx);
+        drop(tx);
+    }
+
+    #[test]
+    fn a_thread_that_panicked_is_ended_and_joined_at_once() {
+        let (sink, _seen, _arrived) = sink();
+        let body: Body = Box::new(|_| panic!("the source failed (this panic is the test)"));
+        let thread =
+            EventThread::start("t", sink, Box::new(|| {}), Duration::from_secs(30), body).unwrap();
+        let began = Instant::now();
+        drop(thread);
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "the drop waited {:?} for a thread that was already gone",
+            began.elapsed()
+        );
     }
 }

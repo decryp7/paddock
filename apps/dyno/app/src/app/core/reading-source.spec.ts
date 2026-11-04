@@ -6,12 +6,13 @@ import { HELPER_CHIP, OPEN_SETTINGS_LABEL, ReadingSource, RETRY_LABEL, TURN_ON_L
 
 const NEEDS: ReadVia = { needsHelper: { reason: "Other accounts' processes are not readable.", next: { openSettings: 'helper' } } };
 
-function render(via: ReadVia | undefined, hint = '') {
+function render(via: ReadVia | undefined, hint = '', canRetry = false) {
   const open = vi.fn().mockResolvedValue(undefined);
   TestBed.configureTestingModule({ providers: [{ provide: DialogService, useValue: { open } }] });
   const f = TestBed.createComponent(ReadingSource);
   f.componentRef.setInput('via', via);
   f.componentRef.setInput('hint', hint);
+  f.componentRef.setInput('canRetry', canRetry);
   const retried = vi.fn();
   f.componentInstance.retry.subscribe(retried);
   f.detectChanges();
@@ -78,12 +79,18 @@ describe('dy-reading-source', () => {
   });
 
   it('offers Try again when the helper did not answer, and tells the page to read again', () => {
-    const { el, open, retried } = render({ unavailable: { reason: 'The helper did not answer.', next: 'retry' } });
+    const { el, open, retried } = render({ unavailable: { reason: 'The helper did not answer.', next: 'retry' } }, '', true);
     const button = q(el, 'reading-source-step') as HTMLButtonElement;
     expect(button.textContent?.trim()).toBe(RETRY_LABEL);
     button.click();
     expect(retried).toHaveBeenCalledTimes(1);
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('shows no Try again button unless the page says it can read again', () => {
+    const { el } = render({ unavailable: { reason: 'The helper did not answer.', next: 'retry' } });
+    expect(q(el, 'reading-source-unavailable')?.textContent).toContain('did not answer');
+    expect(q(el, 'reading-source-step')).toBeNull();
   });
 
   it('shows only the reason, no button, when neither path can read it', () => {

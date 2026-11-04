@@ -64,7 +64,7 @@ export function sourceView(via: ReadVia | null | undefined, hint = ''): SourceVi
       }
       @case ('unavailable') {
         <p class="note" data-testid="reading-source-unavailable">{{ text() }}</p>
-        @if (unavailableStep() === 'retry') { <button type="button" matButton="outlined" (click)="retry.emit()" data-testid="reading-source-step">{{ retryLabel }}</button> }
+        @if (unavailableStep() === 'retry' && canRetry()) { <button type="button" matButton="outlined" (click)="retry.emit()" data-testid="reading-source-step">{{ retryLabel }}</button> }
         @if (unavailableStep() === 'settings') { <button type="button" matButton="outlined" (click)="openSettings()" data-testid="reading-source-step">{{ settingsLabel }}</button> }
       }
     }
@@ -78,6 +78,8 @@ export function sourceView(via: ReadVia | null | undefined, hint = ''): SourceVi
 export class ReadingSource {
   /** The reading's source, as the engine sent it. */
   readonly via = input<ReadVia | null | undefined>();
+  /** Whether the page can read again when asked (it handles `retry`); only then is "Try again" offered. */
+  readonly canRetry = input(false);
   /** The one-line note for a local reading where the helper would add more. */
   readonly hint = input('');
 

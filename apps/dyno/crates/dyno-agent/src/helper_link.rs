@@ -57,6 +57,28 @@ pub trait HelperTransport: Send + Sync {
     }
 }
 
+/// Why a typed call failed: the agent's error, and whether the helper could not be reached at all (silent, absent, foreign) as
+/// opposed to answering with a refusal. Only the first is a reason to leave a reading alone for a while.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallError {
+    /// What went wrong, in words.
+    pub error: PlatformError,
+    /// The helper was not reached (a refusal is a answer, and is not this).
+    pub unreachable: bool,
+}
+
+impl From<PlatformError> for CallError {
+    fn from(error: PlatformError) -> Self {
+        CallError { error, unreachable: false }
+    }
+}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
 /// How long a call may take: the transport's own default, or the short deadline of a live reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wait {
@@ -132,6 +154,14 @@ impl<T: HelperTransport> HelperLink<T> {
 
     fn call(&self, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
         self.call_in(Wait::Default, kind, request)
+    }
+
+    /// [`HelperLink::call_in`] with the failure typed.
+    fn ask(&self, wait: Wait, kind: &str, request: HelperRequest) -> Result<HelperReply, CallError> {
+        self.call_in(wait, kind, request).map_err(|e| CallError {
+            unreachable: !matches!(e, TransportError::Remote { .. }),
+            error: to_platform(e),
+        })
     }
 
     fn call_in(&self, wait: Wait, kind: &str, request: HelperRequest) -> Result<HelperReply, TransportError> {
@@ -245,130 +275,118 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// One page of the process list, scoped to the caller by the helper.
     pub fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, PlatformError> {
-        self.processes_in(query, Wait::Default)
+        self.processes_in(query, Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::processes`] that waits as `wait` says.
-    pub fn processes_in(&self, query: ProcessQuery, wait: Wait) -> Result<ProcessPage, PlatformError> {
-        match self
-            .call_in(wait, "processes", HelperRequest::Processes(query))
-            .map_err(to_platform)?
-        {
+    pub fn processes_in(&self, query: ProcessQuery, wait: Wait) -> Result<ProcessPage, CallError> {
+        match self.ask(wait, "processes", HelperRequest::Processes(query))? {
             HelperReply::Processes(p) => Ok(p),
-            _ => Err(unexpected("Processes")),
+            _ => Err(unexpected("Processes").into()),
         }
     }
 
     /// Per-program traffic counters (Windows), scoped to the caller.
     pub fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        self.traffic_in(Wait::Default)
+        self.traffic_in(Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::traffic`] that waits as `wait` says.
-    pub fn traffic_in(&self, wait: Wait) -> Result<Vec<TrafficCounter>, PlatformError> {
-        match self.call_in(wait, "traffic", HelperRequest::Traffic).map_err(to_platform)? {
+    pub fn traffic_in(&self, wait: Wait) -> Result<Vec<TrafficCounter>, CallError> {
+        match self.ask(wait, "traffic", HelperRequest::Traffic)? {
             HelperReply::Counters(c) => Ok(c),
-            _ => Err(unexpected("Traffic")),
+            _ => Err(unexpected("Traffic").into()),
         }
     }
 
     /// Socket inode to owning program (Linux), scoped to the caller.
     pub fn socket_owners(&self) -> Result<SocketOwners, PlatformError> {
-        self.socket_owners_in(Wait::Default)
+        self.socket_owners_in(Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::socket_owners`] that waits as `wait` says.
-    pub fn socket_owners_in(&self, wait: Wait) -> Result<SocketOwners, PlatformError> {
-        match self
-            .call_in(wait, "socketOwners", HelperRequest::SocketOwners)
-            .map_err(to_platform)?
-        {
+    pub fn socket_owners_in(&self, wait: Wait) -> Result<SocketOwners, CallError> {
+        match self.ask(wait, "socketOwners", HelperRequest::SocketOwners)? {
             HelperReply::SocketOwners(o) => Ok(o),
-            _ => Err(unexpected("SocketOwners")),
+            _ => Err(unexpected("SocketOwners").into()),
         }
     }
 
     /// The programs holding the file with this device and inode (Linux). The helper never opens the file.
     pub fn file_holders(&self, dev: u64, ino: u64) -> Result<FileHolders, PlatformError> {
-        self.file_holders_in(dev, ino, Wait::Default)
+        self.file_holders_in(dev, ino, Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::file_holders`] that waits as `wait` says.
-    pub fn file_holders_in(&self, dev: u64, ino: u64, wait: Wait) -> Result<FileHolders, PlatformError> {
-        match self
-            .call_in(wait, "fileHolders", HelperRequest::FileHolders { dev, ino })
-            .map_err(to_platform)?
-        {
+    pub fn file_holders_in(&self, dev: u64, ino: u64, wait: Wait) -> Result<FileHolders, CallError> {
+        match self.ask(wait, "fileHolders", HelperRequest::FileHolders { dev, ino })? {
             HelperReply::FileHolders(h) => Ok(h),
-            _ => Err(unexpected("FileHolders")),
+            _ => Err(unexpected("FileHolders").into()),
         }
     }
 
     /// Thermal, energy and fan readings.
     pub fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, PlatformError> {
-        self.counters_in(query, Wait::Default)
+        self.counters_in(query, Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::counters`] that waits as `wait` says.
-    pub fn counters_in(&self, query: CounterQuery, wait: Wait) -> Result<Vec<CounterAnswer>, PlatformError> {
-        match self
-            .call_in(wait, "counters", HelperRequest::Counters(query))
-            .map_err(to_platform)?
-        {
+    pub fn counters_in(&self, query: CounterQuery, wait: Wait) -> Result<Vec<CounterAnswer>, CallError> {
+        match self.ask(wait, "counters", HelperRequest::Counters(query))? {
             HelperReply::CounterValues(v) => Ok(v),
-            _ => Err(unexpected("Counters")),
+            _ => Err(unexpected("Counters").into()),
         }
     }
 
     /// Memory modules from the DMI table (Linux).
     pub fn memory(&self) -> Result<MemoryLayout, PlatformError> {
-        self.memory_in(Wait::Default)
+        self.memory_in(Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::memory`] that waits as `wait` says.
-    pub fn memory_in(&self, wait: Wait) -> Result<MemoryLayout, PlatformError> {
-        match self.call_in(wait, "memory", HelperRequest::MemoryModules).map_err(to_platform)? {
+    pub fn memory_in(&self, wait: Wait) -> Result<MemoryLayout, CallError> {
+        match self.ask(wait, "memory", HelperRequest::MemoryModules)? {
             HelperReply::Memory(m) => Ok(m),
-            _ => Err(unexpected("MemoryModules")),
+            _ => Err(unexpected("MemoryModules").into()),
         }
     }
 
     /// Wake requests or Windows Backup versions.
     pub fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError> {
-        self.extras_in(kind, Wait::Default)
+        self.extras_in(kind, Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::extras`] that waits as `wait` says.
-    pub fn extras_in(&self, kind: ExtrasKind, wait: Wait) -> Result<ExtrasAnswer, PlatformError> {
-        match self.call_in(wait, "extras", HelperRequest::Extras(kind)).map_err(to_platform)? {
+    pub fn extras_in(&self, kind: ExtrasKind, wait: Wait) -> Result<ExtrasAnswer, CallError> {
+        match self.ask(wait, "extras", HelperRequest::Extras(kind))? {
             HelperReply::Extras(e) => Ok(e),
-            _ => Err(unexpected("Extras")),
+            _ => Err(unexpected("Extras").into()),
         }
     }
 
     /// The login items of the caller's account plus system-wide ones (macOS).
     pub fn login_items_now(&self) -> Result<LoginItemsReply, PlatformError> {
-        self.login_items_now_in(Wait::Default)
+        self.login_items_now_in(Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::login_items_now`] that waits as `wait` says.
-    pub fn login_items_now_in(&self, wait: Wait) -> Result<LoginItemsReply, PlatformError> {
-        match self.call_in(wait, "loginItems", HelperRequest::LoginItems).map_err(to_platform)? {
+    pub fn login_items_now_in(&self, wait: Wait) -> Result<LoginItemsReply, CallError> {
+        match self.ask(wait, "loginItems", HelperRequest::LoginItems)? {
             HelperReply::LoginItems(r) => Ok(r),
-            _ => Err(unexpected("LoginItems")),
+            _ => Err(unexpected("LoginItems").into()),
         }
     }
 
     /// SMART health of the disks the helper's own scan finds.
     pub fn smart(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
-        self.smart_in(query, Wait::Default)
+        self.smart_in(query, Wait::Default).map_err(|e| e.error)
     }
 
     /// [`HelperLink::smart`] that waits as `wait` says.
-    pub fn smart_in(&self, query: SmartQuery, wait: Wait) -> Result<SmartReply, PlatformError> {
-        match self.call_in(wait, "smart", HelperRequest::Smart(query)).map_err(to_platform)? {
+    pub fn smart_in(&self, query: SmartQuery, wait: Wait) -> Result<SmartReply, CallError> {
+        match self.ask(wait, "smart", HelperRequest::Smart(query))? {
             HelperReply::Smart(s) => Ok(s),
-            _ => Err(unexpected("Smart")),
+            _ => Err(unexpected("Smart").into()),
         }
     }
 
