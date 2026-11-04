@@ -605,8 +605,9 @@ mod tests {
     #[test]
     fn a_spec_can_ask_for_a_plain_automatic_start_and_keeps_the_recovery_actions() {
         let build = |start: Option<WindowsStart>| {
-            let mut b = ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
-                .kind(Kind::SystemService);
+            let mut b =
+                ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                    .kind(Kind::SystemService);
             if let Some(s) = start {
                 b = b.windows_start(s);
             }
@@ -616,11 +617,20 @@ mod tests {
             let create = &calls[0];
             create[create.iter().position(|a| a == "start=").unwrap() + 1].clone()
         };
-        assert_eq!(start_type(&build(None)), "delayed-auto", "other users keep their own setting");
+        assert_eq!(
+            start_type(&build(None)),
+            "delayed-auto",
+            "other users keep their own setting"
+        );
         let auto = build(Some(WindowsStart::Auto));
-        assert_eq!(start_type(&auto), "auto", "the boot gap is seconds, not a delayed minute or two");
+        assert_eq!(
+            start_type(&auto),
+            "auto",
+            "the boot gap is seconds, not a delayed minute or two"
+        );
         assert!(
-            auto.iter().any(|c| c[0] == "failure" && c.contains(&"restart/10000/restart/60000/restart/300000".to_string())),
+            auto.iter().any(|c| c[0] == "failure"
+                && c.contains(&"restart/10000/restart/60000/restart/300000".to_string())),
             "the failure actions stay: {auto:?}"
         );
     }

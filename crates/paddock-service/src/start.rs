@@ -109,7 +109,11 @@ pub fn parse_run(text: &str) -> ServiceRun {
 }
 
 /// Words for a stopped service's exit codes. `explain` turns a service-specific code into the program's own words.
-fn stopped_words(win32: u32, specific: u32, explain: &dyn Fn(u32) -> Option<&'static str>) -> String {
+fn stopped_words(
+    win32: u32,
+    specific: u32,
+    explain: &dyn Fn(u32) -> Option<&'static str>,
+) -> String {
     match (win32, specific) {
         (1066, s) => match explain(s) {
             Some(why) => format!("the service stopped with its own exit code {s}: {why}"),
@@ -160,7 +164,10 @@ pub fn revive(
         log::debug!(service = name, state = format!("{state:?}"), ms = at(pace); "service state");
         match state {
             ServiceRun::Stopped { win32, specific } if started => {
-                let why = format!("it stopped right after it was started: {}", stopped_words(win32, specific, explain));
+                let why = format!(
+                    "it stopped right after it was started: {}",
+                    stopped_words(win32, specific, explain)
+                );
                 log::warn!(service = name, ms = at(pace); "{why}");
                 return Revival::Down(why);
             }
@@ -175,7 +182,10 @@ pub fn revive(
                     log::info!(service = name, ms = at(pace); "started the stopped service without elevation");
                 }
                 Ok(o) => {
-                    let why = format!("the service could not be started without elevation (sc start: {})", o.reason());
+                    let why = format!(
+                        "the service could not be started without elevation (sc start: {})",
+                        o.reason()
+                    );
                     log::warn!(service = name, code = o.code.unwrap_or(-1), ms = at(pace); "{why}");
                     return Revival::Down(why);
                 }
@@ -185,10 +195,16 @@ pub fn revive(
                     return Revival::Down(why);
                 }
             },
-            ServiceRun::StartPending | ServiceRun::Running | ServiceRun::StopPending | ServiceRun::Other(_) => {}
+            ServiceRun::StartPending
+            | ServiceRun::Running
+            | ServiceRun::StopPending
+            | ServiceRun::Other(_) => {}
         }
         if pace.elapsed().saturating_sub(began) >= budget {
-            let why = format!("the service is {state:?} and its endpoint did not answer within {} s", budget.as_secs());
+            let why = format!(
+                "the service is {state:?} and its endpoint did not answer within {} s",
+                budget.as_secs()
+            );
             log::warn!(service = name, ms = at(pace); "{why}");
             return Revival::Waiting(why);
         }
@@ -246,9 +262,15 @@ mod tests {
         let mut pace = Fake(sys.clone());
         let probe = sys.clone();
         let mut sys = sys.clone();
-        revive(&mut sys, Os::Windows, NAME, budget, &mut pace, &|c| (c == 3).then_some("the data folder is not protected"), &mut || {
-            ready(probe.now())
-        })
+        revive(
+            &mut sys,
+            Os::Windows,
+            NAME,
+            budget,
+            &mut pace,
+            &|c| (c == 3).then_some("the data folder is not protected"),
+            &mut || ready(probe.now()),
+        )
     }
 
     #[test]
@@ -264,12 +286,21 @@ mod tests {
         let out = run(&sys, |t| t >= Duration::from_secs(2), DEFAULT_BUDGET);
         assert_eq!(out, Revival::Up);
         assert_eq!(*starts.lock().unwrap(), 1, "exactly one start");
-        assert!(sys.commands().iter().any(|c| c.ends_with("sc start DynoHelper")), "{:?}", sys.commands());
+        assert!(
+            sys.commands()
+                .iter()
+                .any(|c| c.ends_with("sc start DynoHelper")),
+            "{:?}",
+            sys.commands()
+        );
     }
 
     #[test]
     fn a_service_that_is_starting_is_waited_for_not_started_again() {
-        let (sys, starts) = service(vec![query_text("2  START_PENDING", 0, 0)], Output::code(1056));
+        let (sys, starts) = service(
+            vec![query_text("2  START_PENDING", 0, 0)],
+            Output::code(1056),
+        );
         let out = run(&sys, |t| t >= Duration::from_secs(4), DEFAULT_BUDGET);
         assert_eq!(out, Revival::Up);
         assert_eq!(*starts.lock().unwrap(), 0);
@@ -281,25 +312,42 @@ mod tests {
         let out = run(&sys, |_| false, DEFAULT_BUDGET);
         match out {
             Revival::Down(why) => {
-                assert!(why.contains("exit code 3") && why.contains("data folder is not protected"), "{why}");
+                assert!(
+                    why.contains("exit code 3") && why.contains("data folder is not protected"),
+                    "{why}"
+                );
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(*starts.lock().unwrap(), 0, "a failing service is repaired, not looped");
+        assert_eq!(
+            *starts.lock().unwrap(),
+            0,
+            "a failing service is repaired, not looped"
+        );
         let (sys, _) = service(vec![query_text("1  STOPPED", 1, 0)], Output::ok(""));
-        assert!(matches!(run(&sys, |_| false, DEFAULT_BUDGET), Revival::Down(w) if w.contains("Windows error 1")));
+        assert!(
+            matches!(run(&sys, |_| false, DEFAULT_BUDGET), Revival::Down(w) if w.contains("Windows error 1"))
+        );
     }
 
     #[test]
     fn a_failed_start_and_a_service_that_stops_again_are_down() {
         let (sys, _) = service(vec![query_text("1  STOPPED", 0, 0)], Output::code(5));
-        assert!(matches!(run(&sys, |_| false, DEFAULT_BUDGET), Revival::Down(w) if w.contains("sc start")));
+        assert!(
+            matches!(run(&sys, |_| false, DEFAULT_BUDGET), Revival::Down(w) if w.contains("sc start"))
+        );
         let (sys, starts) = service(
-            vec![query_text("1  STOPPED", 0, 0), query_text("1  STOPPED", 1066, 3)],
+            vec![
+                query_text("1  STOPPED", 0, 0),
+                query_text("1  STOPPED", 1066, 3),
+            ],
             Output::ok(""),
         );
         let out = run(&sys, |_| false, DEFAULT_BUDGET);
-        assert!(matches!(out, Revival::Down(ref w) if w.contains("right after it was started")), "{out:?}");
+        assert!(
+            matches!(out, Revival::Down(ref w) if w.contains("right after it was started")),
+            "{out:?}"
+        );
         assert_eq!(*starts.lock().unwrap(), 1);
     }
 
@@ -308,7 +356,11 @@ mod tests {
         let (sys, _) = service(vec![query_text("2  START_PENDING", 0, 0)], Output::ok(""));
         let out = run(&sys, |_| false, Duration::from_secs(10));
         assert!(matches!(out, Revival::Waiting(_)), "{out:?}");
-        assert!(sys.now() >= Duration::from_secs(10) && sys.now() < Duration::from_secs(12), "{:?}", sys.now());
+        assert!(
+            sys.now() >= Duration::from_secs(10) && sys.now() < Duration::from_secs(12),
+            "{:?}",
+            sys.now()
+        );
     }
 
     #[test]
@@ -319,21 +371,43 @@ mod tests {
         let mut pace = Fake(sys.clone());
         let mut s = sys.clone();
         for os in [Os::MacOs, Os::Linux] {
-            assert_eq!(revive(&mut s, os, NAME, DEFAULT_BUDGET, &mut pace, &|_| None, &mut || false), Revival::NotSupported);
+            assert_eq!(
+                revive(
+                    &mut s,
+                    os,
+                    NAME,
+                    DEFAULT_BUDGET,
+                    &mut pace,
+                    &|_| None,
+                    &mut || false
+                ),
+                Revival::NotSupported
+            );
         }
         let gone = FakeSystem::new();
         gone.answer("sc query", Output::code(1060));
         assert_eq!(run(&gone, |_| false, DEFAULT_BUDGET), Revival::NotInstalled);
         let broken = FakeSystem::new();
         broken.answer("sc query", Output::code(5));
-        assert!(matches!(run(&broken, |_| false, DEFAULT_BUDGET), Revival::Down(w) if w.contains("could not be read")));
+        assert!(
+            matches!(run(&broken, |_| false, DEFAULT_BUDGET), Revival::Down(w) if w.contains("could not be read"))
+        );
     }
 
     #[test]
     fn query_output_is_read_into_states() {
-        assert_eq!(parse_run(&query_text("4  RUNNING", 0, 0).stdout), ServiceRun::Running);
-        assert_eq!(parse_run(&query_text("3  STOP_PENDING", 0, 0).stdout), ServiceRun::StopPending);
-        assert_eq!(parse_run(&query_text("7  PAUSED", 0, 0).stdout), ServiceRun::Other(7));
+        assert_eq!(
+            parse_run(&query_text("4  RUNNING", 0, 0).stdout),
+            ServiceRun::Running
+        );
+        assert_eq!(
+            parse_run(&query_text("3  STOP_PENDING", 0, 0).stdout),
+            ServiceRun::StopPending
+        );
+        assert_eq!(
+            parse_run(&query_text("7  PAUSED", 0, 0).stdout),
+            ServiceRun::Other(7)
+        );
         assert_eq!(parse_run("nothing"), ServiceRun::Other(0));
         assert!(parse_run(&query_text("1  STOPPED", 1066, 3).stdout).failed());
         assert!(!parse_run(&query_text("1  STOPPED", 0, 0).stdout).failed());

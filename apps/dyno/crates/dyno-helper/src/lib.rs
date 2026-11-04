@@ -17,11 +17,14 @@ pub mod cli;
 pub mod config;
 pub mod dispatch;
 pub mod elevate;
+#[cfg(windows)]
+pub mod eventlog;
 pub mod logfile;
 pub mod orphan;
 pub mod paths;
 pub mod policy;
 pub mod protect;
+pub mod refusal;
 pub mod serve;
 pub mod server;
 pub mod setup;

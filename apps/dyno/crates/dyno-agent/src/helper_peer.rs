@@ -177,7 +177,10 @@ impl HelperTransport for PeerTransport {
                 None => {
                     reused = false;
                     // The connect waits no longer than what is left of the deadline.
-                    self.connect(left().map_or(CONNECT_TIMEOUT, |l| l.min(CONNECT_TIMEOUT)), left().map_or(DEFAULT_BUDGET, |l| l.min(DEFAULT_BUDGET)))?
+                    self.connect(
+                        left().map_or(CONNECT_TIMEOUT, |l| l.min(CONNECT_TIMEOUT)),
+                        left().map_or(DEFAULT_BUDGET, |l| l.min(DEFAULT_BUDGET)),
+                    )?
                 }
             };
             // The connect may have taken the whole deadline.
@@ -427,10 +430,10 @@ mod tests {
     }
 
     // The helper service after a restart: the program is installed, nothing listens, and the service is down, starting or failed.
+    use paddock_env::Os;
     use paddock_jobs::time::FakeClock;
     use paddock_service::start::{revive, Pace};
     use paddock_service::testing::FakeSystem;
-    use paddock_env::Os;
     use paddock_service::Output;
 
     /// Time on a fake clock: waiting advances it.
@@ -453,7 +456,15 @@ mod tests {
         fn revive(&self, budget: Duration, ready: &mut dyn FnMut() -> bool) -> Revival {
             let mut sys = self.sys.clone();
             let mut pace = Advance(self.clock.clone());
-            revive(&mut sys, Os::Windows, "DynoHelper", budget, &mut pace, &dyno_core::helper_wire::start_exit_words, ready)
+            revive(
+                &mut sys,
+                Os::Windows,
+                "DynoHelper",
+                budget,
+                &mut pace,
+                &dyno_core::helper_wire::start_exit_words,
+                ready,
+            )
         }
     }
 
@@ -468,7 +479,9 @@ mod tests {
         let clock = FakeClock::new();
         let sys = FakeSystem::new();
         let at = Arc::new(AtomicUsize::new(0));
-        sys.on("sc query", move |_, _| Ok(script[at.fetch_add(1, Ordering::SeqCst).min(script.len() - 1)].clone()));
+        sys.on("sc query", move |_, _| {
+            Ok(script[at.fetch_add(1, Ordering::SeqCst).min(script.len() - 1)].clone())
+        });
         let starts = Arc::new(AtomicUsize::new(0));
         let n = starts.clone();
         sys.on("sc start", move |_, _| {
@@ -478,7 +491,10 @@ mod tests {
         let now = clock.clone();
         let t = PeerTransport::new("x", || true)
             .with_clock(Arc::new(clock.clone()))
-            .with_revive(Box::new(FakeService { sys: sys.clone(), clock: clock.clone() }))
+            .with_revive(Box::new(FakeService {
+                sys: sys.clone(),
+                clock: clock.clone(),
+            }))
             .with_opener(Box::new(move |_, _| {
                 if now.monotonic() < up_at {
                     return Err(ConnectError::NotRunning("no such pipe".into()));
@@ -490,8 +506,11 @@ mod tests {
                 )
                 .expect("the test server starts");
                 std::mem::forget(server);
-                BodyPeer::start(Connection::raw(ours, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)), BodyOptions::new("the helper"))
-                    .map_err(ConnectError::Peer)
+                BodyPeer::start(
+                    Connection::raw(ours, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)),
+                    BodyOptions::new("the helper"),
+                )
+                .map_err(ConnectError::Peer)
             }));
         (t, sys, clock, starts)
     }
@@ -499,7 +518,11 @@ mod tests {
     #[test]
     fn a_stopped_helper_service_is_started_once_without_a_prompt_and_the_call_answers() {
         let (t, _sys, _clock, starts) = after_restart(
-            vec![query("1  STOPPED", 0, 0), query("2  START_PENDING", 0, 0), query("4  RUNNING", 0, 0)],
+            vec![
+                query("1  STOPPED", 0, 0),
+                query("2  START_PENDING", 0, 0),
+                query("4  RUNNING", 0, 0),
+            ],
             Duration::from_secs(2),
         );
         assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
@@ -518,11 +541,18 @@ mod tests {
         let (t, _sys, _clock, starts) = after_restart(vec![query("1  STOPPED", 1066, 3)], Duration::from_secs(2));
         match t.call(HelperRequest::Info) {
             Err(TransportError::Silent(why)) => {
-                assert!(why.contains("exit code 3") && why.contains("not protected") && why.contains("no such pipe"), "{why}");
+                assert!(
+                    why.contains("exit code 3") && why.contains("not protected") && why.contains("no such pipe"),
+                    "{why}"
+                );
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(starts.load(Ordering::SeqCst), 0, "a service that fails is repaired, not started in a loop");
+        assert_eq!(
+            starts.load(Ordering::SeqCst),
+            0,
+            "a service that fails is repaired, not started in a loop"
+        );
     }
 
     #[test]
@@ -530,13 +560,20 @@ mod tests {
         let (t, _sys, clock, _starts) = after_restart(vec![query("2  START_PENDING", 0, 0)], Duration::from_secs(60));
         let out = t.call_within(HelperRequest::Info, Some(Duration::from_secs(2)));
         assert!(matches!(out, Err(TransportError::Starting(_))), "{out:?}");
-        assert!(clock.monotonic() <= Duration::from_secs(4), "waited {:?}, not the whole start", clock.monotonic());
+        assert!(
+            clock.monotonic() <= Duration::from_secs(4),
+            "waited {:?}, not the whole start",
+            clock.monotonic()
+        );
     }
 
     #[test]
     fn a_helper_that_is_not_installed_is_absent_and_the_service_is_never_asked() {
         let (t, sys, _clock, _starts) = after_restart(vec![query("1  STOPPED", 0, 0)], Duration::from_secs(60));
-        let t = PeerTransport { installed: Box::new(|| false), ..t };
+        let t = PeerTransport {
+            installed: Box::new(|| false),
+            ..t
+        };
         assert_eq!(t.call(HelperRequest::Info), Err(TransportError::Absent));
         assert!(sys.commands().is_empty(), "{:?}", sys.commands());
     }

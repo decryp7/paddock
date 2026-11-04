@@ -568,9 +568,14 @@ impl StartFailure {
 
     /// The failure a service-specific exit code means; `None` for a code this table does not know.
     pub fn from_code(code: u32) -> Option<StartFailure> {
-        [StartFailure::Other, StartFailure::NotProtected, StartFailure::BadConfig, StartFailure::Endpoint]
-            .into_iter()
-            .find(|f| f.code() == code)
+        [
+            StartFailure::Other,
+            StartFailure::NotProtected,
+            StartFailure::BadConfig,
+            StartFailure::Endpoint,
+        ]
+        .into_iter()
+        .find(|f| f.code() == code)
     }
 
     /// Plain words with the next step.
@@ -977,17 +982,30 @@ mod tests {
 
     #[test]
     fn a_helper_that_is_still_starting_is_not_told_to_repair() {
-        let s = assess(HelperHost::Windows, Ok(()), Probe::Starting("the service is StartPending".into()), "1.1.0");
+        let s = assess(
+            HelperHost::Windows,
+            Ok(()),
+            Probe::Starting("the service is StartPending".into()),
+            "1.1.0",
+        );
         assert_eq!(s.state, HelperState::NotRunning);
         assert!(s.message.contains("starting") && !s.message.contains("Repair"), "{}", s.message);
         assert_eq!(s.detail.as_deref(), Some("the service is StartPending"));
         let silent = assess(HelperHost::Windows, Ok(()), Probe::Silent("x".into()), "1.1.0");
-        assert!(silent.message.contains("Repair"), "a stopped service with an error still says Repair");
+        assert!(
+            silent.message.contains("Repair"),
+            "a stopped service with an error still says Repair"
+        );
     }
 
     #[test]
     fn start_failures_have_distinct_nonzero_exit_codes_that_read_back_into_words() {
-        let all = [StartFailure::Other, StartFailure::NotProtected, StartFailure::BadConfig, StartFailure::Endpoint];
+        let all = [
+            StartFailure::Other,
+            StartFailure::NotProtected,
+            StartFailure::BadConfig,
+            StartFailure::Endpoint,
+        ];
         let mut seen = std::collections::HashSet::new();
         for f in all {
             assert_ne!(f.code(), 0, "0 is a clean stop");

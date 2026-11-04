@@ -234,6 +234,23 @@ impl WindowsService {
     }
 }
 
+/// The first few frames of the call stack that led here, for the log line before a service is deleted.
+fn caller_frames() -> String {
+    let text = std::backtrace::Backtrace::force_capture().to_string();
+    let frames: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| {
+            l.contains("::")
+                && !l.starts_with("at ")
+                && !l.contains("caller_frames")
+                && !l.contains("std::backtrace")
+        })
+        .take(8)
+        .collect();
+    frames.join(" < ")
+}
+
 impl Backend for WindowsService {
     fn mechanism(&self) -> Mechanism {
         Mechanism::WindowsService
@@ -307,6 +324,9 @@ impl Backend for WindowsService {
 
     fn unregister(&mut self) -> Result<(), String> {
         let name = self.spec.name().to_string();
+        // A deleted service cannot be started again, and one deleted while a handle is open only goes at the next restart: say
+        // who asked, before it happens (ER-27).
+        log::warn!(service = name.as_str(), caller = caller_frames().as_str(); "deleting the Windows service (sc stop, sc delete)");
         let _ = self.sys.run(SC, &["stop", &name]);
         match self.sys.run(SC, &["delete", &name]) {
             Ok(o)
@@ -433,5 +453,20 @@ impl Backend for ElevatedWindowsService {
     /// `<program> install` replaces an existing service itself (it runs the whole sequence elevated), so one prompt.
     fn replace_in_one_step(&mut self) -> Option<Result<(), RegisterError>> {
         Some(self.elevated(Verb::Install))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::caller_frames;
+
+    #[test]
+    fn the_line_before_a_service_is_deleted_names_who_asked() {
+        let frames = caller_frames();
+        assert!(
+            frames.contains("the_line_before_a_service_is_deleted_names_who_asked"),
+            "{frames}"
+        );
+        assert!(!frames.contains("caller_frames"), "{frames}");
     }
 }
