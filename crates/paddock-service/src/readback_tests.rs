@@ -606,7 +606,10 @@ fn a_last_exit_knows_whether_it_failed_and_has_words() {
     assert!(!LastExit::Code(0).is_failure() && LastExit::Code(1).is_failure());
     assert!(LastExit::Signal(9).is_failure() && LastExit::Signal(11).is_failure());
     for clean in [1, 2, 13, 15] {
-        assert!(!LastExit::Signal(clean).is_failure(), "SIGHUP, SIGINT, SIGPIPE and SIGTERM are how a service is asked to stop");
+        assert!(
+            !LastExit::Signal(clean).is_failure(),
+            "SIGHUP, SIGINT, SIGPIPE and SIGTERM are how a service is asked to stop"
+        );
     }
     assert!(!LastExit::Win32(0).is_failure() && LastExit::Win32(1067).is_failure());
     assert!(
@@ -741,10 +744,17 @@ fn a_systemd_unit_stopped_by_systemctl_stop_with_sigterm_is_not_running_not_fail
     // `systemctl stop` of a unit that does not catch SIGTERM: the main process ended by signal 15, and systemd says success.
     sys.answer("systemctl is-active", Output::ok("inactive\n"));
     sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
-    sys.answer("systemctl show", show(ETC_UNIT, "enabled", "success", 0, 15, 2));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "enabled", "success", 0, 15, 2),
+    );
     let look = b.inspect();
     assert_eq!(look.job, Job::NotRunning);
-    assert_eq!(look.last_exit, Some(LastExit::Signal(15)), "the detail stays");
+    assert_eq!(
+        look.last_exit,
+        Some(LastExit::Signal(15)),
+        "the detail stays"
+    );
 }
 
 #[test]
@@ -755,10 +765,16 @@ fn a_systemd_result_other_than_success_is_a_failure_and_a_success_result_never_i
     sys.answer("systemctl is-active", Output::ok("failed\n"));
     sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
     // Killed from outside by SIGKILL: Result=signal, a real failure.
-    sys.answer("systemctl show", show(ETC_UNIT, "enabled", "signal", 0, 9, 2));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "enabled", "signal", 0, 9, 2),
+    );
     assert_eq!(b.inspect().job, Job::Failed(LastExit::Signal(9)));
     // A non-zero exit that the unit's SuccessExitStatus accepts is Result=success: not a failure.
-    sys.answer("systemctl show", show(ETC_UNIT, "enabled", "success", 0, 3, 1));
+    sys.answer(
+        "systemctl show",
+        show(ETC_UNIT, "enabled", "success", 0, 3, 1),
+    );
     assert_eq!(b.inspect().job, Job::NotRunning);
 }
 
@@ -772,7 +788,10 @@ fn a_launchd_job_stopped_by_sigterm_is_not_running_not_failed() {
         launchd_print("waiting", 2, "\tlast terminating signal = Terminated: 15\n"),
     );
     let look = b.inspect();
-    assert_eq!((look.job, look.last_exit), (Job::NotRunning, Some(LastExit::Signal(15))));
+    assert_eq!(
+        (look.job, look.last_exit),
+        (Job::NotRunning, Some(LastExit::Signal(15)))
+    );
 }
 
 #[test]
@@ -782,7 +801,10 @@ fn a_service_that_has_never_started_since_boot_has_no_last_exit_and_is_not_a_fai
     let sys = FakeSystem::new();
     let mut b = scm(&sys);
     sys.answer("sc qc", sc_qc("2  AUTO_START  (DELAYED)", SVC_EXE));
-    sys.answer("sc query", sc_query("1  STOPPED", "1077 (0x435)", "0  (0x0)"));
+    sys.answer(
+        "sc query",
+        sc_query("1  STOPPED", "1077 (0x435)", "0  (0x0)"),
+    );
     let look = b.inspect();
     assert_eq!((look.job, look.last_exit), (Job::NotRunning, None));
 }
@@ -792,7 +814,36 @@ fn register_reads_back_a_service_that_never_started_as_not_running() {
     let sys = FakeSystem::new();
     let mut b = scm(&sys);
     sys.answer("sc qc", sc_qc("2  AUTO_START  (DELAYED)", SVC_EXE));
-    sys.answer("sc query", sc_query("1  STOPPED", "1077 (0x435)", "0  (0x0)"));
+    sys.answer(
+        "sc query",
+        sc_query("1  STOPPED", "1077 (0x435)", "0  (0x0)"),
+    );
     let look = b.register().unwrap();
     assert_eq!(look.job, Job::NotRunning);
+}
+
+#[test]
+fn the_event_source_stays_while_the_service_is_marked_for_deletion_and_still_running() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    let key = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\Dyno";
+    // `sc delete` says "marked for deletion" (1072): a handle is open, the process still writes to its log.
+    sys.answer("sc delete", Output::code(1072));
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
+    b.unregister().unwrap();
+    assert!(
+        !sys.commands().contains(&format!("reg delete {key} /f")),
+        "{:?}",
+        sys.commands()
+    );
+    // Once the SCM no longer knows it, the source goes.
+    sys.answer("sc delete", Output::ok(""));
+    sys.answer("sc query", Output::code(1060));
+    b.unregister().unwrap();
+    assert!(
+        sys.commands().contains(&format!("reg delete {key} /f")),
+        "{:?}",
+        sys.commands()
+    );
 }

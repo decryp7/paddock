@@ -326,13 +326,14 @@ pub(crate) fn host(
         Hosting::ServiceManager => Err(ServiceMainError::NotStartedByManager(
             "The service command is for Windows; use `serve`.".to_string(),
         )),
-        Hosting::Foreground => foreground(os_log, slot),
+        Hosting::Foreground => foreground(os_log, slot, true),
+        Hosting::Embedded => foreground(os_log, slot, false),
     }
 }
 
-/// Runs the job on this thread; on Unix SIGTERM and SIGINT mean stop (waited for on a thread of their own, so the stop is an
-/// event, not a poll).
-fn foreground(os_log: Arc<dyn OsLog>, slot: Slot) -> Result<u32, ServiceMainError> {
+/// Runs the job on this thread. With `signals` (on Unix) SIGTERM and SIGINT mean stop: handled once per process and
+/// waited for on a thread of their own, so the stop is an event, not a poll.
+fn foreground(os_log: Arc<dyn OsLog>, slot: Slot, signals: bool) -> Result<u32, ServiceMainError> {
     let Some(job) = crate::service_main::take_job(&slot) else {
         return Err(ServiceMainError::NotStartedByManager(
             "the service body already ran in this process".to_string(),
@@ -340,31 +341,49 @@ fn foreground(os_log: Arc<dyn OsLog>, slot: Slot) -> Result<u32, ServiceMainErro
     };
     let (stop, tx, events) = crate::service_main::stop_pair();
     #[cfg(unix)]
-    if let Err(why) = signals::stop_on_signals(stop.clone(), tx) {
+    if signals && let Err(why) = signals::stop_on_signals(stop.clone(), tx.clone()) {
         os_log.write(
             log::Level::Warn,
             &format!("SIGTERM and SIGINT will not stop the service gracefully: {why}"),
         );
     }
+    // Signal handlers are Unix's; on Windows the SCM's controls are the stop.
     #[cfg(not(unix))]
-    drop(tx);
+    debug_assert!(!signals || cfg!(windows));
     let context = Context {
         stop,
         events,
         os_log,
     };
-    Ok((job.run)(context).code)
+    // `tx` lives to the end of the run, so a body waiting on its events is not woken by a closed channel.
+    let code = (job.run)(context).code;
+    drop(tx);
+    Ok(code)
+}
+
+/// The device and inode of standard error (`None` where it cannot be read), to compare with `JOURNAL_STREAM`.
+#[cfg(not(any(windows, target_os = "macos")))]
+pub(crate) fn stderr_identity() -> Option<(u64, u64)> {
+    // SAFETY: `stat` is written by fstat before it is read; fd 2 is only asked about.
+    unsafe {
+        let mut stat: libc::stat = std::mem::zeroed();
+        (libc::fstat(2, &mut stat) == 0).then(|| (stat.st_dev as u64, stat.st_ino as u64))
+    }
 }
 
 #[cfg(unix)]
 mod signals {
     use crate::scm_host::Control;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
     use std::sync::mpsc::Sender;
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
     /// The write end of the pipe the handler writes to (-1: not installed).
     static WAKE_FD: AtomicI32 = AtomicI32::new(-1);
+    /// Where the stop goes: the run that is going now.
+    static ROUTE: Mutex<Option<(Arc<AtomicBool>, Sender<Control>)>> = Mutex::new(None);
+    /// The handlers are installed once per process.
+    static INSTALLED: OnceLock<Result<(), String>> = OnceLock::new();
 
     /// Where this thread keeps `errno` (null when this Unix is not known: the handler then does not restore it).
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
@@ -392,7 +411,7 @@ mod signals {
         std::ptr::null_mut()
     }
 
-    /// The handler: async-signal-safe, it only writes one byte to the pipe (and keeps `errno`).
+    /// The handler: async-signal-safe, it only writes one byte to the (non-blocking) pipe and keeps `errno`.
     extern "C" fn on_signal(_signal: libc::c_int) {
         let fd = WAKE_FD.load(Ordering::Relaxed);
         if fd >= 0 {
@@ -410,18 +429,48 @@ mod signals {
         }
     }
 
-    /// Handles SIGTERM and SIGINT process-wide (whatever thread they arrive on) and starts the thread that waits on the
-    /// handler's pipe: a stop is an event, not a poll.
-    pub(super) fn stop_on_signals(
-        stop: Arc<AtomicBool>,
-        tx: Sender<Control>,
-    ) -> Result<(), String> {
+    /// `fcntl` flags on `fd`: close on exec, and non-blocking when `nonblocking`.
+    fn set_flags(fd: libc::c_int, nonblocking: bool) -> Result<(), String> {
+        // SAFETY: plain fcntl calls on a descriptor this module just created.
+        unsafe {
+            if libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) != 0 {
+                return Err(format!(
+                    "fcntl(FD_CLOEXEC) failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if nonblocking {
+                let flags = libc::fcntl(fd, libc::F_GETFL);
+                if flags < 0 || libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) != 0 {
+                    return Err(format!(
+                        "fcntl(O_NONBLOCK) failed: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Puts the default action back for SIGTERM and SIGINT: after the first stop request a second one ends the process.
+    fn restore_default() {
+        for signal in [libc::SIGTERM, libc::SIGINT] {
+            // SAFETY: SIG_DFL is a valid disposition for these signals.
+            if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+                log::warn!(signal = signal; "service: the default action of a signal could not be restored");
+            }
+        }
+    }
+
+    fn install() -> Result<(), String> {
         let mut fds = [0 as libc::c_int; 2];
         // SAFETY: `fds` has room for the two descriptors pipe(2) returns.
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(format!("pipe failed: {}", std::io::Error::last_os_error()));
         }
         let (read_fd, write_fd) = (fds[0], fds[1]);
+        set_flags(read_fd, false)?;
+        set_flags(write_fd, true)?;
         WAKE_FD.store(write_fd, Ordering::Relaxed);
         for signal in [libc::SIGTERM, libc::SIGINT] {
             // SAFETY: `action` is fully initialised; the handler is async-signal-safe.
@@ -448,7 +497,13 @@ mod signals {
                     let n = unsafe { libc::read(read_fd, std::ptr::from_mut(&mut byte).cast(), 1) };
                     if n == 1 {
                         log::info!("service: stop requested by a signal");
-                        crate::service_main::signal_stop(&stop, &tx);
+                        // The default action is back before the body hears of the stop, so a second signal that
+                        // follows the event always ends a body that ignores it.
+                        restore_default();
+                        let route = ROUTE.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                        if let Some((stop, tx)) = route {
+                            crate::service_main::signal_stop(&stop, &tx);
+                        }
                         return;
                     }
                     let error = std::io::Error::last_os_error();
@@ -461,6 +516,16 @@ mod signals {
             })
             .map(drop)
             .map_err(|e| format!("the signal thread could not start: {e}"))
+    }
+
+    /// Routes SIGTERM and SIGINT to this run's stop. The handlers and the thread that waits on their pipe are installed
+    /// once per process; the stop is an event, not a poll.
+    pub(super) fn stop_on_signals(
+        stop: Arc<AtomicBool>,
+        tx: Sender<Control>,
+    ) -> Result<(), String> {
+        *ROUTE.lock().unwrap_or_else(PoisonError::into_inner) = Some((stop, tx));
+        INSTALLED.get_or_init(install).clone()
     }
 }
 
@@ -556,7 +621,7 @@ pub use syslog::SysLog;
 
 #[cfg(target_os = "macos")]
 mod syslog {
-    use crate::os_log::{OsLog, syslog_priority};
+    use crate::os_log::{OsLog, check_syslog_ident, unified_priority};
     use log::Level;
     use std::ffi::CString;
     use std::sync::OnceLock;
@@ -573,18 +638,19 @@ mod syslog {
         /// # Errors
         /// When the identifier holds a NUL.
         pub fn open(ident: &str) -> Result<SysLog, String> {
-            let ident =
+            let wanted =
                 CString::new(ident).map_err(|e| format!("the identifier is not valid: {e}"))?;
-            let ident = IDENT.get_or_init(|| ident);
-            // SAFETY: `ident` is a static NUL-terminated string.
-            unsafe { libc::openlog(ident.as_ptr(), libc::LOG_PID, libc::LOG_DAEMON) };
+            let kept = IDENT.get_or_init(|| wanted);
+            check_syslog_ident(kept.to_str().ok(), ident)?;
+            // SAFETY: `kept` is a static NUL-terminated string.
+            unsafe { libc::openlog(kept.as_ptr(), libc::LOG_PID, libc::LOG_DAEMON) };
             Ok(SysLog)
         }
     }
 
     impl OsLog for SysLog {
         fn write(&self, level: Level, text: &str) {
-            let priority = libc::c_int::from(syslog_priority(level));
+            let priority = libc::c_int::from(unified_priority(level));
             for line in text.lines().filter(|l| !l.trim().is_empty()) {
                 let Ok(line) = CString::new(line.replace('\0', " ")) else {
                     continue;
@@ -607,7 +673,10 @@ mod scm {
         Control, HostEvent, HostTimings, HostedChild, Sessions, Target, UserSession,
         env_block_with, pick_user_session, supervise,
     };
-    use crate::service_main::{Context, HOST_EXIT_CODE, Hosting, ServiceExit, ServiceMainError};
+    use crate::service_main::{
+        Context, HOST_EXIT_CODE, Hosting, STOP_TICK, ScmReport, ScmState, ScmStatus, ServiceExit,
+        ServiceMainError, StatusPort, run_under_scm,
+    };
     use crate::spec::ServiceSpec;
     use crate::verbs::Verb;
     use std::ffi::{OsString, c_void};
@@ -741,13 +810,19 @@ mod scm {
         }
     }
 
-    fn status(state: ServiceState, accept_sessions: bool, exit_code: u32) -> ServiceStatus {
+    /// The report as the SCM's own structure.
+    pub(super) fn service_status(report: &ScmReport) -> ServiceStatus {
+        let state = match report.state {
+            ScmState::Running => ServiceState::Running,
+            ScmState::StopPending => ServiceState::StopPending,
+            ScmState::Stopped => ServiceState::Stopped,
+        };
         ServiceStatus {
             service_type: ServiceType::OWN_PROCESS,
             current_state: state,
             controls_accepted: if state == ServiceState::Running {
                 let base = ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN;
-                if accept_sessions {
+                if report.accepts_sessions {
                     base | ServiceControlAccept::SESSION_CHANGE
                 } else {
                     base
@@ -755,40 +830,32 @@ mod scm {
             } else {
                 ServiceControlAccept::empty()
             },
-            exit_code: if exit_code == 0 {
+            exit_code: if report.exit_code == 0 {
                 ServiceExitCode::Win32(0)
             } else {
-                ServiceExitCode::ServiceSpecific(exit_code)
+                ServiceExitCode::ServiceSpecific(report.exit_code)
             },
-            checkpoint: 0,
-            wait_hint: Duration::from_secs(if state == ServiceState::StopPending {
-                30
-            } else {
-                0
-            }),
+            checkpoint: report.checkpoint,
+            wait_hint: report.wait_hint,
             process_id: None,
         }
     }
 
-    /// Tells the SCM the new state. A refusal goes to the OS log and the app log (the SCM then times the service out or keeps
-    /// the old state); the result says whether it was accepted.
-    fn report_status(
-        handle: &ServiceStatusHandle,
-        os_log: &dyn OsLog,
-        state: ServiceState,
-        accept_sessions: bool,
-        exit_code: u32,
-    ) -> bool {
-        match handle.set_service_status(status(state, accept_sessions, exit_code)) {
-            Ok(()) => true,
-            Err(e) => {
-                log::error!(state:? = state, error:% = e; "the service status could not be reported to the Service Control Manager");
-                os_log.write(
-                    log::Level::Error,
-                    &format!("The Service Control Manager refused the state {state:?}: {e}"),
-                );
-                false
-            }
+    /// `SetServiceStatus` through the handle the control handler registration returned (set once, after it exists: the
+    /// handler itself needs the status to report a stop).
+    struct ScmPort {
+        handle: OnceLock<ServiceStatusHandle>,
+    }
+
+    impl StatusPort for ScmPort {
+        fn report(&self, report: &ScmReport) -> Result<(), String> {
+            let handle = self
+                .handle
+                .get()
+                .ok_or_else(|| "the control handler is not registered yet".to_string())?;
+            handle
+                .set_service_status(service_status(report))
+                .map_err(|e| e.to_string())
         }
     }
 
@@ -806,9 +873,15 @@ mod scm {
         };
         let began = Instant::now();
         let (stop, tx, events) = crate::service_main::stop_pair();
-        let (flag, sessions) = (stop.clone(), job.sessions);
+        let port = Arc::new(ScmPort {
+            handle: OnceLock::new(),
+        });
+        let status = Arc::new(ScmStatus::new(port.clone(), os_log.clone(), job.sessions));
+        let (flag, sessions, on_stop) = (stop.clone(), job.sessions, status.clone());
         let handler = move |control| match control {
             ServiceControl::Stop | ServiceControl::Shutdown => {
+                // The SCM is told the stop has begun (with a wait hint) before the body is asked to stop.
+                on_stop.stop_pending();
                 crate::service_main::signal_stop(&flag, &tx);
                 ServiceControlHandlerResult::NoError
             }
@@ -835,30 +908,17 @@ mod scm {
                 return;
             }
         };
-        let registered_ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let running = report_status(&handle, os_log.as_ref(), ServiceState::Running, sessions, 0);
-        log::info!(registered_ms = registered_ms, running_reported = running; "service started");
-        let outcome = (job.run)(Context {
+        if port.handle.set(handle).is_err() {
+            log::error!("service: the status handle was set twice");
+        }
+        log::info!(registered_ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "service: control handler registered");
+        let context = Context {
             stop,
             events,
             os_log: os_log.clone(),
-        });
-        report_status(
-            &handle,
-            os_log.as_ref(),
-            ServiceState::StopPending,
-            sessions,
-            outcome.code,
-        );
-        report_status(
-            &handle,
-            os_log.as_ref(),
-            ServiceState::Stopped,
-            sessions,
-            outcome.code,
-        );
+        };
+        let outcome = run_under_scm(&status, job, context, STOP_TICK);
         *dispatch.code.lock().unwrap_or_else(PoisonError::into_inner) = Some(outcome.code);
-        log::info!(code = outcome.code; "service stopped");
     }
 
     struct WtsSessions {
@@ -1266,4 +1326,83 @@ pub fn process_has_full_token() -> bool {
 #[cfg(not(windows))]
 pub fn process_has_full_token() -> bool {
     false
+}
+
+/// The Windows adapters, exercised on a Windows runner without changing the machine: no registry write, no service
+/// installed (ER-14). The event log test writes entries under a source nobody registered; Windows then files them under the
+/// Application log with its generic "description cannot be found" wrapper, which is the same text path the real source uses.
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::EventLog;
+    use super::scm::service_status;
+    use crate::os_log::OsLog;
+    use crate::service_main::{STOP_WAIT_HINT, ScmReport, ScmState};
+    use log::Level;
+    use std::time::Duration;
+    use windows_service::service::{ServiceControlAccept, ServiceExitCode, ServiceState};
+
+    #[test]
+    fn an_event_source_opens_and_takes_a_line_of_every_level_and_a_long_one() {
+        let source = format!("PaddockServiceTest{}", std::process::id());
+        let log = EventLog::open(&source).expect("the event log opens");
+        for level in [Level::Error, Level::Warn, Level::Info, Level::Debug] {
+            log.write(level, "paddock-service windows test line");
+        }
+        log.write(Level::Info, &"é".repeat(50_000));
+        log.write(Level::Info, "");
+    }
+
+    #[test]
+    fn a_source_name_with_a_nul_is_refused_or_cut_without_a_panic() {
+        // Windows takes the string up to the NUL; the open must not panic or hang whatever it answers.
+        drop(EventLog::open("Paddock\0Test"));
+    }
+
+    fn report(state: ScmState, exit_code: u32, sessions: bool, checkpoint: u32) -> ScmReport {
+        ScmReport {
+            state,
+            accepts_sessions: sessions,
+            exit_code,
+            checkpoint,
+            wait_hint: if state == ScmState::StopPending {
+                STOP_WAIT_HINT
+            } else {
+                Duration::ZERO
+            },
+        }
+    }
+
+    #[test]
+    fn a_report_becomes_the_status_the_scm_gets() {
+        let running = service_status(&report(ScmState::Running, 0, false, 0));
+        assert_eq!(running.current_state, ServiceState::Running);
+        assert_eq!(
+            running.controls_accepted,
+            ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
+        );
+        let host = service_status(&report(ScmState::Running, 0, true, 0));
+        assert!(
+            host.controls_accepted
+                .contains(ServiceControlAccept::SESSION_CHANGE)
+        );
+        let stopping = service_status(&report(ScmState::StopPending, 0, false, 3));
+        assert_eq!(
+            (
+                stopping.current_state,
+                stopping.checkpoint,
+                stopping.wait_hint,
+                stopping.controls_accepted
+            ),
+            (
+                ServiceState::StopPending,
+                3,
+                STOP_WAIT_HINT,
+                ServiceControlAccept::empty()
+            )
+        );
+        let failed = service_status(&report(ScmState::Stopped, 3, false, 0));
+        assert_eq!(failed.exit_code, ServiceExitCode::ServiceSpecific(3));
+        let clean = service_status(&report(ScmState::Stopped, 0, false, 0));
+        assert_eq!(clean.exit_code, ServiceExitCode::Win32(0));
+    }
 }

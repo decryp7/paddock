@@ -114,6 +114,8 @@ pub struct HelperLog {
     early: Option<EarlySink>,
     /// The failure to write the file has been reported to the sink.
     write_failure_reported: AtomicBool,
+    /// Standard error (tests collect the lines).
+    stderr: Box<dyn Fn(&str) + Send + Sync>,
 }
 
 /// Where the lines of a start go before the data folder is verified (besides standard error): the level and the line. The
@@ -151,6 +153,7 @@ impl HelperLog {
             now: unix_now,
             early: None,
             write_failure_reported: AtomicBool::new(false),
+            stderr: Box::new(|line| eprintln!("{line}")),
         }
     }
 
@@ -175,6 +178,13 @@ impl HelperLog {
     #[must_use]
     pub fn with_early_sink(mut self, sink: EarlySink) -> Self {
         self.early = Some(sink);
+        self
+    }
+
+    /// Another standard error (tests).
+    #[must_use]
+    pub fn with_stderr(mut self, stderr: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.stderr = Box::new(stderr);
         self
     }
 
@@ -246,16 +256,18 @@ impl Log for HelperLog {
         }
         let line = format_line((self.now)(), record.level(), &record.args().to_string(), &pairs.0);
         if !self.state.armed.load(Ordering::SeqCst) {
-            eprintln!("{line}");
-            if let Some(sink) = self.early.as_ref().filter(|_| !self.state.ever_armed.load(Ordering::SeqCst)) {
-                sink(record.level(), &line);
+            // Before the data folder is trusted a line is written once: to the OS log when there is one (it falls back to
+            // standard error itself, and under journald standard error is the journal), else to standard error.
+            match self.early.as_ref().filter(|_| !self.state.ever_armed.load(Ordering::SeqCst)) {
+                Some(sink) => sink(record.level(), &line),
+                None => (self.stderr)(&line),
             }
             return;
         }
         // A log that cannot be written must not take the daemon down: the line goes to standard error and the first failure
         // is told to the OS log, so the reason the file is empty can be found.
         if let Err(e) = self.append(&line) {
-            eprintln!("{line}");
+            (self.stderr)(&line);
             self.report_failure("could not be written", &e);
         }
     }
@@ -329,6 +341,34 @@ mod tests {
             heard[0].1.contains("helper.log could not be written") && heard[0].1.contains("standard error"),
             "{heard:?}"
         );
+    }
+
+    #[test]
+    fn a_line_before_the_data_folder_is_trusted_is_written_once_to_the_os_log_or_else_to_standard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let on_stderr = Arc::new(Mutex::new(Vec::<String>::new()));
+        let heard = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (e, h) = (on_stderr.clone(), heard.clone());
+        let with_sink = HelperLog::new(dir.path().join("helper.log"))
+            .with(1000, || 7)
+            .deferred()
+            .with_stderr(move |line| e.lock().unwrap().push(line.to_string()))
+            .with_early_sink(Arc::new(move |_, line| h.lock().unwrap().push(line.to_string())));
+        let write = |log: &HelperLog, text: &str| log.log(&Record::builder().args(format_args!("{text}")).level(Level::Info).build());
+        write(&with_sink, "pre-trust");
+        assert_eq!(heard.lock().unwrap().len(), 1);
+        assert!(
+            on_stderr.lock().unwrap().is_empty(),
+            "the OS log is where it goes: {:?}",
+            on_stderr.lock().unwrap()
+        );
+        let e = on_stderr.clone();
+        let without_sink = HelperLog::new(dir.path().join("helper2.log"))
+            .with(1000, || 7)
+            .deferred()
+            .with_stderr(move |line| e.lock().unwrap().push(line.to_string()));
+        write(&without_sink, "pre-trust, no OS log");
+        assert_eq!(on_stderr.lock().unwrap().len(), 1);
     }
 
     #[test]

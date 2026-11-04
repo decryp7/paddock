@@ -32,7 +32,7 @@ use crate::scm_host::Control;
 use crate::spec::ServiceSpec;
 use log::Level;
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
@@ -60,8 +60,12 @@ pub trait ServiceExit: std::error::Error {
 pub enum Hosting {
     /// By the Windows Service Control Manager (`--service`): the dispatcher runs the body and reports its state.
     ServiceManager,
-    /// By systemd, launchd or a console (`serve`): the body runs on this thread, SIGTERM and SIGINT mean stop.
+    /// By systemd, launchd or a console (`serve`): the body runs on this thread, SIGTERM and SIGINT mean stop (the handlers
+    /// are installed once per process).
     Foreground,
+    /// On this thread like [`Foreground`](Hosting::Foreground), with no signal handler installed (tests, and programs that
+    /// stop the body themselves).
+    Embedded,
 }
 
 /// What the body gets.
@@ -81,9 +85,16 @@ impl Context {
     /// The OS log as the early sink of a deferred file log.
     pub fn early_sink(&self) -> EarlySink {
         let log = self.os_log.clone();
-        Arc::new(move |level, text| log.write(level, &cut(text, MAX_OS_LOG_TEXT)))
+        Arc::new(move |level, text| {
+            EARLY_LINES.fetch_add(1, Ordering::SeqCst);
+            log.write(level, &cut(text, MAX_OS_LOG_TEXT));
+        })
     }
 }
+
+/// How many lines the early sinks have written to the OS log: the panic hook compares it before and after it logs, so a line
+/// that already reached the OS log through the file log's early sink is not written a second time.
+static EARLY_LINES: AtomicU64 = AtomicU64::new(0);
 
 /// Why the program could not be run as a service at all (the body never ran).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,42 +144,38 @@ pub fn failure_text(
     cut(&text, MAX_OS_LOG_TEXT)
 }
 
-/// The words for a panic: what, where and on which thread (no user content: the program's own message and source line).
-pub fn panic_text(
-    name: &str,
-    message: &str,
-    location: Option<(&str, u32)>,
-    thread: &str,
-) -> String {
+/// The words for a panic: what, where and on which thread. The panic's own message is left out (rule 56: it may carry user
+/// content); the program's source line says where to look, and standard error keeps the full message.
+pub fn panic_text(name: &str, location: Option<(&str, u32)>, thread: &str) -> String {
     let at = location.map_or_else(String::new, |(file, line)| format!(" at {file}:{line}"));
-    format!(
-        "{name} panicked on thread '{thread}'{at}: {}",
-        message.trim()
-    )
+    format!("{name} panicked on thread '{thread}'{at}")
 }
 
 /// Makes a panic on any thread leave a trace in the OS log (a service has no console, so on its own it leaves nothing),
-/// then runs the previous hook. Installed for the life of the process; the log is the one of the run.
+/// then runs the previous hook unless the OS log is standard error too (the default hook would print the panic a second
+/// time). The line goes through the program's logger first (its file log, or its early sink before the file is trusted); the
+/// OS log is written directly only when the early sink did not already carry it. Installed for the life of the process.
 fn install_panic_hook(name: &str, os_log: Arc<dyn OsLog>) {
     let previous = std::panic::take_hook();
     let name = name.to_string();
     std::panic::set_hook(Box::new(move |info| {
-        let message = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "(no message)".into());
         let thread = std::thread::current();
-        let text = panic_text(
-            &name,
-            &message,
-            info.location().map(|l| (l.file(), l.line())),
-            thread.name().unwrap_or("unnamed"),
+        let text = cut(
+            &panic_text(
+                &name,
+                info.location().map(|l| (l.file(), l.line())),
+                thread.name().unwrap_or("unnamed"),
+            ),
+            MAX_OS_LOG_TEXT,
         );
+        let heard = EARLY_LINES.load(Ordering::SeqCst);
         log::error!("{text}");
-        os_log.write(Level::Error, &cut(&text, MAX_OS_LOG_TEXT));
-        previous(info);
+        if EARLY_LINES.load(Ordering::SeqCst) == heard {
+            os_log.write(Level::Error, &text);
+        }
+        if !os_log.is_standard_error() {
+            previous(info);
+        }
     }));
 }
 
@@ -203,7 +210,7 @@ pub fn run_body<E: ServiceExit>(
         Ok(Err(e)) => {
             let code = e.exit_code().max(1);
             let text = failure_text(name, &e, code, e.next_step().as_deref());
-            log::error!(ms = ms, code = code; "service: failed");
+            log::error!(ms = ms, code = code, error = text.as_str(); "service: failed");
             os_log.write(Level::Error, &text);
             Outcome { code }
         }
@@ -286,6 +293,170 @@ where
     result
 }
 
+#[cfg(any(windows, test))]
+mod scm_status {
+    use super::*;
+    use std::sync::atomic::AtomicU32;
+    use std::time::Duration;
+    /// What the Service Control Manager is told about the service's state.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum ScmState {
+        /// `SERVICE_RUNNING`.
+        Running,
+        /// `SERVICE_STOP_PENDING`.
+        StopPending,
+        /// `SERVICE_STOPPED`.
+        Stopped,
+    }
+
+    /// One status report: the state, the exit code it carries (0, or the service-specific code), the checkpoint and the wait
+    /// hint that tell the SCM a stop in progress has not hung.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct ScmReport {
+        pub(crate) state: ScmState,
+        /// The host also takes session-change controls while running.
+        pub(crate) accepts_sessions: bool,
+        pub(crate) exit_code: u32,
+        pub(crate) checkpoint: u32,
+        pub(crate) wait_hint: Duration,
+    }
+
+    /// The SCM's `SetServiceStatus` (the Windows adapter; tests use a fake).
+    pub(crate) trait StatusPort: Send + Sync {
+        /// Reports `report`.
+        ///
+        /// # Errors
+        /// The reason the SCM refused it, in words.
+        fn report(&self, report: &ScmReport) -> Result<(), String>;
+    }
+
+    /// How long the SCM waits for a stop before it counts the service hung; each report of the stop raises the checkpoint and
+    /// starts the wait again.
+    pub(crate) const STOP_WAIT_HINT: Duration = Duration::from_secs(30);
+    /// How often a stop in progress is reported again (a third of the hint).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) const STOP_TICK: Duration = Duration::from_secs(10);
+
+    /// The status reports of one service run. Every report is checked: a refusal is logged to the app log and the OS log (the
+    /// SCM then times the service out or keeps the old state).
+    pub(crate) struct ScmStatus {
+        port: Arc<dyn StatusPort>,
+        os_log: Arc<dyn OsLog>,
+        sessions: bool,
+        checkpoint: AtomicU32,
+    }
+
+    impl ScmStatus {
+        pub(crate) fn new(
+            port: Arc<dyn StatusPort>,
+            os_log: Arc<dyn OsLog>,
+            sessions: bool,
+        ) -> Self {
+            Self {
+                port,
+                os_log,
+                sessions,
+                checkpoint: AtomicU32::new(0),
+            }
+        }
+
+        fn send(
+            &self,
+            state: ScmState,
+            exit_code: u32,
+            checkpoint: u32,
+            wait_hint: Duration,
+        ) -> bool {
+            let report = ScmReport {
+                state,
+                accepts_sessions: self.sessions,
+                exit_code,
+                checkpoint,
+                wait_hint,
+            };
+            match self.port.report(&report) {
+                Ok(()) => true,
+                Err(why) => {
+                    log::error!(state:? = state, error = why.as_str(); "the service status could not be reported to the Service Control Manager");
+                    self.os_log.write(
+                        Level::Error,
+                        &format!("The Service Control Manager refused the state {state:?}: {why}"),
+                    );
+                    false
+                }
+            }
+        }
+
+        /// The service is running.
+        pub(crate) fn running(&self) -> bool {
+            self.send(ScmState::Running, 0, 0, Duration::ZERO)
+        }
+
+        /// A stop is in progress: the first report starts the wait, every later one raises the checkpoint.
+        pub(crate) fn stop_pending(&self) -> bool {
+            let checkpoint = self.checkpoint.fetch_add(1, Ordering::SeqCst) + 1;
+            self.send(ScmState::StopPending, 0, checkpoint, STOP_WAIT_HINT)
+        }
+
+        /// The service has stopped with `code` (0: cleanly). A stop that began on its own (the body ended or failed) is reported
+        /// as pending first.
+        pub(crate) fn stopped(&self, code: u32) -> bool {
+            if self.checkpoint.load(Ordering::SeqCst) == 0 {
+                self.stop_pending();
+            }
+            self.send(ScmState::Stopped, code, 0, Duration::ZERO)
+        }
+    }
+
+    /// Runs `job` as the SCM's service: reports Running, runs the body, keeps reporting the stop while the body winds down
+    /// (every `tick` once `stop` is set), then reports Stopped with the body's code.
+    pub(crate) fn run_under_scm(
+        status: &Arc<ScmStatus>,
+        job: Job,
+        context: Context,
+        tick: Duration,
+    ) -> Outcome {
+        let began = Instant::now();
+        let running = status.running();
+        log::info!(running_reported = running; "service started");
+        let stop = context.stop.clone();
+        let (done, finished) = std::sync::mpsc::channel::<()>();
+        let ticker = {
+            let status = status.clone();
+            std::thread::Builder::new()
+                .name("scm-stop-ticker".into())
+                .spawn(move || {
+                    // A stop in progress is reported again every tick until the body is done: the wait is the channel.
+                    while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                        finished.recv_timeout(tick)
+                    {
+                        if stop.load(Ordering::SeqCst) {
+                            status.stop_pending();
+                        }
+                    }
+                })
+        };
+        let outcome = (job.run)(context);
+        drop(done);
+        match ticker {
+            Ok(handle) => {
+                if handle.join().is_err() {
+                    log::error!("service: the stop ticker panicked");
+                }
+            }
+            Err(e) => {
+                log::error!(error:% = e; "service: the stop ticker could not start; a long stop is reported once")
+            }
+        }
+        status.stopped(outcome.code);
+        log::info!(code = outcome.code, ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "service stopped");
+        outcome
+    }
+}
+
+#[cfg(any(windows, test))]
+pub(crate) use scm_status::*;
+
 /// Takes the job out of `slot` (it runs once per process; the SCM may call a service's main only once).
 pub(crate) fn take_job(slot: &Mutex<Option<Job>>) -> Option<Job> {
     slot.lock().unwrap_or_else(PoisonError::into_inner).take()
@@ -310,6 +481,7 @@ pub(crate) fn signal_stop(stop: &AtomicBool, tx: &Sender<Control>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use crate::testing::RecordingOsLog;
 
     #[derive(Debug)]
@@ -456,25 +628,72 @@ mod tests {
     }
 
     #[test]
-    fn the_panic_hook_writes_the_thread_the_place_and_the_message_to_the_os_log_from_any_thread() {
+    fn the_panic_hook_writes_the_thread_and_the_place_but_not_the_message_to_the_os_log_from_any_thread()
+     {
         let log = RecordingOsLog::default();
         let before = std::panic::take_hook();
         install_panic_hook("TestService", Arc::new(log.clone()));
         let joined = std::thread::Builder::new()
             .name("probe-thread".into())
-            .spawn(|| panic!("probe failure"))
+            .spawn(|| panic!("probe failure with user content"))
             .unwrap()
             .join();
         drop(std::panic::take_hook());
         std::panic::set_hook(before);
         assert!(joined.is_err());
-        let text = log.lines().pop().unwrap().1;
+        // Other tests of this process may panic meanwhile: find this one's line.
+        let lines = log.lines();
+        let ours = lines
+            .iter()
+            .find(|(_, t)| t.contains("probe-thread"))
+            .unwrap_or_else(|| panic!("{lines:?}"));
+        assert!(ours.1.contains("service_main.rs"), "{ours:?}");
         assert!(
-            text.contains("probe-thread")
-                && text.contains("probe failure")
-                && text.contains("service_main.rs"),
-            "{text}"
+            !ours.1.contains("user content"),
+            "rule 56: the message may hold user content: {ours:?}"
         );
+        assert_eq!(ours.0, Level::Error);
+        // With a logger whose early sink is the same OS log, the panic reaches the OS log once, not twice.
+        struct ToSink(EarlySink);
+        impl log::Log for ToSink {
+            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                (self.0)(record.level(), &record.args().to_string());
+            }
+            fn flush(&self) {}
+        }
+        let once = RecordingOsLog::default();
+        let sink = context(&once).early_sink();
+        if log::set_boxed_logger(Box::new(ToSink(sink))).is_ok() {
+            log::set_max_level(log::LevelFilter::Info);
+            let before = std::panic::take_hook();
+            install_panic_hook("TestService", Arc::new(once.clone()));
+            let joined = std::thread::Builder::new()
+                .name("dedupe-thread".into())
+                .spawn(|| panic!("second probe"))
+                .unwrap()
+                .join();
+            drop(std::panic::take_hook());
+            std::panic::set_hook(before);
+            assert!(joined.is_err());
+            let heard = once
+                .lines()
+                .iter()
+                .filter(|(_, t)| t.contains("dedupe-thread"))
+                .count();
+            assert_eq!(heard, 1, "{:?}", once.lines());
+        }
+    }
+
+    #[test]
+    fn a_panic_text_has_the_name_the_thread_and_the_place_only() {
+        assert_eq!(
+            panic_text("T", Some(("src/a.rs", 42)), "worker"),
+            "T panicked on thread 'worker' at src/a.rs:42"
+        );
+        assert_eq!(panic_text("T", None, "main"), "T panicked on thread 'main'");
     }
 
     #[test]
@@ -533,7 +752,7 @@ mod tests {
         let log = RecordingOsLog::default();
         let ok = run_hosted(
             &spec(),
-            Hosting::Foreground,
+            Hosting::Embedded,
             false,
             Arc::new(log.clone()),
             |context| {
@@ -544,7 +763,7 @@ mod tests {
         assert_eq!(ok, Ok(0));
         let failed = run_hosted(
             &spec(),
-            Hosting::Foreground,
+            Hosting::Embedded,
             false,
             Arc::new(log.clone()),
             |_| Err(Refused(4, None)),
@@ -555,6 +774,180 @@ mod tests {
                 .iter()
                 .any(|(l, t)| *l == Level::Error && t.contains("exit code 4"))
         );
+    }
+
+    /// A fake SCM: keeps every report, hands each to a channel too (a test waits on the condition, not on the clock), and can
+    /// refuse a state.
+    struct FakePort {
+        seen: Mutex<Vec<ScmReport>>,
+        feed: Mutex<std::sync::mpsc::Sender<ScmReport>>,
+        refuse: Option<ScmState>,
+    }
+
+    impl FakePort {
+        fn new(refuse: Option<ScmState>) -> (Arc<FakePort>, Receiver<ScmReport>) {
+            let (tx, rx) = std::sync::mpsc::channel();
+            (
+                Arc::new(FakePort {
+                    seen: Mutex::new(Vec::new()),
+                    feed: Mutex::new(tx),
+                    refuse,
+                }),
+                rx,
+            )
+        }
+
+        fn reports(&self) -> Vec<ScmReport> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl StatusPort for FakePort {
+        fn report(&self, report: &ScmReport) -> Result<(), String> {
+            if self.refuse == Some(report.state) {
+                return Err("access denied".into());
+            }
+            self.seen.lock().unwrap().push(report.clone());
+            self.feed.lock().unwrap().send(report.clone()).unwrap();
+            Ok(())
+        }
+    }
+
+    fn job(
+        body: impl FnOnce(Context) -> Result<(), Refused> + Send + 'static,
+        log: &RecordingOsLog,
+    ) -> Job {
+        let log: Arc<dyn OsLog> = Arc::new(log.clone());
+        Job {
+            run: Box::new(move |context| run_body("T", log.as_ref(), context, body)),
+            sessions: false,
+        }
+    }
+
+    fn state_of(r: &ScmReport) -> (ScmState, u32, u32) {
+        (r.state, r.exit_code, r.checkpoint)
+    }
+
+    #[test]
+    fn a_clean_service_run_tells_the_scm_running_then_the_stop_pending_then_stopped_with_zero() {
+        let (port, _rx) = FakePort::new(None);
+        let log = RecordingOsLog::default();
+        let status = Arc::new(ScmStatus::new(port.clone(), Arc::new(log.clone()), false));
+        let outcome = run_under_scm(
+            &status,
+            job(|_| Ok(()), &log),
+            context(&log),
+            Duration::from_secs(3600),
+        );
+        assert_eq!(outcome.code, 0);
+        let reports = port.reports();
+        assert_eq!(
+            reports.iter().map(state_of).collect::<Vec<_>>(),
+            [
+                (ScmState::Running, 0, 0),
+                (ScmState::StopPending, 0, 1),
+                (ScmState::Stopped, 0, 0)
+            ]
+        );
+        assert_eq!(
+            reports[1].wait_hint, STOP_WAIT_HINT,
+            "the SCM is told how long a stop may take"
+        );
+        assert_eq!(reports[0].wait_hint, Duration::ZERO);
+    }
+
+    #[test]
+    fn a_failed_body_stops_the_service_with_its_service_specific_code() {
+        let (port, _rx) = FakePort::new(None);
+        let log = RecordingOsLog::default();
+        let status = Arc::new(ScmStatus::new(port.clone(), Arc::new(log.clone()), true));
+        let outcome = run_under_scm(
+            &status,
+            job(|_| Err(Refused(3, None)), &log),
+            context(&log),
+            Duration::from_secs(3600),
+        );
+        assert_eq!(outcome.code, 3);
+        let last = port.reports().pop().unwrap();
+        assert_eq!((last.state, last.exit_code), (ScmState::Stopped, 3));
+        assert!(last.accepts_sessions, "the host's flag is carried");
+    }
+
+    #[test]
+    fn a_stop_in_progress_is_reported_again_with_a_rising_checkpoint_until_the_body_is_done() {
+        let (port, rx) = FakePort::new(None);
+        let log = RecordingOsLog::default();
+        let status = Arc::new(ScmStatus::new(port.clone(), Arc::new(log.clone()), false));
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (tx, events) = std::sync::mpsc::channel();
+        let (stop, _unused, _events) = stop_pair();
+        let context = Context {
+            stop: stop.clone(),
+            events,
+            os_log: Arc::new(log.clone()),
+        };
+        // The body winds down slowly: it waits until the test has seen the repeated reports.
+        let job = job(
+            move |_| {
+                wait.recv().unwrap();
+                Ok(())
+            },
+            &log,
+        );
+        let runner = {
+            let status = status.clone();
+            std::thread::spawn(move || {
+                run_under_scm(&status, job, context, Duration::from_millis(5))
+            })
+        };
+        // The control handler's part: the stop begins (checkpoint 1) and the flag is set.
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(30)).unwrap().state,
+            ScmState::Running
+        );
+        status.stop_pending();
+        stop.store(true, Ordering::SeqCst);
+        let mut checkpoints = Vec::new();
+        while checkpoints.len() < 3 {
+            let report = rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the stop is reported again");
+            assert_eq!(report.state, ScmState::StopPending);
+            checkpoints.push(report.checkpoint);
+        }
+        assert!(
+            checkpoints.windows(2).all(|w| w[0] < w[1]),
+            "{checkpoints:?}"
+        );
+        go.send(()).unwrap();
+        drop(tx);
+        assert_eq!(runner.join().unwrap().code, 0);
+        let last = port.reports().pop().unwrap();
+        assert_eq!(
+            (last.state, last.exit_code, last.checkpoint),
+            (ScmState::Stopped, 0, 0)
+        );
+    }
+
+    #[test]
+    fn a_state_the_scm_refuses_is_logged_to_the_os_log_and_the_run_goes_on() {
+        let (port, _rx) = FakePort::new(Some(ScmState::Running));
+        let log = RecordingOsLog::default();
+        let status = Arc::new(ScmStatus::new(port.clone(), Arc::new(log.clone()), false));
+        let outcome = run_under_scm(
+            &status,
+            job(|_| Ok(()), &log),
+            context(&log),
+            Duration::from_secs(3600),
+        );
+        assert_eq!(outcome.code, 0);
+        let lines = log.lines();
+        assert!(
+            lines.iter().any(|(l, t)| *l == Level::Error
+                && t == "The Service Control Manager refused the state Running: access denied"),
+            "{lines:?}"
+        );
+        assert_eq!(port.reports().last().unwrap().state, ScmState::Stopped);
     }
 
     #[cfg(not(windows))]
@@ -568,7 +961,7 @@ mod tests {
         let log = RecordingOsLog::default();
         let result = run_hosted(
             &spec(),
-            Hosting::Foreground,
+            Hosting::Embedded,
             false,
             Arc::new(log.clone()),
             clean,

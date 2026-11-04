@@ -29,6 +29,11 @@ pub trait OsLog: Send + Sync {
     /// Writes `text` at `level`. Never panics and never blocks the service for long; a line that cannot be written is
     /// dropped (there is nowhere left to report it).
     fn write(&self, level: Level, text: &str);
+
+    /// Whether the lines end up on standard error (the default panic hook would print the same panic there again).
+    fn is_standard_error(&self) -> bool {
+        false
+    }
 }
 
 /// `text` cut to `max` characters (on a character boundary), with an ellipsis when it was cut.
@@ -70,6 +75,7 @@ pub fn journal_lines(level: Level, text: &str) -> Vec<String> {
 pub struct JournalLog<W: Write + Send> {
     out: Mutex<W>,
     prefixed: bool,
+    stderr: bool,
 }
 
 impl<W: Write + Send> JournalLog<W> {
@@ -78,11 +84,26 @@ impl<W: Write + Send> JournalLog<W> {
         Self {
             out: Mutex::new(out),
             prefixed,
+            stderr: false,
+        }
+    }
+}
+
+impl JournalLog<std::io::Stderr> {
+    /// The log over this process's standard error.
+    pub fn stderr(prefixed: bool) -> Self {
+        Self {
+            stderr: true,
+            ..Self::new(std::io::stderr(), prefixed)
         }
     }
 }
 
 impl<W: Write + Send> OsLog for JournalLog<W> {
+    fn is_standard_error(&self) -> bool {
+        self.stderr
+    }
+
     fn write(&self, level: Level, text: &str) {
         let lines = if self.prefixed {
             journal_lines(level, text)
@@ -99,14 +120,44 @@ impl<W: Write + Send> OsLog for JournalLog<W> {
     }
 }
 
-/// Whether standard error is the journal's stream (`JOURNAL_STREAM` is set by systemd for `StandardError=journal`).
-pub fn stderr_is_journal(var: Option<&std::ffi::OsStr>) -> bool {
-    var.is_some_and(|v| !v.is_empty())
+/// The priority the macOS unified log is written with: `syslog(3)` drops `LOG_INFO` and `LOG_DEBUG` lines unless a
+/// logging profile keeps them, so an informational line is `LOG_NOTICE` (5) and survives.
+pub fn unified_priority(level: Level) -> u8 {
+    match level {
+        Level::Info => 5,
+        other => syslog_priority(other),
+    }
+}
+
+/// `openlog` keeps one identifier per process: a second open under another name is refused with the reason, so its lines are
+/// not filed under the first name unnoticed.
+///
+/// # Errors
+/// The words for the log when `wanted` differs from the identifier already open.
+pub fn check_syslog_ident(open: Option<&str>, wanted: &str) -> Result<(), String> {
+    match open {
+        Some(current) if current != wanted => Err(format!(
+            "syslog is already open under the identifier {current}; lines for {wanted} would be filed under it"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Whether standard error is the journal's stream: systemd sets `JOURNAL_STREAM=<device>:<inode>` for
+/// `StandardError=journal`, and a child that inherited the variable but had its standard error redirected must not read as
+/// the journal (`stderr` is the device and inode of file descriptor 2, `None` where it cannot be read).
+pub fn stderr_is_journal(var: Option<&std::ffi::OsStr>, stderr: Option<(u64, u64)>) -> bool {
+    let Some((device, inode)) = stderr else {
+        return false;
+    };
+    var.and_then(std::ffi::OsStr::to_str)
+        .and_then(|v| v.split_once(':'))
+        .is_some_and(|(d, i)| d.parse() == Ok(device) && i.parse() == Ok(inode))
 }
 
 /// A standard-error log that says first why the OS log could not be opened (`why`).
 pub fn stderr_fallback(why: &str) -> Arc<dyn OsLog> {
-    let log = JournalLog::new(std::io::stderr(), false);
+    let log = JournalLog::stderr(false);
     log.write(
         Level::Warn,
         &format!("the OS log could not be opened ({why}); lines go to standard error"),
@@ -134,8 +185,11 @@ pub fn open(spec: &ServiceSpec) -> Arc<dyn OsLog> {
         #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = spec;
-            let prefixed = stderr_is_journal(std::env::var_os("JOURNAL_STREAM").as_deref());
-            Ok(Arc::new(JournalLog::new(std::io::stderr(), prefixed)) as Arc<dyn OsLog>)
+            let prefixed = stderr_is_journal(
+                std::env::var_os("JOURNAL_STREAM").as_deref(),
+                crate::native::stderr_identity(),
+            );
+            Ok(Arc::new(JournalLog::stderr(prefixed)) as Arc<dyn OsLog>)
         }
     })
 }
@@ -211,10 +265,52 @@ mod tests {
     }
 
     #[test]
-    fn standard_error_is_the_journal_when_systemd_says_so() {
-        assert!(stderr_is_journal(Some(std::ffi::OsStr::new("8:1234"))));
-        assert!(!stderr_is_journal(Some(std::ffi::OsStr::new(""))));
-        assert!(!stderr_is_journal(None));
+    fn standard_error_is_the_journal_only_when_the_variable_names_the_same_file() {
+        let var = Some(std::ffi::OsStr::new("8:1234"));
+        assert!(stderr_is_journal(var, Some((8, 1234))));
+        // The variable was inherited, but standard error was redirected to a file or a pipe.
+        assert!(!stderr_is_journal(var, Some((8, 99))));
+        assert!(!stderr_is_journal(var, Some((9, 1234))));
+        assert!(!stderr_is_journal(var, None));
+        assert!(!stderr_is_journal(
+            Some(std::ffi::OsStr::new("")),
+            Some((8, 1234))
+        ));
+        assert!(!stderr_is_journal(
+            Some(std::ffi::OsStr::new("nonsense")),
+            Some((8, 1234))
+        ));
+        assert!(!stderr_is_journal(None, Some((8, 1234))));
+    }
+
+    #[test]
+    fn the_unified_log_keeps_informational_lines_as_notices() {
+        assert_eq!(
+            [Level::Error, Level::Warn, Level::Info, Level::Debug].map(unified_priority),
+            [3, 4, 5, 7]
+        );
+        assert_eq!(
+            syslog_priority(Level::Info),
+            6,
+            "the journal keeps the standard priority"
+        );
+    }
+
+    #[test]
+    fn a_second_syslog_identifier_is_refused_with_the_reason() {
+        assert_eq!(check_syslog_ident(None, "a"), Ok(()));
+        assert_eq!(check_syslog_ident(Some("a"), "a"), Ok(()));
+        let why = check_syslog_ident(Some("a"), "b").unwrap_err();
+        assert!(
+            why.contains("already open under the identifier a") && why.contains("b"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn only_the_stderr_log_says_it_is_standard_error() {
+        assert!(JournalLog::stderr(false).is_standard_error());
+        assert!(!JournalLog::new(Sink::default(), false).is_standard_error());
     }
 
     #[test]
