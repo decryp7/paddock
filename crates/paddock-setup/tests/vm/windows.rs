@@ -1223,7 +1223,8 @@ fn guard_blocks_on_the_installer_accounts_uninstall_key_only() {
 /// An installer that ends without ever running `hold-installing` is its own exit code (31): the app's Failed path relaunches.
 #[test]
 #[ignore = "Windows test VM only: PADDOCK_SETUP_VM=1 (ER-14)"]
-fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_leaves_nothing() {
+fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_what_is_left_is_protected_and_cleaned()
+ {
     let site = Site::with_exe("ended", "PADDOCK_SETUP_EXE_E2E");
     let (installer, good, _other) = e2e_files();
     let (code, out) = apply(&site, &installer, &good, "9.9.9");
@@ -1235,6 +1236,24 @@ fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_leaves_nothing
         "{}",
         site.log()
     );
+    // The program that just ended can still hold its image for a moment, so the run folder may not be removable yet: it is
+    // renamed or left, readable by Administrators and SYSTEM only, and the next clean-up removes it (bounded wait on the
+    // condition, not a fixed sleep).
+    for left in leftovers(&site) {
+        assert_eq!(
+            acl_identities(&site.updates().join(&left)),
+            ["BUILTIN\\Administrators", "NT AUTHORITY\\SYSTEM"],
+            "{left}"
+        );
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !leftovers(&site).is_empty() && std::time::Instant::now() < deadline {
+        let _ = run(
+            &site.setup(),
+            &["clean-staging", "--dir", &site.0.to_string_lossy()],
+        );
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
     assert_eq!(leftovers(&site), Vec::<String>::new(), "{}", site.log());
 }
 
