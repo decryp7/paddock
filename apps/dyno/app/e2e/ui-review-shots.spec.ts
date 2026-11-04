@@ -21,7 +21,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible({ timeout: 45_000 });
     await pressMod(page, 'Mod+Comma');
     const dialog = page.getByRole('dialog');
-    await dialog.getByRole('button', { name: 'Dyno', exact: true }).dispatchEvent('click');
+    await dialog.getByRole('button', { name: 'Dyno', exact: true }).click();
     const row = dialog.getByRole('button', { name: 'Forget saved maps' }).locator('xpath=ancestor::div[contains(@class,"row")][1]');
     await expect(row).toBeVisible({ timeout: 45_000 });
     await page.evaluate(() => document.fonts.ready);
