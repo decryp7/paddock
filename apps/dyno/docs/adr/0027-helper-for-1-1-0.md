@@ -9,6 +9,9 @@
 - Revision 3 (2026-11-03): the delta review's P2 (pipe squatting on Windows) and the user's decisions; accepted.
 - Revision 4 (2026-11-03): WP-0 measured in VMs (section "WP-0 results"): `SeDebugPrivilege` dropped, the pipe SDDL names
   its owner, the NSIS components fixed, `sfltool` works as root, Windows firewall and NVMe SMART need no helper.
+- Amended 2026-11-04 (user): Windows installs per machine (D1 = L reversed for Windows packaging only; the helper is still
+  switched on in Settings), through family ADR [0053](../../../../docs/adr/0053-per-machine-windows-installs.md); see
+  [0027-amendments.md](0027-amendments.md).
 - Date: 2026-11-03
 - Related:
   - Amends ADR [0016](0016-privileged-helper-install-and-ipc.md) (install on a click and the closed request list stay; the
