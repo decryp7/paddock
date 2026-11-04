@@ -164,7 +164,7 @@ agent wire carries `via: ReadVia` (§3.3), which the UI shows as described in §
   energy and fans from `powermetrics` (`helper_counters.rs:236-243`) and **refuses temperatures by design**: "macOS reports a thermal
   pressure level, not temperatures, to software" (`helper_counters.rs:244-246`). On Apple silicon there is no `smc` sampler, so no
   fans; in the VM no CPU power was listed, and the parse of real `powermetrics` output on hardware is not verified
-  (`helper-verification.md:106`). So the macOS claim "Temperature and energy readings" (`helper_wire.rs:391`) cannot be met as worded
+  (`helper-verification.md:106`). So the macOS claim "Temperature and energy readings" (`helper_wire.rs:393`) cannot be met as worded
   (decision D2).
 - **Agent side.** Two merge points: (1) temperatures/fans into `SystemSample` (`dyno-core/src/metrics.rs:259` `temperatures:
   Reading<Vec<Temperature>>`), filled by `SysinfoSensors` (`dyno-platform/src/sensors.rs:52` "reports no temperature sensors"); the
