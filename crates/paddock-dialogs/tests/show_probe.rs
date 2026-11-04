@@ -10,8 +10,15 @@
 fn main() {
     if std::env::var("PADDOCK_REAL_WINDOWS").as_deref() == Ok("1") {
         // A real window only in a throwaway Linux container (xvfb-run, PADDOCK_LIVE_BROWSER=1) or a test VM (rule 7).
-        use paddock_testkit::live_browser::{BrowserWindow, Host, LiveBrowser, live_browser_with, process_env};
-        match live_browser_with(Host::current(), &process_env, BrowserWindow::Shown, "PADDOCK_REAL_WINDOWS") {
+        use paddock_testkit::live_browser::{
+            BrowserWindow, Host, LiveBrowser, live_browser_with, process_env,
+        };
+        match live_browser_with(
+            Host::current(),
+            &process_env,
+            BrowserWindow::Shown,
+            "PADDOCK_REAL_WINDOWS",
+        ) {
             Ok(LiveBrowser::Allowed) => {}
             Ok(LiveBrowser::NotHere(why)) => {
                 eprintln!("show_probe: not run here: {why}");
