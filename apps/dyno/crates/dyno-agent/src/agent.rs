@@ -306,6 +306,10 @@ pub struct Shared {
     pub climate: Arc<crate::helper_readers::counters::HelperClimate>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
+    /// Whether this agent reads through the helper (its own data folder, or the real-engine rig); tests stay off the machine (ER-14).
+    pub helper_first: bool,
+    /// Cancelled with the agent's stop: what runs for the agent alone (the process-sweep worker) ends with it.
+    pub stop_token: paddock_jobs::CancelToken,
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     next_conn: AtomicU64,
@@ -600,6 +604,8 @@ impl Shared {
                 saved_cpu_energy,
             )),
             cores,
+            helper_first,
+            stop_token: paddock_jobs::CancelToken::new(),
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
@@ -609,6 +615,10 @@ impl Shared {
             shared
                 .extras
                 .use_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
+            // The firewall's sources only the helper reads (`pf`, `nft`) are asked through the same port.
+            shared
+                .firewall
+                .bind_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
         }
         shared.disk.set_read_threads(read_threads);
         shared.disk.attach_cache(saved_maps.clone());
@@ -636,6 +646,7 @@ impl Shared {
     /// Asks every loop to stop.
     pub fn request_stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
+        self.stop_token.cancel();
         self.wake_sampler();
         self.power.wake();
         self.wakes.wake();

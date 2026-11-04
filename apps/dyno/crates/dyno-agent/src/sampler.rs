@@ -247,7 +247,6 @@ impl Sampler {
                 temperatures: shared.climate.live_via(),
                 processes: self.provenance.processes.clone(),
                 others: self.provenance.others.clone(),
-                ..Default::default()
             },
         };
         core.latest.live = Some(live.clone());

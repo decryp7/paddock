@@ -218,6 +218,25 @@ impl Running {
         // `bind` wrote `agent.json` (the discovery file the app connects by): this line is when the agent became findable.
         log::info!(ElapsedMs = logging::elapsed_ms(), DiscoveryWritten = true, AgentRun = paddock_log::fingerprint(&discovery.endpoint); "Agent endpoint bound");
         let mut threads = Vec::new();
+        // The processes of every account come from the helper's sweeps when this agent reads through it (the local list stays the fallback).
+        let processes: Box<dyn dyno_core::ports::ProcessSource> = if shared.helper_first {
+            let weak = Arc::downgrade(&shared);
+            let period: helper_readers::processes::SweepPeriod = Arc::new(move || {
+                weak.upgrade().map_or(helper_readers::processes::SWEEP_PERIOD, |s| {
+                    agent::lock(&s.core).settings.sampling.helper_sweep()
+                })
+            });
+            Box::new(helper_readers::processes::HelperFirstProcesses::start(
+                processes,
+                Box::new(helper_first::SharedPort(Arc::downgrade(&shared))),
+                Arc::new(paddock_jobs::time::SystemClock),
+                shared.cores,
+                period,
+                shared.stop_token.clone(),
+            ))
+        } else {
+            processes
+        };
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
