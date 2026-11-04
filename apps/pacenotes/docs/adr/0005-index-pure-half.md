@@ -109,3 +109,23 @@ small generated workspaces.
 - A denied file is invisible to the index even for search by name; the user sees it listed as "withheld" in the report counts.
 - `pacenotes-index` has `rusqlite` (bundled SQLite, the family's version) as its one heavy dependency and no process, network
   or parser dependency.
+
+## Amendment (2026-11-04, ADR 0012): schema v2, the manifest and the per-content fact cache
+
+Accepted by the user on 2026-11-04 with ADR 0012, which replaces these parts of this ADR:
+
+- **Schema.** Schema v1's per-row fact tables (`symbols`, `imports`, `calls`, `chunks`) are replaced by schema v2 (ADR 0012 D4):
+  the manifest, `generation_files` (path, `FileId` and fact key per generation), the per-content fact blobs (`facts` appended in
+  insertion order, `fact_keys` as a narrow index; benchmark B9 may move the blobs into Arrow IPC segment files) and quarantine. The
+  rebuild rule of this ADR stays: a schema v1 file is moved aside and rebuilt, with no migration before v1.
+- **Change plan.** `plan_changes` keeps its rules (unchanged, modified, renamed by content key, added, deleted; a rename keeps the
+  `FileId`). Its input is now the `ChangeSet` of the manifest (ADR 0012 D1), whose stat adds ctime and the file id to size and mtime.
+- **"All of a run's changes are one transaction".** Now only the swap of the generation's path-to-fact-key map is one transaction.
+  The fact blobs are content-addressed and are written as they arrive, in transactions of about 1,000. A crash or a cancel before
+  the swap leaves the previous generation readable, plus unreferenced blobs that the sweep job removes. "Build new data, then swap"
+  still holds.
+- **`symbols_in_file` and search** read the derived snapshot (ADR 0012 D5) instead of SQLite tables. The `LIKE` search over
+  `lower()` goes away; names are found through the snapshot's FST.
+
+Unchanged: the ports `WorkspaceFs` and `SymbolSource` (whose result becomes a fact blob), the denylist and its three doors, the
+walk's link refusal and bounds, and the trap test.

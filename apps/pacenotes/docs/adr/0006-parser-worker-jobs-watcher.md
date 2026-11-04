@@ -154,3 +154,24 @@ worker (the file, once), and the SQLite transaction (one per run).
 - Windows has no stall probe (see above); Cancel and the memory cap are the backstops.
 - The shortcut trusts mtime; a tool that preserves mtime while changing content defeats it (the same weakness as git's index);
   a "re-read everything" action in Settings is the answer.
+
+## Amendment (2026-11-04, ADR 0012): batched requests, rules in the worker, the manifest and the memory budget
+
+Accepted by the user on 2026-11-04 with ADR 0012:
+
+- **Protocol.** A request carries up to 64 files or 4 MiB, and the reply carries one fact blob per file (ADR 0012 D3). When the worker
+  dies or stalls during a batch, the host replays that batch one file at a time in a fresh worker. The file that fails again is
+  quarantined. The others are not: the no-retry rule applies to the culprit, whose failure is deterministic. The worker also reports
+  its peak memory after each batch.
+- **Rules.** The worker runs the structural review rules (ADR 0007) on the tree it has just parsed and returns their results with the
+  facts (ADR 0012 D9). A crash or stall in a rule is handled as in "Crash and stall policy" above.
+- **Pool size.** The Auto default for parse workers becomes `min(cores − 1, memory budget / per-worker peak, 8)` (ADR 0012 D7), with
+  the per-worker peak measured at start and updated from the reports. The 1 GiB cap per worker stays.
+- **The shortcut becomes the manifest** (ADR 0012 D1): equal size, mtime, ctime and file id mean unchanged; the racy rule stays.
+- **Phases.** "Reading code" is followed by "Building the graph" (the snapshot of ADR 0012 D5). That phase has its own scale and is
+  cancellable, because the previous snapshot stays in place until the rename.
+- **The watcher** is unchanged: debounced runs, one at a time. A run is now the manifest comparison, reads for changed stat only,
+  parses for new content keys only, and a snapshot rebuild (or an overlay, if benchmark B4 asks for it).
+
+Unchanged: process isolation, the stall judge and its Windows gap, the `.gitignore` walk through the shared walker, and the rule that
+the index file is never inside the repository.

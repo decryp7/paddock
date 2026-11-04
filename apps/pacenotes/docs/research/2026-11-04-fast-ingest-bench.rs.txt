@@ -2,7 +2,8 @@
 // To run: in a scratch crate outside the repository, put the Cargo.toml below, the first file as src/main.rs and
 // the second as src/kv.rs, then CARGO_BUILD_JOBS=2 cargo build --release, and:
 //   ingest-bench parse <folder> 2 4                              # parse, tags query, hashes, incremental re-parse
-//   ingest-bench graph 1000000 5000000 <scratch>/graph.db        # invented call graph: CSR against SQLite
+//   [REACH=1] ingest-bench graph 1000000 5000000 <scratch>/graph.db   # invented call graph: CSR against SQLite;
+//                                                                    # REACH adds unlimited depth and paths A to B
 //   [KV_SORTED=1] ingest-bench kv <redb|fjall|lmdb|sqlite|sqlite-full> 1000000 <scratch>/kv   # metadata stores
 //
 // [package]
@@ -385,7 +386,93 @@ fn cmd_graph(nodes: u32, edges: usize, db: &Path) {
         t.elapsed().as_secs_f64() * 1e6 / qn as f64,
         acc / qn as i64
     );
+    if std::env::var_os("REACH").is_some() {
+        reach(nodes, &e, &offs, &srcs, &c);
+    }
     println!("peak RSS {:.0} MiB", peak_rss_mb());
+}
+
+/// Unlimited-depth reach and A->B paths: BFS with a visited stamp (each node at most once; cycles end the walk).
+fn reach(nodes: u32, e_by_dst: &[(u32, u32)], roff: &[u32], rsrc: &[u32], c: &rusqlite::Connection) {
+    // forward CSR (callees of src)
+    let t = Instant::now();
+    let mut e: Vec<(u32, u32)> = e_by_dst.to_vec();
+    e.sort_unstable();
+    let mut foff = vec![0u32; nodes as usize + 1];
+    for &(s, _) in &e { foff[s as usize + 1] += 1; }
+    for i in 0..nodes as usize { foff[i + 1] += foff[i]; }
+    let fdst: Vec<u32> = e.iter().map(|&(_, d)| d).collect();
+    println!("CSR forward build {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
+    let mut seen = vec![0u32; nodes as usize];
+    let mut stamp = 0u32;
+    let mut bfs = |start: u32, off: &[u32], adj: &[u32], seen: &mut Vec<u32>, stamp: &mut u32| -> usize {
+        *stamp += 1;
+        let st = *stamp;
+        let mut q = vec![start];
+        seen[start as usize] = st;
+        let mut i = 0;
+        while i < q.len() {
+            let n = q[i] as usize;
+            i += 1;
+            for &m in &adj[off[n] as usize..off[n + 1] as usize] {
+                if seen[m as usize] != st { seen[m as usize] = st; q.push(m); }
+            }
+        }
+        q.len() - 1
+    };
+    let mut rng = Rng(1234);
+    let starts: Vec<u32> = (0..100).map(|_| (rng.next() % nodes as u64) as u32).collect();
+    for (name, off, adj) in [("callers (reverse)", roff, rsrc), ("callees (forward)", &foff[..], &fdst[..])] {
+        let t = Instant::now();
+        let mut tot = 0usize; let mut mx = 0usize; let mut mn = usize::MAX;
+        for &s in &starts { let r = bfs(s, off, adj, &mut seen, &mut stamp); tot += r; mx = mx.max(r); mn = mn.min(r); }
+        println!("CSR all {name}, unlimited depth: {:.2} ms/query, reached avg {} (min {mn}, max {mx}), 100 queries",
+            t.elapsed().as_secs_f64() * 1e3 / 100.0, tot / 100);
+    }
+    // bidirectional BFS A -> B (forward from A, reverse from B), level by level, smaller frontier first
+    let mut seen_b = vec![0u32; nodes as usize];
+    let pairs: Vec<(u32, u32)> = (0..1000).map(|_| ((rng.next() % nodes as u64) as u32, (rng.next() % nodes as u64) as u32)).collect();
+    let t = Instant::now();
+    let (mut found, mut visited, mut maxv, mut lens) = (0usize, 0usize, 0usize, 0usize);
+    for &(a, b) in &pairs {
+        stamp += 1;
+        let st = stamp;
+        seen[a as usize] = st; seen_b[b as usize] = st;
+        let (mut fa, mut fb) = (vec![a], vec![b]);
+        let (mut da, mut db) = (0usize, 0usize);
+        let mut v = 2usize;
+        let mut hit = a == b;
+        while !hit && !fa.is_empty() && !fb.is_empty() {
+            let fwd = fa.len() <= fb.len();
+            let (front, off, adj, mine, other) = if fwd { (&fa, &foff[..], &fdst[..], &mut seen, &seen_b) } else { (&fb, roff, rsrc, &mut seen_b, &seen) };
+            let mut next = Vec::new();
+            'outer: for &n in front.iter() {
+                for &m in &adj[off[n as usize] as usize..off[n as usize + 1] as usize] {
+                    if other[m as usize] == st { hit = true; break 'outer; }
+                    if mine[m as usize] != st { mine[m as usize] = st; next.push(m); v += 1; }
+                }
+            }
+            if fwd { fa = next; da += 1 } else { fb = next; db += 1 }
+        }
+        if hit { found += 1; lens += da + db; }
+        visited += v; maxv = maxv.max(v);
+    }
+    println!("CSR path A->B, bidirectional BFS: {:.2} us/query, {found}/1000 connected, avg length {:.1}, visited avg {} (max {maxv})",
+        t.elapsed().as_secs_f64() * 1e6 / 1000.0, lens as f64 / found.max(1) as f64, visited / 1000);
+    // SQLite: unlimited reach with UNION on the node (dedupe = visited set), and A->B as forward reach then a test
+    let mut st = c.prepare_cached("WITH RECURSIVE r(n) AS (SELECT ?1 UNION SELECT e.src FROM edges e JOIN r ON e.dst = r.n) SELECT count(*) - 1 FROM r").unwrap();
+    let qn = 5;
+    let t = Instant::now();
+    let mut tot = 0i64;
+    for &s in &starts[..qn] { tot += st.query_row([s], |r| r.get::<_, i64>(0)).unwrap(); }
+    println!("SQLite all callers, unlimited depth (recursive CTE, UNION): {:.0} ms/query, reached avg {}, {qn} queries",
+        t.elapsed().as_secs_f64() * 1e3 / qn as f64, tot / qn as i64);
+    let mut st = c.prepare_cached("WITH RECURSIVE r(n) AS (SELECT ?1 UNION SELECT e.dst FROM edges e JOIN r ON e.src = r.n) SELECT count(*) FROM r WHERE n = ?2").unwrap();
+    let t = Instant::now();
+    let mut f = 0i64;
+    for &(a, b) in &pairs[..qn] { f += st.query_row([a, b], |r| r.get::<_, i64>(0)).unwrap(); }
+    println!("SQLite path A->B as forward reach then test (no early exit in SQL): {:.0} ms/query, {f}/{qn} connected",
+        t.elapsed().as_secs_f64() * 1e3 / qn as f64);
 }
 
 fn main() {

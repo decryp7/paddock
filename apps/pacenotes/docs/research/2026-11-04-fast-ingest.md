@@ -129,6 +129,9 @@ small, so the reader keeps `read` into a reused buffer; mmap belongs to the **sn
 
 ## 4. Change detection: "only prepare what changed"
 
+> **Decided 2026-11-04 (user, D1 in section 10):** Pacenotes' own manifest for every folder, with no Git fast path. The Git
+> measurements below stay as the evidence; the `GitAccelerator` of 4.3 is not adopted.
+
 The user's input: *if the code is under Git, only prepare changes; if not, initialise Git to track changes.* This section measures
 both halves and proposes one mechanism with a Git accelerator. Measurements: [performance.md](../performance.md#2026-11-04-fast-ingest-research-parse-hash-and-graph-micro-benchmarks).
 
@@ -332,8 +335,8 @@ Versions and dates from crates.io and the repositories, checked 2026-11-04.
 
 | Candidate | State (checked 2026-11-04) | Licence | refs | callers 3 | in file | path | One file changed | Memory | Share with other apps |
 |---|---|---|---|---|---|---|---|---|---|
-| **Custom: mmap'd CSR snapshot + Arrow IPC or postcard arrays** (baseline) | our code | ours | **under 1 µs** (an offset pair; measured 0.006 µs for the count) | **7.9 µs** (measured, BFS with a visited stamp) | a range in a per-file array (sub-µs, estimate) | bidirectional BFS on CSR, µs to ms (estimate) | rebuild: **83 ms** for 5M edges (sort included, measured), or a delta overlay | **22.9 MiB** for 5M edges both ways counted once (measured); mmap, so resident only what is touched | answers over MCP; the format is private |
-| **SQLite, normalised tables** (interned names, integer ids, two edge indexes) | 3.5x; family store | public domain | **4.1 µs** (measured) | **87 µs** recursive CTE (measured) | indexed, µs | recursive CTE, poor for long paths | delete and insert the file's rows; one transaction | file **222 MiB** for the same edges (measured: table plus two indexes); page cache bounded by `cache_size` | the family's store; a second process can read it |
+| **Custom: mmap'd CSR snapshot + Arrow IPC or postcard arrays** (baseline) | our code | ours | **under 1 µs** (an offset pair; measured 0.006 µs for the count) | **7.9 µs** (measured, BFS with a visited stamp) | a range in a per-file array (sub-µs, estimate) | bidirectional BFS: **26.6 µs** (measured, random pairs) | rebuild: **83 ms** for 5M edges (sort included, measured), or a delta overlay | **22.9 MiB** for 5M edges in one direction (measured; both directions about 46 MiB); mmap, so resident only what is touched | answers over MCP; the format is private |
+| **SQLite, normalised tables** (interned names, integer ids, two edge indexes) | 3.5x; family store | public domain | **4.1 µs** (measured) | **87 µs** recursive CTE (measured) | indexed, µs | 2,742 ms (forward reach then a test, measured) | delete and insert the file's rows; one transaction | file **222 MiB** for the same edges (measured: table plus two indexes); page cache bounded by `cache_size` | the family's store; a second process can read it |
 | **DuckLake** (DuckDB extension; catalog in SQLite, PostgreSQL, MySQL or DuckDB; data as Parquet) | **1.0, 2026-04-13**, "production-ready" with guaranteed backward compatibility ([ducklake.select](https://ducklake.select/)) | MIT | a Parquet scan with zone maps: milliseconds (Debrief: 13 ms for a 500-row page over Parquet) | recursive CTE over Parquet, milliseconds to seconds (estimate) | partition prune, ms | recursive CTE | **each insert writes new Parquet files** unless data inlining is used; small files need `ducklake_merge_adjacent_files` ([compaction](https://ducklake.select/docs/stable/duckdb/maintenance/merge_adjacent_files)) | DuckDB's buffer manager: `memory_limit` default 80% of RAM, must be capped; grows past it (Debrief) | Debrief's trial is queued (memory note); multi-process writes need a PostgreSQL catalog or Quack |
 | **Lance** (lancedb format, Rust) | `lance` 14.0.2 (2026-10-29); very active; stable storage versions are a compatibility contract (README) | Apache-2.0 | random access by row id is its strength ("100x faster than Parquet", vendor claim); by key needs a scalar index (unverified for our shape) | not native: application BFS over row reads (estimate: tens of µs per hop) | scan with filter | not native | versioned appends and deletes (fragments, deletion files); compaction needed | Arrow and DataFusion runtime; caps not documented in the pages read (unverified) | could hold both facts and vectors; heavy dependency set; Windows not stated in the README |
 | **Delta Lake** (delta-rs) | `deltalake` 1.1.2 (2026-10-17) | Apache-2.0 | scan of Parquet via DataFusion, ms | not native | scan | not native | a new Parquet file and a log entry per commit; small-file compaction | DataFusion | built for data lakes and object stores; **overkill locally** |
@@ -345,6 +348,22 @@ Versions and dates from crates.io and the repositories, checked 2026-11-04.
 | **Text: none** (grep-searcher) | ripgrep crates, active | MIT or Unlicense | a literal over a Linux checkout in 0.16 to 0.33 s warm (2016) | | | | zero | the read buffer | MCP tool |
 | **Text: document trigram index** (codesearch design) | our code | ours | candidates in ms, then verify (Cox: 0.01 s against 1.96 s) | | | | posting lists per file | index about 20% of the source; mmap | MCP tool |
 | **Text: positional trigrams** (zoekt design) | Go reference | Apache-2.0 | faster verification | | | | per shard | about 3.5x the source; 1.2x the corpus in RAM | |
+
+**Depth is unlimited by design.** "Callers 3 levels" above is one sample depth, not a limit. Callers, callees and paths are a BFS
+with a visited set: every node is touched at most once, so cycles (recursion, mutual calls) end the walk and the cost is bounded by
+the reachable part of the graph. Measured on the same 1M-node, 5M-edge graph ([record](../performance.md#2026-11-04-fast-ingest-research-parse-hash-and-graph-micro-benchmarks)):
+
+| Query | CSR | SQLite, normalised (recursive CTE, `UNION` as the visited set) |
+|---|---|---|
+| all callers, unlimited depth (avg 595,796 nodes reached; bimodal: 0 or the ~993,000-node giant component) | **24.7 ms** | **3,638 ms** |
+| all callees, unlimited depth (avg 582,564 reached) | 21.2 ms | not run |
+| path A to B (bidirectional BFS; 592 of 1,000 random pairs connected, length 8.9 on average, 1,277 nodes visited on average, 6,692 at most) | **26.6 µs** | 2,742 ms (SQL has no early exit or two-sided search, so it is a full forward reach and a test) |
+
+So unlimited depth is affordable on CSR (tens of ms for the whole reachable graph, and a two-sided path search touches about a
+thousand nodes) and impractical in SQL (seconds). A real call graph is sparser than this random one, so the reach is likely smaller;
+IG-B3 measures it on Linux. **UI guidance:** the view shows levels progressively (one, two, three, more on "Show next level"), with
+counts of what is hidden, and "All callers" (or callees) is an explicit action that runs as a cancellable query with a live count of
+nodes reached, because its answer can be most of the repository.
 
 **DuckLake, specifically.**
 
@@ -438,7 +457,7 @@ pages first, so this is the right side of the trade.
 
 ```
 open      -> map the last snapshot (usable at once; the refresh runs as a job, ER-17 to ER-19)
-change    -> ChangeSource: walk + lstat against the manifest; GitAccelerator fills content keys from the git index (read as data)
+change    -> ChangeSource: walk + lstat against the manifest (decided: no Git accelerator, section 10 D1)
 read+hash -> only keys still unknown; read into a reused buffer           I/O pool: 4 on SSD, 1-2 on HDD
 cache     -> FactKey = H(content key, extractor schema, grammar version and ABI, query pack hash, limits); hit: reuse the blob
 parse     -> worker processes, batched requests (up to 64 files or 4 MiB per round trip), one compact fact blob per file
@@ -532,7 +551,7 @@ memory, sampled every 100 ms, peak and steady.
 |---|---|---|---|
 | B1 | Where do stage 1's 3 ms a file go? | per phase, 1 and 8 workers: read, IPC, parse, extract, apply, SQLite; then batched IPC and `prepare_cached`; add a C corpus | batch size |
 | B2 | Hash choice | SHA-256, BLAKE3, xxh3-128 over the read pass of the large tree | keep SHA-256 unless hash-bound |
-| B3 | Query latency at scale | normalised SQLite against the snapshot for refs, callers 1 to 5, in file, shortest path; 1M, 5M, 20M edges; p50, p99 | snapshot or the SQLite-only fallback |
+| B3 | Query latency at scale | normalised SQLite against the snapshot for refs, callers 1 to 5 levels **and unlimited depth** (time and nodes visited), callees unlimited, in file, path A to B (bidirectional BFS on CSR); 1M, 5M, 20M synthetic edges **and the tier-2 graph of the Linux checkout**; p50, p99 | snapshot or the SQLite-only fallback |
 | B4 | Link cost | full snapshot build from blobs at 100k, 1M, 10M symbols; time and peak footprint, with and without spill | overlay needed or rebuild per run |
 | B5 | Re-open and change detection | open to first answer; new worktree of an indexed repository; branch switch of 10% of files; manifest only against manifest plus git-index keys | the `GitAccelerator` and the shared cache |
 | B6 | Text search | grep-searcher against a document trigram index against FTS5 trigram: p50/p99 warm and cold, index size, build time | whether a text index is built |
@@ -543,7 +562,24 @@ memory, sampled every 100 ms, peak and steady.
 **B9 decision rule.** Take SQLite blobs unless Arrow IPC segments are at least 1.5x faster at ingest **and** not worse on one-file
 update cost, crash recovery and peak footprint (each within 10%). Ties go to SQLite: one file, one engine, the family's store.
 
-## 10. Open questions for the user
+## 10. Decisions (user, 2026-11-04)
+
+The user accepted all nine recommendations on 2026-11-04, with one change to D1. They are recorded as
+[ADR 0012](../adr/0012-fast-ingest.md), with amendments to ADRs 0004, 0005, 0006 and 0007.
+
+| # | Decision (user, 2026-11-04) |
+|---|---|
+| D1 | **Changed from the recommendation.** Change detection uses Pacenotes' own manifest **everywhere**, for consistency: one code path, with no gix blob-id fast path under Git. Size, mtime, ctime and file id are compared, then a content hash is taken when any of them changed. `.gitignore` and the other ignore files are respected through the `ignore` crate. Never `git init`, never a shadow repository. Sections 4.1 and 4.3 above (the `GitAccelerator`) are therefore **not adopted**. The price: a new worktree or a fresh clone reads every file once, because its mtimes are new, but it parses only content the cache has not seen. |
+| D2 | Graph queries are served from the derived mmap snapshot (CSR plus FST); SQLite is the only source of truth. |
+| D3 | Parse results are stored once per content key (fact blobs, schema v2); B9 decides between SQLite blobs and Arrow IPC segments. |
+| D4 | One fact cache is shared by all worktrees and clones; ADR 0012 makes it one cache per user, since the keys are content-addressed. |
+| D5 | DuckDB and DuckLake stay off the interactive path; they are used only for a later Parquet export. |
+| D6 | Text search starts without an index; a trigram index only if B6 asks for one. |
+| D7 | Budgets: under 500 MB peak for a 100k-file first index and under 100 MB idle (estimates for B7 to confirm); Index threads, I/O threads and memory budget are Settings with Auto defaults. |
+| D8 | Review rules run in the parse worker on its tree. |
+| D9 | Submodules and nested repositories are indexed on request. |
+
+## 10a. The questions as they were asked
 
 1. **The user's question: "If code is under Git, only prepare changes; if not, initialise Git to track changes."**
    Recommendation: yes to the first half, no to the second. Under Git, use the git index and trees (read as data through gix, never

@@ -42,7 +42,7 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   `.git`, `.angular` and `fixtures`: 6,419 files (2,989 Rust, 3,430 TypeScript), 50.9 MiB, 1,290,893 lines; read into memory
   first, so no I/O is timed. Graph: invented, 1,000,000 nodes and 5,000,000 call edges from a seeded generator; callees skewed
   (cube of a uniform draw) so a few hubs have many callers
-- **Command:** `ingest-bench parse <worktree> 2 4`; `ingest-bench graph 1000000 5000000 <scratch>/graph.db`;
+- **Command:** `ingest-bench parse <worktree> 2 4`; `[REACH=1] ingest-bench graph 1000000 5000000 <scratch>/graph.db`;
   `[KV_SORTED=1] [KV_SQLITE_CACHE_KIB=65536] ingest-bench kv <redb|fjall|lmdb|sqlite|sqlite-full> 1000000 <scratch>/kv`;
   git: `/usr/bin/time -p` around `GIT_OPTIONAL_LOCKS=0 git status --porcelain=v2 --untracked-files=all`, `git ls-files -s`,
   `git ls-tree -r HEAD`, `git diff --name-status [--no-renames] <a> <b>`, a private index (`GIT_INDEX_FILE=<scratch>/x.idx git read-tree
@@ -70,6 +70,22 @@ Quoted by [research/2026-11-04-fast-ingest.md](research/2026-11-04-fast-ingest.m
   | direct callers | 0.006 µs (offset pair; count only), avg 8 | 4.1 µs, avg 8 |
   | callers 3 levels | 7.9 µs (BFS, visited stamp), avg 284 reached | 87 µs (recursive CTE), avg 123 reached |
   | peak RSS of the run | 74 MiB (both) | |
+
+- **Numbers, unlimited depth and paths** (second run of the same graph with `REACH=1`, 1-minute load 22.9 at the start and 12.3 at
+  the end; the first run's rows repeated within run-to-run spread: callers 3 levels 5.0 µs on CSR and 93 µs in SQLite, direct callers
+  0.066 µs and 2.3 µs). BFS with a visited stamp, each node at most once, so cycles end the walk. Starting nodes are random; in this
+  skewed graph a node either has no callers (reach 0) or reaches the giant component (about 993,000 nodes), so the averages are
+  bimodal:
+
+  | Query | CSR | SQLite (recursive CTE with `UNION`, which deduplicates nodes) |
+  |---|---|---|
+  | forward CSR build (callees) | 85 ms | |
+  | all callers, unlimited depth | 24.7 ms a query, reached avg 595,796 (min 0, max 992,995), 100 queries | 3,638 ms a query, the same reach, 5 queries |
+  | all callees, unlimited depth | 21.2 ms a query, reached avg 582,564 (max 588,451), 100 queries | not run |
+  | path A to B | bidirectional BFS: 26.6 µs a query, 592 of 1,000 pairs connected, average length 8.9, visited avg 1,277 nodes (max 6,692) | SQL has no early exit or two-sided search: forward reach from A, then a test for B, 2,742 ms a query, 5 queries |
+  | peak RSS of the run | 150 MiB (both directions of CSR, the SQLite run included) | |
+
+  No graph from a real repository was measured: the harness has no extractor; IG-B3 adds one for the Linux checkout.
 
 - **Numbers, metadata stores** (1,000,000 rows: 40-byte path key, 64-byte value; commits of 10,000 with fsync, a second thread
   doing point lookups during the load; then 200,000 point lookups; then 100 commits of 100 upserts). redb 2.6.4, fjall 2.11.2

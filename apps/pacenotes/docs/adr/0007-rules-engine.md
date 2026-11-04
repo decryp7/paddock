@@ -58,3 +58,12 @@ SARIF `absent` baseline states are produced only when the report asks for them (
   `Confidence` directly, so nothing is copied twice.
 - A rule that only matches by pattern misses what the grammar cannot express (types resolved across files); that is tier 3 and not this
   crate's job.
+
+## Amendment (2026-11-04, ADR 0012): rules run in the parse worker on the index's tree
+
+Accepted by the user on 2026-11-04 with ADR 0012 (D9). This settles the follow-up named in "Parallelism and cost" above. `find_all`
+takes the tree the parse worker already has, and the outline that names the enclosing symbol comes from the same parse, so a pack of
+N rules costs one parse per file, not N + 1. Results are cached under the file's fact key plus the rule pack's hash: an unchanged file
+under an unchanged pack is not matched again. The step budgets, limits and `Truncated` reasons of this ADR stay as they are. A
+crash in the matcher now costs a worker process and quarantines the file (ADR 0006), instead of costing the caller's process. The
+standalone path (CLI over files outside an index) keeps parsing on its own, inside a worker as well.

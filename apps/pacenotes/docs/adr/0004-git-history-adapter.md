@@ -159,3 +159,14 @@ contract test that the real adapter passes too. A range past the end of the file
 path that is not a valid repository path is counted (`unnamed_sources`), not mapped to nothing. Author text (the email, cut at 128
 bytes) is personal data: it is returned to the caller for the ownership view and is not logged. `since` bounds the walk on a large
 history; lines whose origin lies further back are attributed to the last commit the walk reached.
+
+## Amendment (2026-11-04, ADR 0012): Git is not used for change detection
+
+Accepted by the user on 2026-11-04 with ADR 0012. Nothing in this ADR's rules changes; this amendment records a decision so that
+nobody adds the opposite later. The index finds changed files with Pacenotes' own manifest (size, mtime, ctime, file id, then a
+content hash), the same way for every folder (ADR 0012 D1). So `pacenotes-git` is still never asked for the index, a status, a
+worktree comparison or the blob ids of the working tree. The index loaders stay refused by the crate's guard. The git binary is still
+never run, `git init` is never run in a user's folder, and no shadow repository is kept. The research note behind ADR 0012 measured
+and rejected a Git fast path: read-only status on a stale index re-hashes every file on every call, and a shadow repository is a
+second compressed copy of the code. `History` stays what this ADR made it: log, blame, read at a revision and changed files between
+revisions, for the history views and review.
