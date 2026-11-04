@@ -233,6 +233,17 @@ test('suggest prints the whole register, measured, and is stable on its own outp
   rmSync(root, { recursive: true });
 });
 
+test('suggest keeps a registered crate that has no measured lines, and says so', () => {
+  const root = tree(['a', 'z']);
+  const m = measureByCrate(lcovFor(root, { a: [90, 100] }), () => null, root);
+  const notes = [];
+  const out = suggest(m, entry('a', 90) + entry('z', 93.5), notes);
+  assert.match(out, /name = "z"\nminimum = 93\.50/);
+  assert.ok(notes.some((n) => /crate z has no measured lines/.test(n)));
+  assert.equal(suggest(m, out), out);
+  rmSync(root, { recursive: true });
+});
+
 test('the ratchet CLI reads the base register and the trailer block from git, and fails closed', () => {
   const root = tree(['a', 'b']);
   const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: root, encoding: 'utf8' });

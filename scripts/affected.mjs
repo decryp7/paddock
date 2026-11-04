@@ -105,6 +105,7 @@ export const CI_JOBS = {
   'eslint-preset': ['eslint'],
   crates: ['crates'],
   crate: ['crates'],
+  'coverage-ratchet': ['crates'], // ADR 0050: the register against the base's
   commits: ['tools'], // pull requests only; the tools job checks the rest of the file's contract
   app: ['apps'],
   'paddock-dev': ['paddock-dev'],

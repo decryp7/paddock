@@ -158,7 +158,7 @@ function membersOf(root) {
  * regenerated (minimum = the figure cut to two decimals; each entry's reason and review date kept, a placeholder for a new
  * crate, which validation refuses until a person writes the reason). Running it on its own output gives the same text.
  */
-export function suggest(byCrate, registerText) {
+export function suggest(byCrate, registerText, notes = []) {
   const register = parseRegister(registerText);
   const entries = new Map(register.crates.map((c) => [c.name, c]));
   const lines = registerText.split('\n');
@@ -173,8 +173,22 @@ export function suggest(byCrate, registerText) {
     const figure = (100 * hit) / total;
     if (figure >= DEFAULT_MINIMUM) continue;
     const e = entries.get(crate);
+    entries.delete(crate);
     blocks.push(`[[crate]]\nname = "${crate}"\nminimum = ${floor2(figure).toFixed(2)}\nreason = "${q(e?.reason ?? 'TODO: why these lines cannot be covered')}"\nreview = "${e?.review ?? 'YYYY-MM-DD'}"\n`);
   }
+  // A registered crate with no measured lines (or one at 99 % that is not registered any more is simply not printed): its entry is
+  // kept as it is, and a note says so, so a partial lcov file never drops a registration silently.
+  for (const e of entries.values()) {
+    const m = byCrate.get(e.name);
+    if (m && m.total > 0) {
+      notes.push(`crate ${e.name} reaches ${DEFAULT_MINIMUM} %: its entry is left out of the register.`);
+      continue;
+    }
+    notes.push(`crate ${e.name} has no measured lines in the lcov file: its entry is kept as it is.`);
+    blocks.push(`[[crate]]\nname = "${e.name}"\nminimum = ${Number(e.minimum).toFixed(2)}\nreason = "${q(e.reason ?? '')}"\nreview = "${e.review ?? ''}"\n`);
+  }
+  const nameOf = (b) => /name = "([^"]*)"/.exec(b)[1];
+  blocks.sort((x, y) => nameOf(x).localeCompare(nameOf(y)));
   return [header, '', ...(blocks.length ? [blocks.join('\n')] : []), excludes, ''].join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
@@ -235,7 +249,9 @@ if (isMain(import.meta.url)) {
   if (cmd === 'regex' && a) {
     process.stdout.write(`${ignoreRegex(parseRegister(readFileSync(a, 'utf8')).excludes)}\n`);
   } else if (cmd === 'suggest' && a && b) {
-    process.stdout.write(suggest(measureByCrate(readFileSync(a, 'utf8'), readSource, root), readFileSync(b, 'utf8')));
+    const notes = [];
+    process.stdout.write(suggest(measureByCrate(readFileSync(a, 'utf8'), readSource, root), readFileSync(b, 'utf8'), notes));
+    for (const n of notes) console.error(`::notice::suggest: ${n}`);
   } else if (cmd === 'ratchet' && a) {
     if (!base) {
       // No base: a pull request or a push to main must have one (fail-open there would skip the ratchet silently).

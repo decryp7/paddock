@@ -79,14 +79,37 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
         run: node scripts/affected.mjs --ci
 
-      # The coverage register only ratchets up (ADR 0050): compared with the base's here, where the history is. No base on a
-      # pull request or a push to main is a warning; an unknown base or any git error fails.
-      - name: Coverage ratchet (crates/coverage.toml against the base)
+
+  # The coverage register only ratchets up (ADR 0050): compared with the base's. Its own job, so a failing ratchet never skips the
+  # other jobs (decision 6), and a tree-only clone (commits and trees, no blobs) is enough: `git show` fetches the one blob it needs.
+  coverage-ratchet:
+    name: coverage ratchet (crates/coverage.toml against the base)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.crates == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Ratchet
+        id: ratchet
         env:
-          BASE: ${{ steps.plan.outputs.base }}
+          BASE: ${{ needs.plan.outputs.base }}
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # No base on a pull request or a push to main is a warning (the script says so); an unknown base or a git error fails.
           if [ -n "$BASE" ]; then node scripts/coverage-gate.mjs ratchet crates/coverage.toml --base "$BASE"; else node scripts/coverage-gate.mjs ratchet crates/coverage.toml; fi
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        env:
+          RESULT: ${{ steps.ratchet.outcome }}
+          BASE: ${{ needs.plan.outputs.base }}
+        run: |
+          echo "- coverage ratchet against \`${BASE:-no base}\`: ${RESULT:-skipped}" >> "$GITHUB_STEP_SUMMARY"
+          [ "$RESULT" = success ] || echo "::notice::coverage ratchet was ${RESULT:-skipped}; the ::error:: lines above say why and what to do (minimums only go up; a new entry needs the Coverage-lowered trailer)."
 
   ui:
     needs: [plan]

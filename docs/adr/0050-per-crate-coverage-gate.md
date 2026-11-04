@@ -26,7 +26,7 @@ left out by one long `--ignore-filename-regex` in `ci.yml`, with the reasons onl
    - a figure above the minimum by more than max(0.05 %, 2 lines) fails too ("raise the minimum to X"), so minimums equal
      the measured figures and only go up. A crate whose figure differs between two CI runs of the same tree is
      nondeterministic: fix the test or document why in its reason.
-   - `ratchet --base <rev>` runs in the plan job (which has the history) and reads the register at the base. **A lowered
+   - `ratchet --base <rev>` runs in its own job, `coverage-ratchet` (a tree-only clone with full history, `filter: blob:none`, so a failing ratchet never skips another job), and reads the register at the base. **A lowered
      minimum of an existing entry always fails; no trailer allows it.** A new `[[crate]]` entry and a new `[[exclude]]`
      entry fail unless a commit of the change (`<rev>..HEAD`) has the trailer `Coverage-lowered: <crate|path> <reason>
      approved: user` in its trailer block (`git interpret-trailers --parse`, key matched case-sensitively). The trailer is an
