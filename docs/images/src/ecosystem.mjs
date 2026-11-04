@@ -133,8 +133,9 @@ const stubs = [
   stub(720, T3, H2, 'Diagnosis'),
   stub(1265, T3, H2, 'What’s new'),
 ].join('\n');
-// Pitwall as MCP client and host (planned for Pitwall 1.1): a dashed purple line from the hub to each app whose MCP server it calls,
-// the arrow towards the server. Dashed means planned, as in the legend; the label says MCP, so colour is never the only cue.
+// Pitwall as MCP client and host (planned for Pitwall 1.1): a dash-dot purple line from the hub to each app whose MCP server it calls,
+// the arrow towards the server. Its dash-dot pattern differs from the grey dashed "later" hand-offs, and the label says MCP, so
+// colour is never the only cue; the legend says it is planned.
 function mcp(x, y0, y1, { at, gap } = {}) {
   const mid = at ?? (y0 + y1) / 2;
   const d = gap == null ? `M${x} ${y0} L${x} ${y1}` : `M${x} ${y0} L${x} ${gap - 9} M${x} ${gap + 9} L${x} ${y1}`;
@@ -152,8 +153,8 @@ const mcps = [
 const HX = 162, HW = SX - 40 - HX;
 const cols = [
   [600, 'One local API', ['OpenAI, Anthropic and Ollama', 'compatible, plus /x/v1.']],
-  [930, 'Tools over MCP', ['Planned for 1.1: calls', 'the apps’ MCP servers.']],
-  [1150, 'Yours alone', ['Keys, priorities, caching.', 'No cloud, no telemetry.']],
+  [905, 'Chat and tools over MCP', ['Planned for 1.1: chat that', 'calls the apps’ MCP tools.']],
+  [1185, 'Yours alone', ['Keys, priorities, caching.', 'No cloud, no telemetry.']],
 ];
 const hubCols = cols.map(([x, h, ls]) => `<text class="vt" x="${x}" y="${HUB + 62}">${h}</text>` +
   ls.map((l, k) => `<text class="vs" x="${x}" y="${HUB + 90 + k * 23}">${l}</text>`).join('')).join('');
@@ -221,7 +222,7 @@ const legend = `<g>
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Eight local-first desktop apps and one tool. ${CODEBASE_TOOL}, Debrief and Sighter above; Recce, Dyno and Spotter below; Pitwall, the optional local AI hub, between them; Pitcrew under Dyno. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief drives Sighter over MCP to reproduce a bug from a video, Pitcrew sends Debrief job logs and Dyno sends it issues (one line up the left margin, beside Recce and Pitwall, not through them), Dyno sends Pitcrew machine health and Spotter installed software, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Uses of Pitwall (dotted): ${CODEBASE_TOOL} for answers and embeddings, Debrief as its AI engine once paired (its built-in engine is the fallback), Sighter for vision and as agent planner, Recce for answers, Dyno for diagnosis, Spotter for what's-new summaries. Planned for Pitwall 1.1 (dashed, labelled MCP): Pitwall as MCP client and host calls the MCP servers of ${CODEBASE_TOOL}, Debrief, Sighter, Recce (the family's retrieval engine, so Pitwall builds no index of its own) and Dyno (its MCP server is opt-in). Recce (one search box for the whole PC) is planned and shown with its placeholder icon. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter, Dyno and Recce use the shell with pages. Below them, Tools: the planned Scrutineer signs every app's installers (a private CA and code-signing certificates, installed and verified).</desc>
+<desc id="d">Eight local-first desktop apps and one tool. ${CODEBASE_TOOL}, Debrief and Sighter above; Recce, Dyno and Spotter below; Pitwall, the optional local AI hub, between them; Pitcrew under Dyno. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief drives Sighter over MCP to reproduce a bug from a video, Pitcrew sends Debrief job logs and Dyno sends it issues (one line up the left margin, beside Recce and Pitwall, not through them), Dyno sends Pitcrew machine health and Spotter installed software, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Uses of Pitwall (dotted): ${CODEBASE_TOOL} for answers and embeddings, Debrief as its AI engine once paired (its built-in engine is the fallback), Sighter for vision and as agent planner, Recce for answers, Dyno for diagnosis, Spotter for what's-new summaries. Planned for Pitwall 1.1 (dash-dot, labelled MCP): Pitwall as MCP client and host calls the MCP servers of ${CODEBASE_TOOL}, Debrief, Sighter, Recce (the family's retrieval engine, so Pitwall builds no index of its own) and Dyno (its MCP server is opt-in). Recce (one search box for the whole PC) is planned and shown with its placeholder icon. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter, Dyno and Recce use the shell with pages. Below them, Tools: the planned Scrutineer signs every app's installers (a private CA and code-signing certificates, installed and verified).</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
@@ -246,7 +247,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .ah{fill:var(--hand)}
 .stub{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:1 6}
 .ahp{fill:var(--hubs)}
-.mcp{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:7 6}
+.mcp{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:12 5 1 5}
 .pill{fill:var(--card);stroke:var(--line)}
 .lbl{font-size:17px;font-weight:500;fill:var(--ink)}
 .hub{fill:var(--hubf);stroke:var(--hubs);stroke-width:1.5}

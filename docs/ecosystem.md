@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=867f7026" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dashed lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses, the workbench for the IDE-style apps, and the planned tool Scrutineer, which signs every app's installers" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=e862b089" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps; the planned tool Scrutineer signs every app's installers" width="100%">
 </picture>
 
 Eight desktop apps and one tool for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -16,8 +16,8 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=743d888b) and [dark](images/paddock-ecosystem-dark.png?v=2f87f043), integrations
-[light](images/paddock-integrations-light.png?v=27ab52cd) and [dark](images/paddock-integrations-dark.png?v=799e02ed), hand-offs
+hero [light](images/paddock-ecosystem-light.png?v=d92fe0d8) and [dark](images/paddock-ecosystem-dark.png?v=55edf0ea), integrations
+[light](images/paddock-integrations-light.png?v=a9a7c6fa) and [dark](images/paddock-integrations-dark.png?v=38cb6fd5), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
@@ -77,8 +77,8 @@ Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 - OpenAI-, Anthropic- and Ollama-compatible APIs over models on your own machine, plus `/x/v1` extensions built for the family.
 - llama.cpp is its only engine; model management with checksums, "will it fit?" guidance, presets and idle unloading.
 - One key per app, job priorities (interactive first, batch when idle), prompt-prefix and opt-in response caching, usage and limits per app.
-- Planned for 1.1: chat with text, audio, vision and MCP. As MCP client and host it calls the family's MCP servers (Dyno's,
-  which exists; Recce's for documents, so Pitwall builds no index of its own; Pacenotes', Debrief's and Sighter's when they ship).
+- Planned for 1.1: chat with text, audio, vision and MCP. As MCP client and host it calls the family's MCP servers (Dyno's, on
+  Dyno's unreleased 1.1 line, not in 1.0.0; Recce's for documents, so Pitwall builds no index of its own; Pacenotes', Debrief's and Sighter's when they ship).
 - Local only by design: no cloud models, no telemetry; the only traffic is downloads you asked for.
 
 Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pitwall>
@@ -90,7 +90,8 @@ Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 - Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
 - Strictly read-only: no tuning, no actions and no advice. Dyno needs its small read-only helper, installed with it, to read what only an administrator may see.
 - Extensible with validated declarative packs, no code.
-- An opt-in MCP server (Settings > AI access) on the 1.1 line, which Pitwall 1.1 will call; reading tools come in 1.2.
+- An opt-in MCP server (Settings > AI access) on the unreleased 1.1 line, not in 1.0.0; Pitwall 1.1 will call it; reading
+  tools come in 1.2.
 
 Status: v1.0.0 released, 1.1.0 in progress (the administrator helper's readings, per-machine Windows installs, OS lifecycle checks). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
 
@@ -151,7 +152,7 @@ Status: **planned**; a draft plan is on the branch `docs/code-signing-plan`; Pit
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=38a1e21f" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter, Dyno and Recce reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app (Spotter, Dyno and Recce later); Pitwall runs llama.cpp as a child process and keeps keys in the OS credential store; its tool router, planned for Pitwall 1.1 as MCP client and host, calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno (opt-in, exists) and Recce, which other MCP clients can use too" width="100%">
+  <img src="images/paddock-integrations.svg?v=21b8a969" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter, Dyno and Recce reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app (Spotter, Dyno and Recce later); Pitwall runs llama.cpp as a child process and keeps keys in the OS credential store; its tool router, planned for Pitwall 1.1 as MCP client and host, calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno (opt-in, on Dyno's unreleased 1.1 line) and Recce, which other MCP clients can use too" width="100%">
 </picture>
 
 <picture>
@@ -163,8 +164,8 @@ The apps never depend on each other to do their own job. They meet in a few well
 | Contract | Between | How it works |
 |---|---|---|
 | **Pitwall local API** | every app to Pitwall | HTTP on loopback; OpenAI-, Anthropic- and Ollama-compatible, plus `/x/v1`. One key per app (held in the OS credential store), job priorities, prompt and response caching, usage and limits per app. |
-| **MCP** (planned for Pitwall 1.1) | Pitwall to Pacenotes, Debrief, Sighter, Dyno and Recce; any MCP client | Pitwall becomes MCP client and host (chat with text, audio, vision and MCP): local models call the apps' MCP tools. Dyno's server exists (opt-in, Settings > AI access; reading tools in 1.2). Recce is the family's retrieval engine, so Pitwall builds no index of its own: a knowledge collection is a Recce scope read over MCP. The hero draws these as dashed lines labelled MCP. |
-| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno; Recce | Each serves read-only tools locally (Sighter acts, with allow-list, confirmation, budgets and a stop key); off by default, every call logged, results bounded; Pitwall hosts and serves none. Debrief first. |
+| **MCP** (planned for Pitwall 1.1) | Pitwall to Pacenotes, Debrief, Sighter, Dyno and Recce; any MCP client | Pitwall becomes MCP client and host (chat with text, audio, vision and MCP): local models call the apps' MCP tools. Dyno's server is on its unreleased 1.1 line, not in 1.0.0 (opt-in, Settings > AI access; reading tools in 1.2). Recce is the family's retrieval engine, so Pitwall builds no index of its own: a knowledge collection is a Recce scope read over MCP. The hero draws these as dash-dot lines labelled MCP. |
+| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno; Recce | Each serves read-only tools locally (Sighter acts, with allow-list, confirmation, budgets and a stop key); off by default, every call logged, results bounded; Pitwall serves none. Debrief first. |
 | **Deep links** | Pitcrew and Dyno to Debrief; Dyno to Spotter and Pitcrew | "Job logs" and "Issues" open in Debrief; Dyno's installed software becomes Spotter's watch list; Dyno's machine health shows next to the runners in Pitcrew. The target app opens at the right place. |
 | **Debrief bridge** | Debrief and Pacenotes, both ways | Stack trace to code, and log-line checks against the code. |
 | **Run bundles** | Sighter to Debrief | A file with video, steps and results; Debrief opens it next to the app's logs. |
@@ -179,7 +180,7 @@ The apps never depend on each other to do their own job. They meet in a few well
 
 What each app uses Pitwall for (the dotted lines in the hero): Debrief, its AI engine once paired (from 1.1; the built-in engine is the fallback); Pacenotes, answers, explanations and
 embeddings; Sighter, vision and the agent planner; Recce, answers and re-ranking; Spotter, "What's new" summaries; Dyno,
-explanations of what it shows (later). Pitcrew does not need it. The other way round, the dashed lines labelled MCP are
+explanations of what it shows (later). Pitcrew does not need it. The other way round, the dash-dot lines labelled MCP are
 planned for Pitwall 1.1: Pitwall calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce.
 
 ## Data and privacy

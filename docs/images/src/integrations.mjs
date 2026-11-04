@@ -38,12 +38,12 @@ function app(d, id, x, y, w, h, opts, planned = false, bottom = false) {
   // Apps on this machine (top), each on the shared paddock-pitwall client; Spotter, Dyno and Recce adopt it later (dashed).
   const AY = 144, NW = 144, STEP = 160;
   const apps = [
-    ['pacenotes', CODEBASE_TOOL, 'Tauri app and service', 'Answers, explanations and embeddings.', true],
-    ['debrief', 'Debrief', 'Tauri app', 'AI engine once paired; built-in engine as fallback.', false],
-    ['sighter', 'Sighter', 'Tauri app and server', 'Vision, and the agent planner.', true],
-    ['spotter', 'Spotter', 'Tauri app', 'What’s-new summaries.', false, true],
-    ['dyno', 'Dyno', 'Tauri app and agent', 'Explains what it shows.', false, true],
-    ['recce', 'Recce', 'Tauri app and agent', 'Answers with sources; reranking.', true, true],
+    ['pacenotes', CODEBASE_TOOL, 'app and service', 'Answers, explanations and embeddings.', true],
+    ['debrief', 'Debrief', 'app', 'AI engine once paired; built-in engine as fallback.', false],
+    ['sighter', 'Sighter', 'app and server', 'Vision, and the agent planner.', true],
+    ['spotter', 'Spotter', 'app', 'What’s-new summaries.', false, true],
+    ['dyno', 'Dyno', 'app and agent', 'Explains what it shows.', false, true],
+    ['recce', 'Recce', 'app and agent', 'Answers with sources; reranking.', true, true],
   ];
   const NH = Math.max(...apps.map(([, name, tech, desc]) => d.fit(NW, { name, tech, desc }))) + 16;
   const LIB = { name: 'paddock-pitwall', tech: 'shared Rust crate in each app', desc: 'One client: discovery, pairing, keychain keys, retries, optional-AI state.' };
@@ -61,7 +61,8 @@ function app(d, id, x, y, w, h, opts, planned = false, bottom = false) {
   const credH = d.fit(200, CRED), engH = d.fit(184, ENG), rtH = d.fit(160, RT) + 24;
   const rowH = Math.max(credH, engH + 56, rtH);
   const NOTE = 'Local only: the sole outbound traffic is the model and engine downloads you ask for.';
-  const NY = RY + rowH + 32, noteH = 40, PB = NY + noteH + 24;
+  // The note stops short of the tool router's column, so the router's MCP line runs down beside it to the servers below.
+  const NY = RY + rowH + 32, noteH = 48, NW2 = 456, PB = NY + noteH + 24;
 
   d.group('apps', 48, AY, 992, AGB - AY, 'Apps on this machine');
   d.group('pw', 48, PY, 704, PB - PY, 'Pitwall: one service process, loopback only');
@@ -76,19 +77,21 @@ function app(d, id, x, y, w, h, opts, planned = false, bottom = false) {
   d.node('eng', 328, RY + 40, 184, engH, 'process', ENG);
   d.node('router', 568, RY, 160, rtH, 'accent', RT);
   d.tag(568 + 160 - 8, RY + rtH - 26, 'planned', 'accent');
-  d.note('local', 72, NY, 656, NOTE, noteH);
+  d.note('local', 72, NY, NW2, NOTE, noteH);
 
   link(d, 'lib', 'B', 'api', 'T', { label: 'HTTP, one key per app', at: 0.4 });
   link(d, 'api', 'B', 'cred', 'T');
   d.edge('api', 'eng', [472, API_Y + apiH], [472, RY + 40]); // right of the "Engine process" group label
   link(d, 'api', 'B', 'router', 'T');
 
-  // MCP servers: tools any MCP client may call (ADR 0007); Pitwall's tool router (planned for Pitwall 1.1) is one such client,
-  // other MCP clients (above the group) are the rest. Recce is the family's retrieval engine, so Pitwall builds no index of its
-  // own (Recce plan, 2026-11-04). Dyno's server exists (opt-in in Settings > AI access); the others are planned.
-  const MX = 832, MW = 184;
+  // MCP servers: tools any MCP client may call (ADR 0007), in one row under Pitwall. Pitwall's tool router (planned for Pitwall
+  // 1.1) is one such client; other MCP clients (right of Pitwall) are the rest. Recce is the family's retrieval engine, so Pitwall
+  // builds no index of its own (Recce plan, 2026-11-04). Dyno's server is on its unreleased 1.1 line (opt-in in Settings > AI
+  // access), so it carries a "1.1" pill instead of "planned"; the others are planned.
+  const MW = 176, MGAP = 16, MY = PB + 48;
   const CL = { name: 'Other MCP clients', tech: 'editors, scripts', desc: 'Same servers, same tools.' };
-  const clH = d.fit(MW, CL), MY = PY + clH + 56;
+  // Beside the tool router, top-aligned with it: the two kinds of MCP client side by side, each with its line down to the servers.
+  const CW2 = 208, clH = d.fit(CW2, CL), CX = 808, CY = RY;
   const servers = [
     ['code', CODEBASE_TOOL, 'MCP server, read-only', 'Code graph, review, search.'],
     ['dbmcp', 'Debrief', 'MCP server, read-only', 'Logs and analysis; first.'],
@@ -96,18 +99,25 @@ function app(d, id, x, y, w, h, opts, planned = false, bottom = false) {
     ['dynomcp', 'Dyno', 'MCP server, opt-in', 'Settings > AI access; reading tools in 1.2.'],
     ['recmcp', 'Recce', 'MCP server, read-only', 'Search with citations.'],
   ];
-  const hs = servers.map(([, name, tech, desc]) => d.fit(MW, { name, tech, desc }));
-  const MB = MY + 48 + hs.reduce((a, h) => a + h + 16, 0) - 16 + 24;
-  d.group('mcp', 808, MY, 232, MB - MY, 'MCP servers');
-  servers.reduce((sy, [id, name, tech, desc], k) => { app(d, id, MX, sy, MW, hs[k], { name, tech, desc }, id !== 'dynomcp'); return sy + hs[k] + 16; }, MY + 48);
-  d.node('mcpc', MX, PY, MW, clH, 'external', CL);
-  link(d, 'router', 'R', 'mcp', 'L', { label: 'MCP', dash: true });
-  link(d, 'mcpc', 'B', 'mcp', 'T', { label: 'MCP' });
+  const SH = Math.max(...servers.map(([, name, tech, desc]) => d.fit(MW, { name, tech, desc })));
+  const MB = MY + 48 + SH + 24;
+  d.group('mcp', 48, MY, 992, MB - MY, 'MCP servers');
+  servers.forEach(([id, name, tech, desc], k) => {
+    const x = 72 + k * (MW + MGAP);
+    app(d, id, x, MY + 48, MW, SH, { name, tech, desc }, id !== 'dynomcp');
+    if (id === 'dynomcp') d.tag(x + MW - 8, MY + 56, '1.1', 'process');
+  });
+  d.node('mcpc', CX, CY, CW2, clH, 'external', CL);
+  const RXM = 568 + 80; // the router's centre
+  d.edge('router', 'mcp', [RXM, RY + rtH], [RXM, MY], { dash: true });
+  d.lbl('MCP', RXM, (PB + MY) / 2, 'r');
+  d.edge('mcpc', 'mcp', [CX + CW2 / 2, CY + clH], [CX + CW2 / 2, MY]);
+  d.lbl('MCP', CX + CW2 / 2, (PB + MY) / 2, 'r');
 
   d.legend([{ kind: 'accent', label: 'Pitwall' }, { kind: 'process', label: 'Process' },
     { kind: 'external', label: 'Outside Paddock' }, { kind: 'tag', role: 'process', label: 'Not built yet' }, { kind: 'line', label: 'Request' },
     { kind: 'dashline', label: 'Later' }]);
-  write(d, 'paddock-integrations', Math.max(PB, MB));
+  write(d, 'paddock-integrations', MB);
 }
 
 // ---------------------------------------------------------------- hand-offs between apps
