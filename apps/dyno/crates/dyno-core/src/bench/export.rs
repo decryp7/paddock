@@ -234,11 +234,26 @@ mod tests {
 
     #[test]
     fn the_destination_is_checked_before_anything_is_written() {
-        assert!(validate_destination("/Users/x/results.csv", ExportFormat::Csv).is_ok());
+        // An absolute path is the OS's own: `/Users/x` is not absolute on Windows (no drive), so the cases are built from the temp folder.
+        let abs = |rest: &[&str]| {
+            rest.iter()
+                .fold(std::env::temp_dir(), |p, s| p.join(s))
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert!(validate_destination(&abs(&["x", "results.csv"]), ExportFormat::Csv).is_ok());
         assert!(validate_destination("results.csv", ExportFormat::Csv).is_err());
-        assert!(validate_destination("/Users/x/../y/results.csv", ExportFormat::Csv).is_err());
-        assert!(validate_destination("/Users/x/results.json", ExportFormat::Csv).is_err());
-        assert!(validate_destination("/Users/x/.csv", ExportFormat::Csv).is_err());
+        assert!(validate_destination(&abs(&["x", "..", "y", "results.csv"]), ExportFormat::Csv).is_err());
+        assert!(validate_destination(&abs(&["x", "results.json"]), ExportFormat::Csv).is_err());
+        assert!(validate_destination(&abs(&["x", ".csv"]), ExportFormat::Csv).is_err());
         assert!(validate_destination("", ExportFormat::Json).is_err());
+        #[cfg(windows)]
+        {
+            // A real Windows path is accepted; one without a drive (rooted only) is not absolute there.
+            assert!(validate_destination(r"C:\Users\x\results.csv", ExportFormat::Csv).is_ok());
+            assert!(validate_destination(r"\Users\x\results.csv", ExportFormat::Csv).is_err());
+        }
+        #[cfg(unix)]
+        assert!(validate_destination("/Users/x/results.csv", ExportFormat::Csv).is_ok());
     }
 }

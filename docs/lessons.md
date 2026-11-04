@@ -1290,3 +1290,18 @@ line) never sees it, like the other harnesses it joins in the ignore regex (`pad
 `paddock-ipc` test child). Its check is the `dialog-window-probe` job instead. **Lesson:** a harness is excluded by name with its reason beside
 the regex, never by lowering the gate; and a job that stops at its first failing step (here coverage, before `cargo deny check`) hides the
 steps after it: read a red job's later steps as not run, not as passed.
+
+## Windows-only assumptions in tests that came in with land-f (2026-11-04, Dyno gates run 7494)
+
+Five Dyno tests failed only on the Windows leg (2147 passed, 5 failed); each was a Unix assumption in the test, and one was a real checkout bug.
+- `dyno-helper-service` unit, maintainer-script and polkit tests read `app/src-tauri/linux/*`; `* text=auto` checked them out with CRLF on
+  Windows (`#!/bin/sh\r`, a unit that differs from its render). The packaging files are now `text eol=lf` in `.gitattributes`
+  (`/apps/*/app/src-tauri/linux/**`, the macOS plists). The same files built on a Windows checkout would ship scripts that sh cannot run.
+- `bench::export::tests::the_destination_is_checked_before_anything_is_written`: `/Users/x/results.csv` is not absolute on Windows (no drive). The product
+  is right; the test now builds its paths from `std::env::temp_dir()` and adds a real `C:\...` case and a drive-less one on Windows.
+- `the_helper_installs_and_removes_itself_on_linux_from_the_package` models Linux paths with the fake system's string keys: `Path::join` spells them
+  with backslashes on Windows. `#[cfg(unix)]`, with the reason beside it.
+- `helper_counters::a_sysfs_tree_...`: the fake sysfs tree has `intel-rapl:0`; a colon is not valid in a Windows file name. `#[cfg(unix)]`, with the reason.
+**Lesson:** a test that builds a fake Linux or macOS tree runs on all three runners: build paths from the OS (`temp_dir`, `Path::join`), keep
+test inputs LF in `.gitattributes`, and gate a test by `cfg` only with the reason (never `#[ignore]`). The check before pushing is `cargo xwin clippy
+--all-targets` (an import used only by a gated test is an unused-import error on Windows).

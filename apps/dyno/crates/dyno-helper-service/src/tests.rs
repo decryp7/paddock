@@ -5,6 +5,7 @@ use super::*;
 use paddock_env::MapVars;
 use paddock_service::privileged::{Assessment, UpdateReason};
 use paddock_service::testing::{FakeElevator, FakeFiles, FakeSystem};
+#[cfg(unix)]
 use paddock_service::Output;
 
 fn roots() -> Roots {
@@ -117,6 +118,9 @@ fn make_system(sys: &FakeSystem) -> impl Fn() -> Box<dyn System> + '_ {
     move || Box::new(sys.clone())
 }
 
+// A Linux install modelled with Linux paths (`/usr/lib/systemd/system/...`): on Windows `Path::join` and `Path::new` spell them with backslashes, which
+// the fake system's string keys do not match, and the code under test only ever runs on Linux. Unix hosts run it.
+#[cfg(unix)]
 #[test]
 fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
     let (sys, mut files) = (FakeSystem::new(), FakeFiles::new());
