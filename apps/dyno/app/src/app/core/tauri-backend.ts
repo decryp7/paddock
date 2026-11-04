@@ -5,6 +5,7 @@ import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import type {
   ActivityEntry,
   AgentStatus,
+  TrayAvailability,
   Alarm,
   AlarmChange,
   AlarmFilter,
@@ -124,6 +125,7 @@ export const EVENTS = {
   popoverValues: 'dyno://popover-values',
   widgetLayout: 'dyno://widget-layout',
   navigate: 'dyno://navigate',
+  tray: 'dyno://tray',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -173,6 +175,7 @@ export class TauriBackend implements DynoBackend {
   private readonly popoverChannel: EventChannel<PopoverSurfaceValues>;
   private readonly layoutChannel: EventChannel<DynoSurface>;
   private readonly navigateChannel: EventChannel<Navigate>;
+  private readonly trayChannel: EventChannel<TrayAvailability>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -195,6 +198,7 @@ export class TauriBackend implements DynoBackend {
     this.popoverChannel = new EventChannel(listenFn, EVENTS.popoverValues);
     this.layoutChannel = new EventChannel(listenFn, EVENTS.widgetLayout);
     this.navigateChannel = new EventChannel(listenFn, EVENTS.navigate);
+    this.trayChannel = new EventChannel(listenFn, EVENTS.tray);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -237,6 +241,14 @@ export class TauriBackend implements DynoBackend {
 
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe {
     return this.agentChannel.add(listener);
+  }
+
+  trayAvailability(): Promise<TrayAvailability> {
+    return this.command<TrayAvailability>('tray_availability', undefined);
+  }
+
+  onTrayAvailability(listener: (a: TrayAvailability) => void): Unsubscribe {
+    return this.trayChannel.add(listener);
   }
 
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe {

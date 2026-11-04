@@ -874,6 +874,12 @@ export interface AgentStatus {
   message: string | null;
 }
 
+/**
+ * Whether the desktop shows Dyno's tray icons (the engine's `TrayAvailability`, `crates/dyno-core/src/tray_host.rs`). On Linux the
+ * icons show only when a StatusNotifier host is running; without one the engine sends the whole note to show as `hint`.
+ */
+export type TrayAvailability = 'shown' | { noHost: { hint: string } };
+
 // --------------------------------------------------------------------------------------------------------- errors
 
 export type ErrorCode =

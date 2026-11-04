@@ -8,9 +8,10 @@ import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
 
 const NOW = 1_700_000_000_000;
+const TRAY_NOTE = "Your desktop isn't showing tray icons. On GNOME, turn on the AppIndicator extension (gnome-shell-extension-appindicator), then Dyno's icons appear.";
 
-function setup<T>(component: new () => T) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+function setup<T>(component: new () => T, options: ConstructorParameters<typeof MockBackend>[0] = {}) {
+  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, ...options });
   TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(component);
   f.detectChanges();
@@ -68,6 +69,31 @@ describe('dy-popup-widgets', () => {
     await choices.load();
     expect(choices.popoverDefault('diskSpace')).toEqual({ diskSpace: { volume: 'all' } });
     expect(choices.popoverDefault('network')).toBe('network');
+  });
+});
+
+describe('dy-menu-bar-items tray note', () => {
+  const note = (el: HTMLElement) => el.querySelector('[data-testid="tray-no-host"]');
+
+  it('shows no note when the desktop shows the tray icons', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    expect(note(el)).toBeNull();
+  });
+
+  it('tells the person what to turn on when there is no tray host, and clears it when the host appears', async () => {
+    const { f, mock, el } = setup(MenuBarItems, { tray: 'noHost' });
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(note(el)?.textContent?.trim()).toBe(TRAY_NOTE);
+    });
+    expect(note(el)?.getAttribute('role')).toBe('note');
+    mock.pushTrayAvailability('shown');
+    f.detectChanges();
+    expect(note(el)).toBeNull();
   });
 });
 

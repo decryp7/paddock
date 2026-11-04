@@ -442,6 +442,12 @@ pub enum TrayCommand {
         /// The unavailable frame of every item.
         frames: Vec<(String, Frame)>,
     },
+    /// The desktop's tray host appeared after the icons were made (Linux: an extension turned on, a panel that started late):
+    /// make every icon again so it registers with the host, starting from these frames.
+    Rebuild {
+        /// The unavailable frame of every item.
+        frames: Vec<(String, Frame)>,
+    },
 }
 
 /// The native operations [`apply`] needs: [`NativeOps`] over real icons, a fake in the tests.
@@ -540,6 +546,27 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
         }
         TrayCommand::Paint { item, frame } => {
             paint_one(ops, state, &item, &frame);
+            Ok(())
+        }
+        TrayCommand::Rebuild { frames } => {
+            let specs: Vec<ItemSpec> = {
+                let items = lock(&state.items);
+                items.values().cloned().collect()
+            };
+            logging::info(&format!("tray rebuild: making {} icon(s) again", specs.len()));
+            for spec in &specs {
+                ops.remove(&spec.id);
+                lock(&state.painted).remove(&spec.id);
+                // The next live picture and tooltip are always sent again.
+                lock(&state.drawn).remove(&spec.id);
+                lock(&state.refused).remove(&spec.id);
+                let first = frames.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f);
+                let tooltip = first_tooltip(spec, first);
+                if let Err(e) = ops.make(spec, first, &tooltip) {
+                    logging::info(&format!("tray rebuild: icon {} could not be made again: {e}", tray_id(&spec.id)));
+                    lock(&state.items).remove(&spec.id);
+                }
+            }
             Ok(())
         }
         TrayCommand::Disconnected { frames } => {
@@ -661,6 +688,14 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, 
     })?
 }
 
+/// Makes every icon again from the unavailable frames (the tray host appeared); the next live picture follows. Returns at once.
+pub fn rebuild(app: &AppHandle<Wry>) {
+    let Some(state) = app.try_state::<TrayState>() else { return };
+    let specs: Vec<ItemSpec> = lock(&state.items).values().cloned().collect();
+    let frames = crate::tray_model::TrayItems::new(specs, crate::tray_model::Env::native()).unavailable_frames(dark_taskbar());
+    send(app, TrayCommand::Rebuild { frames });
+}
+
 /// Draws a frame on an item. Returns at once; the main thread does it.
 pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     send(
@@ -719,7 +754,14 @@ impl TrayBackend<Wry> for DynoTray {
         // The icons start as unavailable at their final widths; the first live update replaces them.
         let initial =
             crate::tray_model::TrayItems::new(self.items.clone(), crate::tray_model::Env::native()).unavailable_frames(dark_taskbar());
-        sync_items(app, &self.items, &initial).map_err(|e| e.to_string())
+        sync_items(app, &self.items, &initial).map_err(|e| e.to_string())?;
+        // The icons exist; whether the desktop shows them is another matter (Linux: a StatusNotifier host). With none the shell
+        // is told there is no tray (a hidden start opens the window), and told again when the host appears.
+        if crate::tray_host::start(app) {
+            Ok(())
+        } else {
+            Err("the desktop shows no tray icons (no StatusNotifier host)".to_string())
+        }
     }
 
     fn update(&self, _app: &AppHandle<Wry>, _view: &TrayView) -> Result<(), String> {

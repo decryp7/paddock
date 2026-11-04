@@ -265,6 +265,7 @@
         "popover_preview",
         "popover_snapshot",
         "settings_*",
+        "tray_availability",
         "widget_choices",
         "widget_layout"
       ]
@@ -299,7 +300,8 @@
     }
   },
   "healthServices": [
-    "dy.agent"
+    "dy.agent",
+    "dy.tray"
   ],
   "notificationKinds": {
     "dy.alarm": {
@@ -326,6 +328,7 @@
     "dy.export-report": "Export Markdown…",
     "dy.file-hash.title": "Search the file's hash on VirusTotal",
     "dy.health.agent": "the Dyno agent",
+    "dy.health.tray": "the tray icons",
     "dy.lockers.title": "What is locking this file?",
     "dy.notification.alarm": "Alarm",
     "dy.page.alarms": "Alarms",

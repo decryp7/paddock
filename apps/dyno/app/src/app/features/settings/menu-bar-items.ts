@@ -9,6 +9,7 @@ import { Notifier } from '../../shared/notifier';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { optionLabel } from '../widgets/option-label';
 import { WidgetChoicesStore } from '../../state/widget-choices';
+import { TrayAvailabilityStore } from '../../state/tray-availability.store';
 
 /** The two ways a number draws (the engine's `NumberFormat`). */
 const FORMAT_OPTIONS: PdSelectOption[] = [
@@ -27,6 +28,10 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [MatFormField, MatLabel, MatInput, PdSelect, PdStatusGlyph, PdWidgetChooser, PdWidgetOption],
   template: `
+    <!-- The engine's note when the desktop shows no tray icons (Linux without a StatusNotifier host). -->
+    @if (tray.note(); as hint) {
+      <p class="info warn" role="note" data-testid="tray-no-host"><pd-status-glyph status="warning" [size]="16" />{{ hint }}</p>
+    }
     @if (view(); as v) {
       @if (choices.ready()) {
       <p class="sub">What the tray / menu-bar icon draws live. Add up to {{ v.catalogue.surface.maxPlacements }}, drag to reorder. Changes apply at once; Undo is in the message that follows.</p>
@@ -77,10 +82,13 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     /* The family's info note (as the chooser's limit note): a tinted strip with the info glyph, clear of the list below it. */
     .info { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-3); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .info pd-status-glyph { color: var(--pd-info); flex: none; }
+    .info.warn { background: var(--pd-warning-tint); }
+    .info.warn pd-status-glyph { color: var(--pd-warning); }
   `,
 })
 export class MenuBarItems implements OnInit {
   protected readonly choices = inject(WidgetChoicesStore);
+  protected readonly tray = inject(TrayAvailabilityStore);
   private readonly layouts = inject(WidgetLayouts);
   private readonly notifier = inject(Notifier);
   protected readonly view = this.layouts.menuBar;

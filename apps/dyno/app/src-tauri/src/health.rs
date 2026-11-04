@@ -14,6 +14,10 @@ use tauri::{AppHandle, Manager, Runtime};
 /// The Dyno agent.
 pub const AGENT: &str = "dy.agent";
 
+/// The tray icons: whether the desktop shows them (Linux needs a StatusNotifier host). A line on the chip, with nothing to retry:
+/// it clears by itself when a host appears.
+pub const TRAY: &str = "dy.tray";
+
 /// How long a repair waits for the link to come back before it says it did not.
 const REPAIR_WAIT: Duration = Duration::from_secs(8);
 
@@ -74,6 +78,33 @@ pub fn stall_repair(stall: Stall) -> Option<RepairAction> {
     }
 }
 
+/// Why the tray icons are not shown, or `None` when they are: the engine's note, split into what is wrong and what to do.
+pub fn tray_problem(availability: &dyno_core::tray_host::TrayAvailability) -> Option<Cause> {
+    use dyno_core::tray_host::{TrayAvailability, NO_HOST_ADVICE, NO_HOST_SUMMARY};
+    match availability {
+        TrayAvailability::Shown => None,
+        TrayAvailability::NoHost { .. } => Some(Cause::new(NO_HOST_SUMMARY).hint(NO_HOST_ADVICE).code("dy.tray.no-host")),
+    }
+}
+
+/// Reports the tray's availability to the chip: the line while no host shows the icons, cleared when one does.
+pub fn report_tray<R: Runtime>(app: &AppHandle<R>, availability: &dyno_core::tray_host::TrayAvailability) {
+    let Some(health) = app.try_state::<Arc<Health>>().map(|h| h.inner().clone()) else {
+        crate::logging::info("tray host: the health chip is not set up yet, so it is not told");
+        return;
+    };
+    match tray_problem(availability) {
+        Some(cause) => {
+            health.down(TRAY, cause, None);
+        }
+        None => {
+            if health.is_in_outage(TRAY) {
+                health.ok(TRAY);
+            }
+        }
+    }
+}
+
 /// What the repair reaches: the app, once it is set up (the specs are built before the app exists).
 pub struct Hub<R: Runtime> {
     app: Arc<OnceLock<AppHandle<R>>>,
@@ -102,7 +133,10 @@ impl<R: Runtime> Hub<R> {
     /// The services, in the order the status bar lists them.
     pub fn services(&self) -> Vec<ServiceSpec> {
         let hub = self.clone();
-        vec![ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect())]
+        vec![
+            ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
+            ServiceSpec::new(TRAY, "the tray icons"),
+        ]
     }
 
     /// The repair: the link reconnects with backoff on its own, so this waits (bounded) for it and says what it found.
@@ -198,6 +232,19 @@ mod tests {
         assert_eq!(stall_repair(Stall::AgentNotAnswering), Some(RepairAction::Retry));
         // The plain "still starting" status stays no outage: only the stall the link reports after a while is one.
         assert!(agent_problem(&status(AgentState::Starting, Some("still starting"))).is_none());
+    }
+
+    #[test]
+    fn a_desktop_without_a_tray_host_gets_a_chip_line_with_the_extension_to_turn_on() {
+        use dyno_core::tray_host::TrayAvailability;
+        assert!(tray_problem(&TrayAvailability::Shown).is_none());
+        let cause = tray_problem(&TrayAvailability::no_host()).unwrap();
+        assert_eq!(cause.message, "Your desktop isn't showing tray icons.");
+        assert!(cause
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("gnome-shell-extension-appindicator")));
+        assert_eq!(cause.code.as_deref(), Some("dy.tray.no-host"));
     }
 
     #[test]

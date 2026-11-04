@@ -130,6 +130,18 @@ pub fn tray_available<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.try_state::<Tray<R>>().is_some_and(|t| t.available())
 }
 
+/// Tells the shell whether the desktop shows the tray, for an app whose icon can exist without being shown (Linux without a
+/// StatusNotifier host, until one appears). With no tray a hidden start opens the window and closing the last window quits
+/// ([`creates_main_at_start`](crate::close::creates_main_at_start), `decide_close`). Does nothing when the app has no tray at all.
+pub fn set_tray_available<R: Runtime>(app: &AppHandle<R>, available: bool) {
+    let Some(tray) = app.try_state::<Tray<R>>() else {
+        return;
+    };
+    if tray.available.swap(available, Ordering::SeqCst) != available {
+        log::info!(Available = available; "The desktop now {} the tray", if available { "shows" } else { "does not show" });
+    }
+}
+
 /// Redraws the tray when its model changed, on the main thread (tray calls wait for it). Never fails; callable from
 /// any thread.
 pub fn refresh_tray<R: Runtime>(app: &AppHandle<R>) {

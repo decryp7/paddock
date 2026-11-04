@@ -263,6 +263,7 @@ describe('TauriBackend: push channels', () => {
     ['onAgentStatus', EVENTS.agent],
     ['onDiskScan', EVENTS.diskScan],
     ['onDiskVolumes', EVENTS.diskVolumes],
+    ['onTrayAvailability', EVENTS.tray],
   ] as const)('%s listens to its own event', async (method, event) => {
     const { backend, emit, listen, stops } = fake();
     const l = vi.fn();
@@ -276,6 +277,15 @@ describe('TauriBackend: push channels', () => {
     expect(stops[0]).toHaveBeenCalled();
     emit(event, { id: 2 });
     expect(l).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TauriBackend: the tray host', () => {
+  it('asks the app (not the agent) whether the desktop shows the tray icons, and the event is dyno://tray', async () => {
+    const { backend, invoke } = fake();
+    await backend.trayAvailability();
+    expect(invoke).toHaveBeenLastCalledWith('tray_availability');
+    expect(EVENTS.tray).toBe('dyno://tray');
   });
 });
 

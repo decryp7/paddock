@@ -184,7 +184,7 @@ describe('Dyno manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
     configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
-    expect([...manifest.healthServices].sort()).toEqual(['dy.agent']);
+    expect([...manifest.healthServices].sort()).toEqual(['dy.agent', 'dy.tray']);
     const fs = await nodeFs();
     if (env('PADDOCK_WRITE_MANIFEST') === '1') fs.writeFileSync(MANIFEST, serializeManifest(manifest));
     expect(manifestDrift(manifest, fs.readFileSync(MANIFEST, 'utf8'))).toEqual([]);
