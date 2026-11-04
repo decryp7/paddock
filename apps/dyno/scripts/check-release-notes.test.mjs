@@ -12,8 +12,8 @@ test('the shipped notes (the newest release) have no ADR, work-package or identi
 });
 
 test('finds each kind of reference', () => {
-  const md = '# Changelog\n\n## [2.0.0] - 2026-01-01\n\n### Added\n\n- Benchmarks, disk (ADR 0030 WP-B3)\n- Helper requests for SCHEDULE_WAKE and more\n- A plain sentence.\n';
-  assert.equal(problems(md).length, 2);
+  const md = '# Changelog\n\n## [2.0.0] - 2026-01-01\n\n### Added\n\n- Benchmarks, disk (ADR 0030 WP-B3)\n- Helper requests for SCHEDULE_WAKE and more\n- A plain sentence.\n- Use `dyno awake` here\n';
+  assert.equal(problems(md).length, 3);
   assert.match(problems(md)[0], /ADR 0030/);
 });
 

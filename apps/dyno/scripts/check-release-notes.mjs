@@ -8,8 +8,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-/** What a user must not read: an ADR number, a work package, a SNAKE_CASE identifier. */
-export const FORBIDDEN = [/ADR \d/, /WP-/, /[A-Z]{2,}_[A-Z]/];
+/** What a user must not read: an ADR number, a work package, a SNAKE_CASE identifier, or a backtick (the dialog shows text as it is written, so code marks appear raw). */
+export const FORBIDDEN = [/ADR \d/, /WP-/, /[A-Z]{2,}_[A-Z]/, /`/];
 
 /** The newest release's section: its heading and body lines. */
 export function newestSection(changelog) {
