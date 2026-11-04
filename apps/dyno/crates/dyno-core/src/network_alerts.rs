@@ -135,7 +135,10 @@ mod tests {
             observation(&listener(Exposure::AllInterfaces), ON).unwrap().detail,
             "TCP, on every network interface (reachable from the network)."
         );
-        assert_eq!(observation(&listener(Exposure::Interface), ON).unwrap().detail, "TCP, on one network interface.");
+        assert_eq!(
+            observation(&listener(Exposure::Interface), ON).unwrap().detail,
+            "TCP, on one network interface."
+        );
         // The title names the program; the detail never does.
         for e in [listener(Exposure::AllInterfaces), listener(Exposure::Interface), host()] {
             assert!(!observation(&e, ON).unwrap().detail.contains("node"));
