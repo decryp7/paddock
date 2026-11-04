@@ -3,12 +3,12 @@
 <h1 align="center">Paddock</h1>
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=7877eb0c" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=867f7026" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dashed lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses, the workbench for the IDE-style apps, and the planned tool Scrutineer, which signs every app's installers" width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
 
-Paddock is a family of seven desktop tools for people who keep software and the machines it runs on healthy, and the
+Paddock is a family of eight desktop apps and one tool for people who keep software and the machines it runs on healthy, and the
 foundation they share. Each app does one job well and is useful alone. Together they cover the loop from an incident in
 production, through understanding the code and writing a test, to running it on CI. Everything runs on your computer: no
 cloud, no account, no telemetry. Optional local AI, served by one app, makes each of them smarter without sending a byte
@@ -16,7 +16,7 @@ anywhere.
 
 ## The apps
 
-All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). Scrutineer, a tool rather than an app, is listed in the same table. The old per-app repositories are archived (read-only); their past releases stay downloadable there.
+Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). Scrutineer, a tool rather than an app, is listed in the same table. The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
 | App&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | What it does | Status |
 |---|---|---|
@@ -66,7 +66,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 ## Repository layout
 
 ```
-apps/<app>/       the seven apps, plus the shell and workbench demos
+apps/<app>/       one folder per app (Recce gets its folder when work starts), plus the shell and workbench demos
 crates/           shared Rust crates (Gitea cargo registry)
 ui/               @decryp7/paddock-ui and @decryp7/paddock-e2e
 icons/            the isometric icon family, per app and platform
