@@ -11,6 +11,7 @@ use dyno_agent::helper_centre::{HelperCentre, HelperInstaller};
 use dyno_agent::helper_link::{HelperLink, HelperTransport, TransportError};
 use dyno_core::btm::{LoginItemsReader, LoginItemsReply};
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_extras::{BackupVersion, ExtrasReader, WakeRequest};
 use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::{access, visibility, OthersPolicy, Standing};
 use dyno_core::helper_requests::{SmartQuery, ToolKind};
@@ -61,6 +62,10 @@ pub struct Readers {
     pub traffic: Vec<TrafficCounter>,
     /// The SMART reply.
     pub smart: SmartReply,
+    /// What `powercfg /requests` lists on the helper's computer.
+    pub wake_requests: Vec<WakeRequest>,
+    /// What `wbadmin get versions` lists on the helper's computer.
+    pub backup_versions: Vec<BackupVersion>,
 }
 
 impl Default for Readers {
@@ -76,6 +81,8 @@ impl Default for Readers {
                 skipped: vec![],
                 not_visited: 0,
             },
+            wake_requests: Vec::new(),
+            backup_versions: Vec::new(),
         }
     }
 }
@@ -90,6 +97,15 @@ struct Traffic(Vec<TrafficCounter>);
 impl ProcessTraffic for Traffic {
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
         Ok(self.0.clone())
+    }
+}
+struct Extras(Vec<WakeRequest>, Vec<BackupVersion>);
+impl ExtrasReader for Extras {
+    fn wake_requests(&self) -> Result<Vec<WakeRequest>, PlatformError> {
+        Ok(self.0.clone())
+    }
+    fn backup_versions(&self) -> Result<Vec<BackupVersion>, PlatformError> {
+        Ok(self.1.clone())
     }
 }
 struct Items;
@@ -135,7 +151,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         clock: Box::new(|| 1_000),
         login_items: Box::new(Items),
         holders: Box::new(dyno_core::helper_holders::NoHolders),
-        extras: Box::new(dyno_core::helper_extras::NoExtras),
+        extras: Box::new(Extras(readers.wake_requests, readers.backup_versions)),
         counters: Box::new(dyno_core::helper_counters::NoCounters),
         memory: Box::new(Memory(readers.memory)),
         processes: Box::new(dyno_core::helper_processes::NoProcesses),
