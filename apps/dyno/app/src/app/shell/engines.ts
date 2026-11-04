@@ -31,6 +31,19 @@ export class BrowserEngines {
   readonly jobs = new MemoryJobsBackend((id) => this.cancelJob(id));
   /** Only the shell's Appearance section: Dyno's own settings are its page in the window. */
   readonly settings = new MemorySettingsBackend({ ...SETTINGS_OVERVIEW_FIXTURE, sections: SETTINGS_OVERVIEW_FIXTURE.sections.filter((s) => s.id === 'pd.appearance') }, {});
+
+  constructor() {
+    // Mock only: `?seed=network-alarms` lists what Dyno's network rules post (the engine's own text), without a toast, for the layout checks and screenshots.
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('seed') === 'network-alarms') seedNetworkAlarms(this.centre);
+  }
+}
+
+/** The text of `network_alerts.rs`: the title names the program, the body adds only what the title lacks. Invented hosts (TEST-NET addresses). */
+export function seedNetworkAlarms(centre: MemoryNotificationCentre): void {
+  const post = (cause: string, severity: 'info' | 'warning', title: string, body: string): void => void centre.post({ cause, source: 'alarm', severity, title, body, quiet: true });
+  post('network:newRemoteHost:browser:203.0.113.17', 'info', 'browser.exe connected to a new host', 'Address 203.0.113.17:443');
+  post('network:newRemoteHost:mailer:198.51.100.23', 'info', 'mailer.exe connected to a new host', 'Address 198.51.100.23:993');
+  post('network:newExposedListener:node:tcp:3000', 'warning', 'node started listening on port 3000', 'TCP, on every network interface (reachable from the network).');
 }
 
 let about: AboutBackend | null = null;

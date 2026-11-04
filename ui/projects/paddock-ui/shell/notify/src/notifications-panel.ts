@@ -40,7 +40,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     </div>
     @if (store.notices().length) {
       <div class="pd-select-bar">
-        <mat-checkbox class="pd-pick" [checked]="allSelected()" [indeterminate]="someSelected()" data-testid="notices-select-all" (change)="toggleAll()">{{ t.selectAll }}</mat-checkbox>
+        <mat-checkbox class="pd-pick" [checked]="allSelected()" [indeterminate]="someSelected()" [aria-label]="t.selectAll" data-testid="notices-select-all" (change)="toggleAll()"><span class="pd-select-text">{{ t.selectAllLabel }}</span></mat-checkbox>
         <span class="pd-spacer"></span>
         @if (selectedIds().length) {
           <button type="button" matButton="outlined" class="pd-nowrap" data-testid="notices-delete-selected" (click)="deleteSelected()">{{ deleteSelectedLabel() }}</button>
@@ -101,12 +101,13 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     .pd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-1); }
     .pd-nowrap { white-space: nowrap; }
     /* The select-all row: its box sits in the items' checkbox column (past the item's border and padding). */
-    .pd-select-bar { display: flex; align-items: center; gap: var(--pd-space-1); padding-inline-start: var(--pd-notice-inset); }
+    .pd-select-bar { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height); padding-inline-start: var(--pd-notice-inset); }
+    .pd-select-text { font-size: var(--pd-text-caption); color: var(--pd-text-muted); }
     .pd-spacer, .pd-grow { flex: 1; }
     .pd-err { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-danger); margin: 0; }
     h3 { margin: var(--pd-space-2) 0 0; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
     ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--pd-space-1); }
-    .pd-notice { position: relative; border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: grid; grid-template-columns: var(--pd-pick-size) var(--pd-dot-size) minmax(0, 1fr) auto; align-items: start; column-gap: var(--pd-space-1); row-gap: var(--pd-space-1); }
+    .pd-notice { position: relative; border: 1px solid var(--pd-hairline); border-inline-start: var(--pd-notice-bar) solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: grid; grid-template-columns: var(--pd-checkbox-box-size) var(--pd-dot-size) minmax(0, 1fr) auto; align-items: start; column-gap: var(--pd-space-1); row-gap: var(--pd-space-1); }
     .pd-notice[data-severity='error'], .pd-notice[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
     .pd-notice[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
     .pd-notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
@@ -114,9 +115,9 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     /* One grid: [pick][dot][title][time], the body and buttons under the title (column 3 to the end). The pick column is the touch target
        (density-aware); the shared rule in _material.scss pulls the box to the cell's left edge. The first line's height is one value, so the
        box, the dot and the time pin to it however many lines the title wraps to. */
-    :host { --pd-pick-size: var(--pd-control-height); --pd-dot-size: 7px; --pd-notice-line: calc(var(--pd-text-body) * 1.4); --pd-notice-inset: calc(3px + var(--pd-space-2)); }
-    .pd-pick { --mat-checkbox-state-layer-size: var(--pd-pick-size); grid-column: 1; margin-block: calc((var(--pd-notice-line) - var(--pd-pick-size)) / 2); }
-    .pd-select-bar .pd-pick { margin-block: 0; }
+    :host { --pd-pick-size: var(--pd-control-height); --pd-dot-size: 7px; --pd-notice-line: var(--pd-lh-body); --pd-notice-bar: 3px; --pd-notice-inset: calc(var(--pd-notice-bar) + var(--pd-space-2)); }
+    .pd-pick { --mat-checkbox-state-layer-size: var(--pd-pick-size); grid-column: 1; margin-block: calc((var(--pd-notice-line) - var(--pd-pick-size)) / 2); margin-inline-end: calc((var(--pd-checkbox-box-size) - var(--pd-pick-size)) / 2); }
+    .pd-select-bar .pd-pick { margin-block: 0; margin-inline-end: 0; }
     .pd-dot { grid-column: 2; width: var(--pd-dot-size); height: var(--pd-dot-size); margin-block: calc((var(--pd-notice-line) - var(--pd-dot-size)) / 2); border-radius: 50%; }
     .pd-unread .pd-dot { background: var(--pd-accent); }
     /* Wraps (two lines, then an ellipsis with the full text in the tooltip): a one-line ellipsis cut titles with room to spare. */
@@ -151,6 +152,7 @@ export class PdNotificationsPanel {
     markAllRead: $localize`:@@pd.notifications.mark-all-read:Mark all read`,
     retry: $localize`:@@pd.notifications.retry:Retry`,
     selectAll: $localize`:@@pd.notifications.select-all:Select all notifications`,
+    selectAllLabel: $localize`:@@pd.notifications.select-all-label:Select all`,
     deleteAll: $localize`:@@pd.notifications.delete-all:Delete all`,
     unreadMark: $localize`:@@pd.notifications.unread-mark:, unread`,
   };

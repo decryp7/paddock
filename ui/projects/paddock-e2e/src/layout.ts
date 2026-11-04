@@ -280,6 +280,16 @@ export async function rowPinProblems(root: Locator, tolerance = 3): Promise<{ pr
         if (Math.abs(c - line) > tol) problems.push(`${id}: ${what} centre is ${(c - line).toFixed(1)} px from the title's first line`);
       }
     }
+    // The box-to-dot gap equals the dot-to-title gap (one rhythm), within 1.5 px.
+    for (const item of Array.from(rootEl.querySelectorAll('.pd-notice'))) {
+      const box = item.querySelector('.mdc-checkbox__background');
+      const dot = item.querySelector('.pd-dot');
+      const title = item.querySelector('.pd-title');
+      if (!box || !dot || !title) continue;
+      const a = dot.getBoundingClientRect().left - box.getBoundingClientRect().right;
+      const b = title.getBoundingClientRect().left - dot.getBoundingClientRect().right;
+      if (Math.abs(a - b) > 1.5) problems.push(`${item.getAttribute('data-testid')}: box-to-dot gap ${a.toFixed(1)} px differs from dot-to-title gap ${b.toFixed(1)} px`);
+    }
     return { problems, wrapped };
   }, tolerance);
 }
