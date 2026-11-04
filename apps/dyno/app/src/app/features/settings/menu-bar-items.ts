@@ -36,16 +36,19 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
         @for (kind of kinds(); track kind) {
           <ng-template [pdWidgetOption]="kind" [pdWidgetOptionOf]="sample" let-p>
-            <pd-select [class.narrow]="kind === 'number'" [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
-            @if (kind === 'number') {
-              <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
-              <mat-form-field class="short unit"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
-              @if (support().fixed; as fixed) {
-                <span class="format fixed">{{ fixed }}</span>
-              } @else {
-                <pd-select class="format" [panelWidth]="null" [options]="formatOptions()" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
+            <div class="controls">
+              <pd-select [class.narrow]="kind === 'number'" [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
+              @if (kind === 'number') {
+                <span class="pair">
+                  <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
+                  <mat-form-field class="short unit"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
+                </span>
+                <!-- Where the tray draws one layout the note above says so once; there is no choice to show per row. -->
+                @if (!support().fixed) {
+                  <pd-select class="format" [panelWidth]="null" [options]="formatOptions()" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
+                }
               }
-            }
+            </div>
           </ng-template>
         }
       </pd-widget-chooser>
@@ -69,7 +72,10 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     /* Wide enough for "Label over value" in the trigger and the list, on one line. */
     /* Room for "Label over value" and at least 8 px before the caret. */
     .format { width: 12rem; flex: none; }
-    .fixed { color: var(--text-2); font-size: var(--fs-sm); }
+    /* The row's controls are one group: on a narrow window they wrap together under the description's column (grip, icon and two
+       gaps in), with "more" beside them; Label and Unit never part. */
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); flex: 0 1 auto; margin-inline-start: calc(24px + 16px + 2 * var(--pd-space-2)); }
+    .pair { display: flex; gap: var(--pd-space-2); flex: none; }
     .sub { color: var(--text-2); font-size: var(--fs-sm); margin-block: 0 var(--sp-3); }
     .note { color: var(--text-2); font-size: var(--fs-sm); margin-block-start: var(--sp-3); }
     /* The family's info note (as the chooser's limit note): a tinted strip with the info glyph, clear of the list below it. */

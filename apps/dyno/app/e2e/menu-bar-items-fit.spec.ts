@@ -40,9 +40,11 @@ test('a number row shows its format and description whole', async ({ browser, ba
   const metric = page.locator('mat-select[aria-label^="Metric of"]').first();
   await metric.click();
   await page.getByRole('option', { name: 'Memory pressure' }).click();
-  const metricCut = await metric.locator('.mat-mdc-select-value-text').evaluate((el) => ({ text: el.textContent?.trim(), cut: el.scrollWidth - el.clientWidth }));
-  expect(metricCut.text).toBe('Memory pressure');
-  expect(metricCut.cut, 'the metric select cuts "Memory pressure"').toBeLessThanOrEqual(0);
+  // The choice goes to the engine and back: wait on the shown value, never on time.
+  const metricText = metric.locator('.mat-mdc-select-value-text');
+  await expect(metricText).toHaveText('Memory pressure');
+  const metricCut = await metricText.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(metricCut, 'the metric select cuts "Memory pressure"').toBeLessThanOrEqual(0);
   await trigger.click();
   const options = page.getByRole('option');
   await expect(options.first()).toBeVisible();
@@ -59,18 +61,52 @@ test('a number row shows its format and description whole', async ({ browser, ba
   await ctx.close();
 });
 
-/** Where the tray draws one layout, the row says which, in words: there is no select left to contradict the note. */
-for (const [tray, text] of [[16, 'Value only (label in the tooltip)'], [24, 'Label over value']] as const) {
-  test(`a Windows ${tray} px tray says "${text}" instead of offering a format`, async ({ browser, baseURL }) => {
-    const ctx = await browser.newContext({ baseURL, viewport: { width: 980, height: 900 } });
-    const page = await ctx.newPage();
-    await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: `?mock=windows&tray=${tray}` }));
-    await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-    await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Dyno', exact: true }).click();
-    const first = page.locator('.pd-wc-list').first().locator('li.pd-wc-item').first();
-    await expect(first.locator('.fixed')).toHaveText(text);
-    await expect(page.locator('mat-select[aria-label^="Format of"]')).toHaveCount(0);
-    await expect(page.locator('p.info[role="note"]')).toBeVisible();
-    await ctx.close();
+/**
+ * Where the tray draws one layout there is no per-row format text: the info note says it once, and the row is the metric, Label,
+ * Unit and "more". At 980 px each row is one line; at 760 px the controls wrap as a group onto a second line under the
+ * description's column, with "more" beside them.
+ */
+for (const [tray, noteText] of [[16, '16 px, too small for a label'], [24, 'one number layout']] as const) {
+  test(`a Windows ${tray} px tray: rows say nothing per row, stay on one line, and wrap under the description`, async ({ browser, baseURL }) => {
+    for (const width of [980, 760]) {
+      const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 } });
+      const page = await ctx.newPage();
+      await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: `?mock=windows&tray=${tray}` }));
+      await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+      await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Dyno', exact: true }).click();
+      await expect(page.locator('mat-select[aria-label^="Format of"]')).toHaveCount(0);
+      await expect(page.locator('p.info[role="note"]')).toContainText(noteText);
+      const rows = page.locator('.pd-wc-list').first().locator('li.pd-wc-item');
+      await expect(rows).toHaveCount(4);
+      await expect(rows.first().locator('.fixed'), 'the note says it once; no per-row text').toHaveCount(0);
+      const found = await rows.evaluateAll((lis) =>
+        lis.map((li) => {
+          const box = (sel: string) => li.querySelector(sel)!.getBoundingClientRect();
+          const desc = li.querySelector('.pd-wc-txt span')!;
+          const metric = box('mat-select');
+          const more = box('.pd-wc-more');
+          const label = box('input[aria-label^="Label of"]');
+          const unit = box('input[aria-label^="Unit of"]');
+          const d = box('.pd-wc-txt');
+          return {
+            descLines: desc.getBoundingClientRect().height / parseFloat(getComputedStyle(desc).lineHeight),
+            moreDy: Math.abs(more.top + more.height / 2 - (metric.top + metric.height / 2)),
+            // Label and Unit stay together on one line.
+            pairDy: Math.abs(label.top - unit.top),
+            // No control sits left of the description's column.
+            leftOfText: Math.min(metric.left, label.left, unit.left) - d.left,
+            height: li.getBoundingClientRect().height,
+          };
+        }),
+      );
+      for (const r of found) {
+        expect(r.descLines, `${width}: the description wraps`).toBeLessThan(1.5);
+        expect(r.moreDy, `${width}: "more" is not level with the controls`).toBeLessThan(24);
+        expect(r.pairDy, `${width}: Label and Unit are on different lines`).toBeLessThan(4);
+        expect(r.leftOfText, `${width}: a control sits left of the description column`).toBeGreaterThanOrEqual(-2);
+        if (width === 980) expect(r.height, 'the row wraps at 980 px').toBeLessThan(70);
+      }
+      await ctx.close();
+    }
   });
 }

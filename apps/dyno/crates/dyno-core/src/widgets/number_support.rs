@@ -162,4 +162,27 @@ mod tests {
             "{big}"
         );
     }
+
+    /// The mock's imitation of this function is checked against these values (`number-support-golden.spec.ts`): the file is
+    /// checked on every test run and `PADDOCK_WRITE_TS=1` rewrites it.
+    #[test]
+    fn the_generated_golden_values_are_current() {
+        use paddock_commands::testing::{self, WriteMode};
+        use std::path::Path;
+        let case = |name: &str, platform, px| {
+            format!(
+                "  {name}: {},\n",
+                serde_json::to_string(&number_support(platform, px)).expect("json")
+            )
+        };
+        let body = format!(
+            "// Generated from `number_support` (dyno-core). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p dyno-core --lib widgets::number_support.\n\nexport const NUMBER_SUPPORT_GOLDEN = {{\n{}{}{}{}}} as const;\n",
+            case("mac", TrayPlatform::Mac, 18),
+            case("win16", TrayPlatform::Windows, 16),
+            case("win20", TrayPlatform::Windows, 20),
+            case("win24", TrayPlatform::Windows, 24),
+        );
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src/app/core/generated/number-support-golden.ts");
+        testing::sync_generated(&path, &body, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+    }
 }

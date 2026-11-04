@@ -198,7 +198,7 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
     expect(el.querySelector('[role="note"]')).toBeNull();
   });
 
-  it('says what a small Windows tray draws instead of a choice: value only, label in the tooltip', async () => {
+  it('says why a small Windows tray has no format to choose once, in the note, and not on every row', async () => {
     const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', trayPx: 16 });
     TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
     const f = TestBed.createComponent(MenuBarItems);
@@ -210,13 +210,14 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
     });
     // No select to contradict the note: the row says what is drawn.
     expect(el.querySelector('mat-select[aria-label^="Format of"]')).toBeNull();
-    const fixed = [...el.querySelectorAll('.fixed')].map((x) => x.textContent?.trim());
-    expect(fixed).toEqual(Array(4).fill('Value only (label in the tooltip)'));
+    expect(el.querySelectorAll('.fixed')).toHaveLength(0);
     expect(el.querySelector('[role="note"]')?.textContent).toContain('16 px, too small for a label');
     expect(el.textContent).not.toContain('Label over value');
+    // Label and Unit are one group.
+    expect(el.querySelectorAll('.pair input')).toHaveLength(8);
   });
 
-  it('says label over value as plain text where the Windows icon has room for the label', async () => {
+  it('has no format select where the Windows icon has room for the label, and the note says the one layout', async () => {
     const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', trayPx: 24 });
     TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
     const f = TestBed.createComponent(MenuBarItems);
@@ -227,7 +228,8 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
       expect(rows(el)).toHaveLength(4);
     });
     expect(el.querySelector('mat-select[aria-label^="Format of"]')).toBeNull();
-    expect([...el.querySelectorAll('.fixed')].map((x) => x.textContent?.trim())).toEqual(Array(4).fill('Label over value'));
+    expect(el.querySelectorAll('.fixed')).toHaveLength(0);
+    expect(el.querySelector('[role="note"]')?.textContent).toContain('one number layout');
   });
 
   it('reads the choices again when Settings opens', async () => {
