@@ -228,18 +228,42 @@ export async function helperProtection() {
   return result('Windows: WP-SEC folder protection (owner, no inheritance, standard-user denials incl. junctions)', checks, evidence, 'owner, inheritance and denials as designed');
 }
 
-/** The helper's served-kinds line (ADR 0052 section 1.1 / plan 7.2): what it served, read from its log. */
-export function servedCounts() {
-  const lines = ssh(`Get-Content ${HELPER}\\helper.log -ErrorAction SilentlyContinue | Select-String -Pattern 'served' | Select-Object -Last 3 | ForEach-Object { $_.Line }`, { admin: true }).split('\n').filter(Boolean);
-  return result('Windows: the helper reports which readings it served (served counts)', [{ ok: lines.length > 0, detail: lines.length ? `the helper log has ${lines.length} served line(s)` : 'no served-kinds line in helper.log (the counter is not written)' }], lines, 'served counts logged');
+/**
+ * Tray tooltips. The registry's InitialTooltip is only what Windows recorded at registration, so it is informational. The live tooltip is read
+ * through UI Automation (the taskbar button's name for each Dyno icon, from the in-session actor) and from the app's own log lines "tooltip sent".
+ */
+export async function trayTooltips(actor) {
+  const checks = [];
+  const evidence = [];
+  const reg = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "$($_.InitialTooltip)|promoted=$($_.IsPromoted)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
+  evidence.push(`registry InitialTooltip (informational only): ${reg.join(' ; ')}`);
+  checks.push({ ok: reg.length > 0, detail: `${reg.length} Dyno tray icon(s) registered with Windows (their recorded initial tooltips are informational)` });
+  let names = [];
+  if (actor) {
+    ssh(`Get-ChildItem 'HKCU:\\Control Panel\\NotifyIconSettings' | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.ExecutablePath -like '*dyno-app.exe') { Set-ItemProperty $_.PSPath IsPromoted 1 -Type DWord } }`);
+    await sleep(2500);
+    names = (await actor.send('tray Dyno')).split('\n').map((l) => l.split('\t')[0].trim()).filter(Boolean);
+  }
+  evidence.push(`live taskbar button names (UI Automation): ${names.join(' | ') || '(none read)'}`);
+  const sent = ssh(`Get-ChildItem "$env:LOCALAPPDATA\\Dyno\\logs" -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Select-String -Pattern 'tooltip sent' | Select-Object -Last 5 | ForEach-Object { $_.Line }`).split('\n').filter(Boolean);
+  evidence.push(`app log "tooltip sent" lines: ${sent.length}`, ...sent.map((l) => l.slice(0, 200)));
+  const live = names.filter((n) => n.length > 0);
+  checks.push({ ok: live.length > 0 || sent.length > 0, detail: live.length ? `${live.length} live tooltip(s) through UI Automation` : sent.length ? `${sent.length} "tooltip sent" log line(s)` : 'no live tooltip found through UI Automation or the app log' });
+  for (const n of live) checks.push({ ok: !/[a-z]+_[a-z]+|undefined|null|NaN/.test(n), detail: `live tooltip "${n}"` });
+  return result('Windows: tray icons and their live tooltips', checks, evidence, 'live tooltips are readable');
 }
 
-/** Tray tooltips: the notify-icon tooltips Windows recorded for Dyno are present and read as words, not identifiers. */
-export function trayTooltips() {
-  const rows = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "$($_.InitialTooltip)|promoted=$($_.IsPromoted)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
-  const checks = [{ ok: rows.length > 0, detail: rows.length ? `${rows.length} Dyno tray icon(s) registered with Windows` : 'no Dyno tray icon registered in NotifyIconSettings' }];
-  for (const r of rows) { const tip = r.split('|')[0]; checks.push({ ok: tip.length > 0 && !/[a-z]+_[a-z]+|undefined|null|NaN/.test(tip), detail: `tooltip "${tip}"` }); }
-  return result('Windows: tray icons and their tooltips', checks, rows, `${rows.length} tray icon(s) with readable tooltips`);
+/** The raw `wbadmin get versions` on the VM as administrator, next to what the Backup page says, so a "could not check" can be explained. */
+export function wbadminRaw() {
+  const raw = ssh('wbadmin get versions 2>&1 | Out-String', { admin: true });
+  return result('Windows: raw `wbadmin get versions` (evidence for the Backup page)', [{ ok: true, detail: 'captured as administrator' }], raw.split('\n').slice(0, 25), 'captured');
+}
+
+/** The served counts: stop the helper (a stopped service writes its final tally) and read the `served:` line of its log. */
+export function servedCounts() {
+  ssh('Stop-Service DynoHelper -ErrorAction SilentlyContinue; Start-Sleep 3', { admin: true, ms: 60_000 });
+  const lines = ssh(`Get-Content ${HELPER}\\helper.log -ErrorAction SilentlyContinue | Select-String -Pattern 'served:' | Select-Object -Last 3 | ForEach-Object { $_.Line }`, { admin: true }).split('\n').filter(Boolean);
+  return result('Windows: the helper reports which readings it served (served counts)', [{ ok: lines.length > 0, detail: lines.length ? `the helper log has ${lines.length} "served:" line(s)` : 'no "served:" line in helper.log after the service was stopped' }], lines, 'served counts logged');
 }
 
 export const helperSteps = [
@@ -250,12 +274,13 @@ export const helperSteps = [
     const checks = [{ ok: /^PLANTED/m.test(planted), detail: /^PLANTED/m.test(planted) ? 'a standard user planted a junction at C:\\ProgramData\\Dyno\\Helper before the helper existed' : 'the junction could not be planted (the step proves nothing then)' }, ...on.checks, ...v.checks];
     return result('Windows: admin helper Turn on with a planted junction in its way (UAC over VNC)', checks, [...on.evidence, ...v.evidence], 'Turn on refused to follow the planted junction and the helper is On');
   },
-  () => trayTooltips(),
+  ({ actor }) => trayTooltips(actor),
   () => helperProtection(),
   () => helperFolderAcl(),
   ({ browser }) => helperExploit(browser),
-  ({ browser }) => diskHealth(browser),
   ({ browser }) => repeatInstall(browser),
+  ({ browser }) => diskHealth(browser),
+  () => wbadminRaw(),
   // WP-VMH: one step per helper reading while the helper is on
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser))),
   () => scopingStep(),

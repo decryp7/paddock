@@ -8,26 +8,26 @@
 
 /** page: a route name of Dyno's router (#/<page>), `tab`: a tab or radio label to press first. `all` must all match, `none` must not match. */
 export const READINGS = [
-  { id: 'processes-all-accounts', title: 'Processes of every account', os: ['windows', 'macos', 'linux'], page: 'processes',
-    expect: { windows: [/Account/, /SYSTEM/, /via (the )?helper|read by the administrator helper|administrator helper/i], macos: [/root/, /_[a-z]+/, /via (the )?helper|read by the administrator helper|administrator helper/i], linux: [/root/, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
-  { id: 'traffic-by-program', title: 'Per-program network traffic', os: ['windows'], page: 'network', tab: 'By program',
-    expect: { windows: [/By program/, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
+  { id: 'processes-all-accounts', title: 'Processes of every account', os: ['windows', 'macos', 'linux'], page: 'processes', showAll: true, fullText: 4000, shot: 'processes', minWidth: 1100,
+    expect: { windows: [/Account/, /SYSTEM|NT AUTHORITY/, /Read by the administrator helper/i], macos: [/root/, /_[a-z]+/, /Read by the administrator helper/i], linux: [/root/, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
+  { id: 'traffic-by-program', title: 'Per-program network traffic (Group by: Program)', os: ['windows'], page: 'network', groupBy: 'Program',
+    expect: { windows: [/Read by the administrator helper/i, /[↓↑]/] }, none: [/needs the helper/i] },
   { id: 'wake-requests', title: 'What keeps the computer awake (wake requests)', os: ['windows'], page: 'extras', tab: 'Sleep',
-    expect: { windows: [/via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
-  { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup',
-    expect: { windows: [/no (backup )?versions|has no versions|no Backup and Restore/i] }, none: [/needs the helper/i] },
+    expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i] },
+  { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup', fullText: 4000,
+    expect: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|could not check/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Start-?up',
-    expect: { macos: [/Login items|Background items/i, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/Login items|Background items/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
-    expect: { macos: [/pf/i, /rules?/i, /via (the )?helper|read by the administrator helper|administrator helper/i], linux: [/nft|nftables/i, /rules?/i, /via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/pf/i, /rules?/i, /Read by the administrator helper/i], linux: [/nft|nftables/i, /rules?/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'energy-and-thermal', title: 'macOS CPU energy and thermal pressure (honest reasons in a VM)', os: ['macos'], page: 'power', tab: 'Energy',
     expect: { macos: [/CPU power|energy/i] }, none: [/needs the helper/i] },
   { id: 'sockets-and-holders', title: 'Linux socket owners and file holders', os: ['linux'], page: 'network',
-    expect: { linux: [/via (the )?helper|read by the administrator helper|administrator helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
+    expect: { linux: [/Read by the administrator helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
   { id: 'memory-modules', title: 'Linux memory modules (no DMI in a VM: the reason)', os: ['linux'], page: 'inventory',
     expect: { linux: [/DMI|memory modules/i] }, none: [/needs the helper/i] },
-  { id: 'firewall-windows-unsupported', title: 'Firewall on Windows says it is not supported (honest, no helper)', os: ['windows'], page: 'firewall',
-    expect: { windows: [/not supported|isn.t supported|not available|cannot be read/i] }, none: [] },
+  { id: 'firewall-windows', title: 'Windows Defender Firewall is read without the helper (COM)', os: ['windows'], page: 'firewall',
+    expect: { windows: [/Windows Defender Firewall/, /Domain/, /Private/, /Public/] }, none: [] },
   { id: 'wol-state', title: 'Wake devices readiness (WolState)', os: ['linux'], page: 'power', tab: 'Wake devices',
     expect: { linux: [/readiness|Wake for network|Wake-on-LAN/i] }, none: [/needs the helper/i] },
   { id: 'thermal-pressure', title: 'macOS temperatures: thermal pressure level (VM reason)', os: ['macos'], page: 'power', tab: 'Energy',
@@ -41,11 +41,12 @@ export async function readingStep(reading, os, driver) {
   const title = `Helper reading (${os}): ${reading.title}`;
   const checks = [];
   const evidence = [];
-  const opened = await driver.openPage(reading.page, reading.tab);
+  const opened = await driver.openPage(reading.page, reading.tab, reading);
   checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
   if (!opened) return { title, status: 'fail', summary: checks[0].detail, checks, evidence };
   const text = (await driver.text()).replace(/\s+/g, ' ');
-  evidence.push(`page text: ${text.slice(0, 1800)}`);
+  evidence.push(`page text: ${text.slice(0, reading.fullText ?? 1800)}`);
+  if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
   for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
   for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
   const bad = checks.filter((c) => !c.ok);
@@ -58,15 +59,33 @@ export function readingSteps(os, makeDriver) {
 }
 
 /** Windows: the driver over a Playwright page of the main window (hash routes; tabs are pressed by their label). */
-export function windowsDriver(main) {
+export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ?? null } = {}) {
   return {
-    async openPage(page, tab) {
+    async openPage(page, tab, reading = {}) {
+      if (reading.minWidth) {
+        // The table needs width for its Account column: ask the window for at least that many pixels (DevTools Browser.setWindowBounds).
+        try { const s = await main.context().newCDPSession(main); const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal', width: reading.minWidth + 100, height: 820 } }); } catch { /* a window that cannot be resized keeps its size */ }
+        await new Promise((r) => setTimeout(r, 800));
+      }
       await main.evaluate((p) => { location.hash = `#/${p}`; }, page);
       await new Promise((r) => setTimeout(r, 2500));
       if (tab) { const t = main.getByRole('tab', { name: new RegExp(`^${tab}`) }).or(main.getByRole('radio', { name: new RegExp(`^${tab}`) })).or(main.getByRole('button', { name: new RegExp(`^${tab}`) })); if (!(await t.count())) return false; await t.first().click(); await new Promise((r) => setTimeout(r, 1500)); }
+      if (reading.showAll) { const all = main.getByRole('button', { name: /^All$/ }).or(main.getByRole('radio', { name: /^All$/ })).or(main.getByRole('tab', { name: /^All$/ })); if (await all.count()) { await all.first().click(); await new Promise((r) => setTimeout(r, 2500)); } }
+      if (reading.groupBy) {
+        const sel = main.getByRole('combobox', { name: /Group by/i }).or(main.getByLabel(/Group by/i));
+        if (!(await sel.count())) return false;
+        await sel.first().click(); await new Promise((r) => setTimeout(r, 500));
+        const opt = main.getByRole('option', { name: new RegExp(`^${reading.groupBy}`) });
+        if (!(await opt.count())) return false;
+        await opt.first().click(); await new Promise((r) => setTimeout(r, 2500));
+      }
       return true;
     },
     text: () => main.evaluate(() => document.body.innerText),
+    async shot(name) {
+      if (!shotDir) return null;
+      try { const { mkdirSync, writeFileSync } = await import('node:fs'); mkdirSync(shotDir, { recursive: true }); const f = `dom-${name}.png`; writeFileSync(`${shotDir}/${f}`, await main.screenshot()); return f; } catch { return null; }
+    },
   };
 }
 
