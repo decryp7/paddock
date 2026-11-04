@@ -901,14 +901,16 @@ fn hold_installing_logs_and_releases_when_its_parent_ends() {
         site.setup().display(),
         site.0.display()
     );
-    assert!(
-        Command::new("cmd")
-            .args(["/c", &line])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
+    // `raw_arg`: cmd.exe parses its own command line, so the quotes must reach it as written. No pipe is inherited, so the
+    // test does not wait for the holder's handles, only for cmd itself.
+    use std::os::windows::process::CommandExt;
+    let status = Command::new("cmd")
+        .raw_arg(format!("/c \"{line}\""))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while !site.log().contains("the installer ended; lock released")
         && std::time::Instant::now() < deadline

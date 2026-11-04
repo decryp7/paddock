@@ -412,8 +412,8 @@ impl stop::StopPort for StopAdapter {
                 pid: a.id.map(|i| i.pid()),
                 started_ms: a.id.map(|i| i.started().as_micros() / 1000),
                 session: a.session,
-                // The stopper no longer reports which step ended a process; its own log lines (ER-27) say.
-                method: "stop-all".into(),
+                // S1 stops by handle only (8e3ee63a9): there is no method to report.
+                method: "by-handle".into(),
                 outcome: match &a.outcome {
                     Outcome::Ended => "ended".into(),
                     Outcome::Skipped(why) => format!("skipped: {why}"),
