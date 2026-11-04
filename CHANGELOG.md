@@ -11,6 +11,11 @@ Conventional Commits; one semver tag for the whole repo.
 - New public CSS custom property `--pd-checkbox-box-size` (18px, in the token sheet; read by the shared checkbox pull in `_material.scss`): the shared rule that pulls a checkbox's box back by half the touch target's overhang reads it instead of a literal 18px. A page never adds its own pull on top (a second shift clipped the AI access page and the notification pane).
 - `@decryp7/paddock-ui/shell/notify`: each notification is a grid `[checkbox][dot][title][time]` with the body and buttons under the title; the box, dot and time stay on the title's first line when it wraps. Select all has its own labelled row in the items' checkbox column. Delete all and Mark all read are text buttons in the muted colour (Delete all is no longer outlined in danger red; the confirmation carries the danger). No class or test id was renamed.
 - `@decryp7/paddock-e2e`: `checkboxLayoutProblems`, `bodyIndentProblems` and `rowPinProblems` check a page's checkbox layout (clipped, covered, off the title line, body not under the title, dot or time off the first line).
+### `@decryp7/paddock-ui`: `pd-select` `panelWidth`; the widget chooser row wraps its controls
+
+- `pd-select` has a `panelWidth` input (`'auto'` by default, the trigger's width; `null` sizes the list to its longest option), so a narrow trigger no longer wraps a longer option.
+- `pd-widget-chooser`: a shown row is two columns, the lead (grip and kind icon; its width is the custom property `--pd-wc-text-inset`, derived from `--pd-wc-grip-size` and `--pd-wc-icon-size`) and a wrapping body of the description, the app's option controls and "more". A wrapped line starts at the body's edge, under the description's column, and "more" ends the last line. Narrow (the list under 35rem wide: the list is the container, so a preview column beside it counts) the description keeps 10rem so the controls wrap under it. `--pd-wc-more-size` (40px) sizes the "more" button and its reserve.
+- Dyno: the engine's `widget_choices` carries `number` (`NumberSupport`: the formats and label the tray draws on this OS, and why not); Settings shows only what it says and one item limit (the engine's).
 
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 

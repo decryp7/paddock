@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { mockWidgetChoices } from '../../core/mock/widgets';
 import { provideIcons } from '../../shared/icons';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
@@ -196,13 +195,11 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
     });
     const trigger = el.querySelector<HTMLElement>('mat-select[aria-label^="Format of"]')!;
     expect(trigger.getAttribute('aria-disabled')).not.toBe('true');
-    expect(el.querySelector('p.note[role="note"]')).toBeNull();
+    expect(el.querySelector('[role="note"]')).toBeNull();
   });
 
-  it('disables the format choice and gives the engine\'s reason where the tray cannot draw it', async () => {
-    const why = 'Tray icons are 16 px here, too small for a label above the number. The label shows in the tooltip.';
-    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
-    vi.spyOn(mock, 'widgetChoices').mockResolvedValue(mockWidgetChoices({ formats: ['stacked'], labelInIcon: false, note: why }));
+  it('says why a small Windows tray has no format to choose once, in the note, and not on every row', async () => {
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', trayPx: 16 });
     TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
     const f = TestBed.createComponent(MenuBarItems);
     f.detectChanges();
@@ -211,7 +208,39 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
       f.detectChanges();
       expect(rows(el)).toHaveLength(4);
     });
-    expect(el.querySelector('mat-select[aria-label^="Format of"]')!.getAttribute('aria-disabled')).toBe('true');
-    expect(el.querySelector('p.note[role="note"]')?.textContent?.trim()).toBe(why);
+    // No select to contradict the note: the row says what is drawn.
+    expect(el.querySelector('mat-select[aria-label^="Format of"]')).toBeNull();
+    expect(el.querySelectorAll('.fixed')).toHaveLength(0);
+    expect(el.querySelector('[role="note"]')?.textContent).toContain('16 px, too small for a label');
+    expect(el.textContent).not.toContain('Label over value');
+    // Label and Unit are one group.
+    expect(el.querySelectorAll('.pair input')).toHaveLength(8);
+  });
+
+  it('has no format select where the Windows icon has room for the label, and the note says the one layout', async () => {
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', trayPx: 24 });
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+    const f = TestBed.createComponent(MenuBarItems);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    expect(el.querySelector('mat-select[aria-label^="Format of"]')).toBeNull();
+    expect(el.querySelectorAll('.fixed')).toHaveLength(0);
+    expect(el.querySelector('[role="note"]')?.textContent).toContain('one number layout');
+  });
+
+  it('reads the choices again when Settings opens', async () => {
+    const { f, mock, el } = setup(MenuBarItems);
+    const spy = vi.spyOn(mock, 'widgetChoices');
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+    const before = spy.mock.calls.length;
+    await TestBed.inject(WidgetChoicesStore).reload();
+    expect(spy.mock.calls.length).toBe(before + 1);
   });
 });
