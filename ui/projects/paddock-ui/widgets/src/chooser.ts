@@ -100,7 +100,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                   <mat-icon class="pd-wc-kicon" [svgIcon]="info.icon" />
                 }
               </span>
-              <div class="pd-wc-body">
+              <div class="pd-wc-body" [class.pd-wc-body--more]="editable()">
                 <span class="pd-wc-txt"><b>{{ titleOf(p) }}</b><span>{{ info?.summary }}</span></span>
                 @if (editable()) {
                   @if (optionFor(p); as opt) {
@@ -216,7 +216,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     @container (min-width: 880px) { .pd-wc--preview { grid-template-columns: minmax(0, 1fr) 360px; } }
     .pd-wc-label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 6px; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
     .pd-wc-count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
-    .pd-wc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
+    /* The rows' wrapping follows the list's own width (a preview column beside it narrows the list, not the chooser). */
+    .pd-wc-list { container-type: inline-size; list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
     .pd-wc-item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px var(--pd-space-2) 6px var(--pd-space-1); background: var(--pd-surface-1); }
     .pd-wc-item + .pd-wc-item { border-top: 1px solid var(--pd-hairline); }
     .pd-wc-add { padding-left: var(--pd-space-3); }
@@ -226,14 +227,15 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-txt { display: grid; min-width: 0; flex: 1; }
     /* A shown row is two columns: the lead (grip and kind icon, --pd-wc-text-inset wide) and the body, a wrapping line of the
        description, the app's controls and "more". A wrapped line starts at the body's edge, so it is never left of the text. */
-    .pd-widget-chooser { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
+    .pd-widget-chooser { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-more-size: 40px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
     .pd-wc-row { display: grid; grid-template-columns: var(--pd-wc-text-inset) minmax(0, 1fr); align-items: center; column-gap: 0; }
     .pd-wc-lead { display: flex; align-items: center; gap: var(--pd-space-2); height: var(--pd-control-height); align-self: start; }
-    .pd-wc-body { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; padding-inline-end: calc(40px + var(--pd-space-1)); }
+    .pd-wc-body { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
+    .pd-wc-body--more { padding-inline-end: calc(var(--pd-wc-more-size) + var(--pd-space-1)); }
     /* "more" is out of the flow, at the end of the body's last line (the body's bottom), so it is level with the last line of
        controls however the controls wrap; the padding keeps every line clear of it. */
     .pd-wc-body > .pd-wc-more { position: absolute; inset-inline-end: 0; bottom: 0; margin: 0; }
-    /* Wide: the description takes what the controls leave; narrow (the chooser under 35rem): it keeps 10rem, so the controls wrap
+    /* Wide: the description takes what the controls leave; narrow (the list under 35rem): it keeps 10rem, so the controls wrap
        under it instead of squeezing it. */
     .pd-wc-body > .pd-wc-txt { flex: 1 1 0; min-width: min-content; }
     @container (max-width: 559px) { .pd-wc-body > .pd-wc-txt { flex-basis: 10rem; } }
@@ -243,7 +245,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-grip:hover { background: var(--pd-hover); color: var(--pd-text-muted); }
     .pd-wc-grip:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-wc-grip[aria-disabled='true'] { cursor: default; opacity: 0.5; }
-    .pd-wc-more { flex: none; }
+    .pd-wc-more { flex: none; width: var(--pd-wc-more-size); height: var(--pd-wc-more-size); --mat-icon-button-state-layer-size: var(--pd-wc-more-size); }
     /* The row's ⋯ stays marked while its menu is open: a tint and a ring. */
     .pd-wc-more[aria-expanded='true'] { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }

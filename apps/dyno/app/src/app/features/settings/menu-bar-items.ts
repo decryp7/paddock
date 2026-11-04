@@ -65,11 +65,11 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     .short { width: 5rem; flex: none; }
     .unit { width: 4.5rem; }
     /* A number row also holds its label and unit: the metric picker gives way so the description keeps its width. */
-    .narrow { width: 11.5rem; flex: none; }
+    .narrow { width: 11rem; flex: none; }
     .faint { color: var(--text-3); }
     /* Wide enough for "Label over value" in the trigger and the list, on one line. */
     /* Room for "Label over value" and at least 8 px before the caret. */
-    .format { width: 12rem; flex: none; }
+    .format { width: 11.5rem; flex: none; }
     /* Label and Unit stay together when the chooser wraps the row's controls. */
     .pair { display: flex; gap: var(--pd-space-1); flex: none; }
     .sub { color: var(--text-2); font-size: var(--fs-sm); margin-block: 0 var(--sp-3); }

@@ -129,3 +129,43 @@ for (const platform of PLATFORMS) {
     });
   }
 }
+
+/**
+ * The chooser sizes its rows by the width of its list, not of the whole chooser: with a preview column beside it (the popup
+ * widgets, a 900 px chooser) the list is about 520 px, so the description keeps its 10rem and the controls wrap under it.
+ */
+test('the popup widgets chooser with its preview column: rows follow the list width', async ({ browser, baseURL }) => {
+  const ctx = await browser.newContext({ baseURL, viewport: { width: 1320, height: 1000 } });
+  const page = await ctx.newPage();
+  await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
+  await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+  await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Dyno', exact: true }).click();
+  // Settings caps its content at 790 px, so the chooser never gets its preview column beside the list here; give it the width an
+  // app with a wider page has (900 px: the list is then about 520 px).
+  await page.addStyleTag({ content: 'dy-popup-widgets pd-widget-chooser { width: 900px; max-width: none; }' });
+  const list = page.locator('dy-popup-widgets .pd-wc-list').first();
+  await expect(list.locator('li.pd-wc-row')).not.toHaveCount(0);
+  const preview = page.locator('dy-popup-widgets .pd-wc-preview');
+  await expect(preview).toBeVisible();
+  const [listBox, previewBox] = [await list.boundingBox(), await preview.boundingBox()];
+  expect(previewBox!.x, 'the preview column is beside the list').toBeGreaterThan(listBox!.x + listBox!.width);
+  const found = await list.evaluate((ul) => {
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return {
+      width: ul.getBoundingClientRect().width,
+      rem,
+      rows: [...ul.querySelectorAll('li.pd-wc-row')].map((li) => {
+        const txt = li.querySelector('.pd-wc-txt')!;
+        const more = li.querySelector('.pd-wc-more')!.getBoundingClientRect();
+        const d = txt.getBoundingClientRect();
+        return { basis: getComputedStyle(txt).flexBasis, descW: d.width, moreLeftOfText: more.left < d.left };
+      }),
+    };
+  });
+  expect(found.width, 'the list is narrower than the chooser').toBeLessThan(560);
+  for (const r of found.rows) {
+    expect(r.basis, 'a list under 35rem makes the description keep 10rem').toBe(`${10 * found.rem}px`);
+    expect(r.moreLeftOfText).toBe(false);
+  }
+  await ctx.close();
+});
