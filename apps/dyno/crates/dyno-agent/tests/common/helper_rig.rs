@@ -11,14 +11,16 @@ use dyno_agent::helper_centre::{HelperCentre, HelperInstaller};
 use dyno_agent::helper_link::{HelperLink, HelperTransport, TransportError};
 use dyno_core::btm::{LoginItemsReader, LoginItemsReply};
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_counters::{CounterAnswer, CounterReader, CounterValue};
 use dyno_core::helper_memory::MemoryReader;
-use dyno_core::helper_policy::{access, visibility, OthersPolicy, Standing};
-use dyno_core::helper_requests::{SmartQuery, ToolKind};
+use dyno_core::helper_policy::{access, visibility, Access, OthersPolicy, Standing};
+use dyno_core::helper_requests::{CounterId, SmartQuery, ToolKind};
 use dyno_core::helper_wire::{HelperAction, HelperInfo, HelperReply, HelperRequest, HelperUser, ToolStatus, HELPER_API};
 use dyno_core::inventory::MemoryLayout;
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{PlatformError, ProcessTraffic};
 use dyno_core::smart::{SmartReader, SmartReply, ToolInstaller};
+use dyno_core::wake::{IfName, WolReader, WolReply};
 use dyno_helper::audit::AuditLog;
 use dyno_helper::dispatch::{Ctx, Dispatcher, Parts};
 use paddock_jobs::time::SystemClock;
@@ -61,6 +63,12 @@ pub struct Readers {
     pub traffic: Vec<TrafficCounter>,
     /// The SMART reply.
     pub smart: SmartReply,
+    /// What each counter id answers (an `Unavailable` value answers as a refusal with its words; an id not listed is unsupported).
+    pub counters: Vec<CounterAnswer>,
+    /// The helper's log, oldest first.
+    pub log: Vec<String>,
+    /// The Wake-on-LAN modes every interface answers; `None` answers like a system that reads none.
+    pub wol: Option<WolReply>,
 }
 
 impl Default for Readers {
@@ -76,6 +84,9 @@ impl Default for Readers {
                 skipped: vec![],
                 not_visited: 0,
             },
+            counters: Vec::new(),
+            log: Vec::new(),
+            wol: None,
         }
     }
 }
@@ -108,6 +119,24 @@ impl SmartReader for Smart {
         Ok(self.0.clone())
     }
 }
+struct Counters(Vec<CounterAnswer>);
+impl CounterReader for Counters {
+    fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
+        match self.0.iter().find(|a| a.id == id).map(|a| &a.value) {
+            Some(CounterValue::Unavailable(why)) => Err(PlatformError::Unsupported(why.clone())),
+            Some(v) => Ok(v.clone()),
+            None => Err(PlatformError::Unsupported("The rig has no such reading.".into())),
+        }
+    }
+}
+struct Wol(Option<WolReply>);
+impl WolReader for Wol {
+    fn read(&self, _: &IfName) -> Result<WolReply, PlatformError> {
+        self.0
+            .clone()
+            .ok_or_else(|| PlatformError::Unsupported("The rig reads no Wake-on-LAN modes.".into()))
+    }
+}
 struct Tools;
 impl ToolInstaller for Tools {
     fn install(&self, tool: ToolKind, _: &[u8]) -> Result<ToolStatus, PlatformError> {
@@ -136,14 +165,14 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         login_items: Box::new(Items),
         holders: Box::new(dyno_core::helper_holders::NoHolders),
         extras: Box::new(dyno_core::helper_extras::NoExtras),
-        counters: Box::new(dyno_core::helper_counters::NoCounters),
+        counters: Box::new(Counters(readers.counters)),
         memory: Box::new(Memory(readers.memory)),
         processes: Box::new(dyno_core::helper_processes::NoProcesses),
         smart: Box::new(Smart(readers.smart)),
         tools: Box::new(Tools),
         wakes: Box::new(dyno_core::wake::NoWakes),
-        wol: Box::new(dyno_core::wake::NoWakes),
-        log_tail: Box::new(|_| Vec::new()),
+        wol: Box::new(Wol(readers.wol)),
+        log_tail: Box::new(move |n| readers.log[readers.log.len().saturating_sub(n)..].to_vec()),
         on_uninstall: Box::new(|| {}),
     })
 }
@@ -179,6 +208,14 @@ impl HelperTransport for DispatcherTransport {
         let request: HelperRequest = postcard::from_bytes(&on_wire).expect("a request decodes");
         let ctx = self.caller.lock().unwrap().ctx(&request);
         self.served.lock().unwrap().push(format!("{:?}", request.kind()));
+        // The restriction table is applied by the helper's server before the dispatcher (`dyno_helper::auth::authorize`); the rig applies
+        // the same table, so an account that may not make a request is refused as it would be.
+        if ctx.access == Access::Denied {
+            return Err(TransportError::Remote {
+                code: dyno_core::helper_wire::codes::REFUSED.into(),
+                message: "That account may not make this request: it is for the owner or an administrator".into(),
+            });
+        }
         match self.dispatcher.handle_for(&ctx, request) {
             Ok(reply) => {
                 let bytes = postcard::to_stdvec(&reply).expect("a reply encodes");

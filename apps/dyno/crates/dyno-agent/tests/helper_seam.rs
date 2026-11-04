@@ -77,12 +77,16 @@ struct Rig {
 
 impl Rig {
     fn start(caller: Caller, host: HelperHost, up: bool) -> Rig {
+        Rig::start_with(caller, host, up, Readers::default())
+    }
+
+    fn start_with(caller: Caller, host: HelperHost, up: bool, readers: Readers) -> Rig {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         let readers = Readers {
             memory: linux::parse(&dmi_table(), TOTAL),
-            ..Readers::default()
+            ..readers
         };
         let transport = DispatcherTransport::new(dispatcher(host, readers, tmp.path()), caller);
         transport.up.store(up, Ordering::SeqCst);
@@ -179,4 +183,161 @@ fn a_caller_who_may_not_read_the_audit_log_still_sees_a_ready_helper() {
     let rig = Rig::start(Caller::Other, HelperHost::Linux, true);
     assert_eq!(rig.state(), HelperState::Ready);
     assert_eq!(rig.inventory().memory_via, ReadVia::Helper, "memory is open to any caller");
+}
+
+// ---- WP-CNT and WP-DEAD: counters, the helper log and Wake-on-LAN modes through the same real dispatcher ----
+
+use dyno_agent::helper_first::CentrePort;
+use dyno_agent::helper_readers::wol::HelperReadiness;
+use dyno_core::helper_counters::{CounterAnswer, CounterValue, EnergyDomain};
+use dyno_core::helper_requests::CounterId;
+use dyno_core::wake::{WolMode, WolReply};
+use dyno_core::wol::readiness::{linux_wakeup_item, ItemState};
+use dyno_core::wol::{ReadinessSource, ThisPcWol};
+
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
+fn apple_silicon() -> Vec<CounterAnswer> {
+    vec![
+        CounterAnswer {
+            id: CounterId::Thermal,
+            value: CounterValue::Unavailable("macOS reports a thermal pressure level, not temperatures, to software.".into()),
+        },
+        CounterAnswer {
+            id: CounterId::Fans,
+            value: CounterValue::Unavailable("Apple silicon Macs have no smc sampler.".into()),
+        },
+        CounterAnswer {
+            id: CounterId::CpuEnergy,
+            value: CounterValue::CpuEnergy(vec![EnergyDomain {
+                label: "CPU Power".into(),
+                microjoules: None,
+                wraps_at_microjoules: None,
+                milliwatts: Some(3_000),
+            }]),
+        },
+    ]
+}
+
+fn counters_reach_the_energy_report_and_the_temperature_source(caller: Caller) {
+    let rig = Rig::start_with(
+        caller,
+        HelperHost::Macos,
+        true,
+        Readers {
+            counters: apple_silicon(),
+            ..Readers::default()
+        },
+    );
+    let shared = rig.running.as_ref().unwrap().shared.clone();
+    let began = std::time::Instant::now();
+    loop {
+        let (_, cpu) = shared.climate.cpu_energy();
+        if cpu == ReadVia::Helper && shared.climate.live_via() != ReadVia::Local {
+            break;
+        }
+        assert!(began.elapsed() < HANG_GUARD, "the climate never read through the helper");
+        std::thread::yield_now();
+    }
+    let ReadVia::Unavailable { reason, .. } = shared.climate.live_via() else {
+        panic!("{:?}", shared.climate.live_via())
+    };
+    assert!(reason.contains("thermal pressure"), "{reason}");
+    let peer = connect(&rig.dirs).unwrap().0;
+    let Reply::Energy(report) = ask_within(&peer, Request::EnergyReport { days: 1 }, SLOW).unwrap() else {
+        panic!("energy")
+    };
+    assert_eq!(report.cpu_via, ReadVia::Helper);
+    assert!(rig.served.lock().unwrap().iter().any(|k| k == "Counters"), "the helper was asked");
+}
+
+#[test]
+fn the_owner_gets_cpu_energy_and_the_reason_for_missing_temperatures() {
+    counters_reach_the_energy_report_and_the_temperature_source(Caller::Owner);
+}
+
+#[test]
+fn any_other_account_gets_the_same_counters() {
+    counters_reach_the_energy_report_and_the_temperature_source(Caller::Other);
+}
+
+fn bundle_file(rig: &Rig, path: &str) -> Option<String> {
+    let bundle = dyno_agent::diagnostics::collect(&rig.running.as_ref().unwrap().shared).unwrap();
+    bundle.files.iter().find(|f| f.path == path).map(|f| f.text.clone())
+}
+
+#[test]
+fn the_owner_s_bundle_holds_the_helper_log() {
+    let rig = Rig::start_with(
+        Caller::Owner,
+        HelperHost::Linux,
+        true,
+        Readers {
+            log: vec!["helper started".into(), "request served".into()],
+            ..Readers::default()
+        },
+    );
+    let text = bundle_file(&rig, "helper/helper.log").expect("the helper log is in the bundle");
+    assert!(text.contains("helper started") && text.contains("request served"), "{text}");
+    assert!(bundle_file(&rig, "helper/helper-log.txt").is_none());
+}
+
+#[test]
+fn another_account_s_bundle_says_why_the_helper_log_is_missing() {
+    let rig = Rig::start_with(
+        Caller::Other,
+        HelperHost::Linux,
+        true,
+        Readers {
+            log: vec!["helper started".into()],
+            ..Readers::default()
+        },
+    );
+    assert!(
+        bundle_file(&rig, "helper/helper.log").is_none(),
+        "the helper refuses the log to another account"
+    );
+    let why = bundle_file(&rig, "helper/helper-log.txt").expect("the reason is in the bundle");
+    assert!(!why.trim().is_empty() && !why.contains("helper started"), "{why}");
+}
+
+struct OneCard;
+impl ReadinessSource for OneCard {
+    fn read(&self) -> ThisPcWol {
+        ThisPcWol {
+            items: vec![linux_wakeup_item("enp3s0", "enabled\n")],
+        }
+    }
+}
+
+fn wol_mode_is_judged_through_the_helper(caller: Caller) {
+    let tmp = tempfile::tempdir().unwrap();
+    let readers = Readers {
+        wol: Some(WolReply {
+            enabled: vec![],
+            supported: vec![WolMode::Magic, WolMode::Phy],
+        }),
+        ..Readers::default()
+    };
+    let transport = DispatcherTransport::new(dispatcher(HelperHost::Linux, readers, tmp.path()), caller);
+    let served = transport.served.clone();
+    let centre = std::sync::Arc::new(helper_rig::centre_over(transport, HelperHost::Linux));
+    let readiness = HelperReadiness::new(std::sync::Arc::new(OneCard), Box::new(CentrePort(centre)));
+    let items = readiness.read().items;
+    assert!(
+        matches!(&items[0].state, ItemState::Problem { fix, .. } if fix.contains("ethtool -s enp3s0 wol g")),
+        "{:?}",
+        items[0]
+    );
+    assert!(served.lock().unwrap().iter().any(|k| k == "WolState"), "the helper was asked");
+}
+
+#[test]
+fn the_owner_s_card_mode_comes_from_the_helper() {
+    wol_mode_is_judged_through_the_helper(Caller::Owner);
+}
+
+#[test]
+fn any_account_s_card_mode_comes_from_the_helper() {
+    wol_mode_is_judged_through_the_helper(Caller::Other);
 }
