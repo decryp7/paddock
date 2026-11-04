@@ -123,7 +123,7 @@ async function main(argv) {
     let active = '';
     for (let i = 0; i < 25 && active !== 'active'; i++) { await sleep(3000); active = g('systemctl is-active dyno-helper.service').stdout.trim(); }
     checks.push({ ok: active === 'active', detail: `dyno-helper.service is ${active || 'absent'}` });
-    const stat = g('stat -c "%n %U:%G %a" /var/lib/dyno-helper /var/lib/dyno-helper/* /usr/bin/dyno-helper 2>&1').stdout.trim();
+    const stat = g('sudo sh -c "stat -c \'%n %U:%G %a\' /var/lib/dyno-helper /var/lib/dyno-helper/* /usr/bin/dyno-helper" 2>&1').stdout.trim();
     const bad = stat.split('\n').filter((l) => /\/var\/lib\/dyno-helper/.test(l) && !/ root:root (7[0-5][0-5])$/.test(l));
     checks.push({ ok: bad.length === 0 && /dyno-helper/.test(stat), detail: bad.length ? `helper paths not root-only: ${bad.join('; ')}` : 'the helper data folder and its files are root:root and not writable by others' });
     const w = g('mkdir -p /var/lib/dyno-helper/tools/x 2>&1; touch /var/lib/dyno-helper/probe 2>&1; echo $?').stdout.trim();
@@ -138,8 +138,9 @@ async function main(argv) {
     // 6. Turn off: the service and data are gone.
     press('^Dyno$');
     checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
-    await sleep(6000);
-    if (g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes') { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
+    let offPrompt = false;
+    for (let i = 0; i < 15 && !offPrompt; i++) { await sleep(2000); offPrompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
+    if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
     let gone = false;
     for (let i = 0; i < 25 && !gone; i++) { await sleep(3000); gone = g('systemctl is-active dyno-helper.service; test -e /var/lib/dyno-helper && echo present || echo gone').stdout.includes('gone'); }
     checks.push({ ok: gone, detail: gone ? 'the helper service and data folder are gone' : 'the helper is still installed 75 s after Turn off' });
@@ -147,8 +148,9 @@ async function main(argv) {
 
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit$', 'menu item'); await sleep(8000);
-    const left = g('pgrep -c -x "dyno-app|dyno-agent" || true').stdout.trim();
-    push(result('Quit (File > Quit) leaves nothing running', [{ ok: left === '0' || left === '', detail: `${left || 0} Dyno process(es) after Quit` }], [], 'no process left'));
+    const leftList = g('ps -eo pid=,ppid=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim();
+    const leftN = leftList ? leftList.split('\n').length : 0;
+    push(result('Quit (File > Quit) leaves nothing running', [{ ok: leftN === 0, detail: `${leftN} Dyno process(es) after Quit` }], leftList.split('\n'), 'no process left'));
 
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();
