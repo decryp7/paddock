@@ -102,17 +102,24 @@ fn run(program: &Path, args: &[&str]) -> (i32, String) {
     )
 }
 
-/// [`run`] with environment variables for the child (the fake installer reads them).
+/// [`run`] with environment variables for the child (the fake installer reads them). The output goes to a file, not a pipe:
+/// `Command::output` waits for every holder of the pipe, which would also wait for a started installer that outlives the
+/// program, and these tests must observe the program returning while the installer still runs.
 fn run_env(program: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String) {
-    let out = Command::new(program)
+    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let file =
+        std::env::temp_dir().join(format!("paddock-setup-out-{}-{n}.txt", std::process::id()));
+    let out = std::fs::File::create(&file).expect("output file");
+    let status = Command::new(program)
         .args(args)
         .envs(env.iter().copied())
-        .output()
+        .stdout(out)
+        .status()
         .expect("run paddock-setup");
-    (
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let _ = std::fs::remove_file(&file);
+    (status.code().unwrap_or(-1), text)
 }
 
 fn scratch(name: &str) -> PathBuf {
