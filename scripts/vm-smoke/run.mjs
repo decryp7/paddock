@@ -15,6 +15,7 @@ import { renderResult } from './judge.mjs';
 import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 import { MacGui } from './mac-gui.mjs';
 import { MacIdleChecks } from './mac-idle.mjs';
+import { macDriver, readingSteps } from './helper-readings.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -43,7 +44,7 @@ export function parseArgs(argv) {
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
-  if (!['start', 'power'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default) or power`);
+  if (!['start', 'power', 'helper'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default), power or helper`);
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
   if (!o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
@@ -153,7 +154,7 @@ async function main(argv) {
     const stage = join(scratch, 'stage');
     mkdirSync(stage);
     cpSync(dmg, join(stage, 'installer.dmg'));
-    if (o.suite === 'power') {
+    if (o.suite === 'power' || o.suite === 'helper') {
       // The GUI driver (guest/axdrive.swift) is compiled on the host, never run there, and cached by the hash of its source; the image's own
       // copy predates `drag`. The guest installs it from the read-only share.
       const src = join(HERE, 'guest', 'axdrive.swift');
@@ -203,7 +204,7 @@ async function main(argv) {
 
     log('booting headless');
     // The power suite also needs the VM's own VNC server (real pointer drags); it listens on 127.0.0.1 only and the URL stays in memory.
-    const vnc = o.suite === 'power';
+    const vnc = o.suite === 'power' || o.suite === 'helper';
     runChild = spawn(tartBin, ['run', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
     let vncUrl = null;
     runChild.stdout.on('data', (d) => { vncUrl ??= /vnc:\/\/\S+/.exec(String(d))?.[0] ?? null; });
@@ -221,14 +222,14 @@ async function main(argv) {
     log(`VM up after ${Math.round((Date.now() - t0) / 1000)} s`);
 
     const guest = { exec, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
-    if (o.suite === 'power') {
+    if (o.suite === 'power' || o.suite === 'helper') {
       const i = await exec(`sudo cp '${SHARE}/axdrive' /usr/local/bin/axdrive && sudo chmod 755 /usr/local/bin/axdrive && /usr/local/bin/axdrive trusted; echo trusted=$?`);
       log(`axdrive installed in the guest (${i.stdout.trim().split('\n').at(-1)})`);
     }
     const check = new Check(guest, config, { log });
     const started = new Date().toISOString();
     const staged = `${SHARE}/installer.dmg`;
-    const { steps, version } = o.suite === 'power'
+    const { steps, version } = o.suite === 'power' || o.suite === 'helper'
       ? await (async () => {
         const evDir = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}-power-evidence`);
         mkdirSync(evDir, { recursive: true });
@@ -247,12 +248,13 @@ async function main(argv) {
         const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
         const { loadRules, MacTour } = await import('./mac-tour.mjs');
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });
-        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour });
+        const readings = readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
+        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: readings, helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
     const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
-    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}${o.suite === 'power' ? '-power' : ''}.md`);
+    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}${o.suite === 'power' ? '-power' : o.suite === 'helper' ? '-helper' : ''}.md`);
     writeFileSync(file, md);
     log(`result: ${file}`);
     console.log(file);

@@ -179,11 +179,16 @@ export async function repeatInstall(browser) {
   return result('Windows: repeat install of the disk health tool', checks, [], 'a second install works');
 }
 
+import { readingSteps, windowsDriver } from './helper-readings.mjs';
+const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+
 export const helperSteps = [
   ({ browser }) => helperOn(browser),
   () => helperFolderAcl(),
   ({ browser }) => helperExploit(browser),
   ({ browser }) => diskHealth(browser),
   ({ browser }) => repeatInstall(browser),
+  // WP-VMH: one step per helper reading while the helper is on
+  ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser))),
   ({ browser }) => helperOff(browser),
 ];

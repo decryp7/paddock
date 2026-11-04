@@ -254,7 +254,7 @@ export const POWER_MANUAL = [
  * `makePower` builds the PowerChecks for it, `gui` (macOS) the MacGui that clicks the helper's password sheet, `idle` the idle checks.
  * The helper goes on first (a scheduled wake needs it on macOS) and off after the wake checks. Returns { steps, version }.
  */
-export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWER_MANUAL, gui = null, idle = null, tour = null, extra = [] }) {
+export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWER_MANUAL, gui = null, idle = null, tour = null, extra = [], helperOnly = false }) {
   const steps = [];
   const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
   const install = push(await check.install(stagedDmg));
@@ -264,14 +264,16 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
   {
     const power = makePower();
     if (gui) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
-    push(await power.keepAwake());
-    push(await power.scheduledWake());
-    push(await power.wakeOnLan());
-    if (tour) for (const s of await tour.run()) push(s);
+    if (!helperOnly) {
+      push(await power.keepAwake());
+      push(await power.scheduledWake());
+      push(await power.wakeOnLan());
+      if (tour) for (const s of await tour.run()) push(s);
+    }
     // Extension point: one function per wired helper reading (each `async (ctx) => step`), run while the helper is on.
     for (const fn of extra) push(await fn({ power, gui, check }));
     if (gui) push(await gui.helperOff());
-    if (idle) push(await idle.run());
+    if (idle && !helperOnly) push(await idle.run());
   }
   push(await check.quit('Quit after the power checks'));
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
