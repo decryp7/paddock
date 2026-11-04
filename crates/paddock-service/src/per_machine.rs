@@ -21,6 +21,9 @@ pub struct StopExclusion {
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PerMachineConfig {
+    /// A note for the reader of the file.
+    #[serde(rename = "$comment", default)]
+    pub comment: Option<String>,
     /// The exclusions.
     #[serde(default)]
     pub stop_exclusions: Vec<StopExclusion>,

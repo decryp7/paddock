@@ -279,7 +279,7 @@ fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_h
 }
 
 #[test]
-fn the_windows_uninstaller_asks_for_one_prompt_to_remove_the_service_with_the_bundled_copy() {
+fn the_windows_uninstaller_removes_the_service_with_the_bundled_copy_only_when_not_updating() {
     let hooks = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../app/src-tauri/windows/installer-hooks.nsh"
@@ -297,8 +297,11 @@ fn the_windows_uninstaller_asks_for_one_prompt_to_remove_the_service_with_the_bu
         "only when the service exists"
     );
     assert!(
-        pre_uninstall.contains(r#"ExecShellWait "runas" "$INSTDIR\dyno-helper.exe" "uninstall""#),
+        pre_uninstall.contains(r#"nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" uninstall'"#),
         "the bundled copy removes the installed one (a running program cannot delete itself)"
     );
-    assert_eq!(pre_uninstall.matches("runas").count(), 1, "one prompt");
+    assert_eq!(pre_uninstall.matches("runas").count(), 0, "the uninstaller is elevated already: no second prompt");
+    let guard = pre_uninstall.find("$UpdateMode <> 1").expect("only when not updating (a manual upgrade keeps the helper)");
+    assert!(guard < pre_uninstall.find("dyno-helper.exe").unwrap(), "the update guard comes first");
+    assert!(!pre_uninstall.contains("service uninstall"), "the agent has no Windows registration of its own");
 }

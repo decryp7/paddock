@@ -40,3 +40,4 @@ node_modules
 /apps/workbench-demo/src-tauri/target/
 /apps/workbench-demo/dist/
 /vm-smoke-results/
+/apps/dyno/app/src-tauri/windows/paddock-setup.exe

@@ -1,0 +1,9 @@
+{
+  "$comment": "Programs of the bundle that the per-machine installer must not stop (family ADR 0053 section 2.1); each needs a reason.",
+  "stopExclusions": [
+    {
+      "image": "dyno-helper.exe",
+      "reason": "The service runs from its own protected folder, Dyno Helper in Program Files; a dyno-helper.exe running from the install folder is an elevated install or removal of a few seconds that must not be cut short, so the last Restart Manager listing reports it instead."
+    }
+  ]
+}
