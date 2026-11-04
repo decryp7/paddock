@@ -370,6 +370,9 @@ pub fn sc_exit_codes(sc_query: &str) -> Option<(u32, u32)> {
     Some((first("WIN32_EXIT_CODE")?, first("SERVICE_EXIT_CODE")?))
 }
 
+/// `ERROR_SERVICE_NEVER_STARTED`: stopped because it has not started since boot (demand or delayed start, or just created);
+/// there is no last exit, and it is not a failure.
+pub const SC_NEVER_STARTED: u32 = 1077;
 /// `ERROR_SERVICE_SPECIFIC_ERROR`: the real code is `SERVICE_EXIT_CODE`.
 pub const SC_SERVICE_SPECIFIC: u32 = 1066;
 /// `SERVICE_DEMAND_START` start type.

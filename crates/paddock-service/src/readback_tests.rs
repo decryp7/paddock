@@ -774,3 +774,25 @@ fn a_launchd_job_stopped_by_sigterm_is_not_running_not_failed() {
     let look = b.inspect();
     assert_eq!((look.job, look.last_exit), (Job::NotRunning, Some(LastExit::Signal(15))));
 }
+
+#[test]
+fn a_service_that_has_never_started_since_boot_has_no_last_exit_and_is_not_a_failure() {
+    // ERROR_SERVICE_NEVER_STARTED (1077): demand or delayed-auto start not yet begun, or just created. The "press Repair"
+    // bug of docs/lessons.md ("A delayed service looked like a broken one") came from reading this as damage.
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc qc", sc_qc("2  AUTO_START  (DELAYED)", SVC_EXE));
+    sys.answer("sc query", sc_query("1  STOPPED", "1077 (0x435)", "0  (0x0)"));
+    let look = b.inspect();
+    assert_eq!((look.job, look.last_exit), (Job::NotRunning, None));
+}
+
+#[test]
+fn register_reads_back_a_service_that_never_started_as_not_running() {
+    let sys = FakeSystem::new();
+    let mut b = scm(&sys);
+    sys.answer("sc qc", sc_qc("2  AUTO_START  (DELAYED)", SVC_EXE));
+    sys.answer("sc query", sc_query("1  STOPPED", "1077 (0x435)", "0  (0x0)"));
+    let look = b.register().unwrap();
+    assert_eq!(look.job, Job::NotRunning);
+}
