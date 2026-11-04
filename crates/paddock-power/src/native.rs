@@ -20,9 +20,9 @@ mod imp {
         EventSink, Hold, HoldRequest, PowerError, PowerEvent, PowerOs, Scope, SleepWakeSource,
         Subscription,
     };
-    use std::ffi::{CString, c_char, c_void};
+    use std::ffi::{c_char, c_void, CString};
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-    use std::sync::{Arc, mpsc};
+    use std::sync::{mpsc, Arc};
     use std::thread::JoinHandle;
 
     type CfRef = *const c_void;
@@ -267,9 +267,9 @@ mod imp {
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::System::Power::{
-        DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, PowerClearRequest, PowerCreateRequest,
-        PowerRegisterSuspendResumeNotification, PowerRequestDisplayRequired,
-        PowerRequestSystemRequired, PowerSetRequest, PowerUnregisterSuspendResumeNotification,
+        PowerClearRequest, PowerCreateRequest, PowerRegisterSuspendResumeNotification,
+        PowerRequestDisplayRequired, PowerRequestSystemRequired, PowerSetRequest,
+        PowerUnregisterSuspendResumeNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,
     };
     use windows_sys::Win32::System::Threading::{
         POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0,
@@ -545,12 +545,14 @@ mod imp {
             // ended with 143), so it runs on a thread of its own and dropping the subscription never waits for it.
             let c = self.connection.inner().clone();
             let thread = self.thread.take();
-            let closing = std::thread::Builder::new().name("paddock-power-close".into()).spawn(move || {
-                zbus::block_on(c.graceful_shutdown());
-                if let Some(t) = thread {
-                    let _ = t.join();
-                }
-            });
+            let closing = std::thread::Builder::new()
+                .name("paddock-power-close".into())
+                .spawn(move || {
+                    zbus::block_on(c.graceful_shutdown());
+                    if let Some(t) = thread {
+                        let _ = t.join();
+                    }
+                });
             if let Err(e) = closing {
                 log::warn!("the power subscription could not be closed on its own thread: {e}");
             }
