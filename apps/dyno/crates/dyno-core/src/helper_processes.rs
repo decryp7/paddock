@@ -123,6 +123,9 @@ pub enum RawOwner {
     System,
     /// A service account that is not a person's (by name, and its id so the account that is asking still sees its own).
     Service(String, Option<HelperUser>),
+    /// The OS gave no owner for the process (it was reading it as it ended, or the account may not be read). Never shown as the
+    /// system's or as the caller's: it counts as another account's, so a caller without full scope sees it only in the total.
+    Unknown,
 }
 
 /// What the OS read for one process: the allow-listed fields and the owner, nothing else.
@@ -268,6 +271,7 @@ fn see(p: &RawProcess, caller: &HelperUser, scope: Visibility, homes: &[(HelperU
         RawOwner::Service(name, _) => (OwnerKind::Service(name.clone()), Some(name.clone()), false),
         RawOwner::Account { id, name } if id == caller => (OwnerKind::Caller, name.clone(), false),
         RawOwner::Account { name, .. } => (OwnerKind::OtherUser, name.clone(), true),
+        RawOwner::Unknown => (OwnerKind::OtherUser, None, true),
     };
     let account = if other_account {
         match scope {
@@ -387,6 +391,25 @@ mod tests {
             limit,
             class: RequestClass::User,
         }
+    }
+
+    #[test]
+    fn a_process_with_no_known_owner_is_another_accounts_and_never_the_systems() {
+        let sweep = Sweep {
+            processes: vec![raw(1, user(1_000, "ana"), None), raw(2, RawOwner::Unknown, None)],
+            homes: vec![],
+            taken_at: 1,
+        };
+        let me = HelperUser::Uid(1_000);
+        let q = ProcessQuery::default();
+        let total = build_page(&sweep, &me, Visibility::Own(OthersPolicy::Total), &q);
+        assert_eq!(total.items.iter().map(|e| e.pid).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(total.others.map(|o| o.processes), Some(1), "counted in the total, not listed");
+        let hidden = build_page(&sweep, &me, Visibility::Own(OthersPolicy::Hidden), &q);
+        assert_eq!((hidden.items.len(), hidden.others), (1, None));
+        let full = build_page(&sweep, &me, Visibility::Full, &q);
+        assert_eq!(full.items.len(), 2);
+        assert_eq!(full.items[1].owner, OwnerKind::OtherUser);
     }
 
     #[test]

@@ -75,11 +75,13 @@ impl RequestKind {
         RequestKind::WolState,
     ];
 
-    /// Requests that run an external tool for a long time: the server gives them `Weight::Slow` (one per account at a time).
+    /// Requests that run an external tool for a long time, or sweep the whole process table twice (`Traffic`): the server gives them
+    /// `Weight::Slow` (one per account at a time).
     pub fn is_slow(self) -> bool {
         matches!(
             self,
             RequestKind::Smart
+                | RequestKind::Traffic
                 | RequestKind::LoginItems
                 | RequestKind::Firewall
                 | RequestKind::Extras
@@ -255,6 +257,7 @@ mod tests {
         assert_eq!(
             slow,
             [
+                K::Traffic,
                 K::LoginItems,
                 K::Smart,
                 K::InstallTool,

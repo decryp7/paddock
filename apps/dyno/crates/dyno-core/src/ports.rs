@@ -60,6 +60,17 @@ pub trait ReverseDns: Send + Sync {
 pub trait ProcessTraffic: Send + Sync {
     /// One read of every process's counters.
     fn counters(&self) -> Result<Vec<crate::network_traffic::TrafficCounter>, PlatformError>;
+
+    /// One read with where it came from. A reader that is the helper-first seam (the agent's Windows traffic) overrides this to
+    /// say whether the helper answered, what the caller may not see, and what to do when nothing could be read.
+    fn read(&self) -> crate::network_traffic::TrafficRead {
+        crate::network_traffic::TrafficRead {
+            answer: self
+                .counters()
+                .map(|counters| crate::network_traffic::TrafficAnswer { counters, others: None }),
+            via: crate::read_via::ReadVia::Local,
+        }
+    }
 }
 
 /// The OS's performance counters (WP-12): what exists and what they read now. Observe-only. Reading is bounded by a

@@ -64,12 +64,23 @@ impl Caller {
         dyno_helper::auth::authorize(&self.peer(), &owner(), request)
     }
 
+    /// The account the connection would have established (a Unix uid): the owner is uid 501, the others differ, so scoping by
+    /// account has someone to compare with.
+    pub fn uid(self) -> u32 {
+        match self {
+            Caller::Owner => 501,
+            Caller::Admin => 502,
+            Caller::Other => 503,
+        }
+    }
+
     fn ctx(self, request: &HelperRequest) -> Result<Ctx, dyno_helper::auth::Refusal> {
         let mut ctx = Ctx::anonymous(Some(4242));
+        ctx.uid = Some(self.uid());
         ctx.access = self.authorize(request)?;
         ctx.view.scope = dyno_helper::auth::scope(&self.peer(), &owner(), &dyno_helper::policy::HelperPolicy::default());
         // The connection's account, which the scoped readings (processes, socket owners, file holders) answer for.
-        ctx.account = Some(owner());
+        ctx.account = Some(HelperUser::Uid(self.uid()));
         Ok(ctx)
     }
 }
@@ -80,6 +91,8 @@ pub struct Readers {
     pub memory: MemoryLayout,
     /// The per-program traffic counters.
     pub traffic: Vec<TrafficCounter>,
+    /// Whether the counters grow by 1 000 received bytes with every read (rates need two reads that differ).
+    pub traffic_grows: bool,
     /// The SMART reply.
     pub smart: SmartReply,
     /// The firewall as `pf` or `nft` reports it.
@@ -104,6 +117,7 @@ impl Default for Readers {
                 reason: dyno_core::inventory::Unavailable::failed("fake"),
             },
             traffic: Vec::new(),
+            traffic_grows: false,
             smart: SmartReply {
                 disks: vec![],
                 skipped: vec![],
@@ -125,10 +139,43 @@ impl MemoryReader for Memory {
         self.0.clone()
     }
 }
-struct Traffic(Vec<TrafficCounter>);
+/// The counters, which grow by 1 000 bytes per read when `grows` (so two reads give rates).
+struct Traffic {
+    counters: Vec<TrafficCounter>,
+    grows: bool,
+    reads: std::sync::atomic::AtomicU64,
+}
 impl ProcessTraffic for Traffic {
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        Ok(self.0.clone())
+        let n = if self.grows {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        } else {
+            0
+        };
+        Ok(self
+            .counters
+            .iter()
+            .map(|c| TrafficCounter {
+                bytes_in: c.bytes_in + n * 1_000,
+                ..c.clone()
+            })
+            .collect())
+    }
+}
+struct Sweeps(Vec<RawProcess>);
+impl ProcessSweeper for Sweeps {
+    fn sweep(&self) -> Result<Sweep, PlatformError> {
+        Ok(Sweep {
+            processes: self.0.clone(),
+            homes: Vec::new(),
+            taken_at: 1,
+        })
+    }
+}
+struct NoFirewall;
+impl dyno_core::firewall::FirewallReader for NoFirewall {
+    fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
+        Err(PlatformError::Unsupported("The rig has no firewall.".into()))
     }
 }
 struct Items;
@@ -203,7 +250,11 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
             host,
             agent_exe: "/x/dyno-agent".into(),
         },
-        traffic: Box::new(Traffic(readers.traffic)),
+        traffic: Box::new(Traffic {
+            counters: readers.traffic,
+            grows: readers.traffic_grows,
+            reads: std::sync::atomic::AtomicU64::new(0),
+        }),
         audit: AuditLog::new(dir.join("audit.jsonl")),
         clock: Box::new(|| 1_000),
         login_items: Box::new(Items),
@@ -215,6 +266,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         smart: Box::new(Smart(readers.smart)),
         firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),
+        firewall: Box::new(NoFirewall),
         wakes: Box::new(dyno_core::wake::NoWakes),
         wol: Box::new(Wol(readers.wol)),
         log_tail: Box::new(move |n| readers.log[readers.log.len().saturating_sub(n)..].to_vec()),

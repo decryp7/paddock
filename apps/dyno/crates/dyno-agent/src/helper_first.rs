@@ -22,7 +22,7 @@ use dyno_core::helper_requests::{CounterQuery, ExtrasKind, ProcessQuery, SmartQu
 use dyno_core::helper_wire::{HelperState, HelperStatus};
 use dyno_core::inventory::MemoryLayout;
 use dyno_core::metrics::Reading;
-use dyno_core::network_traffic::TrafficCounter;
+use dyno_core::network_traffic::TrafficAnswer;
 use dyno_core::read_via::{sentence, NextStep, ReadVia, NEEDS_ADMIN};
 use dyno_core::smart::SmartReply;
 use dyno_core::wake::{IfName, WolReply};
@@ -64,7 +64,7 @@ pub trait HelperCalls: Send + Sync {
     /// One page of the process list, scoped to the caller by the helper.
     fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, CallError>;
     /// Per-program traffic counters (Windows), scoped to the caller.
-    fn traffic(&self) -> Result<Vec<TrafficCounter>, CallError>;
+    fn traffic(&self) -> Result<TrafficAnswer, CallError>;
     /// Socket inode to owning program (Linux).
     fn socket_owners(&self) -> Result<SocketOwners, CallError>;
     /// The programs holding the file with this device and inode (Linux).
@@ -104,7 +104,7 @@ impl<T: HelperTransport> HelperCalls for Bounded<T> {
     fn processes(&self, query: ProcessQuery) -> Result<ProcessPage, CallError> {
         self.link.processes_in(query, self.wait)
     }
-    fn traffic(&self) -> Result<Vec<TrafficCounter>, CallError> {
+    fn traffic(&self) -> Result<TrafficAnswer, CallError> {
         self.link.traffic_in(self.wait)
     }
     fn socket_owners(&self) -> Result<SocketOwners, CallError> {

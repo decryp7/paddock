@@ -557,7 +557,13 @@ impl Shared {
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
             network: {
-                let centre = crate::network::NetCentre::new(network.sockets, network.dns, network.traffic);
+                // Windows reads per-program traffic through the helper first (its counters need administrator rights).
+                let traffic = if host == dyno_core::helper::HelperHost::Windows {
+                    Box::new(crate::helper_readers::traffic::HelperTraffic::new(network.traffic, port(me)))
+                } else {
+                    network.traffic
+                };
+                let centre = crate::network::NetCentre::new(network.sockets, network.dns, traffic);
                 if helper_first && host == dyno_core::helper::HelperHost::Linux {
                     // Linux hides the program of other accounts' sockets: the helper's map fills them.
                     centre.with_owners(crate::helper_readers::holders::SocketOwnerStep::for_this_os(
