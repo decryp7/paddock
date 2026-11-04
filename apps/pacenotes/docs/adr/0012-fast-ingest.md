@@ -47,8 +47,8 @@ the stores. This ADR fixes the design that follows from it.
 - **Windows reads everything from the directory enumeration**, never one handle per file. Each directory is opened once and read with
   `GetFileInformationByHandleEx(FileIdExtdDirectoryInfo)` (or `NtQueryDirectoryFile`). That returns the 128-bit file id,
   `ChangeTime`, `LastWriteTime`, `EndOfFile`, the attributes and the reparse tag. The volume serial is read once per volume.
-  - **Links:** only the symlink and mount-point reparse tags (`IO_REPARSE_TAG_SYMLINK`, `IO_REPARSE_TAG_MOUNT_POINT`) are skipped and
-    counted, which is the link refusal. Other reparse points (deduplication, for example) are ordinary files.
+  - **Links:** only the symlink, mount-point and WSL symlink reparse tags (`IO_REPARSE_TAG_SYMLINK`, `IO_REPARSE_TAG_MOUNT_POINT`,
+    `IO_REPARSE_TAG_LX_SYMLINK`) are skipped and counted, which is the link refusal. Other reparse points (deduplication, for example) are ordinary files.
   - **Cloud placeholders** whose content is not on disk (`FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, or `RECALL_ON_OPEN`) are withheld
     and counted as "not on this computer", so that no read ever triggers a download.
   - **Stat by handle where the directory entry can lag.** NTFS updates a directory entry's times and size lazily while a writer holds
@@ -248,7 +248,8 @@ Rule results are cached beside the blob under `FactKey ‖ rule pack hash` (D9).
   - Inside the holder one writer thread does all bulk writes (ADR 0005's single writer).
 - **Readers.** Any number of processes read through WAL: the app, the MCP server (`pacenotes serve --stdio`) and the CLI.
 - **Small control writes from any process.** Lease rows, reference touches and `damaged_blobs` rows (D3, D6a) are not write sessions.
-  Any process makes them as one short SQLite transaction without the owner lock; SQLite's own write lock serialises them with a
+  Any process makes them as one short SQLite transaction started with `BEGIN IMMEDIATE` (so it takes SQLite's write lock at once and
+  cannot fail to upgrade midway), without the owner lock; SQLite's own write lock serialises them with a
   session's transactions, which are bounded to about 50 ms (rule 52). This is how an MCP server process makes the only writes it ever
   makes (MCP tools are read-only for user data, proposal 13). A user-facing live write (a suppression, a confirmed link) goes through the
   catalog's owner, the app's writer thread. A CLI that needs one while the app owns the catalog waits for the catalog lock, as below.
@@ -392,30 +393,31 @@ a crash. So the protocol never needs a cross-file transaction: every state a cra
 **Generation references.** The fact store keeps `generation_refs(folder_id, generation, catalog_path, touched_at)`: which generations of
 which folders still name blobs. A blob is live while any ref or lease names a generation that names it, or while its run lease is live.
 
-**The swap, in three steps:**
+**The swap, in three steps.** The run holds the fact-store session lock from step 1 through step 3, so no sweep runs in between.
 
-1. **In the fact store, one transaction:** add the ref for generation N+1, keep the ref for N, and clear the run's tags on the blobs
-   it wrote (they are now protected by N+1's ref).
+1. **In the fact store, one transaction:** add the ref for generation N+1 and keep the ref for N. The run's tags stay on its blobs.
 2. **In the catalog, one transaction:** swap the current generation to N+1 (the `generation_files` map and `meta`).
-3. **In the fact store, one transaction:** drop the ref for N, unless a lease still holds N.
+3. **In the fact store, one transaction:** drop the ref for N (unless a lease still holds N) and clear the run's tags on its blobs,
+   which N+1's ref now protects.
 
 What a crash leaves:
 
-| Crash | State | Repair at the next open |
+| Crash | State | Repair |
 |---|---|---|
-| before step 1 | the run's blobs are tagged with a dead run lease | the sweep removes them once the lease is stale |
-| between steps 1 and 2 | refs for N and N+1; the catalog still says N | reconciliation drops N+1's ref |
-| between steps 2 and 3 | refs for N and N+1; the catalog says N+1 | reconciliation drops N's ref, unless leased |
+| before step 1 | the run's blobs are tagged with a dead run lease, and no ref names them | the sweep removes them once the lease is stale |
+| between steps 1 and 2 | refs for N and N+1; the catalog still says N; the run's tags remain | reconciliation drops N+1's ref; the blobs only it named go at the next sweep |
+| between steps 2 and 3 | refs for N and N+1; the catalog says N+1; the run's tags remain | reconciliation drops N's ref (unless leased); the tags of the dead run are cleared, because N+1's ref protects its blobs |
 
-**Reconciliation.** Opening a folder compares its refs in the fact store with the catalog's current generation and its leased
-generations. It drops any other ref of that folder, adds a missing ref for the current generation, and logs each change.
+**Reconciliation** runs only under the folder's catalog lock. Opening a folder for writing compares its refs in the fact store with the
+catalog's current generation and its leased generations. It drops any other ref of that folder, adds a missing ref for the current
+generation, clears the tags of dead runs on blobs a ref names, and logs each change.
 
 **Leases are rows in the fact store:** `generation_leases(folder_id, generation, process_id, purpose, snapshot_name)`, where
 `process_id` is a `ProcessId` (pid and start time).
 
 - A reader that maps a snapshot takes one lease per mapped snapshot. A reader that answers from blobs takes one per generation it uses.
 - **Taking a lease:**
-  - In one fact-store transaction, check that a ref for that generation still exists, and insert the lease.
+  - In one fact-store transaction (`BEGIN IMMEDIATE`), check that a ref for that generation still exists, and insert the lease.
   - Then re-read the catalog's `meta`. If the current generation moved in the meantime, release the lease and start again with the new
     generation.
   - So a reader never holds a generation whose blobs the sweep could already have taken.
@@ -426,13 +428,18 @@ generations. It drops any other ref of that folder, adds a missing ref for the c
 **Run leases.** An indexing run writes `run_leases(run_id, process_id)` before its first blob and tags its blobs with the run id until
 step 1 of the swap.
 
-**The sweep** runs as a job after a swap, at open, and on "Clean up the index". It works in chunks, each one fact-store write
-transaction that re-checks, inside that transaction, every reference before it deletes anything.
+**The sweep** runs as a job after a swap, at open, and on "Clean up the index", and only while it holds the fact-store session lock.
+It works in chunks, each one fact-store write transaction that re-checks, inside that transaction, every reference before it deletes
+anything.
 
 - It **deletes a blob** only if it is named by no generation that has a ref, no generation that has a lease, and no live run lease.
 - It **deletes a snapshot file** only if no lease names it and it is not its folder's current snapshot (read from the catalog).
+- For each folder whose catalog lock it can take (without waiting), it **drops that folder's lingering refs**: those that are neither
+  the catalog's current generation nor leased. This catches refs a crash left behind in folders that are not being opened.
 - It **drops a folder's refs** (and logs each one) when:
-  - the folder's path or its catalog file no longer exists; or
+  - the folder's path or its catalog file no longer exists. A folder on a drive that is not mounted counts as gone: its refs are
+    dropped and its blobs swept, so after a remount the folder's next open reads, hashes and parses again what other folders of the
+    repository do not share. The log line says the volume was not mounted, so the cost after a remount is explained; or
   - the ref was not touched within the "Forget folders not opened for" period (a Setting, default 90 days). Opening a folder or
     running an index touches it.
 - It **removes a whole fact store** that no live catalog references (D4).
@@ -593,7 +600,7 @@ for memory (rule 26) and the raw output linked.
 | IG-B7 | B7: physical footprint at three sizes during first ingest, idle and querying; workers 2, 4 and 8; in-flight budgets 32, 64 and 128 MiB; the shrink rule exercised | IG2, IG3, IG4 | 2 |
 | IG-B8 | B8: a rule pack's time per file with one shared parse against one parse per rule | IG7 | 1 |
 | IG-B9 | B9: the two `FactStore` adapters (SQLite append-ordered blobs against Arrow IPC segments): ingest with the key-index insert timed separately, footprint, disk, re-open, one-file update, crash test, branch switch, sweep; the decision recorded as an amendment here | IG2, IG13 | 3 |
-| IG1 | Manifest and `ChangeSource` (D1): the stat values on all three platforms, `path_key`, the racy rule, volume detection and "Always check content", renames by lazy `Fingerprint`; replaces the stamp shortcut of ADR 0006 | IG14 (Windows part) | 3 |
+| IG1 | Manifest and `ChangeSource` (D1): the stat values on all three platforms, `path_key`, the racy rule with observed skew, volume detection and "Always check content", renames paired by the raw hash first, then by the `Fingerprint` stored in the same read for renames whose line endings changed; replaces the stamp shortcut of ADR 0006 | IG14 (Windows part) | 3 |
 | IG2 | Fact cache and schema v2 (D3, D4): `FactStore` port and the SQLite adapter, blob format with header checksum, `FactKey`, the `EXTRACTOR_BUILD_ID` build script and golden-corpus test, the raw-bytes span test, damaged and missing blobs as misses (with the reader's hand-off), the file layout, repository identity through the commit-graph with its fallbacks and logging, session-scoped owner locks, control writes and `SQLITE_BUSY` handling, dev and test data folders, the streaming writer with byte-bounded channels and 50 ms transactions, the `paddock-storage` category | IG-B1 | 8.5 |
 | IG3 | Batched worker protocol (D2): up to 64 files or 4 MiB a request, the replay that finds and quarantines a culprit, per-worker peak reports | | 3 |
 | IG4 | Snapshot builder and reader (D5): arena, FST, structure of arrays, CSR both ways, spilling interner and sort, header checksum and section checksums, fresh names, rename with retry and directory fsync, the rebuild-is-identical property test | IG2 | 7 |
@@ -606,7 +613,7 @@ for memory (rule 26) and the raw output linked.
 | IG11 | Tier-2 name resolution in the link step: imports and scopes per language, candidate edges by name with a confidence label ("certain", "likely", "possible"), and tier-3 overlay | IG4 | 4 |
 | IG12 | Moving schema v1's consumers to the snapshot: search, `symbols_in_file`, the MCP tools and the UI's queries; removing the v1 tables and their tests | IG5 | 3 |
 | IG13 | References, leases and garbage collection (D6a): the three-step swap, reconciliation at open, lease and run-lease rows with the take-then-recheck protocol, stale-lease removal by `ProcessId`, the chunked transactional sweep, dropping refs of gone or long-unopened folders, orphaned fact stores, incremental vacuum; the two-process test with kills before and between the swap steps | IG2, IG4 | 5 |
-| IG14 | Windows enumeration in `paddock-walk` (shared, D1): `FileIdExtdDirectoryInfo` per directory, the volume serial once per volume, only symlink and mount-point reparse tags skipped, cloud placeholders withheld and counted, stat by handle for watcher-named and racy files, the stat fields on every platform, cancel and progress; Windows CI tests for placeholders, reparse tags and a file held open while it grows | | 4 |
+| IG14 | Windows enumeration in `paddock-walk` (shared, D1): `FileIdExtdDirectoryInfo` per directory, the volume serial once per volume, only the symlink, mount-point and WSL symlink (`LX_SYMLINK`) reparse tags skipped, cloud placeholders withheld and counted, stat by handle for watcher-named and racy files, the stat fields on every platform, cancel and progress; Windows CI tests for placeholders, reparse tags and a file held open while it grows | | 4 |
 | IG15 | Logging (D11): the phase, cache, worker, writer, snapshot and sweep events with run ids, and a test that a diagnostic bundle of a failing fixture run names the cause | IG2, IG3, IG4 | 2 |
 
 **Total.** IG1 to IG15 without IG10 come to 53.5 agent-days and the benchmark packages (IG0 and IG-B1 to IG-B9) to 15.5, so about
