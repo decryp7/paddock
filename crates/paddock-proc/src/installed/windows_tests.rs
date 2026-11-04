@@ -1,4 +1,4 @@
-//! `stop_all` against the real Windows APIs (Restart Manager, the process table, handles, `SeDebugPrivilege`), with
+//! `stop_all` against the real Windows APIs (the process table, handles, `SeDebugPrivilege`, the Restart Manager check), with
 //! children of this test binary copied into a temporary folder (ER-14: only processes the test started, only its own
 //! folder). Run on the Windows VM (`cargo xwin test --no-run`, then the test executable on the guest).
 
@@ -59,72 +59,36 @@ fn programs_in_the_folder_are_ended_and_a_lookalike_folder_is_left_alone() {
     assert_eq!(report.exit_code(), 0, "{report:?}");
     assert!(gone(&mut a) && gone(&mut b), "{report:?}");
     assert!(decoy.0.try_wait().unwrap().is_none(), "the program of the lookalike folder runs on");
-    assert!(report.actions.iter().all(|x| x.outcome == Outcome::Ended), "{report:?}");
+    assert_eq!(report.actions.iter().filter(|x| x.outcome == Outcome::Ended).count(), 2, "{report:?}");
+    assert!(report.actions.iter().any(|x| matches!(&x.outcome, Outcome::Skipped(w) if w.contains("outside"))), "{report:?}");
     assert!(report.actions.iter().all(|x| x.id.is_some() && x.session.is_some()), "{report:?}");
 }
 
-/// Restart Manager that lists nothing and fails to shut down, so the fallback by handle does the work.
-struct NoRm(WindowsMachine);
-
-impl Machine for NoRm {
-    type Held = HeldProcess;
-    fn rm_list(&mut self, _: &[PathBuf]) -> Result<Vec<RmProcess>, StopError> {
-        Err(StopError::RestartManager { call: "RmStartSession", code: 5 })
-    }
-    fn rm_shutdown(&mut self, _: &[PathBuf], _: Duration) -> Result<(), StopError> {
-        Err(StopError::RestartManager { call: "RmShutdown", code: 5 })
-    }
-    fn processes(&mut self) -> Result<Vec<Candidate>, StopError> {
-        self.0.processes()
-    }
-    fn enable_privilege(&mut self) -> Result<(), StopError> {
-        self.0.enable_privilege()
-    }
-    fn drop_privilege(&mut self) {
-        self.0.drop_privilege()
-    }
-    fn open(&mut self, pid: u32, for_end: bool) -> Result<HeldProcess, OpenFailure> {
-        self.0.open(pid, for_end)
-    }
-    fn terminate(&mut self, held: &HeldProcess) -> Result<(), StopError> {
-        self.0.terminate(held)
-    }
-    fn wait_exit(&mut self, held: &HeldProcess, bound: Duration) -> bool {
-        self.0.wait_exit(held, bound)
-    }
-}
-
 #[test]
-fn the_fallback_ends_by_handle_when_the_privilege_is_held_and_reports_when_it_is_not() {
+fn the_privilege_is_enabled_by_stop_all_and_dropped_again() {
     let tmp = tempfile::tempdir().unwrap();
     let app = tmp.path().join("app");
-    let lookalike = tmp.path().join("app-helper");
     let mut a = start(&copy_into(&app, NAMES[0]));
-    let mut decoy = start(&copy_into(&lookalike, NAMES[0]));
     let (own, own_image) = here();
     let imgs = images();
     let req = Request { dir: &app, images: &imgs, own, own_image: own_image.as_deref() };
-    // An elevated administrator's token holds SeDebugPrivilege (disabled); a standard token does not.
-    let elevated = WindowsMachine.enable_privilege().is_ok();
-    WindowsMachine.drop_privilege();
-    let report = stop_all(&mut NoRm(WindowsMachine), &req, &Bounds::default());
-    assert!(matches!(report.restart_manager_error, Some(StopError::RestartManager { .. })));
+    // An elevated administrator's token holds SeDebugPrivilege (disabled, or enabled in an elevated SSH or PowerShell
+    // session): disable it first so a missing enable cannot hide. A standard token does not hold it.
+    let mut m = WindowsMachine;
+    let elevated = m.enable_privilege().is_ok();
+    m.drop_privilege();
+    let report = stop_all(&mut m, &req, &Bounds::default());
     if elevated {
         assert_eq!(report.exit_code(), 0, "{report:?}");
         assert!(gone(&mut a), "{report:?}");
-        assert!(report.actions.iter().any(|x| x.method == Method::Handle && x.outcome == Outcome::Ended));
-        assert!(report.actions.iter().any(|x| matches!(&x.outcome, Outcome::Skipped(w) if w.contains("outside"))), "{report:?}");
+        assert!(report.privilege_error.is_none());
+        // Dropped again: enabling works from a clean state and nothing was left enabled by stop_all itself.
+        assert!(m.enable_privilege().is_ok());
+        m.drop_privilege();
     } else {
         assert_eq!(report.exit_code(), EXIT_STILL_RUNNING, "{report:?}");
         assert!(matches!(report.privilege_error, Some(StopError::Privilege(_))));
         assert!(a.0.try_wait().unwrap().is_none());
-    }
-    assert!(decoy.0.try_wait().unwrap().is_none(), "the lookalike folder's program runs on");
-    // The privilege was dropped again: enabling and dropping works from a clean state.
-    let mut m = WindowsMachine;
-    if elevated {
-        assert!(m.enable_privilege().is_ok());
-        m.drop_privilege();
     }
 }
 

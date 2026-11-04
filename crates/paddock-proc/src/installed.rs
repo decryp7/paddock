@@ -1,19 +1,20 @@
-//! Stopping every session's copy of an installed app (ADR 0053 §3): the installer, updater and uninstaller of a per-machine
-//! app must replace files that programs in other users' sessions hold open. [`stop_all`] ends them in two steps, each over a
-//! port ([`Machine`]) so the whole decision runs over a fake in unit tests:
+//! Stopping every session's copy of an installed app (ADR 0053 section 3): the installer, updater and uninstaller of a
+//! per-machine app must replace files that programs in other users' sessions hold open. [`stop_all`] works over a port
+//! ([`Machine`]) so the whole decision runs over a fake in unit tests.
 //!
-//! 1. **Restart Manager first.** One session over the full path of every listed program in the install folder; it names every
-//!    process in any session that uses them, by identity (pid plus start time, rule 53), asks them to close and ends those
-//!    that do not, within [`Bounds::rm`]. Nothing is restarted (decision O2).
-//! 2. **Fallback by handle, with `SeDebugPrivilege`.** Only for what Restart Manager could not list or end. For each process
-//!    whose image name is listed: the privilege is enabled, a handle is opened and the image path and start time are read
-//!    from it; a program that does not run from exactly the install folder (the helper's `Dyno Helper` folder starts with
-//!    `Dyno`) is left alone and logged; otherwise a second handle opened for termination must be the same process, it is
-//!    terminated and waited for within [`Bounds::end_each`], and the privilege is dropped again at once.
+//! **By handle, with `SeDebugPrivilege`, is the way** (measured on Windows 11 in the S0 spike): Restart Manager lists other
+//! sessions' processes but `RmShutdown(RmForceShutdown)` returns `ERROR_FAIL_NOACTION_REBOOT` and ends nothing, not even
+//! the same session's processes, whenever another session holds a file; and `SeDebugPrivilege` is needed even to open
+//! another user's process for `PROCESS_QUERY_LIMITED_INFORMATION`. So, from one look at the process table, for each
+//! process whose image name is listed: the privilege is enabled, a handle is opened and the image path and start time
+//! are read from it; a program that does not run from exactly the install folder (the helper's `Dyno Helper` folder
+//! starts with `Dyno`) is left alone and logged; otherwise a second handle opened for termination must be the same process
+//! (rule 53), it is terminated and waited for within [`Bounds::end_each`], and the privilege is dropped again at once.
+//! Restart Manager is only the check afterwards: one listing over the full path of every listed program names anything
+//! that still uses them, in any session.
 //!
-//! The report names every process acted on (image, identity, session, method, outcome) so the installer's `setup.log` can
-//! show the whole flow (ER-27). The process never ends itself: its own identity is excluded from both steps, and its own image
-//! is left out of the Restart Manager registration (which would end it, since it runs from the folder it is clearing).
+//! The report names every process acted on (image, identity, session, outcome) so the installer's `setup.log` can show the
+//! whole flow (ER-27). The caller is never ended: its identity is excluded and its own image is left out of the registration.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -31,8 +32,6 @@ pub const EXIT_STILL_RUNNING: i32 = 11;
 /// How long each step may take. These are an installer's bounds, not a UI's (ER-19 is about the app's own jobs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bounds {
-    /// Restart Manager's shutdown, in all.
-    pub rm: Duration,
     /// Waiting for one terminated process to exit.
     pub end_each: Duration,
     /// All the fallback's waits together.
@@ -42,7 +41,6 @@ pub struct Bounds {
 impl Default for Bounds {
     fn default() -> Bounds {
         Bounds {
-            rm: Duration::from_secs(20),
             end_each: Duration::from_secs(5),
             end_total: Duration::from_secs(20),
         }
@@ -73,9 +71,6 @@ pub enum StopError {
         /// Its Windows error code.
         code: u32,
     },
-    /// Restart Manager did not finish within its bound.
-    #[error("Restart Manager did not finish within {0:?}")]
-    RestartManagerTimeout(Duration),
     /// The process table could not be read.
     #[error("the process table could not be read (error {0})")]
     Table(u32),
@@ -105,8 +100,6 @@ pub struct RmProcess {
     pub session: Option<u32>,
     /// Its image file name, or the application name Restart Manager gives.
     pub name: String,
-    /// Restart Manager reports the status `RmStatusUnknown`: it cannot be trusted to end it.
-    pub unknown: bool,
 }
 
 /// One process of the process table.
@@ -132,10 +125,8 @@ pub trait Held {
 pub trait Machine {
     /// A process held open by handle.
     type Held: Held;
-    /// Names every process in any session that uses one of `files` (a new Restart Manager session).
+    /// Names every process in any session that uses one of `files` (a new Restart Manager session): the check.
     fn rm_list(&mut self, files: &[PathBuf]) -> Result<Vec<RmProcess>, StopError>;
-    /// Asks them to close and ends those that do not (`RmShutdown(RmForceShutdown)`), within `bound`.
-    fn rm_shutdown(&mut self, files: &[PathBuf], bound: Duration) -> Result<(), StopError>;
     /// One look at the process table.
     fn processes(&mut self) -> Result<Vec<Candidate>, StopError>;
     /// Enables `SeDebugPrivilege` in this process's token.
@@ -148,15 +139,6 @@ pub trait Machine {
     fn terminate(&mut self, held: &Self::Held) -> Result<(), StopError>;
     /// Waits on the held process's handle for it to exit; true when it did within `bound`.
     fn wait_exit(&mut self, held: &Self::Held, bound: Duration) -> bool;
-}
-
-/// How a process was dealt with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    /// Restart Manager asked it to close or ended it.
-    RestartManager,
-    /// Terminated through a handle, with `SeDebugPrivilege`.
-    Handle,
 }
 
 /// What came of one process.
@@ -179,8 +161,6 @@ pub struct Action {
     pub id: Option<ProcessId>,
     /// Its session, when known.
     pub session: Option<u32>,
-    /// The method.
-    pub method: Method,
     /// The outcome.
     pub outcome: Outcome,
 }
@@ -192,7 +172,7 @@ pub struct StopReport {
     pub actions: Vec<Action>,
     /// Image names of listed programs that still run from the folder.
     pub still_running: Vec<String>,
-    /// Why the first step failed, when it did (the fallback then covers everything).
+    /// Why the final Restart Manager check failed, when it did (the handle results then stand alone).
     pub restart_manager_error: Option<StopError>,
     /// Why `SeDebugPrivilege` could not be enabled, when it could not.
     pub privilege_error: Option<StopError>,
@@ -231,9 +211,9 @@ fn note(report: &mut StopReport, action: Action) {
         action.session.map_or_else(|| "?".to_owned(), |s| s.to_string())
     );
     match &action.outcome {
-        Outcome::Ended => log::info!("stop-all: ended {who} by {:?}", action.method),
-        Outcome::Skipped(why) => log::info!("stop-all: left {who} alone ({:?}): {why}", action.method),
-        Outcome::Failed(why) => log::warn!("stop-all: could not end {who} ({:?}): {why}", action.method),
+        Outcome::Ended => log::info!("stop-all: ended {who}"),
+        Outcome::Skipped(why) => log::info!("stop-all: left {who} alone: {why}"),
+        Outcome::Failed(why) => log::warn!("stop-all: could not end {who}: {why}"),
     }
     report.actions.push(action);
 }
@@ -256,70 +236,20 @@ pub fn stop_all<M: Machine>(machine: &mut M, req: &Request<'_>, bounds: &Bounds)
         .map(|i| join_win(req.dir, i))
         .filter(|f| own_image.as_ref().is_none_or(|o| *o != parts(f)))
         .collect();
-    log::info!("stop-all: {} listed programs in the install folder, step 1: Restart Manager", files.len());
+    log::info!("stop-all: {} listed programs; ending them by handle", files.len());
 
-    // Step 1: Restart Manager.
-    let raw = match machine.rm_list(&files) {
-        Ok(l) => l,
+    let table = machine.processes();
+    let candidates: Vec<Candidate> = match table {
+        Ok(t) => t
+            .into_iter()
+            .filter(|c| c.pid != req.own.pid() && wanted.contains(&c.image.to_lowercase()))
+            .collect(),
         Err(e) => {
-            log::warn!("stop-all: Restart Manager could not list: {e}; everything goes to the fallback");
-            report.restart_manager_error = Some(e);
+            // Nothing can be ended without the table; the check below names what runs.
+            log::warn!("stop-all: {e}");
             Vec::new()
         }
     };
-    // A shutdown would end this process too when Restart Manager lists it.
-    let rm_covers_self = raw.iter().any(|p| p.id == req.own);
-    let listed: Vec<RmProcess> = raw.into_iter().filter(|p| p.id != req.own).collect();
-    let mut unresolved: Vec<RmProcess> = Vec::new();
-    if listed.is_empty() {
-        // Nothing to shut down.
-    } else if rm_covers_self {
-        log::warn!("stop-all: Restart Manager lists this process; its shutdown would end it, so the fallback ends the rest");
-        unresolved = listed.clone();
-    } else {
-        if let Err(e) = machine.rm_shutdown(&files, bounds.rm) {
-            log::warn!("stop-all: Restart Manager shutdown: {e}");
-            report.restart_manager_error = Some(e);
-        }
-        let after = machine.rm_list(&files).unwrap_or_else(|e| {
-            log::warn!("stop-all: Restart Manager could not list again: {e}");
-            listed.clone()
-        });
-        for p in &listed {
-            let left = p.unknown || after.iter().any(|a| a.id == p.id);
-            if left {
-                unresolved.push(p.clone());
-            } else {
-                note(
-                    &mut report,
-                    Action {
-                        image: p.name.clone(),
-                        id: Some(p.id),
-                        session: p.session,
-                        method: Method::RestartManager,
-                        outcome: Outcome::Ended,
-                    },
-                );
-            }
-        }
-    }
-
-    // Step 2: the fallback, for what Restart Manager could not list or end.
-    log::info!("stop-all: step 2: by handle ({} left by Restart Manager)", unresolved.len());
-    let table = match machine.processes() {
-        Ok(t) => t,
-        Err(e) => {
-            log::warn!("stop-all: {e}");
-            for p in &unresolved {
-                remember(&mut report, &p.name);
-            }
-            return report;
-        }
-    };
-    let candidates: Vec<Candidate> = table
-        .into_iter()
-        .filter(|c| c.pid != req.own.pid() && wanted.contains(&c.image.to_lowercase()))
-        .collect();
     let mut spent = Duration::ZERO;
     let mut privilege_lost = false;
     for c in candidates {
@@ -342,12 +272,17 @@ pub fn stop_all<M: Machine>(machine: &mut M, req: &Request<'_>, bounds: &Bounds)
         note(&mut report, action);
     }
 
-    // What the last listing still shows (nothing, when both steps worked).
-    if (!unresolved.is_empty() || !report.actions.is_empty() || privilege_lost)
-        && let Ok(rest) = machine.rm_list(&files)
-    {
-        for p in rest.iter().filter(|p| p.id != req.own) {
-            remember(&mut report, &p.name);
+    // The check: Restart Manager names whatever still uses the files, in any session.
+    match machine.rm_list(&files) {
+        Ok(rest) => {
+            for p in rest.iter().filter(|p| p.id != req.own) {
+                log::warn!("stop-all: {} (session {:?}, {}) still uses the install folder", p.name, p.session, p.id);
+                remember(&mut report, &p.name);
+            }
+        }
+        Err(e) => {
+            log::warn!("stop-all: the final Restart Manager check failed: {e}");
+            report.restart_manager_error = Some(e);
         }
     }
     log::info!(
@@ -366,7 +301,7 @@ fn end_by_handle<M: Machine>(
     c: &Candidate,
     spent: &mut Duration,
 ) -> Action {
-    let mut action = Action { image: c.image.clone(), id: None, session: None, method: Method::Handle, outcome: Outcome::Ended };
+    let mut action = Action { image: c.image.clone(), id: None, session: None, outcome: Outcome::Ended };
     let held = match machine.open(c.pid, false) {
         Ok(h) => h,
         Err(OpenFailure::Gone) => {

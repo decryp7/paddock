@@ -21,8 +21,7 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::RestartManager::{
-    CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmEndSession, RmForceShutdown, RmGetList, RmRegisterResources, RmShutdown,
-    RmStartSession,
+    CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmEndSession, RmGetList, RmRegisterResources, RmStartSession,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
@@ -31,8 +30,6 @@ use windows_sys::Win32::System::Threading::{
 
 /// `ERROR_NOT_ALL_ASSIGNED`: `AdjustTokenPrivileges` succeeded but the token does not hold the privilege.
 const ERROR_NOT_ALL_ASSIGNED: u32 = 1300;
-/// `RmStatusUnknown`.
-const RM_STATUS_UNKNOWN: u32 = 0;
 /// `RM_INVALID_TS_SESSION`.
 const RM_INVALID_TS_SESSION: u32 = u32::MAX;
 
@@ -111,7 +108,6 @@ impl RmSession {
                         id: ProcessId::new(i.Process.dwProcessId, StartTime::from_micros(started)),
                         session: (i.TSSessionId != RM_INVALID_TS_SESSION).then_some(i.TSSessionId),
                         name: from_wide(&i.strAppName),
-                        unknown: i.AppStatus == RM_STATUS_UNKNOWN,
                     })
                 })
                 .collect());
@@ -192,22 +188,6 @@ impl Machine for WindowsMachine {
 
     fn rm_list(&mut self, files: &[PathBuf]) -> Result<Vec<RmProcess>, StopError> {
         RmSession::start(files)?.list()
-    }
-
-    fn rm_shutdown(&mut self, files: &[PathBuf], bound: Duration) -> Result<(), StopError> {
-        // RmShutdown has no timeout of its own: run it on a worker and stop waiting after `bound`. The worker finishes by
-        // itself (its session ends with it); what Restart Manager has not ended by then goes to the fallback.
-        let files = files.to_vec();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let result = RmSession::start(&files).and_then(|s| {
-                // SAFETY: a valid session handle; no status callback.
-                let rc = unsafe { RmShutdown(s.0, RmForceShutdown as u32, None) };
-                if rc == ERROR_SUCCESS { Ok(()) } else { Err(StopError::RestartManager { call: "RmShutdown", code: rc }) }
-            });
-            let _ = tx.send(result);
-        });
-        rx.recv_timeout(bound).unwrap_or(Err(StopError::RestartManagerTimeout(bound)))
     }
 
     fn processes(&mut self) -> Result<Vec<Candidate>, StopError> {
