@@ -71,6 +71,17 @@ describe('MapPage', () => {
     expect(q('[data-testid="credit"]')!.textContent).toContain('Natural Earth');
   });
 
+  it('keys every legend step by its fill and by the marker size the map draws for it (a second channel besides colour)', async () => {
+    const { all } = await open();
+    const keys = all('[data-testid="legend"] .key[data-step]');
+    expect(keys.map((k) => k.dataset['step'])).toEqual(['0', '1', '2', '3', '4']);
+    expect(keys.map((k) => k.querySelector('svg.swatch')!.getAttribute('data-step'))).toEqual(['0', '1', '2', '3', '4']);
+    const legendRadii = keys.map((k) => Number(k.querySelector('svg.size circle')!.getAttribute('r')));
+    expect(legendRadii).toEqual([3, 4, 5, 6, 7]);
+    // The same radius as the map's marker for a country in that step (US: 54 connections, step 3).
+    expect(Number(all('g.spot[data-country="US"] circle.dot')[0]!.getAttribute('r'))).toBe(legendRadii[3]);
+  });
+
   it('offers the same data as a table, sortable, with a button per country', async () => {
     const { all, q, f, settle } = await open();
     all('[role="radio"], pd-segmented-control button').find((b) => /Table/.test(b.textContent ?? ''))!.click();
@@ -135,6 +146,8 @@ describe('MapPage', () => {
     expect(tip.textContent).toContain('54 connections');
     expect(tip.textContent).toContain('1 flagged');
     expect(tip.textContent).toContain('Google Chrome, Slack, Spotify');
+    // The legend step in words, so the count band never rests on telling the fills apart.
+    expect(q('[data-testid="tip-step"]')!.textContent).toBe('Legend step 50–199');
     // Below the marker: the flag label sits above it.
     const spot = all('g.spot').find((s) => s.dataset['country'] === 'US')!.querySelector('circle.dot')!;
     expect(Number(spot.getAttribute('cy')) / 491 * 100).toBeLessThan(parseFloat(tip.style.top));

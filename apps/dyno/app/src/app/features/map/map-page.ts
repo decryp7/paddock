@@ -120,6 +120,7 @@ export function countryLabel(c: CountryCount): string {
                   <div class="tip" role="status" data-testid="country-tip" [style.left.%]="t.left" [style.top.%]="t.top">
                     <strong>{{ t.country.name }}</strong>
                     <span>{{ t.country.connections }} {{ t.country.connections === 1 ? 'connection' : 'connections' }}@if (t.country.flagged > 0) { · {{ t.country.flagged }} flagged }</span>
+                    <span class="faint" data-testid="tip-step">Legend step {{ legend[step(t.country.connections)]!.label }}</span>
                     @if (t.country.topPrograms.length > 0) { <span class="faint">{{ t.country.topPrograms.join(', ') }}</span> }
                   </div>
                 }
@@ -127,7 +128,13 @@ export function countryLabel(c: CountryCount): string {
               <figcaption class="faint credit" data-testid="credit">{{ credit(s) }}</figcaption>
               @if (arcs().hidden > 0) { <figcaption class="faint">Arcs are drawn for the {{ arcs().arcs.length }} busiest destinations; {{ arcs().hidden }} more are dots. The table lists every country.</figcaption> }
               <figcaption class="legend" aria-label="Legend: connections per country" data-testid="legend">
-                @for (l of legend; track l.label; let i = $index) { <span class="key"><i [attr.data-step]="i"></i> {{ l.label }}</span> }
+                @for (l of legend; track l.label; let i = $index) {
+                  <span class="key" [attr.data-step]="i">
+                    <svg class="swatch" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" [attr.data-step]="i"><rect x="0.5" y="0.5" width="15" height="15" rx="3" /></svg>
+                    <svg class="size" viewBox="0 0 18 16" width="18" height="16" aria-hidden="true"><circle cx="9" cy="8" [attr.r]="dotRadius(l.min)" /></svg>
+                    {{ l.label }}
+                  </span>
+                }
                 <span class="key"><i class="hatch"></i> ⚑ flagged by one of your lists</span>
               </figcaption>
             </figure>
@@ -187,19 +194,27 @@ export function countryLabel(c: CountryCount): string {
     .tip { position: absolute; display: grid; gap: 2px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font-size: var(--fs-xs); box-shadow: 0 2px 8px rgb(0 0 0 / 25%); pointer-events: none; max-width: 240px; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .act { text-align: right; white-space: nowrap; }
-    /* Three separate levels: the sea is the page's own surface, the land sits one step away from it (1.5 to 1), and the lowest
-       connection band one more step; a spec measures the ratios in both themes. */
-    :host { --land-mix: 17%; --b0: 66%; --b1: 74%; --b2: 82%; --b3: 90%; --b4: 96%; --sea: var(--surface-1); --land: color-mix(in srgb, var(--text-1) var(--land-mix), var(--surface-1)); }
+    /* The sea is the page's own surface and the land one step away from it (1.5 to 1); the five count steps are the accent's count
+       ramp (--pd-count-1 to -5), told apart by lightness in every colour vision (the token test measures it). A spec measures the
+       sea, land and lowest step in both themes. */
+    :host { --land-mix: 17%; --sea: var(--surface-1); --land: color-mix(in srgb, var(--text-1) var(--land-mix), var(--surface-1)); }
     @media (prefers-color-scheme: light) {
-      :host-context(:root:not([data-theme='dark'])) { --land-mix: 20%; --b0: 52%; --b1: 62%; --b2: 72%; --b3: 82%; --b4: 92%; }
+      :host-context(:root:not([data-theme='dark'])) { --land-mix: 20%; }
     }
-    :host-context(:root[data-theme='light']) { --land-mix: 20%; --b0: 52%; --b1: 62%; --b2: 72%; --b3: 82%; --b4: 92%; }
+    :host-context(:root[data-theme='light']) { --land-mix: 20%; }
     .land { fill: var(--land); stroke: var(--sea); stroke-width: 0.4; }
-    .land[data-step='0'], .key i[data-step='0'] { fill: color-mix(in srgb, var(--accent) var(--b0), var(--land)); background: color-mix(in srgb, var(--accent) var(--b0), var(--land)); }
-    .land[data-step='1'], .key i[data-step='1'] { fill: color-mix(in srgb, var(--accent) var(--b1), var(--land)); background: color-mix(in srgb, var(--accent) var(--b1), var(--land)); }
-    .land[data-step='2'], .key i[data-step='2'] { fill: color-mix(in srgb, var(--accent) var(--b2), var(--land)); background: color-mix(in srgb, var(--accent) var(--b2), var(--land)); }
-    .land[data-step='3'], .key i[data-step='3'] { fill: color-mix(in srgb, var(--accent) var(--b3), var(--land)); background: color-mix(in srgb, var(--accent) var(--b3), var(--land)); }
-    .land[data-step='4'], .key i[data-step='4'] { fill: color-mix(in srgb, var(--accent) var(--b4), var(--land)); background: color-mix(in srgb, var(--accent) var(--b4), var(--land)); }
+    .land[data-step='0'] { fill: var(--pd-count-1); }
+    .land[data-step='1'] { fill: var(--pd-count-2); }
+    .land[data-step='2'] { fill: var(--pd-count-3); }
+    .land[data-step='3'] { fill: var(--pd-count-4); }
+    .land[data-step='4'] { fill: var(--pd-count-5); }
+    .key .swatch rect { stroke: var(--border-strong); stroke-width: 1; }
+    .key .swatch[data-step='0'] rect { fill: var(--pd-count-1); }
+    .key .swatch[data-step='1'] rect { fill: var(--pd-count-2); }
+    .key .swatch[data-step='2'] rect { fill: var(--pd-count-3); }
+    .key .swatch[data-step='3'] rect { fill: var(--pd-count-4); }
+    .key .swatch[data-step='4'] rect { fill: var(--pd-count-5); }
+    .key .size circle { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
     .sea { fill: var(--sea); stroke: var(--border); stroke-width: 1; }
     .arc { stroke: var(--accent); stroke-linecap: round; }
     .callout text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); }
@@ -214,8 +229,8 @@ export function countryLabel(c: CountryCount): string {
     .home text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); }
     .legend { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-2); }
     .key { display: inline-flex; gap: 6px; align-items: center; }
-    .key i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; }
-    .key i.hatch { background: repeating-linear-gradient(45deg, var(--warn) 0 3px, transparent 3px 6px); }
+    .key svg { display: block; width: auto; height: 16px; }
+    .key i.hatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; background: repeating-linear-gradient(45deg, var(--warn) 0 3px, transparent 3px 6px); }
     table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
     .grid th, .grid td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
     .grid thead th { color: var(--text-2); font-weight: var(--fw-semibold); padding: 0; }

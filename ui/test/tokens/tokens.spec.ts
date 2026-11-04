@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { contrast, deltaE, deltaE2000, parseColor, simulate, type Cvd, type Rgba } from './color';
+import { contrast, deltaE, deltaE2000, lab, parseColor, simulate, type Cvd, type Rgba } from './color';
 import { ACCENTS, readRules, resolve, type Contrast, type Scheme, type Vars } from './css';
 
 const rules = readRules();
@@ -365,5 +365,50 @@ describe('widget frame (ADR 0035)', () => {
   it('keeps one geometry at every density: no row-height or card-padding token, the popup is 8 / 12 px by design', () => {
     for (const f of ['frame.ts', 'area.ts']) expect(src(f), f).not.toMatch(/--pd-(row-height|card-padding)/);
     expect(src('frame.ts')).toContain('padding: var(--pd-space-2) var(--pd-space-3)');
+  });
+});
+
+// The count ramp (--pd-count-1 to -5, fewest to most): five legend steps drawn as country fills on Dyno's connections map, where
+// neighbouring countries are often neighbouring steps. Lightness carries the order (it survives every colour-vision deficiency):
+// neighbours are CIEDE2000 >= 10 apart in normal vision and under protanopia, deuteranopia and tritanopia, and L* >= 10 apart,
+// rising with the count in dark and falling in light. Step 1 reads on the page (3:1, WCAG 1.4.11), and every step stays clear of the
+// warning colour of the hatched "flagged" marker (the hatch and the flag glyph carry it too).
+const COUNT_MIN_DE00 = 10;
+const COUNT_MIN_DL = 10;
+const COUNT_MIN_DE00_WARNING = 7;
+const RAMPED = ACCENTS.filter((a) => resolve(rules, 'dark', a)['--pd-count-1'] !== undefined);
+
+describe('count ramp', () => {
+  it('Dyno defines one (its connections map uses it)', () => {
+    expect(RAMPED).toContain('dyno');
+  });
+});
+
+describe.each(SCHEMES.flatMap((s) => RAMPED.map((a) => [s, a] as const)))('count ramp, %s, %s', (scheme, accent) => {
+  const v = resolve(rules, scheme, accent);
+  const ramp = [1, 2, 3, 4, 5].map((i) => col(v, `--pd-count-${i}`));
+  const L = (c: Rgba): number => lab(c)[0];
+
+  it.each(['normal', ...CVDS] as const)(`neighbouring steps are CIEDE2000 >= ${COUNT_MIN_DE00} apart, %s`, (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (let i = 0; i + 1 < ramp.length; i++) {
+      expect(deltaE2000(see(ramp[i] as Rgba), see(ramp[i + 1] as Rgba)), `step ${i + 1} vs ${i + 2}`).toBeGreaterThanOrEqual(COUNT_MIN_DE00);
+    }
+  });
+
+  it(`lightness orders the steps: L* >= ${COUNT_MIN_DL} per step, lighter with the count in dark, darker in light`, () => {
+    for (let i = 0; i + 1 < ramp.length; i++) {
+      const step = (L(ramp[i + 1] as Rgba) - L(ramp[i] as Rgba)) * (scheme === 'dark' ? 1 : -1);
+      expect(step, `step ${i + 1} to ${i + 2}`).toBeGreaterThanOrEqual(COUNT_MIN_DL);
+    }
+  });
+
+  it('every step is 3:1 against the page (the map\'s sea)', () => {
+    for (const [i, c] of ramp.entries()) expect(contrast(c, col(v, '--pd-bg')), `step ${i + 1}`).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(['normal', ...CVDS] as const)(`every step is CIEDE2000 >= ${COUNT_MIN_DE00_WARNING} from the warning colour (the flagged hatch), %s`, (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (const [i, c] of ramp.entries()) expect(deltaE2000(see(c), see(col(v, '--pd-warning'))), `step ${i + 1}`).toBeGreaterThanOrEqual(COUNT_MIN_DE00_WARNING);
   });
 });

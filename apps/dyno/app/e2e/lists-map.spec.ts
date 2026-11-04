@@ -124,5 +124,39 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(ratios.band0VsLand).toBeGreaterThanOrEqual(1.5);
       expect(ratios.band0VsSea).toBeGreaterThanOrEqual(1.5);
     });
+
+    test('neighbouring legend steps differ in lightness (1.3 to 1 or more), and each key fill is the map\'s fill for that step', async ({ page }) => {
+      await page.goto(url('map'));
+      await page.getByTestId('world-map').waitFor();
+      const r = await page.evaluate(() => {
+        const rgb = (css: string): [number, number, number] => {
+          const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
+          c.fillStyle = '#000';
+          c.fillStyle = css;
+          c.fillRect(0, 0, 1, 1);
+          const d = c.getImageData(0, 0, 1, 1).data;
+          return [d[0]!, d[1]!, d[2]!];
+        };
+        const lum = ([r, g, b]: [number, number, number]) => {
+          const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+        };
+        const keys = [0, 1, 2, 3, 4].map((i) => getComputedStyle(document.querySelector(`[data-testid="legend"] svg.swatch[data-step="${i}"] rect`)!).fill);
+        // A land path in every step, so the map's own fill is compared (the mock has countries in only some steps).
+        const probe = document.querySelector('path.land[data-step="-1"]')!;
+        const land = [0, 1, 2, 3, 4].map((i) => {
+          probe.setAttribute('data-step', String(i));
+          return getComputedStyle(probe).fill;
+        });
+        probe.setAttribute('data-step', '-1');
+        const ratios = keys.slice(1).map((k, i) => {
+          const [x, y] = [lum(rgb(k)), lum(rgb(keys[i]!))];
+          return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+        });
+        return { keys, land, ratios };
+      });
+      expect(r.keys).toEqual(r.land);
+      for (const [i, ratio] of r.ratios.entries()) expect(ratio, `step ${i + 1} vs ${i + 2}`).toBeGreaterThanOrEqual(1.3);
+    });
   });
 }

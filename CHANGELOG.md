@@ -4,6 +4,8 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui` tokens: the count ramp `--pd-count-1` to `-5`
+- New CSS custom properties `--pd-count-1` to `--pd-count-5` (fewest to most): a five-step ramp for counts drawn as area fills, defined per accent from `count-dark`/`count-light` in `$accents` (Dyno only so far). `npm run test:tokens` measures it: neighbours CIEDE2000 >= 10 in normal vision and under protanopia, deuteranopia and tritanopia, L* >= 10 per step, step 1 at 3:1 on the page, every step >= 7 from the warning colour (design guide, section 4).
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
