@@ -3,14 +3,32 @@
 Research note, 2026-11-04. Status: proposal for the user; nothing here is decided. Branch `docs/pacenotes-fast-ingest`, based on
 `steward/pacenotes-stage1` at c1bba3f9f.
 
+> **Superseded by [ADR 0012](../adr/0012-fast-ingest.md) where they differ.** The user decided on 2026-11-04 (section 10). Where
+> this note and the ADR disagree, the ADR wins: change detection is the manifest alone (no Git accelerator), the fact cache is
+> per repository identity and keyed by a hash of the raw bytes, and the review of 2026-11-04 added leases, Windows enumeration and
+> logging. The note keeps the research and the measurements.
+>
+> | This note | ADR 0012 |
+> |---|---|
+> | D1 (the user's Git question) | D1 (manifest only, changed by the user) |
+> | D2 (snapshot for serving) | D5 |
+> | D3 (fact blobs per content key) | D3 |
+> | D4 (cache across worktrees and clones) | D3 and D4 (per repository identity) |
+> | D5 (DuckDB and DuckLake export only) | D8 |
+> | D6 (text search without an index) | D6 |
+> | D7 (memory budgets) | D7 |
+> | D8 (rules in the worker) | D9 |
+> | D9 (submodules on request) | D10 |
+> | not in the note | D2 (pipeline), D6a (leases and GC), D11 (logging) |
+
 **Question.** Pacenotes reads a repository and builds a graph. How do we make that ingest as fast as possible, and which intermediate
 representation lets every later function (search, call graph, references, diagrams, call traces, MCP answers, review rules, coverage
 mapping) answer quickly without parsing again?
 
 **Short answer.** Make the parse result of a file a **content-addressed, immutable fact blob** (keyed by the file's content hash plus
 the extractor, grammar and pack versions), so a file that any worktree, branch or earlier run has seen is never parsed again; find
-what changed with **Pacenotes' own stat manifest for every folder**, accelerated under Git by blob ids read from the git index (never
-`git init`, never the git binary); keep the catalog and the blobs in **SQLite** (one row per file instead of dozens); and serve every
+what changed with **Pacenotes' own stat manifest for every folder** (decided: no Git fast path, never `git init`, never the git
+binary); keep the catalog and the blobs in **SQLite** (one row per file instead of dozens); and serve every
 query from a **derived, memory-mapped snapshot** per generation (interned strings, `u32` ids, sorted arrays, CSR adjacency, a name
 FST). Memory is bounded by streaming and mmap (target, estimate: under 500 MB peak for a 100k-file first index, under 100 MB idle).
 DuckDB and DuckLake fit analytics, not the interactive path. Section 7 has the recommendation per layer, section 9 the benchmark
@@ -139,8 +157,8 @@ both halves and proposes one mechanism with a Git accelerator. Measurements: [pe
 
 | Question | Measured or found | Source |
 |---|---|---|
-| `git status --porcelain=v2 -uall` on this repository (11,867 tracked files), git index fresh | 0.07 to 0.08 s warm, 0.34 s the first time | measured |
-| the same on a 27,390-file public open-source checkout (27 submodules) whose index stat data is **stale** (27,363 of 27,390 entries; the checkout had been copied, so every inode and ctime differs) | **5.9 s every time**, and 33 s cold: git re-reads and re-hashes every stat-dirty file, and with `GIT_OPTIONAL_LOCKS=0` (what a read-only tool must use) it cannot write the refreshed index, so it pays again on every call | measured; the mechanism is git's own ([racy-git](https://git-scm.com/docs/racy-git): 2.22 s against 0.14 s on a 20,000-file Linux tree once refreshed) |
+| `git status --porcelain=v2 -uall` on this repository (this branch's worktree at c1bba3f9f, 11,867 tracked files), git index fresh | 0.07 to 0.08 s warm, 0.34 s the first time | measured |
+| the same on a local mirror of the public repository github.com/UberGuidoZ/Flipper at commit 9bec07fa2 (2024-12-19; 27,390 tracked files, 27 submodules) whose index stat data is **stale** (27,363 of 27,390 entries; the checkout had been copied, so every inode and ctime differs) | **5.9 s every time**, and 33 s cold: git re-reads and re-hashes every stat-dirty file, and with `GIT_OPTIONAL_LOCKS=0` (what a read-only tool must use) it cannot write the refreshed index, so it pays again on every call | measured; the mechanism is git's own ([racy-git](https://git-scm.com/docs/racy-git): 2.22 s against 0.14 s on a 20,000-file Linux tree once refreshed) |
 | a **private index file** (`GIT_INDEX_FILE` in Pacenotes' data folder): `read-tree HEAD`, then `update-index --refresh` once | read-tree 0.03 s; first refresh 5.9 s (hashes everything once); afterwards status 0.03 s (`-uno`) and 0.07 s (untracked too); index file 3.3 MB | measured |
 | `git ls-files -s` (path, mode, blob id per entry) | 0.01 s for 11,867 and for 27,390 entries | measured |
 | `git ls-tree -r HEAD` (blob ids of the commit) | 0.17 s (11,867) and 0.12 s (27,390) | measured |
@@ -228,7 +246,7 @@ Perforce and Mercurial working copies and their ignore rules, fails on read-only
 compression pass on first open, needs the git binary, and runs configured filters. The one thing (b) gives that (a) does not is
 history of a non-git folder, which Pacenotes does not need for indexing.
 
-### 4.3 One interface for both
+### 4.3 One interface for both (as proposed; the `GitAccelerator` part was not adopted, ADR 0012 D1)
 
 Both paths produce the same thing for the indexer, so it never knows whether Git was involved:
 
@@ -263,7 +281,7 @@ The watcher stays as ADR 0006 has it: OS notifications through `paddock-watch`, 
 time. A run is now `ChangeSource` then the pipeline: one walk and `lstat` per file against the manifest (the no-change case is the
 measured 0.26 s on 20k files), reads only for stat changes, parses only for new content keys. Two additions: (1) when
 `paddock-watch` carries paths (its known limit today), the run stats only those paths and their folders instead of the whole tree;
-(2) a change of `.git/HEAD` or `.git/index` (a checkout, a pull) is a hint to run the `GitAccelerator` before the walk, so a branch
+(2) (not adopted, ADR 0012 D1) a change of `.git/HEAD` or `.git/index` (a checkout, a pull) is a hint to run the `GitAccelerator` before the walk, so a branch
 switch of thousands of files turns into blob-id cache hits rather than reads. Events inside `.git` still start a cheap run, as today.
 
 ## 5. Stores compared
@@ -447,7 +465,7 @@ pages first, so this is the right side of the trade.
 
 | Layer | Store | Why |
 |---|---|---|
-| **Catalog and metadata** (manifest, generations, content key to fact blob, blob id to fingerprint, quarantine, versions, user state) | **SQLite** (WAL, rusqlite bundled) | family store; multi-process readers for MCP; crash-safe; 359k rows/s loaded in path order, 2.6 µs point lookups, 11 MiB peak RSS; 2 MB default cache |
+| **Catalog and metadata** (manifest, generations, content key to fact blob, quarantine, versions, user state) | **SQLite** (WAL, rusqlite bundled) | family store; multi-process readers for MCP; crash-safe; 359k rows/s loaded in path order, 2.6 µs point lookups, 11 MiB peak RSS; 2 MB default cache |
 | **Bulk facts** (per-file parse results) | **content-addressed fact blobs** (postcard, optional zstd) in the same SQLite file, appended in insertion order with a narrow content-key index (section 5.1); **top-2 contender**: append-only segment files (Arrow IPC or postcard packs) per ingest batch with the same index in SQLite | one row per file instead of dozens; shared across worktrees and branches; writes early, swaps only the map; avoids the random-key B-tree cost measured in 5.1 |
 | **Graph and search** (refs, callers, in file, path, names, text) | **derived mmap snapshot**: string arena, name FST, symbol and occurrence arrays, CSR forward and reverse; text by grep-searcher first, a document trigram index only if B6 asks | 4.1 µs to under 1 µs for refs and 87 µs to 7.9 µs for callers 3 against normalised SQLite; 22.9 against 222 MiB for 5M edges; near-instant re-open; private memory small |
 | **Embeddings** | as decided: the `VectorIndex` port with its spike (hannoy, libSQL, usearch, proposal 21.3), vectors cached by chunk text hash and model id (ADR 0001); Lance stays behind LanceDB as the fallback named there | no new decision needed; Lance would bring Arrow and DataFusion for one layer |
@@ -484,8 +502,9 @@ serve     -> queries read the snapshot (and one blob for detail); SQLite for use
   batch, the host replays the batch one file at a time to find the culprit and quarantines only it.
 - **A derived, mmap'd snapshot for serving** (codesearch, zoekt, Kythe's serving tables). Missing, stale or damaged means rebuild,
   never a user-visible error, so it needs no migrations, only a version in its header, like the vector index (proposal 21.3).
-- **Overlay, then compaction** (Glean's stacked databases) only if B4 shows the full link is too slow for a watcher run: 83 ms for
-  5M edges suggests a rebuild per run is affordable up to Linux scale (estimate), which is simpler (KISS).
+- **Overlay, then compaction** (Glean's stacked databases) only if B4 shows the full link is too slow for a watcher run. The 83 ms
+  measured here is a CSR build from an in-memory edge list, not the real link from blobs; B4 measures the real link before anything
+  relies on it.
 - **Parse once, serve every consumer.** The worker emits symbols, occurrences with a role bitset (as SCIP does), imports, call
   candidates, chunk spans with a text hash, string literals and log-call sites (Debrief bridge). Review rules run **inside the worker on
   the same tree** (the parse is most of a rule's 25 ms) and are cached under the same key plus the rule pack's hash.
@@ -504,8 +523,10 @@ serve     -> queries read the snapshot (and one blob for detail); SQLite for use
   call edges as CSR forward and reverse with tier and confidence, import graph as CSR. Little-endian fixed-width arrays (`bytemuck` or
   Arrow IPC buffers; the ADR picks one). Written aside, fsynced, renamed; old snapshots deleted when no reader holds them (Windows cannot
   delete a mapped file).
-- **Cache sharing.** The fact-blob cache is keyed per repository identity (root commit or remote), so all worktrees and clones on the
-  machine share it; snapshots stay per worktree. Both are a "cache" category in `paddock-storage` (clearable, rebuilt on demand).
+- **Cache sharing (as decided, ADR 0012 D3 and D4).** One fact store per **repository identity** (the root commits plus the `origin`
+  URL for a Git folder; its own random identity for any other folder): worktrees and clones of one repository share it, different
+  repositories do not. Each folder has its own catalog, which attaches its repository's fact store; snapshots stay per folder. The
+  key is a BLAKE3 hash of the raw bytes plus the language, grammar identity, build-derived extractor id and limits.
 
 ### 7.4 Ranked options, fallback and risks
 
@@ -521,18 +542,18 @@ serve     -> queries read the snapshot (and one blob for detail); SQLite for use
 **Risks.** (1) A second, derived format to keep correct: derive it only from blobs, and test "rebuild from blobs gives the same
 snapshot" as a property. (2) Name-based tier-2 resolution makes the link step global: edges are resolved at link time, never stored in
 a blob. (3) mmap of a replaced file: never modify in place; write aside and rename. (4) Windows: a mapped file cannot be deleted, so old
-snapshots go lazily. (5) The git-index path depends on line endings and LFS; the blob-id-to-fingerprint map is learned, never assumed.
-(6) ADR 0004 needs an amendment to read the git index as data.
+snapshots go lazily. (5) Leases and garbage collection across processes (ADR 0012 D6a) must be right, or a reader loses its generation: a two-process test
+guards it. (6) Windows needs the directory enumeration in `paddock-walk` for cheap stat values (ADR 0012 D1).
 
 ## 8. Parallelism and cost (rule 51, ER-20)
 
 | Stage | Kind of work | Bound (Auto default; each a Setting) | Cheaper operation |
 |---|---|---|---|
-| change | metadata I/O | 4 threads on SSD, 1 to 2 on HDD | one walk instead of three (after `paddock-walk` unfreezes); stat shortcut; git-index keys; watcher paths |
+| change | metadata I/O | 4 threads on SSD, 1 to 2 on HDD | one walk instead of three (after `paddock-walk` unfreezes); the stat comparison; watcher paths |
 | read and hash | I/O then CPU | 4 on SSD | skip by stat and by git key; SHA-256 is 526 MiB/s, BLAKE3 1,675 (switch only if B2 shows the read pass hash-bound) |
 | parse | CPU, a process each | `min(cores − 1, memory budget / per-worker peak, 8)` | the fact cache; batched requests; incremental re-parse of open files (39x) |
 | write | one writer | 1 (SQLite has one writer) | one blob row per file, prepared once, batches of ~1,000 |
-| link | CPU and memory | parallel sort (cores − 1), CSR build single-threaded | 83 ms per 5M edges; overlay only if needed; spill above the budget |
+| link | CPU and memory | parallel sort (cores − 1), CSR build single-threaded | B4 measures the real link (83 ms was a CSR build from an in-memory list); overlay only if needed; spill above the budget |
 | embed | CPU | cores − 1 | cache by chunk text hash and model id (ADR 0001) |
 | serve | memory reads | per query | mmap; no work at open |
 
@@ -553,7 +574,7 @@ memory, sampled every 100 ms, peak and steady.
 | B2 | Hash choice | SHA-256, BLAKE3, xxh3-128 over the read pass of the large tree | keep SHA-256 unless hash-bound |
 | B3 | Query latency at scale | normalised SQLite against the snapshot for refs, callers 1 to 5 levels **and unlimited depth** (time and nodes visited), callees unlimited, in file, path A to B (bidirectional BFS on CSR); 1M, 5M, 20M synthetic edges **and the tier-2 graph of the Linux checkout**; p50, p99 | snapshot or the SQLite-only fallback |
 | B4 | Link cost | full snapshot build from blobs at 100k, 1M, 10M symbols; time and peak footprint, with and without spill | overlay needed or rebuild per run |
-| B5 | Re-open and change detection | open to first answer; new worktree of an indexed repository; branch switch of 10% of files; manifest only against manifest plus git-index keys | the `GitAccelerator` and the shared cache |
+| B5 | Re-open and change detection | open to first answer; a new worktree of an indexed repository; a branch switch of 10% of files; the no-change run on macOS, Linux and Windows (directory-enumeration stat) | the Auto I/O threads and the shared per-repository cache |
 | B6 | Text search | grep-searcher against a document trigram index against FTS5 trigram: p50/p99 warm and cold, index size, build time | whether a text index is built |
 | B7 | Memory at three sizes | peak and steady private footprint and RSS during first ingest, idle, querying; workers 2, 4, 8; in-flight budgets 32, 64, 128 MiB | the Auto defaults and the 500 MB target |
 | B8 | Rules on the worker's tree | rule pack time per file, one parse against one parse per rule | moving rules into the worker |
@@ -572,7 +593,7 @@ The user accepted all nine recommendations on 2026-11-04, with one change to D1.
 | D1 | **Changed from the recommendation.** Change detection uses Pacenotes' own manifest **everywhere**, for consistency: one code path, with no gix blob-id fast path under Git. Size, mtime, ctime and file id are compared, then a content hash is taken when any of them changed. `.gitignore` and the other ignore files are respected through the `ignore` crate. Never `git init`, never a shadow repository. Sections 4.1 and 4.3 above (the `GitAccelerator`) are therefore **not adopted**. The price: a new worktree or a fresh clone reads every file once, because its mtimes are new, but it parses only content the cache has not seen. |
 | D2 | Graph queries are served from the derived mmap snapshot (CSR plus FST); SQLite is the only source of truth. |
 | D3 | Parse results are stored once per content key (fact blobs, schema v2); B9 decides between SQLite blobs and Arrow IPC segments. |
-| D4 | One fact cache is shared by all worktrees and clones; ADR 0012 makes it one cache per user, since the keys are content-addressed. |
+| D4 | One fact cache is shared by all worktrees and clones **of a repository** (per repository identity); different repositories do not share. |
 | D5 | DuckDB and DuckLake stay off the interactive path; they are used only for a later Parquet export. |
 | D6 | Text search starts without an index; a trigram index only if B6 asks for one. |
 | D7 | Budgets: under 500 MB peak for a 100k-file first index and under 100 MB idle (estimates for B7 to confirm); Index threads, I/O threads and memory budget are Settings with Auto defaults. |

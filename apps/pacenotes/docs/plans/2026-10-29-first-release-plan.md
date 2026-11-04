@@ -367,6 +367,21 @@ Order: top to bottom; two packages run at once when load allows. Designs and the
 Stage 1 delivers no app and nothing the user can run: it is the parsing, history, rules, index, diagram, requirement and
 coverage core with its tests, so stage 2 starts with the hardest pure parts proven.
 
+### 4.3a Fast ingest (ADR 0012, accepted 2026-11-04; about 67.5 agent-days, 70 with IG10)
+
+[ADR 0012](../adr/0012-fast-ingest.md) replaces the index's storage and change detection with the manifest, the per-repository fact
+cache, the SQLite catalog and the derived mmap graph, and lists the work packages IG0 to IG15 and the benchmark packages IG-B1 to
+IG-B9 with their sizes and dependencies (the ADR's table is the source; it is not copied here). Placement:
+
+- **Stage 1 (pure crates, no shared change):** IG0, IG-B1, IG-B6, IG3, then IG2 (with its `FactStore` port) and IG-B9, IG4, IG-B3,
+  IG5, IG11, IG7, IG-B8, IG13, IG15. They extend A3a and A3's crates and change no shared path.
+- **Stage 2 (shared changes and adapters):** IG14 (the stat fields and the Windows directory enumeration in `paddock-walk`), then IG1
+  and IG-B5; IG6, IG8 and IG-B7; IG9; IG12 (moving the UI and MCP consumers to the snapshot) with wave 3's search and understand
+  packages. IG10 (Parquet export) waits for Debrief's DuckLake trial.
+- **Effect on other packages:** A3's index job gains the phases of ADR 0006's amendment; B2 reads chunk text hashes from the fact
+  blobs; A4's references and call graph run on the snapshot's queries (IG5, IG11); C1's rules run in the worker (IG7); H1's
+  single-writer lock is the owner lock of ADR 0012 D4; F2's budgets include the B7 targets.
+
 ### 4.4 Stage 2, wave 2: app skeleton, index job, embeddings, shared rules (about 5 days)
 
 | # | Package | Owned files | Failing test first | Depends | Days |
@@ -468,9 +483,10 @@ F1 in detail:
 |---|---|---|
 | Stage 1, beside Pitwall 1.1 and Debrief 1.2 | about 41 | five to seven weeks at one or two agents |
 | Stage 2, waves 2-8 | about 156 | nine to eleven weeks at four agents if nothing waits |
-| Package sum | about 197 | |
-| Review and CI overhead (about 20 %) | about 40 | |
-| **Planning figure for the full v1** | **230 to 270** | re-estimated after stage 1 with the measured pace |
+| Fast ingest (ADR 0012, section 4.3a; added 2026-11-04) | about 67.5 (70 with IG10) | spread over both stages; partly overlaps A3, A4 and C1, reconciled at the stage-1 re-estimate |
+| Package sum | about 265 | |
+| Review and CI overhead (about 20 %) | about 53 | |
+| **Planning figure for the full v1** | **300 to 350** (230 to 270 before ADR 0012) | re-estimated after stage 1 with the measured pace |
 
 Not counted: the Pitwall toolsets (about 2 days in Pitwall's release) and the out-of-process packaging of the functions
 (after v1). The proposal's own estimate for this scope is 100-125k lines of Rust and 22-26 weeks elapsed (proposal §19);
