@@ -1,5 +1,5 @@
 //! The Windows edge of the dialog size state machine (ADR 0043 §3, §4 and D4, D5): physical px for the window's own
-//! monitor and DPI, and the four messages only the window procedure sees.
+//! monitor and DPI, and the messages only the window procedure sees.
 //!
 //! * **Scale and frame.** `GetDpiForWindow` for the scale; the **full** frame for `SetWindowPos` from
 //!   `AdjustWindowRectExForDpi` with the window's own styles at a given DPI; the **visible** frame (what the clamp to the
@@ -10,6 +10,8 @@
 //! * **DPI change.** `WM_GETDPISCALEDSIZE` is answered with the outer size the state machine wants at the new DPI, which
 //!   becomes the suggested rectangle of `WM_DPICHANGED`; the posted refit then corrects Windows 10, where tao computes
 //!   its own rectangle (D5).
+//! * **Snap.** `WM_WINDOWPOSCHANGED` while `IsWindowArranged`: an Aero snap sends neither `WM_SIZING` nor `SC_SIZE`, and
+//!   sends no size change at all when the kind's floor is wider than the snapped half (a viewer at 150 %).
 //! * **Move end.** `WM_EXITSIZEMOVE` tells the state machine to check the clamp on the monitor the window ended on.
 //!
 //! The subclass is chained after tao's own (installed later, so it is called first and passes everything on). It must be
@@ -29,8 +31,9 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_EXITSIZEMOVE, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_SIZING, WM_SYSCOMMAND,
+    GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetWindowLongPtrW, IsWindowArranged, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_EXITSIZEMOVE, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_SIZING, WM_SYSCOMMAND,
+    WM_WINDOWPOSCHANGED,
 };
 
 /// The subclass id of this edge on a window ("PDLG").
@@ -43,6 +46,9 @@ pub trait WindowEvents {
     fn user_resize_started(&self);
     /// A move or resize ended (`WM_EXITSIZEMOVE`).
     fn size_move_ended(&self);
+    /// The window is arranged by the OS (an Aero snap: `WM_WINDOWPOSCHANGED` with `IsWindowArranged`), whether or not the
+    /// snap changed its size.
+    fn snapped(&self);
     /// The logical inner size the window should have at `dpi`, for `WM_GETDPISCALEDSIZE`; `None` leaves the OS's size.
     fn inner_for_dpi(&self, dpi: u32) -> Option<Size>;
 }
@@ -239,6 +245,13 @@ unsafe extern "system" fn subclass_proc(
             events.size_move_ended();
             None
         }
+        WM_WINDOWPOSCHANGED => {
+            // SAFETY: a plain query of the window handle the message came for.
+            if unsafe { IsWindowArranged(hwnd) }.as_bool() {
+                events.snapped();
+            }
+            None
+        }
         WM_GETDPISCALEDSIZE => {
             let dpi = wparam.0 as u32;
             let inner = events.inner_for_dpi(dpi)?;
@@ -286,6 +299,7 @@ mod tests {
     struct Log {
         resize: u32,
         ended: u32,
+        snapped: u32,
     }
 
     struct Sink {
@@ -299,6 +313,9 @@ mod tests {
         }
         fn size_move_ended(&self) {
             self.log.borrow_mut().ended += 1;
+        }
+        fn snapped(&self) {
+            self.log.borrow_mut().snapped += 1;
         }
         fn inner_for_dpi(&self, _dpi: u32) -> Option<Size> {
             self.inner

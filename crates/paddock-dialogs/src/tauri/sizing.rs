@@ -18,6 +18,7 @@ pub(super) enum Phase {
     Ready,
     Resized,
     UserResize,
+    Snapped,
     Moved,
     Scale,
     Deadline,
@@ -30,6 +31,7 @@ impl Phase {
             Phase::Ready => "ready",
             Phase::Resized => "resized",
             Phase::UserResize => "user-resize",
+            Phase::Snapped => "snapped",
             Phase::Moved => "moved",
             Phase::Scale => "scale",
             Phase::Deadline => "deadline",
@@ -364,6 +366,21 @@ pub fn user_resize_started<R: Runtime>(window: &Window<R>) {
     );
 }
 
+/// The window system says the window is snapped (Windows `IsWindowArranged`): the size is theirs for this opening, also when
+/// the snap changed no size.
+#[cfg(windows)]
+pub(super) fn snapped<R: Runtime>(window: &Window<R>) {
+    let app = window.app_handle();
+    let _ = transition(
+        app,
+        window,
+        std::env::consts::OS,
+        Phase::Snapped,
+        |_| "the OS says the window is snapped".into(),
+        |s, _| s.on_snapped(),
+    );
+}
+
 /// The window moved (perhaps to another monitor): the clamp is made again; the mode never changes.
 pub(super) fn moved<R: Runtime>(window: &Window<R>) {
     let app = window.app_handle();
@@ -432,6 +449,11 @@ pub(super) fn install_edge<R: Runtime>(app: &AppHandle<R>, window: Window<R>) {
             fn size_move_ended(&self) {
                 if let Some(w) = self.window() {
                     on_main_thread(&self.app, move || moved(&w));
+                }
+            }
+            fn snapped(&self) {
+                if let Some(w) = self.window() {
+                    on_main_thread(&self.app, move || snapped(&w));
                 }
             }
             fn inner_for_dpi(&self, _dpi: u32) -> Option<Size> {
