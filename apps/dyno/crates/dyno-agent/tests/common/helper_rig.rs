@@ -49,6 +49,8 @@ impl Caller {
         let mut ctx = Ctx::anonymous(Some(4242));
         ctx.access = access(request.kind(), standing);
         ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
+        // The connection's account, which the scoped readings (processes, socket owners, file holders) answer for.
+        ctx.account = Some(owner());
         ctx
     }
 }
@@ -61,6 +63,8 @@ pub struct Readers {
     pub traffic: Vec<TrafficCounter>,
     /// The SMART reply.
     pub smart: SmartReply,
+    /// Who holds which socket or file (Linux); nothing by default.
+    pub holders: Box<dyn dyno_core::helper_holders::HolderSource>,
 }
 
 impl Default for Readers {
@@ -76,6 +80,7 @@ impl Default for Readers {
                 skipped: vec![],
                 not_visited: 0,
             },
+            holders: Box::new(dyno_core::helper_holders::NoHolders),
         }
     }
 }
@@ -134,7 +139,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         audit: AuditLog::new(dir.join("audit.jsonl")),
         clock: Box::new(|| 1_000),
         login_items: Box::new(Items),
-        holders: Box::new(dyno_core::helper_holders::NoHolders),
+        holders: readers.holders,
         extras: Box::new(dyno_core::helper_extras::NoExtras),
         counters: Box::new(dyno_core::helper_counters::NoCounters),
         memory: Box::new(Memory(readers.memory)),

@@ -84,6 +84,9 @@ pub struct SocketRow {
     pub state: SocketState,
     /// The owning process, when the OS told us (other users' processes need elevation on macOS and Linux).
     pub pid: Option<u32>,
+    /// Linux only: the socket's inode (`/proc/net/*`), which the helper maps to the program that holds it when the kernel hid the
+    /// owner from this account. An input to the agent's owner step; the agent clears it before the rows leave it.
+    pub inode: Option<u64>,
 }
 
 /// How far a listening socket can be reached.
@@ -640,6 +643,7 @@ mod tests {
             remote: None,
             state: SocketState::Listen,
             pid,
+            inode: None,
         }
     }
 
@@ -651,6 +655,7 @@ mod tests {
             remote: Some((remote, port)),
             state,
             pid,
+            inode: None,
         }
     }
 

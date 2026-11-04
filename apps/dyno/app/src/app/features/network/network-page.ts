@@ -9,6 +9,7 @@ import { formatRate, formatRelative } from '../../shared/format';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
+import { ReadingSource } from '../../core/reading-source';
 import { NetworkStore } from '../../state/network.store';
 import { Lookups } from '../lookup/lookups';
 import { type GroupBy, allGroupKeys, type TableRow, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, middleEllipsis, ownerName, ownerReason, portService, protoText, reachTone, sortListeners, stateView, summarise, tableRows } from './network-model';
@@ -41,7 +42,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions],
+  imports: [ReadingSource, AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -81,8 +82,9 @@ function readCollapsed(): Set<string> {
         <p class="note" data-testid="country-filter"><dy-icon name="globe" /> <span>Showing connections to <b>{{ cc }}</b> only.</span> <button type="button" matButton="outlined" (click)="store.setQuery({ country: null })">Show all countries</button></p>
       }
 
-      <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
+      <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5">
         @if (store.snapshot(); as s) {
+          <dy-reading-source [via]="s.ownersVia" />
           @if (s.unknownOwners > 0 && !noteDismissed()) {
             <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without administrator rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }

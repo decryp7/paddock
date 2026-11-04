@@ -523,7 +523,12 @@ impl Shared {
             dirs,
             core: Mutex::new(core),
             ports: Ports {
-                locks: Mutex::new(locks),
+                // Linux: the helper first (it sees every account's descriptors), then the agent's own reader.
+                locks: Mutex::new(if helper_first && host == dyno_core::helper::HelperHost::Linux {
+                    Box::new(crate::helper_readers::holders::HelperLocks::new(locks, port(me)))
+                } else {
+                    locks
+                }),
                 details: Mutex::new(details),
                 facts: Mutex::new(facts),
                 activity: Mutex::new(activity),
@@ -540,7 +545,17 @@ impl Shared {
             issues: crate::issues::IssueCentre::new(issues),
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
-            network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
+            network: {
+                let centre = crate::network::NetCentre::new(network.sockets, network.dns, network.traffic);
+                if helper_first && host == dyno_core::helper::HelperHost::Linux {
+                    // Linux hides the program of other accounts' sockets: the helper's map fills them.
+                    centre.with_owners(crate::helper_readers::holders::SocketOwnerStep::for_this_os(
+                        crate::helper_first::HelperFirst::new(crate::helper_readers::holders::SocketOwnerReading, port(me)),
+                    ))
+                } else {
+                    centre
+                }
+            },
             hardware: crate::hardware::HardwareCentre::new(
                 hardware.signals,
                 if helper_first {

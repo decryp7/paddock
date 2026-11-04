@@ -3,12 +3,14 @@
 //! activity entries. Observe-only: nothing here closes a connection or touches a firewall.
 
 use crate::agent::{lock, now, Shared};
+use crate::helper_readers::holders::SocketOwnerStep;
 use dyno_core::activity::ActivityKind;
 use dyno_core::network::{NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
 use dyno_core::network_traffic::{TrafficRow, TrafficTracker};
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
 use dyno_core::protocol::{AgentError, ErrorCode};
+use dyno_core::read_via::ReadVia;
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::sync::mpsc;
@@ -36,6 +38,8 @@ const RESOLVE_DEADLINE: Duration = Duration::from_secs(3);
 struct State {
     tracker: Tracker,
     cache: Option<(Instant, Vec<SocketRow>)>,
+    /// Who read the owners of the cached rows (Linux: the helper fills those the kernel hides).
+    owners_via: ReadVia,
 }
 
 struct Traffic {
@@ -53,6 +57,8 @@ pub struct NetCentre {
     dns: Arc<dyn ReverseDns>,
     traffic_source: Arc<dyn ProcessTraffic>,
     state: Mutex<State>,
+    /// The helper's map of hidden socket owners (Linux); none where the OS names every owner itself.
+    owners: Option<Mutex<SocketOwnerStep>>,
     traffic: Arc<Mutex<Traffic>>,
     names: Names,
 }
@@ -78,7 +84,9 @@ impl NetCentre {
             state: Mutex::new(State {
                 tracker: Tracker::new(),
                 cache: None,
+                owners_via: ReadVia::Local,
             }),
+            owners: None,
             traffic: Arc::new(Mutex::new(Traffic {
                 tracker: TrafficTracker::new(),
                 cache: None,
@@ -86,6 +94,12 @@ impl NetCentre {
             })),
             names: Arc::default(),
         }
+    }
+
+    /// The same centre with the helper filling the owners the kernel hides from this account (Linux).
+    pub fn with_owners(mut self, step: SocketOwnerStep) -> NetCentre {
+        self.owners = Some(Mutex::new(step));
+        self
     }
 
     /// Reads the rows (from the cache when fresh), learns them and returns them with the events they imply.
@@ -97,9 +111,18 @@ impl NetCentre {
             }
         }
         let rows = self.sockets.sockets().map_err(|e| AgentError::new(error_code(&e), e.to_string()))?;
+        let rows = self.with_owners_filled(rows, &mut s);
         let events = s.tracker.update(now(), &rows, processes);
         s.cache = Some((Instant::now(), rows.clone()));
         Ok((rows, events))
+    }
+
+    /// `rows` with the hidden owners filled in by the helper; records where they came from in `state`.
+    fn with_owners_filled(&self, rows: Vec<SocketRow>, state: &mut State) -> Vec<SocketRow> {
+        let Some(step) = &self.owners else { return rows };
+        let (rows, via) = lock(step).fill(rows, Instant::now());
+        state.owners_via = via;
+        rows
     }
 
     /// Established connections per process id, for the program baseline. A refused read (a cut-down list on macOS
@@ -169,6 +192,7 @@ impl NetCentre {
                 Some(&|ip: &IpAddr| shared.intel.flagged_by(ip)),
             )
         };
+        snapshot.owners_via = lock(&self.state).owners_via.clone();
         (snapshot.traffic, snapshot.traffic_note) = self.traffic();
         Ok(snapshot)
     }
@@ -348,6 +372,7 @@ mod tests {
             remote: None,
             state: SocketState::Listen,
             pid: Some(1),
+            inode: None,
         }
     }
 
