@@ -163,13 +163,9 @@ impl HelperInstaller for OsInstaller {
     }
 }
 
+/// The folders Windows names, from the OS and not the environment (the one implementation, shared with the helper).
 fn windows_roots() -> WindowsRoots {
-    let var = |k: &str, d: &str| PathBuf::from(std::env::var_os(k).unwrap_or_else(|| d.into()));
-    WindowsRoots {
-        program_files: var("ProgramFiles", r"C:\Program Files"),
-        program_data: var("ProgramData", r"C:\ProgramData"),
-        system_root: var("SystemRoot", r"C:\Windows"),
-    }
+    dyno_helper_service::windows_roots(&paddock_service::privileged::OsKnownFolders)
 }
 
 /// The connection to this machine's helper (also what the VM test sends requests through).

@@ -122,6 +122,12 @@ pub fn eventcreate_arguments(level: Level, text: &str) -> Vec<String> {
         .collect()
 }
 
+/// `eventcreate.exe` in the system folder the OS names: never `%SystemRoot%` from the environment, which an elevated install
+/// may inherit from a user-writable place. `None` when the OS does not name it (the report is then skipped, it is a courtesy).
+pub fn eventcreate_program(folders: &dyn paddock_service::privileged::KnownFolders) -> Option<std::path::PathBuf> {
+    folders.system_directory().ok().map(|dir| dir.join("eventcreate.exe"))
+}
+
 /// Where events that must outlive the log file go (the Windows Event Log in the service; none elsewhere), set once at start.
 static EVENT_SINK: OnceLock<EarlySink> = OnceLock::new();
 

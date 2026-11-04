@@ -16,11 +16,26 @@ pub const LINUX_PROGRAM_FOLDER: &str = "/usr/bin";
 /// The Linux folder a package installs the system unit into (shipped disabled).
 pub const LINUX_UNIT_FOLDER: &str = "/usr/lib/systemd/system";
 
-/// The folders Windows names (read from the environment at run time; tests pass their own).
+/// The folders Windows names (as the OS reports them, never the environment: an elevated process may inherit a user-writable
+/// one; tests pass their own).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Roots {
-    /// `%ProgramFiles%`.
+    /// Program Files (`FOLDERID_ProgramFiles`).
     pub program_files: PathBuf,
+}
+
+impl Roots {
+    /// The roots `folders` names.
+    ///
+    /// # Errors
+    /// [`ServiceError::Unavailable`] when the OS does not name Program Files: nothing is installed into a guessed place.
+    pub fn from_known(folders: &dyn super::KnownFolders) -> Result<Self, ServiceError> {
+        let program_files = folders.program_files().map_err(|e| {
+            ServiceError::Unavailable(format!("Windows did not name the Program Files folder: {e}"))
+        })?;
+        log::info!(program_files = program_files.display().to_string().as_str(); "install roots from the OS");
+        Ok(Self { program_files })
+    }
 }
 
 /// The protected copy of the program: a folder only an administrator can change, and the file inside it.

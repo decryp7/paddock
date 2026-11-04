@@ -53,7 +53,8 @@ impl RealSystem {
 
 impl System for RealSystem {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError> {
-        let resolved = crate::privileged::windows_acl::system_tool(program);
+        let resolved = crate::privileged::system_tool(program)
+            .map_err(|e| RunError::NotStarted(format!("{program}: the system folder is unknown: {e}")))?;
         let mut cmd = paddock_proc::command(&resolved);
         cmd.args(args);
         let out =

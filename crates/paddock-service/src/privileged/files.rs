@@ -44,9 +44,14 @@ pub trait ProtectedFiles: Send {
     fn facts(&mut self, path: &Path) -> io::Result<Option<FileFacts>>;
     /// Creates the folder (and missing parents) with `mode` where the OS has modes.
     fn create_dir(&mut self, path: &Path, mode: u32) -> io::Result<()>;
-    /// Copies `from` to `to` through one open handle of the source and a new temporary file next to `to`, hashing what it
-    /// writes, then renames over `to` (a running copy is replaced atomically on Unix). Returns the SHA-256 in hex.
-    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> io::Result<String>;
+    /// Opens `path` once without following a link, takes its facts from that open handle and, when it is a regular file of at
+    /// most `max` bytes, reads all of it from the same handle. What is checked and what is later written are therefore the
+    /// same bytes, whatever happens to the path afterwards. `Ok(None)` when nothing is there; a link is reported as a link
+    /// (no bytes); a file over `max` is `InvalidData`.
+    fn open_source(&mut self, path: &Path, max: u64) -> io::Result<Option<HeldSource>>;
+    /// Writes `bytes` to a new temporary file next to `to`, hashing what it writes, then renames it over `to` (a running copy
+    /// is replaced atomically on Unix). Returns the SHA-256 in hex.
+    fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> io::Result<String>;
     /// The SHA-256 of a file in hex.
     fn sha256(&mut self, path: &Path) -> io::Result<String>;
     /// Opens `path`, takes its facts from the open handle (so they describe the file that is read, not a path that may
@@ -57,6 +62,15 @@ pub trait ProtectedFiles: Send {
     fn remove_file(&mut self, path: &Path) -> io::Result<()>;
     /// Removes an empty folder; a missing folder is `NotFound`.
     fn remove_dir(&mut self, path: &Path) -> io::Result<()>;
+}
+
+/// A program read through one open handle: its facts and its bytes ([`ProtectedFiles::open_source`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldSource {
+    /// What the open handle is.
+    pub facts: FileFacts,
+    /// The bytes read from that handle (empty unless it is a regular file).
+    pub bytes: Vec<u8>,
 }
 
 /// Why a path is not a protected place.
@@ -225,8 +239,61 @@ impl ProtectedFiles for RealFiles {
         }
     }
 
-    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> io::Result<String> {
-        let source = std::fs::File::open(from)?;
+    fn open_source(&mut self, path: &Path, max: u64) -> io::Result<Option<HeldSource>> {
+        use io::Read;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Never follow a link at the last component; never block on a pipe.
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_FLAG_OPEN_REPARSE_POINT: a link is opened as the link, not followed.
+            options.custom_flags(0x0020_0000);
+        }
+        let file = match options.open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                // O_NOFOLLOW on a link fails (ELOOP): report it as a link, not as an unreadable file.
+                return match std::fs::symlink_metadata(path) {
+                    Ok(m) if m.file_type().is_symlink() => Ok(Some(HeldSource {
+                        facts: facts_of(&m),
+                        bytes: Vec::new(),
+                    })),
+                    _ => Err(e),
+                };
+            }
+        };
+        let facts = facts_of(&file.metadata()?);
+        if facts.kind != FileKind::File {
+            return Ok(Some(HeldSource {
+                facts,
+                bytes: Vec::new(),
+            }));
+        }
+        if facts.len > max {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("the program is larger than {max} bytes"),
+            ));
+        }
+        let mut bytes = Vec::with_capacity(usize::try_from(facts.len).unwrap_or(0));
+        file.take(max + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > max {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("the program is larger than {max} bytes"),
+            ));
+        }
+        Ok(Some(HeldSource { facts, bytes }))
+    }
+
+    fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> io::Result<String> {
         let tmp = temp_name(to);
         paddock_proc::cleanup::remove_file(&tmp);
         let mut options = std::fs::OpenOptions::new();
@@ -239,7 +306,7 @@ impl ProtectedFiles for RealFiles {
         #[cfg(not(unix))]
         let _: u32 = mode;
         let mut out = options.open(&tmp)?;
-        let result = hash_stream(&source, Some(&mut out)).and_then(|hash| {
+        let result = hash_stream(bytes, Some(&mut out)).and_then(|hash| {
             out.sync_all()?;
             Ok(hash)
         });
@@ -281,6 +348,14 @@ impl ProtectedFiles for RealFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the installer does: one open handle, then the write of those bytes.
+    fn copy(files: &mut RealFiles, from: &Path, to: &Path, mode: u32) -> io::Result<String> {
+        let held = files
+            .open_source(from, 1 << 20)?
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        files.write_program(&held.bytes, to, mode)
+    }
 
     fn facts(kind: FileKind, owner: Option<u32>, mode: Option<u32>) -> FileFacts {
         FileFacts {
@@ -347,7 +422,7 @@ mod tests {
         let folder = dir.path().join("a").join("b");
         files.create_dir(&folder, 0o755).unwrap();
         let dst = folder.join("prog");
-        let hash = files.copy_program(&src, &dst, 0o755).unwrap();
+        let hash = copy(&mut files, &src, &dst, 0o755).unwrap();
         // SHA-256("hello")
         assert_eq!(
             hash,
@@ -361,7 +436,7 @@ mod tests {
         assert_eq!(files.facts(&folder).unwrap().unwrap().kind, FileKind::Dir);
         // Replacing a copy leaves no temporary file behind.
         std::fs::write(&src, b"hello again").unwrap();
-        files.copy_program(&src, &dst, 0o755).unwrap();
+        copy(&mut files, &src, &dst, 0o755).unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"hello again");
         assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
         files.remove_file(&dst).unwrap();
@@ -372,8 +447,7 @@ mod tests {
             io::ErrorKind::NotFound
         );
         assert_eq!(
-            files
-                .copy_program(&dir.path().join("none"), &dst, 0o755)
+            copy(&mut files, &dir.path().join("none"), &dst, 0o755)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::NotFound
@@ -418,16 +492,62 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert_eq!(files.facts(&link).unwrap().unwrap().kind, FileKind::Symlink);
         // The destination folder is missing: the temporary file cannot be made and nothing is left.
-        let err = files
-            .copy_program(&target, &dir.path().join("no/such/prog"), 0o755)
+        let err = copy(&mut files, &target, &dir.path().join("no/such/prog"), 0o755)
             .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
         // A folder where the program should go: the rename fails and the temporary file is removed.
         let blocked = dir.path().join("blocked");
         std::fs::create_dir(&blocked).unwrap();
         std::fs::write(blocked.join("keep"), b"k").unwrap();
-        assert!(files.copy_program(&target, &blocked, 0o755).is_err());
+        assert!(copy(&mut files, &target, &blocked, 0o755).is_err());
         assert!(files.facts(&temp_name(&blocked)).unwrap().is_none());
         assert_eq!(files.facts(&dir.path().join("x")).unwrap(), None);
+    }
+
+    #[test]
+    fn a_source_is_read_once_through_its_handle_and_a_swap_of_the_path_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = RealFiles;
+        let src = dir.path().join("src");
+        assert_eq!(files.open_source(&src, 100).unwrap(), None);
+        std::fs::write(&src, b"signed bytes").unwrap();
+        let held = files.open_source(&src, 100).unwrap().unwrap();
+        assert_eq!((held.facts.kind, held.facts.len), (FileKind::File, 12));
+        // The path now names another file: what was read stays what is written.
+        std::fs::remove_file(&src).unwrap();
+        std::fs::write(&src, b"replacement!").unwrap();
+        let dst = dir.path().join("dst");
+        let hash = files.write_program(&held.bytes, &dst, 0o755).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"signed bytes");
+        assert_eq!(hash, hash_bytes(b"signed bytes"));
+        // A file over the bound is refused, not truncated.
+        assert_eq!(
+            files.open_source(&src, 5).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        // A folder is reported as a folder, with no bytes.
+        let held = files.open_source(dir.path(), 100).unwrap().unwrap();
+        assert_eq!((held.facts.kind, held.bytes.len()), (FileKind::Dir, 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_source_is_reported_as_a_link_and_never_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = RealFiles;
+        let target = dir.path().join("t");
+        std::fs::write(&target, b"x").unwrap();
+        let link = dir.path().join("l");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let held = files.open_source(&link, 100).unwrap().unwrap();
+        assert_eq!((held.facts.kind, held.bytes.len()), (FileKind::Symlink, 0));
+        // A file that cannot be opened for another reason is an error.
+        use std::os::unix::fs::PermissionsExt;
+        let locked = dir.path().join("locked");
+        std::fs::write(&locked, b"x").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(&locked).is_err() {
+            assert!(files.open_source(&locked, 100).is_err());
+        }
     }
 }

@@ -17,6 +17,7 @@
 pub mod assess;
 pub mod elevate;
 pub mod files;
+pub mod known_folders;
 pub mod install;
 pub mod layout;
 pub mod trust;
@@ -26,9 +27,10 @@ pub mod windows_acl;
 
 pub use assess::{Assessment, BundledHelper, InstalledHelper, UpdateReason, assess};
 pub use elevate::{ElevatedCommand, ElevationError, run_elevated};
-pub use files::{FileFacts, FileKind, ProtectedFiles, RealFiles, Violation, verify_protected};
+pub use files::{FileFacts, FileKind, HeldSource, ProtectedFiles, RealFiles, Violation, verify_protected};
+pub use known_folders::{KnownFolders, OsKnownFolders, system_tool, system_tool_in};
 pub use install::{
-    InstallError, Installer, Phase, PhaseRecord, Report, Step, Waits, plan_install, plan_uninstall,
+    InstallError, Installer, MAX_PROGRAM, MAX_SIGNATURE, Phase, SignatureCheck, SourceVerifier, PhaseRecord, Report, Step, Waits, plan_install, plan_uninstall,
     plan_uninstall_self,
 };
 pub use layout::{CopyTarget, Layout, Roots, backend_for, layout};

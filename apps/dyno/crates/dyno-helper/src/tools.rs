@@ -217,7 +217,10 @@ pub fn holder_source(host: HelperHost) -> Box<dyn dyno_core::helper_holders::Hol
 /// The Windows extras reader (`powercfg`, `wbadmin`); nothing elsewhere.
 pub fn extras_reader(host: HelperHost) -> Box<dyn dyno_core::helper_extras::ExtrasReader> {
     match host {
-        HelperHost::Windows => Box::new(dyno_platform::helper_extras::WindowsExtras(Box::new(SystemRunner))),
+        HelperHost::Windows => Box::new(dyno_platform::helper_extras::WindowsExtras::new(
+            Box::new(SystemRunner),
+            crate::elevate::windows_roots().system_root.join("System32"),
+        )),
         _ => Box::new(dyno_core::helper_extras::NoExtras),
     }
 }

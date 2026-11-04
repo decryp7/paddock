@@ -10,15 +10,17 @@
 //! The agent reaches the running helper through [`client::connect`] (the trust check of `paddock-ipc`'s system endpoint).
 //!
 //! Registration goes through `paddock-service` (rule 55): this crate only says what Dyno's helper is ([`spec`]) and
-//! where Dyno keeps it ([`windows_roots`]).
+//! where Dyno keeps it ([`windows_roots`], [`install_roots`]).
 
 use dyno_core::helper_wire::{HelperUser, HELPER_API};
-use paddock_env::{Os, Vars};
+use dyno_core::helper_paths::WindowsRoots;
+use paddock_env::Os;
 use paddock_service::hardening::{Hardening, Sandbox};
 use paddock_service::privileged::{
     assess as assess_installed, backend_for, layout, run_elevated, Assessment, BundledHelper, ElevationError, InstallError,
-    InstalledHelper, Installer, Layout, ProtectedFiles, Report, Roots,
+    InstalledHelper, Installer, KnownFolders, Layout, ProtectedFiles, Report, Roots, SignatureCheck, SourceVerifier,
 };
+use paddock_service::privileged::trust::TrustPort;
 use paddock_service::spec::{Kind, Restart, ServiceSpec, WindowsStart};
 use paddock_service::{Elevator, ServiceError, System};
 use std::path::{Path, PathBuf};
@@ -79,14 +81,36 @@ pub fn spec() -> ServiceSpec {
         .unwrap_or_else(|e| unreachable!("the helper's constant spec is valid: {e}"))
 }
 
-/// `%ProgramFiles%` from the environment (the default only when the variable is missing).
-pub fn windows_roots(vars: &dyn Vars) -> Roots {
-    let program_files = vars
-        .get("ProgramFiles")
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| PathBuf::from("C:\\Program Files"));
-    Roots { program_files }
+/// The folders Windows names for the helper's places: Program Files, ProgramData and the Windows folder, as the OS reports
+/// them (`SHGetKnownFolderPath`, `GetSystemDirectoryW`), never from the environment: the elevated install may inherit a
+/// user-writable `HKCU\Environment` (the `windir` UAC bypass). Where the OS gives no answer the usual folder is used and the
+/// failure is logged; the install itself uses [`install_roots`], which refuses instead.
+pub fn windows_roots(folders: &dyn KnownFolders) -> WindowsRoots {
+    let or_default = |what: &str, found: std::io::Result<PathBuf>, default: &str| {
+        found.unwrap_or_else(|e| {
+            log::warn!(folder = what, error:% = e; "the OS did not name the folder, using the usual one");
+            PathBuf::from(default)
+        })
+    };
+    let system = or_default("system directory", folders.system_directory(), r"C:\Windows\System32");
+    WindowsRoots {
+        program_files: or_default("Program Files", folders.program_files(), r"C:\Program Files"),
+        program_data: or_default("ProgramData", folders.program_data(), r"C:\ProgramData"),
+        // Split as text: a Windows path is not split by a Unix host's separators.
+        system_root: system
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .rsplit_once(['\\', '/'])
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), |(root, _)| PathBuf::from(root)),
+    }
+}
+
+/// The roots the protected install builds its folder under.
+///
+/// # Errors
+/// [`ServiceError::Unavailable`] when the OS does not name Program Files.
+pub fn install_roots(folders: &dyn KnownFolders) -> Result<Roots, ServiceError> {
+    Roots::from_known(folders)
 }
 
 /// Where Dyno's helper lives on `os`.
@@ -208,21 +232,35 @@ pub fn assess(answer: Option<(&str, u32)>) -> Assessment {
 ///
 /// # Errors
 /// An [`InstallError`] (also when the layout cannot be built).
+///
+/// Windows: `trust` judges Program Files, the helper's folder and the copy, and the source must sit in a folder only
+/// administrators can change. macOS: `verifier` must accept the bytes of `source` against the signature next to it
+/// ([`source_check::signature_locations`]). Both fail closed (security review F1, F2).
 pub fn install_in_place(
     os: Os,
     roots: &Roots,
     source: &Path,
     files: &mut dyn ProtectedFiles,
+    trust: &mut dyn TrustPort,
+    verifier: &dyn SourceVerifier,
     make_system: &dyn Fn() -> Box<dyn System>,
 ) -> Result<Report, InstallError> {
     let spec = spec();
     let layout = helper_layout(os, roots).map_err(|e| InstallError::Refused(e.to_string()))?;
     let mut backend = backend_for(&layout, &spec, make_system()).map_err(|e| InstallError::Refused(e.to_string()))?;
     let mut sys = make_system();
-    let report = Installer::new(&layout, files, backend.as_mut(), sys.as_mut()).install(source)?;
+    let mut installer = Installer::new(&layout, files, backend.as_mut(), sys.as_mut()).with_trust(trust);
+    if os == Os::MacOs {
+        installer = installer.with_signature(SignatureCheck {
+            verifier,
+            locations: source_check::signature_locations(source),
+        });
+    }
+    let report = installer.install(source)?;
     log::info!(
         os:? = os,
         sha256 = report.sha256.as_deref().unwrap_or(""),
+        signature = report.signature.as_deref().unwrap_or("not required"),
         replaced = report.replaced_existing;
         "the helper was installed"
     );
@@ -266,6 +304,7 @@ pub fn uninstall_self_in_place(
 }
 
 pub mod client;
+pub mod source_check;
 
 #[cfg(test)]
 mod tests;

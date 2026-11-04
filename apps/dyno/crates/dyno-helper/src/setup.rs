@@ -8,9 +8,11 @@ use crate::elevate::{helper_paths, this_host};
 use crate::paths::HelperPaths;
 use crate::serve::os_of;
 use dyno_core::helper_wire::HelperUser;
-use dyno_helper_service::{install_in_place, uninstall_in_place, uninstall_self_in_place, windows_roots};
-use paddock_env::{Os, ProcessVars};
-use paddock_service::privileged::{ProtectedFiles, RealFiles, Report};
+use dyno_helper_service::source_check::FamilyKey;
+use dyno_helper_service::{install_in_place, install_roots, uninstall_in_place, uninstall_self_in_place};
+use paddock_env::Os;
+use paddock_service::privileged::trust_real::RealTrust;
+use paddock_service::privileged::{OsKnownFolders, ProtectedFiles, RealFiles, Report};
 use paddock_service::{RealSystem, System};
 use std::path::Path;
 
@@ -70,8 +72,18 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
         .map_err(|e| e.to_string())?;
     let config = HelperConfig::new(owner, crate::VERSION).with_app(crate::orphan::app_location(&source));
     write_config(&paths, &config, &mut files)?;
-    let roots = windows_roots(&ProcessVars);
-    let report = install_in_place(os_of(host), &roots, &source, &mut files, &system).map_err(|e| e.to_string())?;
+    // The folders come from the OS, never from the environment (an elevated process may inherit a user-writable one).
+    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
+    let report = install_in_place(
+        os_of(host),
+        &roots,
+        &source,
+        &mut files,
+        &mut RealTrust,
+        &FamilyKey::compiled_in(),
+        &system,
+    )
+    .map_err(|e| e.to_string())?;
     register_event_source(os_of(host), system().as_mut());
     Ok(report)
 }
@@ -127,8 +139,8 @@ pub fn uninstall() -> Result<Report, String> {
         return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
     }
     audit_run("uninstall", "");
-    let report =
-        uninstall_in_place(os_of(this_host()), &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())?;
+    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
+    let report = uninstall_in_place(os_of(this_host()), &roots, &mut RealFiles, &system).map_err(|e| e.to_string())?;
     // The program and the registration are gone: what the helper wrote next to them goes too (its log of the removal is the
     // installer's own phase list above, printed by the command).
     match remove_data_folder(&helper_paths()) {
@@ -245,7 +257,8 @@ pub fn uninstall_self(os: Os) -> Result<Report, String> {
     if let Err(why) = remove_endpoint(&helper_paths()) {
         log::warn!(why = why.as_str(); "self-uninstall: the endpoint was kept");
     }
-    uninstall_self_in_place(os, &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())
+    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
+    uninstall_self_in_place(os, &roots, &mut RealFiles, &system).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

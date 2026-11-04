@@ -99,6 +99,18 @@ case "$(uname -s)" in
     done
     ident="$(codesign -dv "$app/Contents/MacOS/dyno-helper" 2>&1 | sed -n 's/^Identifier=//p')"
     [[ "$ident" == net.decryptology.dyno.helper ]] || err "dyno-helper has the code-signing identifier '${ident:-none}', not net.decryptology.dyno.helper (ADR 0027)"
+    # Security review F2: the helper in the bundle must be the bytes the release signed (the elevated install verifies them with the
+    # family key and refuses anything else). sidecar.mjs wrote the hash it signed; an unsigned build (no key) has none and says so.
+    signed_hash="$(cat "$(dirname "$0")/../app/src-tauri/binaries/dyno-helper.sha256" 2>/dev/null || true)"
+    sig_file="$app/Contents/Resources/dyno-helper.minisig"
+    if [[ -n "$signed_hash" ]]; then
+      actual="$(shasum -a 256 "$app/Contents/MacOS/dyno-helper" | cut -d' ' -f1)"
+      echo "dyno-helper sha256 in the bundle: $actual; signed: $signed_hash"
+      [[ "$actual" == "$signed_hash" ]] || err "the bundled dyno-helper ($actual) is not the file the release signed ($signed_hash): Tauri changed it after signing, so its install would be refused"
+      [[ -s "$sig_file" ]] || err "the .app has no dyno-helper.minisig in Contents/Resources"
+    else
+      echo "::warning::the bundled dyno-helper is not signed (no signing key in this build): turning the helper on will be refused"
+    fi
     if [[ -x "$app/Contents/MacOS/dyno-helper" ]]; then "$app/Contents/MacOS/dyno-helper" --self-test || err "the bundled dyno-helper --self-test failed"; fi
     agent="$app/Contents/MacOS/dyno-agent"
     if [[ -x "$agent" ]]; then

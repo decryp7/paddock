@@ -2,14 +2,14 @@
 //! Dyno's wiring of the helper install over the recording fakes: nothing is installed (ER-14).
 
 use super::*;
-use paddock_env::MapVars;
+use crate::source_check::FamilyKey;
 use paddock_service::privileged::{Assessment, UpdateReason};
 use paddock_service::testing::{FakeElevator, FakeFiles, FakeSystem};
 #[cfg(unix)]
 use paddock_service::Output;
 
 fn roots() -> Roots {
-    windows_roots(&MapVars::new())
+    install_roots(&RealFolders).unwrap()
 }
 
 #[test]
@@ -44,15 +44,55 @@ fn the_spec_is_valid_and_carries_the_adrs_hardening() {
     assert!(sc.iter().any(|c| c[..3] == ["privs", "DynoHelper", "SeChangeNotifyPrivilege"]));
 }
 
+/// Folders the way a machine whose environment was poisoned reports them: the OS's answer is the real one.
+struct RealFolders;
+
+impl paddock_service::privileged::KnownFolders for RealFolders {
+    fn system_directory(&self) -> std::io::Result<PathBuf> {
+        Ok(PathBuf::from("D:\\RealWin\\System32"))
+    }
+    fn program_files(&self) -> std::io::Result<PathBuf> {
+        Ok(PathBuf::from("D:\\Real Program Files"))
+    }
+    fn program_data(&self) -> std::io::Result<PathBuf> {
+        Ok(PathBuf::from("D:\\RealData"))
+    }
+}
+
+struct NoFolders;
+
+impl paddock_service::privileged::KnownFolders for NoFolders {
+    fn system_directory(&self) -> std::io::Result<PathBuf> {
+        Err(std::io::Error::other("no answer"))
+    }
+    fn program_files(&self) -> std::io::Result<PathBuf> {
+        Err(std::io::Error::other("no answer"))
+    }
+    fn program_data(&self) -> std::io::Result<PathBuf> {
+        Err(std::io::Error::other("no answer"))
+    }
+}
+
 #[test]
-fn program_files_comes_from_the_environment() {
-    assert_eq!(roots().program_files, PathBuf::from("C:\\Program Files"));
-    let vars = MapVars::new().with("ProgramFiles", "D:\\Programs");
-    assert_eq!(windows_roots(&vars).program_files, PathBuf::from("D:\\Programs"));
+fn the_folders_come_from_the_os_and_never_from_the_environment() {
+    // An elevated process may inherit a user-writable HKCU\Environment; whatever it says must not be used. (The process
+    // environment of this test is not even looked at: the folders are a port.)
+    let w = windows_roots(&RealFolders);
+    assert_eq!(w.program_files, PathBuf::from("D:\\Real Program Files"));
+    assert_eq!(w.program_data, PathBuf::from("D:\\RealData"));
+    assert_eq!(w.system_root, PathBuf::from("D:\\RealWin"));
     assert_eq!(
-        windows_roots(&MapVars::new().with("ProgramFiles", "")).program_files,
-        PathBuf::from("C:\\Program Files")
+        install_roots(&RealFolders).unwrap().program_files,
+        PathBuf::from("D:\\Real Program Files")
     );
+}
+
+#[test]
+fn an_os_that_names_no_folder_stops_the_install_but_not_the_path_lookup() {
+    assert!(install_roots(&NoFolders).is_err());
+    let w = windows_roots(&NoFolders);
+    assert_eq!(w.program_files, PathBuf::from("C:\\Program Files"));
+    assert_eq!(w.system_root, PathBuf::from("C:\\Windows"));
 }
 
 #[test]
@@ -73,7 +113,7 @@ fn turning_on_and_off_asks_once_through_the_os_prompt() {
     assert_eq!(commands.len(), 1);
     assert!(
         commands[0]
-            .starts_with("/usr/bin/osascript -e do shell script \"'/Applications/Dyno.app/Contents/MacOS/dyno-helper' 'install' '--for' 'uid:501' 2>&1\""),
+            .starts_with("/usr/bin/osascript -e do shell script \"/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin '/Applications/Dyno.app/Contents/MacOS/dyno-helper' 'install' '--for' 'uid:501' 2>&1\""),
         "{}",
         commands[0]
     );
@@ -175,6 +215,8 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
         &roots(),
         Path::new("/usr/bin/dyno-helper"),
         &mut files,
+        &mut paddock_service::privileged::trust_fake::windows_machine(|_| paddock_service::privileged::trust_fake::locked()),
+        &FamilyKey::from_text(None),
         &make_system(&sys),
     )
     .unwrap();
@@ -204,21 +246,90 @@ fn the_helper_installs_and_removes_itself_on_linux_from_the_package() {
     assert!(sys.commands().contains(&"systemctl disable --now dyno-helper.service".to_string()));
 }
 
+const KEY: &str = include_str!("../../../../../crates/paddock-updater/tests/fixtures/key.pub");
+const SIGNED: &[u8] = include_bytes!("../../../../../crates/paddock-updater/tests/fixtures/update.bin");
+const SIGNATURE: &[u8] = include_bytes!("../../../../../crates/paddock-updater/tests/fixtures/update.bin.sig");
+const MAC_SOURCE: &str = "/Applications/Dyno.app/Contents/MacOS/dyno-helper";
+const MAC_SIGNATURE: &str = "/Applications/Dyno.app/Contents/Resources/dyno-helper.minisig";
+
+fn mac_install(files: &mut FakeFiles, sys: &FakeSystem) -> Result<Report, InstallError> {
+    install_in_place(
+        Os::MacOs,
+        &roots(),
+        Path::new(MAC_SOURCE),
+        files,
+        &mut paddock_service::privileged::trust_fake::windows_machine(|_| paddock_service::privileged::trust_fake::locked()),
+        &FamilyKey::from_text(Some(KEY)),
+        &make_system(sys),
+    )
+}
+
 #[test]
 fn the_helper_refuses_to_install_where_it_is_not_protected() {
     let (sys, mut files) = (FakeSystem::new(), FakeFiles::new());
-    files.put_file("/Applications/Dyno.app/Contents/MacOS/dyno-helper", b"x", 501, 0o755);
+    files.put_file(MAC_SOURCE, SIGNED, 501, 0o755);
+    files.put_file(MAC_SIGNATURE, SIGNATURE, 501, 0o644);
     files.put_dir("/Library/PrivilegedHelperTools", 501, 0o755);
-    let err = install_in_place(
-        Os::MacOs,
-        &roots(),
-        Path::new("/Applications/Dyno.app/Contents/MacOS/dyno-helper"),
-        &mut files,
-        &make_system(&sys),
-    )
-    .unwrap_err();
-    assert!(matches!(err, InstallError::Refused(_)), "{err}");
+    let err = mac_install(&mut files, &sys).unwrap_err();
+    assert!(matches!(&err, InstallError::Refused(w) if w.contains("not protected")), "{err}");
     assert!(!sys.commands().iter().any(|c| c.contains("bootstrap")), "nothing was registered");
+}
+
+#[test]
+fn a_macos_helper_is_copied_only_with_a_valid_signature_of_the_family_key() {
+    let (sys, mut files) = (FakeSystem::new(), FakeFiles::new());
+    files.put_dir("/Library/PrivilegedHelperTools", 0, 0o755);
+    files.put_file(MAC_SOURCE, SIGNED, 501, 0o755);
+    // Missing: refused with the next step, nothing written.
+    let err = mac_install(&mut files, &sys).unwrap_err();
+    assert!(matches!(&err, InstallError::Refused(w) if w.contains("no signature file") && w.contains("official download")), "{err}");
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
+    // Not the signature of these bytes (a replaced helper): refused.
+    let mut replaced = SIGNED.to_vec();
+    replaced[0] ^= 1;
+    files.put_file(MAC_SOURCE, &replaced, 501, 0o755);
+    files.put_file(MAC_SIGNATURE, SIGNATURE, 501, 0o644);
+    let err = mac_install(&mut files, &sys).unwrap_err();
+    assert!(matches!(&err, InstallError::Refused(w) if w.contains("does not match its signature") && w.contains("reinstall Dyno")), "{err}");
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
+    // An empty or garbled signature file (a build that was not signed): refused.
+    files.put_file(MAC_SOURCE, SIGNED, 501, 0o755);
+    for bad in [&b""[..], b"not a signature", &[0xff, 0xfe][..]] {
+        files.put_file(MAC_SIGNATURE, bad, 501, 0o644);
+        let err = mac_install(&mut files, &sys).unwrap_err();
+        assert!(matches!(err, InstallError::Refused(_)), "{err}");
+    }
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
+    // The genuine pair is accepted, and the verdict and the hash are reported.
+    files.put_file(MAC_SIGNATURE, SIGNATURE, 501, 0o644);
+    let report = mac_install(&mut files, &sys);
+    // (The registration itself is the fake backend's business: the signature phase is what this test is about.)
+    if let Ok(r) = &report {
+        assert!(r.signature.as_deref().is_some_and(|v| v.starts_with("valid")));
+    }
+    assert!(files.calls().iter().any(|c| c.starts_with("write ")), "{:?}", files.calls());
+}
+
+#[test]
+fn a_build_without_the_family_key_refuses_every_helper() {
+    use paddock_service::privileged::SourceVerifier;
+    let none = FamilyKey::from_text(None);
+    let err = none.verify(SIGNED, SIGNATURE).unwrap_err();
+    assert!(err.contains("no update key") && err.contains("official download"), "{err}");
+    assert!(FamilyKey::from_text(Some("   ")).verify(SIGNED, SIGNATURE).is_err());
+    assert!(FamilyKey::from_text(Some("not a key")).verify(SIGNED, SIGNATURE).is_err());
+    let key = FamilyKey::from_text(Some(KEY));
+    assert!(key.verify(SIGNED, SIGNATURE).unwrap().starts_with("valid"));
+}
+
+#[test]
+fn the_signature_is_looked_for_next_to_the_helper_and_in_the_bundles_resources() {
+    use crate::source_check::{signature_locations, SIGNATURE_FILE};
+    assert_eq!(
+        signature_locations(Path::new(MAC_SOURCE)),
+        [PathBuf::from("/Applications/Dyno.app/Contents/MacOS").join(SIGNATURE_FILE), PathBuf::from(MAC_SIGNATURE)]
+    );
+    assert_eq!(signature_locations(Path::new("/opt/dyno/dyno-helper")), [PathBuf::from("/opt/dyno").join(SIGNATURE_FILE)]);
 }
 
 #[test]

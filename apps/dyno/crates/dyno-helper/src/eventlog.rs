@@ -14,10 +14,9 @@ const WAIT: Duration = Duration::from_secs(3);
 /// Reports `text` as `level` under the helper's source. A failure is ignored: the Event Log is a courtesy to the person who
 /// reads why the service stopped, never a reason for it to stop.
 pub fn report(level: Level, text: &str) {
-    let program = std::env::var_os("SystemRoot")
-        .map_or_else(|| "C:\\Windows".into(), std::path::PathBuf::from)
-        .join("System32")
-        .join("eventcreate.exe");
+    let Some(program) = crate::refusal::eventcreate_program(&paddock_service::privileged::OsKnownFolders) else {
+        return;
+    };
     let Ok(mut child) = dyno_platform::process::command(program)
         .args(eventcreate_arguments(level, text))
         .stdin(Stdio::null())
