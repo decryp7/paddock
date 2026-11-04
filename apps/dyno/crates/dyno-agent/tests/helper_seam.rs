@@ -180,3 +180,27 @@ fn a_caller_who_may_not_read_the_audit_log_still_sees_a_ready_helper() {
     assert_eq!(rig.state(), HelperState::Ready);
     assert_eq!(rig.inventory().memory_via, ReadVia::Helper, "memory is open to any caller");
 }
+
+#[test]
+fn the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up() {
+    let rig = Rig::start(Caller::Owner, HelperHost::Linux, false);
+    let before = rig.inventory();
+    assert!(matches!(before.memory, MemoryLayout::TotalOnly { .. }), "{:?}", before.memory);
+    assert!(matches!(before.memory_via, ReadVia::NeedsHelper { .. }), "{:?}", before.memory_via);
+    rig.up.store(true, Ordering::SeqCst);
+    // The readiness answer is kept a few seconds: wait on the condition, not on a fixed time.
+    let until = std::time::Instant::now() + SLOW;
+    let after = loop {
+        let inv = rig.inventory();
+        if inv.memory_via == ReadVia::Helper || std::time::Instant::now() > until {
+            break inv;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(after.memory_via, ReadVia::Helper);
+    assert!(
+        matches!(&after.memory, MemoryLayout::Slots(a) if a.slots == 4),
+        "{:?}",
+        after.memory
+    );
+}
