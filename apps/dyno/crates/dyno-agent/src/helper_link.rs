@@ -266,10 +266,15 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// The firewall as the helper reads it (`pf` or `nft`), reduced to what this account may have.
     pub fn firewall(&self) -> Result<FirewallSource, PlatformError> {
-        match self.call("firewall", HelperRequest::Firewall).map_err(to_platform)? {
+        self.firewall_in(Wait::Default).map_err(|e| e.error)
+    }
+
+    /// [`HelperLink::firewall`] that waits as `wait` says and says whether the helper was reached.
+    pub fn firewall_in(&self, wait: Wait) -> Result<FirewallSource, CallError> {
+        match self.ask(wait, "firewall", HelperRequest::Firewall)? {
             // The helper wrote `via` too (it is part of its wire type); the agent decides who read it.
             HelperReply::Firewall(f) => Ok(f.with_via(ReadVia::Helper)),
-            _ => Err(unexpected("Firewall")),
+            _ => Err(unexpected("Firewall").into()),
         }
     }
 
