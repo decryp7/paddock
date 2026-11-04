@@ -113,11 +113,17 @@ case "$(uname -s)" in
       label="net.decryptology.dyno.checkbundle.$$"
       launchctl submit -l "$label" -o "$view" -e "$view.err" -- "$agent" view || err "launchctl could not start the bundled dyno-agent view"
       for _ in $(seq 1 100); do [[ -s "$view" || -s "$view.err" ]] && break; sleep 0.2; done
+      if [[ ! -s "$view" && ! -s "$view.err" ]]; then
+        # Neither output file got a byte in 20 s: the job did not run or could not open them. Say what launchd knows.
+        state="$(launchctl print "gui/$(id -u)/$label" 2>&1 | grep -E 'state =|last exit code|exit status|spawn' | tr -s ' \t' ' ' | paste -sd';' - | head -c 400 || true)"
+        [[ -n "$state" ]] || state="$(launchctl print "user/$(id -u)/$label" 2>&1 | head -c 300 | tr '\n' ';' || true)"
+        err "the launchd job $label (dyno-agent view, output in $view) wrote nothing in 20 s; launchctl print: ${state:-nothing}; TMPDIR=${TMPDIR:-unset} (macOS denies a launchd job a temp folder on an external volume, TCC Removable Volumes: TMPDIR must be on the internal disk, see conformance/ci/job-tmpdir.sh); this is not a code-signing identifier problem"
+      fi
       launchctl remove "$label" 2>/dev/null || true
       line="$(head -n 1 "$view")"
       echo "bundled agent socket view (as a launchd job): ${line:-none} $(head -c 300 "$view.err" 2>/dev/null)"
       rm -f "$view" "$view.err"
-      [[ "$line" =~ identifier=net\.decryptology\.dyno\. ]] || err "the running bundled agent reports '${line:-nothing}': its code-signing identifier is not net.decryptology.dyno.* (ADR 0026)"
+      [[ -z "$line" ]] || [[ "$line" =~ identifier=net\.decryptology\.dyno\. ]] || err "the running bundled agent reports '${line:-nothing}': its code-signing identifier is not net.decryptology.dyno.* (ADR 0026)"
       # The kernel hides other programs' sockets from a cut-down view only on macOS 27 (ADR 0026).
       if [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 && "$line" == *"cut_down=true"* ]]; then
         err "macOS showed the bundled agent only its own sockets even as a launchd job ('$line'): the Network page would be empty (ADR 0026)"
