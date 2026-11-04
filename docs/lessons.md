@@ -1347,3 +1347,13 @@ The test failed once in a full nextest run in 0.010 s (so not a timeout) and pas
 Fix: `start` frees the slot first, then runs a hand-over closure that publishes the result. Failing-first test: `an_answered_request_has_already_freed_its_slot` (3000 calls, `in_flight` must be 0 after each).
 Proof (macOS, 8 `yes` loops started and stopped by pid, built once, 100 runs of all `counters::` tests at 8 threads, 100 of the new test, 300 of the original): before the fix, the new test failed 100 of 100 with and without load, and the original test failed 0 of 300 without load and 18 of 300 under load; after the fix 0 failures in every row.
 **Rule:** whatever tells a waiter "done" is published after the resource it counts is released. Class check: no other slot or semaphore in Dyno or the shared crates (`paddock-jobs`, `paddock-ipc` permits, `paddock-download` hosts, the disk engine queue) sends before it releases.
+
+## A test counted every job as a finished one; the agent has its own start-up job (2026-11-04, Dyno gates run 7510, Windows)
+
+`only_the_last_few_finished_jobs_are_kept_and_an_unknown_id_is_not_found` listed 17 jobs against `KEPT_FINISHED` 16 (1 of 2166 on the Windows leg).
+The agent's network watcher starts a job of its own at start (`JobSpec::RebuildIntel`, the match index of the user's lists), and `Request::Jobs`
+lists the jobs that have not ended besides the last 16 that have: on a slow machine that job is still running when the test counts. Code reading,
+not a reproduction (0 of 60 on the Mac under load): the first line of defence in the test was the assumption that no other job exists. The test now
+registers a job that has not ended on purpose (it failed first with the same 17 against 16), counts only the ended jobs against `KEPT_FINISHED` and
+asserts the live one is listed. **Lesson:** a count over a shared list names what it counts (`is_terminal`), and a feature that starts work at
+start-up (here the network watcher) invalidates every test that assumed an empty agent: arrange the other work instead of hoping it is done.

@@ -371,6 +371,9 @@ fn a_limit_is_named_in_the_result_and_a_bad_folder_fails_with_what_to_fix() {
 fn only_the_last_few_finished_jobs_are_kept_and_an_unknown_id_is_not_found() {
     let h = Harness::start(vec![]);
     let peer = h.client();
+    // Another job that has not ended, as the agent's own start-up job (the match index of the lists) can still be on a slow machine
+    // (Windows CI run 7510: 17 listed against 16): it is listed besides the finished ones and never counts among them.
+    let _alive = h.shared().jobs.register_external("test", "A job that has not ended", None);
     let tmp = tempfile::tempdir().unwrap();
     let f = tmp.path().join("p.bin");
     std::fs::write(&f, b"abc").unwrap();
@@ -383,7 +386,10 @@ fn only_the_last_few_finished_jobs_are_kept_and_an_unknown_id_is_not_found() {
     let Reply::Jobs(all) = ask(&peer, Request::Jobs).unwrap() else {
         panic!("jobs")
     };
-    assert_eq!(all.len(), dyno_core::jobs::KEPT_FINISHED);
+    // Only the last few jobs that ended are kept; a job that has not ended is listed besides them.
+    let ended: Vec<_> = all.iter().filter(|j| j.is_terminal()).collect();
+    assert_eq!(ended.len(), dyno_core::jobs::KEPT_FINISHED, "{all:?}");
+    assert!(all.iter().any(|j| !j.is_terminal()), "the job that has not ended is listed");
     assert!(all.windows(2).all(|w| w[0].id < w[1].id && w[0].seq >= 1));
     let err = peer
         .call(Message::Request(Box::new(Request::JobResult { id: 9999 })), Duration::from_secs(5))
