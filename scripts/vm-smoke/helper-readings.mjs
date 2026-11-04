@@ -16,7 +16,7 @@ export const READINGS = [
     expect: { windows: [/via helper/i] }, none: [/needs the helper/i] },
   { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup',
     expect: { windows: [/no (backup )?versions|has no versions|no Backup and Restore/i] }, none: [/needs the helper/i] },
-  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Startup',
+  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Start-?up',
     expect: { macos: [/Login items|Background items/i, /via helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
     expect: { macos: [/pf/i, /rules?/i, /via helper/i], linux: [/nft|nftables/i, /rules?/i, /via helper/i] }, none: [/needs the helper/i] },
@@ -75,6 +75,7 @@ export function macDriver(gui) {
   const label = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
   return {
     async openPage(page, tab) {
+      await gui.closeSettings(); // the Settings window stays open after the helper step and would be read as the page
       const ok = (await gui.waitFor(() => gui.press(gui.app, `^${label[page]}$`, 'AXLink'), 15_000)).ok;
       if (ok && tab) return (await gui.waitFor(() => gui.press(gui.app, `^${tab}( |$)`, 'AXRadioButton'), 10_000)).ok;
       return ok;
