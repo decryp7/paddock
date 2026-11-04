@@ -148,7 +148,9 @@ mod tests {
         assert_eq!(reply.disks.len(), 1);
         assert_eq!(reply.skipped.len(), 2);
         assert!(reply.skipped[0].reason.contains("took longer") && reply.skipped[0].reason.contains("Try again"));
-        assert!(!format!("{reply:?}").contains("SECRET1"));
+        // The serial travels only inside the wear id (the history key, amended 2026-11-04); nowhere else in the reply.
+        assert_eq!(reply.disks[0].wear_id.as_deref(), Some("EX SECRET1"));
+        assert_eq!(format!("{reply:?}").matches("SECRET1").count(), 1);
         let seen = seen.lock().unwrap();
         let cmds: Vec<_> = seen.iter().map(|t| t.args.join(" ")).collect();
         assert_eq!(

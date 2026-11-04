@@ -18,7 +18,7 @@ use crate::wake::{IfName, WakeEntry, WakeTag, WolReply};
 use serde::{Deserialize, Serialize};
 
 /// The version of the helper's request set. A different value is refused by the agent with "update the helper".
-pub const HELPER_API: u32 = 3;
+pub const HELPER_API: u32 = 4;
 
 /// The oldest helper build this Dyno accepts as `Ready`. Raised only when a helper fix must reach users (ADR 0027 section 4).
 pub const MIN_HELPER_VERSION: &str = "1.1.0";

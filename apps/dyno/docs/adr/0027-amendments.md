@@ -33,3 +33,7 @@ decided, amending O2 (**amended 2026-11-04 (user): helper first, unelevated fall
   Dyno uses (the helper's, Dyno's own, or the person's own install). The install folder is defined once
   (`dyno_platform::tool_install::install_folder`/`smartctl_path`) and used by the installer, the tools list and the helper's reader.
 - The installer empties its destination folder first, so a file left by an earlier install cannot pass the post-install check.
+- The helper's `Smart` reply carries what the agent's own reader makes, so turning the helper on loses nothing and the history
+  continues: `SmartDisk` gained `wear_id` (`DiskWear::id`, model and serial; the one place a serial travels, still no WWN),
+  `bytes_written` and `rated_bytes`, filled by the same parser (`parse_smartctl_ssd`, rule 55); `SmartDisk::to_wear()` makes the
+  `DiskWear`. `HELPER_API` is 4. Test: `the_helper_path_and_the_agents_own_path_make_the_same_wear_reading_with_the_same_id`.
