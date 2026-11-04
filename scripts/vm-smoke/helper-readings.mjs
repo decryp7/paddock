@@ -43,7 +43,7 @@ export async function readingStep(reading, os, driver) {
   const evidence = [];
   const opened = await driver.openPage(reading.page, reading.tab, reading);
   checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
-  if (!opened) return { title, status: 'fail', summary: checks[0].detail, checks, evidence };
+  if (!opened) return { title, status: 'fail', summary: checks[0].detail, checks, evidence: driver.why ? [driver.why] : evidence };
   const text = (await driver.text()).replace(/\s+/g, ' ');
   evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
   if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
@@ -73,10 +73,10 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
       if (reading.showAll) { const all = main.getByRole('button', { name: /^All$/ }).or(main.getByRole('radio', { name: /^All$/ })).or(main.getByRole('tab', { name: /^All$/ })); if (await all.count()) { await all.first().click(); await new Promise((r) => setTimeout(r, 2500)); } }
       if (reading.groupBy) {
         const sel = main.getByRole('combobox', { name: /Group by/i }).or(main.getByLabel(/Group by/i));
-        if (!(await sel.count())) return false;
+        if (!(await sel.count())) { this.why = 'no "Group by" combobox; controls on the page: ' + (await main.evaluate(() => [...document.querySelectorAll('select, [role=combobox], mat-select, [role=tab], [role=radio], button')].map((e) => `${e.tagName.toLowerCase()}:${(e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40)}`).filter((x) => !x.endsWith(':')).slice(0, 40).join(' | '))); return false; }
         await sel.first().click(); await new Promise((r) => setTimeout(r, 500));
         const opt = main.getByRole('option', { name: new RegExp(`^${reading.groupBy}`) });
-        if (!(await opt.count())) return false;
+        if (!(await opt.count())) { this.why = 'no option "' + reading.groupBy + '" after opening Group by'; return false; }
         await opt.first().click(); await new Promise((r) => setTimeout(r, 2500));
       }
       return true;

@@ -16,7 +16,8 @@ export async function scopingStep() {
   const pw = randomBytes(12).toString('hex').replace(/[a-f]*$/, '') + 'zq' + randomBytes(4).toString('hex'); // lowercase and digits, never stored
   const dyno = 'C:\\Users\\paddock-test\\AppData\\Local\\Dyno';
   // The owner: a probe process with a name nobody else has, and the owner's own view (the positive control).
-  ssh(`Copy-Item "$env:SystemRoot\\System32\\ping.exe" "C:\\Users\\paddock-test\\owner-secret-probe.exe" -Force; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -ArgumentList "-t","127.0.0.1" -WindowStyle Hidden`);
+  // A busy probe (a copy of powershell.exe under a unique name) so it ranks in `dyno top` by CPU.
+  ssh(`Copy-Item "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" "C:\\Users\\paddock-test\\owner-secret-probe.exe" -Force; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -ArgumentList "-NoProfile","-Command","while($true){ }" -WindowStyle Hidden`);
   await sleep(4000);
   const ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 400 --json 2>&1 | Out-String`);
   checks.push({ ok: /owner-secret-probe/i.test(ownerView), detail: /owner-secret-probe/i.test(ownerView) ? 'positive control: the owner sees its own probe process' : 'positive control failed: the owner does not see its own probe process in `dyno top`' });
@@ -29,6 +30,8 @@ export async function scopingStep() {
   let done = false;
   for (let i = 0; i < 40 && !done; i++) { await sleep(4000); done = ssh(`Test-Path ${PUB}\\dyno2-done.txt`, { admin: true }) === 'True'; }
   checks.push({ ok: done, detail: done ? 'the second account ran its own Dyno agent and read its view' : 'the second account\'s run did not finish within 160 s (see dyno2-run.log)' });
+  const diagRun = ssh(`Get-Content ${PUB}\\dyno2-run.log -ErrorAction SilentlyContinue | Select-Object -First 8; schtasks /query /tn Dyno2 /v /fo list | Select-String 'Last Result|Status|Run As User'`, { admin: true });
+  evidence.push('--- second account task', ...diagRun.split('\n'), `--- owner's top (first 300 chars): ${ownerView.slice(0, 300).replace(/\s+/g, ' ')}`);
   const who = ssh(`Get-Content ${PUB}\\dyno2-whoami.txt -ErrorAction SilentlyContinue`, { admin: true });
   const top = ssh(`Get-Content ${PUB}\\dyno2-top.json -Raw -ErrorAction SilentlyContinue`, { admin: true });
   const snap = ssh(`Get-Content ${PUB}\\dyno2-snapshot.json -Raw -ErrorAction SilentlyContinue`, { admin: true });
