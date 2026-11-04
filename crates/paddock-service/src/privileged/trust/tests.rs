@@ -654,6 +654,24 @@ fn the_fake_port_models_create_lock_rename_remove_and_walk() {
             .keys()
             .any(|k| k.starts_with(&format!("{}\\", p.key(&aside))))
     );
+    // Moved-aside folders are numbered and the oldest beyond the newest `keep` go, with what is in them.
+    p.put("C:\\ProgramData\\Old", locked());
+    p.put("C:\\ProgramData\\Old\\inside", locked());
+    p.rename_aside("C:\\ProgramData\\Old").unwrap();
+    p.put("C:\\ProgramData\\Old", locked());
+    let second = p.rename_aside("C:\\ProgramData\\Old").unwrap();
+    assert!(second.ends_with(".untrusted-2"), "{second}");
+    let removed = p.sweep_aside("C:\\ProgramData", 1).unwrap();
+    assert_eq!(
+        removed,
+        vec!["c:\\programdata\\old.untrusted-1".to_string()]
+    );
+    assert!(
+        !p.nodes
+            .keys()
+            .any(|k| k.starts_with("c:\\programdata\\old.untrusted-1"))
+    );
+    assert!(p.nodes.contains_key("c:\\programdata\\old.untrusted-2"));
     // Unix flavour.
     let mut u = FakePort {
         style: Style::Unix,
@@ -714,6 +732,9 @@ fn a_junction_on_the_way_is_named_a_link_even_when_what_is_behind_it_cannot_be_e
         }
         fn rename_aside(&mut self, p: &str) -> io::Result<String> {
             self.0.rename_aside(p)
+        }
+        fn sweep_aside(&mut self, p: &str, keep: usize) -> io::Result<Vec<String>> {
+            self.0.sweep_aside(p, keep)
         }
         fn remove_tree(&mut self, p: &str) -> io::Result<()> {
             self.0.remove_tree(p)

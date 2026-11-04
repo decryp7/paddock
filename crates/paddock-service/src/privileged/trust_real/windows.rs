@@ -1,173 +1,14 @@
-//! The real [`TrustPort`]: the facts of each path component are read from an object opened for that purpose and never
-//! followed through a link (`O_NOFOLLOW` semantics on Unix, `FILE_FLAG_OPEN_REPARSE_POINT` on Windows).
-//!
-//! Native glue (crates/README.md): it reads the real disk, so it is covered by the VM checks and by the pure rule's tests in
-//! [`super::trust`], not by unit tests here. The `ls -lde` parsing is tested in `trust`.
+//! The Windows real port (see the parent module). Native glue: only a Windows runner covers it.
 #![allow(unsafe_code)]
 
-use super::files::FileKind;
-use super::trust::{Node, Security, Style, TrustPort};
+use super::{
+    HeldImage, RealTrust, remove_tree_no_follow, rename_aside_free, sweep_aside_free,
+    walk_no_follow,
+};
+use crate::privileged::files::FileKind;
+use crate::privileged::trust::{Node, Security, Style, TrustPort};
 use std::io;
 
-/// The real machine.
-#[derive(Debug, Default)]
-pub struct RealTrust;
-
-#[cfg(unix)]
-impl TrustPort for RealTrust {
-    fn style(&self) -> Style {
-        Style::Unix
-    }
-
-    fn node(&mut self, path: &str) -> io::Result<Option<Node>> {
-        use std::os::unix::fs::MetadataExt;
-        let meta = match std::fs::symlink_metadata(path) {
-            Ok(m) => m,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e),
-        };
-        let t = meta.file_type();
-        let kind = if t.is_symlink() {
-            FileKind::Symlink
-        } else if t.is_dir() {
-            FileKind::Dir
-        } else if t.is_file() {
-            FileKind::File
-        } else {
-            FileKind::Other
-        };
-        Ok(Some(Node {
-            kind,
-            security: Security::Unix {
-                owner: meta.uid(),
-                mode: meta.mode() & 0o7777,
-                write_acl: cfg!(target_os = "macos")
-                    && !t.is_symlink()
-                    && mac_acl_allows_write(path),
-            },
-        }))
-    }
-
-    fn canonical(&mut self, path: &str) -> io::Result<String> {
-        Ok(std::fs::canonicalize(path)?.to_string_lossy().into_owned())
-    }
-
-    fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>> {
-        walk_no_follow(self, path, limit)
-    }
-
-    fn create_dir(&mut self, path: &str) -> io::Result<()> {
-        use std::os::unix::fs::DirBuilderExt;
-        // One level, create-new, exactly 0755 (the umask cannot widen it; narrowing is undone by `lock_dir`).
-        std::fs::DirBuilder::new().mode(0o755).create(path)
-    }
-
-    fn lock_dir(&mut self, path: &str) -> io::Result<()> {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        // By descriptor of a folder opened without following a link, so the mode lands on the folder that was checked.
-        let dir = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
-            .open(path)?;
-        dir.set_permissions(std::fs::Permissions::from_mode(0o755))
-    }
-
-    fn rename_aside(&mut self, path: &str) -> io::Result<String> {
-        rename_aside_free(path)
-    }
-
-    fn remove_tree(&mut self, path: &str) -> io::Result<()> {
-        remove_tree_no_follow(path)
-    }
-}
-
-/// Every entry below `root` (a link is listed and not entered), at most `limit`.
-fn walk_no_follow(
-    port: &mut dyn TrustPort,
-    root: &str,
-    limit: usize,
-) -> io::Result<Vec<(String, Node)>> {
-    let sep = if port.style() == Style::Windows {
-        '\\'
-    } else {
-        '/'
-    };
-    let mut out = Vec::new();
-    let mut todo = vec![root.to_string()];
-    while let Some(dir) = todo.pop() {
-        for entry in std::fs::read_dir(&dir)? {
-            let name = entry?.file_name().to_string_lossy().into_owned();
-            let path = format!("{}{sep}{name}", dir.trim_end_matches(sep));
-            let Some(node) = port.node(&path)? else {
-                continue;
-            };
-            if node.kind == FileKind::Dir {
-                todo.push(path.clone());
-            }
-            out.push((path, node));
-            if out.len() > limit {
-                return Err(io::Error::other(format!("more than {limit} entries")));
-            }
-        }
-    }
-    Ok(out)
-}
-
-/// Renames `path` next to itself to a free name; the entry is never opened or followed.
-fn rename_aside_free(path: &str) -> io::Result<String> {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    for n in 0..100 {
-        let aside = format!("{path}.untrusted-{secs}-{n}");
-        if std::fs::symlink_metadata(&aside).is_ok() {
-            continue;
-        }
-        std::fs::rename(path, &aside)?;
-        return Ok(aside);
-    }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "no free name to move the folder aside",
-    ))
-}
-
-/// `std::fs::remove_dir_all` removes a link inside the tree (and the root, if it is one) and never follows it, on Unix
-/// and on Windows (it opens each entry with `FILE_FLAG_OPEN_REPARSE_POINT`); a root that is itself a link is removed as the
-/// link it is.
-fn remove_tree_no_follow(path: &str) -> io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => {
-            // A directory symlink or junction is removed with remove_dir on Windows, a file symlink with remove_file.
-            std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path))
-        }
-        Ok(_) => std::fs::remove_dir_all(path),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn mac_acl_allows_write(path: &str) -> bool {
-    // `ls -lde` lists the ACL entries under the line of the folder itself; a failure to run it is treated as "has a write
-    // entry" so that the rule refuses rather than guesses.
-    match std::process::Command::new("/bin/ls")
-        .args(["-lde", "--", path])
-        .output()
-    {
-        Ok(o) if o.status.success() => {
-            super::trust::acl_allows_write(&String::from_utf8_lossy(&o.stdout))
-        }
-        _ => true,
-    }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn mac_acl_allows_write(_path: &str) -> bool {
-    false
-}
-
-#[cfg(windows)]
 impl TrustPort for RealTrust {
     fn style(&self) -> Style {
         Style::Windows
@@ -231,15 +72,18 @@ impl TrustPort for RealTrust {
         rename_aside_free(path)
     }
 
+    fn sweep_aside(&mut self, parent: &str, keep: usize) -> io::Result<Vec<String>> {
+        sweep_aside_free(parent, keep)
+    }
+
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
         remove_tree_no_follow(path)
     }
 }
 
-#[cfg(windows)]
 mod win {
-    use super::super::trust::{Ace, Descriptor, is_trusted_sid};
-    use super::super::windows_acl::PROTECTED_FOLDER_SDDL;
+    use crate::privileged::trust::{Ace, Descriptor, is_trusted_sid};
+    use crate::privileged::windows_acl::PROTECTED_FOLDER_SDDL;
     use std::io;
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
@@ -448,110 +292,33 @@ mod win {
     }
 }
 
-/// A program held open for a privileged run: opened without following a link, shown to be a regular file, and kept open
-/// until it is dropped (after the process started), so the file that was checked is the file that runs.
-///
-/// - **Windows:** opened with `FILE_SHARE_READ` only (nobody can write to, rename or delete it while held) and with
-///   `FILE_FLAG_OPEN_REPARSE_POINT`; [`final_path`](Self::final_path) is what `GetFinalPathNameByHandle` returns for this
-///   handle, so a junction in the requested path shows as a different path.
-/// - **Unix:** opened with `O_NOFOLLOW` after resolving the path; on Linux the program runs through
-///   `/proc/self/fd/<fd>` of this descriptor (the kernel's `execve` of that path runs the open file); elsewhere it runs by the
-///   resolved path and the protected folder chain is what prevents a swap.
-#[derive(Debug)]
-pub struct HeldImage {
-    _file: std::fs::File,
-    final_path: String,
-    spawn_path: String,
+/// Holds `requested` for a run (see [`HeldImage`]).
+pub(super) fn open_image(requested: &str) -> io::Result<HeldImage> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 1;
+    const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const REPARSE: u32 = 0x400;
+    let file = std::fs::OpenOptions::new()
+        .access_mode(GENERIC_READ)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(OPEN_REPARSE_POINT)
+        .open(requested)?;
+    let meta = file.metadata()?;
+    if meta.file_attributes() & REPARSE != 0 || !meta.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    let final_path = final_path_of(&file)?;
+    Ok(HeldImage {
+        spawn_path: final_path.clone(),
+        final_path,
+        _file: file,
+    })
 }
 
-impl HeldImage {
-    /// Holds `requested`.
-    ///
-    /// # Errors
-    /// The path is missing, is a link or reparse point, or is not a regular file.
-    pub fn open(requested: &str) -> io::Result<Self> {
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-            const GENERIC_READ: u32 = 0x8000_0000;
-            const FILE_SHARE_READ: u32 = 1;
-            const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-            const REPARSE: u32 = 0x400;
-            let file = std::fs::OpenOptions::new()
-                .access_mode(GENERIC_READ)
-                .share_mode(FILE_SHARE_READ)
-                .custom_flags(OPEN_REPARSE_POINT)
-                .open(requested)?;
-            let meta = file.metadata()?;
-            if meta.file_attributes() & REPARSE != 0 || !meta.is_file() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "not a regular file",
-                ));
-            }
-            let final_path = final_path_of(&file)?;
-            Ok(HeldImage {
-                spawn_path: final_path.clone(),
-                final_path,
-                _file: file,
-            })
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-            let resolved = std::fs::canonicalize(requested)?
-                .to_string_lossy()
-                .into_owned();
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&resolved)?;
-            let meta = file.metadata()?;
-            if !meta.is_file() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "not a regular file",
-                ));
-            }
-            // The facts of the open descriptor, not of the path.
-            if meta.uid() != 0 || meta.mode() & 0o022 != 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "not owned by root or writable by others",
-                ));
-            }
-            #[cfg(target_os = "linux")]
-            let spawn_path = {
-                use std::os::fd::AsRawFd;
-                let via_fd = format!("/proc/self/fd/{}", file.as_raw_fd());
-                if std::path::Path::new(&via_fd).exists() {
-                    via_fd
-                } else {
-                    resolved.clone()
-                }
-            };
-            #[cfg(not(target_os = "linux"))]
-            let spawn_path = resolved.clone();
-            Ok(HeldImage {
-                _file: file,
-                final_path: resolved,
-                spawn_path,
-            })
-        }
-    }
-
-    /// The path the open object really has (links resolved).
-    pub fn final_path(&self) -> &str {
-        &self.final_path
-    }
-
-    /// What to run: the final path, or the descriptor's `/proc` path on Linux.
-    pub fn spawn_path(&self) -> &str {
-        &self.spawn_path
-    }
-}
-
-#[cfg(windows)]
 fn final_path_of(file: &std::fs::File) -> io::Result<String> {
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::HANDLE;
@@ -582,175 +349,11 @@ fn final_path_of(file: &std::fs::File) -> io::Result<String> {
     ))
 }
 
-#[cfg(all(test, unix))]
-mod unix_tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-
-    fn text(p: &std::path::Path) -> String {
-        p.to_string_lossy().into_owned()
-    }
-
-    #[test]
-    fn a_symlink_is_reported_as_a_link_and_not_followed() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target");
-        std::fs::create_dir(&target).unwrap();
-        let link = dir.path().join("link");
-        symlink(&target, &link).unwrap();
-        let mut port = RealTrust;
-        assert_eq!(
-            port.node(&text(&link)).unwrap().unwrap().kind,
-            FileKind::Symlink
-        );
-        assert_eq!(
-            port.node(&text(&target)).unwrap().unwrap().kind,
-            FileKind::Dir
-        );
-        assert!(
-            port.node(&text(&dir.path().join("none")))
-                .unwrap()
-                .is_none()
-        );
-        // The rule refuses a chain through it.
-        let through = format!("{}/file", text(&link));
-        std::fs::write(target.join("file"), b"x").unwrap();
-        let e = super::super::trust::verify_chain(&mut port, &through, FileKind::File, None, false)
-            .unwrap_err();
-        assert!(
-            matches!(
-                e.reason,
-                super::super::trust::Reason::Link | super::super::trust::Reason::UntrustedOwner(_)
-            ),
-            "{e}"
-        );
-    }
-
-    #[test]
-    fn remove_tree_removes_links_and_never_what_they_point_at() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = dir.path().join("outside");
-        std::fs::create_dir(&outside).unwrap();
-        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
-        let tree = dir.path().join("tree");
-        std::fs::create_dir_all(tree.join("sub")).unwrap();
-        std::fs::write(tree.join("sub/file"), b"x").unwrap();
-        symlink(&outside, tree.join("sub/link")).unwrap();
-        symlink(outside.join("keep.txt"), tree.join("filelink")).unwrap();
-        let mut port = RealTrust;
-        port.remove_tree(&text(&tree)).unwrap();
-        assert!(!tree.exists());
-        assert_eq!(std::fs::read(outside.join("keep.txt")).unwrap(), b"keep");
-        // A root that is itself a link goes as the link it is.
-        let root_link = dir.path().join("root-link");
-        symlink(&outside, &root_link).unwrap();
-        port.remove_tree(&text(&root_link)).unwrap();
-        assert!(std::fs::symlink_metadata(&root_link).is_err());
-        assert!(outside.join("keep.txt").exists());
-        port.remove_tree(&text(&dir.path().join("missing")))
-            .unwrap();
-    }
-
-    #[test]
-    fn walk_lists_links_without_entering_them_and_is_bounded() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = dir.path().join("outside");
-        std::fs::create_dir_all(outside.join("deep")).unwrap();
-        let tree = dir.path().join("tree");
-        std::fs::create_dir_all(tree.join("a")).unwrap();
-        std::fs::write(tree.join("a/f"), b"x").unwrap();
-        symlink(&outside, tree.join("a/link")).unwrap();
-        let mut port = RealTrust;
-        let walked = port.walk(&text(&tree), 100).unwrap();
-        let names: Vec<String> = walked
-            .iter()
-            .map(|(p, _)| p.trim_start_matches(&text(&tree)).to_string())
-            .collect();
-        assert!(
-            names.contains(&"/a".to_string())
-                && names.contains(&"/a/f".to_string())
-                && names.contains(&"/a/link".to_string()),
-            "{names:?}"
-        );
-        assert!(
-            !names.iter().any(|n| n.contains("deep")),
-            "a link is not entered: {names:?}"
-        );
-        assert!(port.walk(&text(&tree), 1).is_err(), "bounded");
-    }
-
-    #[test]
-    fn create_dir_makes_one_level_exactly_0755_and_never_over_something() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let mut port = RealTrust;
-        let made = dir.path().join("made");
-        port.create_dir(&text(&made)).unwrap();
-        assert_eq!(
-            std::fs::metadata(&made).unwrap().permissions().mode() & 0o7777,
-            0o755
-        );
-        assert_eq!(
-            port.create_dir(&text(&made)).unwrap_err().kind(),
-            io::ErrorKind::AlreadyExists
-        );
-        assert!(
-            port.create_dir(&text(&dir.path().join("a/b"))).is_err(),
-            "the parent must exist"
-        );
-        std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o777)).unwrap();
-        port.lock_dir(&text(&made)).unwrap();
-        assert_eq!(
-            std::fs::metadata(&made).unwrap().permissions().mode() & 0o7777,
-            0o755
-        );
-        let link = dir.path().join("link");
-        symlink(&made, &link).unwrap();
-        assert!(port.lock_dir(&text(&link)).is_err(), "a link is not locked");
-    }
-
-    #[test]
-    fn rename_aside_moves_the_entry_and_not_what_a_link_points_at() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = dir.path().join("outside");
-        std::fs::create_dir(&outside).unwrap();
-        let link = dir.path().join("Dyno");
-        symlink(&outside, &link).unwrap();
-        let mut port = RealTrust;
-        let aside = port.rename_aside(&text(&link)).unwrap();
-        assert!(std::fs::symlink_metadata(&link).is_err());
-        assert!(
-            std::fs::symlink_metadata(&aside)
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
-        assert!(outside.exists());
-    }
-
-    #[test]
-    fn a_held_image_must_be_a_regular_file_owned_by_root() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("prog");
-        std::fs::write(&file, b"\x7fELFxxxx").unwrap();
-        // Owned by the user running the test, so not trusted (unless the test runs as root).
-        let r = HeldImage::open(&text(&file));
-        if unsafe { libc::getuid() } != 0 {
-            assert_eq!(r.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
-        }
-        assert!(
-            HeldImage::open(&text(dir.path())).is_err(),
-            "a folder is not a program"
-        );
-        assert!(HeldImage::open(&text(&dir.path().join("missing"))).is_err());
-    }
-}
-
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod windows_tests {
     //! Run on a Windows runner as an ordinary user (no administrator needed), and on the Windows test VM.
-    use super::super::trust::{Reason, verify_chain};
     use super::*;
+    use crate::privileged::trust::{Reason, verify_chain};
     use std::process::Command;
 
     fn text(p: &std::path::Path) -> String {
@@ -758,7 +361,7 @@ mod windows_tests {
     }
 
     fn icacls(args: &[&str]) {
-        let out = Command::new(super::super::windows_acl::system_tool("icacls"))
+        let out = Command::new(crate::privileged::windows_acl::system_tool("icacls"))
             .args(args)
             .output()
             .unwrap();
@@ -873,7 +476,7 @@ mod windows_tests {
         match HeldImage::open(&through) {
             Ok(held) => {
                 assert!(
-                    super::super::trust::require_same_path(
+                    crate::privileged::trust::require_same_path(
                         &through,
                         held.final_path(),
                         Style::Windows
@@ -895,6 +498,34 @@ mod windows_tests {
         // Removing the tree removes the junction and not its target.
         port.remove_tree(&text(&junction)).unwrap();
         assert!(target.join("prog.exe").exists());
+    }
+
+    #[test]
+    fn sweep_aside_keeps_the_newest_and_removes_a_junction_without_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        let parent = dir.path().join("parent");
+        std::fs::create_dir(&parent).unwrap();
+        for name in ["Dyno.untrusted-5-0", "Dyno.untrusted-9-1"] {
+            std::fs::create_dir(parent.join(name)).unwrap();
+        }
+        let junction = parent.join("Dyno.untrusted-1-0");
+        let out = Command::new("cmd")
+            .args(["/C", "mklink", "/J", &text(&junction), &text(&outside)])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let mut removed = RealTrust.sweep_aside(&text(&parent), 1).unwrap();
+        removed.sort();
+        assert_eq!(removed, vec!["Dyno.untrusted-1-0", "Dyno.untrusted-5-0"]);
+        assert!(parent.join("Dyno.untrusted-9-1").exists());
+        assert!(outside.join("keep.txt").exists());
     }
 
     #[test]

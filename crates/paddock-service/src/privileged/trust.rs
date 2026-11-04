@@ -161,6 +161,9 @@ pub trait TrustPort: Send {
     /// Renames the entry next to itself to a name that is free, never following it, and returns the new path. Nothing in it
     /// is read or run again.
     fn rename_aside(&mut self, path: &str) -> io::Result<String>;
+    /// Removes the oldest `*.untrusted-<n>` entries next to each other in `parent` (the folders [`rename_aside`](Self::rename_aside)
+    /// made) beyond the newest `keep`, without following links, and returns the names removed.
+    fn sweep_aside(&mut self, parent: &str, keep: usize) -> io::Result<Vec<String>>;
     /// Removes a folder tree without following any link or reparse point: a link inside is removed, never its target.
     fn remove_tree(&mut self, path: &str) -> io::Result<()>;
 }
