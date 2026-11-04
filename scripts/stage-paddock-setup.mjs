@@ -90,7 +90,7 @@ export function stage({ app, target, root = REPO, run = defaultRun, env = proces
     throw new Error('no updater public key for a release build: paddock-setup.exe would refuse every update. Set the TAURI_UPDATER_PUBKEY secret (PADDOCK_TAURI_UPDATER_PUBKEY) for this job, then run it again.');
   }
   const buildEnv = { ...env, ...setupEnv(conf, key) };
-  const args = ['build', '-p', 'paddock-setup', '--features', 'proc-stop', '--release', '--message-format=json-render-diagnostics'];
+  const args = ['build', '-p', 'paddock-setup', '--release', '--message-format=json-render-diagnostics'];
   if (target) args.push('--target', target);
   console.log(`::group::paddock-setup for ${app}: cargo ${args.join(' ')}`);
   const out = run('cargo', args, { cwd: join(root, 'crates'), env: buildEnv });

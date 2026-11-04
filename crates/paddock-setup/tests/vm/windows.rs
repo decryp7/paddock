@@ -1106,7 +1106,7 @@ fn same_folder_logs_its_answer() {
     );
 }
 
-/// `stop-all` over the real stopper (a build with the `proc-stop` feature, `PADDOCK_SETUP_EXE_STOP`): a listed program that
+/// `stop-all` over the real stopper (a build with `paddock_proc::installed` in the tree, `PADDOCK_SETUP_EXE_STOP`): a listed program that
 /// runs from the folder is ended; a program with the same file name from another folder is not.
 #[test]
 #[ignore = "Windows test VM only: PADDOCK_SETUP_VM=1 (ER-14)"]

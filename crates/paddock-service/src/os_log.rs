@@ -184,7 +184,7 @@ pub fn open(spec: &ServiceSpec) -> Arc<dyn OsLog> {
         }
         #[cfg(not(any(windows, target_os = "macos")))]
         {
-            let _ = spec;
+            let _: &ServiceSpec = spec;
             let prefixed = stderr_is_journal(
                 std::env::var_os("JOURNAL_STREAM").as_deref(),
                 crate::native::stderr_identity(),

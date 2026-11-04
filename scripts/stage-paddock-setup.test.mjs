@@ -58,14 +58,14 @@ test('staging fails closed without the paddock-setup crate, copies the built pro
   assert.equal(out, join(src, 'windows/paddock-setup.exe'));
   assert.equal(readFileSync(out, 'utf8'), 'MZ');
   assert.equal(logs[0].cmd, 'cargo');
-  assert.deepEqual(logs[0].args.slice(0, 5), ['build', '-p', 'paddock-setup', '--features', 'proc-stop']);
-  assert.ok(logs[0].args.includes('--release') && logs[0].args.includes('--message-format=json-render-diagnostics'));
+  // No `--features`: the stopper is on by the build.rs cfg `has_proc_installed`; a feature that does not exist fails the build.
+  assert.deepEqual(logs[0].args, ['build', '-p', 'paddock-setup', '--release', '--message-format=json-render-diagnostics']);
   assert.equal(logs[0].cwd, join(root, 'crates'));
   assert.equal(logs[0].env.PADDOCK_SETUP_UPDATE_KEY, 'PUB');
   assert.equal(logs[0].env.PADDOCK_SETUP_IDENTIFIER, 'net.decryptology.dyno');
   const t = stage({ app: 'dyno', root, run, env: {}, target: 'x86_64-pc-windows-msvc' });
   assert.ok(t);
-  assert.deepEqual(logs[1].args.slice(-2), ['--target', 'x86_64-pc-windows-msvc']);
+  assert.deepEqual(logs[1].args, ['build', '-p', 'paddock-setup', '--release', '--message-format=json-render-diagnostics', '--target', 'x86_64-pc-windows-msvc']);
   assert.throws(() => stage({ app: 'nope', root, run, env: {} }), /no such app/);
 });
 
