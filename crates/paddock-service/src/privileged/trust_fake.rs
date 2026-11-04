@@ -7,8 +7,6 @@ use super::trust::*;
 use std::collections::HashMap;
 use std::io;
 
-pub const LOCKED_LISTING: &str = "C:\\x NT AUTHORITY\\SYSTEM:(OI)(CI)(F)\r\n BUILTIN\\Administrators:(OI)(CI)(F)\r\n BUILTIN\\Users:(OI)(CI)(RX)\r\n";
-
 /// A fake machine: nodes by path (Windows paths compare lower-case).
 pub struct FakePort {
     pub style: Style,
@@ -18,6 +16,13 @@ pub struct FakePort {
 }
 
 impl FakePort {
+    fn sep(&self) -> &'static str {
+        if self.style == Style::Windows {
+            "\\"
+        } else {
+            "/"
+        }
+    }
     pub fn key(&self, p: &str) -> String {
         match self.style {
             Style::Windows => p.replace('/', "\\").trim_end_matches('\\').to_lowercase(),
@@ -45,62 +50,76 @@ impl TrustPort for FakePort {
             .cloned()
             .unwrap_or_else(|| path.to_string()))
     }
-    fn create_dir_all(&mut self, path: &str) -> io::Result<()> {
-        self.calls.push(format!("mkdir {path}"));
+    fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>> {
+        let key = self.key(path);
+        let sep = self.sep();
+        let mut out: Vec<(String, Node)> = self
+            .nodes
+            .iter()
+            .filter(|(k, _)| k.starts_with(&format!("{key}{sep}")))
+            .map(|(k, n)| (k.clone(), n.clone()))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        if out.len() > limit {
+            return Err(io::Error::other("too many entries"));
+        }
+        Ok(out)
+    }
+    fn create_dir(&mut self, path: &str) -> io::Result<()> {
+        self.calls.push(format!("create_dir {path}"));
+        let key = self.key(path);
+        if self.nodes.contains_key(&key) {
+            return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+        }
+        let made = match self.style {
+            Style::Windows => locked(),
+            Style::Unix => unix_dir(0, 0o755),
+        };
+        self.nodes.insert(key, made);
+        Ok(())
+    }
+    fn lock_dir(&mut self, path: &str) -> io::Result<()> {
+        self.calls.push(format!("lock_dir {path}"));
         let key = self.key(path);
         let made = match self.style {
-            Style::Windows => inherited_from_program_data(),
-            Style::Unix => Node {
-                kind: FileKind::Dir,
-                security: Security::Unix {
-                    owner: 0,
-                    mode: 0o755,
-                    write_acl: false,
-                },
-            },
+            Style::Windows => locked(),
+            Style::Unix => unix_dir(0, 0o755),
         };
-        self.nodes.entry(key).or_insert(made);
-        Ok(())
+        match self.nodes.get_mut(&key) {
+            Some(n) => {
+                *n = made;
+                Ok(())
+            }
+            None => Err(io::Error::from(io::ErrorKind::NotFound)),
+        }
+    }
+    fn rename_aside(&mut self, path: &str) -> io::Result<String> {
+        self.calls.push(format!("rename_aside {path}"));
+        let key = self.key(path);
+        let sep = self.sep();
+        let aside = format!("{path}.untrusted-1");
+        let aside_key = self.key(&aside);
+        let moved: Vec<String> = self
+            .nodes
+            .keys()
+            .filter(|k| **k == key || k.starts_with(&format!("{key}{sep}")))
+            .cloned()
+            .collect();
+        for k in moved {
+            if let Some(n) = self.nodes.remove(&k) {
+                self.nodes
+                    .insert(format!("{aside_key}{}", &k[key.len()..]), n);
+            }
+        }
+        Ok(aside)
     }
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
         self.calls.push(format!("remove_tree {path}"));
         let key = self.key(path);
-        let sep = if self.style == Style::Windows {
-            "\\"
-        } else {
-            "/"
-        };
+        let sep = self.sep();
         self.nodes
             .retain(|k, _| k != &key && !k.starts_with(&format!("{key}{sep}")));
         Ok(())
-    }
-    fn chmod(&mut self, path: &str, mode: u32) -> io::Result<()> {
-        self.calls.push(format!("chmod {path} {mode:o}"));
-        let key = self.key(path);
-        if let Some(Node {
-            security: Security::Unix { mode: m, .. },
-            ..
-        }) = self.nodes.get_mut(&key)
-        {
-            *m = mode;
-        }
-        Ok(())
-    }
-    /// `/inheritance:r` locks the folder (what `acl_command` asks for); a bare folder name lists the listing a locked folder
-    /// gives.
-    fn icacls(&mut self, args: &[String]) -> io::Result<String> {
-        self.calls.push(format!("icacls {}", args.join(" ")));
-        let key = self.key(&args[0]);
-        if args.iter().any(|a| a == "/inheritance:r") {
-            if let Some(n) = self.nodes.get_mut(&key) {
-                *n = locked();
-            }
-            Ok(String::new())
-        } else if args.len() == 1 {
-            Ok(LOCKED_LISTING.to_string())
-        } else {
-            Ok(String::new())
-        }
     }
 }
 
@@ -227,6 +246,18 @@ pub fn stock_program_data() -> Node {
 /// A folder the unfixed helper made in `C:\ProgramData`: everything inherited, Users may create things in it.
 pub fn inherited_from_program_data() -> Node {
     from_sddl(FileKind::Dir, SDDL_DYNO_HELPER_UNFIXED)
+}
+
+/// A Unix folder.
+pub fn unix_dir(owner: u32, mode: u32) -> Node {
+    Node {
+        kind: FileKind::Dir,
+        security: Security::Unix {
+            owner,
+            mode,
+            write_acl: false,
+        },
+    }
 }
 
 /// A folder after `protect`: SYSTEM and Administrators full, Users read and execute, owner Administrators.

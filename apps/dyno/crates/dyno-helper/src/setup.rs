@@ -64,7 +64,7 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     // Repair: the data root and its tools and staging folders are locked first; one a user made is removed (links are
     // removed, never followed), so nothing in it is trusted. Then the configuration is written into the locked root.
     #[cfg(windows)]
-    crate::protect::TrustGuard::system(host)
+    crate::protect::TrustGuard::system(host, &paths.data_dir)
         .prepare_folders(&paths.data_dir, crate::protect::OnUntrusted::Purge)
         .map_err(|e| e.to_string())?;
     let config = HelperConfig::new(owner, crate::VERSION).with_app(crate::orphan::app_location(&source));

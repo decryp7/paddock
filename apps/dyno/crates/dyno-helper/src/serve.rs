@@ -63,22 +63,31 @@ pub fn os_of(host: HelperHost) -> Os {
 /// # Errors
 /// Why the helper will not start.
 pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
-    HelperLog::new(paths.log.clone()).install();
+    // Until the data folder is verified the log goes to standard error and no file in the folder is touched.
+    let log_gate = HelperLog::new(paths.log.clone()).deferred().install();
     let mut files = RealFiles;
-    let trust = Arc::new(crate::protect::TrustGuard::system(paths.host));
+    let trust = Arc::new(crate::protect::TrustGuard::system(paths.host, &paths.data_dir));
     lock_folders(&trust, paths)?;
     let program = std::env::current_exe().unwrap_or_else(|_| paths.binary.clone());
+    let pending = paths.config.with_extension("json.new");
     let checks = startup::verdicts(
         &mut files,
         &mut paddock_service::privileged::trust_real::RealTrust,
         &program,
         &paths.data_dir,
         &paths.config,
+        &[
+            ("the policy file", paths.policy.as_path()),
+            ("the audit log", paths.audit.as_path()),
+            ("the pending configuration", pending.as_path()),
+        ],
     );
     for v in &checks {
         log::info!(what = v.what, protected = v.result.is_ok(), detail = v.result.as_ref().err().map_or("", String::as_str); "Helper: protected-location check");
     }
     startup::require_all(&checks)?;
+    // The data folder and what is in it are verified: the log may open its file there now.
+    log_gate.arm();
     let config = startup::load_config(&mut files, &paths.config)?;
     let loaded = policy::load(&mut files, &paths.policy);
     let audit = AuditLog::new(paths.audit.clone());

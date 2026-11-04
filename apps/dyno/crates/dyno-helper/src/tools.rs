@@ -59,11 +59,11 @@ impl ToolInstaller for PinnedInstaller {
         }
         if let Err(e) = self.trust.ensure_root(Path::new(&self.roots.tools), OnUntrusted::Purge) {
             log::warn!(Error = e.to_string().as_str(); "InstallTool refused: the tools folder is not protected");
-            return Err(e);
+            return Err(e.into());
         }
         if let Err(e) = self.trust.reset_root(Path::new(&self.roots.staging)) {
             log::warn!(Error = e.to_string().as_str(); "InstallTool refused: the staging folder is not protected");
-            return Err(e);
+            return Err(e.into());
         }
         let mut ports = self.ports.lock().unwrap_or_else(|p| p.into_inner());
         install(ports.as_mut(), &self.clock, self.host, tool, bytes, &self.roots).map_err(PlatformError::from)
@@ -139,13 +139,10 @@ impl InstallPorts for FsPorts {
         let _ = std::fs::remove_dir_all(&self.staging);
     }
 
-    fn remove_dir(&mut self, path: &str) {
-        // `path` is the pin's own folder under the helper's tools folder, built by `install`; never a caller's text.
-        if let Err(e) = std::fs::remove_dir_all(path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!(Error = e.to_string().as_str(); "InstallTool: an older install folder could not be removed");
-            }
-        }
+    fn remove_dir(&mut self, path: &str) -> std::io::Result<()> {
+        // `path` is the pin's own folder under the helper's tools folder, built by `install`; never a caller's text. Links
+        // in it are removed, never followed.
+        remove_entry_no_follow(Path::new(path))
     }
 }
 
@@ -290,13 +287,15 @@ mod tests {
             true
         }
         fn clear_staging(&mut self) {}
-        fn remove_dir(&mut self, _: &str) {}
+        fn remove_dir(&mut self, _: &str) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     fn roots() -> InstallRoots {
         InstallRoots {
-            staging: "C:\\s".into(),
-            tools: "C:\\t".into(),
+            staging: "/h/staging".into(),
+            tools: "/h/tools".into(),
         }
     }
 

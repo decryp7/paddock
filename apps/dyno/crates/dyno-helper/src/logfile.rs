@@ -5,7 +5,8 @@
 use log::{Level, Log, Metadata, Record};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// The log is rotated once (to `helper.log.1`) when it grows past this.
 pub const MAX_LOG_BYTES: u64 = 1024 * 1024;
@@ -14,9 +15,22 @@ const TAIL_WINDOW: u64 = 128 * 1024;
 /// The longest line `tail` returns.
 const MAX_LINE: usize = 400;
 
+/// Lets the deferred log open its file once the data folder is verified.
+#[derive(Debug, Clone)]
+pub struct LogGate(Arc<AtomicBool>);
+
+impl LogGate {
+    /// From now on the log is written to its file.
+    pub fn arm(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 /// A [`log::Log`] that appends to a file.
 pub struct HelperLog {
     path: PathBuf,
+    /// Until armed the log writes to standard error and touches no file: the data folder is not yet known to be protected.
+    armed: Arc<AtomicBool>,
     max_bytes: u64,
     now: fn() -> i64,
     lock: Mutex<()>,
@@ -48,6 +62,7 @@ impl HelperLog {
     pub fn new(path: PathBuf) -> Self {
         HelperLog {
             path,
+            armed: Arc::new(AtomicBool::new(true)),
             max_bytes: MAX_LOG_BYTES,
             now: unix_now,
             lock: Mutex::new(()),
@@ -62,11 +77,21 @@ impl HelperLog {
         self
     }
 
-    /// Makes this the process's logger at Info level. A second install is ignored.
-    pub fn install(self) {
+    /// A log that writes to standard error only, until its [`LogGate`] is armed (the data folder is verified first; no file
+    /// in it is opened, created or rotated before that).
+    #[must_use]
+    pub fn deferred(self) -> Self {
+        self.armed.store(false, Ordering::SeqCst);
+        self
+    }
+
+    /// Makes this the process's logger at Info level. A second install is ignored. The gate arms the file.
+    pub fn install(self) -> LogGate {
+        let gate = LogGate(self.armed.clone());
         if log::set_boxed_logger(Box::new(self)).is_ok() {
             log::set_max_level(log::LevelFilter::Info);
         }
+        gate
     }
 
     fn append(&self, line: &str) -> std::io::Result<()> {
@@ -78,12 +103,25 @@ impl HelperLog {
         }
         let mut options = std::fs::OpenOptions::new();
         options.create(true).append(true);
+        // Never through a link: the log is opened without following one and must be a regular file.
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+            options.custom_flags(OPEN_REPARSE_POINT);
         }
         let mut file = options.open(&self.path)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the log is not a regular file",
+            ));
+        }
         writeln!(file, "{line}")
     }
 }
@@ -99,8 +137,13 @@ impl Log for HelperLog {
         }
         let mut pairs = Pairs(String::new());
         let _ = record.key_values().visit(&mut pairs);
+        let line = format_line((self.now)(), record.level(), &record.args().to_string(), &pairs.0);
+        if !self.armed.load(Ordering::SeqCst) {
+            eprintln!("{line}");
+            return;
+        }
         // A log that cannot be written must not take the daemon down.
-        let _ = self.append(&format_line((self.now)(), record.level(), &record.args().to_string(), &pairs.0));
+        let _ = self.append(&line);
     }
 
     fn flush(&self) {}
@@ -133,6 +176,35 @@ pub fn tail(path: &Path, n: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_deferred_log_touches_no_file_until_it_is_armed_and_never_follows_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.log");
+        let log = HelperLog::new(path.clone()).with(1000, || 7).deferred();
+        let gate = LogGate(log.armed.clone());
+        let write = |log: &HelperLog, text: &str| {
+            log.log(&Record::builder().args(format_args!("{text}")).level(Level::Info).build());
+        };
+        write(&log, "before");
+        assert!(
+            !path.exists() && std::fs::read_dir(dir.path()).unwrap().count() == 0,
+            "nothing is created before the gate"
+        );
+        gate.arm();
+        write(&log, "after");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("after"));
+        #[cfg(unix)]
+        {
+            let target = dir.path().join("elsewhere");
+            std::fs::write(&target, b"keep").unwrap();
+            let linked = dir.path().join("linked.log");
+            std::os::unix::fs::symlink(&target, &linked).unwrap();
+            let l2 = HelperLog::new(linked).with(1000, || 7);
+            write(&l2, "must not land in the target");
+            assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+        }
+    }
 
     #[test]
     fn lines_are_one_line_each_and_keep_their_pairs() {

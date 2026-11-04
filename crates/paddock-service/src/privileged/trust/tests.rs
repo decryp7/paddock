@@ -503,3 +503,232 @@ fn a_staging_folder_users_can_write_to_is_refused() {
         "{e}"
     );
 }
+
+#[test]
+fn write_attributes_and_extended_attributes_count_inside_the_root_but_not_on_ancestors() {
+    // Stock C:\ProgramData gives Users WEA and WA (in DCLCRPCR): fine on an ancestor, not on the containing folder.
+    let mut p = windows_machine(|_| locked());
+    check(&mut p).unwrap();
+    for (mask, name) in [
+        (right::WRITE_ATTRIBUTES, "FILE_WRITE_ATTRIBUTES"),
+        (right::WRITE_EA, "FILE_WRITE_EA"),
+    ] {
+        let mut folder = locked();
+        if let Security::Windows(d) = &mut folder.security {
+            d.dacl.as_mut().unwrap().push(Ace::allow(SID_USERS, mask));
+        }
+        let mut p = windows_machine(|_| locked());
+        p.put(TOOLS, folder);
+        let e = check(&mut p).unwrap_err();
+        assert!(
+            matches!(e.reason, Reason::Grants { right, .. } if right == name),
+            "{e}"
+        );
+    }
+}
+
+#[test]
+fn a_tree_is_untrusted_when_any_entry_below_the_folder_is_a_link_or_a_users() {
+    let user = "S-1-5-21-1-2-3-1001";
+    let mut p = windows_machine(|_| locked());
+    verify_tree(&mut p, TOOLS, 100).unwrap();
+    // A user-owned entry deep in the tree.
+    let mut owned = locked();
+    if let Security::Windows(d) = &mut owned.security {
+        d.owner = user.into();
+    }
+    p.put(
+        "C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5\\bin",
+        owned,
+    );
+    let e = verify_tree(&mut p, TOOLS, 100).unwrap_err();
+    assert!(
+        e.path.ends_with("\\bin") && matches!(e.reason, Reason::UntrustedOwner(_)),
+        "{e}"
+    );
+    // A junction.
+    let mut p = windows_machine(|_| locked());
+    let mut junction = locked();
+    junction.kind = FileKind::Symlink;
+    p.put(
+        "C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5\\bin",
+        junction,
+    );
+    assert_eq!(
+        verify_tree(&mut p, TOOLS, 100).unwrap_err().reason,
+        Reason::Link
+    );
+    // An entry that lets Users write next to smartctl.exe (DLL planting).
+    let mut p = windows_machine(|_| locked());
+    let mut writable = locked();
+    if let Security::Windows(d) = &mut writable.security {
+        d.dacl
+            .as_mut()
+            .unwrap()
+            .push(Ace::allow(SID_USERS, right::WRITE_DATA));
+    }
+    p.put(
+        "C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5\\bin",
+        writable,
+    );
+    assert!(matches!(
+        verify_tree(&mut p, TOOLS, 100).unwrap_err().reason,
+        Reason::Grants { .. }
+    ));
+    // Bounded.
+    let mut p = windows_machine(|_| locked());
+    assert!(matches!(
+        verify_tree(&mut p, TOOLS, 2).unwrap_err().reason,
+        Reason::Unreadable(_)
+    ));
+}
+
+#[test]
+fn the_folders_between_a_base_and_a_directory_are_listed_top_down() {
+    assert_eq!(
+        between(
+            "C:\\ProgramData",
+            "C:\\ProgramData\\Dyno\\Helper\\tools",
+            Style::Windows
+        )
+        .unwrap(),
+        vec![
+            "C:\\ProgramData\\Dyno".to_string(),
+            "C:\\ProgramData\\Dyno\\Helper".to_string()
+        ]
+    );
+    assert_eq!(
+        between("c:\\programdata", "C:\\ProgramData\\Dyno", Style::Windows).unwrap(),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        between("/var", "/var/lib/dyno-helper", Style::Unix).unwrap(),
+        vec!["/var/lib".to_string()]
+    );
+    assert!(between("C:\\ProgramData", "C:\\Users\\Eve", Style::Windows).is_none());
+    assert!(between("C:\\ProgramData", "C:\\ProgramData", Style::Windows).is_none());
+    assert!(is_within(
+        "C:\\ProgramData\\Dyno",
+        "c:\\programdata",
+        Style::Windows
+    ));
+    assert!(!is_within(
+        "C:\\ProgramDataX",
+        "C:\\ProgramData",
+        Style::Windows
+    ));
+}
+
+#[test]
+fn the_fake_port_models_create_lock_rename_remove_and_walk() {
+    let mut p = windows_machine(|_| locked());
+    // Create is create-new; the new folder carries the protected descriptor.
+    assert_eq!(
+        p.create_dir(TOOLS).unwrap_err().kind(),
+        io::ErrorKind::AlreadyExists
+    );
+    p.remove_tree("C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5")
+        .unwrap();
+    p.create_dir("C:\\ProgramData\\Dyno\\Helper\\tools\\again")
+        .unwrap();
+    assert!(
+        p.walk(TOOLS, 10)
+            .unwrap()
+            .iter()
+            .any(|(k, _)| k.ends_with("\\again"))
+    );
+    assert!(p.walk(TOOLS, 0).is_err());
+    // Lock sets the protected descriptor on what is there and fails on what is not.
+    p.put(TOOLS, inherited_from_program_data());
+    p.lock_dir(TOOLS).unwrap();
+    assert_eq!(p.nodes[&p.key(TOOLS)], locked());
+    assert_eq!(
+        p.lock_dir("C:\\none").unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
+    // Aside moves the folder and what is below it.
+    let aside = p.rename_aside(TOOLS).unwrap();
+    assert!(p.nodes.contains_key(&p.key(&aside)) && !p.nodes.contains_key(&p.key(TOOLS)));
+    assert!(
+        p.nodes
+            .keys()
+            .any(|k| k.starts_with(&format!("{}\\", p.key(&aside))))
+    );
+    // Unix flavour.
+    let mut u = FakePort {
+        style: Style::Unix,
+        nodes: HashMap::new(),
+        links: HashMap::new(),
+        calls: vec![],
+    };
+    u.create_dir("/d").unwrap();
+    u.lock_dir("/d").unwrap();
+    assert_eq!(u.nodes["/d"], unix_dir(0, 0o755));
+    assert_eq!(u.walk("/d", 5).unwrap(), vec![]);
+}
+
+#[test]
+fn a_container_where_users_can_delete_children_is_refused_before_anything_is_made_in_it() {
+    let mut p = windows_machine(|_| locked());
+    verify_container(&mut p, "C:\\ProgramData").unwrap();
+    let mut pd = stock_program_data();
+    if let Security::Windows(d) = &mut pd.security {
+        d.dacl
+            .as_mut()
+            .unwrap()
+            .push(Ace::allow(SID_USERS, right::DELETE_CHILD));
+    }
+    p.put("C:\\ProgramData", pd);
+    let e = verify_container(&mut p, "C:\\ProgramData").unwrap_err();
+    assert!(
+        matches!(e.reason, Reason::Grants { right, .. } if right.contains("FILE_DELETE_CHILD")),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_junction_on_the_way_is_named_a_link_even_when_what_is_behind_it_cannot_be_examined() {
+    // Windows answers "untrusted mount point" (448) for anything behind a junction a user made: the junction is the finding.
+    struct Behind(FakePort);
+    impl TrustPort for Behind {
+        fn style(&self) -> Style {
+            self.0.style()
+        }
+        fn node(&mut self, path: &str) -> io::Result<Option<Node>> {
+            if path.ends_with("prog.exe") {
+                return Err(io::Error::from_raw_os_error(448));
+            }
+            self.0.node(path)
+        }
+        fn canonical(&mut self, p: &str) -> io::Result<String> {
+            self.0.canonical(p)
+        }
+        fn walk(&mut self, p: &str, l: usize) -> io::Result<Vec<(String, Node)>> {
+            self.0.walk(p, l)
+        }
+        fn create_dir(&mut self, p: &str) -> io::Result<()> {
+            self.0.create_dir(p)
+        }
+        fn lock_dir(&mut self, p: &str) -> io::Result<()> {
+            self.0.lock_dir(p)
+        }
+        fn rename_aside(&mut self, p: &str) -> io::Result<String> {
+            self.0.rename_aside(p)
+        }
+        fn remove_tree(&mut self, p: &str) -> io::Result<()> {
+            self.0.remove_tree(p)
+        }
+    }
+    let mut m = windows_machine(|_| locked());
+    let mut junction = locked();
+    junction.kind = FileKind::Symlink;
+    m.put(
+        "C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5",
+        junction,
+    );
+    let mut p = Behind(m);
+    let path = "C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5\\prog.exe";
+    let e = verify_chain(&mut p, path, FileKind::File, Some(TOOLS), false).unwrap_err();
+    assert_eq!(e.reason, Reason::Link, "{e}");
+    assert!(e.path.ends_with("smartmontools-7.5"), "{e}");
+}

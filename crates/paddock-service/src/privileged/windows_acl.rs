@@ -7,6 +7,23 @@ use std::path::Path;
 /// `icacls`.
 pub const ICACLS: &str = "icacls";
 
+/// The SDDL of a protected folder, the same ACL as [`acl_command`] but in the form `SetSecurityInfo` and
+/// `CreateDirectoryW` take: owner Administrators, the DACL protected (no inheritance from above), SYSTEM and Administrators Full
+/// control and Users Read and execute, all inherited by what the folder holds. A test keeps the two in step.
+pub const PROTECTED_FOLDER_SDDL: &str =
+    "O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+
+/// A bare name of a Windows system tool as its absolute path under `%SystemRoot%\System32` (so a program planted in the
+/// working folder or on `PATH` is never the one a SYSTEM process runs). Other programs, and every program on another OS, are
+/// returned as given.
+pub fn system_tool(program: &str) -> String {
+    if cfg!(windows) && program.eq_ignore_ascii_case("icacls") {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+        return format!("{}\\System32\\icacls.exe", root.trim_end_matches('\\'));
+    }
+    program.to_string()
+}
+
 /// The `icacls` call that replaces the folder's ACL: inheritance removed, then SYSTEM (`S-1-5-18`) and Administrators
 /// (`S-1-5-32-544`) Full control and Users (`S-1-5-32-545`) Read and execute, all inherited by what the folder holds.
 pub fn acl_command(folder: &Path) -> Vec<String> {
@@ -91,6 +108,41 @@ pub fn acl_shape_ok(listing: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sddl_and_the_icacls_call_describe_the_same_acl() {
+        // SYSTEM Full, Administrators Full, Users Read and execute, both inherited by folders and files, owner Administrators.
+        let c = acl_command(Path::new("C:\\x"));
+        for (sid, sddl_sid, sddl_rights, icacls_rights) in [
+            ("S-1-5-18", "SY", "FA", "F"),
+            ("S-1-5-32-544", "BA", "FA", "F"),
+            ("S-1-5-32-545", "BU", "0x1200a9", "RX"),
+        ] {
+            assert!(
+                PROTECTED_FOLDER_SDDL.contains(&format!("(A;OICI;{sddl_rights};;;{sddl_sid})")),
+                "{sid}"
+            );
+            assert!(
+                c.contains(&format!("*{sid}:(OI)(CI){icacls_rights}")),
+                "{sid}"
+            );
+        }
+        assert!(PROTECTED_FOLDER_SDDL.starts_with("O:BAD:P"));
+    }
+
+    #[test]
+    fn a_system_tool_is_run_by_its_absolute_path_on_windows_only() {
+        let p = system_tool("icacls");
+        if cfg!(windows) {
+            assert!(
+                p.to_ascii_lowercase().ends_with("\\system32\\icacls.exe"),
+                "{p}"
+            );
+        } else {
+            assert_eq!(p, "icacls");
+        }
+        assert_eq!(system_tool("other"), "other");
+    }
 
     #[test]
     fn the_acl_command_names_the_well_known_sids() {

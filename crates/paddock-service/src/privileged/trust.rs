@@ -55,6 +55,10 @@ pub mod right {
     pub const WRITE_DAC: u32 = 0x0004_0000;
     /// `WRITE_OWNER`.
     pub const WRITE_OWNER: u32 = 0x0008_0000;
+    /// `FILE_WRITE_EA`.
+    pub const WRITE_EA: u32 = 0x0000_0010;
+    /// `FILE_WRITE_ATTRIBUTES`.
+    pub const WRITE_ATTRIBUTES: u32 = 0x0000_0100;
     /// `GENERIC_WRITE`.
     pub const GENERIC_WRITE: u32 = 0x4000_0000;
     /// `GENERIC_ALL`.
@@ -144,14 +148,21 @@ pub trait TrustPort: Send {
     fn node(&mut self, path: &str) -> io::Result<Option<Node>>;
     /// The path with every link resolved (Unix; used for programs the OS ships, like `/usr/sbin/smartctl`).
     fn canonical(&mut self, path: &str) -> io::Result<String>;
-    /// Creates the folder and its missing parents.
-    fn create_dir_all(&mut self, path: &str) -> io::Result<()>;
+    /// Every entry below `path`, never following a link (a link is listed, not entered), at most `limit`; an error when
+    /// there are more.
+    fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>>;
+    /// Creates one folder (its parent must exist) and fails if it exists: on Windows with a protected security descriptor
+    /// given at creation (`CreateDirectoryW` with `SECURITY_ATTRIBUTES`: SYSTEM and Administrators full, Users read and
+    /// execute, no inheritance from above), elsewhere root-owned 0755.
+    fn create_dir(&mut self, path: &str) -> io::Result<()>;
+    /// Sets the owner and the protected DACL (Windows: `SetSecurityInfo` on a handle opened without following a link, after
+    /// checking it is a real folder; never by path) or the mode 0755 (Unix) of an existing folder.
+    fn lock_dir(&mut self, path: &str) -> io::Result<()>;
+    /// Renames the entry next to itself to a name that is free, never following it, and returns the new path. Nothing in it
+    /// is read or run again.
+    fn rename_aside(&mut self, path: &str) -> io::Result<String>;
     /// Removes a folder tree without following any link or reparse point: a link inside is removed, never its target.
     fn remove_tree(&mut self, path: &str) -> io::Result<()>;
-    /// Sets the permission bits (Unix).
-    fn chmod(&mut self, path: &str, mode: u32) -> io::Result<()>;
-    /// Runs `icacls` with `args` and returns its output (Windows); a failure is an error with the reason.
-    fn icacls(&mut self, args: &[String]) -> io::Result<String>;
 }
 
 /// Why a component is not trusted.
@@ -228,6 +239,13 @@ impl fmt::Display for Untrusted {
     }
 }
 
+impl Untrusted {
+    /// The same words without the next step (for a message that is itself the result of a repair).
+    pub fn describe(&self) -> String {
+        format!("{} is not a protected place: {}", self.path, self.reason)
+    }
+}
+
 impl std::error::Error for Untrusted {}
 
 fn fail(path: &str, reason: Reason) -> Untrusted {
@@ -282,8 +300,13 @@ fn norm(path: &str, style: Style) -> String {
     }
 }
 
-fn is_trusted(sid: &str) -> bool {
+/// Whether `sid` is SYSTEM, Administrators or TrustedInstaller.
+pub fn is_trusted_sid(sid: &str) -> bool {
     TRUSTED.contains(&sid)
+}
+
+fn is_trusted(sid: &str) -> bool {
+    is_trusted_sid(sid)
 }
 
 /// The first right of `mask` that matters for a component, by name. `inside` adds the rights that create or write.
@@ -307,6 +330,12 @@ fn bad_right(mask: u32, inside: bool) -> Option<&'static str> {
         }
         if mask & APPEND_DATA != 0 {
             return Some("FILE_APPEND_DATA (add subfolder)");
+        }
+        if mask & WRITE_ATTRIBUTES != 0 {
+            return Some("FILE_WRITE_ATTRIBUTES");
+        }
+        if mask & WRITE_EA != 0 {
+            return Some("FILE_WRITE_EA");
         }
     }
     None
@@ -429,14 +458,20 @@ pub fn verify_chain(
         }
         _ => None,
     };
+    // From the top of the chain down, so a link or junction on the way is named as one even when what lies behind it cannot
+    // be examined at all (Windows refuses to traverse an untrusted mount point).
     let mut nodes = Vec::with_capacity(chain.len());
-    for c in &chain {
+    for c in chain.iter().rev() {
         let node = port
             .node(c)
             .map_err(|e| fail(c, Reason::Unreadable(e.to_string())))?
             .ok_or_else(|| fail(c, Reason::Missing))?;
+        if node.kind == FileKind::Symlink {
+            return Err(fail(c, Reason::Link));
+        }
         nodes.push(node);
     }
+    nodes.reverse();
     for (i, (c, node)) in chain.iter().zip(&nodes).enumerate() {
         if node.kind == FileKind::Symlink {
             return Err(fail(c, Reason::Link));
@@ -489,6 +524,103 @@ pub fn require_same_path(requested: &str, final_path: &str, style: Style) -> Res
     } else {
         Err(fail(requested, Reason::Redirected(final_path.to_string())))
     }
+}
+
+/// Checks `dir` as a place the helper will make folders in: the chain to it passes the ancestor rule and no other account may
+/// delete what is made in it (`FILE_DELETE_CHILD`), so a user cannot swap a folder the helper made for their own.
+///
+/// # Errors
+/// The first component that is not protected.
+pub fn verify_container(port: &mut dyn TrustPort, dir: &str) -> Result<(), Untrusted> {
+    verify_chain(port, dir, FileKind::Dir, None, false)?;
+    let node = port
+        .node(dir)
+        .map_err(|e| fail(dir, Reason::Unreadable(e.to_string())))?
+        .ok_or_else(|| fail(dir, Reason::Missing))?;
+    if let Security::Windows(d) = &node.security {
+        let dacl = d.dacl.as_ref().ok_or_else(|| fail(dir, Reason::NullDacl))?;
+        for ace in dacl.iter().filter(|a| {
+            a.allow && !a.inherit_only && !is_trusted(&a.sid) && a.sid != SID_CREATOR_OWNER
+        }) {
+            if ace.mask & (right::DELETE_CHILD | right::GENERIC_ALL) != 0 {
+                return Err(fail(
+                    dir,
+                    Reason::Grants {
+                        sid: ace.sid.clone(),
+                        right: "FILE_DELETE_CHILD on what is made in it",
+                    },
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Checks everything below `dir` (a folder already shown to be protected) without following a link: no link or reparse
+/// point, and every entry owned and guarded as the inside rule says. One entry that fails makes the whole folder untrusted.
+///
+/// # Errors
+/// The first entry that is not protected.
+pub fn verify_tree(port: &mut dyn TrustPort, dir: &str, limit: usize) -> Result<(), Untrusted> {
+    let style = port.style();
+    let top = port
+        .node(dir)
+        .map_err(|e| fail(dir, Reason::Unreadable(e.to_string())))?
+        .ok_or_else(|| fail(dir, Reason::Missing))?;
+    let entries = port
+        .walk(dir, limit)
+        .map_err(|e| fail(dir, Reason::Unreadable(e.to_string())))?;
+    let mut by_path: std::collections::HashMap<String, &Node> = std::collections::HashMap::new();
+    by_path.insert(norm(dir, style), &top);
+    for (path, node) in &entries {
+        by_path.insert(norm(path, style), node);
+    }
+    for (path, node) in &entries {
+        if node.kind == FileKind::Symlink {
+            return Err(fail(path, Reason::Link));
+        }
+        match &node.security {
+            Security::Windows(d) => {
+                let parent = parent_of(path, style)
+                    .and_then(|p| by_path.get(&norm(&p, style)).map(|n| (p, *n)))
+                    .and_then(|(p, n)| match &n.security {
+                        Security::Windows(pd) => Some((p, pd)),
+                        Security::Unix { .. } => None,
+                    });
+                check_windows(
+                    path,
+                    d,
+                    parent.as_ref().map(|(p, pd)| (p.as_str(), *pd)),
+                    true,
+                )?;
+            }
+            Security::Unix {
+                owner,
+                mode,
+                write_acl,
+            } => check_unix(path, *owner, *mode, *write_acl)?,
+        }
+    }
+    Ok(())
+}
+
+/// The folders strictly between `base` and `dir`, from the one under `base` down to `dir`'s parent. `None` when `dir` is
+/// not below `base`.
+pub fn between(base: &str, dir: &str, style: Style) -> Option<Vec<String>> {
+    if !is_within(dir, base, style) || norm(dir, style) == norm(base, style) {
+        return None;
+    }
+    let mut up = Vec::new();
+    let mut cur = parent_of(dir, style);
+    while let Some(c) = cur {
+        if norm(&c, style) == norm(base, style) {
+            up.reverse();
+            return Some(up);
+        }
+        up.push(c.clone());
+        cur = parent_of(&c, style);
+    }
+    None
 }
 
 /// Whether `ls -lde` output on macOS lists an ACL entry that allows a write, an append, a delete or a change of

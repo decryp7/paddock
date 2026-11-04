@@ -23,17 +23,20 @@ impl TrustPort for Shared {
     fn canonical(&mut self, p: &str) -> io::Result<String> {
         self.0.lock().unwrap().canonical(p)
     }
-    fn create_dir_all(&mut self, p: &str) -> io::Result<()> {
-        self.0.lock().unwrap().create_dir_all(p)
+    fn walk(&mut self, p: &str, limit: usize) -> io::Result<Vec<(String, paddock_service::privileged::trust::Node)>> {
+        self.0.lock().unwrap().walk(p, limit)
+    }
+    fn create_dir(&mut self, p: &str) -> io::Result<()> {
+        self.0.lock().unwrap().create_dir(p)
+    }
+    fn lock_dir(&mut self, p: &str) -> io::Result<()> {
+        self.0.lock().unwrap().lock_dir(p)
+    }
+    fn rename_aside(&mut self, p: &str) -> io::Result<String> {
+        self.0.lock().unwrap().rename_aside(p)
     }
     fn remove_tree(&mut self, p: &str) -> io::Result<()> {
         self.0.lock().unwrap().remove_tree(p)
-    }
-    fn chmod(&mut self, p: &str, m: u32) -> io::Result<()> {
-        self.0.lock().unwrap().chmod(p, m)
-    }
-    fn icacls(&mut self, a: &[String]) -> io::Result<String> {
-        self.0.lock().unwrap().icacls(a)
     }
 }
 
@@ -69,12 +72,14 @@ impl ToolRunner for Runs {
 
 fn guard(machine: FakePort, host: HelperHost, redirect: Option<&str>) -> (Arc<TrustGuard>, Shared) {
     let shared = Shared(Arc::new(Mutex::new(machine)));
+    let base = if host == HelperHost::Windows { "C:\\ProgramData" } else { "/var" };
     let g = TrustGuard::new(
         host,
         Box::new(shared.clone()),
         Box::new(Opener {
             redirect: redirect.map(str::to_string),
         }),
+        Path::new(base),
     );
     (Arc::new(g), shared)
 }
@@ -149,22 +154,17 @@ fn install_locks_the_data_root_tools_and_staging() {
     let tools = Path::new(DATA).join("tools").to_string_lossy().into_owned();
     let staging = Path::new(DATA).join("staging").to_string_lossy().into_owned();
     for dir in [DATA, tools.as_str(), staging.as_str()] {
-        assert!(c.contains(&format!("mkdir {dir}")), "{c:?}");
-        assert!(
-            c.iter()
-                .any(|x| x.starts_with("icacls ") && x.contains(dir) && x.contains("/inheritance:r")),
-            "{c:?}"
-        );
-        assert!(
-            c.iter()
-                .any(|x| x.starts_with("icacls ") && x.contains(dir) && x.contains("/setowner *S-1-5-32-544")),
-            "{c:?}"
-        );
+        let made = c
+            .iter()
+            .position(|x| x == &format!("create_dir {dir}"))
+            .unwrap_or_else(|| panic!("{dir} made: {c:?}"));
+        let locked = c
+            .iter()
+            .position(|x| x == &format!("lock_dir {dir}"))
+            .unwrap_or_else(|| panic!("{dir} locked: {c:?}"));
+        assert!(made < locked, "created, then locked by handle: {c:?}");
     }
-    assert!(
-        c.iter().any(|x| x.contains("*S-1-5-32-545:(OI)(CI)RX")),
-        "Users only read and execute: {c:?}"
-    );
+    assert!(c.iter().all(|x| !x.contains("icacls")), "no ACL is set by path: {c:?}");
     assert!(
         c.iter().all(|x| !x.starts_with("remove_tree")),
         "a folder that was not there is not removed: {c:?}"
@@ -195,7 +195,7 @@ fn a_tools_folder_a_user_made_is_removed_and_made_again_as_system() {
     g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
     let c = calls(&machine);
     let removed = c.iter().position(|x| x == &format!("remove_tree {TOOLS}")).expect("removed");
-    let made = c.iter().position(|x| x == &format!("mkdir {TOOLS}")).expect("made again");
+    let made = c.iter().position(|x| x == &format!("create_dir {TOOLS}")).expect("made again");
     assert!(removed < made, "{c:?}");
     // What the user had put below is gone with it.
     assert!(!machine
@@ -243,20 +243,77 @@ fn a_protected_folder_is_locked_again_but_never_emptied() {
 }
 
 #[test]
-fn a_fault_in_an_ancestor_is_reported_and_nothing_below_it_is_destroyed() {
-    let mut m = windows_machine(|_| locked());
-    let mut pd = stock_program_data();
-    if let Security::Windows(d) = &mut pd.security {
-        d.dacl.as_mut().unwrap().push(Ace::allow(SID_USERS, right::DELETE_CHILD));
+fn no_acl_change_happens_when_a_system_ancestor_fails() {
+    // ProgramData (the base) lets Users delete its children: a user could swap Dyno for a junction. Nothing is made, locked,
+    // moved or removed, whichever policy asks, and Repair is not named when Repair itself is what failed.
+    for (policy, repair_named) in [(OnUntrusted::Purge, false), (OnUntrusted::Refuse, true)] {
+        let mut m = windows_machine(|_| locked());
+        let mut pd = stock_program_data();
+        if let Security::Windows(d) = &mut pd.security {
+            d.dacl.as_mut().unwrap().push(Ace::allow(SID_USERS, right::DELETE_CHILD));
+        }
+        m.put("C:\\ProgramData", pd);
+        let (g, machine) = guard(m, HelperHost::Windows, None);
+        let e = g.ensure_root(Path::new(TOOLS), policy).unwrap_err().to_string();
+        assert!(e.contains("DELETE_CHILD"), "{e}");
+        assert_eq!(e.contains("Repair the helper"), repair_named, "{e}");
+        assert!(calls(&machine).is_empty(), "nothing is touched: {:?}", calls(&machine));
     }
-    m.put("C:\\ProgramData", pd);
+    // Also a fault above the base.
+    let mut m = windows_machine(|_| locked());
+    let mut root = stock_drive_root();
+    if let Security::Windows(d) = &mut root.security {
+        d.dacl.as_mut().unwrap().push(Ace::allow(SID_USERS, right::WRITE_DAC));
+    }
+    m.put("C:\\", root);
     let (g, machine) = guard(m, HelperHost::Windows, None);
-    let e = g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap_err().to_string();
-    assert!(e.contains("DELETE_CHILD"), "{e}");
+    assert!(g.prepare_folders(Path::new(DATA), OnUntrusted::Purge).is_err());
+    assert!(calls(&machine).is_empty());
+}
+
+#[test]
+fn an_untrusted_vendor_folder_on_the_way_is_moved_aside_and_never_removed_or_followed() {
+    // A user made C:\ProgramData\Dyno (they own it, so they can re-permission it) with a Helper tree inside.
+    let user = "S-1-5-21-111-222-333-1001";
+    let mut m = windows_machine(|_| locked());
+    let mut dyno = inherited_from_program_data();
+    if let Security::Windows(sd) = &mut dyno.security {
+        sd.owner = user.into();
+    }
+    m.put("C:\\ProgramData\\Dyno", dyno);
+    let (g, machine) = guard(m, HelperHost::Windows, None);
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    let c = calls(&machine);
+    let aside = c
+        .iter()
+        .position(|x| x == "rename_aside C:\\ProgramData\\Dyno")
+        .expect("moved aside");
+    let made = c.iter().position(|x| x == "create_dir C:\\ProgramData\\Dyno").expect("made again");
+    assert!(aside < made, "{c:?}");
     assert!(
-        calls(&machine).iter().all(|x| !x.starts_with("remove_tree")),
-        "emptying the folder cannot cure its parent"
+        c.iter().all(|x| !x.starts_with("remove_tree")),
+        "what a user made is moved aside, never deleted as SYSTEM: {c:?}"
     );
+    // The new folders are the helper's: tools is made fresh under the new Helper.
+    assert!(c.contains(&format!("create_dir {TOOLS}")), "{c:?}");
+}
+
+#[test]
+fn a_user_owned_entry_deep_in_a_locked_tools_folder_makes_the_folder_untrusted() {
+    // The attack: the user pre-created tools\\smartmontools-7.5\\bin before the folder was locked; the lock does not change
+    // an owner, so the entry is still the user's.
+    let user = "S-1-5-21-111-222-333-1001";
+    let mut m = windows_machine(|_| locked());
+    let mut bin = locked();
+    if let Security::Windows(d) = &mut bin.security {
+        d.owner = user.into();
+    }
+    m.put("C:\\ProgramData\\Dyno\\Helper\\tools\\smartmontools-7.5\\bin", bin);
+    let (g, machine) = guard(m, HelperHost::Windows, None);
+    let e = g.ensure_root(Path::new(TOOLS), OnUntrusted::Refuse).unwrap_err().to_string();
+    assert!(e.contains("bin") && e.contains("owner"), "{e}");
+    g.ensure_root(Path::new(TOOLS), OnUntrusted::Purge).unwrap();
+    assert!(calls(&machine).contains(&format!("remove_tree {TOOLS}")));
 }
 
 fn unix_machine(owner: u32, mode: u32) -> FakePort {
@@ -284,14 +341,20 @@ fn unix_machine(owner: u32, mode: u32) -> FakePort {
 }
 
 #[test]
-fn unix_folders_are_root_owned_0755_and_one_somebody_else_owns_is_emptied() {
+fn unix_folders_are_root_owned_0755_and_one_loose_or_somebody_elses_is_emptied() {
     let tools = "/var/lib/dyno-helper/tools";
-    let (g, machine) = guard(unix_machine(0, 0o777), HelperHost::Linux, None);
+    let (g, machine) = guard(unix_machine(0, 0o755), HelperHost::Linux, None);
     g.ensure_root(Path::new(tools), OnUntrusted::Purge).unwrap();
-    assert!(calls(&machine).contains(&format!("chmod {tools} 755")));
-    let (g, machine) = guard(unix_machine(501, 0o755), HelperHost::Macos, None);
-    g.ensure_root(Path::new(tools), OnUntrusted::Purge).unwrap();
-    assert!(calls(&machine).contains(&format!("remove_tree {tools}")));
+    assert!(calls(&machine).contains(&format!("lock_dir {tools}")));
+    assert!(
+        calls(&machine).iter().all(|x| !x.starts_with("remove_tree")),
+        "a protected folder is kept"
+    );
+    for (owner, mode) in [(501, 0o755), (0, 0o777)] {
+        let (g, machine) = guard(unix_machine(owner, mode), HelperHost::Macos, None);
+        g.ensure_root(Path::new(tools), OnUntrusted::Purge).unwrap();
+        assert!(calls(&machine).contains(&format!("remove_tree {tools}")), "{owner} {mode:o}");
+    }
 }
 
 #[test]
@@ -348,7 +411,11 @@ impl TrustPort for Anything {
     }
     fn node(&mut self, p: &str) -> io::Result<Option<paddock_service::privileged::trust::Node>> {
         use paddock_service::privileged::files::FileKind;
-        let kind = if p.ends_with(".exe") || p.ends_with("smartctl") || p.ends_with("setup.exe") {
+        // "/h/..." are made-up folders of the tests that never touch the disk; anything else must really be there.
+        if !p.starts_with("/h") && !Path::new(p).exists() {
+            return Ok(None);
+        }
+        let kind = if p.ends_with(".exe") || p.ends_with("smartctl") {
             FileKind::File
         } else {
             FileKind::Dir
@@ -365,20 +432,26 @@ impl TrustPort for Anything {
     fn canonical(&mut self, p: &str) -> io::Result<String> {
         Ok(p.to_string())
     }
-    fn create_dir_all(&mut self, p: &str) -> io::Result<()> {
-        std::fs::create_dir_all(p)
+    fn walk(&mut self, _p: &str, _limit: usize) -> io::Result<Vec<(String, paddock_service::privileged::trust::Node)>> {
+        Ok(Vec::new())
+    }
+    fn create_dir(&mut self, p: &str) -> io::Result<()> {
+        if p.starts_with("/h") {
+            return Ok(());
+        }
+        std::fs::create_dir(p)
+    }
+    fn lock_dir(&mut self, _p: &str) -> io::Result<()> {
+        Ok(())
+    }
+    fn rename_aside(&mut self, p: &str) -> io::Result<String> {
+        Ok(p.to_string())
     }
     fn remove_tree(&mut self, p: &str) -> io::Result<()> {
         match std::fs::remove_dir_all(p) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             other => other,
         }
-    }
-    fn chmod(&mut self, _p: &str, _m: u32) -> io::Result<()> {
-        Ok(())
-    }
-    fn icacls(&mut self, _a: &[String]) -> io::Result<String> {
-        Ok(String::new())
     }
 }
 
@@ -388,6 +461,7 @@ pub(crate) fn trusting() -> Arc<TrustGuard> {
         HelperHost::Linux,
         Box::new(Anything),
         Box::new(Opener { redirect: None }),
+        Path::new("/"),
     ))
 }
 
@@ -405,7 +479,7 @@ fn a_clean_install_folder_that_still_inherits_users_write_is_locked_again() {
         g.ensure_root(Path::new(dir), OnUntrusted::Purge).unwrap();
         g.verify_dir(Path::new(dir), Path::new(dir)).unwrap();
     }
-    assert!(calls(&machine).iter().filter(|c| c.contains("/inheritance:r")).count() >= 2);
+    assert!(calls(&machine).iter().filter(|c| c.starts_with("lock_dir")).count() >= 2);
 }
 
 #[test]
@@ -413,5 +487,7 @@ fn resetting_the_staging_folder_empties_it_and_locks_it_again() {
     let (g, machine) = guard(windows_machine(|_| locked()), HelperHost::Windows, None);
     g.reset_root(Path::new(STAGING)).unwrap();
     let c = calls(&machine);
-    assert!(c.iter().position(|x| x == &format!("remove_tree {STAGING}")) < c.iter().position(|x| x == &format!("mkdir {STAGING}")));
+    let removed = c.iter().position(|x| x == &format!("remove_tree {STAGING}")).expect("emptied");
+    let made = c.iter().rposition(|x| x == &format!("create_dir {STAGING}")).expect("made again");
+    assert!(removed < made, "{c:?}");
 }

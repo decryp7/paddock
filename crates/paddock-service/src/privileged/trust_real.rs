@@ -52,26 +52,84 @@ impl TrustPort for RealTrust {
         Ok(std::fs::canonicalize(path)?.to_string_lossy().into_owned())
     }
 
-    fn create_dir_all(&mut self, path: &str) -> io::Result<()> {
+    fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>> {
+        walk_no_follow(self, path, limit)
+    }
+
+    fn create_dir(&mut self, path: &str) -> io::Result<()> {
         use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o755)
-            .create(path)
+        // One level, create-new, exactly 0755 (the umask cannot widen it; narrowing is undone by `lock_dir`).
+        std::fs::DirBuilder::new().mode(0o755).create(path)
     }
 
-    fn chmod(&mut self, path: &str, mode: u32) -> io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    fn lock_dir(&mut self, path: &str) -> io::Result<()> {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        // By descriptor of a folder opened without following a link, so the mode lands on the folder that was checked.
+        let dir = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(path)?;
+        dir.set_permissions(std::fs::Permissions::from_mode(0o755))
     }
 
-    fn icacls(&mut self, _args: &[String]) -> io::Result<String> {
-        Err(io::Error::from(io::ErrorKind::Unsupported))
+    fn rename_aside(&mut self, path: &str) -> io::Result<String> {
+        rename_aside_free(path)
     }
 
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
         remove_tree_no_follow(path)
     }
+}
+
+/// Every entry below `root` (a link is listed and not entered), at most `limit`.
+fn walk_no_follow(
+    port: &mut dyn TrustPort,
+    root: &str,
+    limit: usize,
+) -> io::Result<Vec<(String, Node)>> {
+    let sep = if port.style() == Style::Windows {
+        '\\'
+    } else {
+        '/'
+    };
+    let mut out = Vec::new();
+    let mut todo = vec![root.to_string()];
+    while let Some(dir) = todo.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            let path = format!("{}{sep}{name}", dir.trim_end_matches(sep));
+            let Some(node) = port.node(&path)? else {
+                continue;
+            };
+            if node.kind == FileKind::Dir {
+                todo.push(path.clone());
+            }
+            out.push((path, node));
+            if out.len() > limit {
+                return Err(io::Error::other(format!("more than {limit} entries")));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Renames `path` next to itself to a free name; the entry is never opened or followed.
+fn rename_aside_free(path: &str) -> io::Result<String> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    for n in 0..100 {
+        let aside = format!("{path}.untrusted-{secs}-{n}");
+        if std::fs::symlink_metadata(&aside).is_ok() {
+            continue;
+        }
+        std::fs::rename(path, &aside)?;
+        return Ok(aside);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "no free name to move the folder aside",
+    ))
 }
 
 /// `std::fs::remove_dir_all` removes a link inside the tree (and the root, if it is one) and never follows it, on Unix
@@ -157,49 +215,45 @@ impl TrustPort for RealTrust {
         Ok(std::fs::canonicalize(path)?.to_string_lossy().into_owned())
     }
 
-    fn create_dir_all(&mut self, path: &str) -> io::Result<()> {
-        std::fs::create_dir_all(path)
+    fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>> {
+        walk_no_follow(self, path, limit)
     }
 
-    fn chmod(&mut self, _path: &str, _mode: u32) -> io::Result<()> {
-        Err(io::Error::from(io::ErrorKind::Unsupported))
+    fn create_dir(&mut self, path: &str) -> io::Result<()> {
+        win::create_dir_protected(path)
+    }
+
+    fn lock_dir(&mut self, path: &str) -> io::Result<()> {
+        win::lock_dir(path)
+    }
+
+    fn rename_aside(&mut self, path: &str) -> io::Result<String> {
+        rename_aside_free(path)
     }
 
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
         remove_tree_no_follow(path)
     }
-
-    fn icacls(&mut self, args: &[String]) -> io::Result<String> {
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        use crate::port::System as _;
-        let out = crate::system::RealSystem::new()
-            .run(super::windows_acl::ICACLS, &refs)
-            .map_err(|e| io::Error::other(format!("icacls {e}")))?;
-        if out.success() {
-            Ok(out.stdout)
-        } else {
-            Err(io::Error::other(format!(
-                "icacls exited with {:?}: {}",
-                out.code,
-                out.stderr.lines().next().unwrap_or("")
-            )))
-        }
-    }
 }
 
 #[cfg(windows)]
 mod win {
-    use super::super::trust::{Ace, Descriptor};
+    use super::super::trust::{Ace, Descriptor, is_trusted_sid};
+    use super::super::windows_acl::PROTECTED_FOLDER_SDDL;
     use std::io;
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
     use windows::Win32::Security::Authorization::{
-        ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT,
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
     };
     use windows::Win32::Security::{
-        ACL, DACL_SECURITY_INFORMATION, GetAce, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        PSID,
+        ACL, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorDacl,
+        GetSecurityDescriptorOwner, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
     };
+    use windows::Win32::Storage::FileSystem::CreateDirectoryW;
+    use windows::core::{BOOL, PCWSTR};
 
     const ACCESS_ALLOWED: u8 = 0;
     const ACCESS_DENIED: u8 = 1;
@@ -217,6 +271,104 @@ mod win {
         // SAFETY: allocated by ConvertSidToStringSidW with LocalAlloc.
         unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
         s
+    }
+
+    struct Sd(PSECURITY_DESCRIPTOR);
+
+    impl Drop for Sd {
+        fn drop(&mut self) {
+            // SAFETY: allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW with LocalAlloc.
+            unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
+        }
+    }
+
+    fn sd_from_sddl(sddl: &str) -> io::Result<Sd> {
+        let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: `wide` is NUL-terminated and outlives the call; `sd` is a valid out-pointer.
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                PCWSTR(wide.as_ptr()),
+                SDDL_REVISION_1,
+                &mut sd,
+                None,
+            )
+        }
+        .map_err(|e| io::Error::other(e.to_string()))?;
+        Ok(Sd(sd))
+    }
+
+    /// Creates one folder, create-new, with the protected descriptor given at creation (the DACL of
+    /// [`PROTECTED_FOLDER_SDDL`]; the owner is whoever the creator's token makes it and `lock_dir` then sets Administrators).
+    pub fn create_dir_protected(path: &str) -> io::Result<()> {
+        // The DACL part only: a creator may not be allowed to name an owner.
+        let sd = sd_from_sddl(&PROTECTED_FOLDER_SDDL[4..])?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd.0.0,
+            bInheritHandle: false.into(),
+        };
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is NUL-terminated; `attributes` and the descriptor it points to outlive the call.
+        unsafe { CreateDirectoryW(PCWSTR(wide.as_ptr()), Some(&attributes)) }
+            .map_err(|e| io::Error::from_raw_os_error(e.code().0 & 0xffff))
+    }
+
+    /// Applies the protected DACL and, when the owner is not SYSTEM or Administrators, Administrators as owner, to the folder
+    /// by a handle opened without following a link, after checking that it is a real folder.
+    pub fn lock_dir(path: &str) -> io::Result<()> {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const READ_CONTROL: u32 = 0x0002_0000;
+        const WRITE_DAC: u32 = 0x0004_0000;
+        const WRITE_OWNER: u32 = 0x0008_0000;
+        const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
+        const BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const REPARSE: u32 = 0x400;
+        let file = std::fs::OpenOptions::new()
+            .access_mode(READ_CONTROL | WRITE_DAC | WRITE_OWNER | FILE_READ_ATTRIBUTES)
+            .share_mode(7)
+            .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
+            .open(path)?;
+        let meta = file.metadata()?;
+        if meta.file_attributes() & REPARSE != 0 || !meta.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a real folder (a link, or not a folder)",
+            ));
+        }
+        let current = descriptor(&file)?;
+        let sd = sd_from_sddl(PROTECTED_FOLDER_SDDL)?;
+        let (mut owner, mut dacl) = (PSID::default(), std::ptr::null_mut::<ACL>());
+        let (mut present, mut defaulted) = (BOOL(0), BOOL(0));
+        // SAFETY: `sd` is a valid descriptor; the out-pointers are valid and point into `sd`.
+        unsafe {
+            GetSecurityDescriptorOwner(sd.0, &mut owner, &mut defaulted)
+                .map_err(|e| io::Error::other(e.to_string()))?;
+            GetSecurityDescriptorDacl(sd.0, &mut present, &mut dacl, &mut defaulted)
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+        let mut what = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+        let set_owner = !is_trusted_sid(&current.owner);
+        if set_owner {
+            what |= OWNER_SECURITY_INFORMATION;
+        }
+        // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER for the whole call; owner and dacl point into `sd`.
+        let status = unsafe {
+            SetSecurityInfo(
+                HANDLE(file.as_raw_handle()),
+                SE_FILE_OBJECT,
+                what,
+                set_owner.then_some(owner),
+                None,
+                Some(dacl),
+                None,
+            )
+        };
+        if status.0 != 0 {
+            return Err(io::Error::from_raw_os_error(status.0 as i32));
+        }
+        Ok(())
     }
 
     /// The owner and DACL of the open object.
@@ -407,7 +559,9 @@ fn final_path_of(file: &std::fs::File) -> io::Result<String> {
     use windows::Win32::Storage::FileSystem::{FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW};
     let handle = HANDLE(file.as_raw_handle());
     let mut buf = vec![0u16; 1024];
-    loop {
+    // The size is asked for at most twice (the second call has the size the first one reported); a path longer than the
+    // longest the system allows is refused.
+    for _ in 0..3 {
         // SAFETY: `handle` is open for the whole call and `buf` is a valid writable buffer.
         let n =
             unsafe { GetFinalPathNameByHandleW(handle, &mut buf, FILE_NAME_NORMALIZED) } as usize;
@@ -417,6 +571,350 @@ fn final_path_of(file: &std::fs::File) -> io::Result<String> {
         if n < buf.len() {
             return Ok(String::from_utf16_lossy(&buf[..n]));
         }
+        if n > 32_768 {
+            break;
+        }
         buf.resize(n + 1, 0);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "the final path is longer than Windows allows",
+    ))
+}
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn text(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_symlink_is_reported_as_a_link_and_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let link = dir.path().join("link");
+        symlink(&target, &link).unwrap();
+        let mut port = RealTrust;
+        assert_eq!(
+            port.node(&text(&link)).unwrap().unwrap().kind,
+            FileKind::Symlink
+        );
+        assert_eq!(
+            port.node(&text(&target)).unwrap().unwrap().kind,
+            FileKind::Dir
+        );
+        assert!(
+            port.node(&text(&dir.path().join("none")))
+                .unwrap()
+                .is_none()
+        );
+        // The rule refuses a chain through it.
+        let through = format!("{}/file", text(&link));
+        std::fs::write(target.join("file"), b"x").unwrap();
+        let e = super::super::trust::verify_chain(&mut port, &through, FileKind::File, None, false)
+            .unwrap_err();
+        assert!(
+            matches!(
+                e.reason,
+                super::super::trust::Reason::Link | super::super::trust::Reason::UntrustedOwner(_)
+            ),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn remove_tree_removes_links_and_never_what_they_point_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        let tree = dir.path().join("tree");
+        std::fs::create_dir_all(tree.join("sub")).unwrap();
+        std::fs::write(tree.join("sub/file"), b"x").unwrap();
+        symlink(&outside, tree.join("sub/link")).unwrap();
+        symlink(outside.join("keep.txt"), tree.join("filelink")).unwrap();
+        let mut port = RealTrust;
+        port.remove_tree(&text(&tree)).unwrap();
+        assert!(!tree.exists());
+        assert_eq!(std::fs::read(outside.join("keep.txt")).unwrap(), b"keep");
+        // A root that is itself a link goes as the link it is.
+        let root_link = dir.path().join("root-link");
+        symlink(&outside, &root_link).unwrap();
+        port.remove_tree(&text(&root_link)).unwrap();
+        assert!(std::fs::symlink_metadata(&root_link).is_err());
+        assert!(outside.join("keep.txt").exists());
+        port.remove_tree(&text(&dir.path().join("missing")))
+            .unwrap();
+    }
+
+    #[test]
+    fn walk_lists_links_without_entering_them_and_is_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(outside.join("deep")).unwrap();
+        let tree = dir.path().join("tree");
+        std::fs::create_dir_all(tree.join("a")).unwrap();
+        std::fs::write(tree.join("a/f"), b"x").unwrap();
+        symlink(&outside, tree.join("a/link")).unwrap();
+        let mut port = RealTrust;
+        let walked = port.walk(&text(&tree), 100).unwrap();
+        let names: Vec<String> = walked
+            .iter()
+            .map(|(p, _)| p.trim_start_matches(&text(&tree)).to_string())
+            .collect();
+        assert!(
+            names.contains(&"/a".to_string())
+                && names.contains(&"/a/f".to_string())
+                && names.contains(&"/a/link".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.contains("deep")),
+            "a link is not entered: {names:?}"
+        );
+        assert!(port.walk(&text(&tree), 1).is_err(), "bounded");
+    }
+
+    #[test]
+    fn create_dir_makes_one_level_exactly_0755_and_never_over_something() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let mut port = RealTrust;
+        let made = dir.path().join("made");
+        port.create_dir(&text(&made)).unwrap();
+        assert_eq!(
+            std::fs::metadata(&made).unwrap().permissions().mode() & 0o7777,
+            0o755
+        );
+        assert_eq!(
+            port.create_dir(&text(&made)).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert!(
+            port.create_dir(&text(&dir.path().join("a/b"))).is_err(),
+            "the parent must exist"
+        );
+        std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o777)).unwrap();
+        port.lock_dir(&text(&made)).unwrap();
+        assert_eq!(
+            std::fs::metadata(&made).unwrap().permissions().mode() & 0o7777,
+            0o755
+        );
+        let link = dir.path().join("link");
+        symlink(&made, &link).unwrap();
+        assert!(port.lock_dir(&text(&link)).is_err(), "a link is not locked");
+    }
+
+    #[test]
+    fn rename_aside_moves_the_entry_and_not_what_a_link_points_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let link = dir.path().join("Dyno");
+        symlink(&outside, &link).unwrap();
+        let mut port = RealTrust;
+        let aside = port.rename_aside(&text(&link)).unwrap();
+        assert!(std::fs::symlink_metadata(&link).is_err());
+        assert!(
+            std::fs::symlink_metadata(&aside)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(outside.exists());
+    }
+
+    #[test]
+    fn a_held_image_must_be_a_regular_file_owned_by_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("prog");
+        std::fs::write(&file, b"\x7fELFxxxx").unwrap();
+        // Owned by the user running the test, so not trusted (unless the test runs as root).
+        let r = HeldImage::open(&text(&file));
+        if unsafe { libc::getuid() } != 0 {
+            assert_eq!(r.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        }
+        assert!(
+            HeldImage::open(&text(dir.path())).is_err(),
+            "a folder is not a program"
+        );
+        assert!(HeldImage::open(&text(&dir.path().join("missing"))).is_err());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    //! Run on a Windows runner as an ordinary user (no administrator needed), and on the Windows test VM.
+    use super::super::trust::{Reason, verify_chain};
+    use super::*;
+    use std::process::Command;
+
+    fn text(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    fn icacls(args: &[&str]) {
+        let out = Command::new(super::super::windows_acl::system_tool("icacls"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "icacls {args:?}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+
+    #[test]
+    fn a_folder_a_user_made_under_a_user_writable_place_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let made = dir.path().join("Helper");
+        std::fs::create_dir(&made).unwrap();
+        let mut port = RealTrust;
+        let e = verify_chain(
+            &mut port,
+            &text(&made),
+            FileKind::Dir,
+            Some(&text(&made)),
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(e.reason, Reason::UntrustedOwner(_) | Reason::Grants { .. }),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn the_descriptor_read_back_after_icacls_has_the_sids_and_masks_that_were_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("locked");
+        std::fs::create_dir(&folder).unwrap();
+        let path = text(&folder);
+        icacls(&[
+            &path,
+            "/inheritance:r",
+            "/grant:r",
+            "*S-1-5-18:(OI)(CI)F",
+            "/grant:r",
+            "*S-1-5-32-544:(OI)(CI)F",
+            "/grant:r",
+            "*S-1-5-32-545:(OI)(CI)RX",
+        ]);
+        let node = RealTrust.node(&path).unwrap().unwrap();
+        assert_eq!(node.kind, FileKind::Dir);
+        let Security::Windows(d) = node.security else {
+            panic!("a Windows descriptor")
+        };
+        let aces = d.dacl.expect("a DACL");
+        let find = |sid: &str| {
+            aces.iter()
+                .find(|a| a.sid == sid)
+                .unwrap_or_else(|| panic!("{sid} in {aces:?}"))
+        };
+        assert_eq!(aces.len(), 3, "{aces:?}");
+        assert_eq!(find("S-1-5-18").mask, 0x001f_01ff);
+        assert_eq!(find("S-1-5-32-544").mask, 0x001f_01ff);
+        assert_eq!(find("S-1-5-32-545").mask, 0x0012_00a9);
+        assert!(aces.iter().all(|a| a.allow && !a.inherit_only));
+    }
+
+    #[test]
+    fn create_dir_gives_the_protected_descriptor_at_creation_and_never_over_something() {
+        let dir = tempfile::tempdir().unwrap();
+        let made = text(&dir.path().join("made"));
+        let mut port = RealTrust;
+        port.create_dir(&made).unwrap();
+        let Security::Windows(d) = port.node(&made).unwrap().unwrap().security else {
+            panic!()
+        };
+        let aces = d.dacl.unwrap();
+        let sids: Vec<&str> = aces.iter().map(|a| a.sid.as_str()).collect();
+        assert_eq!(sids.len(), 3, "{aces:?}");
+        for sid in ["S-1-5-18", "S-1-5-32-544", "S-1-5-32-545"] {
+            assert!(sids.contains(&sid), "{sids:?}");
+        }
+        assert_eq!(
+            port.create_dir(&made).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+    }
+
+    #[test]
+    fn a_junction_in_the_middle_of_a_path_is_a_link_and_the_held_final_path_differs() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("prog.exe"), b"MZ").unwrap();
+        let junction = dir.path().join("junction");
+        let out = Command::new("cmd")
+            .args(["/C", "mklink", "/J", &text(&junction), &text(&target)])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let mut port = RealTrust;
+        assert_eq!(
+            port.node(&text(&junction)).unwrap().unwrap().kind,
+            FileKind::Symlink
+        );
+        let through = format!("{}\\prog.exe", text(&junction));
+        let e = verify_chain(&mut port, &through, FileKind::File, None, false).unwrap_err();
+        assert_eq!(e.reason, Reason::Link, "{e}");
+        // Windows may refuse to traverse a junction made by an ordinary user at all ("untrusted mount point", 448); if it
+        // opens, the handle's final path is where the junction leads, which is not the requested path.
+        match HeldImage::open(&through) {
+            Ok(held) => {
+                assert!(
+                    super::super::trust::require_same_path(
+                        &through,
+                        held.final_path(),
+                        Style::Windows
+                    )
+                    .is_err(),
+                    "the handle's final path {} is not the requested {through}",
+                    held.final_path()
+                );
+                assert!(
+                    held.final_path()
+                        .to_lowercase()
+                        .ends_with("target\\prog.exe"),
+                    "{}",
+                    held.final_path()
+                );
+            }
+            Err(e) => assert!(matches!(e.raw_os_error(), Some(448 | 1920 | 4390)), "{e}"),
+        }
+        // Removing the tree removes the junction and not its target.
+        port.remove_tree(&text(&junction)).unwrap();
+        assert!(target.join("prog.exe").exists());
+    }
+
+    #[test]
+    fn a_held_image_cannot_be_written_renamed_or_deleted_but_can_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("prog.exe");
+        std::fs::write(&file, b"MZ").unwrap();
+        let held = HeldImage::open(&text(&file)).unwrap();
+        let sharing_violation =
+            |r: io::Result<()>| assert_eq!(r.unwrap_err().raw_os_error(), Some(32));
+        sharing_violation(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&file)
+                .map(drop),
+        );
+        sharing_violation(std::fs::remove_file(&file));
+        sharing_violation(std::fs::rename(&file, dir.path().join("moved.exe")));
+        assert_eq!(std::fs::read(&file).unwrap(), b"MZ");
+        drop(held);
+        std::fs::remove_file(&file).unwrap();
     }
 }
