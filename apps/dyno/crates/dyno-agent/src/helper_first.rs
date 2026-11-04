@@ -229,6 +229,15 @@ pub trait HelperPort: Send + Sync {
     fn epoch(&self) -> u64;
     /// The calls for a reading of `class`, or `None` when the agent is gone (shutting down).
     fn calls(&self, class: ReadClass) -> Option<Arc<dyn HelperCalls>>;
+    /// How many calls so far found the helper unreachable (not merely refusing): a reading whose call raised it earned a strike.
+    fn faults(&self) -> u64;
+    /// The clock the strikes are counted on.
+    fn now(&self) -> Duration;
+}
+
+/// How long something unreachable is left alone after its `strikes`th failure in a row: 5, 10, 20, 40 s, then [`BACKOFF_CAP`].
+fn backoff(strikes: u32) -> Duration {
+    READY_TTL.saturating_mul(1u32 << strikes.saturating_sub(1).min(10)).min(BACKOFF_CAP)
 }
 
 /// A port with no helper: never ready. Readings composed in a test agent that must not touch the machine use it (ER-14).
@@ -244,6 +253,12 @@ impl HelperPort for OffPort {
     fn calls(&self, _: ReadClass) -> Option<Arc<dyn HelperCalls>> {
         None
     }
+    fn faults(&self) -> u64 {
+        0
+    }
+    fn now(&self) -> Duration {
+        Duration::ZERO
+    }
 }
 
 /// A centre as a port.
@@ -258,6 +273,12 @@ impl<T: HelperTransport + 'static> HelperPort for CentrePort<T> {
     }
     fn calls(&self, class: ReadClass) -> Option<Arc<dyn HelperCalls>> {
         Some(Arc::new(Bounded::new(self.0.link_arc(), class)))
+    }
+    fn faults(&self) -> u64 {
+        self.0.link().faults()
+    }
+    fn now(&self) -> Duration {
+        self.0.link().clock().monotonic()
     }
 }
 
@@ -283,6 +304,12 @@ impl HelperPort for SharedPort {
     }
     fn calls(&self, class: ReadClass) -> Option<Arc<dyn HelperCalls>> {
         Some(Arc::new(Bounded::new(self.centre()?.link_arc(), class)))
+    }
+    fn faults(&self) -> u64 {
+        self.centre().map_or(0, |c| c.link().faults())
+    }
+    fn now(&self) -> Duration {
+        self.centre().map_or(Duration::ZERO, |c| c.link().clock().monotonic())
     }
 }
 
@@ -361,7 +388,7 @@ impl ReadyGate {
             0
         };
         let ttl = if answer.is_unreachable() {
-            READY_TTL.saturating_mul(1u32 << (state.strikes - 1).min(10)).min(BACKOFF_CAP)
+            backoff(state.strikes)
         } else {
             READY_TTL
         };
@@ -398,10 +425,9 @@ pub trait HelperReading: Send {
     type Value;
     /// A short name for the log (no user content).
     fn name(&self) -> &'static str;
-    /// How long the helper may take: [`ReadClass::Live`] (the default) or [`ReadClass::Bulk`].
-    fn class(&self) -> ReadClass {
-        ReadClass::Live
-    }
+    /// How long the helper may take: [`ReadClass::Live`] or [`ReadClass::Bulk`]. Every reading says, so none gets a 2 s deadline by
+    /// default (SMART takes as long as smartctl takes).
+    fn class(&self) -> ReadClass;
     /// Asks the helper, through a typed [`HelperCalls`] method. An answer that holds nothing useful is an `Err` with the reason,
     /// so the agent's own reader gets its turn (Smart: no disk with wear counters).
     ///
@@ -433,6 +459,10 @@ pub struct HelperFirst<R: HelperReading> {
     fallback: bool,
     /// What the last read came to, so a repeat is logged at debug and a change at warn (one line per change, not per tick).
     last_outcome: Option<String>,
+    /// Calls of this reading that found the helper unreachable in a row, and until when it is left alone: one slow kind must not
+    /// cost every read a deadline while the rest of the helper answers.
+    strikes: u32,
+    quiet_until: Option<Duration>,
 }
 
 impl<R: HelperReading> HelperFirst<R> {
@@ -443,6 +473,8 @@ impl<R: HelperReading> HelperFirst<R> {
             port,
             fallback: true,
             last_outcome: None,
+            strikes: 0,
+            quiet_until: None,
         }
     }
 
@@ -502,8 +534,20 @@ impl<R: HelperReading> HelperFirst<R> {
             self.note("read on this computer, the helper cannot be reached", true, started);
             return out;
         };
+        if self.quiet_until.is_some_and(|until| self.port.now() < until) {
+            let out = self.without_helper(&Availability::Silent("The helper did not answer this reading in time.".into()));
+            self.note(
+                "read on this computer, the helper is being left alone for this reading",
+                true,
+                started,
+            );
+            return out;
+        }
+        let faults = self.port.faults();
         match self.reading.via_helper(&*calls) {
             Ok(v) => {
+                self.strikes = 0;
+                self.quiet_until = None;
                 self.note("the helper answered", false, started);
                 Sourced {
                     value: Reading::Available(v),
@@ -511,6 +555,11 @@ impl<R: HelperReading> HelperFirst<R> {
                 }
             }
             Err(e) => {
+                if self.port.faults() > faults {
+                    // The call found the helper unreachable (a refusal would not have): this reading waits before asking again.
+                    self.strikes = self.strikes.saturating_add(1);
+                    self.quiet_until = Some(self.port.now() + backoff(self.strikes));
+                }
                 let out = self.after_helper_error(&e.to_string());
                 self.note(&format!("the helper could not read it: {e}"), true, started);
                 out
@@ -637,6 +686,10 @@ pub(crate) mod testkit {
                 clock: Mutex::new(None),
                 info_times: Mutex::new(Vec::new()),
             })
+        }
+        /// How many scripted answers have not been asked for yet.
+        pub(crate) fn scripted_left(&self) -> usize {
+            self.script.lock().unwrap().len()
         }
         pub(crate) fn set(&self, mode: Mode) {
             *self.mode.lock().unwrap() = mode;
@@ -945,6 +998,9 @@ mod tests {
         fn name(&self) -> &'static str {
             "memory modules"
         }
+        fn class(&self) -> ReadClass {
+            ReadClass::Live
+        }
         fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, PlatformError> {
             calls.memory()
         }
@@ -1148,6 +1204,12 @@ mod tests {
         fn epoch(&self) -> u64 {
             0
         }
+        fn faults(&self) -> u64 {
+            0
+        }
+        fn now(&self) -> Duration {
+            Duration::ZERO
+        }
         fn calls(&self, _: ReadClass) -> Option<Arc<dyn HelperCalls>> {
             None
         }
@@ -1173,5 +1235,55 @@ mod tests {
         clock.advance(S(5));
         assert!(c.ready());
         assert_eq!(net.infos.load(Ordering::SeqCst), 2, "5 s on that clock expired the answer");
+    }
+
+    fn silent() -> Result<HelperReply, TransportError> {
+        Err(TransportError::Silent("no answer".into()))
+    }
+    fn memory_answer() -> Result<HelperReply, TransportError> {
+        Ok(HelperReply::Memory(total_only(8, "h")))
+    }
+
+    #[test]
+    fn a_reading_that_times_out_is_left_alone_for_a_growing_time_while_the_helper_stays_ready() {
+        // The probe answers every time; only this reading's call hangs: it earns its own strike (5, 10 s ...), and meanwhile the
+        // local value is read without waiting for the helper again.
+        let (net, clock) = (Net::new(true, vec![silent(), silent(), memory_answer()]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let (r, local_calls) = mem(Reading::Available(total_only(4, "local")), false);
+        let mut f = HelperFirst::new(r, port(&c));
+        assert_eq!(f.read().via, ReadVia::Local, "the call hung: the local value");
+        assert_eq!(net.scripted_left(), 2);
+        clock.advance(S(1));
+        assert_eq!(f.read().via, ReadVia::Local);
+        assert_eq!(
+            net.scripted_left(),
+            2,
+            "no call to the helper for this reading during the first 5 s"
+        );
+        clock.advance(S(5));
+        assert_eq!(f.read().via, ReadVia::Local, "asked again after 5 s; it hung again (second strike)");
+        assert_eq!(net.scripted_left(), 1);
+        clock.advance(S(6));
+        assert_eq!(f.read().via, ReadVia::Local, "the second strike keeps it quiet for 10 s, not 5");
+        assert_eq!(net.scripted_left(), 1);
+        clock.advance(S(5));
+        assert_eq!(f.read().via, ReadVia::Helper, "and a working call ends the strikes");
+        assert_eq!(local_calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn a_refusal_is_not_a_strike() {
+        let (net, clock) = (Net::new(true, vec![refused(), memory_answer()]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let (r, _) = mem(Reading::Available(total_only(4, "local")), false);
+        let mut f = HelperFirst::new(r, port(&c));
+        assert_eq!(f.read().via, ReadVia::Local);
+        clock.advance(S(1));
+        assert_eq!(
+            f.read().via,
+            ReadVia::Helper,
+            "the helper answered a refusal, so it is asked again at once"
+        );
     }
 }

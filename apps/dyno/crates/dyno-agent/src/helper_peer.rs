@@ -8,7 +8,8 @@ use crate::helper_link::{HelperTransport, TransportError};
 use dyno_core::helper_wire::{HelperMessage, HelperReply, HelperRequest};
 use dyno_helper_service::client::{connect, ConnectError};
 use paddock_ipc::{BodyPeer, IpcError};
-use std::sync::Mutex;
+use paddock_jobs::time::{Clock, SystemClock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How long an ordinary request may take before the agent stops waiting for the helper (the helper's own tool timeouts are
@@ -26,6 +27,8 @@ pub struct PeerTransport {
     open: Opener,
     /// The connection kept for the next call. A call takes it, so two calls at once use two connections.
     kept: Mutex<Option<BodyPeer<HelperMessage>>>,
+    /// Times a live deadline across the connect and the retry.
+    clock: Arc<dyn Clock>,
 }
 
 impl PeerTransport {
@@ -37,13 +40,30 @@ impl PeerTransport {
             installed: Box::new(installed),
             open: Box::new(connect),
             kept: Mutex::new(None),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// The same transport timing its deadlines on `clock` (tests).
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// [`PeerTransport::new`] over another way to open the connection (tests).
     pub fn with_opener(mut self, open: Opener) -> Self {
         self.open = open;
         self
+    }
+}
+
+/// How long one call may wait: the kind's own wait, shortened to `max` for a live reading, except that a slow kind (SMART, an
+/// install) ignores a live deadline: it takes as long as the tool takes.
+fn effective_wait(request: &HelperRequest, max: Option<Duration>) -> Duration {
+    let own = wait_for(request);
+    match max {
+        Some(m) if own < SLOW => m.min(own),
+        _ => own,
     }
 }
 
@@ -88,9 +108,15 @@ impl HelperTransport for PeerTransport {
     }
 
     fn call_within(&self, request: HelperRequest, max: Option<Duration>) -> Result<HelperReply, TransportError> {
-        let wait = max.map_or_else(|| wait_for(&request), |m| m.min(wait_for(&request)));
+        // One total for the whole call: the connect and the retry on a stale connection spend it too.
+        let began = self.clock.monotonic();
         let mut reused = true;
         loop {
+            let left = || max.map(|m| m.saturating_sub(self.clock.monotonic().saturating_sub(began)));
+            let spent = || TransportError::Silent("the deadline passed before the helper could be asked".into());
+            if left() == Some(Duration::ZERO) {
+                return Err(spent());
+            }
             let peer = match self.take() {
                 Some(p) => p,
                 None => {
@@ -98,6 +124,12 @@ impl HelperTransport for PeerTransport {
                     self.connect()?
                 }
             };
+            // The connect may have taken the whole deadline.
+            if left() == Some(Duration::ZERO) {
+                self.keep(peer);
+                return Err(spent());
+            }
+            let wait = effective_wait(&request, left());
             let answer = peer.call(HelperMessage::Request(request.clone()), wait);
             match answer {
                 Ok(HelperMessage::Reply(r)) => {
@@ -247,6 +279,58 @@ mod tests {
         t.kept.lock().unwrap().as_ref().expect("kept").close();
         assert_eq!(t.call(HelperRequest::Info), Ok(HelperReply::Bye));
         assert_eq!(opens.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn slow_kinds_ignore_a_live_deadline_and_quick_ones_obey_it() {
+        let live = Some(Duration::from_secs(2));
+        assert_eq!(effective_wait(&HelperRequest::Smart(SmartQuery::default()), live), SLOW);
+        assert_eq!(effective_wait(&HelperRequest::Info, live), Duration::from_secs(2));
+        assert_eq!(effective_wait(&HelperRequest::Info, None), QUICK);
+        assert_eq!(
+            effective_wait(&HelperRequest::Info, Some(Duration::from_secs(90))),
+            QUICK,
+            "a deadline never lengthens a wait"
+        );
+    }
+
+    #[test]
+    fn the_deadline_is_one_total_that_the_connect_uses_up_first() {
+        use paddock_jobs::time::FakeClock;
+        let clock = FakeClock::new();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let (spent, counted) = (clock.clone(), seen.clone());
+        let t = PeerTransport::new("x", || true)
+            .with_clock(Arc::new(clock))
+            .with_opener(Box::new(move |_| {
+                // A slow connect: it takes longer than the whole deadline.
+                spent.advance(Duration::from_secs(3));
+                let (ours, theirs) = pair().expect("a stream pair");
+                struct Count(Arc<AtomicUsize>);
+                impl BodyHandler<HelperMessage> for Count {
+                    fn handle(&self, _: HelperMessage) -> Result<HelperMessage, RemoteError> {
+                        self.0.fetch_add(1, Ordering::SeqCst);
+                        Ok(HelperMessage::Reply(HelperReply::Bye))
+                    }
+                }
+                let server = BodyPeer::<HelperMessage>::start(
+                    Connection::raw(theirs, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)),
+                    BodyOptions::new("test helper").serve(Count(counted.clone())),
+                )
+                .expect("the test server starts");
+                std::mem::forget(server);
+                BodyPeer::start(
+                    Connection::raw(ours, FrameLimit::new(dyno_core::helper_wire::MAX_FRAME)),
+                    BodyOptions::new("the helper"),
+                )
+                .map_err(ConnectError::Peer)
+            }));
+        let out = t.call_within(HelperRequest::Info, Some(Duration::from_secs(2)));
+        assert!(
+            matches!(out, Err(TransportError::Silent(ref why)) if why.contains("deadline")),
+            "{out:?}"
+        );
+        assert_eq!(seen.load(Ordering::SeqCst), 0, "nothing was sent once the time was spent");
     }
 
     #[test]

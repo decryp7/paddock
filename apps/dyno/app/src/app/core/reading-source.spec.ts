@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { SETTINGS_DIALOG_ID } from '@decryp7/paddock-ui/shell/settings';
 import type { ReadVia } from './api.types';
-import { HELPER_CHIP, ReadingSource, TURN_ON_LABEL, UPDATE_LABEL, sourceView } from './reading-source';
+import { HELPER_CHIP, OPEN_SETTINGS_LABEL, ReadingSource, RETRY_LABEL, TURN_ON_LABEL, UPDATE_LABEL, sourceView } from './reading-source';
 
 const NEEDS: ReadVia = { needsHelper: { reason: "Other accounts' processes are not readable.", next: { openSettings: 'helper' } } };
 
@@ -12,8 +12,10 @@ function render(via: ReadVia | undefined, hint = '') {
   const f = TestBed.createComponent(ReadingSource);
   f.componentRef.setInput('via', via);
   f.componentRef.setInput('hint', hint);
+  const retried = vi.fn();
+  f.componentInstance.retry.subscribe(retried);
   f.detectChanges();
-  return { el: f.nativeElement as HTMLElement, open };
+  return { el: f.nativeElement as HTMLElement, open, retried };
 }
 const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`);
 
@@ -32,7 +34,10 @@ describe('sourceView', () => {
     expect(sourceView({ needsHelper: { reason: 'x', next: 'retry' } })).toMatchObject({ kind: 'needsHelper', step: null });
     expect(sourceView({ needsHelper: { reason: 'x', next: { openSettings: 'general' } } })).toMatchObject({ step: null });
     expect(sourceView({ needsHelper: { reason: 'x', next: 'updateHelper' } })).toMatchObject({ step: 'update' });
-    expect(sourceView({ unavailable: { reason: 'No sensors.', next: null } })).toEqual({ kind: 'unavailable', reason: 'No sensors.' });
+    expect(sourceView({ unavailable: { reason: 'No sensors.', next: null } })).toEqual({ kind: 'unavailable', reason: 'No sensors.', step: null });
+    expect(sourceView({ unavailable: { reason: 'x', next: 'retry' } })).toMatchObject({ step: 'retry' });
+    expect(sourceView({ unavailable: { reason: 'x', next: { openSettings: 'helper' } } })).toMatchObject({ step: 'settings' });
+    expect(sourceView({ unavailable: { reason: 'x', next: 'showLog' } })).toMatchObject({ step: null });
   });
 });
 
@@ -62,6 +67,23 @@ describe('dy-reading-source', () => {
     expect(button.textContent?.trim()).toBe(UPDATE_LABEL);
     button.click();
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Settings when the helper needs repairing, as the next step says', () => {
+    const { el, open } = render({ unavailable: { reason: 'Another program answers where the helper should be.', next: { openSettings: 'helper' } } });
+    const button = q(el, 'reading-source-step') as HTMLButtonElement;
+    expect(button.textContent?.trim()).toBe(OPEN_SETTINGS_LABEL);
+    button.click();
+    expect(open).toHaveBeenCalledWith(SETTINGS_DIALOG_ID, { inputs: { page: 'dy.general', anchor: { id: 'helper', at: expect.any(Number) } } });
+  });
+
+  it('offers Try again when the helper did not answer, and tells the page to read again', () => {
+    const { el, open, retried } = render({ unavailable: { reason: 'The helper did not answer.', next: 'retry' } });
+    const button = q(el, 'reading-source-step') as HTMLButtonElement;
+    expect(button.textContent?.trim()).toBe(RETRY_LABEL);
+    button.click();
+    expect(retried).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('shows only the reason, no button, when neither path can read it', () => {

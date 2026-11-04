@@ -1,7 +1,7 @@
 //! Memory modules (Linux): the slot table is root-only, so the helper reads it (`MemoryModules`); without the helper Dyno knows
 //! the total and says why. The second instance of the seam, and the smallest (helper-wiring plan section 8.3).
 
-use crate::helper_first::{HelperCalls, HelperReading};
+use crate::helper_first::{HelperCalls, HelperReading, ReadClass};
 use dyno_core::helper::HelperHost;
 use dyno_core::inventory::{MemoryLayout, Unavailable};
 use dyno_core::metrics::Reading;
@@ -34,6 +34,10 @@ impl HelperReading for MemoryModules {
 
     fn name(&self) -> &'static str {
         "memory modules"
+    }
+
+    fn class(&self) -> ReadClass {
+        ReadClass::Live
     }
 
     fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, PlatformError> {
