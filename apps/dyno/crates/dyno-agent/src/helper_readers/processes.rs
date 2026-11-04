@@ -327,7 +327,9 @@ pub fn merge(mut local: Vec<ProcessSample>, sweep: &SweepView) -> Vec<ProcessSam
         if l.parent.is_none() {
             l.parent = h.parent;
         }
-        if l.owner != Owner::Own {
+        // The helper may place a row local could not (Unknown). It never relabels one local placed: a stale entry at a reused pid
+        // must not turn another account's process into the system's or the caller's (that would bypass the Total/Hidden scope).
+        if l.owner == Owner::Unknown {
             l.owner = h.owner;
         }
     }
@@ -695,6 +697,32 @@ mod tests {
         assert_eq!(table.iter().filter(|p| p.pid == 7).count(), 1);
         let p = table.iter().find(|p| p.pid == 7).unwrap();
         assert_eq!((p.memory, p.user_name()), (Measured::Value(10 << 20), Some("sam")));
+    }
+
+    #[test]
+    fn the_helper_never_relabels_a_local_other_row_as_system_or_own() {
+        // A stale helper entry at the same pid and start time says System; local placed the row as another account's.
+        let (mut w, store, _) = worker(
+            true,
+            vec![Ok(page(vec![entry(7, OwnerKind::System, Some("SYSTEM"), 10)], None, None))],
+        );
+        w.sweep_once();
+        let table = HelperFirstProcesses::new(Box::new(Local(local_table())), store).processes();
+        let p = table.iter().find(|p| p.pid == 7).unwrap();
+        assert_eq!(p.owner, Owner::Other, "kept as local placed it");
+        let (listed, other) = ProcessProvenance::default().split(&table, true);
+        assert!(listed.iter().all(|p| p.pid != 7), "still folded into Other users");
+        assert_eq!(other.map(|o| o.count), Some(1));
+        // A row local could not place takes the helper's owner.
+        let mut unknown = local_table();
+        unknown[1].owner = Owner::Unknown;
+        let (mut w, store, _) = worker(
+            true,
+            vec![Ok(page(vec![entry(7, OwnerKind::System, Some("SYSTEM"), 10)], None, None))],
+        );
+        w.sweep_once();
+        let table = HelperFirstProcesses::new(Box::new(Local(unknown)), store).processes();
+        assert_eq!(table.iter().find(|p| p.pid == 7).unwrap().owner, Owner::System);
     }
 
     #[test]

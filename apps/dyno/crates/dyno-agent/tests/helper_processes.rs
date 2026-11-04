@@ -55,7 +55,12 @@ fn machine() -> Vec<RawProcess> {
         id: owner(),
         name: Some("me".into()),
     };
-    vec![raw(1, RawOwner::System, 10), raw(2, me, 10), raw(3, sam, 1_000)]
+    vec![
+        raw(1, RawOwner::System, 10),
+        raw(2, me, 10),
+        raw(3, sam, 1_000),
+        raw(4, RawOwner::Unknown, 10),
+    ]
 }
 
 fn run(
@@ -120,8 +125,24 @@ fn another_standard_user_gets_a_total_and_no_names() {
     );
     let prov = src.provenance();
     let o = prov.others_total.expect("the helper's total");
-    // The caller is its own account (uid 503): the owner's process (2) and sam's (3) are both another account's, the system's (1) is listed.
-    assert_eq!((o.count, prov.others), (2, ReadVia::Helper));
+    // The owner's, sam's and the one with no known owner are all another account's to this caller: counted, never listed.
+    assert_eq!((o.count, prov.others), (3, ReadVia::Helper));
+}
+
+#[test]
+fn a_process_with_no_known_owner_is_another_accounts_never_the_systems() {
+    // The agent's path uses the helper's one owner rule (`see()`, rule 55) and has no second one.
+    let (_, _, owner_sees) = run(Caller::Owner);
+    let p = owner_sees
+        .iter()
+        .find(|p| p.pid == 4)
+        .expect("the owner sees it, as another account's");
+    assert_eq!(p.owner, Owner::Other);
+    let (_, _, other_sees) = run(Caller::Other);
+    assert!(
+        other_sees.iter().all(|p| p.pid != 4),
+        "a standard account does not see it by name or pid"
+    );
 }
 
 /// Rule 48: what one real sweep and its pages cost on this machine. A measurement, not a test (it reads this computer's own process
