@@ -38,6 +38,8 @@ import {
   resultTitle,
   spreadText,
   statusNote,
+  pastNote,
+  featuredRun,
   verdictWord,
   type BenchPreset,
   type PickedPlan,
@@ -210,6 +212,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 <span class="spacer"></span>
                 <span class="sub">{{ day(run.startedAt) }}</span>
               </div>
+              @if (store.busy()) { <p class="load" role="status">This is your previous run; the new one is still measuring.</p> }
               @if (oldWay(run); as note) { <p class="load"><span class="badge">Old method</span> {{ note }}</p> }
               <p class="load" aria-label="Machine load when the run started">
                 Machine at the start: <span class="num">{{ pct(run.load.cpuPercent) }}</span> CPU, <span class="num">{{ pct(run.load.memoryPercent) }}</span> memory{{ run.load.onBattery === true ? ', on battery' : run.load.onBattery === false ? ', on mains power' : '' }}
@@ -245,7 +248,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                         @if (r.trace?.length) { <dy-sustained-chart [trace]="r.trace!" /> }
                         <span class="took">Took {{ took(r) }}</span>
                       } @else {
-                        <p class="why" role="status" [attr.data-kind]="kindOf(r.status)"><dy-icon [name]="icon(r.status)" /> <span><strong>{{ word2(r.status) }}</strong> {{ note(r.status) }} {{ next(r.status) }}</span></p>
+                        <p class="why" role="status" [attr.data-kind]="kindOf(r.status)"><dy-icon [name]="icon(r.status)" /> <span><strong>{{ word2(r.status) }}</strong> {{ past(r.status, day(run.startedAt)) }} {{ next(r.status) }}</span></p>
                         @if (r.status.state === 'failed') { <button type="button" matButton="outlined" (click)="store.retryKind(r.kind)"><dy-icon name="refresh" /> Retry</button> }
                         @if (r.trace?.length) { <dy-sustained-chart [trace]="r.trace!" /> <p class="note">The points measured before it stopped are kept.</p> }
                         @if (r.needsFolder && r.device) {
@@ -441,7 +444,13 @@ export class BenchPage implements OnInit, OnDestroy {
   /** Whether "compared with your last run" is shown: the engine found something comparable and neither run is from 1.0. */
   protected readonly showCompared = computed(() => comparable(this.latest(), this.previous(), this.store.lastComparison()?.deltas.length ?? 0));
   /** The run before the latest one, for "compared with your last run". */
-  protected readonly previous = computed(() => this.store.overview()?.runs[1] ?? null);
+  protected readonly previous = computed(() => this.runsAfterLatest()[0] ?? null);
+  /** The runs older than the featured one. */
+  private readonly runsAfterLatest = computed(() => {
+    const runs = this.store.overview()?.runs ?? [];
+    const at = runs.findIndex((x) => x.id === this.latest()?.id);
+    return at < 0 ? [] : runs.slice(at + 1);
+  });
   protected readonly label = signal('');
   protected readonly change = signal('');
   protected readonly picked = signal<string[]>([]);
@@ -450,6 +459,7 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly day = formatDayTime;
   protected readonly note = statusNote;
+  protected readonly past = pastNote;
   protected readonly spread = (m: BenchMetric): string => spreadText(m, formatMetric);
   protected readonly oldWay = methodNote;
   protected readonly phaseWhere = phaseText;
@@ -474,9 +484,9 @@ export class BenchPage implements OnInit, OnDestroy {
     { key: 'actions', header: 'Actions', value: () => '', headerHidden: true, sortable: false, width: '44px' },
   ];
   protected readonly word = (d: MetricDelta) => verdictWord(d.verdict);
-  protected readonly latest = computed(() => this.store.overview()?.runs[0] ?? null);
+  protected readonly latest = computed(() => featuredRun(this.store.overview()?.runs ?? []));
   /** The best value of each metric over the runs before the latest one. */
-  protected readonly others = computed(() => bestValues((this.store.overview()?.runs ?? []).slice(1)));
+  protected readonly others = computed(() => bestValues(this.runsAfterLatest()));
   protected readonly icons: Record<BenchKind, 'cpu' | 'memory' | 'disk' | 'gpu'> = { cpu: 'cpu', memory: 'memory', disk: 'disk', gpu: 'gpu' };
   protected readonly hasBefore = computed(() => {
     const g = this.change().trim();
@@ -563,7 +573,7 @@ export class BenchPage implements OnInit, OnDestroy {
       case 'cancelled':
         return 'Cancelled.';
       default:
-        return 'Not available.';
+        return 'Not measured.';
     }
   }
 

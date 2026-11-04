@@ -43,6 +43,24 @@ export function statusNote(s: BenchStatus): string {
   }
 }
 
+/**
+ * A stored run's failure is a fact about that run, never a current error: worded in the past with the run's date.
+ * (The engine decides what the reason says; whether the runner exists now is not this run's business.) '' when done.
+ */
+export function pastNote(s: BenchStatus, day: string): string {
+  switch (s.state) {
+    case 'unavailable':
+      return `This run on ${day} could not measure: ${s.reason.charAt(0).toLowerCase()}${s.reason.slice(1)}`;
+    default:
+      return statusNote(s);
+  }
+}
+
+/** The run the result card features: the newest that measured something, so an empty run does not hide a real result. */
+export function featuredRun(runs: readonly BenchRun[]): BenchRun | null {
+  return runs.find((r) => r.results.some((x) => x.status.state === 'done')) ?? runs[0] ?? null;
+}
+
 /** The best value of each metric over all runs (the longest bar), so bars are comparable between runs. For latency the best is the smallest. */
 export function bestValues(runs: BenchRun[]): Map<string, number> {
   const best = new Map<string, number>();

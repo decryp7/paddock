@@ -31,6 +31,8 @@ import {
   presetKinds,
   spreadText,
   statusNote,
+  pastNote,
+  featuredRun,
   sweepPoints,
   traceReadout,
   verdictWord,
@@ -56,6 +58,23 @@ describe('bench model', () => {
     expect(spreadText({ ...metric('x', 100), samples: [98, 100, 102], min: 98, max: 102 }, fmt)).toBe('98 to 102');
     expect(spreadText(metric('x', 100), fmt)).toBe('');
     expect(spreadText({ ...metric('x', 100), samples: [1, 2], min: NaN, max: 2 }, fmt)).toBe('');
+  });
+
+  it('words a stored failure in the past, with its date, and never as a current error', () => {
+    const unavailable = { state: 'unavailable', reason: 'The benchmark runner was missing from the Dyno 1.0 installation.' } as const;
+    const text = pastNote(unavailable, 'Mon 08:25');
+    expect(text).toBe('This run on Mon 08:25 could not measure: the benchmark runner was missing from the Dyno 1.0 installation.');
+    expect(text).not.toMatch(/reinstall/i);
+    expect(pastNote({ state: 'done', metrics: [] }, 'Mon 08:25')).toBe('');
+    expect(pastNote({ state: 'failed', reason: 'z' }, 'Mon 08:25')).toBe('z');
+  });
+
+  it('features the newest run that measured something, else the newest run', () => {
+    const empty = mockRun('n', 3, 'n', 1, { results: [{ kind: 'cpu', status: { state: 'unavailable', reason: 'x' }, millis: 0, method: 1, trace: [], details: [], needsFolder: false, device: null }] });
+    const good = mockRun('g', 2, 'g', 1);
+    expect(featuredRun([empty, good])?.id).toBe('g');
+    expect(featuredRun([empty])?.id).toBe('n');
+    expect(featuredRun([])).toBeNull();
   });
 
   it('marks a run measured the old way and no other', () => {
