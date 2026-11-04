@@ -242,8 +242,9 @@ impl Sampler {
             processes: Some(listed),
             groups: Some(listed_groups),
             other_users,
-            // The temperatures are WP-CNT's; the process list and the "Other users" total say who read them.
+            // The temperatures are WP-CNT's; the process list and the "Other users" total say who read them (WP-PROC).
             via: dyno_core::read_via::LiveVia {
+                temperatures: shared.climate.live_via(),
                 processes: self.provenance.processes.clone(),
                 others: self.provenance.others.clone(),
                 ..Default::default()

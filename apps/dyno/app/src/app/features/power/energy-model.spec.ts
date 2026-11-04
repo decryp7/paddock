@@ -1,7 +1,7 @@
 import type { EnergyDay, EnergyReport } from '../../core/api.types';
-import { chartBars, co2Text, inputsLine, costText, hasData, kwhText, secsText, sourceText, unknownPercent } from './energy-model';
+import { chartBars, co2Text, cpuEnergyText, inputsLine, costText, hasData, kwhText, secsText, sourceText, unknownPercent } from './energy-model';
 
-const day = (p: Partial<EnergyDay> = {}): EnergyDay => ({ dayStart: 0, onSecs: 0, sleepSecs: 0, unknownSecs: 0, kwh: null, cost: null, co2Kg: null, ...p });
+const day = (p: Partial<EnergyDay> = {}): EnergyDay => ({ dayStart: 0, onSecs: 0, sleepSecs: 0, unknownSecs: 0, kwh: null, cost: null, co2Kg: null, cpuKwh: null, ...p });
 const report = (p: Partial<EnergyReport> = {}): EnergyReport => ({
   enabled: true,
   days: [],
@@ -10,6 +10,7 @@ const report = (p: Partial<EnergyReport> = {}): EnergyReport => ({
   sleepEnergyCounted: true,
   currency: null,
   trackingSince: 1,
+  cpuVia: 'local',
   ...p,
 });
 
@@ -77,5 +78,11 @@ describe('the energy model', () => {
     const over = chartBars([d(0, 30, 10)], plot, () => '');
     expect(over.bars[0]!.onH).toBe(240);
   });
-});
 
+  it('says the CPU energy beside the estimate only when the helper measured some', () => {
+    expect(cpuEnergyText(report())).toBeNull();
+    const text = cpuEnergyText(report({ totals: day({ cpuKwh: 1.256 }), cpuVia: 'helper' }));
+    expect(text).toContain('1.26 kWh');
+    expect(text).toContain('not the whole computer');
+  });
+});

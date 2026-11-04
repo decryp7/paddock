@@ -3,10 +3,11 @@ import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MatButton } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { AsyncState } from '../../shared/async-state';
+import { ReadingSource } from '../../core/reading-source';
 import { Icon } from '../../shared/icon';
 import { EnergyStore } from '../../state/energy.store';
 import { SettingsStore } from '../../state/settings.store';
-import { ENERGY_RANGES, chartBars, co2Text, costText, hasData, inputsLine, kwhText, secsText, sourceText, unknownPercent } from './energy-model';
+import { ENERGY_RANGES, chartBars, co2Text, cpuEnergyText, costText, hasData, inputsLine, kwhText, secsText, sourceText, unknownPercent } from './energy-model';
 
 /**
  * The energy report: how long the computer was on, asleep, or not seen by Dyno, and what that comes to from the person's own
@@ -15,7 +16,7 @@ import { ENERGY_RANGES, chartBars, co2Text, costText, hasData, inputsLine, kwhTe
  */
 @Component({
   selector: 'dy-energy-tab',
-  imports: [AsyncState, Icon, MatButton, MatButtonToggleModule],
+  imports: [AsyncState, Icon, MatButton, MatButtonToggleModule, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!store.report()" [error]="store.error()" what="the energy report" [rows]="3" (retry)="store.load()">
@@ -46,6 +47,11 @@ import { ENERGY_RANGES, chartBars, co2Text, costText, hasData, inputsLine, kwhTe
           @if (inputs(); as line) {
             <p class="inputs">{{ line }} · <button type="button" class="link" (click)="openSettings()">Edit in Settings</button></p>
           }
+
+          @if (cpuLine(); as line) {
+            <p class="inputs" data-testid="cpu-energy">{{ line }}</p>
+          }
+          <dy-reading-source [via]="r.cpuVia" data-testid="cpu-energy-source" />
 
           <figure class="chart">
             <svg viewBox="0 0 640 230" role="img" [attr.aria-label]="chartLabel()">
@@ -81,7 +87,7 @@ import { ENERGY_RANGES, chartBars, co2Text, costText, hasData, inputsLine, kwhTe
               }
             </tbody>
           </table>
-          <p class="foot">Dyno never claims savings: these are your watts times the time it saw. CPU-only energy and measured readings arrive with the helper.</p>
+          <p class="foot">Dyno never claims savings: these are your watts times the time it saw. On a Mac, the helper adds the CPU's own energy (and fan speeds on Intel Macs) beside the estimate.</p>
         }
       }
     </dy-async>
@@ -121,6 +127,7 @@ export class EnergyTab implements OnInit {
   protected readonly store = inject(EnergyStore);
   protected readonly ranges = ENERGY_RANGES;
   protected readonly source = computed(() => (this.store.report() ? sourceText(this.store.report()!) : ''));
+  protected readonly cpuLine = computed(() => (this.store.report() ? cpuEnergyText(this.store.report()!) : null));
   protected readonly has = computed(() => (this.store.report() ? hasData(this.store.report()!) : false));
   protected readonly kwh = kwhText;
   protected readonly co2 = co2Text;

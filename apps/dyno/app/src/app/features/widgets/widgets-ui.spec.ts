@@ -44,6 +44,20 @@ function env() {
 const rd = (value: number | null, tone: MetricReading['tone'] = 'ok', extra: Partial<MetricReading> = {}): MetricReading => ({ value, text: value === null ? '—' : String(value), unit: '%', percent: value, tone, reason: null, ...extra });
 
 describe('dy-widget', () => {
+  it('names who read the temperature: the helper, or the reason nobody could on this Mac', () => {
+    const mock = env();
+    const update = mock.liveUpdate('summary');
+    TestBed.inject(LiveStore).receive({ ...update, via: { ...update.via, temperatures: 'helper' } });
+    const el = body('bigNumber', given('bigNumber', 'temperature', rd(61))).nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="reading-source-helper"]')).not.toBeNull();
+    const why = 'macOS reports a thermal pressure level, not temperatures, to software.';
+    TestBed.inject(LiveStore).receive({ ...update, via: { ...update.via, temperatures: { unavailable: { reason: why, next: null } } } });
+    const g = body('bigNumber', given('bigNumber', 'temperature', rd(null, 'ok', { reason: why }))).nativeElement as HTMLElement;
+    expect(g.querySelector('[data-testid="reading-source-unavailable"]')?.textContent).toContain('thermal pressure');
+    const other = body('bigNumber', given('bigNumber', 'cpuTotal', rd(5))).nativeElement as HTMLElement;
+    expect(other.querySelector('dy-reading-source')).toBeNull();
+  });
+
   it('colours a big number by the engine tone only, with the number still printed', () => {
     env();
     const f = body('bigNumber', given('bigNumber', 'cpuTotal', rd(95, 'bad')));

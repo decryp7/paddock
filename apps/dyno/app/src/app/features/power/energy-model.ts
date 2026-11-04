@@ -42,6 +42,13 @@ export function sourceText(r: EnergyReport): string {
   return r.sleepEnergyCounted ? 'Estimated from your numbers (watts when on and asleep).' : 'Estimated from your numbers; time asleep counts as 0 W until you enter its watts.';
 }
 
+/** What the CPU energy line says, or null when this computer is not asked for it (an engine that did not try says `local`). */
+export function cpuEnergyText(r: EnergyReport): string | null {
+  const kwh = r.totals.cpuKwh;
+  if (kwh === null) return null;
+  return `CPU energy measured by the helper: ${kwhText(kwh)}. This is the processor alone, not the whole computer, so it sits beside the estimate.`;
+}
+
 /** Whether the report has anything to show: Dyno has noted at least one event in the range. */
 export function hasData(r: EnergyReport): boolean {
   return r.trackingSince !== null && r.totals.onSecs + r.totals.sleepSecs > 0;

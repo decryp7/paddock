@@ -289,13 +289,12 @@ impl PowerCentre {
             .store
             .power_events(since)
             .map_err(|e| format!("Dyno could not read its power log: {e}"))?;
-        Ok(dyno_core::power::energy::report(
-            &entries,
-            days,
-            at,
-            core.zone.as_ref(),
-            &core.settings.power.energy,
-        ))
+        // The CPU energy the helper measured goes beside the estimate, never in its place (plan section 2.7).
+        let (cpu_joules, cpu_via) = shared.climate.cpu_energy();
+        Ok(
+            dyno_core::power::energy::report(&entries, days, at, core.zone.as_ref(), &core.settings.power.energy)
+                .with_cpu_energy(&cpu_joules, cpu_via),
+        )
     }
 
     /// Releases the hold and removes the marker: a clean stop of the agent.

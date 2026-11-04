@@ -3,7 +3,10 @@
 //! uploaded; the user decides what to do with the file.
 
 use crate::agent::{lock, now, Shared};
+use crate::helper_first::{HelperCalls, HelperReading, ReadClass, Sourced};
+use crate::helper_link::CallError;
 use dyno_core::diagnostics::{BundleBuilder, DiagnosticsBundle, Redactor, SavedDiagnostics};
+use dyno_core::metrics::Reading;
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::recorder::CaptureReason;
 use serde::Serialize;
@@ -12,6 +15,50 @@ use std::path::Path;
 
 /// Most activity entries and alarm events included.
 const RECENT: u32 = 200;
+/// The helper's log lines a bundle holds (the helper clamps its reply to its own cap).
+pub const HELPER_LOG_LINES: u32 = 200;
+
+/// The helper's own log (`LogTail`), for the bundle: ER-27 wants a helper failure explained from the bundle alone. Only the helper can
+/// read it (it is root's), and only the owner or an administrator may ask.
+pub struct HelperLog;
+
+impl HelperReading for HelperLog {
+    type Value = Vec<String>;
+
+    fn name(&self) -> &'static str {
+        "helper log"
+    }
+
+    fn class(&self) -> ReadClass {
+        // A person saves a bundle and waits; the log is read once, not every few seconds.
+        ReadClass::Bulk
+    }
+
+    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Vec<String>, CallError> {
+        calls.log_tail(HELPER_LOG_LINES)
+    }
+
+    fn local(&mut self) -> Reading<Vec<String>> {
+        Reading::unavailable("the helper's log is readable only through the helper")
+    }
+}
+
+/// The bundle file for the helper's log: its lines when the helper gave them, else a note saying why not (so a bundle from a computer
+/// with a broken helper still explains it).
+pub fn helper_log_file(got: Sourced<Vec<String>>) -> (&'static str, &'static str, String) {
+    match got.value {
+        Reading::Available(lines) => (
+            "helper/helper.log",
+            "The last lines of the administrator helper's own log",
+            lines.join("\n") + "\n",
+        ),
+        Reading::Unavailable(why) => (
+            "helper/helper-log.txt",
+            "Why the administrator helper's log is not in this bundle",
+            format!("{}\n", got.via.reason().unwrap_or(&why)),
+        ),
+    }
+}
 
 fn json<T: Serialize>(v: &T) -> String {
     serde_json::to_string_pretty(v).unwrap_or_else(|e| format!("{{\"error\":\"could not serialise: {e}\"}}"))
@@ -157,6 +204,9 @@ pub fn collect_with_logs(shared: &Shared, log_dir: &Path) -> Result<DiagnosticsB
             json(&r),
         )?;
     }
+    // The helper's own log, or why it is missing; best effort like the logs below.
+    let (path, what, text) = helper_log_file(lock(&shared.helper_log).read());
+    let _ = add(path, what, text);
     // Last and best effort: a log that does not fit the bundle's total is left out, it never fails the save.
     for (path, text) in recent_logs(log_dir) {
         let _ = add(
@@ -336,5 +386,51 @@ mod tests {
         let (s, c) = r.apply("on Workstation-77 as nobody-here");
         assert_eq!(s, "on <machine> as nobody-here");
         assert_eq!(c.machine_names, 1);
+    }
+
+    use crate::helper_first::testkit::{centre, port, Net};
+    use crate::helper_first::HelperFirst;
+    use crate::helper_link::TransportError;
+    use dyno_core::helper_wire::HelperReply;
+    use dyno_core::read_via::ReadVia;
+    use paddock_jobs::time::FakeClock;
+
+    fn log_reading(up: bool, answers: Vec<Result<HelperReply, TransportError>>) -> Sourced<Vec<String>> {
+        let c = centre(&Net::new(up, answers), &FakeClock::new());
+        HelperFirst::new(HelperLog, port(&c)).read()
+    }
+
+    #[test]
+    fn the_helpers_log_goes_into_the_bundle_and_is_redacted_with_the_rest() {
+        let lines = vec!["2026-11-04 helper started".to_string(), "alex connected from 10.0.0.7".to_string()];
+        let got = log_reading(true, vec![Ok(HelperReply::Log(lines))]);
+        assert_eq!(got.via, ReadVia::Helper);
+        let (path, _, text) = helper_log_file(got);
+        assert_eq!(path, "helper/helper.log");
+        let mut b = BundleBuilder::new(Redactor::new(&["alex".into()], &[], &[]), Timestamp(1), "0.1.0", "TestOS");
+        b.add(path, "log", &text).unwrap();
+        let out = b.build();
+        let body = out.files.iter().find(|f| f.path == path).map(|f| f.text.clone()).unwrap();
+        assert!(
+            body.contains("helper started") && !body.contains("alex") && !body.contains("10.0.0.7"),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn without_the_helper_the_bundle_says_why_its_log_is_missing() {
+        let (path, _, text) = helper_log_file(log_reading(false, vec![]));
+        assert_eq!(path, "helper/helper-log.txt");
+        assert!(text.contains("readable only through the helper"), "{text}");
+        let refused = log_reading(
+            true,
+            vec![Err(TransportError::Remote {
+                code: "denied".into(),
+                message: "Only the owner or an administrator may read the helper's log.".into(),
+            })],
+        );
+        let (path, _, text) = helper_log_file(refused);
+        assert_eq!(path, "helper/helper-log.txt");
+        assert!(text.contains("owner or an administrator"), "{text}");
     }
 }

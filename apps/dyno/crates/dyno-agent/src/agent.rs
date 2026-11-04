@@ -11,7 +11,7 @@ use dyno_core::alerts::Alerts;
 use dyno_core::facts::SystemFacts;
 use dyno_core::grouping::AppGroup;
 use dyno_core::metrics::SystemSample;
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, UserActivity};
+use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message};
 use dyno_core::settings::Settings;
@@ -300,6 +300,10 @@ pub struct Shared {
     pub helper: Arc<crate::helper_centre::HelperCentre<Box<dyn crate::helper_link::HelperTransport>>>,
     /// The memory layout: the helper first, then this computer (the seam's second instance, plan section 8.3).
     pub memory: Mutex<crate::helper_first::HelperFirst<crate::helper_readers::memory::MemoryModules>>,
+    /// The helper's own log for the diagnostics bundle (plan section 7.1).
+    pub helper_log: Mutex<crate::helper_first::HelperFirst<crate::diagnostics::HelperLog>>,
+    /// Temperatures, fans and CPU energy from the helper (macOS; plan section 2.7).
+    pub climate: Arc<crate::helper_readers::counters::HelperClimate>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -479,6 +483,9 @@ impl Shared {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
+        let saved_cpu_energy = crate::helper_readers::counters::parse_saved(
+            core.store.meta(crate::helper_readers::counters::META_KEY).ok().flatten().as_deref(),
+        );
         let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let own_folder = dirs.root() == Dirs::current().root();
@@ -573,11 +580,24 @@ impl Shared {
                 power_marker,
             )),
             wakes: crate::wakes::WakeCentre::new(wol.wake_timer.clone(), Arc::new(crate::wakes::SharedHelper::new(me.clone()))),
-            wol: crate::wol::WolCentre::new(wol),
+            wol: crate::wol::WolCentre::new({
+                let mut wol = wol;
+                // Linux: each card that may wake the computer is judged by its own mode, read by the helper (plan section 7.1).
+                if host == dyno_core::helper::HelperHost::Linux && helper_first {
+                    wol.readiness = Arc::new(crate::helper_readers::wol::HelperReadiness::new(wol.readiness.clone(), port(me)));
+                }
+                wol
+            }),
             helper: Arc::new(helper_centre),
             memory: Mutex::new(crate::helper_first::HelperFirst::new(
                 crate::helper_readers::memory::MemoryModules::new(host, local_memory),
                 port(me),
+            )),
+            helper_log: Mutex::new(crate::helper_first::HelperFirst::new(crate::diagnostics::HelperLog, port(me))),
+            climate: Arc::new(crate::helper_readers::counters::HelperClimate::new(
+                port(me),
+                helper_first && host == dyno_core::helper::HelperHost::Macos,
+                saved_cpu_energy,
             )),
             cores,
             stop: AtomicBool::new(false),
@@ -595,6 +615,11 @@ impl Shared {
         shared.counters.attach_cache(saved_maps);
         shared.disk.apply_saved_maps(saved_maps_settings);
         shared.bench.attach(Arc::new(AgentBenchEnv(Arc::downgrade(&shared))));
+        let sensors: Box<dyn SystemSensors> = if shared.climate.active() {
+            Box::new(crate::helper_readers::counters::HelperSensors::new(sensors, shared.climate.clone()))
+        } else {
+            sensors
+        };
         Ok((shared, sensors, processes))
     }
 
