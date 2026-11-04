@@ -1241,8 +1241,8 @@ On the Windows VM (installer from CI run 7521) the helper service crashed 21 s a
 exist after a restart. Start at login said on while the `Run` key held no Dyno value, on Windows and on GNOME (CI run 7528);
 both builds still used `tauri-plugin-autostart`, and the per-user writers that replace it (`91d703d81`) read their write back
 but had not yet run on a VM. On GNOME "Turn off administrator readings" reported done while the packaged unit in
-`/usr/lib/systemd/system` stayed enabled and active: `Systemd::unregister` dropped the result of `systemctl disable --now`
-and returned `Ok` for a packaged unit without looking. The tray's `NIM_MODIFY` lacked `NIF_GUID` and the shell refused it
+`/usr/lib/systemd/system` stayed enabled and active, traced to `Systemd::unregister`, which drops the result of
+`systemctl disable --now` and returns `Ok` for a packaged unit without looking (to be confirmed by ADR 0054's RC-2). The tray's `NIM_MODIFY` lacked `NIF_GUID` and the shell refused it
 (`ae396138c`). Every adapter was unit-tested against a fake that keeps what it is given. **Lesson (class: a registration is
 proved only by the OS reading it back, across restarts, other users, updates and removal):** the service port's `register`
 and `unregister` return the OS's post-inspection, the UI shows that inspection, and each registration has a lifecycle row on

@@ -90,7 +90,7 @@ canonical = "paddock-service"
 paths = ["crates/paddock-service/src/native.rs"]
 symbols = ["item:run_as_service"]
 status = "built"
-adr = "docs/adr/0054-os-integration-proved-on-the-real-os.md"
+adr = "0054"
 
   [[mechanism.copy]]
   paths = ["apps/dyno/crates/dyno-helper/src/winsvc.rs"]

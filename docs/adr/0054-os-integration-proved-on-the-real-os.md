@@ -1,8 +1,17 @@
 # 54. OS integration proved on the real OS: read-back registrations, a lifecycle suite, no discarded errors at the edges, fakes under contract, recorded red runs and layout matrices
 
-- Status: Proposed (2026-11-04), revision 2. Written on the user's go-ahead of 2026-11-04 (ER-21 / rule 40 redesign after
+- Status: Proposed (2026-11-04), revision 3. Written on the user's go-ahead of 2026-11-04 (ER-21 / rule 40 redesign after
   the Dyno 1.1.0 work of that day). Docs only: nothing here is built yet. Patterns 1 and 2 go into Dyno 1.1.0, **the full
   set** (the user's choice of D5, 2026-11-04); patterns 3 to 5 apply family-wide after that release.
+- Revision 3 (2026-11-04) answers the re-review of `707a1c1ec`, which approves the design with one P1 in the text:
+  - P1: option (a). L-1b depends only on ADR 0053's S5 (the `login.rs` API, mostly already in `91d703d81`), not on Dyno's
+    whole 0053 adoption. Only Dyno's `apps/dyno/app/src-tauri/src/login.rs` is sequenced between 0053's package D and
+    L-3 (§1.1, §7.3). RC-1's estimate is named as tracked on its branch.
+  - P2s: `native.rs` line numbers on main; the `crates/` cap is measured by E-3's first report run; one `// silent:`
+    counter for C93 and C87, owned by A1-s; the lesson says "traced to" until RC-2 confirms; the register entry's `adr`;
+    `repair.rs` in L-1a; the RC-1 citation.
+  - The open decisions are recorded as the reviewer's recommendations, as coordinator defaults the user may revise. D6
+    gates only Spotter's lifecycle run, not C92 and C93 enforcement.
 - Revision 2 (2026-11-04) answers the independent review of `df802bb54` ("not yet"):
   - P1-1: no new trait; `paddock_service::backend::Backend` and `Inspection` are extended (§1.1).
   - P1-2: the slices of ADR 0052 that 1.1.0 needs are chosen and sized (§7.1).
@@ -29,8 +38,8 @@
     hatch, C87 (silent drops, family-wide, report-only first), `ReadBack` and `NextStep` (WP-B1), `features.toml`, and the
     shared layout checks `expectLayoutClean` (WP-C2). This ADR extends those and does not repeat them.
   - **ADR 0053** on `origin/docs/dyno-adr-0027-per-machine` (`868641b1c`, proposed): its Windows per-machine VM suite (§9,
-    PM-1 to PM-19 with PM-5b and PM-12b) is the base of §1.3, and its S5 and Dyno PM packages adopt `UserRunEntry` first
-    (§1.1, P1-7).
+    PM-1 to PM-19 with PM-5b and PM-12b) is the base of §1.3, and its S5 settles the `login.rs` API that L-1b
+    builds on, and its package D wires Dyno's `login.rs` before L-3 (§1.1, P1-7).
   - The commit-lint trailer on `origin/ci/failing-first-trailer` (`263d49d0b`, `5c4358e64`, not on main): §4 extends it.
   - The branch `fix/dyno-helper-after-restart` (local, worktree `/Volumes/d7sst7/dev-targets/wt/dyno-helper-boot`, head
     `3fd9797ee`, not pushed when read) owns the Windows helper's restart failure (RC-1).
@@ -60,7 +69,7 @@ columns mean:
 | **Start at login on Windows.** The UI said on ("Launch at login after switching it on: true"). After the restart nothing started Dyno, the `Run` key had no Dyno value and the tray had 0 icons. This build still used **`tauri-plugin-autostart`**: CI run 7521 predates `91d703d81`. The UI showed the plugin's intended state, not the OS's | same file, step 9 | verified |
 | **Start at login on Linux (GNOME).** Switched on, then after the reboot Dyno did not start. This build also still used the plugin: CI run 7528 predates `91d703d81` | `.../2026-11-04T09-22-13-585Z-dyno-linux.md` step 6 (CI run 7528, `vm-smoke` at `6463a4843`) | verified |
 | **The new login writers** of `91d703d81` (`feat/dyno-launch-at-login-default`) replace the plugin with `paddock_service::login`'s `UserRunEntry`, `XdgAutostart` and `AppServiceAutostart`, which read their write back. They are tested against a fake registry that keeps what `reg add` is given (`login.rs`, `registry(sys, drop_writes)`). **They have not run on a real VM yet** (RC-3) | `crates/paddock-service/src/login.rs` at `91d703d81` | verified |
-| **Linux turn-off.** "Turn off administrator readings" reported done. 75 s later `dyno-helper.service` was still `active` and `enabled`, through the packaged unit `/usr/lib/systemd/system/dyno-helper.service` and its `multi-user.target.wants` link; `/var/lib/dyno-helper` stayed. The journal shows "restart counter is at 1". The review traced the cause to `Systemd::unregister`: it drops the result of `systemctl disable --now <unit>` (`let _ = self.ctl(..)`), and for a packaged unit it then returns `Ok(())` without looking. Why the installer's `Step::ConfirmGone` did not catch it is part of RC-2 | same file, step 15; `crates/paddock-service/src/backend/systemd.rs:188-190` at `afc0106b2` (`origin/dyno/wp-int`; `:173` on main) | verified (file and code); the causal link is reported |
+| **Linux turn-off.** "Turn off administrator readings" reported done. 75 s later `dyno-helper.service` was still `active` and `enabled`, through the packaged unit `/usr/lib/systemd/system/dyno-helper.service` and its `multi-user.target.wants` link; `/var/lib/dyno-helper` stayed. The journal shows "restart counter is at 1". The review traced the cause to `Systemd::unregister` (to be confirmed by RC-2's reproduction, ER-28): it drops the result of `systemctl disable --now <unit>` (`let _ = self.ctl(..)`), and for a packaged unit it then returns `Ok(())` without looking. Why the installer's `Step::ConfirmGone` did not catch it is part of RC-2 | same file, step 15; `crates/paddock-service/src/backend/systemd.rs:188-190` at `afc0106b2` (`origin/dyno/wp-int`; `:173` on main) | verified (file and code); the causal link is reported |
 | **Windows tray tooltip.** The `NIM_MODIFY` lacked `NIF_GUID`, so the shell refused it and every icon kept its first tip. The unit tests passed because nothing asked the shell | fix `ae396138c`; `apps/dyno/vendor/PATCHES.md`; the Windows VM run recorded in `18106f8e7` | verified (commits) |
 | **Earlier: the TCC work folder.** macOS TCC denied self-responsible processes on the external work volume; only a real run on the runner showed it | lessons.md, "TCC blocked self-responsible processes on the external work volume" (2026-11-04) | read |
 
@@ -83,7 +92,7 @@ ADR 0052 §1.4 requires a VM step per platform feature; it does not say what suc
 | Instance | Source | How checked |
 |---|---|---|
 | **Dyno's service entry.** `fn service_main(..) { let _ = serve_until_stopped(); }` drops every error of the SCM registration, the status reports and the serve loop. `serve()`'s error becomes exit code 1 (`ServiceExitCode::Win32(1)`), so the event log says only "terminated unexpectedly" | `apps/dyno/crates/dyno-helper/src/winsvc.rs:22`, `:53-54` at `afc0106b2` | verified |
-| **The shared service entry has the same shape.** `native::scm::run_as_service` drops `set_service_status` three times (`let _ = handle.set_service_status(..)` at `:405`, `:415`, `:416`), and `:353` drops a `OnceLock::set` | `crates/paddock-service/src/native.rs:351-416` at `afc0106b2` | verified |
+| **The shared service entry has the same shape.** `native::scm::run_as_service` drops `set_service_status` three times (`let _ = handle.set_service_status(..)` at `:392`, `:402`, `:403`), and `:340` drops a `OnceLock::set` | `crates/paddock-service/src/native.rs:338-403` on `origin/main` (`4b6d99f57`; the same lines are `:351-416` at `afc0106b2`) | verified |
 | **`Systemd::unregister`** drops `disable --now` (above) | `crates/paddock-service/src/backend/systemd.rs:188` at `afc0106b2` | verified |
 | **The tray tooltip.** `let _ = icon.set_tooltip(..)` in Dyno's tray hid the refused modify ("app log 'tooltip sent' lines: 0") | `apps/dyno/app/src-tauri/src/tray.rs` before `ae396138c` (now `if let Err(e) = ..`, line 379) | verified |
 | **The tray's visibility call.** `unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) };` in `set_tray_visible` still drops the `BOOL` | `apps/dyno/vendor/tray-icon/src/platform_impl/windows/mod.rs:84` at `afc0106b2` | verified |
@@ -174,9 +183,9 @@ drop hides a failure the user sees.
   not running.
 - **Waits are event-driven.** Waiting for a state change uses `NotifyServiceStatusChangeW` and systemd's D-Bus
   `PropertiesChanged`, bounded by ADR 0031's patience, never a poll (ADR 0024).
-- **The login writers move behind the port, in this order (P1-7).** `crates/paddock-service/src/login.rs` has one owner at
-  a time:
-  1. ADR 0053's S5 and Dyno's PM packages adopt `UserRunEntry` as it is.
+- **The login writers move behind the port, in this order (P1-7).** Each file has one owner at a time:
+  1. ADR 0053's S5 settles `crates/paddock-service/src/login.rs`'s `UserRunEntry` API (most of it is already in
+     `91d703d81`). L-1b waits for S5 only, not for Dyno's whole 0053 adoption.
   2. Then L-1b moves the writers, with no API change before that:
      - `UserRunEntry` merges into the `WindowsRun` backend, the same `Run`-value mechanism. `WindowsRun` gains the
        `TokenElevationTypeFull` rule and `StartupApproved`.
@@ -187,6 +196,10 @@ drop hides a failure the user sees.
   `login.rs` is the canonical of the registered mechanism `launch-at-login`, whose copies are Dyno's `login.rs` and
   `login_item.rs` (delete by `dyno-v1.1.0`) and Spotter's `tauri_plugin_autostart` wiring. L-1b therefore touches those
   copies or waives them in the same change (rule 55 (a)), and Dyno's copies go with L-3.
+
+  Dyno's `apps/dyno/app/src-tauri/src/login.rs` is the one file both ADRs change. ADR 0053's package D edits it first (it
+  wires `UserRunEntry` and the start check of its §6.2); L-3 edits it after D's commit has landed, on the API of L-1b. No
+  other part of D gates this ADR.
 - **Registrations that are not services return their own read-back.** Each is declared like a service (§1.2):
   - tray icons: Dyno's tray adapter returns a `TrayPlacement` from `Shell_NotifyIconGetRect`, `NSStatusItem.isVisible` or
     the StatusNotifierWatcher;
@@ -302,7 +315,11 @@ taken from Dyno's Cargo graph. C93 fails on:
 The escape hatch is ADR 0052's `// silent: <why>`:
 - It is counted against `[caps] silent`.
 - Dyno's cap is 20 (ADR 0052's starting value).
-- `crates/wiring.toml` has its own cap of 15, so the shared crates cannot absorb drops without a trailer.
+- `crates/wiring.toml` has its own cap. It is set from E-3's first report run over the shared crates, after E-4's fixes:
+  the number of `// silent:` lines that remain is measured, recorded in the commit that sets it, and becomes the cap. No
+  number is guessed here.
+- There is one `// silent:` counter per app and one for `crates/`, shared by C93 and ADR 0052's C87: a hatch is counted
+  once whichever check reads it. A1-s owns the counter (in the `wiring.toml` reader), and both checks call it.
 - Adding a hatch or raising a cap needs ADR 0052's `Escape-hatch:` trailer.
 
 Typical legitimate uses are `CloseHandle` during clean-up after an error was already reported, and a `send` to a receiver
@@ -339,7 +356,7 @@ canonical = "paddock-service"
 paths = ["crates/paddock-service/src/native.rs"]
 symbols = ["item:run_as_service"]
 status = "built"
-adr = "docs/adr/0054-os-integration-proved-on-the-real-os.md"
+adr = "0054"
 
   [[mechanism.copy]]
   paths = ["apps/dyno/crates/dyno-helper/src/winsvc.rs"]
@@ -534,7 +551,7 @@ For the engineering rules (coordinator-owned sync, as for ER-33):
 | `register`/`unregister` return the post-inspection; typed `Inspection`; the UI binds it | type plus the existing shared port | the Linux turn-off (`StillPresent`); a switch that is on with no `Run` value |
 | C92: declared registrations, including packaged ones, each with a lifecycle row | source and packaging check | every Dyno registration today, none of which is declared; the packaged unit |
 | Lifecycle suite L1 to L8 with crash counters; rule 54 (d) | real-OS release gate, local VM | the 21 s crash (L3: 7034); the service gone after a restart (L4); login (L4); the turn-off (L7) and its restart counter (L3) |
-| C93 over app and shared-crate edges, with caps; `service_main` | source check without baseline; one mechanism | `winsvc.rs:22`; `native.rs:405`, `:415`, `:416`; `systemd.rs:188`; `tray-icon/.../windows/mod.rs:84` |
+| C93 over app and shared-crate edges, with caps; `service_main` | source check without baseline; one mechanism | `winsvc.rs:22`; `native.rs:392`, `:402`, `:403` (main); `systemd.rs:188`; `tray-icon/.../windows/mod.rs:84` |
 | ESLint `no-floating-promises`, `paddock/no-silent-catch` | lint | an adapter that drops an `invoke` failure |
 | `contract_tests!` with `TestRoot`; recordings for scripted doubles; C94 and C95 | shared kit plus enumerating checks | the fake rooted at `/`; the rig's copy of auth; canned `systemctl` output |
 | commit-lint format, `./dev red` notes, pre-push check, nightly sample | lint, tool, re-run | `74e57f519`, `b8628bc21`, `13bf96710` |
@@ -591,25 +608,25 @@ that rules each out, and fixes with a failing test first. All three land before 
 
 | WP | What | Owner | Owned paths | Days |
 |---|---|---|---|---|
-| RC-1 | The Windows helper crash 21 s after install, and the service gone after a restart | **the agent on `fix/dyno-helper-after-restart`** (worktree `dyno-helper-boot`; three commits and uncommitted changes to `winsvc.rs`, `logfile.rs`, `serve.rs`, `setup.rs` when read). This ADR adds only its acceptance: an ER-28 cause list in the commit, a failing test, and a green L3/L4 on the Windows VM. **E-2 starts after it lands and rebases on it** | that branch's files | 0 here (its own estimate) |
+| RC-1 | The Windows helper crash 21 s after install, and the service gone after a restart | **the agent on `fix/dyno-helper-after-restart`** (worktree `/Volumes/d7sst7/dev-targets/wt/dyno-helper-boot`). When read on 2026-11-04 the branch was **not pushed**: local commits `25eea905e`, `b47f8ba4d` and `3fd9797ee`, plus uncommitted changes to `winsvc.rs`, `logfile.rs`, `serve.rs` and `setup.rs`. Its pushed commits are cited here once they exist. This ADR adds only its acceptance: an ER-28 cause list in the commit, a failing test, and a green L3/L4 on the Windows VM. **E-2 starts after it lands and rebases on it** | that branch's files | tracked on `fix/dyno-helper-after-restart` |
 | RC-2 | The Linux turn-off: a failing test for `Systemd::unregister` with `disable --now` failing on a packaged unit, the fix of §1.1, and the reason `Step::ConfirmGone` passed (which path Turn off took, and what `inspect` returned), confirmed in the VM's journal | the L-1a agent | `crates/paddock-service/src/backend/systemd.rs`, `crates/paddock-service/src/privileged/install.rs` and their tests | 1–1.5 |
-| RC-3 | The login writers of `91d703d81` on real VMs: Windows `Run` plus `StartupApproved`, GNOME autostart, macOS `SMAppService.mainApp`, with L2 and L4 rows run before the full suite; each failure fixed with a failing test | the L-3 agent, after ADR 0053's `UserRunEntry` adoption | Dyno's login adoption files (L-3) and `login.rs` only after P1-7's hand-over | 1.5–2 |
+| RC-3 | The login writers of `91d703d81` on real VMs: Windows `Run` plus `StartupApproved`, GNOME autostart, macOS `SMAppService.mainApp`, with L2 and L4 rows run before the full suite; each failure fixed with a failing test | the L-3 agent, after ADR 0053's S5 | Dyno's login adoption files (L-3) and `login.rs` only after P1-7's hand-over | 1.5–2 |
 
 ### 7.3 Into Dyno 1.1.0 (patterns 1 and 2, the full set)
 
 | WP | What | Owned paths | Depends on | Days |
 |---|---|---|---|---|
-| A1-s | The `wiring.toml` reader slice (§7.1) | `tools/paddock-dev/src/wiring.rs` | – | 1–1.5 |
-| L-1a | `Backend`'s `register`/`unregister` return the inspection; `UnregisterError`; typed `Job::Failed`, `LastExit`, `restarts`, `UnitFile` for SCM, systemd and launchd; event-driven waits; `Step::Confirm`/`ConfirmGone` on the returned inspection; checks of `Manager`'s callers and the register's copies | `crates/paddock-service/src/backend/{mod,systemd,launchd,windows}.rs`, `crates/paddock-service/src/{manager.rs,privileged/install.rs}` | RC-2 in the same branch | 3–4 |
-| L-1b | The login writers behind `Backend` (`WindowsRun` with the elevation rule, `XdgAutostart`, main-app `LaunchdBundled`); `Autostart` removed | `crates/paddock-service/src/login.rs`, `crates/paddock-service/src/backend/` (new XDG backend) | ADR 0053 S5 and Dyno PM adoption landed (P1-7); L-1a | 1.5–2 |
+| A1-s | The `wiring.toml` reader slice (§7.1), and the one `// silent:` counter that C93 and C87 share | `tools/paddock-dev/src/wiring.rs` | – | 1–1.5 |
+| L-1a | `Backend`'s `register`/`unregister` return the inspection; `UnregisterError`; typed `Job::Failed`, `LastExit`, `restarts`, `UnitFile` for SCM, systemd and launchd; event-driven waits; `Step::Confirm`/`ConfirmGone` on the returned inspection; checks of `Manager`'s callers and the register's copies | `crates/paddock-service/src/backend/{mod,systemd,launchd,windows}.rs`, `crates/paddock-service/src/{manager.rs,repair.rs,privileged/install.rs}` | RC-2 in the same branch | 3–4 |
+| L-1b | The login writers behind `Backend` (`WindowsRun` with the elevation rule, `XdgAutostart`, main-app `LaunchdBundled`); `Autostart` removed | `crates/paddock-service/src/login.rs`, `crates/paddock-service/src/backend/` (new XDG backend) | ADR 0053 S5 landed (P1-7); L-1a | 1.5–2 |
 | L-2 | Tray read-back: every `Shell_NotifyIconW` result checked and logged, `Shell_NotifyIconGetRect` after add, macOS and Linux visibility read-back, the tray's placement in diagnostics | `apps/dyno/app/src-tauri/src/tray.rs`, `apps/dyno/vendor/tray-icon/src/platform_impl/windows/mod.rs`, `apps/dyno/vendor/PATCHES.md` | – | 1–1.5 |
-| L-3 | Dyno adopts: the helper service, login entries, helper folder ACLs and the helper pipe declared; the switch and the helper card bound to inspections with the mismatch sentence; the diagnostics list | `apps/dyno/wiring.toml`; `apps/dyno/app/src-tauri/src/{login.rs,login_item.rs,service_repair.rs,shell.rs}`; `apps/dyno/crates/dyno-helper/src/setup.rs`; `apps/dyno/app/src/app/features/settings/{helper-card.ts,helper-model.ts}`; `apps/dyno/app/src/app/state/helper.store.ts`; `apps/dyno/app/src/app/core/mock/helper.ts` (P2: owned paths) | A1-s, L-1a, L-1b | 2.5–3.5 |
+| L-3 | Dyno adopts: the helper service, login entries, helper folder ACLs and the helper pipe declared; the switch and the helper card bound to inspections with the mismatch sentence; the diagnostics list | `apps/dyno/wiring.toml`; `apps/dyno/app/src-tauri/src/{login.rs,login_item.rs,service_repair.rs,shell.rs}`; `apps/dyno/crates/dyno-helper/src/setup.rs`; `apps/dyno/app/src/app/features/settings/{helper-card.ts,helper-model.ts}`; `apps/dyno/app/src/app/state/helper.store.ts`; `apps/dyno/app/src/app/core/mock/helper.ts` (P2: owned paths) | A1-s, L-1a, L-1b; ADR 0053 package D's commit to Dyno's `login.rs` | 2.5–3.5 |
 | L-4 | The lifecycle suite: L1 to L8 driven by `[[os_registration]]`; probes per kind and OS; the crash counters of L3; L6 from the last released tag; `--record` for §3.3's recordings; PM-1 to PM-19, PM-5b and PM-12b as the Windows per-machine rows; README and testing-manual page | `scripts/vm-smoke/{lifecycle.mjs,lifecycle.test.mjs,probes/}`, `scripts/vm-smoke/README.md`, the Linux image script | ADR 0053 S9's accounts and UAC automation (shared; whichever lands first builds them) | 4.5–5.5 |
 | L-5 | C92 (source and packaging), with its fixtures | `tools/paddock-dev/src/checks/c92_os_registrations.rs`, fixtures | A1-s | 1.5–2 |
 | L-6 | Rule 54 (d): `./dev release tag` reads the lifecycle results; the tag checklist text | `tools/paddock-dev/src/release/` | L-4 | 0.5 |
 | E-1 | `service_main` with OS-log sinks (the event source in the install plan, `StandardError=journal`, `os_log`), checked status reports, the exit-code table, the panic boundary; `native::scm::run_as_service` replaced and its callers moved (rule 43); the `service-main` register entry updated | `crates/paddock-service/src/{service_main.rs,os_log/,native.rs,render.rs}`, `docs/known-copies.toml` | – | 2.5–3 |
 | E-2 | Dyno's helper adopts `service_main` on all three OS; `winsvc.rs` deleted; the deferred file log sends its pre-trust lines to the OS log | `apps/dyno/crates/dyno-helper/src/{winsvc.rs,main.rs,cli.rs,logfile.rs}` | E-1, RC-1 landed | 1 |
-| E-3 | C93 over app and shared-crate edges, the caps, the inner `deny` attribute; `crates/wiring.toml` with `[edges]` and `[caps] silent = 15` | `tools/paddock-dev/src/checks/c93_edges.rs`, fixtures, `crates/wiring.toml` | A1-s | 1.5–2 |
+| E-3 | C93 over app and shared-crate edges, the caps, the inner `deny` attribute; `crates/wiring.toml` with `[edges]`, and `[caps] silent` set from its first report run after E-4 | `tools/paddock-dev/src/checks/c93_edges.rs`, fixtures, `crates/wiring.toml` | A1-s | 1.5–2 |
 | E-4 | Fix every C93 finding: in `paddock-service` (65 `let _ =`, 1 `.ok();` as upper bounds), `paddock-proc` (26, 3), `paddock-ipc` (27, 1), and in Dyno's edge modules (upper bounds 79, 17, 44, 128 in its four Rust folders; most of `dyno-agent`'s are expected outside the edges) | the edge modules C93 lists | E-3, E-1 (so `native.rs` is fixed once) | 3–5 |
 | E-5 | ESLint `no-floating-promises`, `no-misused-promises`, `paddock/no-silent-catch` for Dyno's backend adapters and the shell adapters | `eslint/src/rules/no-silent-catch.mjs`, the preset's adapter globs, findings in `apps/dyno/app/src/app/core/` | – | 0.5–1 |
 | **Dyno 1.1.0 total** | (with RC-2 and RC-3) | | | **26.5–36** |
@@ -617,19 +634,24 @@ that rules each out, and fixes with a failing test first. All three land before 
 **The new 1.1.0 estimate.** Revision 1 said 19 to 25 days. The 26.5 to 36 here adds:
 - A1-s;
 - RC-2 and RC-3;
-- L-1b, now its own package after ADR 0053's adoption;
+- L-1b, now its own package after ADR 0053's S5;
 - the shared crates in C93 and E-4 (118 `let _ =` and 5 `.ok();` more to judge);
 - E-1's second entry point;
 - the crash counters, the recordings and L6's start from the released tag in L-4.
 
-It does not include RC-1, which has its own branch and estimate.
+It does not include RC-1, whose estimate is tracked on `fix/dyno-helper-after-restart`.
 
 **The order and the critical path.**
 - Start in parallel: RC-2 with L-1a, E-1, A1-s, L-2 and L-4.
-- Then E-3 and L-5 (after A1-s); E-4 (after E-3 and E-1); L-1b (after ADR 0053's adoption and L-1a); L-3 with RC-3;
-  E-2 (after RC-1); then L-6.
+- Then E-3 and L-5 (after A1-s); E-4 (after E-3 and E-1); L-1b (after ADR 0053's S5 and L-1a); L-3 with RC-3 (after
+  L-1b and package D's `login.rs` commit); E-2 (after RC-1); then L-6.
 - The critical path is L-1a (3–4) → L-1b (1.5–2) → L-3 with RC-3 (4–5.5) → the lifecycle runs on three OS (1.5–2.5): about
-  **10 to 14 working days with four agents.** That assumes ADR 0053's `UserRunEntry` adoption is in by the time L-1a ends.
+  **10 to 14 working days with four agents.** It holds on two conditions:
+  - ADR 0053's S5 (1 to 1.5 days, most of it in `91d703d81`) lands before L-1a ends, about day 3 to 4. This is likely,
+    since S5 has no dependency.
+  - Package D's commit to Dyno's `login.rs` lands before L-1b ends, about day 5 to 6. D is 7 to 10 days, so its login
+    step must come early in D's order. If it comes later, L-3 starts later and the path slips by the same number of days.
+    The coordinator orders D's login step first.
 - This is on top of ADR 0053's Dyno work (its own 3 to 4 weeks). The two share the VM set-up and runs, so the calendar time
   of both is less than the sum.
 
@@ -662,7 +684,8 @@ both, and with them the register entry.
 | Waiver | Until (delete by) | Why |
 |---|---|---|
 | macOS lifecycle L2's Login Items approval and L5 (second user) are MANUAL rows for Dyno | `dyno-v1.2.0` or **2027-01-03**, whichever is first | the Tart macOS VM runs `--no-graphics`; approval needs a click in System Settings, and a second macOS GUI session is not automated yet |
-| C92, C93 (app edges) and the lifecycle gate do not block apps other than Dyno | each app's next release-line tag after `dyno-v1.1.0` (Spotter's is `spotter-v1.0.0`), at latest **2027-01-03** | A-1 adopts them per app (D6) |
+| The lifecycle gate does not block apps other than Dyno and Spotter | each app's next release-line tag after `dyno-v1.1.0`, at latest **2027-01-03** | A-1 adopts it per app; Spotter is gated from `spotter-v1.0.0` (D6) |
+| C92 and C93 (app edges) do not block apps other than Dyno, Spotter included | each app's next release-line tag after `dyno-v1.1.0`, and for Spotter its next after `spotter-v1.0.0`; at latest **2027-01-03** | A-1 adopts them per app; D6 gates only Spotter's lifecycle run |
 | ESLint `paddock/no-silent-catch` in apps other than Dyno | the same | the same |
 | C94, C95, C96 are report-only | **2027-01-03** | F-* and M-* land after the tag; each enforces when its adoption WP lands |
 
@@ -730,10 +753,10 @@ C93 over the shared crates on Dyno's release path has no waiver: E-4 fixes them 
 | # | Question | State |
 |---|---|---|
 | D1 | Pattern 2 as its own rule or a clause of rule 67 (b) | **Decided: fold into rule 67 (b) and amend ER-27** (coordinator, 2026-11-04, following the review) |
-| D2 | The escape hatch for a deliberate drop | Recommended: ADR 0052's `// silent: <why>`, counted against its cap |
-| D3 | Where red-run logs live | Recommended: git notes under `refs/notes/failing-first`, rewritten on rebase and amend, with CI run references also allowed |
-| D4 | Pattern 4 as a new rule or an amendment | Recommended: amend rule 5 and ER-11 |
+| D2 | The escape hatch for a deliberate drop | **Coordinator default (the reviewer's recommendation), user may revise:** ADR 0052's `// silent: <why>`, one counter with C87 |
+| D3 | Where red-run logs live | **Coordinator default (the reviewer's recommendation), user may revise:** git notes under `refs/notes/failing-first`, rewritten on rebase and amend, with CI run references also allowed |
+| D4 | Pattern 4 as a new rule or an amendment | **Coordinator default (the reviewer's recommendation), user may revise:** amend rule 5 and ER-11 |
 | D5 | Dyno 1.1.0 scope | **Decided: the full set** (the user, 2026-11-04): 26.5 to 36 days of packages in §7.3, critical path about 10 to 14 working days with four agents |
-| D6 | Spotter 1.0 under the lifecycle gate | Recommended: yes; its waiver ends at `spotter-v1.0.0` |
-| D7 | Where registrations are declared | Recommended: `wiring.toml`, through the WP-A1 slice A1-s pulled into 1.1.0 |
-| D8 | Real-adapter contract runs for registration ports | Recommended: in the lifecycle VM only (ER-14) |
+| D6 | Spotter 1.0 under the lifecycle gate | **Coordinator default (the reviewer's recommendation), user may revise:** yes, the lifecycle run gates `spotter-v1.0.0`; C92 and C93 are not enforced for Spotter before that tag (§8) |
+| D7 | Where registrations are declared | **Coordinator default (the reviewer's recommendation), user may revise:** `wiring.toml`, through the WP-A1 slice A1-s pulled into 1.1.0 |
+| D8 | Real-adapter contract runs for registration ports | **Coordinator default (the reviewer's recommendation), user may revise:** in the lifecycle VM only (ER-14) |
