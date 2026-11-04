@@ -219,6 +219,10 @@ export async function helperProtection() {
     const den = ssh(`$r = @(); try { New-Item -ItemType File "${f}\\probe-std.txt" -Value x -ErrorAction Stop | Out-Null; Remove-Item "${f}\\probe-std.txt" -Force; $r += "FILE-OK" } catch { $r += "FILE-DENIED" }; $o = cmd /c mklink /J "${f}\\evil-link" C:\\Windows 2>&1; if (Test-Path "${f}\\evil-link") { cmd /c rmdir "${f}\\evil-link" | Out-Null; $r += "LINK-OK" } else { $r += "LINK-DENIED" }; $r -join ' '`);
     checks.push({ ok: /FILE-DENIED/.test(den) && /LINK-DENIED/.test(den), detail: `${f}: standard user create file ${/FILE-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}, create junction ${/LINK-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}` });
   }
+  // Re-check on the next build (a569f4744 locks C:\ProgramData\Dyno itself): recorded as found, not failed.
+  const dyno = ssh(`"owner=" + (Get-Acl "${DYNO}").Owner; icacls "${DYNO}" | Where-Object { $_ -and $_ -notmatch 'Successfully' }`, { admin: true });
+  evidence.push(`== ${DYNO} (C:\\ProgramData\\Dyno itself)`, ...dyno.split('\n'));
+  checks.push({ ok: true, detail: `RE-CHECK ON NEXT BUILD (a569f4744): C:\\ProgramData\\Dyno as found: ${/\(I\)/.test(dyno) ? 'inherits ACL entries' : 'inheritance off'}, ${dyno.split('\n')[0]}` });
   return result('Windows: WP-SEC folder protection (owner, no inheritance, standard-user denials incl. junctions)', checks, evidence, 'owner, inheritance and denials as designed');
 }
 
