@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { jobsProviders, mockWithJobs } from '../../testing/job-test-support';
 import { BACKEND } from '../core/backend';
+import { HelperStore } from './helper.store';
 import { ToolStore } from './tool.store';
 
-function setup() {
-  const { mock, jobs } = mockWithJobs({ os: 'windows', helper: 'ready' });
+function setup(helper: 'ready' | 'off' = 'ready') {
+  const { mock, jobs } = mockWithJobs({ os: 'windows', helper });
   TestBed.configureTestingModule({ providers: [jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   return { mock, store: TestBed.inject(ToolStore) };
 }
@@ -30,5 +31,25 @@ describe('ToolStore', () => {
     expect(store.actionError()).toBeNull();
     expect(store.offer()?.state).toEqual({ installed: '7.5' });
     expect(store.offer()?.source).toBe('helper');
+  });
+
+  it('follows the helper: after Turn on the tool offer is reloaded without pressing the tool card\'s own Check again', async () => {
+    const { store } = setup('off');
+    const helper = TestBed.inject(HelperStore);
+    await helper.load();
+    await store.load();
+    expect(store.offer()?.state).toEqual({ needsHelper: expect.any(String) });
+    await helper.start('turnOn');
+    await vi.waitFor(() => expect(store.offer()?.state).toBe('available'), { timeout: 5000 });
+  });
+
+  it('reloads the offer whenever the helper card reads its state again (its Check again)', async () => {
+    const { mock, store } = setup('ready');
+    const helper = TestBed.inject(HelperStore);
+    await helper.load();
+    await store.load();
+    const spy = vi.spyOn(mock, 'toolOffer');
+    await helper.load();
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 5000 });
   });
 });
