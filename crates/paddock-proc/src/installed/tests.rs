@@ -29,6 +29,8 @@ struct Proc {
     terminate_fails: bool,
     /// The process table does not list it, but Restart Manager does.
     hidden_from_table: bool,
+    /// Restart Manager lists it although its program is not one of the listed ones (a system component mapping the files).
+    rm_lists_anyway: bool,
 }
 
 /// The file name of a Windows path (the host may not split on a backslash).
@@ -49,6 +51,7 @@ fn proc(pid: u32, session: u32, image: &str) -> Proc {
         no_image: false,
         terminate_fails: false,
         hidden_from_table: false,
+        rm_lists_anyway: false,
     }
 }
 
@@ -107,8 +110,8 @@ impl Machine for Fake {
         Ok(self
             .procs
             .iter()
-            .filter(|p| p.alive && files.iter().any(|f| f.to_string_lossy().eq_ignore_ascii_case(&p.image.to_string_lossy())))
-            .map(|p| RmProcess { id: p.id, session: Some(p.session), name: base_name(&p.image) })
+            .filter(|p| p.alive && (p.rm_lists_anyway || files.iter().any(|f| f.to_string_lossy().eq_ignore_ascii_case(&p.image.to_string_lossy()))))
+            .map(|p| RmProcess { id: p.id, session: Some(p.session), name: base_name(&p.image), image: Some(base_name(&p.image)) })
             .collect())
     }
 
@@ -216,7 +219,7 @@ fn the_check_registers_the_full_path_of_every_listed_image() {
     let files = &f.registered[0];
     assert_eq!(files.len(), 3);
     assert!(files.iter().any(|p| p == Path::new(r"C:\Program Files\Dyno\Dyno.exe")));
-    assert_eq!(f.count("enable"), 0, "no candidates, no privilege");
+    assert_eq!(f.count("enable"), 1, "only the check needs the privilege when there are no candidates");
 }
 
 #[test]
@@ -237,7 +240,7 @@ fn the_privilege_is_enabled_before_the_first_open_and_dropped_after_each_entry()
         assert!((0..=1).contains(&depth), "unbalanced at {e}: {ev:?}");
     }
     assert_eq!(depth, 0);
-    assert_eq!((f.count("enable"), f.count("drop")), (2, 2));
+    assert_eq!((f.count("enable"), f.count("drop")), (3, 3), "two entries and the check");
     assert!(!f.privilege_on);
 }
 
@@ -414,4 +417,24 @@ fn errors_are_described_for_the_log() {
     ] {
         assert!(!e.to_string().is_empty());
     }
+}
+
+#[test]
+fn a_system_component_that_only_maps_the_files_does_not_block() {
+    // On Arm Windows the x86 emulation cache service is listed for every x64 program file.
+    let mut cache = proc(50, 0, r"C:\Windows\System32\XtaCache.exe");
+    cache.rm_lists_anyway = true;
+    let mut f = Fake::new(vec![dyno(10, 1), cache]);
+    let r = run(&mut f);
+    assert_eq!(r.exit_code(), 0, "{r:?}");
+    assert!(f.alive(50), "not ours to end");
+    assert_eq!(f.count("terminate:50"), 0);
+}
+
+#[test]
+fn the_check_runs_with_the_privilege_and_drops_it() {
+    let mut f = Fake::new(vec![]);
+    run(&mut f);
+    let ev: Vec<&str> = f.events.iter().map(String::as_str).collect();
+    assert_eq!(ev, vec!["processes", "enable", "rm_list", "drop"]);
 }

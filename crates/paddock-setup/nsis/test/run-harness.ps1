@@ -34,7 +34,7 @@ $r = Run $installer "/S /D=$a" @{}
 Check 'A fresh install exit 0' ($r.Code -eq 0) "code $($r.Code)"
 Check 'A order of calls' ((Cmds $r) -match '^(hold-installing,)?check-dir,guard,stop-all,clean-run,clean-staging$' -or (Cmds $r) -match 'check-dir,guard,stop-all,clean-run,clean-staging') (Cmds $r)
 Check 'A clean-run machine scope' ($r.Lines -match 'clean-run --dir .* --scope machine') ($r.Lines -join '|')
-Check 'A stop list' ($r.Lines -match 'stop-all --dir .* --images harness.exe,harness-agent.exe') ($r.Lines -join '|')
+Check 'A stop list' ($r.Lines -match 'stop-all --dir .* --images "harness.exe,harness-agent.exe"') ($r.Lines -join '|')
 Check 'A files' ((Test-Path "$a\harness.txt") -and (Test-Path "$a\paddock-setup.exe") -and (Test-Path "$a\uninstall.exe")) (Get-ChildItem $a -Name -ErrorAction SilentlyContinue)
 
 # E: update over the existing install: no guard

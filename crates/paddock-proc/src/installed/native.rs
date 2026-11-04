@@ -108,6 +108,7 @@ impl RmSession {
                         id: ProcessId::new(i.Process.dwProcessId, StartTime::from_micros(started)),
                         session: (i.TSSessionId != RM_INVALID_TS_SESSION).then_some(i.TSSessionId),
                         name: from_wide(&i.strAppName),
+                        image: image_name_of(i.Process.dwProcessId),
                     })
                 })
                 .collect());
@@ -121,6 +122,22 @@ impl Drop for RmSession {
         // SAFETY: the handle came from RmStartSession and is ended once.
         unsafe { RmEndSession(self.0) };
     }
+}
+
+/// The program's file name of `pid`, read through a handle (needs the privilege for another user's process).
+fn image_name_of(pid: u32) -> Option<String> {
+    // SAFETY: plain values; the handle is closed below.
+    let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if h.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    // SAFETY: `buf` is writable for `len` characters.
+    let ok = unsafe { QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &raw mut len) } != 0;
+    // SAFETY: opened above.
+    unsafe { CloseHandle(h) };
+    ok.then(|| from_wide(&buf[..len as usize])).and_then(|p| p.rsplit(['\\', '/']).next().map(str::to_owned))
 }
 
 /// A process held open by handle, closed on drop.

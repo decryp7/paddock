@@ -98,8 +98,11 @@ pub struct RmProcess {
     pub id: ProcessId,
     /// Its session, when known.
     pub session: Option<u32>,
-    /// Its image file name, or the application name Restart Manager gives.
+    /// The application name Restart Manager gives (a window title or a service name).
     pub name: String,
+    /// The file name of the process's program, read from a handle, when it could be read. Restart Manager also lists
+    /// system components that merely map the files (the x86 emulation cache on Arm); only a listed program counts.
+    pub image: Option<String>,
 }
 
 /// One process of the process table.
@@ -272,12 +275,23 @@ pub fn stop_all<M: Machine>(machine: &mut M, req: &Request<'_>, bounds: &Bounds)
         note(&mut report, action);
     }
 
-    // The check: Restart Manager names whatever still uses the files, in any session.
-    match machine.rm_list(&files) {
+    // The check: Restart Manager names whatever still uses the files, in any session. Reading another user's process
+    // needs the privilege, so it is enabled around the listing too.
+    let checking = !privilege_lost && machine.enable_privilege().is_ok();
+    let listed = machine.rm_list(&files);
+    if checking {
+        machine.drop_privilege();
+    }
+    match listed {
         Ok(rest) => {
             for p in rest.iter().filter(|p| p.id != req.own) {
-                log::warn!("stop-all: {} (session {:?}, {}) still uses the install folder", p.name, p.session, p.id);
-                remember(&mut report, &p.name);
+                let counts = p.image.as_deref().is_none_or(|i| wanted.contains(&i.to_lowercase()));
+                if counts {
+                    log::warn!("stop-all: {} (session {:?}, {}) still uses the install folder", p.name, p.session, p.id);
+                    remember(&mut report, p.image.as_deref().unwrap_or(&p.name));
+                } else {
+                    log::info!("stop-all: {} ({}) maps the files but is not a listed program; ignored", p.name, p.id);
+                }
             }
         }
         Err(e) => {

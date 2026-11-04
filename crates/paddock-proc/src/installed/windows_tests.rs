@@ -40,6 +40,14 @@ fn here() -> (ProcessId, Option<PathBuf>) {
     (ProcessId::of(std::process::id()).unwrap(), std::env::current_exe().ok())
 }
 
+/// Whether this token can enable SeDebugPrivilege (an elevated administrator's can; a standard user's cannot).
+fn elevated() -> bool {
+    let mut m = WindowsMachine;
+    let ok = m.enable_privilege().is_ok();
+    m.drop_privilege();
+    ok
+}
+
 fn images() -> Vec<String> {
     NAMES.iter().map(|s| (*s).to_owned()).collect()
 }
@@ -55,7 +63,15 @@ fn programs_in_the_folder_are_ended_and_a_lookalike_folder_is_left_alone() {
     let (own, own_image) = here();
     let imgs = images();
     let req = Request { dir: &app, images: &imgs, own, own_image: own_image.as_deref() };
+    let was_elevated = elevated();
     let report = stop_all(&mut WindowsMachine, &req, &Bounds::default());
+    if !was_elevated {
+        // A standard token cannot enable SeDebugPrivilege: stop_all says so and ends nothing (the installer is elevated).
+        assert_eq!(report.exit_code(), EXIT_STILL_RUNNING, "{report:?}");
+        assert!(matches!(report.privilege_error, Some(StopError::Privilege(_))));
+        assert!(a.0.try_wait().unwrap().is_none() && b.0.try_wait().unwrap().is_none());
+        return;
+    }
     assert_eq!(report.exit_code(), 0, "{report:?}");
     assert!(gone(&mut a) && gone(&mut b), "{report:?}");
     assert!(decoy.0.try_wait().unwrap().is_none(), "the program of the lookalike folder runs on");
@@ -115,7 +131,12 @@ fn the_stopper_survives_clearing_its_own_folder() {
     }
     let lines = testchild::lines(&text);
     assert_eq!(lines.last(), Some(&"alive"), "the stopper reported after clearing: {text}");
-    assert!(lines[0].starts_with("exit 0"), "{text}");
     assert!(stopper.0.try_wait().unwrap().is_none(), "the stopper itself was not ended");
-    assert!(gone(&mut victim));
+    if elevated() {
+        assert!(lines[0].starts_with("exit 0"), "{text}");
+        assert!(gone(&mut victim));
+    } else {
+        assert!(lines[0].starts_with("exit 11"), "{text}");
+        assert!(victim.0.try_wait().unwrap().is_none());
+    }
 }
