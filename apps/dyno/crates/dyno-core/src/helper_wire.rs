@@ -381,27 +381,73 @@ pub fn prompt_text(host: HelperHost, verb: &str) -> String {
     }
 }
 
+/// One line the helper's card promises: the words shown, and the request kinds that deliver it.
+///
+/// The kinds are what `dyno-agent/tests/helper_wiring.rs` checks against production code: a promise whose kind no code sends is a
+/// reading that is advertised and never delivered (ADR 0052 section 1.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Advertised {
+    /// The words the card, the user guide and the changelog use.
+    pub text: &'static str,
+    /// The request kinds the reading is made of (never empty).
+    pub kinds: &'static [RequestKind],
+}
+
 /// What the helper shows once it is on, per system: the one list the card uses both for "turning it on adds" and "Dyno now also shows".
-pub fn readings(host: HelperHost) -> &'static [&'static str] {
+pub fn readings(host: HelperHost) -> &'static [Advertised] {
+    const PROCESSES: Advertised = Advertised {
+        text: "Every process of every account",
+        kinds: &[RequestKind::Processes],
+    };
     match host {
         HelperHost::Windows => &[
-            "Every process of every account",
-            "Per-program network traffic",
-            "Disk health",
-            "What is keeping the computer awake",
-            "Windows Backup versions (the backups of Backup and Restore)",
+            PROCESSES,
+            Advertised {
+                text: "Per-program network traffic",
+                kinds: &[RequestKind::Traffic],
+            },
+            Advertised {
+                text: "Disk health",
+                kinds: &[RequestKind::Smart],
+            },
+            Advertised {
+                text: "What is keeping the computer awake",
+                kinds: &[RequestKind::Extras],
+            },
+            Advertised {
+                text: "Windows Backup versions (the backups of Backup and Restore)",
+                kinds: &[RequestKind::Extras],
+            },
         ],
         HelperHost::Macos => &[
-            "Every process of every account",
-            "Login items and background tasks",
-            "Firewall (pf) rules",
-            "Temperature and energy readings",
+            PROCESSES,
+            Advertised {
+                text: "Login items and background tasks",
+                kinds: &[RequestKind::LoginItems],
+            },
+            Advertised {
+                text: "Firewall (pf) rules",
+                kinds: &[RequestKind::Firewall],
+            },
+            Advertised {
+                text: "Temperature and energy readings",
+                kinds: &[RequestKind::Counters],
+            },
         ],
         HelperHost::Linux => &[
-            "Every process of every account",
-            "Which program owns each socket and file",
-            "Firewall (nft) rules",
-            "Memory modules",
+            PROCESSES,
+            Advertised {
+                text: "Which program owns each socket and file",
+                kinds: &[RequestKind::SocketOwners, RequestKind::FileHolders],
+            },
+            Advertised {
+                text: "Firewall (nft) rules",
+                kinds: &[RequestKind::Firewall],
+            },
+            Advertised {
+                text: "Memory modules",
+                kinds: &[RequestKind::MemoryModules],
+            },
         ],
     }
 }
@@ -433,7 +479,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
         readings: if state == HelperState::NotIncluded {
             Vec::new()
         } else {
-            readings(host).iter().map(|r| (*r).to_string()).collect()
+            readings(host).iter().map(|r| r.text.to_string()).collect()
         },
         detail,
         error: None,
@@ -611,6 +657,35 @@ mod tests {
     }
 
     #[test]
+    fn every_advertised_reading_names_the_request_kinds_that_deliver_it() {
+        for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
+            let list = readings(host);
+            assert!(!list.is_empty(), "{host:?}");
+            for (i, a) in list.iter().enumerate() {
+                assert!(!a.text.is_empty() && !a.kinds.is_empty(), "{host:?}: {a:?}");
+                assert!(list[..i].iter().all(|b| b.text != a.text), "{host:?}: {} twice", a.text);
+                for k in a.kinds {
+                    // A reading is made of reads; the control requests (install, uninstall, wakes, audit) are not readings.
+                    assert!(
+                        !matches!(
+                            k,
+                            RequestKind::Info
+                                | RequestKind::InstallTool
+                                | RequestKind::Uninstall
+                                | RequestKind::Audit
+                                | RequestKind::ScheduleWake
+                                | RequestKind::CancelWake
+                                | RequestKind::ListWakes
+                        ),
+                        "{host:?}: {} names {k:?}",
+                        a.text
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn garbage_does_not_decode_into_a_request() {
         assert!(postcard::from_bytes::<HelperMessage>(&[0xff, 0xff, 0xff, 0xff]).is_err());
         assert!(postcard::from_bytes::<HelperMessage>(&[]).is_err());
@@ -661,7 +736,7 @@ mod tests {
         for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
             let ready = assess(host, Ok(()), Probe::Answered(info("1.1.0", HELPER_API), vec![]), "1.1.0");
             assert!(
-                ready.readings.iter().map(String::as_str).eq(readings(host).iter().copied()) && !ready.message.contains("1.1.0"),
+                ready.readings.iter().map(String::as_str).eq(readings(host).iter().map(|r| r.text)) && !ready.message.contains("1.1.0"),
                 "{host:?}: the readings now on, not the version"
             );
             let off = assess(host, Ok(()), Probe::Absent, "1.1.0");
