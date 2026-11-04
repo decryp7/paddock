@@ -84,6 +84,21 @@ status = "built"
   note = "SMAppService.agent for the bundled agent plist."
 
 [[mechanism]]
+id = "service-main"
+title = "Running a service or daemon body under the OS service manager (status reports, exit codes, fatal error to the OS log)"
+canonical = "paddock-service"
+paths = ["crates/paddock-service/src/native.rs"]
+symbols = ["item:run_as_service"]
+status = "built"
+adr = "docs/adr/0054-os-integration-proved-on-the-real-os.md"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-helper/src/winsvc.rs"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.0"
+  note = "Dyno's helper wraps the SCM itself and drops serve's error; the shared one drops set_service_status. Both are replaced by service_main (ADR 0054 E-1, E-2)."
+
+[[mechanism]]
 id = "launch-at-login"
 title = "The launch-at-login switch: the app's own login item and the start reason (login item, restored at login)"
 canonical = "paddock-service"
