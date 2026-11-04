@@ -3,6 +3,7 @@
 //! folder, and an entry that cannot be removed because a program holds it is kept and logged, never a failure.
 //! The folder and the removal are behind [`StagingFs`], so the decisions run over a fake.
 
+use crate::checkdir::components;
 use crate::log::Sink;
 
 /// An entry of `$INSTDIR\updates\`.
@@ -16,8 +17,21 @@ pub struct Entry {
 
 /// The files kept: the log and its one rotation.
 pub const KEPT: [&str; 2] = ["setup.log", "setup.log.1"];
-/// The prefix of a folder that was renamed for removal.
-pub const TRASH_PREFIX: &str = "trash-";
+
+/// The entry of `updates_dir` that contains `keep` (the running installer's own folder, `$EXEDIR`), if any. That entry is
+/// never touched: a rename is no test for "in use" (Windows renames a folder with a running image in it), so what is in use is
+/// named by the caller instead.
+pub fn kept_child(updates_dir: &str, keep: &str) -> Option<String> {
+    let base = components(updates_dir);
+    let kept = components(keep);
+    (!base.is_empty()
+        && kept.len() > base.len()
+        && base
+            .iter()
+            .zip(&kept)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b)))
+    .then(|| kept[base.len()].clone())
+}
 
 /// Why an entry was not removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,9 +46,6 @@ pub enum RemoveError {
 pub trait StagingFs {
     /// The entries of `updates\` (no recursion).
     fn list(&mut self) -> Result<Vec<Entry>, String>;
-    /// Renames a folder next to itself to `trash-<name>`; this fails (`InUse`) when anything inside is open, which is how a
-    /// running installer's folder is found without deleting part of it. Returns the renamed entry.
-    fn trash(&mut self, entry: &Entry) -> Result<Entry, RemoveError>;
     /// Removes an entry (a folder with everything in it, a link as a link).
     fn remove(&mut self, entry: &Entry) -> Result<(), RemoveError>;
 }
@@ -60,34 +71,21 @@ pub struct Cleaned {
 }
 
 /// Removes what [`removals`] names; in-use entries are kept and logged, other failures are logged with the entry and the cause.
-pub fn clean(fs: &mut dyn StagingFs, log: &mut dyn Sink) -> Result<Cleaned, String> {
-    let entries = fs.list()?;
+/// `keep` is the name of an entry that is never touched (see [`kept_child`]).
+pub fn clean(
+    fs: &mut dyn StagingFs,
+    keep: Option<&str>,
+    log: &mut dyn Sink,
+) -> Result<Cleaned, String> {
+    let entries: Vec<Entry> = fs
+        .list()?
+        .into_iter()
+        .filter(|e| keep.is_none_or(|k| !e.name.eq_ignore_ascii_case(k)))
+        .collect();
     let wanted = removals(&entries);
     let mut out = Cleaned::default();
     for entry in entries.iter().filter(|e| wanted.contains(&e.name)) {
-        // A folder is renamed first: the rename fails when anything in it is open, so nothing of a folder that a running
-        // installer uses is ever half deleted. Only what was renamed is deleted. Leftover `trash-` folders go directly.
-        let target = if entry.is_dir && !entry.name.starts_with(TRASH_PREFIX) {
-            match fs.trash(entry) {
-                Ok(renamed) => renamed,
-                Err(RemoveError::InUse) => {
-                    out.in_use += 1;
-                    log.line("clean-staging", &format!("kept {} (in use)", entry.name));
-                    continue;
-                }
-                Err(RemoveError::Other(why)) => {
-                    out.failed += 1;
-                    log.line(
-                        "clean-staging",
-                        &format!("could not rename {}: {why}", entry.name),
-                    );
-                    continue;
-                }
-            }
-        } else {
-            entry.clone()
-        };
-        match fs.remove(&target) {
+        match fs.remove(entry) {
             Ok(()) => out.removed += 1,
             Err(RemoveError::InUse) => {
                 out.in_use += 1;
@@ -141,6 +139,32 @@ mod tests {
     }
 
     #[test]
+    fn the_running_installers_folder_is_found_by_its_path() {
+        let up = r"C:\Program Files\Dyno\updates";
+        assert_eq!(
+            kept_child(up, r"C:\Program Files\Dyno\updates\run-1-a").as_deref(),
+            Some("run-1-a")
+        );
+        assert_eq!(
+            kept_child(up, r"c:\program files\dyno\UPDATES\run-1-a\tmp\").as_deref(),
+            Some("run-1-a")
+        );
+        assert_eq!(
+            kept_child(up, r"\\?\C:\Program Files\Dyno\updates\x.exe").as_deref(),
+            Some("x.exe")
+        );
+        for other in [
+            up,
+            r"C:\Program Files\Dyno",
+            r"C:\Users\a\Temp\nsx1",
+            r"C:\Program Files\Dyno\updates2\run-1",
+            "",
+        ] {
+            assert_eq!(kept_child(up, other), None, "{other}");
+        }
+    }
+
+    #[test]
     fn empty() {
         assert!(removals(&[]).is_empty());
     }
@@ -150,8 +174,6 @@ mod tests {
         busy: Vec<&'static str>,
         broken: Vec<&'static str>,
         removed: Vec<String>,
-        trashed: Vec<String>,
-        stuck: Vec<&'static str>,
         list_error: Option<String>,
     }
     impl StagingFs for Fake {
@@ -160,21 +182,8 @@ mod tests {
                 .clone()
                 .map_or(Ok(self.entries.clone()), Err)
         }
-        fn trash(&mut self, entry: &Entry) -> Result<Entry, RemoveError> {
-            if self.busy.contains(&entry.name.as_str()) {
-                return Err(RemoveError::InUse);
-            }
-            if self.broken.contains(&entry.name.as_str()) {
-                return Err(RemoveError::Other("error 5".into()));
-            }
-            self.trashed.push(entry.name.clone());
-            Ok(Entry {
-                name: format!("{TRASH_PREFIX}{}", entry.name),
-                is_dir: true,
-            })
-        }
         fn remove(&mut self, entry: &Entry) -> Result<(), RemoveError> {
-            if self.stuck.contains(&entry.name.as_str()) {
+            if self.busy.contains(&entry.name.as_str()) {
                 return Err(RemoveError::InUse);
             }
             if self.broken.contains(&entry.name.as_str()) {
@@ -202,8 +211,6 @@ mod tests {
             busy: vec![],
             broken: vec![],
             removed: vec![],
-            trashed: vec![],
-            stuck: vec![],
             list_error: None,
         }
     }
@@ -213,7 +220,7 @@ mod tests {
         let mut f = fake();
         f.busy = vec!["run-2-b"];
         let mut log = Lines::default();
-        let done = clean(&mut f, &mut log).unwrap();
+        let done = clean(&mut f, None, &mut log).unwrap();
         assert_eq!(
             done,
             Cleaned {
@@ -222,9 +229,7 @@ mod tests {
                 failed: 0
             }
         );
-        // The busy folder was neither renamed nor deleted: no part of a running installer's folder goes.
-        assert_eq!(f.trashed, ["run-1-a"]);
-        assert_eq!(f.removed, ["trash-run-1-a", "stray.exe"]);
+        assert_eq!(f.removed, ["run-1-a", "stray.exe"]);
         assert!(
             log.0
                 .iter()
@@ -235,11 +240,19 @@ mod tests {
     }
 
     #[test]
+    fn the_kept_entry_is_never_listed_for_removal() {
+        let mut f = fake();
+        let done = clean(&mut f, Some("RUN-2-B"), &mut Lines::default()).unwrap();
+        assert_eq!(done.removed, 2);
+        assert_eq!(f.removed, ["run-1-a", "stray.exe"]);
+    }
+
+    #[test]
     fn another_failure_names_the_entry_and_the_cause() {
         let mut f = fake();
         f.broken = vec!["stray.exe"];
         let mut log = Lines::default();
-        let done = clean(&mut f, &mut log).unwrap();
+        let done = clean(&mut f, None, &mut log).unwrap();
         assert_eq!(done.failed, 1);
         assert!(
             log.0
@@ -257,52 +270,11 @@ mod tests {
     }
 
     #[test]
-    fn a_rename_that_fails_for_another_reason_and_a_delete_that_finds_a_file_in_use_are_reported() {
-        let mut f = fake();
-        f.broken = vec!["run-1-a"];
-        f.stuck = vec!["stray.exe"];
-        let mut log = Lines::default();
-        let done = clean(&mut f, &mut log).unwrap();
-        assert_eq!(
-            done,
-            Cleaned {
-                removed: 1,
-                in_use: 1,
-                failed: 1
-            }
-        );
-        assert!(
-            log.0
-                .iter()
-                .any(|l| l == "clean-staging: could not rename run-1-a: error 5"),
-            "{:?}",
-            log.0
-        );
-        assert!(
-            log.0
-                .iter()
-                .any(|l| l == "clean-staging: kept stray.exe (in use)"),
-            "{:?}",
-            log.0
-        );
-    }
-
-    #[test]
-    fn a_leftover_trash_folder_is_removed_directly() {
-        let mut f = fake();
-        f.entries = vec![e("trash-run-9-z", true)];
-        let done = clean(&mut f, &mut Lines::default()).unwrap();
-        assert_eq!(done.removed, 1);
-        assert!(f.trashed.is_empty());
-        assert_eq!(f.removed, ["trash-run-9-z"]);
-    }
-
-    #[test]
     fn an_unreadable_folder_is_an_error() {
         let mut f = fake();
         f.list_error = Some("access denied".into());
         assert_eq!(
-            clean(&mut f, &mut Lines::default()),
+            clean(&mut f, None, &mut Lines::default()),
             Err("access denied".to_string())
         );
     }

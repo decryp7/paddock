@@ -19,6 +19,7 @@ fn the_include_can_call_every_command() {
         "clean-run --dir D --scope machine",
         "clean-run --dir D --scope all",
         "clean-staging --dir D",
+        r"clean-staging --dir D --keep C:\a\updates\run-1-a",
         r"apply-update --file C:\t\u.exe --signature c2ln --version 1.2.3 --size 10 --restart",
         "hold-installing",
         "hold-installing --dir D",

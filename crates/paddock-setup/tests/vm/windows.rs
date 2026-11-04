@@ -1007,7 +1007,13 @@ fn clean_staging_keeps_what_is_in_use_and_removes_the_rest() {
         .unwrap();
     let (code, _) = run(
         &site.setup(),
-        &["clean-staging", "--dir", &site.0.to_string_lossy()],
+        &[
+            "clean-staging",
+            "--dir",
+            &site.0.to_string_lossy(),
+            "--keep",
+            &busy.to_string_lossy(),
+        ],
     );
     let (busy_left, idle_left) = (busy.exists(), idle.exists());
     let _ = child.kill();
@@ -1221,7 +1227,7 @@ fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_leaves_nothing
         "{}",
         site.log()
     );
-    assert_eq!(leftovers(&site), Vec::<String>::new());
+    assert_eq!(leftovers(&site), Vec::<String>::new(), "{}", site.log());
 }
 
 /// While a hand-off is running a second `apply-update` is busy (21) and run 1's folder is untouched; after it ends a third

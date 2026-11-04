@@ -17,8 +17,9 @@ use paddock_updater::signature::{UpdateKey, VerifyError, trusted_comment, verify
 use semver::Version;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Foundation::{
     GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
@@ -32,7 +33,10 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetFinalPathNameByHandleW, OPEN_EXISTING, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
     VOLUME_NAME_DOS, VS_FIXEDFILEINFO, VerQueryValueW,
 };
-use windows_sys::Win32::System::Threading::{INFINITE, ReleaseMutex, WaitForMultipleObjects};
+use windows_sys::Win32::System::Threading::{
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, INFINITE, PROCESS_INFORMATION, ReleaseMutex,
+    STARTUPINFOW, WaitForMultipleObjects,
+};
 
 const FILE_SHARE_READ_ONLY: u32 = FILE_SHARE_READ;
 /// `GetDriveTypeW` answer for a local fixed disk.
@@ -52,7 +56,7 @@ pub struct Real<'a> {
     lock_owned: bool,
     handoff: Option<Owned>,
     signal: Option<Owned>,
-    child: Option<std::process::Child>,
+    child: Option<Owned>,
 }
 
 impl<'a> Real<'a> {
@@ -174,10 +178,9 @@ impl UpdatePort for Real<'_> {
             .map(|n| n.to_string_lossy().into_owned());
         let mut fs = UpdatesFolder {
             dir: PathBuf::from(&self.layout.updates),
-            skip,
         };
         let mut log = self.log;
-        if let Err(e) = crate::staging::clean(&mut fs, &mut log) {
+        if let Err(e) = crate::staging::clean(&mut fs, skip.as_deref(), &mut log) {
             self.log
                 .line("apply-update", &format!("old staging not listed: {e}"));
         }
@@ -417,23 +420,61 @@ impl UpdatePort for Real<'_> {
     }
 
     fn start(&mut self, dest: &str, run: &RunPaths) -> Result<(), Refusal> {
-        let child = std::process::Command::new(dest)
-            .args(INSTALLER_ARGS)
-            .env("TEMP", &run.tmp)
-            .env("TMP", &run.tmp)
-            .current_dir(&run.tmp)
-            // The installer is not given the caller's console or pipes (an inheriting pipe would keep the caller waiting).
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-        match child {
-            Ok(c) => {
-                self.child = Some(c);
+        // CreateProcessW with no handle inheritance: the installer gets neither the caller's console nor any pipe (an
+        // inherited pipe would keep the caller waiting), and TEMP/TMP point into the run folder's `tmp\`.
+        let mut command = to_wide(&format!("\"{dest}\" {}", INSTALLER_ARGS.join(" ")));
+        let app = to_wide(dest);
+        let cwd = to_wide(&run.tmp);
+        let mut env: Vec<u16> = Vec::new();
+        for (key, value) in std::env::vars_os() {
+            let name = key.to_string_lossy().to_ascii_uppercase();
+            if name == "TEMP" || name == "TMP" {
+                continue;
+            }
+            env.extend(key.encode_wide());
+            env.push(u16::from(b'='));
+            env.extend(value.encode_wide());
+            env.push(0);
+        }
+        for name in ["TEMP", "TMP"] {
+            env.extend(name.encode_utf16());
+            env.push(u16::from(b'='));
+            env.extend(run.tmp.encode_utf16());
+            env.push(0);
+        }
+        env.push(0);
+        // SAFETY: zeroed structures of the right types; every pointer is to a live, NUL-terminated buffer.
+        let created = unsafe {
+            let mut si: STARTUPINFOW = std::mem::zeroed();
+            si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+            let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+            let ok = CreateProcessW(
+                app.as_ptr(),
+                command.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                CREATE_UNICODE_ENVIRONMENT,
+                env.as_ptr().cast(),
+                cwd.as_ptr(),
+                &si,
+                &mut pi,
+            );
+            if ok == 0 {
+                Err(handle::last_error())
+            } else {
+                drop(Owned(pi.hThread));
+                Ok(Owned(pi.hProcess))
+            }
+        };
+        match created {
+            Ok(process) => {
+                self.child = Some(process);
                 Ok(())
             }
-            Err(e) => {
-                self.log.line("apply-update", &format!("start failed: {e}"));
+            Err(code) => {
+                self.log
+                    .line("apply-update", &format!("start failed (error {code})"));
                 Err(Refusal::StartFailed)
             }
         }
@@ -452,7 +493,7 @@ impl UpdatePort for Real<'_> {
         let (Some(event), Some(child)) = (&self.handoff, &self.child) else {
             return Handover::InstallerEnded;
         };
-        let handles = [event.0, child.as_raw_handle()];
+        let handles = [event.0, child.0];
         // A wait on two handles, not a poll: it ends when the installer holds the lock or its process has ended.
         // SAFETY: both handles are valid for the length of the call.
         let r = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) };

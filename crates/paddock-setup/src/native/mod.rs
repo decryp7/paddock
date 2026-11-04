@@ -206,15 +206,18 @@ fn run(command: Command) -> Exit {
                 },
             )
         }
-        Command::CleanStaging { dir } => {
+        Command::CleanStaging { dir, keep } => {
             let Ok((proof, mut log)) = checked(&dir) else {
                 return Exit::BadDir;
             };
             let mut fs = staging_fs::UpdatesFolder {
                 dir: PathBuf::from(proof.path()).join("updates"),
-                skip: None,
             };
-            let exit = match staging::clean(&mut fs, &mut log) {
+            let updates = fs.dir.to_string_lossy().into_owned();
+            let kept = keep
+                .as_deref()
+                .and_then(|k| staging::kept_child(&updates, k));
+            let exit = match staging::clean(&mut fs, kept.as_deref(), &mut log) {
                 Ok(done) if done.failed == 0 => Exit::Ok,
                 Ok(_) => Exit::Failed,
                 Err(why) => {

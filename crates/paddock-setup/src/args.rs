@@ -63,10 +63,13 @@ pub enum Command {
         /// Which values.
         scope: RunScope,
     },
-    /// `clean-staging --dir <install folder>`.
+    /// `clean-staging --dir <install folder> [--keep <folder>]`. The installer include passes `--keep "$EXEDIR"`: the folder
+    /// the running installer lives in is never touched.
     CleanStaging {
         /// `$INSTDIR`.
         dir: String,
+        /// A folder (or a path inside one) below `updates\` that stays.
+        keep: Option<String>,
     },
     /// `apply-update --file <download> --signature <base64 signature text> --version <v> [--size <bytes>] --restart`.
     ApplyUpdate {
@@ -250,6 +253,7 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
         }
         "clean-staging" => Command::CleanStaging {
             dir: o.required("--dir")?,
+            keep: o.optional("--keep")?,
         },
         "apply-update" => {
             let file =
@@ -373,7 +377,17 @@ mod tests {
         );
         assert_eq!(
             p("clean-staging|--dir|D"),
-            Ok(Command::CleanStaging { dir: "D".into() })
+            Ok(Command::CleanStaging {
+                dir: "D".into(),
+                keep: None
+            })
+        );
+        assert_eq!(
+            p("clean-staging|--dir|D|--keep|E"),
+            Ok(Command::CleanStaging {
+                dir: "D".into(),
+                keep: Some("E".into())
+            })
         );
         assert_eq!(
             p("hold-installing"),
