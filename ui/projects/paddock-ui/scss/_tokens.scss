@@ -317,7 +317,7 @@ $accents: (
   // count-dark / count-light: the five-step count ramp (--pd-count-1 to -5, fewest to most) of an app that draws counts as fills
   // (Dyno's connections map). Only an accent with a measured ramp defines the tokens; see the design guide, section 4.
   'dyno': (dark: #f063a8, light: #b01e6e, fill: #c2287c,
-    count-dark: (#a4307d, #ba5892, #e076af, #fea5ce, #ffe8ec), count-light: (#cb6faa, #b64d82, #982665, #64003b, #300013)),
+    count-dark: (#9c378a, #b05e9b, #d87ab4, #f4a8ce, #ffdae0), count-light: (#df59c8, #b747a0, #97356a, #6a2241, #3d0f1c)),
   'spotter': (dark: #2cc4b0, light: #0b7a6e, fill: #0e8577),
   'pacenotes': (dark: #8da74e, light: #576d07, fill: #657c1f),
   'sighter': (dark: #c488cf, light: #884f92, fill: #975ea2),

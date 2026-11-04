@@ -187,12 +187,17 @@ Order matters: adjacent series differ in hue AND lightness. Assign by series ide
 | 8 | grey | #A2ACB1 | #6F737D |
 Sequential ramp (one hue, 6 steps, for heatmaps): from surface-2 to accent-500 in OKLCH lightness steps (dark: light
 increases; light: dark increases). Count ramp (`--pd-count-1` to `-5`, fewest to most): five steps an app draws as
-area fills where neighbouring areas are often neighbouring steps (Dyno's connections map, 2026-11-04). An accent defines it only
-with measured values (`count-dark`/`count-light` in `$accents`; Dyno has one): one hue family, lightness carries the order (L*
->= 10 per step, lighter with the count in dark, darker in light), neighbours CIEDE2000 >= 10 apart in normal vision and under
-protanopia, deuteranopia and tritanopia, step 1 at 3:1 on the page, every step CIEDE2000 >= 7 from the warning colour. Five
-fills are still keyed by a second channel: the legend shows the marker size of each step and the tooltip names the step. A
-shade-mix of the accent into the land (Dyno 1.1.0's first map) measured only CIEDE2000 1.1 to 4.5 between neighbours. Diverging: series 1 - neutral - series 2 (never red/green). Event/level colours in
+area fills where neighbouring areas are often neighbouring steps (Dyno's connections map, 2026-11-04). Use the sequential
+ramp for a continuous value read along a legend gradient (a heatmap); use the count ramp when a few named bands must be told
+apart area by area. An accent defines it only with measured values (`count-dark`/`count-light` in `$accents`; Dyno has
+one). One hue family; lightness carries the order: L* >= 10 per step, lighter with the count in dark and darker in light,
+the darkest step at L* >= 12. In normal vision and under protanopia, deuteranopia and tritanopia, neighbours are CIEDE2000 >= 10
+and 1.3:1 in luminance apart (the last pair 1.4:1), and every step is CIEDE2000 >= 7 from the warning colour. Step 1 is
+3:1 on the page in normal vision. Markers drawn on the fills use the text colour with a page-colour halo (CIEDE2000 >= 15
+from every step; the fill or the halo is 3:1 on every step in every vision), never the accent, which sits inside the ramp.
+Five fills are still keyed by a second channel: the legend draws each step's marker size on its fill, and the tooltip
+names the step. A shade-mix of the accent into the land (Dyno 1.1.0's first map) measured only CIEDE2000 1.1 to 4.5
+between neighbours. Diverging: series 1 - neutral - series 2 (never red/green). Event/level colours in
 Debrief (fatal/error/warn/info/debug) use the status set + shape, not this palette. Validate with the dataviz skill's
 palette validator and a Machado CVD simulation before freezing; adjacent pairs delta-E >= 20 under deuteranopia/protanopia.
 Scope of the rule (no 8-colour categorical palette passes all 28 pairs, so the rule says where it must hold). It supersedes the one-line

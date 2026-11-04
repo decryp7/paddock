@@ -75,7 +75,7 @@ export function countryLabel(c: CountryCount): string {
               <div class="frame">
                 <svg [attr.viewBox]="'0 0 ' + size.width + ' ' + size.height" role="group" aria-label="World map of connections by country" data-testid="world-map">
                   <defs>
-                    <pattern id="flagged-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2.2" height="5" class="hatch-bar" /></pattern>
+                    <pattern id="flagged-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" class="hatch-gap" /><rect width="2.2" height="5" class="hatch-bar" /></pattern>
                     <clipPath id="sphere"><path [attr.d]="sphere()" /></clipPath>
                   </defs>
                   <path class="sea" [attr.d]="sphere()" />
@@ -84,6 +84,7 @@ export function countryLabel(c: CountryCount): string {
                       <path class="land" [attr.d]="p.d" [attr.data-code]="p.code" [attr.data-step]="stepFor(p.code)" />
                     }
                     @for (a of arcs().arcs; track a.code) {
+                      <path class="arc-casing" [attr.d]="a.d" [attr.stroke-width]="3.4 + step(a.connections) * 0.7" [attr.opacity]="0.55 + step(a.connections) * 0.1" fill="none" />
                       <path class="arc" [attr.d]="a.d" [attr.stroke-width]="1.4 + step(a.connections) * 0.7" [attr.opacity]="0.55 + step(a.connections) * 0.1" fill="none" [attr.data-arc]="a.code" />
                     }
                   </g>
@@ -120,7 +121,7 @@ export function countryLabel(c: CountryCount): string {
                   <div class="tip" role="status" data-testid="country-tip" [style.left.%]="t.left" [style.top.%]="t.top">
                     <strong>{{ t.country.name }}</strong>
                     <span>{{ t.country.connections }} {{ t.country.connections === 1 ? 'connection' : 'connections' }}@if (t.country.flagged > 0) { · {{ t.country.flagged }} flagged }</span>
-                    <span class="faint" data-testid="tip-step">Legend step {{ legend[step(t.country.connections)]!.label }}</span>
+                    <span class="faint" data-testid="tip-step">Step {{ step(t.country.connections) + 1 }} of {{ legend.length }} ({{ legend[step(t.country.connections)]!.label }})</span>
                     @if (t.country.topPrograms.length > 0) { <span class="faint">{{ t.country.topPrograms.join(', ') }}</span> }
                   </div>
                 }
@@ -128,10 +129,10 @@ export function countryLabel(c: CountryCount): string {
               <figcaption class="faint credit" data-testid="credit">{{ credit(s) }}</figcaption>
               @if (arcs().hidden > 0) { <figcaption class="faint">Arcs are drawn for the {{ arcs().arcs.length }} busiest destinations; {{ arcs().hidden }} more are dots. The table lists every country.</figcaption> }
               <figcaption class="legend" aria-label="Legend: connections per country" data-testid="legend">
+                <span class="lead">Shade and dot size: connections per country</span>
                 @for (l of legend; track l.label; let i = $index) {
                   <span class="key" [attr.data-step]="i">
-                    <svg class="swatch" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" [attr.data-step]="i"><rect x="0.5" y="0.5" width="15" height="15" rx="3" /></svg>
-                    <svg class="size" viewBox="0 0 18 16" width="18" height="16" aria-hidden="true"><circle cx="9" cy="8" [attr.r]="dotRadius(l.min)" /></svg>
+                    <svg class="swatch" viewBox="0 0 30 18" width="30" height="18" aria-hidden="true" [attr.data-step]="i"><rect x="0.5" y="0.5" width="29" height="17" rx="3" /><circle cx="15" cy="9" [attr.r]="dotRadius(l.min)" /></svg>
                     {{ l.label }}
                   </span>
                 }
@@ -191,6 +192,7 @@ export function countryLabel(c: CountryCount): string {
     .map-skeleton span { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: var(--fs-md); }
     svg { display: block; width: 100%; height: auto; max-height: 70vh; color: var(--accent); }
     .hatch-bar { fill: var(--warn); }
+    .hatch-gap { fill: var(--surface-1); }
     .tip { position: absolute; display: grid; gap: 2px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font-size: var(--fs-xs); box-shadow: 0 2px 8px rgb(0 0 0 / 25%); pointer-events: none; max-width: 240px; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .act { text-align: right; white-space: nowrap; }
@@ -214,23 +216,28 @@ export function countryLabel(c: CountryCount): string {
     .key .swatch[data-step='2'] rect { fill: var(--pd-count-3); }
     .key .swatch[data-step='3'] rect { fill: var(--pd-count-4); }
     .key .swatch[data-step='4'] rect { fill: var(--pd-count-5); }
-    .key .size circle { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
+    .key .swatch circle { fill: var(--text-1); stroke: var(--surface-1); stroke-width: 1.5; }
     .sea { fill: var(--sea); stroke: var(--border); stroke-width: 1; }
+    /* Arcs keep the accent, on a 1 px page-colour casing each side so they stay apart from the count fills they cross. */
     .arc { stroke: var(--accent); stroke-linecap: round; }
+    .arc-casing { stroke: var(--surface-1); stroke-linecap: round; }
     .callout text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); }
     .spot { cursor: pointer; outline: none; }
-    .spot .dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
-    .spot:focus-visible .dot { stroke: var(--text-1); stroke-width: 3; }
+    /* Markers sit outside the count ramp: the text colour with a page-colour halo (the token test measures both against every step). */
+    .spot .dot { fill: var(--text-1); stroke: var(--surface-1); stroke-width: 1.5; }
+    .spot:focus-visible .dot { stroke: var(--focus); stroke-width: 3; }
     .spot .flag { stroke: var(--warn); stroke-width: 1.5; color: var(--warn); }
     .flagmark path { fill: var(--warn); stroke: var(--warn); stroke-width: 1.4; stroke-linejoin: round; }
     .flagmark text { fill: var(--text-1); font: var(--fw-semibold) 11px var(--font-sans); }
-    .home circle { fill: var(--text-1); stroke: var(--surface-1); stroke-width: 2; }
+    /* Home is a ring, the destinations filled dots of the same ink. */
+    .home circle { fill: var(--surface-1); stroke: var(--text-1); stroke-width: 3; }
     .pill { fill: var(--surface-1); stroke: var(--border-strong); stroke-width: 0.8; }
     .home text { fill: var(--text-1); font: var(--fw-semibold) 12px var(--font-sans); }
     .legend { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-2); }
-    .key { display: inline-flex; gap: 6px; align-items: center; }
-    .key svg { display: block; width: auto; height: 16px; }
-    .key i.hatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; background: repeating-linear-gradient(45deg, var(--warn) 0 3px, transparent 3px 6px); }
+    .legend .lead { color: var(--text-2); }
+    .key { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+    .key svg { display: block; width: 30px; height: 18px; }
+    .key i.hatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; background: repeating-linear-gradient(45deg, var(--warn) 0 3px, var(--surface-1) 3px 6px); }
     table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
     .grid th, .grid td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
     .grid thead th { color: var(--text-2); font-weight: var(--fw-semibold); padding: 0; }

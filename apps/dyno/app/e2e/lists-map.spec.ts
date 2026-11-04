@@ -153,9 +153,11 @@ for (const scheme of ['light', 'dark'] as const) {
           const [x, y] = [lum(rgb(k)), lum(rgb(keys[i]!))];
           return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
         });
-        return { keys, land, ratios };
+        return { keys, land, ratios, plain: getComputedStyle(probe).fill };
       });
       expect(r.keys).toEqual(r.land);
+      // The ramp is defined for this app's accent: no step falls back to the plain land colour.
+      expect(r.keys).not.toContain(r.plain);
       for (const [i, ratio] of r.ratios.entries()) expect(ratio, `step ${i + 1} vs ${i + 2}`).toBeGreaterThanOrEqual(1.3);
     });
   });

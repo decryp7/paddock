@@ -370,12 +370,19 @@ describe('widget frame (ADR 0035)', () => {
 
 // The count ramp (--pd-count-1 to -5, fewest to most): five legend steps drawn as country fills on Dyno's connections map, where
 // neighbouring countries are often neighbouring steps. Lightness carries the order (it survives every colour-vision deficiency):
-// neighbours are CIEDE2000 >= 10 apart in normal vision and under protanopia, deuteranopia and tritanopia, and L* >= 10 apart,
-// rising with the count in dark and falling in light. Step 1 reads on the page (3:1, WCAG 1.4.11), and every step stays clear of the
-// warning colour of the hatched "flagged" marker (the hatch and the flag glyph carry it too).
+// neighbours are CIEDE2000 >= 10 apart and at least 1.3:1 in luminance (1.4:1 for the last pair, the darkest or lightest end) in
+// normal vision and under protanopia, deuteranopia and tritanopia, and L* >= 10 apart, rising with the count in dark and falling
+// in light, with the dark end at L* >= 12 so it never reads as text. Step 1 is 3:1 on the page in normal vision (WCAG 1.4.11), and
+// every step stays clear of the warning colour of the hatched "flagged" marker (the hatch and the flag glyph carry it too). The
+// map's markers are the text colour with a page-colour halo: outside the ramp (CIEDE2000 >= 15 from every step in normal vision),
+// and the fill or the halo is 3:1 against every step in every vision.
 const COUNT_MIN_DE00 = 10;
 const COUNT_MIN_DL = 10;
+const COUNT_MIN_RATIO = 1.3;
+const COUNT_MIN_RATIO_END = 1.4;
+const COUNT_MIN_END_L = 12;
 const COUNT_MIN_DE00_WARNING = 7;
+const COUNT_MIN_DE00_MARKER = 15;
 const RAMPED = ACCENTS.filter((a) => resolve(rules, 'dark', a)['--pd-count-1'] !== undefined);
 
 describe('count ramp', () => {
@@ -403,7 +410,31 @@ describe.each(SCHEMES.flatMap((s) => RAMPED.map((a) => [s, a] as const)))('count
     }
   });
 
-  it('every step is 3:1 against the page (the map\'s sea)', () => {
+  it.each(['normal', ...CVDS] as const)(`neighbouring steps are ${COUNT_MIN_RATIO}:1 apart in luminance (the last pair ${COUNT_MIN_RATIO_END}:1), %s`, (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (let i = 0; i + 1 < ramp.length; i++) {
+      const min = i + 2 === ramp.length ? COUNT_MIN_RATIO_END : COUNT_MIN_RATIO;
+      expect(contrast(see(ramp[i] as Rgba), see(ramp[i + 1] as Rgba)), `step ${i + 1} vs ${i + 2}`).toBeGreaterThanOrEqual(min);
+    }
+  });
+
+  it(`the darkest step is L* >= ${COUNT_MIN_END_L} (it never reads as black ink)`, () => {
+    expect(Math.min(...ramp.map(L))).toBeGreaterThanOrEqual(COUNT_MIN_END_L);
+  });
+
+  it(`the marker (the text colour) is CIEDE2000 >= ${COUNT_MIN_DE00_MARKER} from every step, normal vision`, () => {
+    for (const [i, c] of ramp.entries()) expect(deltaE2000(c, col(v, '--pd-text')), `step ${i + 1}`).toBeGreaterThanOrEqual(COUNT_MIN_DE00_MARKER);
+  });
+
+  it.each(['normal', ...CVDS] as const)('the marker\'s fill (the text colour) or its halo (the page colour) is 3:1 against every step, %s', (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (const [i, c] of ramp.entries()) {
+      const best = Math.max(contrast(see(col(v, '--pd-text')), see(c)), contrast(see(col(v, '--pd-bg')), see(c)));
+      expect(best, `step ${i + 1}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('every step is 3:1 against the page (the map\'s sea), normal vision', () => {
     for (const [i, c] of ramp.entries()) expect(contrast(c, col(v, '--pd-bg')), `step ${i + 1}`).toBeGreaterThanOrEqual(3);
   });
 
