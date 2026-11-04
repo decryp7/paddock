@@ -1336,3 +1336,14 @@ that grew after the first measure drew only the rows its old height plus the buf
 the body to 1600 px and found an 800 px gap before the fix and none after. **Rule:** whatever sizes a CDK viewport from
 outside re-measures it when it resizes (`pd-table` calls `checkViewportSize()` from its body ResizeObserver); a virtual
 list spec asserts the last drawn row meets the body's bottom edge after the body changed height.
+
+## A request's answer was visible before its slot was freed: a phantom Busy (2026-11-04, Dyno `counters::tests::requests_and_the_pinned_reading_run_as_live_work`)
+The test failed once in a full nextest run in 0.010 s (so not a timeout) and passed 6 of 6 alone. Causes listed, each with what rules it out:
+- Thread roles shared across tests (a global registry or a leaked thread-local): ruled out by reading `priority.rs`: the role is a `thread_local` set inside each spawned thread, and the test reads only its own three threads.
+- Other tests creating threads the test reads: ruled out, the `Roles` source belongs to this test's own `CounterCentre`.
+- An ordering assumption between tests: ruled out, the test shares nothing with the others.
+- The hang-guard loop leaving early on a stale value: ruled out, the loop only runs after `poll_pinned` returned; the failure came before any sleep.
+- **Confirmed:** `CounterCentre::start` sent a request's result (`within`'s channel, the listing's `notify_all`) inside the thread's closure, and freed the `Slot` after it. A caller that had its answer could still see `in_flight` at 1, so with the catalog thread and the values thread not yet released, `poll_pinned` met `MAX_IN_FLIGHT` and returned false. The real effect: the page's next request, or the pinned reading, can get a Busy right after another request answered.
+Fix: `start` frees the slot first, then runs a hand-over closure that publishes the result. Failing-first test: `an_answered_request_has_already_freed_its_slot` (3000 calls, `in_flight` must be 0 after each).
+Proof (macOS, 8 `yes` loops started and stopped by pid, built once, 100 runs of all `counters::` tests at 8 threads, 100 of the new test, 300 of the original): before the fix, the new test failed 100 of 100 with and without load, and the original test failed 0 of 300 without load and 18 of 300 under load; after the fix 0 failures in every row.
+**Rule:** whatever tells a waiter "done" is published after the resource it counts is released. Class check: no other slot or semaphore in Dyno or the shared crates (`paddock-jobs`, `paddock-ipc` permits, `paddock-download` hosts, the disk engine queue) sends before it releases.
