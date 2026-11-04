@@ -42,6 +42,7 @@ let nextId = 0;
         [value]="chosen() ? value() : null"
         [placeholder]="placeholder()"
         [disabled]="disabled()"
+        [panelWidth]="panelWidth()"
         [errorStateMatcher]="matcher"
         [aria-label]="ariaLabel() || outsideLabel()"
         [aria-labelledby]="labelledBy()"
@@ -71,6 +72,8 @@ export class PdSelect {
   /** Text for no choice. */
   readonly placeholder = input<string>('');
   readonly disabled = input(false);
+  /** The list's width: 'auto' (the default) is the trigger's; `null` sizes it to its longest option (never narrower than the trigger). */
+  readonly panelWidth = input<string | number | null>('auto');
   readonly invalid = input(false);
   /** A visible label, in the outline's notch (D1); without it the select is named by `ariaLabel` or an outside `<label for>`. */
   readonly label = input<string>('');

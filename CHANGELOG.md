@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `pd-select` `panelWidth`; the widget chooser row wraps its controls
+
+- `pd-select` has a `panelWidth` input (`'auto'` by default, the trigger's width; `null` sizes the list to its longest option), so a narrow trigger no longer wraps a longer option.
+- `pd-widget-chooser`: a row wraps its option controls onto a second line instead of squeezing the kind's description, which keeps at least 10rem; the row's "more" button stays at the end.
+- Dyno: the engine's `widget_choices` carries `number` (`NumberSupport`: the formats and label the tray draws on this OS, and why not); Settings shows only what it says and one item limit (the engine's).
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.

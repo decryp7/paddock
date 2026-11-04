@@ -219,7 +219,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-added .pd-wc-txt b, .pd-wc-added .pd-wc-kicon.mat-icon { color: var(--pd-text-muted); }
     /* Material's .mat-icon (24 px) is one class; two win. */
     .pd-wc-kicon.mat-icon { width: 16px; height: 16px; color: var(--pd-text-muted); flex: none; }
-    .pd-wc-txt { display: grid; min-width: 11rem; flex: 1 1 11rem; }
+    .pd-wc-txt { display: grid; min-width: 10rem; flex: 1 1 10rem; }
     .pd-wc-txt b { font-weight: var(--pd-weight-medium); white-space: nowrap; }
     .pd-wc-txt span { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-wc-grip { display: inline-grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: none; color: var(--pd-text-subtle); cursor: grab; flex: none; }

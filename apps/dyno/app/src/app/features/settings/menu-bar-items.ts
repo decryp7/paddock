@@ -39,7 +39,7 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
             @if (kind === 'number') {
               <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
               <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
-              <pd-select class="format" [options]="formatOptions()" [disabled]="formatOptions().filter(enabled).length < 2" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
+              <pd-select class="format" [panelWidth]="null" [options]="formatOptions()" [disabled]="formatOptions().filter(enabled).length < 2" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
             }
           </ng-template>
         }
@@ -58,10 +58,10 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     :host { display: block; }
     .short { width: 5rem; flex: none; }
     /* A number row also holds its label and unit: the metric picker gives way so the description keeps its width. */
-    .narrow { width: 9.5rem; flex: none; }
+    .narrow { width: 10rem; flex: none; }
     .faint { color: var(--text-3); }
     /* Wide enough for "Label over value" in the trigger and the list, on one line. */
-    .format { width: 13rem; flex: none; }
+    .format { width: 11rem; flex: none; }
     .sub { color: var(--text-2); font-size: var(--fs-sm); margin-block: 0 var(--sp-3); }
     .note { color: var(--text-2); font-size: var(--fs-sm); margin-block-start: var(--sp-3); }
   `,

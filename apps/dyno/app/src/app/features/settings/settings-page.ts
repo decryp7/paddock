@@ -95,7 +95,6 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
             <section class="card" aria-label="Menu bar">
               <h2>Menu bar</h2>
               <h3 id="menu-bar-items">Menu bar items</h3>
-              <p class="sub">What the tray / menu-bar icon draws live. Drag to reorder. Changes apply at once; Undo is in the message that follows.</p>
               <dy-menu-bar-items />
               <h3 id="popup-widgets">Popup widgets</h3>
               <p class="sub">What the popup shows when you click the icon, and in what order. The preview follows your choices.</p>
