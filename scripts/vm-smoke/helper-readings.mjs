@@ -16,7 +16,7 @@ export const READINGS = [
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup', fullText: 4000,
     expect: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|could not check/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
-  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Start-?up',
+  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Boot|Start-?up',
     expect: { macos: [/Login items|Background items/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
     expect: { macos: [/pf/i, /rules?/i, /Read by the administrator helper/i], linux: [/nft|nftables/i, /rules?/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
@@ -45,7 +45,7 @@ export async function readingStep(reading, os, driver) {
   checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
   if (!opened) return { title, status: 'fail', summary: checks[0].detail, checks, evidence };
   const text = (await driver.text()).replace(/\s+/g, ' ');
-  evidence.push(`page text: ${text.slice(0, reading.fullText ?? 1800)}`);
+  evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
   if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
   for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
   for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
@@ -93,10 +93,11 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
 export function macDriver(gui) {
   const label = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
   return {
-    async openPage(page, tab) {
+    async openPage(page, tab, reading = {}) {
       await gui.closeSettings(); // the Settings window stays open after the helper step and would be read as the page
+      if (reading.minWidth && (await gui.has(gui.app, '^Collapse sidebar'))) await gui.press(gui.app, '^Collapse sidebar'); // room for the Account column
       const ok = (await gui.waitFor(() => gui.press(gui.app, `^${label[page]}$`, 'AXLink'), 15_000)).ok;
-      if (ok && tab) return (await gui.waitFor(() => gui.press(gui.app, `^${tab}( |$)`, 'AXRadioButton'), 10_000)).ok;
+      if (ok && tab) return (await gui.waitFor(async () => (await gui.press(gui.app, `^(${tab})( |$)`, 'AXRadioButton')) || (await gui.press(gui.app, `^(${tab})( |$)`, 'AXButton')), 10_000)).ok;
       return ok;
     },
     async text() { return (await gui.texts()).map((t) => t.text).join(' '); },
