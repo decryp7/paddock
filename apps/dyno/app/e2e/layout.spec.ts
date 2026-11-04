@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, pressMod, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 import { NAV } from '../src/app/shell/nav';
 import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
@@ -202,3 +202,18 @@ test.describe('nothing is cut off', () => {
     });
   }
 });
+
+/** Rule: no button label wraps. The disk-map settings put "Forget saved maps" beside a long text; the button keeps its label on one line. */
+for (const width of WIDTHS) {
+  test(`no button label wraps on the settings page at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/?latency=0#/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible({ timeout: 45_000 });
+    await pressMod(page, 'Mod+Comma');
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Dyno', exact: true }).dispatchEvent('click');
+    await expect(dialog.getByRole('button', { name: 'Forget saved maps' })).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    await expectNoButtonLabelWraps(page, `settings at ${width}`);
+  });
+}

@@ -194,3 +194,46 @@ export async function textCutOffWithoutTooltip(page: Page): Promise<string[]> {
 export async function expectNoSilentClipping(page: Page, label = ''): Promise<void> {
   expect(await textClippedWithoutEllipsis(page), `text cut without an ellipsis${label ? ` (${label})` : ''}`).toEqual([]);
 }
+
+/** The number of text lines a label occupies, from the tops of its client rects (rects within 2 px of each other share a line). */
+export function lineCount(tops: readonly number[]): number {
+  const lines: number[] = [];
+  for (const t of [...tops].sort((a, b) => a - b)) if (lines.length === 0 || t - lines[lines.length - 1]! > 2) lines.push(t);
+  return lines.length;
+}
+
+/** The selector of everything that looks like a button: its label must stay on one line. A clickable card (`pd-card`) holds paragraphs by design and is not a label button. */
+export const BUTTON_SELECTOR = 'button, [role="button"]:not(pd-card), a.pd-btn, a[matButton], a.mat-mdc-button-base';
+
+/**
+ * The drawn buttons with a text that wraps onto more than one line (a button grows to fit its label or the layout gives it room; it
+ * never wraps it, and truncation is only for a declared full-text tooltip). Each text node is measured on its own, so a row button
+ * that lays several texts side by side (a badge, a name, a time) is not a wrapped label, and neither is an icon beside the label.
+ */
+export async function buttonLabelsThatWrap(page: Page): Promise<string[]> {
+  const found = await page.evaluate((selector) => {
+    const out: { name: string; tops: number[][] }[] = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>(selector))) {
+      if (el.getClientRects().length === 0) continue;
+      const perText: number[][] = [];
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if ((n.textContent ?? '').trim() === '') continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        perText.push(Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top * 10) / 10));
+      }
+      out.push({ name: `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 40)}"`, tops: perText });
+    }
+    return out;
+  }, BUTTON_SELECTOR);
+  return found
+    .map((b) => ({ name: b.name, lines: Math.max(0, ...b.tops.map((t) => lineCount(t))) }))
+    .filter((b) => b.lines > 1)
+    .map((b) => `${b.name}: ${b.lines} lines`);
+}
+
+/** Fails when any button label of the page wraps. */
+export async function expectNoButtonLabelWraps(page: Page, label = ''): Promise<void> {
+  expect(await buttonLabelsThatWrap(page), `button label wraps${label ? ` (${label})` : ''}`).toEqual([]);
+}
