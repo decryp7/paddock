@@ -89,7 +89,9 @@ function card(a, i, y) {
   const x = cardX(i);
   const ico = icon(a.id, x + 22, y + 24, 64);
   const bar = `<rect x="${x + 104}" y="${y + 28}" width="20" height="3" rx="1.5" fill="${a.accent ?? 'var(--link)'}"/>`;
-  const tag = statusChip(a.key ? STATUS[a.key] : a.id === 'dyno' ? { text: 'v1.0.0', tone: 'ok' } : STATUS[a.id], x + CW - 18, y + 14);
+  const st = STATUS[a.key ?? a.id];
+  // A long status does not fit beside the name: it moves to the bottom right of the card.
+  const tag = statusChip(st, x + CW - 18, st.text.length > 14 ? y + CH - 40 : y + 14);
   const badge = a.ci ? `<text class="cinote" x="${x + 104}" y="${y + 153}">${a.ci}</text>` : '';
   const text = a.lines.map((l, k) => `<text class="promise" x="${x + 104}" y="${y + 96 + k * 23}">${l}</text>`).join('');
   return `<g><rect class="card" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="16"/>${ico}${bar}${tag}${badge}` +

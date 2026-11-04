@@ -10,7 +10,7 @@ export const STATUS = {
   pitwall: { text: 'v1.0.3', tone: 'ok' },
   debrief: { text: 'v1.1.1', tone: 'ok' },
   spotter: { text: 'In development', tone: 'dev' },
-  dyno: { text: 'In development', tone: 'dev' },
+  dyno: { text: 'v1.0.0, 1.1.0 in progress', tone: 'ok' },
   sighter: { text: 'Planned', tone: 'design' },
   pacenotes: { text: 'Planned', tone: 'design' },
   recce: { text: 'Planned', tone: 'design' },
