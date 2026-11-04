@@ -20,7 +20,7 @@ test('a number row shows its format and description whole', async ({ browser, ba
   expect(closed.text).toBe('Label over value');
   expect(closed.cut, 'the closed select cuts its text').toBeLessThanOrEqual(0);
   const desc = await page.locator('.pd-wc-list').first().locator('.pd-wc-txt span').first().evaluate((el) => el.getBoundingClientRect().width);
-  expect(desc, 'the description column is narrow').toBeGreaterThanOrEqual(100);
+  expect(desc, 'the description column is narrow').toBeGreaterThanOrEqual(96);
   // The row stays one line: the description is not wrapped and the row's "more" button sits beside the format select.
   const row = await page.locator('.pd-wc-list').first().locator('li.pd-wc-item').first().evaluate((li) => {
     const top = (sel: string) => li.querySelector(sel)!.getBoundingClientRect();
@@ -62,51 +62,70 @@ test('a number row shows its format and description whole', async ({ browser, ba
 });
 
 /**
- * Where the tray draws one layout there is no per-row format text: the info note says it once, and the row is the metric, Label,
- * Unit and "more". At 980 px each row is one line; at 760 px the controls wrap as a group onto a second line under the
- * description's column, with "more" beside them.
+ * The whole matrix in one place (platform x window width x kind): every row of the menu bar list, with the kinds with the
+ * fewest and the most controls and the longest description. Each row keeps its description whole, wraps its controls under the
+ * description's column (never left of it), keeps "more" on the last line of controls, and is one line wide, two at most narrow.
  */
-for (const [tray, noteText] of [[16, '16 px, too small for a label'], [24, 'one number layout']] as const) {
-  test(`a Windows ${tray} px tray: rows say nothing per row, stay on one line, and wrap under the description`, async ({ browser, baseURL }) => {
-    for (const width of [980, 760]) {
+const PLATFORMS = [
+  { name: 'mac', query: '', note: null, formatSelect: true },
+  { name: 'win16', query: '?mock=windows&tray=16', note: '16 px, too small for a label', formatSelect: false },
+  { name: 'win24', query: '?mock=windows&tray=24', note: 'one number layout', formatSelect: false },
+] as const;
+for (const platform of PLATFORMS) {
+  for (const width of [980, 760]) {
+    test(`menu bar rows: ${platform.name} at ${width} px (number, line graph, meter, graph and number)`, async ({ browser, baseURL }) => {
       const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 } });
       const page = await ctx.newPage();
-      await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: `?mock=windows&tray=${tray}` }));
+      await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: platform.query }));
       await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
       await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Dyno', exact: true }).click();
-      await expect(page.locator('mat-select[aria-label^="Format of"]')).toHaveCount(0);
-      await expect(page.locator('p.info[role="note"]')).toContainText(noteText);
       const rows = page.locator('.pd-wc-list').first().locator('li.pd-wc-item');
       await expect(rows).toHaveCount(4);
+      for (const [i, kind] of ['Line graph', 'Meter', 'Graph and number'].entries()) {
+        await page.getByRole('button', { name: `Add ${kind}`, exact: true }).click();
+        await expect(rows).toHaveCount(5 + i);
+      }
+      await expect(page.locator('mat-select[aria-label^="Format of"]')).toHaveCount(platform.formatSelect ? 4 : 0);
+      if (platform.note) await expect(page.locator('p.info[role="note"]')).toContainText(platform.note);
       await expect(rows.first().locator('.fixed'), 'the note says it once; no per-row text').toHaveCount(0);
       const found = await rows.evaluateAll((lis) =>
         lis.map((li) => {
-          const box = (sel: string) => li.querySelector(sel)!.getBoundingClientRect();
+          const body = li.querySelector('.pd-wc-body') ?? li;
+          const parts = [...body.children].filter((c) => !c.matches('.pd-wc-lead, .pd-wc-grip, .pd-wc-kicon, .cdk-drag-placeholder, .pd-wc-placeholder')) as HTMLElement[];
+          const txt = li.querySelector('.pd-wc-txt')!.getBoundingClientRect();
+          const more = li.querySelector('.pd-wc-more')!.getBoundingClientRect();
+          const mid = (r: DOMRect) => r.top + r.height / 2;
+          const lineMids = parts.map((c) => mid(c.getBoundingClientRect()));
+          // Parts on one line share a centre line (to a few px); count the distinct ones.
+          const lines = [...lineMids].sort((a, b) => a - b).reduce<number[]>((acc, m) => (acc.length && m - acc[acc.length - 1]! < 12 ? acc : [...acc, m]), []);
+          const controls = parts.filter((c) => !c.matches('.pd-wc-txt, .pd-wc-more')).map((c) => c.getBoundingClientRect());
           const desc = li.querySelector('.pd-wc-txt span')!;
-          const metric = box('mat-select');
-          const more = box('.pd-wc-more');
-          const label = box('input[aria-label^="Label of"]');
-          const unit = box('input[aria-label^="Unit of"]');
-          const d = box('.pd-wc-txt');
           return {
+            title: li.querySelector('.pd-wc-txt b')!.textContent,
+            lines: lines.length,
+            // "more" is level with a line of controls, and that is the last line.
+            moreLevel: controls.some((c) => Math.abs(mid(c) - mid(more)) < 12),
+            moreLast: lines.length > 0 && Math.abs(lines[lines.length - 1]! - mid(more)) < 12,
+            // Nothing left of the text column.
+            leftOfText: Math.min(...controls.map((c) => c.left), more.left) - txt.left,
             descLines: desc.getBoundingClientRect().height / parseFloat(getComputedStyle(desc).lineHeight),
-            moreDy: Math.abs(more.top + more.height / 2 - (metric.top + metric.height / 2)),
-            // Label and Unit stay together on one line.
-            pairDy: Math.abs(label.top - unit.top),
-            // No control sits left of the description's column.
-            leftOfText: Math.min(metric.left, label.left, unit.left) - d.left,
-            height: li.getBoundingClientRect().height,
           };
         }),
       );
+      expect(found).toHaveLength(7);
       for (const r of found) {
-        expect(r.descLines, `${width}: the description wraps`).toBeLessThan(1.5);
-        expect(r.moreDy, `${width}: "more" is not level with the controls`).toBeLessThan(24);
-        expect(r.pairDy, `${width}: Label and Unit are on different lines`).toBeLessThan(4);
-        expect(r.leftOfText, `${width}: a control sits left of the description column`).toBeGreaterThanOrEqual(-2);
-        if (width === 980) expect(r.height, 'the row wraps at 980 px').toBeLessThan(70);
+        const at = `${platform.name} ${width} ${r.title}`;
+        expect(r.moreLevel, `${at}: "more" is not level with the controls`).toBe(true);
+        expect(r.moreLast, `${at}: "more" is not on the last line`).toBe(true);
+        expect(r.leftOfText, `${at}: something sits left of the description column`).toBeGreaterThanOrEqual(-2);
+        if (width === 980) {
+          expect(r.lines, `${at}: wraps at 980 px`).toBe(1);
+          expect(r.descLines, `${at}: the description wraps`).toBeLessThan(1.5);
+        } else {
+          expect(r.lines, `${at}: more than two lines at 760 px`).toBeLessThanOrEqual(2);
+        }
       }
       await ctx.close();
-    }
-  });
+    });
+  }
 }

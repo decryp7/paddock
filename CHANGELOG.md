@@ -7,7 +7,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### `@decryp7/paddock-ui`: `pd-select` `panelWidth`; the widget chooser row wraps its controls
 
 - `pd-select` has a `panelWidth` input (`'auto'` by default, the trigger's width; `null` sizes the list to its longest option), so a narrow trigger no longer wraps a longer option.
-- `pd-widget-chooser`: a row wraps its option controls onto a second line instead of squeezing the kind's description, which keeps at least 10rem; the row's "more" button stays at the end.
+- `pd-widget-chooser`: a shown row is two columns, the lead (grip and kind icon; its width is the custom property `--pd-wc-text-inset`, derived from `--pd-wc-grip-size` and `--pd-wc-icon-size`) and a wrapping body of the description, the app's option controls and "more". A wrapped line starts at the body's edge, under the description's column, and "more" ends the last line. Narrow (the chooser under 35rem) the description keeps 10rem so the controls wrap under it.
 - Dyno: the engine's `widget_choices` carries `number` (`NumberSupport`: the formats and label the tray draws on this OS, and why not); Settings shows only what it says and one item limit (the engine's).
 
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
