@@ -4,6 +4,7 @@
 
 use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
+use dyno_core::firewall::FirewallReader;
 use dyno_core::helper_counters::{answer, CounterReader, CounterValue};
 use dyno_core::helper_extras::{backup_answer, wake_answer, ExtrasReader};
 use dyno_core::helper_holders::{file_answer, socket_answer, HolderSource};
@@ -48,6 +49,8 @@ pub struct Parts {
     pub wakes: Box<dyn WakeScheduler>,
     /// The wake-on-LAN reader of this system (Linux).
     pub wol: Box<dyn WolReader>,
+    /// The firewall reader of this system (`pf` on macOS, nftables on Linux; Windows is read in the agent).
+    pub firewall: Box<dyn FirewallReader>,
     /// The last `n` lines of the helper's log, oldest first.
     pub log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
     /// Called after an `Uninstall` request was audited and answered (it removes the helper in the background).
@@ -71,6 +74,7 @@ pub struct Dispatcher {
     processes: Box<dyn ProcessSweeper>,
     smart: Box<dyn SmartReader>,
     tools: Box<dyn ToolInstaller>,
+    firewall: Box<dyn FirewallReader>,
     log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
 }
 
@@ -128,6 +132,7 @@ impl Dispatcher {
             processes: parts.processes,
             smart: parts.smart,
             tools: parts.tools,
+            firewall: parts.firewall,
             log_tail: parts.log_tail,
         }
     }
@@ -283,12 +288,19 @@ impl Dispatcher {
                 counters.truncate(MAX_COUNTERS);
                 Ok(HelperReply::Counters(counters))
             }
-            // The readers arrive with their work packages (ADR 0027 WP-4 to WP-10); until then the helper
-            // says so, and the agent shows the reading as unavailable with this reason.
-            HelperRequest::Firewall => Err(RemoteError::new(
-                codes::UNSUPPORTED,
-                "This reading is not available in this build of the helper yet.",
-            )),
+            HelperRequest::Firewall => {
+                let started = std::time::Instant::now();
+                let view = self.firewall.read();
+                let ms = started.elapsed().as_millis() as u64;
+                match &view {
+                    Ok(v) => log::info!(rules = v.rule_count, access:? = ctx.access, ms = ms; "Helper: firewall read"),
+                    Err(e) => log::warn!(error = e.to_string().as_str(), ms = ms; "Helper: firewall read failed"),
+                }
+                view.map_err(|e| remote(&e))?
+                    .for_access(ctx.access)
+                    .map(HelperReply::Firewall)
+                    .ok_or_else(|| RemoteError::new(codes::REFUSED, "This account may not read the firewall."))
+            }
             HelperRequest::Uninstall => {
                 self.audit
                     .record(&AuditEntry {
@@ -411,6 +423,7 @@ mod tests {
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
+            firewall: Box::new(crate::tools::NotHere("none")),
             wakes,
             wol,
             log_tail: Box::new(|n| (0..n.min(3)).map(|i| format!("line {i}")).collect()),
@@ -481,8 +494,68 @@ mod tests {
         assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
         let bad = HelperRequest::Smart(SmartQuery { max_disks: 99 });
         assert_eq!(r.d.handle(None, bad).unwrap_err().code, codes::REFUSED);
-        let ok = HelperRequest::Firewall;
-        assert_eq!(r.d.handle(None, ok).unwrap_err().code, codes::UNSUPPORTED);
+    }
+
+    struct FakeFirewall(Result<dyno_core::firewall::FirewallSource, PlatformError>);
+    impl dyno_core::firewall::FirewallReader for FakeFirewall {
+        fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
+            self.0.clone()
+        }
+    }
+
+    fn firewall_view() -> dyno_core::firewall::FirewallSource {
+        use dyno_core::firewall::{FirewallProfile, FirewallRule, RuleAction, RuleDirection, RuleSource};
+        let rule = FirewallRule {
+            name: "pf rule 1".into(),
+            direction: RuleDirection::In,
+            action: RuleAction::Block,
+            enabled: true,
+            program: None,
+            ports: Some("= 22".into()),
+            addresses: Some("from 192.0.2.0/24 to any".into()),
+            profile: FirewallProfile::All,
+            source: RuleSource::Pf,
+            group: None,
+            service: None,
+            protocol: Some("tcp".into()),
+        };
+        dyno_core::firewall::FirewallSource::new(RuleSource::Pf).with_rules(vec![rule])
+    }
+
+    fn rig_firewall(reader: FakeFirewall) -> Rig {
+        let mut r = rig(HelperHost::Macos, Ok(vec![]));
+        r.d.firewall = Box::new(reader);
+        r
+    }
+
+    #[test]
+    fn firewall_answers_the_readers_view_and_counts_only_for_other_callers() {
+        let r = rig_firewall(FakeFirewall(Ok(firewall_view())));
+        let full = r.d.handle(None, HelperRequest::Firewall).unwrap();
+        match full {
+            HelperReply::Firewall(v) => assert_eq!((v.rule_count, v.rules.len(), v.rules_hidden), (1, 1, false)),
+            other => panic!("{other:?}"),
+        }
+        let mut other = Ctx::anonymous(Some(9));
+        other.access = Access::CountsOnly;
+        match r.d.handle_for(&other, HelperRequest::Firewall).unwrap() {
+            HelperReply::Firewall(v) => assert_eq!((v.rule_count, v.rules.len(), v.rules_hidden), (1, 0, true)),
+            other => panic!("{other:?}"),
+        }
+        other.access = Access::Denied;
+        assert_eq!(r.d.handle_for(&other, HelperRequest::Firewall).unwrap_err().code, codes::REFUSED);
+    }
+
+    #[test]
+    fn firewall_reader_failures_keep_their_code_and_a_system_without_one_says_so() {
+        let r = rig_firewall(FakeFirewall(Err(PlatformError::Unsupported(
+            "nft is not available on this computer.".into(),
+        ))));
+        assert_eq!(r.d.handle(None, HelperRequest::Firewall).unwrap_err().code, codes::UNSUPPORTED);
+        let r = rig_firewall(FakeFirewall(Err(PlatformError::Failed("pfctl failed (x).".into()))));
+        assert_eq!(r.d.handle(None, HelperRequest::Firewall).unwrap_err().code, codes::FAILED);
+        let r = rig(HelperHost::Windows, Ok(vec![]));
+        assert_eq!(r.d.handle(None, HelperRequest::Firewall).unwrap_err().code, codes::UNSUPPORTED);
     }
 
     #[test]
@@ -515,6 +588,7 @@ mod tests {
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
+            firewall: Box::new(crate::tools::NotHere("none")),
             wakes: Box::new(dyno_core::wake::NoWakes),
             wol: Box::new(dyno_core::wake::NoWakes),
             log_tail: Box::new(|_| vec![]),
@@ -580,6 +654,7 @@ mod tests {
             processes: Box::new(dyno_core::helper_processes::NoProcesses),
             smart: Box::new(NoSmart),
             tools: Box::new(NoSmart),
+            firewall: Box::new(crate::tools::NotHere("none")),
             wakes: Box::new(dyno_core::wake::NoWakes),
             wol: Box::new(dyno_core::wake::NoWakes),
             log_tail: Box::new(|_| vec![]),

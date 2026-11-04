@@ -12,6 +12,8 @@ use serde_json::Value;
 const MAX_ITEMS: usize = 100_000;
 /// The most bytes of `nft -j` output read (the helper's reply frame is 4 MB).
 pub const MAX_NFT_BYTES: usize = 4 * 1024 * 1024;
+/// The most bytes of `pfctl` rule output read.
+pub const MAX_PF_BYTES: usize = 4 * 1024 * 1024;
 
 /// Why an output could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,8 +229,11 @@ pub fn parse_pf_rules(text: &str) -> Vec<FirewallRule> {
     out
 }
 
-/// `pfctl -s info` plus `pfctl -s rules` as a view.
+/// `pfctl -s info` plus `pfctl -s rules` (and the anchors' rules, appended) as a view.
 pub fn pf_view(info: &str, rules: &str) -> Result<FirewallSource, FirewallParseError> {
+    if rules.len() > MAX_PF_BYTES {
+        return Err(FirewallParseError::TooLarge);
+    }
     let enabled = parse_pf_status(info).ok_or_else(|| FirewallParseError::Unrecognised(first_line(info)))?;
     let mut v = FirewallSource::new(RuleSource::Pf).with_rules(parse_pf_rules(rules));
     v.states.push(ProfileState {
@@ -558,6 +563,62 @@ block drop in quick inet6 proto udp from any to { 2001:db8::1 2001:db8::2 } port
             }
         }
         assert!(parse_pf_rules("block").len() == 1 && parse_pf_rules("pass in port").len() == 1);
+    }
+
+    #[test]
+    fn pf_output_over_the_limit_is_refused_not_parsed() {
+        let big = "pass in all\n".repeat(MAX_PF_BYTES / 12 + 2);
+        assert_eq!(pf_view("Status: Enabled", &big), Err(FirewallParseError::TooLarge));
+    }
+
+    /// A tiny xorshift so the mutation test needs no dependency and replays the same inputs every run.
+    fn next(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn mutated_outputs_never_panic_and_stay_within_the_caps() {
+        let seeds: [&str; 3] = [PF, NFT, APPS];
+        let mut rng = 0x9E37_79B9_7F4A_7C15_u64;
+        for round in 0..3_000 {
+            let mut bytes = seeds[round % 3].as_bytes().to_vec();
+            for _ in 0..1 + next(&mut rng) % 8 {
+                let at = (next(&mut rng) as usize) % bytes.len().max(1);
+                match next(&mut rng) % 4 {
+                    0 => {
+                        let last = bytes.len() - 1;
+                        bytes[at.min(last)] = next(&mut rng) as u8;
+                    }
+                    1 => bytes.truncate(at),
+                    2 => {
+                        let b = b"{}\\"[next(&mut rng) as usize % 3];
+                        bytes.insert(at, b);
+                    }
+                    _ => {
+                        let end = (at + 40).min(bytes.len());
+                        let chunk = bytes[at..end].to_vec();
+                        bytes.extend(chunk);
+                    }
+                }
+                if bytes.is_empty() {
+                    bytes.push(b' ');
+                }
+            }
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            for v in [
+                pf_view("Status: Enabled", &text),
+                parse_nft(&text),
+                alf_view("Firewall is enabled. (State = 1)", "", "", &text),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                assert!(v.rules.len() <= MAX_FIREWALL_RULES && v.rules.iter().all(|r| r.name.chars().count() <= 256));
+            }
+        }
     }
 
     #[test]

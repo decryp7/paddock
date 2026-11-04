@@ -142,6 +142,22 @@ pub fn smart_reader(host: HelperHost, tools_dir: &std::path::Path, clock: Arc<dy
     }
 }
 
+/// The firewall reader of this system: `pf` on macOS, nftables on Linux (both as root, fixed arguments). Windows Defender Firewall
+/// is read by the agent itself, so there the helper says so.
+pub fn firewall_reader(host: HelperHost, clock: Arc<dyn Clock>) -> Box<dyn dyno_core::firewall::FirewallReader> {
+    match host {
+        HelperHost::Macos => Box::new(dyno_platform::firewall_readers::PfReader::new(Box::new(SystemRunner), clock)),
+        HelperHost::Linux => Box::new(dyno_platform::firewall_readers::NftReader::new(
+            "/usr/sbin/nft",
+            Box::new(SystemRunner),
+            clock,
+        )),
+        HelperHost::Windows => Box::new(NotHere(
+            "The agent reads Windows Defender Firewall itself; the helper has nothing to add.",
+        )),
+    }
+}
+
 /// Who holds which socket or file: Linux reads `/proc` as root.
 pub fn holder_source(host: HelperHost) -> Box<dyn dyno_core::helper_holders::HolderSource> {
     match host {
@@ -205,6 +221,12 @@ pub(crate) struct NotHere(pub(crate) &'static str);
 
 impl SmartReader for NotHere {
     fn read(&self, _query: dyno_core::helper_requests::SmartQuery) -> Result<dyno_core::smart::SmartReply, PlatformError> {
+        Err(PlatformError::Unsupported(self.0.into()))
+    }
+}
+
+impl dyno_core::firewall::FirewallReader for NotHere {
+    fn read(&self) -> Result<dyno_core::firewall::FirewallSource, PlatformError> {
         Err(PlatformError::Unsupported(self.0.into()))
     }
 }
