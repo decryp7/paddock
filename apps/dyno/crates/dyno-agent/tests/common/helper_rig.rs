@@ -13,7 +13,7 @@ use dyno_core::btm::{LoginItemsReader, LoginItemsReply};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_counters::{CounterAnswer, CounterReader, CounterValue};
 use dyno_core::helper_memory::MemoryReader;
-use dyno_core::helper_policy::{access, visibility, Access, OthersPolicy, Standing};
+use dyno_core::helper_policy::Access;
 use dyno_core::helper_requests::{CounterId, SmartQuery, ToolKind};
 use dyno_core::helper_wire::{HelperAction, HelperInfo, HelperReply, HelperRequest, HelperUser, ToolStatus, HELPER_API};
 use dyno_core::inventory::MemoryLayout;
@@ -38,20 +38,37 @@ pub enum Caller {
 }
 
 impl Caller {
-    fn standing(self) -> Standing {
-        match self {
-            Caller::Owner => Standing::Owner,
-            Caller::Admin => Standing::Administrator,
-            Caller::Other => Standing::Other,
-        }
+    /// The connection's caller as the helper's identity code decides it, from invented OS facts: the owner is uid 501, an
+    /// administrator is in the admin group, anyone else is neither.
+    pub fn peer(self) -> paddock_ipc::Caller {
+        let (uid, groups) = match self {
+            Caller::Owner => (501, vec![20]),
+            Caller::Admin => (502, vec![20, 80]),
+            Caller::Other => (503, vec![20]),
+        };
+        paddock_ipc::identity::identify(
+            paddock_ipc::identity::RawPeer {
+                account: paddock_ipc::AccountId::Uid(uid),
+                admin: paddock_ipc::identity::AdminEvidence::Groups(groups),
+                audit: paddock_ipc::AuditHint::new(Some(4242), Some("/x".into())),
+            },
+            &paddock_ipc::AdminRule::new([80]),
+        )
     }
 
-    fn ctx(self, request: &HelperRequest) -> Ctx {
-        let standing = self.standing();
+    /// What the helper's server decides for this caller and `request`: its own `auth::authorize`, not a copy of it (rule 55).
+    ///
+    /// # Errors
+    /// The server's refusal.
+    pub fn authorize(self, request: &HelperRequest) -> Result<Access, dyno_helper::auth::Refusal> {
+        dyno_helper::auth::authorize(&self.peer(), &owner(), request)
+    }
+
+    fn ctx(self, request: &HelperRequest) -> Result<Ctx, dyno_helper::auth::Refusal> {
         let mut ctx = Ctx::anonymous(Some(4242));
-        ctx.access = access(request.kind(), standing);
-        ctx.view.scope = visibility(standing, false, OthersPolicy::Total, false);
-        ctx
+        ctx.access = self.authorize(request)?;
+        ctx.view.scope = dyno_helper::auth::scope(&self.peer(), &owner(), &dyno_helper::policy::HelperPolicy::default());
+        Ok(ctx)
     }
 }
 
@@ -206,16 +223,17 @@ impl HelperTransport for DispatcherTransport {
         }
         let on_wire = postcard::to_stdvec(&request).expect("a request encodes");
         let request: HelperRequest = postcard::from_bytes(&on_wire).expect("a request decodes");
-        let ctx = self.caller.lock().unwrap().ctx(&request);
         self.served.lock().unwrap().push(format!("{:?}", request.kind()));
-        // The restriction table is applied by the helper's server before the dispatcher (`dyno_helper::auth::authorize`); the rig applies
-        // the same table, so an account that may not make a request is refused as it would be.
-        if ctx.access == Access::Denied {
-            return Err(TransportError::Remote {
-                code: dyno_core::helper_wire::codes::REFUSED.into(),
-                message: "That account may not make this request: it is for the owner or an administrator".into(),
-            });
-        }
+        // The server checks the restriction table before the dispatcher; the rig asks the same function.
+        let ctx = match self.caller.lock().unwrap().ctx(&request) {
+            Ok(ctx) => ctx,
+            Err(refusal) => {
+                return Err(TransportError::Remote {
+                    code: dyno_core::helper_wire::codes::REFUSED.into(),
+                    message: refusal.to_string(),
+                })
+            }
+        };
         match self.dispatcher.handle_for(&ctx, request) {
             Ok(reply) => {
                 let bytes = postcard::to_stdvec(&reply).expect("a reply encodes");

@@ -341,3 +341,50 @@ fn the_owner_s_card_mode_comes_from_the_helper() {
 fn any_account_s_card_mode_comes_from_the_helper() {
     wol_mode_is_judged_through_the_helper(Caller::Other);
 }
+
+// ---- the rig and the helper's server agree on who may ask what ----
+
+/// One request of every kind that matters to the table: refused to another account, counts only, or open.
+fn sample_requests() -> Vec<dyno_core::helper_wire::HelperRequest> {
+    use dyno_core::helper_wire::HelperRequest as R;
+    vec![
+        R::Info,
+        R::Audit(5),
+        R::LogTail(5),
+        R::Uninstall,
+        R::Firewall,
+        R::MemoryModules,
+        R::ListWakes,
+        R::Traffic,
+        R::WolState {
+            ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
+        },
+    ]
+}
+
+#[test]
+fn the_rig_refuses_exactly_what_the_helper_server_refuses() {
+    use dyno_core::helper_policy::{access, Access, Standing};
+    for caller in [Caller::Owner, Caller::Admin, Caller::Other] {
+        for request in sample_requests() {
+            // The server's own check, on the caller as the helper's identity code decides it.
+            let server = dyno_helper::auth::authorize(&caller.peer(), &helper_rig::owner(), &request);
+            let tmp = tempfile::tempdir().unwrap();
+            let transport = DispatcherTransport::new(dispatcher(HelperHost::Linux, Readers::default(), tmp.path()), caller);
+            let rig_refused = matches!(
+                dyno_agent::helper_link::HelperTransport::call(&transport, request.clone()),
+                Err(dyno_agent::helper_link::TransportError::Remote { ref code, .. }) if code == dyno_core::helper_wire::codes::REFUSED
+            );
+            assert_eq!(rig_refused, server.is_err(), "{caller:?} {:?}", request.kind());
+            // And the table itself says the same for another account.
+            if caller == Caller::Other {
+                assert_eq!(
+                    server.is_err(),
+                    access(request.kind(), Standing::Other) == Access::Denied,
+                    "{:?}",
+                    request.kind()
+                );
+            }
+        }
+    }
+}
