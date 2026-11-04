@@ -42,7 +42,15 @@ function executableOf(command, bundleDir) {
 export function instancesOf(procs, spec, bundleDir) {
   const exe = `${bundleDir}/Contents/MacOS/${spec.name}`;
   const re = spec.argsPattern ? new RegExp(spec.argsPattern) : null;
-  return procs.filter((p) => executableOf(p.command, bundleDir) === exe && (!re || re.test(p.command.slice(exe.length))));
+  // The SMAppService agent (Start at login on) shows in ps as a bare `dyno-agent run`, with no bundle path. It counts only when launchd
+  // itself reports the spec's `loginJob` with this very pid (identity from launchctl, never the name alone).
+  const loginPid = spec.loginJob ? procs.jobs?.[spec.loginJob]?.pid ?? null : null;
+  return procs.filter((p) => {
+    const first = p.command.split(/\s/)[0];
+    const isBare = loginPid !== null && p.pid === loginPid && first === spec.name;
+    const rest = isBare ? p.command.slice(first.length) : p.command.slice(exe.length);
+    return (executableOf(p.command, bundleDir) === exe || isBare) && (!re || re.test(rest));
+  });
 }
 
 /** Names of the config's processes that run from the bundle in this snapshot, with their pids: the compact evidence line. */
@@ -86,11 +94,13 @@ export function judgeSnapshot(procs, config, bundleDir, want) {
       // The app's own launchd job (Dyno ADR 0026: `net.decryptology.dyno.agent.ondemand`, bootstrapped even with Start at login off):
       // launchd is a legal parent only when launchd itself reports that job with this very pid (identity, never "ppid is 1").
       const jobPid = spec.parentJob ? procs.jobs?.[spec.parentJob]?.pid ?? null : null;
-      const viaJob = Boolean(spec.parentJob) && p.ppid === 1 && jobPid === p.pid;
+      const loginJobPid = spec.loginJob ? procs.jobs?.[spec.loginJob]?.pid ?? null : null;
+      const viaLoginJob = want.loginService === true && p.ppid === 1 && loginJobPid === p.pid;
+      const viaJob = (Boolean(spec.parentJob) && p.ppid === 1 && jobPid === p.pid) || viaLoginJob;
       checks.push({
         id: `parent:${spec.name}:${p.pid}`,
         ok: viaApp || viaLaunchd || viaJob,
-        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : viaJob ? `launchd, as the job ${spec.parentJob} (launchd reports pid ${jobPid})` : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + (spec.parentJob && p.ppid === 1 ? `; launchd does not report job ${spec.parentJob} with pid ${p.pid}` : '') + ')'}`,
+        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : viaJob ? `launchd, as the job ${viaLoginJob ? spec.loginJob : spec.parentJob} (launchd reports pid ${viaLoginJob ? loginJobPid : jobPid})` : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + (spec.parentJob && p.ppid === 1 ? `; launchd does not report job ${spec.parentJob} with pid ${p.pid}` : '') + ')'}`,
       });
     }
   }
@@ -146,8 +156,17 @@ export function judgeWindow(snapshots, config, bundleDir, want) {
  * Orphans after Quit: any process of the app that is still alive, with its parent. After a Quit nothing may remain, whoever the
  * parent is (an orphan has ppid 1).
  */
-export function orphansAfterQuit(procs, config, bundleDir) {
-  return config.processes.flatMap((spec) => instancesOf(procs, spec, bundleDir).map((p) => ({ name: spec.name, pid: p.pid, ppid: p.ppid, etime: p.etime, orphan: p.ppid === 1 })));
+export function orphansAfterQuit(procs, config, bundleDir, want = {}) {
+  return config.processes.flatMap((spec) =>
+    instancesOf(procs, spec, bundleDir)
+      // Start at login on: the agent that launchd supervises (the login job, with this pid) is expected to survive Quit.
+      .filter((p) => !(want.loginService === true && spec.loginJob && procs.jobs?.[spec.loginJob]?.pid === p.pid))
+      .map((p) => ({ name: spec.name, pid: p.pid, ppid: p.ppid, etime: p.etime, orphan: p.ppid === 1 })));
+}
+
+/** The supervised agents that survive Quit with the login service on, as `name pid (job label)`: evidence that the survivor is the supervised one. */
+export function supervisedSurvivors(procs, config, bundleDir) {
+  return config.processes.flatMap((spec) => (spec.loginJob ? instancesOf(procs, spec, bundleDir).filter((p) => procs.jobs?.[spec.loginJob]?.pid === p.pid).map((p) => `${spec.name} pid ${p.pid} (launchd job ${spec.loginJob})`) : []));
 }
 
 /** `launchctl print gui/<uid>/<label>` to { state, pid, program } (any field null when the job is not loaded or the text lacks it). */
@@ -179,7 +198,7 @@ export function judgeStateFile(content, procs, spec, bundleDir) {
 
 /** The step list of a run to Markdown: a table of pass/fail per step, then each step's evidence. */
 export function renderResult(run) {
-  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO' })[s] ?? s.toUpperCase();
+  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO', 'not-measured': 'NOT MEASURED' })[s] ?? s.toUpperCase();
   const lines = [
     `# VM start check: ${run.app} ${run.version ?? ''}`.trimEnd(),
     '',

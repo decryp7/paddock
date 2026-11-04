@@ -78,6 +78,8 @@ async function main(argv) {
     const rosetta = g('cat /proc/sys/fs/binfmt_misc/rosetta | head -1').stdout.trim();
     log(`desktop up; rosetta ${rosetta || 'NOT registered'}`);
 
+    // The repo's AT-SPI driver goes into the guest for every run (the base image holds an older copy: a change to guest/atspi.py needs no base rebuild).
+    sh('bash', ['-c', `cat ${JSON.stringify(join(HERE, 'guest', 'atspi.py'))} | TART_HOME=${TART_HOME} tart exec -i ${vm} sudo tee /var/cache/vmsmoke/atspi.py >/dev/null`], 60_000);
     // 1. Install the CI's amd64 .deb (Rosetta runs it; the amd64 libraries were installed in the base).
     let checks = [];
     sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
@@ -95,7 +97,15 @@ async function main(argv) {
     const ps = g('ps -eo pid=,ppid=,args= | grep -E "dyno-(app|agent)( |$)" | grep -v grep').stdout.trim().split('\n').filter(Boolean);
     const apps = ps.filter((l) => /dyno-app$/.test(l.trim())), agents = ps.filter((l) => /dyno-agent run$/.test(l.trim()));
     const appPid = apps[0]?.trim().split(/\s+/)[0];
-    checks = [{ ok: ready, detail: ready ? 'dyno status answers' : 'no answer from dyno status within 3 min' }, { ok: apps.length === 1, detail: `dyno-app: ${apps.length} running (allowed 1)` }, { ok: agents.length === 1, detail: `dyno-agent run: ${agents.length} running (allowed 1)` }, { ok: agents.length === 1 && agents[0].trim().split(/\s+/)[1] === appPid, detail: 'the agent is the app\'s child' }];
+    // Since Dyno 1.1.0 "Start at login" is on by default: the agent is supervised by `systemd --user` (unit dyno-agent). Its parent is then
+    // systemd --user or, in the 1.0 mode, the app.
+    const loginActive = ses('systemctl --user is-active dyno-agent 2>&1').stdout.trim();
+    const agentPpid = agents.length === 1 ? agents[0].trim().split(/\s+/)[1] : null;
+    const parentComm = agentPpid ? g(`ps -o comm= -p ${agentPpid}`).stdout.trim() : '';
+    const parentArgs = agentPpid ? g(`ps -o args= -p ${agentPpid}`).stdout.trim() : '';
+    const viaApp = agentPpid !== null && agentPpid === appPid;
+    const viaSystemd = /^systemd$/.test(parentComm) && /--user/.test(parentArgs);
+    checks = [{ ok: ready, detail: ready ? 'dyno status answers' : 'no answer from dyno status within 3 min' }, { ok: apps.length === 1, detail: `dyno-app: ${apps.length} running (allowed 1)` }, { ok: agents.length === 1, detail: `dyno-agent run: ${agents.length} running (allowed 1)` }, { ok: viaApp || viaSystemd, detail: `the agent's parent is ${viaApp ? 'the app' : viaSystemd ? 'systemd --user' : `not allowed (${parentComm || 'none'}: ${parentArgs || 'no agent'}; expected systemd --user or the app)`}` }, { ok: loginActive === 'active', detail: `systemctl --user is-active dyno-agent: ${loginActive || '(no answer)'} (the login service is on by default since 1.1.0)` }];
     push(result('Cold start, one instance', checks, ps, 'one app, one agent under it'));
 
     // 3. Keep awake: systemd-inhibit lists a Dyno block inhibitor, then not.
@@ -176,7 +186,7 @@ async function main(argv) {
     }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.
     const labels = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
-    const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60', 60_000).stdout.split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); } };
+    const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); } };
     for (const fn of readingSteps('linux', async () => driver)) push(await fn({}));
 
     // 6. Turn off: the service and data are gone.
@@ -185,11 +195,13 @@ async function main(argv) {
     let offPrompt = false;
     for (let i = 0; i < 15 && !offPrompt; i++) { await sleep(2000); offPrompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
     if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
-    // "Installed" = the unit file is there or the service is active. A leftover data folder is its own line, with what is in it.
-    const installed = () => g('if [ -e /usr/lib/systemd/system/dyno-helper.service ] || systemctl is-active --quiet dyno-helper.service; then echo installed; else echo removed; fi').stdout.trim();
+    // "Installed" = the service is active or enabled (or a copy of the unit sits in /etc, where a registration without the package writes it).
+    // The unit file in /usr/lib/systemd/system belongs to the .deb (dpkg owns it; Turn off only disables and stops it), so it stays until the
+    // package is removed. A leftover data folder is its own line, with what is in it.
+    const installed = () => g('if [ -e /etc/systemd/system/dyno-helper.service ] || systemctl is-active --quiet dyno-helper.service || systemctl is-enabled --quiet dyno-helper.service; then echo installed; else echo removed; fi').stdout.trim();
     let state = installed();
     for (let i = 0; i < 25 && state !== 'removed'; i++) { await sleep(3000); state = installed(); }
-    checks.push({ ok: state === 'removed', detail: state === 'removed' ? 'the unit file is gone and the service is not active' : 'the unit file or an active service is still there 75 s after Turn off' });
+    checks.push({ ok: state === 'removed', detail: state === 'removed' ? 'the service is stopped and disabled (the unit file stays: the package owns it)' : 'the service is still active or enabled, or a unit copy is in /etc, 75 s after Turn off' });
     const folder = g('sudo ls -la /var/lib/dyno-helper 2>&1').stdout.trim();
     const folderGone = /No such file or directory/.test(folder);
     // 7526 includes the log-race fix (450746cfd): the data folder must be gone.
@@ -203,8 +215,15 @@ async function main(argv) {
     // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
     let leftList = '';
     for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim(); if (!leftList) break; await sleep(2000); }
-    const leftN = leftList ? leftList.split('\n').length : 0;
-    push(result('Quit (File > Quit) leaves nothing running', [{ ok: leftN === 0, detail: leftN === 0 ? 'no Dyno process 40 s after Quit' : `${leftN} Dyno process(es) still running 40 s after Quit (pid ppid seconds args below)` }], leftList ? ['pid ppid age-s args', ...leftList.split('\n')] : [], 'no process left'));
+    // With the login service on, the supervised agent (`dyno-agent run` under systemd --user, unit active) is expected to survive Quit;
+    // everything else of Dyno must be gone.
+    const supervised = g('systemctl --user is-active dyno-agent 2>&1').stdout.trim() === 'active';
+    const sysUserPid = ses('systemctl --user show -p MainPID --value dyno-agent 2>&1').stdout.trim();
+    const leftLines = leftList ? leftList.split('\n') : [];
+    const isSupervisedAgent = (l) => { const f = l.trim().split(/\s+/); return supervised && /dyno-agent run$/.test(l.trim()) && f[0] === sysUserPid; };
+    const others = leftLines.filter((l) => !isSupervisedAgent(l));
+    const survivors = leftLines.filter(isSupervisedAgent);
+    push(result('Quit (File > Quit) leaves only the supervised agent', [{ ok: others.length === 0, detail: others.length === 0 ? 'no Dyno process other than the supervised agent 40 s after Quit' : `${others.length} Dyno process(es) still running 40 s after Quit (pid ppid seconds args below)` }, ...(supervised ? [{ ok: survivors.length === 1, detail: survivors.length === 1 ? `the supervised agent survived Quit: pid ${sysUserPid}, unit dyno-agent active` : `the login service is active (MainPID ${sysUserPid}) but no matching dyno-agent run survived Quit` }] : [])], leftList ? ['pid ppid age-s args', ...leftLines] : [], 'only the supervised agent is left'));
 
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();

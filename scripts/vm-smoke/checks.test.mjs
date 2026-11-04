@@ -8,7 +8,7 @@ import { parseArgs } from './run.mjs';
 
 const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 // Dyno's own config has no scripted Launch-at-login toggle (SMAppService is called by the app itself); the handover logic is tested with one.
-const config = { ...dynoConfig, loginService: { ...dynoConfig.loginService, on: ['Contents/MacOS/dyno-agent', 'service', 'install'], off: ['Contents/MacOS/dyno-agent', 'service', 'uninstall'] } };
+const config = { ...dynoConfig, loginService: { ...dynoConfig.loginService, defaultOn: false, on: ['Contents/MacOS/dyno-agent', 'service', 'install'], off: ['Contents/MacOS/dyno-agent', 'service', 'uninstall'] } };
 const B = '/Applications/Dyno.app';
 
 /** A small fake guest: a process table, an agent.json, and the few commands the check issues. `bug` picks a seeded fault. */

@@ -33,7 +33,9 @@ export const READINGS = [
   { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on the dashboard widget', os: ['macos'], page: 'dashboard', fullText: 4000,
     expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i] },
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
-    expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i] },
+    expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i],
+    // The VM base has no smartmontools: the reading cannot be taken there, which is neither a pass nor a fail of the product.
+    notMeasured: { linux: { when: /smartctl[^.]*is not installed/i, why: 'smartmontools missing in base' } } },
 ];
 
 /** One reading on one OS as a step { title, status, summary, checks, evidence }. */
@@ -47,6 +49,11 @@ export async function readingStep(reading, os, driver) {
   const text = (await driver.text()).replace(/\s+/g, ' ');
   evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
   if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
+  const nm = reading.notMeasured?.[os];
+  if (nm && nm.when.test(text)) {
+    const detail = `not measured: ${nm.why} (the page says ${nm.when})`;
+    return { title, status: 'not-measured', summary: `not measured: ${nm.why}`, checks: [...checks, { ok: true, detail }], evidence };
+  }
   for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
   for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
   const bad = checks.filter((c) => !c.ok);

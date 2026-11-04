@@ -1,7 +1,7 @@
 // The start check itself, against a `guest` (the Tart VM in run.mjs, a fake in checks.test.mjs). Every wait is a poll on state with a
 // guard for a truly stuck step; the verdicts come from judge.mjs. The guest is a throw-away clone: the only processes the check ends
 // are the app's own leftovers, and only after re-checking their identity in the same guest command (rule 53).
-import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
+import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, supervisedSurvivors } from './judge.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -37,6 +37,10 @@ export class Check {
     // A helper with a launchd job of its own (spec.parentJob) that runs under launchd: ask launchd for the job, so the judge can check the pid.
     procs.jobs = {};
     for (const spec of this.config.processes) {
+      // The login item's job (SMAppService): asked always, because its agent shows in ps as a bare `dyno-agent run`.
+      if (spec.loginJob) {
+        procs.jobs[spec.loginJob] = parseLaunchctlPrint((await this.g.exec(`launchctl print gui/$(id -u)/${spec.loginJob} 2>&1`)).stdout);
+      }
       if (spec.parentJob && instancesOf(procs, spec, this.bundle).some((p) => p.ppid === 1)) {
         procs.jobs[spec.parentJob] = parseLaunchctlPrint((await this.g.exec(`launchctl print gui/$(id -u)/${spec.parentJob} 2>&1`)).stdout);
       }
@@ -117,7 +121,7 @@ export class Check {
   }
 
   /** Start, wait for ready (guarded), then observe: the common body of the cold start, relaunch and login-service steps. */
-  async startAndJudge({ hidden = false, loginService = false, title, pre } = {}) {
+  async startAndJudge({ hidden = false, loginService = this.config.loginService?.defaultOn === true, title, pre } = {}) {
     this.loginOn = loginService;
     const cleaned = await this.reset();
     if (pre) await pre();
@@ -142,9 +146,10 @@ export class Check {
   async quit(title) {
     const name = this.config.quit.appleScriptName;
     const q = await this.g.exec(`osascript -e ${sq(`tell application "${name}" to quit`)}`, { timeoutMs: 30_000 });
-    const gone = await this.until(async () => orphansAfterQuit(await this.snapshot(), this.config, this.bundle).length === 0, 40_000);
+    const gone = await this.until(async () => orphansAfterQuit(await this.snapshot(), this.config, this.bundle, { loginService: this.loginOn === true }).length === 0, 40_000);
     const procs = await this.snapshot();
-    const left = orphansAfterQuit(procs, this.config, this.bundle);
+    const login = this.loginOn === true;
+    const left = orphansAfterQuit(procs, this.config, this.bundle, { loginService: login });
     const checks = [
       { ok: q.code === 0, detail: q.code === 0 ? 'Quit sent (osascript)' : `Quit command failed (exit ${q.code}): ${q.stderr.trim().slice(0, 200)}` },
       { ok: gone.ok, detail: gone.ok ? `every process of the app ended ${(gone.tookMs / 1000).toFixed(0)} s after Quit` : 'processes of the app still running after the 40 s guard' },
@@ -155,7 +160,10 @@ export class Check {
       const loaded = lc.stdout.trim() === '0';
       checks.push({ ok: !loaded, detail: `launchd job ${spec.parentJob}: ${loaded ? 'STILL LOADED after Quit (ADR 0026: the job must be gone)' : 'gone after Quit'}` });
     }
-    for (const f of (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
+    // Start at login on: the supervised agent survives Quit, so it is the one that must be there, and its discovery file stays with it.
+    const survivors = login ? supervisedSurvivors(procs, this.config, this.bundle) : [];
+    if (login) checks.push({ ok: survivors.length > 0, detail: survivors.length ? `the supervised agent survived Quit as expected: ${survivors.join(', ')}` : 'Start at login is on but launchd has no running agent for the login job after Quit' });
+    for (const f of login ? [] : (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
       const c = await this.readFile(f.path);
       checks.push({ ok: c == null, detail: `${f.path}: ${c == null ? 'removed' : 'still there after Quit'}` });
     }
@@ -237,6 +245,7 @@ export class Check {
     await phase('off', svc.off, false);
     await phase('on again', svc.on, true);
     await run(svc.off);
+    this.loginOn = false;
     const ok = checks.every((c) => c.ok);
     // Duplicates are judged either way, but a handover that never registered the launchd job is not proven: say so instead of PASS.
     const proven = loaded.every(Boolean);

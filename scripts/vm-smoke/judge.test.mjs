@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { describeTree, distinctCounts, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, peakCounts, renderResult } from './judge.mjs';
+import { describeTree, distinctCounts, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, peakCounts, renderResult, supervisedSurvivors } from './judge.mjs';
 
 const BUNDLE = '/Applications/Dyno.app';
 const config = {
@@ -157,4 +157,39 @@ test('every app config lists an app process, only known keys, and helpers whose 
     if (c.loginService) assert.match(c.loginService.label, /^net\.decryptology\./);
   }
   assert.ok(seen.includes('dyno'), `configs found: ${seen}`);
+});
+
+const LOGIN = 'net.decryptology.dyno.agent';
+const loginConfig = { processes: [config.processes[0], { ...config.processes[1], parents: ['app'], loginJob: LOGIN }] };
+const withJob = (procs, pid) => Object.assign(procs, { jobs: { [LOGIN]: { state: 'running', pid, program: null } } });
+
+test('the SMAppService agent (bare "dyno-agent run") is found by the launchd job pid, not by name alone', () => {
+  const rows = [[10, 1, '00:30', APP], [819, 1, '00:29', 'dyno-agent run']];
+  assert.equal(instancesOf(withJob(ps(rows), 819), loginConfig.processes[1], BUNDLE).length, 1);
+  assert.equal(instancesOf(withJob(ps(rows), 555), loginConfig.processes[1], BUNDLE).length, 0);
+  assert.equal(instancesOf(ps(rows), loginConfig.processes[1], BUNDLE).length, 0);
+  const ok = judgeSnapshot(withJob(ps(rows), 819), loginConfig, BUNDLE, { running: true, loginService: true });
+  assert.equal(ok.ok, true);
+  assert.match(ok.checks.find((c) => c.id.startsWith('parent:')).detail, new RegExp(`job ${LOGIN}`));
+  assert.equal(judgeSnapshot(withJob(ps(rows), 819), loginConfig, BUNDLE, { running: true, loginService: false }).ok, false);
+});
+
+test('after Quit with the login service on only the supervised agent may remain', () => {
+  const left = withJob(ps([[819, 1, '03:00', 'dyno-agent run'], [820, 1, '03:00', `${BUNDLE}/Contents/MacOS/dyno-app`]]), 819);
+  assert.deepEqual(orphansAfterQuit(left, loginConfig, BUNDLE, { loginService: true }).map((o) => o.name), ['dyno-app']);
+  assert.equal(orphansAfterQuit(left, loginConfig, BUNDLE, { loginService: false }).length, 2);
+  assert.deepEqual(supervisedSurvivors(left, loginConfig, BUNDLE), [`dyno-agent pid 819 (launchd job ${LOGIN})`]);
+  const gone = withJob(ps([[99, 1, '10:00', '/usr/sbin/cfprefsd']]), null);
+  assert.equal(orphansAfterQuit(gone, loginConfig, BUNDLE, { loginService: true }).length, 0);
+  assert.deepEqual(supervisedSurvivors(gone, loginConfig, BUNDLE), []);
+});
+
+test('a reading the VM base cannot take is NOT MEASURED, not pass or fail', async () => {
+  const { readingStep, READINGS } = await import('./helper-readings.mjs');
+  const r = READINGS.find((x) => x.id === 'lifespan-smart');
+  const s = await readingStep(r, 'linux', { openPage: async () => true, text: async () => 'Lifespan /usr/sbin/smartctl is not installed' });
+  assert.equal(s.status, 'not-measured');
+  assert.equal(s.summary, 'not measured: smartmontools missing in base');
+  assert.equal((await readingStep(r, 'linux', { openPage: async () => true, text: async () => 'Lifespan SSD 99%' })).status, 'pass');
+  assert.match(renderResult({ app: 'Dyno', steps: [s] }), /NOT MEASURED/);
 });

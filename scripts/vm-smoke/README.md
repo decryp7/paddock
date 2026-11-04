@@ -70,7 +70,7 @@ window; no check is "sleep, then look".
 `apps/<app>/vm-smoke.json` lists what the app may start. `processes[]`: `name` (the file in `Contents/MacOS`), `role` (`app` or
 `helper`), `max` (default 1), `min` (default 1; 0 for helpers started on demand), `parents` (`app`, and `launchd` for a helper
 that a login item may start), `argsPattern` (a regex on the arguments, so the check's own CLI calls such as `dyno-agent status`
-are not counted). `stateFiles[]`: a discovery file (`path`, `helper`, `jsonPidField`, `removedAfterQuit`). Also `ready`,
+are not counted). `stateFiles[]`: a discovery file (`path`, `helper`, `jsonPidField`, `removedAfterQuit`; not required while the login service is on). A process may name a `loginJob`: the launchd job of the login item, whose agent shows in `ps` as a bare `dyno-agent run`; it is identified by `launchctl print` (the pid) and is expected to survive Quit while the login service is on (`loginService.defaultOn`, true since Dyno 1.1.0). Also `ready`,
 `loginService`, `quit.appleScriptName`, `updateHost`, `readyTimeoutSec`, `settleSec`, `logs`. Adding a helper to an app means
 adding it here; `scripts/vm-smoke/judge.test.mjs` checks the shape.
 
