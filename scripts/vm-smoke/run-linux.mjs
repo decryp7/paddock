@@ -141,18 +141,25 @@ async function main(argv) {
     let offPrompt = false;
     for (let i = 0; i < 15 && !offPrompt; i++) { await sleep(2000); offPrompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
     if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
-    let gone = false;
-    for (let i = 0; i < 25 && !gone; i++) { await sleep(3000); gone = g('systemctl is-active dyno-helper.service; test -e /var/lib/dyno-helper && echo present || echo gone').stdout.includes('gone'); }
-    checks.push({ ok: gone, detail: gone ? 'the helper service and data folder are gone' : 'the helper is still installed 75 s after Turn off' });
+    // "Installed" = the unit file is there or the service is active. A leftover data folder is its own line, with what is in it.
+    const installed = () => g('if [ -e /usr/lib/systemd/system/dyno-helper.service ] || systemctl is-active --quiet dyno-helper.service; then echo installed; else echo removed; fi').stdout.trim();
+    let state = installed();
+    for (let i = 0; i < 25 && state !== 'removed'; i++) { await sleep(3000); state = installed(); }
+    checks.push({ ok: state === 'removed', detail: state === 'removed' ? 'the unit file is gone and the service is not active' : 'the unit file or an active service is still there 75 s after Turn off' });
+    const folder = g('sudo ls -la /var/lib/dyno-helper 2>&1').stdout.trim();
+    const folderGone = /No such file or directory/.test(folder);
+    checks.push({ ok: folderGone, detail: folderGone ? 'the helper data folder is gone' : 'the helper data folder /var/lib/dyno-helper is left in place after Turn off' });
     const why = g('echo "pkexec: $(pgrep -x pkexec || echo none)"; echo "service: $(systemctl is-active dyno-helper.service)"; ls -ld /var/lib/dyno-helper 2>&1; sudo journalctl -u dyno-helper.service --no-pager 2>&1 | tail -5').stdout.trim();
     const card = atspi('tree dyno 60').stdout.split('\n').map((l) => l.trim()).filter((l) => /administrator|Turn|helper|polkit|authenticate|not allowed|cancel/i.test(l)).slice(0, 8);
-    push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), ...card], 'service and data removed'));
+    push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), '$ sudo ls -la /var/lib/dyno-helper', ...folder.split('\n'), ...card], 'service and data removed'));
 
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit$', 'menu item'); await sleep(8000);
-    const leftList = g('ps -eo pid=,ppid=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim();
+    // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
+    let leftList = '';
+    for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim(); if (!leftList) break; await sleep(2000); }
     const leftN = leftList ? leftList.split('\n').length : 0;
-    push(result('Quit (File > Quit) leaves nothing running', [{ ok: leftN === 0, detail: `${leftN} Dyno process(es) after Quit` }], leftList.split('\n'), 'no process left'));
+    push(result('Quit (File > Quit) leaves nothing running', [{ ok: leftN === 0, detail: leftN === 0 ? 'no Dyno process 40 s after Quit' : `${leftN} Dyno process(es) still running 40 s after Quit (pid ppid seconds args below)` }], leftList ? ['pid ppid age-s args', ...leftList.split('\n')] : [], 'no process left'));
 
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();
