@@ -16,7 +16,7 @@ anywhere.
 
 ## The apps
 
-All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
+All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). Scrutineer, a tool rather than an app, is listed in the same table. The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
 | App&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | What it does | Status |
 |---|---|---|
@@ -28,8 +28,7 @@ All seven live in this repository under [`apps/`](apps/); Recce, the eighth, is 
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
 | <img src="docs/images/src/icons/recce-placeholder.svg?v=927fe524" width="40" height="40" align="absmiddle" alt=""> **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (placeholder page, draft plan) |
-
-Planned tool: <img src="docs/images/src/icons/scrutineer-placeholder.svg?v=0009a2de" width="40" height="40" align="absmiddle" alt=""> **[Scrutineer](tools/scrutineer/README.md)** generates, signs, verifies and installs code-signing certificates (placeholder page; plan: branch `docs/code-signing-plan`). Pitwall 1.1 is planned as the first release signed through it.
+| <img src="docs/images/src/icons/scrutineer-placeholder.svg?v=0009a2de" width="40" height="40" align="absmiddle" alt=""> **[Scrutineer](tools/scrutineer/README.md)** | A tool, not an app: generates, signs, verifies and installs your own code-signing certificates, so your apps show you as the publisher. Pitwall 1.1 is planned as the first release signed through it. | Planned (placeholder page, draft plan) |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
