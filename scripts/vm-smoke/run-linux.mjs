@@ -158,7 +158,11 @@ async function main(argv) {
       const ext = g('gnome-extensions list --enabled 2>&1 | grep -i -E "appindicator|tray" || echo "no appindicator extension enabled"').stdout.trim();
       const bar = atspi('tree gnome-shell 14 2>&1 | grep -i dyno | head -6').stdout.trim();
       steps.push(result('Restart check: tray icons on GNOME after the reboot', [{ ok: true, detail: `indicator support: ${ext}` }, { ok: /dyno/i.test(bar), detail: /dyno/i.test(bar) ? 'a Dyno indicator exists in the GNOME top bar' : 'no Dyno indicator in the GNOME top bar (GNOME shows tray icons only with an AppIndicator extension)' }], [ext, bar], 'recorded'));
-      if (!autostarted) { ses('systemd-run --user --collect --unit=dyno-gui2 -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1'); await sleep(30_000); }
+      if (!autostarted) {
+        ses('systemd-run --user --collect --unit=dyno-gui2 -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1');
+        for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000);
+        await sleep(15_000);
+      }
       const cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim();
       press('^Processes$', 'link'); await sleep(4000);
       const procPage = atspi('tree dyno 80').stdout;
