@@ -644,3 +644,18 @@ and nothing it can make decides anything**:
   account's network authentication to a server the user names (SMB), and nothing else: the opened handle is still checked to be
   a regular file on a local fixed disk before a byte is read, and the copy is verified on the protected copy. Opening component
   by component would close it and is not done now.
+
+### §2/§4.3 (what the include does with `paddock-setup.exe`): additions
+
+- `apply-update` runs from `$INSTDIR\paddock-setup.exe`, and the installer's own file copy silently fails to overwrite a file
+  that is still running. `apply-update` therefore does nothing after the hand-over except release its handles, log and exit; the
+  installer's copy comes only after its stop step. The skipped copy is detectable: the per-app build sets the program's
+  `FileVersion` to the app version, so the installer (after its copy) and the app (at the next start) compare
+  `FileVersion` of `$INSTDIR\paddock-setup.exe` with the version they expect and report a mismatch in the details, in
+  `setup.log` and as a Health line.
+- `stop-all` never ends its own parent chain (a parent that started before its child), so the waiting `apply-update` is safe
+  from it.
+- `hold-installing [--dir "$INSTDIR"]` is started with `Exec` first thing in `PREINSTALL` and `PREUNINSTALL`, its exit code
+  is ignored and nothing waits for it. Exclusion does not depend on an acknowledgement: `apply-update` waits for the hold, and a
+  hand-started install is excluded by the private lock itself. A hand-started install resets (or makes) the app's signal,
+  which is harmless because the signal decides nothing.
