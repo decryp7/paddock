@@ -89,6 +89,8 @@ async function main(argv) {
     const exe = o.installer ? resolve(o.installer) : await download(o.run, 'dyno-Windows', scratch);
     if (!existsSync(exe)) throw new Error(`${exe} is not a file`);
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
+    // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
+    if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
     started = true;
     log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
     if (o.vnc) {
