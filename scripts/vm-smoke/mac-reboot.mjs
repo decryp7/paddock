@@ -53,9 +53,14 @@ export function macRebootCheck({ waitReady }) {
       { ok: /state = running/.test(post.join('\n')), detail: `helper after the restart: ${post.find((l) => /state =/.test(l))?.trim() ?? 'not loaded'}` },
       { ok: autostart, detail: autostart ? 'Dyno started by itself after login (SMAppService login item)' : 'Dyno did not start by itself after login' },
     ], ['--- Dyno processes (pid etime lstart)', ...procs.split('\n'), '--- login/boot', ...login.split('\n'), '--- helper', ...post], 'helper running, Dyno autostarted'));
-    const win = (await g.exec('/usr/local/bin/axdrive windows')).stdout.split('\n').filter((l) => /net\.decryptology\.dyno\.menubar/.test(l));
-    steps.push(result('Restart check: menu-bar icons after the restart', [{ ok: win.length > 0, detail: `${win.length} Dyno menu-bar item(s) after the restart` }], win, 'menu-bar items present'));
-    if (!autostart) { await g.exec('open -a /Applications/Dyno.app'); await sleep(25_000); }
+    // The menu-bar items: poll up to 90 s after the autostart and say how long they took.
+    const startedAt = Date.now();
+    let win = [];
+    for (let i = 0; i < 30 && !win.length; i++) { win = (await g.exec('/usr/local/bin/axdrive windows')).stdout.split('\n').filter((l) => /net\.decryptology\.dyno\.menubar/.test(l)); if (!win.length) await sleep(3000); }
+    const took = Math.round((Date.now() - startedAt) / 1000);
+    steps.push(result('Restart check: menu-bar icons after the restart', [{ ok: win.length > 0, detail: win.length ? `${win.length} Dyno menu-bar item(s) after the restart (appeared ${took} s after the check began, about 1 min after the autostart)` : 'no Dyno menu-bar item 90 s after the autostart' }], win, 'menu-bar items present'));
+    // An autostarted Dyno may be hidden in the tray: bring its window up the way a click on the Dock or the menu bar does.
+    await g.exec('open -a /Applications/Dyno.app'); await sleep(20_000);
     await gui.closeSettings();
     const opened = await gui.press(gui.app, '^Processes$', 'AXLink');
     await sleep(4000);
