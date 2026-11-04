@@ -1234,3 +1234,48 @@ Full Disk Access for the runner does not help, because the denied process is not
 belongs to the responsible process, not the parent):** keep the work folder and caches on the external disk if wanted, but put
 each job's `TMPDIR` on the internal disk (`job-tmpdir.sh` now does so on macOS when `diskutil info -plist` says Internal=false),
 and a check that finds empty output from a launchd job prints `launchctl print` and the exit state before it guesses a cause.
+
+## OS registrations passed against fakes and failed on the real OS (2026-11-04, Dyno 1.1.0; ADR 0054)
+
+On the Windows VM (installer from CI run 7521) the helper service crashed 21 s after install (events 7045, 7034) and did not
+exist after a restart; start at login said on while the `Run` key held no Dyno value. On the GNOME VM (CI run 7528) start at
+login started nothing, and "Turn off administrator readings" reported done while the packaged unit in
+`/usr/lib/systemd/system` stayed enabled and active. The tray's `NIM_MODIFY` lacked `NIF_GUID` and the shell refused it
+(`ae396138c`). Every adapter was unit-tested against a fake that keeps what it is given. **Lesson (class: a registration is
+proved only by the OS reading it back, across restarts, other users, updates and removal):** every OS registration reads back
+what it wrote and the UI shows that observed state, and each one has a lifecycle row on a VM per OS before a release
+(ADR 0054 §1, proposed rule 68).
+
+## A service's fatal error went nowhere (2026-11-04, Dyno helper; ADR 0054)
+
+`winsvc.rs` ran the helper as `let _ = serve_until_stopped();` and reduced `serve()`'s error to exit code 1, so Event Viewer
+said only "terminated unexpectedly". The helper's file log is deferred until its folders are verified (`fc140fc6f`), and a
+Windows service's standard error is not kept, so a refusal at start left no trace. `let _ = icon.set_tooltip(..)` hid the
+refused tray modify, and the autostart plugin's silent success hid that nothing was registered. **Lesson (class: errors
+dropped where code meets the OS):** at an OS edge an error is returned, carried into the observed state or logged, never
+dropped, and a service writes its fatal error to the OS's own log from its first line (ADR 0054 §2, proposed rule 69).
+
+## Fakes that drift or decide (2026-11-04, Dyno; ADR 0054)
+
+A fake trust port rooted at `/` ran in tests on Windows and was gated to Unix (`74803654f`) instead of being made OS-native;
+the helper test rig re-implemented the helper's authorisation (`deb7db7d6` made it call the real `auth::authorize`); the mock
+copied the engine's number-support strings until a golden written by the engine's own test replaced them. **Lesson (class: a
+double is a second implementation unless a contract binds it):** every double passes the port's contract suite, which also runs
+against the real adapter on each OS, and a double stores, replays or delegates but never decides (ADR 0054 §3, proposed rule 70).
+
+## Two failing-first claims had not been run (2026-11-04, Dyno; ADR 0054)
+
+`74e57f519` and `b8628bc21` claimed red runs for UI specs and a Rust test that were never run (corrected by `77bf0b5ae`), and
+`13bf96710` claimed red against `Live` without a run (corrected by `357b6704c`). A free-text trailer cannot tell a run from an
+intention. **Lesson (class: a claim about a run must point at the run):** the trailer names the red state (a commit, or a commit
+plus a patch) and where its log is kept, `./dev red` makes both, and a nightly sample re-runs claims (ADR 0054 §4, rule 5
+amendment).
+
+## A shared row fixed one platform at a time (2026-11-04, widget chooser; ADR 0054)
+
+The tray "label over value" row of the shared widget chooser took four rounds in one afternoon (`5670221aa`, `4d56051c3`,
+`c896717b9`, `c927c9add`, then `78b230db2`): each fix was judged on the platform in front of the author, and the container query
+measured the whole chooser, so with a preview column the rows used the wide layout. **Lesson (class: layout that depends on a
+platform capability, a width and a variant):** the platform difference reaches the component as a capability value, and a
+declared matrix of every capability, width and variant runs the shared layout checks on every change (ADR 0054 §5, proposed
+rule 71).
