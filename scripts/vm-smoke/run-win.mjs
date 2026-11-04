@@ -12,13 +12,17 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderResult } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
+import { copyFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const VMDIR = process.env.PADDOCK_WIN_VM_DIR ?? '/Volumes/d7sst7/vms/paddock-win11-test';
 const SNAPSHOT = 'gui-session-tools';
+const VMX = process.env.PADDOCK_WIN_VMX ?? '/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx';
+export const VNC_PORT = 5995;
 const GUEST = 'C:\\paddock-test\\vmcheck';
+const VNC_PW = process.env.PADDOCK_VNC_PW ?? Math.random().toString(36).slice(2, 10); // a per-run password, never printed
 const log = (m) => console.error(`vm-smoke(win): ${m}`);
 
 export function parseArgs(argv) {
@@ -26,7 +30,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Windows suite');
@@ -66,11 +70,13 @@ async function main(argv) {
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-win-'));
   let started = false;
+  let vmxBackup = null;
   const cleanup = () => {
     if (started && o.keep) log('--keep: the VM is left running with Dyno up (CDP port 9222 in the guest); revert it with: vm-win.sh stop; vm-win.sh revert gui-session-tools');
     else if (started) {
       log(`reverting the VM to ${SNAPSHOT}`);
       vm(['stop'], 200_000);
+      if (vmxBackup && existsSync(vmxBackup)) { copyFileSync(vmxBackup, VMX); log('vmx restored from its backup'); }
       vm(['revert', SNAPSHOT], 300_000);
     }
     rmSync(scratch, { recursive: true, force: true });
@@ -82,6 +88,15 @@ async function main(argv) {
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
     started = true;
     log('revert to the snapshot'); if (vm(['revert', SNAPSHOT], 300_000).code !== 0) throw new Error(`revert to ${SNAPSHOT} failed`);
+    if (o.vnc) {
+      // VNC for the UAC consent (secure desktop). Only between revert and start; the vmx is backed up first and restored after every run.
+      vmxBackup = join(scratch, 'paddock-win11-test.vmx.bak');
+      copyFileSync(VMX, vmxBackup);
+      vm(['stop'], 200_000);
+      const text = readFileSync(VMX, 'utf8').split('\n').filter((l) => !/^RemoteDisplay\.vnc\./.test(l)).join('\n');
+      writeFileSync(VMX, `${text.trimEnd()}\nRemoteDisplay.vnc.enabled = "TRUE"\nRemoteDisplay.vnc.port = "${VNC_PORT}"\nRemoteDisplay.vnc.password = "${VNC_PW}"\n`);
+      log(`vmx: VNC on port ${VNC_PORT} for this run (backup kept until the end)`);
+    }
     log('start (bounded 10 min)'); if (vm(['start'], 600_000).code !== 0) throw new Error('the VM did not start or SSH did not answer');
     const ip = vm(['ip'], 30_000).stdout.trim().split('\n')[0];
     log(`guest ${ip}; waiting for the console session (bounded 6 min)`);
