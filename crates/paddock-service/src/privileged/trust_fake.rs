@@ -120,21 +120,23 @@ impl TrustPort for FakePort {
         }
         Ok(aside)
     }
-    fn sweep_aside(&mut self, parent: &str, keep: usize) -> io::Result<Vec<String>> {
-        self.calls.push(format!("sweep_aside {parent} {keep}"));
+    fn sweep_aside(&mut self, parent: &str, name: &str, keep: usize) -> io::Result<Vec<String>> {
+        self.calls
+            .push(format!("sweep_aside {parent} {name} {keep}"));
         let pkey = self.key(parent);
         let sep = self.sep();
-        let prefix = format!("{pkey}{sep}");
+        let prefix = format!("{pkey}{sep}{}.untrusted-", name.to_lowercase());
         let mut asides: Vec<(u64, String)> = self
             .nodes
-            .keys()
-            .filter_map(|k| {
+            .iter()
+            .filter_map(|(k, node)| {
                 let rest = k.strip_prefix(&prefix)?;
-                if rest.contains(sep) {
-                    return None;
-                }
-                let n = rest.rsplit_once(".untrusted-")?.1.parse().ok()?;
-                Some((n, k.clone()))
+                let n: u64 = rest.parse().ok()?;
+                let trusted = match &node.security {
+                    Security::Windows(d) => is_trusted_sid(&d.owner),
+                    Security::Unix { owner, .. } => *owner == 0,
+                };
+                (node.kind == FileKind::Dir && trusted).then(|| (n, k.clone()))
             })
             .collect();
         asides.sort_by_key(|a| std::cmp::Reverse(a.0));

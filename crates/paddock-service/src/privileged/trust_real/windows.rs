@@ -72,8 +72,8 @@ impl TrustPort for RealTrust {
         rename_aside_free(path)
     }
 
-    fn sweep_aside(&mut self, parent: &str, keep: usize) -> io::Result<Vec<String>> {
-        sweep_aside_free(parent, keep)
+    fn sweep_aside(&mut self, parent: &str, name: &str, keep: usize) -> io::Result<Vec<String>> {
+        sweep_aside_free(self, parent, name, keep)
     }
 
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
@@ -89,12 +89,13 @@ mod win {
     use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
     use windows::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-        GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
+        GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows::Win32::Security::{
         ACL, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorDacl,
         GetSecurityDescriptorOwner, OWNER_SECURITY_INFORMATION,
         PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+        SetKernelObjectSecurity,
     };
     use windows::Win32::Storage::FileSystem::CreateDirectoryW;
     use windows::core::{BOOL, PCWSTR};
@@ -161,6 +162,16 @@ mod win {
     /// Applies the protected DACL and, when the owner is not SYSTEM or Administrators, Administrators as owner, to the folder
     /// by a handle opened without following a link, after checking that it is a real folder.
     pub fn lock_dir(path: &str) -> io::Result<()> {
+        lock_dir_with(path, true)
+    }
+
+    /// [`lock_dir`], with the owner change optional (a test without the right to give an owner locks the DACL only).
+    ///
+    /// The security is set on this one folder by `SetKernelObjectSecurity` (`NtSetSecurityObject`), **not** by
+    /// `SetSecurityInfo`, which propagates the inheritable entries to every child: a file a user hard-linked into the
+    /// folder (one they could not write) would have its security rewritten with the folder's (CVE-2019-0841). The children
+    /// are not changed here; `verify_tree` finds one that is not as it should be.
+    pub fn lock_dir_with(path: &str, may_set_owner: bool) -> io::Result<()> {
         use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
         const READ_CONTROL: u32 = 0x0002_0000;
         const WRITE_DAC: u32 = 0x0004_0000;
@@ -193,25 +204,15 @@ mod win {
                 .map_err(|e| io::Error::other(e.to_string()))?;
         }
         let mut what = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
-        let set_owner = !is_trusted_sid(&current.owner);
+        let set_owner = may_set_owner && !is_trusted_sid(&current.owner);
         if set_owner {
             what |= OWNER_SECURITY_INFORMATION;
         }
-        // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER for the whole call; owner and dacl point into `sd`.
-        let status = unsafe {
-            SetSecurityInfo(
-                HANDLE(file.as_raw_handle()),
-                SE_FILE_OBJECT,
-                what,
-                set_owner.then_some(owner),
-                None,
-                Some(dacl),
-                None,
-            )
-        };
-        if status.0 != 0 {
-            return Err(io::Error::from_raw_os_error(status.0 as i32));
-        }
+        let _ = (owner, dacl, present);
+        // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER for the whole call; `sd` is a valid self-relative
+        // descriptor (owner, protected DACL) that outlives it.
+        unsafe { SetKernelObjectSecurity(HANDLE(file.as_raw_handle()), what, sd.0) }
+            .map_err(|e| io::Error::from_raw_os_error(e.code().0 & 0xffff))?;
         Ok(())
     }
 
@@ -501,16 +502,49 @@ mod windows_tests {
     }
 
     #[test]
-    fn sweep_aside_keeps_the_newest_and_removes_a_junction_without_its_target() {
+    fn locking_a_folder_changes_that_folder_only_not_a_file_hard_linked_into_it() {
+        // CVE-2019-0841: SetSecurityInfo propagates the folder's inheritable entries to every child, including a file a user
+        // hard-linked in (which is the same file as the original). The lock must change this folder alone.
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("original.txt");
+        std::fs::write(&original, b"x").unwrap();
+        let folder = dir.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::hard_link(&original, folder.join("link.txt")).unwrap();
+        let before = RealTrust.node(&text(&original)).unwrap().unwrap();
+        win::lock_dir_with(&text(&folder), false).unwrap();
+        let after = RealTrust.node(&text(&original)).unwrap().unwrap();
+        assert_eq!(before, after, "the hard-linked file keeps its own security");
+        let Security::Windows(d) = RealTrust.node(&text(&folder)).unwrap().unwrap().security else {
+            panic!()
+        };
+        assert_eq!(d.dacl.unwrap().len(), 3, "the folder itself is locked");
+    }
+
+    #[test]
+    fn record_whether_a_standard_user_can_hard_link_a_file_they_cannot_write() {
+        // The attack needs a link to a file the user may not write. Recorded, not asserted: an administrator may.
+        let dir = tempfile::tempdir().unwrap();
+        let target = std::path::Path::new("C:\\Windows\\win.ini");
+        let result = std::fs::hard_link(target, dir.path().join("hl.ini"));
+        eprintln!(
+            "HARDLINK_RESULT win.ini -> {}",
+            match &result {
+                Ok(()) => "created (the account can write attributes)".to_string(),
+                Err(e) => format!("refused: {e}"),
+            }
+        );
+    }
+
+    #[test]
+    fn sweep_aside_removes_a_junction_named_like_an_aside_never_its_target() {
         let dir = tempfile::tempdir().unwrap();
         let outside = dir.path().join("outside");
         std::fs::create_dir(&outside).unwrap();
         std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
         let parent = dir.path().join("parent");
         std::fs::create_dir(&parent).unwrap();
-        for name in ["Dyno.untrusted-5-0", "Dyno.untrusted-9-1"] {
-            std::fs::create_dir(parent.join(name)).unwrap();
-        }
+        std::fs::create_dir(parent.join("Dyno.untrusted-5-0")).unwrap();
         let junction = parent.join("Dyno.untrusted-1-0");
         let out = Command::new("cmd")
             .args(["/C", "mklink", "/J", &text(&junction), &text(&outside)])
@@ -521,10 +555,15 @@ mod windows_tests {
             "{}",
             String::from_utf8_lossy(&out.stdout)
         );
-        let mut removed = RealTrust.sweep_aside(&text(&parent), 1).unwrap();
-        removed.sort();
-        assert_eq!(removed, vec!["Dyno.untrusted-1-0", "Dyno.untrusted-5-0"]);
-        assert!(parent.join("Dyno.untrusted-9-1").exists());
+        // A junction that looks like one the helper made is not one: it is left alone (its target too).
+        let removed = super::super::tests::Trusting(RealTrust)
+            .sweep_aside(&text(&parent), "Dyno", 0)
+            .unwrap();
+        assert_eq!(removed, vec!["Dyno.untrusted-5-0"]);
+        assert!(
+            std::fs::symlink_metadata(&junction).is_ok(),
+            "a link is never swept"
+        );
         assert!(outside.join("keep.txt").exists());
     }
 

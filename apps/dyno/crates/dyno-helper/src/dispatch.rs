@@ -61,6 +61,8 @@ pub struct Dispatcher {
     audit: AuditLog,
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
     on_uninstall: Box<dyn Fn() + Send + Sync>,
+    /// Set when the helper has been asked to remove itself: it answers nothing more (and audits nothing more).
+    closed: std::sync::atomic::AtomicBool,
     login_items: Box<dyn LoginItemsReader>,
     wakes: Box<dyn WakeScheduler>,
     wol: Box<dyn WolReader>,
@@ -118,6 +120,7 @@ impl Dispatcher {
             audit: parts.audit,
             clock: parts.clock,
             on_uninstall: parts.on_uninstall,
+            closed: std::sync::atomic::AtomicBool::new(false),
             login_items: parts.login_items,
             wakes: parts.wakes,
             wol: parts.wol,
@@ -194,6 +197,12 @@ impl Dispatcher {
 
     /// Answers one request from the caller `ctx` describes.
     pub fn handle_for(&self, ctx: &Ctx, request: HelperRequest) -> Result<HelperReply, RemoteError> {
+        if self.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(RemoteError::new(
+                codes::REFUSED,
+                "The helper is being removed and answers nothing more.",
+            ));
+        }
         let peer = ctx.pid;
         request.validate().map_err(|e| RemoteError::new(codes::REFUSED, e.to_string()))?;
         match request {
@@ -299,6 +308,8 @@ impl Dispatcher {
                         detail: "Asked by the authorised user.".into(),
                     })
                     .map_err(|m| RemoteError::new(codes::FAILED, format!("{m} Nothing was removed.")))?;
+                // From here on the helper answers nothing and writes nothing: the removal that follows owns its folder.
+                self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
                 (self.on_uninstall)();
                 Ok(HelperReply::Bye)
             }
@@ -418,6 +429,11 @@ mod tests {
         Rig { d, gone, _dir: dir }
     }
 
+    /// The audit file as it is on disk (the dispatcher answers nothing once it has been asked to uninstall).
+    fn audit_on_disk(r: &Rig) -> Vec<AuditEntry> {
+        AuditLog::new(r._dir.path().join("audit.jsonl")).tail(50)
+    }
+
     fn audit(r: &Rig) -> Vec<AuditEntry> {
         match r.d.handle(None, HelperRequest::Audit(50)).unwrap() {
             HelperReply::Entries(e) => e,
@@ -490,7 +506,18 @@ mod tests {
         let r = rig(HelperHost::Linux, Ok(vec![]));
         assert_eq!(r.d.handle(Some(5), HelperRequest::Uninstall).unwrap(), HelperReply::Bye);
         assert!(r.gone.load(Ordering::SeqCst));
-        assert!(audit(&r)[0].what.contains("Remove the Dyno helper"));
+        assert!(audit_on_disk(&r)[0].what.contains("Remove the Dyno helper"));
+    }
+
+    #[test]
+    fn once_asked_to_uninstall_the_helper_answers_and_audits_nothing_more() {
+        let r = rig(HelperHost::Linux, Ok(vec![]));
+        assert_eq!(r.d.handle(Some(5), HelperRequest::Uninstall).unwrap(), HelperReply::Bye);
+        let before = audit_on_disk(&r).len();
+        for request in [HelperRequest::Info, HelperRequest::Uninstall, HelperRequest::Firewall] {
+            assert_eq!(r.d.handle(Some(6), request).unwrap_err().code, codes::REFUSED);
+        }
+        assert_eq!(audit_on_disk(&r).len(), before, "nothing is audited after the removal started");
     }
 
     #[test]

@@ -15,7 +15,8 @@ use dyno_core::ports::PlatformError;
 use dyno_platform::runner::{Tool, ToolOutput, ToolRunner};
 use paddock_service::privileged::files::FileKind;
 use paddock_service::privileged::trust::{
-    between, is_within, parent_of, require_same_path, verify_chain, verify_container, verify_tree, Reason, TrustPort, Untrusted,
+    between, child_of, is_within, parent_of, require_same_path, verify_chain, verify_container, verify_tree, Reason, Style, TrustPort,
+    Untrusted,
 };
 use paddock_service::privileged::trust_real::{HeldImage, RealTrust};
 use std::io;
@@ -188,6 +189,8 @@ impl TrustGuard {
         //    repair or install and only refused at start; once it passes, it is locked too, so Users cannot pre-create what
         //    goes in it (a user-made `Helper` next to the helper's own).
         for folder in &between {
+            // The way on towards `dir` is judged on its own (by the next step); the rest of this folder is checked now.
+            let toward = child_of(folder, path, style);
             match port.node(folder).map_err(|e| could_not("examine", &e))? {
                 None => port.create_dir(folder).map_err(|e| could_not("create", &e))?,
                 Some(_) => {
@@ -196,20 +199,20 @@ impl TrustGuard {
                             return Err(Unusable::HelperFolderNotProtected(found));
                         }
                         log::warn!(Dir = folder.as_str(), Found = found.to_string().as_str(); "Helper: a folder on the way is not trusted; moved aside");
-                        let aside = port.rename_aside(folder).map_err(|e| could_not("move aside", &e))?;
-                        log::warn!(Dir = folder.as_str(), Aside = aside.as_str(); "Helper: the untrusted folder was moved aside and is never read");
+                        Self::move_aside(port.as_mut(), folder, style)?;
                         port.create_dir(folder).map_err(|e| could_not("create", &e))?;
-                        if let Some(parent) = parent_of(folder, style) {
-                            match port.sweep_aside(&parent, MAX_ASIDE) {
-                                Ok(gone) if !gone.is_empty() => {
-                                    log::info!(Parent = parent.as_str(), Removed = gone.len(), Kept = MAX_ASIDE; "Helper: older moved-aside folders were removed");
-                                }
-                                Ok(_) => {}
-                                Err(e) => {
-                                    log::warn!(Parent = parent.as_str(), Error = e.to_string().as_str(); "Helper: older moved-aside folders could not be removed");
-                                }
-                            }
+                    } else if let Err(found) = verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE) {
+                        // Locking sets this folder alone; whatever is in it was not changed by that and must be the
+                        // helper's already. A foreign entry (or one whose security is not the helper's) is moved aside
+                        // by a repair or install and only refused at start.
+                        if on_untrusted == OnUntrusted::Refuse {
+                            return Err(Unusable::HelperFolderNotProtected(found));
                         }
+                        let entry = child_of(folder, &found.path, style).ok_or_else(|| could_not("examine", &found.describe()))?;
+                        log::warn!(Dir = folder.as_str(), Entry = entry.as_str(), Found = found.to_string().as_str(); "Helper: a foreign entry in a folder on the way; moved aside");
+                        Self::move_aside(port.as_mut(), &entry, style)?;
+                        verify_tree(port.as_mut(), folder, toward.as_deref(), MAX_TREE)
+                            .map_err(|u| could_not("verify after moving aside", &u.describe()))?;
                     }
                 }
             }
@@ -220,7 +223,7 @@ impl TrustGuard {
             None => port.create_dir(path).map_err(|e| could_not("create", &e))?,
             Some(_) => {
                 let found = verify_chain(port.as_mut(), path, FileKind::Dir, Some(path), false)
-                    .and_then(|()| verify_tree(port.as_mut(), path, MAX_TREE))
+                    .and_then(|()| verify_tree(port.as_mut(), path, None, MAX_TREE))
                     .err();
                 if let Some(found) = found.filter(|f| is_within(&f.path, path, style)) {
                     log::warn!(Dir = path, Found = found.to_string().as_str(), Purge = on_untrusted == OnUntrusted::Purge; "Helper: an existing folder is not protected");
@@ -238,11 +241,38 @@ impl TrustGuard {
         // 4. Owner and DACL on the folder itself, then the whole check.
         port.lock_dir(path).map_err(|e| could_not("lock", &e))?;
         verify_chain(port.as_mut(), path, FileKind::Dir, Some(path), false)
-            .and_then(|()| verify_tree(port.as_mut(), path, MAX_TREE))
+            .and_then(|()| verify_tree(port.as_mut(), path, None, MAX_TREE))
             .map_err(|u| match on_untrusted {
                 OnUntrusted::Refuse => Unusable::HelperFolderNotProtected(u),
                 OnUntrusted::Purge => could_not("verify after the lock", &u.describe()),
             })
+    }
+
+    /// Moves `entry` aside (never read, followed or deleted), makes the moved folder the trusted set's alone so it can be
+    /// swept later, and keeps only the newest [`MAX_ASIDE`] of the helper's own moved-aside folders next to it.
+    fn move_aside(port: &mut dyn TrustPort, entry: &str, style: Style) -> Result<(), Unusable> {
+        let could_not = |what: &str, e: &dyn std::fmt::Display| Unusable::CouldNotLock {
+            path: entry.to_string(),
+            why: format!("{what}: {e}"),
+        };
+        let aside = port.rename_aside(entry).map_err(|e| could_not("move aside", &e))?;
+        log::warn!(Dir = entry, Aside = aside.as_str(); "Helper: the untrusted folder was moved aside and is never read");
+        // Best effort: if the owner cannot be given to the trusted set the folder is simply never swept.
+        if let Err(e) = port.lock_dir(&aside) {
+            log::warn!(Aside = aside.as_str(), Error = e.to_string().as_str(); "Helper: a moved-aside folder could not be locked; it is kept");
+        }
+        if let (Some(parent), Some(name)) = (parent_of(entry, style), entry.rsplit(['\\', '/']).next()) {
+            match port.sweep_aside(&parent, name, MAX_ASIDE) {
+                Ok(gone) if !gone.is_empty() => {
+                    log::info!(Parent = parent.as_str(), Removed = gone.len(), Kept = MAX_ASIDE; "Helper: older moved-aside folders were removed");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!(Parent = parent.as_str(), Error = e.to_string().as_str(); "Helper: older moved-aside folders could not be removed");
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Empties `dir` (links removed, never followed) and locks it again: the staging folder of one install, so what an earlier

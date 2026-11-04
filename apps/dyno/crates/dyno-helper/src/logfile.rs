@@ -15,17 +15,52 @@ const TAIL_WINDOW: u64 = 128 * 1024;
 /// The longest line `tail` returns.
 const MAX_LINE: usize = 400;
 
+/// Opens `path` for appending, creating it (0600 on Unix), never through a link: `O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`,
+/// and the result must be a regular file. Used by the helper log and the audit log.
+pub(crate) fn open_append_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the file is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
 /// What the log and its gate share: whether the file may be written, and the lock an append holds while it writes.
 #[derive(Debug)]
-struct GateState {
+pub(crate) struct GateState {
     /// Until armed (and again once quiesced) the log writes to standard error and touches no file.
-    armed: AtomicBool,
-    lock: Mutex<()>,
+    pub(crate) armed: AtomicBool,
+    pub(crate) lock: Mutex<()>,
+}
+
+impl GateState {
+    pub(crate) fn open() -> Arc<GateState> {
+        Arc::new(GateState {
+            armed: AtomicBool::new(true),
+            lock: Mutex::new(()),
+        })
+    }
 }
 
 /// Lets the deferred log open its file once the data folder is verified, and stops it before the folder is removed.
 #[derive(Debug, Clone)]
-pub struct LogGate(Arc<GateState>);
+pub struct LogGate(pub(crate) Arc<GateState>);
 
 impl LogGate {
     /// From now on the log is written to its file.
@@ -45,9 +80,20 @@ impl LogGate {
 /// The gate of the installed logger, for code that removes the data folder.
 static INSTALLED: OnceLock<LogGate> = OnceLock::new();
 
+/// The gates of the other files the helper writes in the data folder (the audit log), registered by the daemon.
+static EXTRA: Mutex<Vec<LogGate>> = Mutex::new(Vec::new());
+
+/// Adds a gate that [`quiesce_installed`] stops too.
+pub fn register_gate(gate: LogGate) {
+    EXTRA.lock().unwrap_or_else(|p| p.into_inner()).push(gate);
+}
+
 /// Stops the installed logger's file (see [`LogGate::quiesce`]); nothing to do when no file logger is installed.
 pub fn quiesce_installed() {
     if let Some(gate) = INSTALLED.get() {
+        gate.quiesce();
+    }
+    for gate in EXTRA.lock().unwrap_or_else(|p| p.into_inner()).iter() {
         gate.quiesce();
     }
 }
@@ -87,10 +133,7 @@ impl HelperLog {
     pub fn new(path: PathBuf) -> Self {
         HelperLog {
             path,
-            state: Arc::new(GateState {
-                armed: AtomicBool::new(true),
-                lock: Mutex::new(()),
-            }),
+            state: GateState::open(),
             max_bytes: MAX_LOG_BYTES,
             now: unix_now,
         }
@@ -138,27 +181,7 @@ impl HelperLog {
             old.push(".1");
             let _ = std::fs::rename(&self.path, old);
         }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        // Never through a link: the log is opened without following one and must be a regular file.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-            options.custom_flags(OPEN_REPARSE_POINT);
-        }
-        let mut file = options.open(&self.path)?;
-        if !file.metadata()?.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "the log is not a regular file",
-            ));
-        }
+        let mut file = open_append_no_follow(&self.path)?;
         writeln!(file, "{line}")
     }
 }

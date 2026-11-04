@@ -63,6 +63,15 @@ impl TrustPort for RealTrust {
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
             .open(path)?;
+        // As root the folder is made root's too (a moved-aside folder was a user's), so that only the trusted set owns what the
+        // helper keeps; a user who is not root cannot give it away and the owner check refuses the folder instead.
+        if unsafe { libc::geteuid() } == 0 {
+            use std::os::fd::AsRawFd;
+            // SAFETY: `dir` is open; -1 leaves the group as it is.
+            if unsafe { libc::fchown(dir.as_raw_fd(), 0, libc::gid_t::MAX) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
         dir.set_permissions(std::fs::Permissions::from_mode(0o755))
     }
 
@@ -70,8 +79,8 @@ impl TrustPort for RealTrust {
         rename_aside_free(path)
     }
 
-    fn sweep_aside(&mut self, parent: &str, keep: usize) -> io::Result<Vec<String>> {
-        sweep_aside_free(parent, keep)
+    fn sweep_aside(&mut self, parent: &str, name: &str, keep: usize) -> io::Result<Vec<String>> {
+        sweep_aside_free(self, parent, name, keep)
     }
 
     fn remove_tree(&mut self, path: &str) -> io::Result<()> {
@@ -321,48 +330,6 @@ mod unix_tests {
                 .is_symlink()
         );
         assert!(outside.exists());
-    }
-
-    #[test]
-    fn sweep_aside_keeps_the_newest_and_removes_the_rest_without_following_links() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = dir.path().join("outside");
-        std::fs::create_dir(&outside).unwrap();
-        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
-        let parent = dir.path().join("parent");
-        std::fs::create_dir(&parent).unwrap();
-        for name in [
-            "Dyno.untrusted-5-0",
-            "Dyno.untrusted-9-1",
-            "Dyno.untrusted-7-0",
-            "other",
-            "Dyno.untrusted-x-y",
-        ] {
-            std::fs::create_dir(parent.join(name)).unwrap();
-        }
-        symlink(&outside, parent.join("Dyno.untrusted-1-0")).unwrap();
-        let mut port = RealTrust;
-        let mut removed = port.sweep_aside(&text(&parent), 1).unwrap();
-        removed.sort();
-        assert_eq!(
-            removed,
-            vec![
-                "Dyno.untrusted-1-0",
-                "Dyno.untrusted-5-0",
-                "Dyno.untrusted-7-0"
-            ]
-        );
-        assert!(
-            parent.join("Dyno.untrusted-9-1").exists()
-                && parent.join("other").exists()
-                && parent.join("Dyno.untrusted-x-y").exists()
-        );
-        assert!(
-            outside.join("keep.txt").exists(),
-            "a link is removed, never what it points at"
-        );
-        assert!(port.sweep_aside(&text(&parent), 5).unwrap().is_empty());
-        assert!(port.sweep_aside(&text(&parent.join("none")), 1).is_err());
     }
 
     #[test]

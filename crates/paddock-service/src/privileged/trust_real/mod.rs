@@ -72,27 +72,54 @@ fn rename_aside_free(path: &str) -> io::Result<String> {
 }
 
 /// Removes the oldest `<name>.untrusted-<secs>-<n>` entries in `parent` beyond the newest `keep` (see [`rename_aside_free`]),
-/// never following a link, and returns the names removed.
-fn sweep_aside_free(parent: &str, keep: usize) -> io::Result<Vec<String>> {
+/// never following a link, and returns the names removed. Only an entry whose name is exactly that (digits only), that is a
+/// real folder and not a link, and whose owner SYSTEM, Administrators or root holds, is touched: a folder a user made with a
+/// similar name, or a link, stays.
+fn sweep_aside_free(
+    port: &mut dyn TrustPort,
+    parent: &str,
+    name: &str,
+    keep: usize,
+) -> io::Result<Vec<String>> {
+    use crate::privileged::trust::Security;
+    let prefix = format!("{name}.untrusted-");
+    let sep = if cfg!(windows) { '\\' } else { '/' };
     let mut found: Vec<((u64, u64), String)> = Vec::new();
     for entry in std::fs::read_dir(parent)? {
-        let name = entry?.file_name().to_string_lossy().into_owned();
-        let Some((_, suffix)) = name.rsplit_once(".untrusted-") else {
+        let entry_name = entry?.file_name().to_string_lossy().into_owned();
+        let Some(suffix) = entry_name.strip_prefix(&prefix) else {
             continue;
         };
         let Some((secs, n)) = suffix.split_once('-') else {
             continue;
         };
-        if let (Ok(secs), Ok(n)) = (secs.parse(), n.parse()) {
-            found.push(((secs, n), name));
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !digits(secs) || !digits(n) {
+            continue;
+        }
+        let (Ok(secs), Ok(n)) = (secs.parse(), n.parse()) else {
+            continue;
+        };
+        let path = format!("{}{sep}{entry_name}", parent.trim_end_matches(sep));
+        let Some(node) = port.node(&path)? else {
+            continue;
+        };
+        let trusted = match &node.security {
+            Security::Windows(d) => crate::privileged::trust::is_trusted_sid(&d.owner),
+            Security::Unix { owner, .. } => *owner == 0,
+        };
+        if node.kind == FileKind::Dir && trusted {
+            found.push(((secs, n), entry_name));
         }
     }
     found.sort_by_key(|f| std::cmp::Reverse(f.0));
     let mut removed = Vec::new();
-    for (_, name) in found.into_iter().skip(keep) {
-        let sep = if cfg!(windows) { '\\' } else { '/' };
-        remove_tree_no_follow(&format!("{}{sep}{name}", parent.trim_end_matches(sep)))?;
-        removed.push(name);
+    for (_, entry_name) in found.into_iter().skip(keep) {
+        remove_tree_no_follow(&format!(
+            "{}{sep}{entry_name}",
+            parent.trim_end_matches(sep)
+        ))?;
+        removed.push(entry_name);
     }
     Ok(removed)
 }
@@ -153,5 +180,153 @@ impl HeldImage {
     /// What to run: the final path, or the descriptor's `/proc` path on Linux.
     pub fn spawn_path(&self) -> &str {
         &self.spawn_path
+    }
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use crate::privileged::trust::Security;
+
+    /// The real port, reporting every owner as the trusted one (the tests cannot make root-owned or Administrators-owned
+    /// folders): for the tests of the sweep.
+    pub(super) struct Trusting(pub RealTrust);
+
+    impl TrustPort for Trusting {
+        fn style(&self) -> Style {
+            self.0.style()
+        }
+        fn node(&mut self, path: &str) -> io::Result<Option<Node>> {
+            Ok(self.0.node(path)?.map(|mut n| {
+                n.security = match n.security {
+                    Security::Unix {
+                        mode, write_acl, ..
+                    } => Security::Unix {
+                        owner: 0,
+                        mode,
+                        write_acl,
+                    },
+                    Security::Windows(mut d) => {
+                        d.owner = crate::privileged::trust::SID_ADMINISTRATORS.into();
+                        Security::Windows(d)
+                    }
+                };
+                n
+            }))
+        }
+        fn canonical(&mut self, p: &str) -> io::Result<String> {
+            self.0.canonical(p)
+        }
+        fn walk(&mut self, p: &str, l: usize) -> io::Result<Vec<(String, Node)>> {
+            self.0.walk(p, l)
+        }
+        fn create_dir(&mut self, p: &str) -> io::Result<()> {
+            self.0.create_dir(p)
+        }
+        fn lock_dir(&mut self, p: &str) -> io::Result<()> {
+            self.0.lock_dir(p)
+        }
+        fn rename_aside(&mut self, p: &str) -> io::Result<String> {
+            self.0.rename_aside(p)
+        }
+        fn sweep_aside(
+            &mut self,
+            parent: &str,
+            name: &str,
+            keep: usize,
+        ) -> io::Result<Vec<String>> {
+            sweep_aside_free(self, parent, name, keep)
+        }
+        fn remove_tree(&mut self, p: &str) -> io::Result<()> {
+            self.0.remove_tree(p)
+        }
+    }
+
+    fn text(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn sweep_aside_matches_only_the_exact_name_prefix_and_real_folders_and_keeps_the_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        std::fs::create_dir(&parent).unwrap();
+        for name in [
+            "Dyno.untrusted-5-0",
+            "Dyno.untrusted-9-1",
+            "Dyno.untrusted-7-0",
+            // Not the helper's names: another folder's prefix, no numbers, extra characters, a different case of the name.
+            "Other.untrusted-1-0",
+            "Dyno.untrusted-x-y",
+            "Dyno.untrusted-1-2-3",
+            "Dyno.untrusted-",
+            "xDyno.untrusted-2-0",
+            "other",
+        ] {
+            std::fs::create_dir(parent.join(name)).unwrap();
+        }
+        // A file with the right name is not a folder.
+        std::fs::write(parent.join("Dyno.untrusted-3-0"), b"file").unwrap();
+        let mut port = Trusting(RealTrust);
+        let mut removed = port.sweep_aside(&text(&parent), "Dyno", 1).unwrap();
+        removed.sort();
+        assert_eq!(removed, vec!["Dyno.untrusted-5-0", "Dyno.untrusted-7-0"]);
+        for kept in [
+            "Dyno.untrusted-9-1",
+            "Other.untrusted-1-0",
+            "Dyno.untrusted-x-y",
+            "Dyno.untrusted-1-2-3",
+            "Dyno.untrusted-",
+            "xDyno.untrusted-2-0",
+            "other",
+            "Dyno.untrusted-3-0",
+        ] {
+            assert!(
+                parent.join(kept).exists(),
+                "{kept} is not the helper's and stays"
+            );
+        }
+        assert!(
+            port.sweep_aside(&text(&parent), "Dyno", 5)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            port.sweep_aside(&text(&parent.join("none")), "Dyno", 1)
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sweep_aside_never_follows_or_removes_a_link_and_skips_what_an_untrusted_user_owns() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        let parent = dir.path().join("parent");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::create_dir(parent.join("Dyno.untrusted-9-0")).unwrap();
+        std::os::unix::fs::symlink(&outside, parent.join("Dyno.untrusted-1-0")).unwrap();
+        let removed = Trusting(RealTrust)
+            .sweep_aside(&text(&parent), "Dyno", 0)
+            .unwrap();
+        assert_eq!(removed, vec!["Dyno.untrusted-9-0"]);
+        assert!(
+            std::fs::symlink_metadata(parent.join("Dyno.untrusted-1-0")).is_ok(),
+            "the link stays"
+        );
+        assert!(outside.join("keep.txt").exists());
+        // Owned by the user running the test (not root): not the helper's, so not touched.
+        if unsafe { libc::getuid() } != 0 {
+            std::fs::create_dir(parent.join("Dyno.untrusted-4-0")).unwrap();
+            assert!(
+                RealTrust
+                    .sweep_aside(&text(&parent), "Dyno", 0)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(parent.join("Dyno.untrusted-4-0").exists());
+        }
     }
 }
