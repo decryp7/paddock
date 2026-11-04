@@ -31,6 +31,12 @@ export class WidgetChoicesStore {
     return this.loading;
   }
 
+  /** Reads the choices again (the tray's capabilities follow the taskbar's scaling); the old ones stay until the new arrive. */
+  reload(): Promise<void> {
+    this.loading = null;
+    return this.load();
+  }
+
   /** A valid widget of `kind` with default options. Only called once the choices are read (the choosers wait for `ready`). */
   dashboardDefault(kind: DashboardKind): DashboardWidget {
     const found = this._choices()?.dashboard.find((k) => k.kind === kind);

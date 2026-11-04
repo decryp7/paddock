@@ -720,8 +720,22 @@ function accepted(kind: DashboardKind): Metric[] {
   return METRIC_TITLES.map(([m]) => m);
 }
 
+/** What the tray draws of a number item (the engine's `number_support`, imitated: macOS has both formats; Windows and Linux one, with the label only from 22 px). */
+export function mockNumberSupport(os: 'macos' | 'windows' | 'linux', px: number): WidgetChoices['number'] {
+  if (os === 'macos') return { formats: ['stacked', 'line'], labelInIcon: true, fixed: null, note: null };
+  const label = px >= 22;
+  return {
+    formats: ['stacked'],
+    labelInIcon: label,
+    fixed: label ? 'Label over value' : 'Value only (label in the tooltip)',
+    note: label
+      ? 'Here, tray icons have one number layout: the label over the value. The label is also in the tooltip.'
+      : `Here, tray icons are ${px} px, too small for a label above the number. The label shows in the tooltip; with display scaling at 150 % or more there is room for it.`,
+  };
+}
+
 /** What the choosers offer (the engine's `widget_choices`, imitated). */
-export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = { formats: ['stacked', 'line'], labelInIcon: true, note: null }): WidgetChoices {
+export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockNumberSupport('macos', 18)): WidgetChoices {
   const title = (m: Metric) => METRIC_TITLES.find(([x]) => x === m)?.[1] ?? String(m);
   const choice = (metric: Metric) => ({ metric, title: title(metric) });
   return {

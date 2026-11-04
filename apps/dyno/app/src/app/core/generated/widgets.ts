@@ -789,6 +789,11 @@ formats: Array<NumberFormat>,
  */
 labelInIcon: boolean, 
 /**
+ * What the row says when there is no choice of format: the one layout this tray draws, in words ("Value only (label in the
+ * tooltip)"). `None`: the person chooses among `formats`.
+ */
+fixed: string | null, 
+/**
  * Why a format or the label is missing, in one sentence for the Settings page; `None` when everything is drawn.
  */
 note: string | null, };

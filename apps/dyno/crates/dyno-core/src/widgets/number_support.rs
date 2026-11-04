@@ -38,6 +38,9 @@ pub struct NumberSupport {
     pub formats: Vec<NumberFormat>,
     /// Whether the label is drawn in the icon (it is always in the tooltip).
     pub label_in_icon: bool,
+    /// What the row says when there is no choice of format: the one layout this tray draws, in words ("Value only (label in the
+    /// tooltip)"). `None`: the person chooses among `formats`.
+    pub fixed: Option<String>,
     /// Why a format or the label is missing, in one sentence for the Settings page; `None` when everything is drawn.
     pub note: Option<String>,
 }
@@ -48,6 +51,7 @@ pub fn number_support(platform: TrayPlatform, px: u32) -> NumberSupport {
         TrayPlatform::Mac => NumberSupport {
             formats: vec![NumberFormat::Stacked, NumberFormat::Line],
             label_in_icon: true,
+            fixed: None,
             note: None,
         },
         TrayPlatform::Windows | TrayPlatform::Linux => {
@@ -55,11 +59,18 @@ pub fn number_support(platform: TrayPlatform, px: u32) -> NumberSupport {
             NumberSupport {
                 formats: vec![NumberFormat::Stacked],
                 label_in_icon,
+                fixed: Some(
+                    if label_in_icon {
+                        "Label over value"
+                    } else {
+                        "Value only (label in the tooltip)"
+                    }
+                    .into(),
+                ),
                 note: Some(if label_in_icon {
-                    "Windows and Linux tray icons have one number layout: the label over the value. The label is also in the tooltip."
-                        .into()
+                    "Here, tray icons have one number layout: the label over the value. The label is also in the tooltip.".into()
                 } else {
-                    format!("Tray icons are {px} px here, too small for a label above the number. The label shows in the tooltip; a larger display scaling makes room for it.")
+                    format!("Here, tray icons are {px} px, too small for a label above the number. The label shows in the tooltip; with display scaling at 150 % or more there is room for it.")
                 }),
             }
         }
@@ -115,5 +126,40 @@ mod tests {
             assert_eq!(differs, number_support(TrayPlatform::Windows, px as u32).label_in_icon, "{px}");
             assert_eq!(ink_above, differs, "{px}");
         }
+    }
+
+    #[test]
+    fn a_fixed_layout_says_what_is_drawn_so_the_row_never_contradicts_its_note() {
+        // Mac: a choice, so no fixed text.
+        assert_eq!(number_support(TrayPlatform::Mac, 18).fixed, None);
+        // Small icons: no label in the icon, and the row says so in words.
+        for px in [16, 20] {
+            let s = number_support(TrayPlatform::Windows, px);
+            assert_eq!(s.fixed.as_deref(), Some("Value only (label in the tooltip)"), "{px}");
+            assert!(!s.fixed.unwrap().contains("Label over value"), "{px}");
+        }
+        // Larger icons: the one layout, label over value.
+        for px in [22, 24, 32] {
+            assert_eq!(
+                number_support(TrayPlatform::Windows, px).fixed.as_deref(),
+                Some("Label over value"),
+                "{px}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_notes_name_no_os_and_give_the_scaling_that_makes_room() {
+        for px in [16, 20] {
+            let note = number_support(TrayPlatform::Windows, px).note.unwrap();
+            assert!(note.starts_with("Here, tray icons"), "{note}");
+            assert!(note.contains("150 % or more"), "{note}");
+            assert!(!note.contains("Linux") && !note.contains("Windows"), "{note}");
+        }
+        let big = number_support(TrayPlatform::Windows, 24).note.unwrap();
+        assert!(
+            big.starts_with("Here, tray icons") && !big.contains("Linux") && !big.contains("Windows"),
+            "{big}"
+        );
     }
 }

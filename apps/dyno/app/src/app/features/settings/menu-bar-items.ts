@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdWidgetChooser, PdWidgetOption } from '@decryp7/paddock-ui/widgets';
 import type { Edit, MenuBarItem, MenuBarKind, Metric, NumberFormat, Placement } from '../../core/generated/widgets';
@@ -24,13 +25,13 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
 @Component({
   selector: 'dy-menu-bar-items',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MatFormField, MatLabel, MatInput, PdSelect, PdWidgetChooser, PdWidgetOption],
+  imports: [MatFormField, MatLabel, MatInput, PdSelect, PdStatusGlyph, PdWidgetChooser, PdWidgetOption],
   template: `
     @if (view(); as v) {
       @if (choices.ready()) {
       <p class="sub">What the tray / menu-bar icon draws live. Add up to {{ v.catalogue.surface.maxPlacements }}, drag to reorder. Changes apply at once; Undo is in the message that follows.</p>
       @if (support().note; as why) {
-        <p class="note" role="note">{{ why }}</p>
+        <p class="info" role="note"><pd-status-glyph status="info" [size]="16" />{{ why }}</p>
       }
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
         @for (kind of kinds(); track kind) {
@@ -38,8 +39,12 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
             <pd-select [class.narrow]="kind === 'number'" [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
             @if (kind === 'number') {
               <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
-              <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
-              <pd-select class="format" [panelWidth]="null" [options]="formatOptions()" [disabled]="formatOptions().filter(enabled).length < 2" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
+              <mat-form-field class="short unit"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
+              @if (support().fixed; as fixed) {
+                <span class="format fixed">{{ fixed }}</span>
+              } @else {
+                <pd-select class="format" [panelWidth]="null" [options]="formatOptions()" [value]="format(p)" [ariaLabel]="label('Format', p)" (valueChange)="setFormat(p, $event)" />
+              }
             }
           </ng-template>
         }
@@ -57,13 +62,19 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
   styles: `
     :host { display: block; }
     .short { width: 5rem; flex: none; }
+    .unit { width: 4.5rem; }
     /* A number row also holds its label and unit: the metric picker gives way so the description keeps its width. */
-    .narrow { width: 10rem; flex: none; }
+    .narrow { width: 11.5rem; flex: none; }
     .faint { color: var(--text-3); }
     /* Wide enough for "Label over value" in the trigger and the list, on one line. */
-    .format { width: 11rem; flex: none; }
+    /* Room for "Label over value" and at least 8 px before the caret. */
+    .format { width: 12rem; flex: none; }
+    .fixed { color: var(--text-2); font-size: var(--fs-sm); }
     .sub { color: var(--text-2); font-size: var(--fs-sm); margin-block: 0 var(--sp-3); }
     .note { color: var(--text-2); font-size: var(--fs-sm); margin-block-start: var(--sp-3); }
+    /* The family's info note (as the chooser's limit note): a tinted strip with the info glyph, clear of the list below it. */
+    .info { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-3); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
+    .info pd-status-glyph { color: var(--pd-info); flex: none; }
   `,
 })
 export class MenuBarItems implements OnInit {
@@ -73,14 +84,13 @@ export class MenuBarItems implements OnInit {
   protected readonly view = this.layouts.menuBar;
   /** The type witness of the option templates (`pdWidgetOptionOf`). */
   protected readonly sample: MenuBarItem | null = null;
-  /** The formats, those this platform's tray does not draw marked disabled (the engine says which: `choices.number`). */
+  /** The formats this platform's tray draws (the engine says which: `choices.number`). */
   protected readonly formatOptions = computed<PdSelectOption[]>(() => {
     const drawn = this.choices.choices()?.number.formats ?? [];
-    return FORMAT_OPTIONS.map((o) => ({ ...o, disabled: !drawn.includes(o.value as NumberFormat) }));
+    return FORMAT_OPTIONS.filter((o) => drawn.includes(o.value as NumberFormat));
   });
-  protected readonly enabled = (o: PdSelectOption): boolean => o.disabled !== true;
   /** What the tray draws of a number here, and why anything is missing (from the engine). */
-  protected readonly support = computed(() => this.choices.choices()?.number ?? { formats: [], labelInIcon: true, note: null });
+  protected readonly support = computed(() => this.choices.choices()?.number ?? { formats: [], labelInIcon: true, fixed: null, note: null });
   /** Said once there are more than four items: what each system does with items that do not fit. */
   protected readonly overflowNote =
     'More than four items may not all fit. On a Mac the menu bar hides the items that do not fit, without a sign, when the active app\'s menus need the room or a notch is in the way; the stacked number is the narrowest format. On Windows 11 icons you have not pinned to the taskbar go to the overflow flyout (the chevron); each keeps its place there.';
@@ -90,7 +100,8 @@ export class MenuBarItems implements OnInit {
 
   ngOnInit(): void {
     void this.layouts.use('menuBar');
-    void this.choices.load();
+    // Read again each time Settings opens: what the tray draws depends on the taskbar's scaling now, not when the app started.
+    void this.choices.reload();
   }
 
   protected format(p: Placement<MenuBarItem>): NumberFormat {

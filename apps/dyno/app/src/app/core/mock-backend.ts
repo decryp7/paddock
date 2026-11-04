@@ -4,7 +4,7 @@ import type { EditOutcome, FirewallView, GeoSummary, IntelEdit, IntelStatus, Mea
 import { MockIntel } from './mock/intel';
 import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import gridCases from '../../../../../../ui/projects/paddock-ui/widgets/generated/grid-cases.json';
-import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
+import { MockWidgets, mockMetricReading, mockNumberSupport, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
 import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
@@ -149,6 +149,8 @@ export interface MockOptions {
   machine?: MockMachine;
   /** The operating system the mock pretends to run on (default macOS). */
   os?: MockOs;
+  /** The tray icon size in pixels the mock's engine reports (`?tray=24`; default 16 off macOS). */
+  trayPx?: number;
   /** The CPU layout: `hybrid` (performance + efficiency cores; the default on macOS) or `uniform`. */
   cpu?: 'hybrid' | 'uniform';
   /** Simulated round-trip per request (skeletons show in the browser; 0 in unit tests). */
@@ -212,6 +214,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
   return {
     machine: tokens.includes('desktop') ? 'desktop' : 'laptop',
     os: os ?? 'macos',
+    ...(Number.isInteger(Number(q.get('tray'))) && Number(q.get('tray')) > 0 ? { trayPx: Number(q.get('tray')) } : {}),
     ...(cpu ? { cpu } : {}),
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
@@ -333,6 +336,9 @@ export class MockBackend implements DynoBackend {
   /** The lists whose saved answer was already given once (`savedListsAgeMs`). */
   private readonly savedGiven = new Set<string>();
   private readonly options: MockOptions;
+  /** What the tray draws of a number: the mock's OS and (`?tray=16`) the taskbar's icon size. */
+  private readonly os: MockOs;
+  private readonly trayPx: number;
 
   /** True the first time a list is asked for when `savedListsAgeMs` is set: the saved answer; the next ask has the fresh one. */
   private takeSaved(list: string): boolean {
@@ -343,6 +349,8 @@ export class MockBackend implements DynoBackend {
 
   constructor(options: MockOptions = {}) {
     this.options = options;
+    this.os = options.os ?? 'macos';
+    this.trayPx = options.trayPx ?? (this.os === 'macos' ? 18 : 16);
     this.machine = options.machine ?? 'laptop';
     const base = osProfile(options.os ?? 'macos');
     this.profile =
@@ -1555,7 +1563,7 @@ export class MockBackend implements DynoBackend {
   }
 
   widgetChoices(): Promise<WidgetChoices> {
-    return this.reply('widgetChoices', () => mockWidgetChoices());
+    return this.reply('widgetChoices', () => mockWidgetChoices(mockNumberSupport(this.os, this.trayPx)));
   }
 
   showMainWindow(): Promise<void> {
