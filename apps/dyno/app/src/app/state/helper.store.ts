@@ -1,5 +1,5 @@
 import { computed, inject } from '@angular/core';
-import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { CommandError, HelperAction, HelperStatus } from '../core/api.types';
 import { BACKEND } from '../core/backend';
@@ -21,6 +21,21 @@ interface HelperState {
   cancelled: boolean;
 }
 
+/** The waits between timed reads while the helper is not answering (ms); the last one repeats. */
+export const HELPER_POLL_STEPS_MS: readonly number[] = [2000, 4000, 8000, 15_000];
+/** Timed reads stop once the waits so far add up to this (ms): after about three minutes the card waits for the person. */
+export const HELPER_POLL_LIMIT_MS = 180_000;
+
+/**
+ * The wait before the next timed read, or null when the state needs none (anything but "installed, not answering") or the
+ * limit is used up. `waited` is the sum of the waits so far.
+ */
+export function nextHelperPoll(status: HelperStatus | null, step: number, waited: number): number | null {
+  if (status?.state !== 'notRunning') return null;
+  const wait = HELPER_POLL_STEPS_MS[Math.min(step, HELPER_POLL_STEPS_MS.length - 1)];
+  return waited + wait > HELPER_POLL_LIMIT_MS ? null : wait;
+}
+
 /**
  * The privileged helper for Settings (ADR 0027): its state, and Turn on / Repair / Update / Turn off as one job with phases and
  * Cancel. The job has no UI deadline: a quiet job is "Still working" (ER-19). Absent, silent and foreign helpers are states
@@ -35,13 +50,45 @@ export const HelperStore = signalStore(
   })),
   withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter)) => {
     let run: JobRun | null = null;
+    // Just after Windows starts the helper's service is still coming up: while it is installed but not answering the card
+    // reads again by itself, with growing waits, and stops once it answers (or is off) or the limit is used up.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let step = 0;
+    let waited = 0;
+    function stopPolling(): void {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    }
+    function schedule(): void {
+      stopPolling();
+      if (store.action() !== null) return;
+      const wait = nextHelperPoll(store.status(), step, waited);
+      if (wait === null) return;
+      step++;
+      waited += wait;
+      timer = setTimeout(() => void poll(), wait);
+    }
+    /** A timed read: the card stays as it is (no spinner, no error) when it fails, and the next one is scheduled. */
+    async function poll(): Promise<void> {
+      timer = null;
+      try {
+        patchState(store, { status: await backend.helperStatus() });
+      } catch {
+        // The last state stays on the card; the next timed read may succeed.
+      }
+      schedule();
+    }
     async function load(): Promise<void> {
+      stopPolling();
+      step = 0;
+      waited = 0;
       patchState(store, { loading: true, error: null });
       try {
         patchState(store, { status: await backend.helperStatus(), loading: false });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }
+      schedule();
     }
     return {
       load,
@@ -53,6 +100,7 @@ export const HelperStore = signalStore(
       async start(action: HelperAction): Promise<void> {
         if (store.action() !== null) return;
         patchState(store, { action, jobId: null, actionError: null, cancelled: false });
+        stopPolling();
         run = starter.run({ helper: { action } }, (jobId) => patchState(store, { jobId }));
         try {
           const out = await run.result;
@@ -71,6 +119,13 @@ export const HelperStore = signalStore(
       async cancel(): Promise<void> {
         await run?.cancel();
       },
+      /** Stops the timed reads (the card went away). */
+      stopPolling,
     };
+  }),
+  withHooks({
+    onDestroy(store) {
+      store.stopPolling();
+    },
   }),
 );
