@@ -264,6 +264,7 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
   {
     const power = makePower();
     if (gui) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
+    if (helperOnly && tour) push(await tour.menuBar()); // the tray: Dyno's menu-bar items
     if (!helperOnly) {
       push(await power.keepAwake());
       push(await power.scheduledWake());

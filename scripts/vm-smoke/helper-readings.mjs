@@ -26,6 +26,12 @@ export const READINGS = [
     expect: { linux: [/via helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
   { id: 'memory-modules', title: 'Linux memory modules (no DMI in a VM: the reason)', os: ['linux'], page: 'inventory',
     expect: { linux: [/DMI|memory modules/i] }, none: [/needs the helper/i] },
+  { id: 'firewall-windows-unsupported', title: 'Firewall on Windows says it is not supported (honest, no helper)', os: ['windows'], page: 'firewall',
+    expect: { windows: [/not supported|isn.t supported|not available|cannot be read/i] }, none: [] },
+  { id: 'wol-state', title: 'Wake devices readiness (WolState)', os: ['linux'], page: 'power', tab: 'Wake devices',
+    expect: { linux: [/readiness|Wake for network|Wake-on-LAN/i] }, none: [/needs the helper/i] },
+  { id: 'thermal-pressure', title: 'macOS temperatures: thermal pressure level (VM reason)', os: ['macos'], page: 'power', tab: 'Energy',
+    expect: { macos: [/pressure|thermal|temperature/i] }, none: [/needs the helper/i] },
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
     expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i] },
 ];

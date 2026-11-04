@@ -182,13 +182,76 @@ export async function repeatInstall(browser) {
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
 
+
+const DYNO = 'C:\\ProgramData\\Dyno';
+const JUNCTION_TARGET = 'C:\\Users\\paddock-test\\evil-target';
+
+/** WP-SEC (fc140fc6f): before the helper exists, a standard user plants a junction where the helper's data folder goes; the install must not follow it. */
+export function plantJunction() {
+  return ssh(`Remove-Item "${JUNCTION_TARGET}" -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory "${JUNCTION_TARGET}" -Force | Out-Null; Set-Content "${JUNCTION_TARGET}\\canary.txt" canary; New-Item -ItemType Directory "${DYNO}" -Force -ErrorAction SilentlyContinue | Out-Null; cmd /c mklink /J "${DYNO}\\Helper" "${JUNCTION_TARGET}" 2>&1; if ((Get-Item "${DYNO}\\Helper" -Force -ErrorAction SilentlyContinue).Attributes -match 'ReparsePoint') { "PLANTED" } else { "NOT-PLANTED" }`);
+}
+
+export function verifyJunction() {
+  const checks = [];
+  const evidence = [];
+  const target = ssh(`Get-ChildItem "${JUNCTION_TARGET}" -Force | Select-Object -ExpandProperty Name`, { admin: true }).split('\n').map((l) => l.trim()).filter(Boolean);
+  evidence.push(`junction target now holds: ${target.join(', ') || '(empty)'}`);
+  checks.push({ ok: target.length === 1 && target[0] === 'canary.txt', detail: target.length === 1 && target[0] === 'canary.txt' ? 'the helper did not write through the planted junction (target holds only the canary)' : `the helper wrote through the planted junction: target holds ${target.join(', ')}` });
+  const real = ssh(`$i = Get-Item "${HELPER}" -Force -ErrorAction SilentlyContinue; if (-not $i) { "ABSENT" } elseif ($i.Attributes -match 'ReparsePoint') { "STILL-A-LINK" } else { "REAL owner=" + (Get-Acl "${HELPER}").Owner }`, { admin: true });
+  evidence.push(`Helper folder: ${real}`);
+  checks.push({ ok: /^REAL owner=(BUILTIN\\Administrators|NT AUTHORITY\\SYSTEM)/.test(real), detail: /^REAL/.test(real) ? `the helper folder is a real folder, ${real.replace('REAL ', '')}` : `the helper folder is ${real}` });
+  const aside = ssh(`Get-ChildItem "${DYNO}" -Force | Select-Object -ExpandProperty Name`, { admin: true }).split('\n').map((l) => l.trim()).filter(Boolean);
+  evidence.push(`${DYNO} holds: ${aside.join(', ')}`);
+  return { checks, evidence };
+}
+
+/** The owner and inheritance of the helper's folders, and the standard user's denials (create, junction) on each. */
+export async function helperProtection() {
+  const checks = [];
+  const evidence = [];
+  const folders = [HELPER, `${HELPER}\\staging`, `${HELPER}\\tools`];
+  for (const f of folders) {
+    const info = ssh(`if (Test-Path "${f}") { "owner=" + (Get-Acl "${f}").Owner; icacls "${f}" | Where-Object { $_ -and $_ -notmatch 'Successfully' } } else { "ABSENT" }`, { admin: true });
+    evidence.push(`== ${f}`, ...info.split('\n'));
+    if (/ABSENT/.test(info)) { checks.push({ ok: f.endsWith('tools') || f.endsWith('staging'), detail: `${f} is absent (allowed only for tools and staging before a tool install)` }); continue; }
+    checks.push({ ok: /owner=(BUILTIN\\Administrators|NT AUTHORITY\\SYSTEM)/.test(info), detail: `${f}: owner ${(/owner=(\S+)/.exec(info) ?? [])[1]} (must be Administrators or SYSTEM)` });
+    checks.push({ ok: !/\(I\)/.test(info), detail: /\(I\)/.test(info) ? `${f}: still inherits ACL entries (protected folders must not)` : `${f}: inheritance is off` });
+    const den = ssh(`$r = @(); try { New-Item -ItemType File "${f}\\probe-std.txt" -Value x -ErrorAction Stop | Out-Null; Remove-Item "${f}\\probe-std.txt" -Force; $r += "FILE-OK" } catch { $r += "FILE-DENIED" }; $o = cmd /c mklink /J "${f}\\evil-link" C:\\Windows 2>&1; if (Test-Path "${f}\\evil-link") { cmd /c rmdir "${f}\\evil-link" | Out-Null; $r += "LINK-OK" } else { $r += "LINK-DENIED" }; $r -join ' '`);
+    checks.push({ ok: /FILE-DENIED/.test(den) && /LINK-DENIED/.test(den), detail: `${f}: standard user create file ${/FILE-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}, create junction ${/LINK-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}` });
+  }
+  return result('Windows: WP-SEC folder protection (owner, no inheritance, standard-user denials incl. junctions)', checks, evidence, 'owner, inheritance and denials as designed');
+}
+
+/** The helper's served-kinds line (ADR 0052 section 1.1 / plan 7.2): what it served, read from its log. */
+export function servedCounts() {
+  const lines = ssh(`Get-Content ${HELPER}\\helper.log -ErrorAction SilentlyContinue | Select-String -Pattern 'served' | Select-Object -Last 3 | ForEach-Object { $_.Line }`, { admin: true }).split('\n').filter(Boolean);
+  return result('Windows: the helper reports which readings it served (served counts)', [{ ok: lines.length > 0, detail: lines.length ? `the helper log has ${lines.length} served line(s)` : 'no served-kinds line in helper.log (the counter is not written)' }], lines, 'served counts logged');
+}
+
+/** Tray tooltips: the notify-icon tooltips Windows recorded for Dyno are present and read as words, not identifiers. */
+export function trayTooltips() {
+  const rows = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "$($_.InitialTooltip)|promoted=$($_.IsPromoted)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
+  const checks = [{ ok: rows.length > 0, detail: rows.length ? `${rows.length} Dyno tray icon(s) registered with Windows` : 'no Dyno tray icon registered in NotifyIconSettings' }];
+  for (const r of rows) { const tip = r.split('|')[0]; checks.push({ ok: tip.length > 0 && !/[a-z]+_[a-z]+|undefined|null|NaN/.test(tip), detail: `tooltip "${tip}"` }); }
+  return result('Windows: tray icons and their tooltips', checks, rows, `${rows.length} tray icon(s) with readable tooltips`);
+}
+
 export const helperSteps = [
-  ({ browser }) => helperOn(browser),
+  async ({ browser }) => {
+    const planted = plantJunction();
+    const on = await helperOn(browser);
+    const v = verifyJunction();
+    const checks = [{ ok: /^PLANTED/m.test(planted), detail: /^PLANTED/m.test(planted) ? 'a standard user planted a junction at C:\\ProgramData\\Dyno\\Helper before the helper existed' : 'the junction could not be planted (the step proves nothing then)' }, ...on.checks, ...v.checks];
+    return result('Windows: admin helper Turn on with a planted junction in its way (UAC over VNC)', checks, [...on.evidence, ...v.evidence], 'Turn on refused to follow the planted junction and the helper is On');
+  },
+  () => trayTooltips(),
+  () => helperProtection(),
   () => helperFolderAcl(),
   ({ browser }) => helperExploit(browser),
   ({ browser }) => diskHealth(browser),
   ({ browser }) => repeatInstall(browser),
   // WP-VMH: one step per helper reading while the helper is on
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser))),
+  () => servedCounts(),
   ({ browser }) => helperOff(browser),
 ];
