@@ -1,0 +1,53 @@
+[package]
+name = "paddock-setup"
+version = "0.1.0"
+description = "The installer's work for per-machine Windows installs (family ADR 0053): the small program `paddock-setup.exe` carried inside each app's installer (guard, check-dir, same-folder, stop-all, clean-run, clean-staging, apply-update, hold-installing, self-test) and the pure core behind it (decisions, argument parsing, version rules, hive-scan filtering, the setup log), also used in-process by the app (the leftover per-user copy probe)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+build = "build.rs"
+
+[package.metadata.paddock]
+# Unfinished until `paddock-proc::installed::stop_all` (ADR 0053 section 3, plan S1) lands and `proc-stop` is on by default.
+scaffold = true
+
+[features]
+# `stop-all` over `paddock_proc::installed::stop_all` (S1, branch feat/per-machine-stop-and-include). Without it the
+# subcommand answers exit 12 "not built into this program".
+proc-stop = []
+
+[lib]
+name = "paddock_setup"
+path = "src/lib.rs"
+
+[[bin]]
+name = "paddock-setup"
+path = "src/main.rs"
+
+[dependencies]
+# The protected-folder rule's accounts (`is_trusted_sid`): one implementation (rule 55).
+paddock-service = { workspace = true }
+# `signature::verify_file`: the same check the app runs (rule 55).
+paddock-updater = { workspace = true }
+semver = "1"
+base64 = "0.22"
+thiserror = "2"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# The native glue (`src/native/`): registry, tokens, handles, security descriptors, the mutex and the process start.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Globalization",
+] }
+
+[dev-dependencies]
+tempfile = "3"

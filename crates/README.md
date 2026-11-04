@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`, `paddock-siblings/src/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`, `paddock-siblings/src/native.rs`, `paddock-setup/src/native/` (a folder of glue modules).
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -1603,6 +1603,28 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   plist and NSIS hooks, so the page, the health entry and
   `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
 - Not here: Task Scheduler entries (no app uses them).
+
+## `paddock-setup` (family ADR 0053, plan S2 and S3)
+
+The installer's work for per-machine Windows installs. A library (pure core, tested on any host) and one binary,
+`paddock-setup.exe`, which each app's Windows bundle job builds with the app's constants compiled in
+(`PADDOCK_SETUP_IDENTIFIER`, `PADDOCK_SETUP_PRODUCT`, `PADDOCK_SETUP_MAIN`, `PADDOCK_SETUP_UPDATE_KEY`, and for the version
+resource `PADDOCK_SETUP_PRODUCT` and `PADDOCK_SETUP_VERSION`: `FileDescription` becomes "<App> update").
+
+- **Commands** (`paddock-setup <command> [--option value]`, exit codes in `exit::Exit`): `guard` (per-user copy guard),
+  `check-dir`, `same-folder`, `stop-all` (over `paddock_proc::installed::stop_all`, feature `proc-stop`), `clean-run`,
+  `clean-staging`, `apply-update` (the elevated hand-off, trust model of ADR section 4.2), `hold-installing` (the installer
+  include's `Global\<identifier>.setup` mutex with its explicit descriptor), `self-test` (the ADR 0039 gate reads it).
+- **Pure core:** `args` (typed command line), `guard` (`decide` over `InstallFacts`, `per_user_copy` for the app's own start),
+  `checkdir` (the install-folder and `updates\` rules), `samefolder`, `runvalues`, `staging`, `apply` (the sequence over
+  `UpdatePort`, `Refusal` with exit codes and sentences, `Layout`), `handoff` (the mutex name, its descriptor and the
+  60-second grace for the app: `still_installing`), `log` (`setup.log`, 1 MiB, one rotation, openable only with a
+  `CheckedDir`), `stop`, `selftest`, `versionres` (a `.res` writer, no resource compiler needed).
+- **Native glue:** `src/native/` (Windows only, left out of the coverage job), tested on the Windows test VM by
+  `tests/it/windows.rs`.
+- **Features:** `proc-stop` (stop-all over `paddock-proc`; off until plan S1 lands).
+- **Used by:** the apps' installer hooks (S4) and `paddock-updater`'s `ElevatedHandoff` (S5); the app also calls
+  `guard::per_user_copy`.
 
 ## `paddock-diag` (plan X2)
 
