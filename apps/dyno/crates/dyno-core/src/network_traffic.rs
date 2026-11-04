@@ -89,7 +89,7 @@ fn whose(pid: u32, sweep: &Sweep, caller: &HelperUser) -> Whose {
     match &p.owner {
         RawOwner::System | RawOwner::Service(..) => Whose::Shown,
         RawOwner::Account { id, .. } if id == caller => Whose::Shown,
-        RawOwner::Account { .. } => Whose::Other,
+        RawOwner::Account { .. } | RawOwner::Unknown => Whose::Other,
     }
 }
 
@@ -191,6 +191,64 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = ",bytes_in,bytes_out,\nkernel_task.0,3112760137,9478161228,\nGoogle Chrome H.905,1000,200,\nweird.name.with.dots.77,5,6,\nbroken line\nnopid,1,2,\nx.notapid,1,2,\ny.9,abc,2,\n";
+
+    #[test]
+    fn a_counter_whose_process_has_no_known_owner_is_only_in_the_total() {
+        use crate::helper_processes::{ProcState, RawProcess};
+        let me = HelperUser::Uid(1_000);
+        let process = |pid, owner| RawProcess {
+            pid,
+            started: Some(1),
+            parent: None,
+            name: format!("p{pid}"),
+            path: None,
+            owner,
+            state: ProcState::Running,
+            threads: None,
+            cpu_time_ms: None,
+            memory_bytes: None,
+            disk_read_bytes: None,
+            disk_written_bytes: None,
+        };
+        let sweep = Sweep {
+            processes: vec![
+                process(
+                    1,
+                    RawOwner::Account {
+                        id: me.clone(),
+                        name: None,
+                    },
+                ),
+                process(2, RawOwner::Unknown),
+            ],
+            homes: vec![],
+            taken_at: 1,
+        };
+        let counters = vec![
+            TrafficCounter {
+                pid: 1,
+                name: "mine".into(),
+                bytes_in: 1,
+                bytes_out: 1,
+            },
+            TrafficCounter {
+                pid: 2,
+                name: "mystery".into(),
+                bytes_in: 5,
+                bytes_out: 6,
+            },
+        ];
+        let a = traffic_answer(counters, &sweep, &me, Visibility::Own(OthersPolicy::Total));
+        assert_eq!(a.counters.iter().map(|c| c.pid).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            a.others,
+            Some(OthersTraffic {
+                programs: 1,
+                bytes_in: 5,
+                bytes_out: 6
+            })
+        );
+    }
 
     #[test]
     fn nettop_text_becomes_counters_and_bad_lines_are_skipped() {
