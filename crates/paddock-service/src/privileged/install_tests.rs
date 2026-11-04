@@ -1609,3 +1609,64 @@ fn a_signature_location_that_cannot_be_read_is_skipped_and_the_next_one_is_used(
         .unwrap();
     assert_eq!(report.signature.as_deref(), Some("valid"));
 }
+
+#[test]
+fn a_verbatim_prefixed_source_is_judged_by_the_path_without_the_prefix() {
+    // `canonicalize` on Windows returns `\\?\C:\...`: the chain check and the "already inside the protected folder" comparison
+    // must see the plain path, or a per-machine source fails with "not there" and the installed copy could be copied onto itself.
+    let files = windows_disk();
+    let verbatim = format!("\\\\?\\{WIN_SOURCE}");
+    files.put_file(verbatim.as_str(), b"helper.exe", 0, 0);
+    let report = win_install_with(&mut win_trust(), &files, &verbatim);
+    assert!(report.is_ok(), "{report:?}");
+    let inside = format!("\\\\?\\{WIN_PROGRAM}");
+    files.put_file(inside.as_str(), b"helper.exe", 0, 0);
+    let err = win_install_with(&mut win_trust(), &files, &inside).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("already inside")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn the_source_check_alone_changes_nothing_and_refuses_a_bad_source() {
+    let files = mac_disk();
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    let (mut f, mut b, mut s) = (files.clone(), Scripted::default(), FakeSystem::new());
+    let err = Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier: &v,
+            locations: vec![PathBuf::from(SIG)],
+        })
+        .preflight(Path::new(SOURCE))
+        .unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("no signature file")),
+        "{err:?}"
+    );
+    assert!(
+        !files
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("write ") || c.starts_with("create_dir"))
+    );
+    assert!(
+        !b.log()
+            .iter()
+            .any(|l| l == "register" || l == "unregister" || l == "evict")
+    );
+    files.put_file(SIG, b"sig-1", 501, 0o644);
+    let (mut f, mut b, mut s) = (files.clone(), Scripted::default(), FakeSystem::new());
+    let report = Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier: &v,
+            locations: vec![PathBuf::from(SIG)],
+        })
+        .preflight(Path::new(SOURCE))
+        .unwrap();
+    assert_eq!(report.signature.as_deref(), Some("valid"));
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
+}

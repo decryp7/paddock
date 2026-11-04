@@ -59,7 +59,8 @@ impl FamilyKey {
             key: match UpdateKey::resolve([text]) {
                 Some(key) => Ok(key),
                 None => Err(
-                    "this build of Dyno carries no update key, so its helper cannot be checked; install Dyno from the official download".into(),
+                    "this build of Dyno carries no update key, so its helper cannot be checked; install Dyno from the official download"
+                        .into(),
                 ),
             },
             signed_name: signed_name.to_string(),

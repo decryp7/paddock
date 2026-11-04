@@ -252,8 +252,9 @@ impl ProtectedFiles for RealFiles {
         #[cfg(windows)]
         {
             use std::os::windows::fs::OpenOptionsExt;
-            // FILE_FLAG_OPEN_REPARSE_POINT: a link is opened as the link, not followed.
-            options.custom_flags(0x0020_0000);
+            // FILE_FLAG_OPEN_REPARSE_POINT: a link is opened as the link, not followed. FILE_FLAG_BACKUP_SEMANTICS: a folder can be
+            // opened at all (and is then reported as a folder, not as an access error).
+            options.custom_flags(0x0020_0000 | 0x0200_0000);
         }
         let file = match options.open(path) {
             Ok(f) => f,

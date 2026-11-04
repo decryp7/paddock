@@ -191,6 +191,15 @@ fn violation(what: &str, path: &Path, v: &Violation) -> InstallError {
     InstallError::Refused(format!("{what} {} is not protected: {v}", path.display()))
 }
 
+/// `\\?\C:\x` as `C:\x` (what `canonicalize` returns on Windows is the verbatim form, which neither the trust rule's path
+/// splitting nor a comparison with the layout's plain paths understands). `\\?\UNC\` paths are left as they are.
+pub fn without_verbatim_prefix(path: &str) -> &str {
+    match path.strip_prefix("\\\\?\\") {
+        Some(rest) if !rest.starts_with("UNC\\") => rest,
+        _ => path,
+    }
+}
+
 /// A Windows path that failed the trust rule, in words with the next step.
 fn untrusted(what: &str, e: &Untrusted) -> InstallError {
     log::error!(what = what, path = e.path.as_str(), reason:% = e.reason; "install: not a protected place");
@@ -282,6 +291,16 @@ impl<'a> Installer<'a> {
         Ok(self.report)
     }
 
+    /// Checks the program that would be installed (its place, its signature) and nothing else: no folder is made, nothing is
+    /// written or registered. The caller runs it before it prepares anything of its own, so a refused source leaves no trace.
+    ///
+    /// # Errors
+    /// An [`InstallError`] when the source would be refused by [`install`](Self::install).
+    pub fn preflight(mut self, source: &Path) -> Result<Report, InstallError> {
+        self.check_source(source)?;
+        Ok(self.report)
+    }
+
     /// Stops and removes the service and its protected copy.
     ///
     /// # Errors
@@ -329,7 +348,7 @@ impl<'a> Installer<'a> {
         if self.layout.os == Os::Windows {
             // The chain to the source must be one only administrators can change: a per-user copy is refused (a user could
             // swap it between this check and the copy), the per-machine one in Program Files passes.
-            let text = source.to_string_lossy().into_owned();
+            let text = without_verbatim_prefix(&source.to_string_lossy()).to_string();
             let port = self.trust_port()?;
             trust::verify_chain(port, &text, FileKind::File, None, false).map_err(|e| {
                 log::error!(source = "checked", verdict = "refused"; "install: the program to copy is not in a protected place");
@@ -358,7 +377,16 @@ impl<'a> Installer<'a> {
                 held.facts.kind
             )));
         }
-        if source == copy.file || source.starts_with(&copy.folder) && !copy.folder_is_system {
+        let inside = if self.layout.os == Os::Windows {
+            // Windows paths are compared as text with Windows rules, whatever the host.
+            let plain = without_verbatim_prefix(&source.to_string_lossy()).to_string();
+            let (file, folder) = (copy.file.to_string_lossy(), copy.folder.to_string_lossy());
+            trust::is_within(&plain, &file, Style::Windows)
+                || (trust::is_within(&plain, &folder, Style::Windows) && !copy.folder_is_system)
+        } else {
+            source == copy.file || source.starts_with(&copy.folder) && !copy.folder_is_system
+        };
+        if inside {
             return Err(InstallError::Refused(
                 "the program to copy is already inside the protected folder".into(),
             ));

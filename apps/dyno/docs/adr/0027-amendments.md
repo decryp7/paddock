@@ -70,3 +70,10 @@ What the install does about what it can control (rule 55: one implementation, `p
   refuses a source whose chain a user can change (a per-user install: reinstall Dyno for all users). macOS verifies a minisign
   signature of the bytes with the family update key against `dyno-helper.minisig` in the bundle; missing or bad is refused.
 - F3: the macOS prompt runs the helper under `env -i` with a fixed PATH.
+- Measured on the Windows test VM (2026-11-05): with the environment poisoned, the pre-fix install ran a program from the
+  poisoned `SystemRoot` as an elevated administrator; `ProgramFiles` could not be shown to redirect the install (Windows sets it
+  itself and the install still used `C:\Program Files`). The fix takes both from the OS regardless, since only the SystemRoot
+  bypass was demonstrated.
+- The macOS helper signature is made under the file name `dyno-helper-<version>-<target triple>`, and the helper requires its own
+  version and architecture in the signed trusted comment, so no older family-signed helper passes. The source and signature check
+  runs before the helper prepares any folder or writes its configuration.

@@ -267,6 +267,36 @@ pub fn install_in_place(
     Ok(report)
 }
 
+/// The source and signature check of [`install_in_place`] alone: nothing is made, written or registered. The helper runs it before
+/// it prepares its own folders or writes its configuration, so a refused source leaves nothing behind.
+///
+/// # Errors
+/// The [`InstallError`] that [`install_in_place`] would give for the source.
+pub fn preflight_in_place(
+    os: Os,
+    roots: &Roots,
+    source: &Path,
+    files: &mut dyn ProtectedFiles,
+    trust: &mut dyn TrustPort,
+    verifier: &dyn SourceVerifier,
+    make_system: &dyn Fn() -> Box<dyn System>,
+) -> Result<Report, InstallError> {
+    let spec = spec();
+    let layout = helper_layout(os, roots).map_err(|e| InstallError::Refused(e.to_string()))?;
+    let mut backend = backend_for(&layout, &spec, make_system()).map_err(|e| InstallError::Refused(e.to_string()))?;
+    let mut sys = make_system();
+    let mut installer = Installer::new(&layout, files, backend.as_mut(), sys.as_mut()).with_trust(trust);
+    if os == Os::MacOs {
+        installer = installer.with_signature(SignatureCheck {
+            verifier,
+            locations: source_check::signature_locations(source),
+        });
+    }
+    let report = installer.preflight(source)?;
+    log::info!(os:? = os, signature = report.signature.as_deref().unwrap_or("not required"); "the helper to install passed the source check");
+    Ok(report)
+}
+
 /// The elevated side of "turn off": stops and removes the registration and the protected copy.
 ///
 /// # Errors

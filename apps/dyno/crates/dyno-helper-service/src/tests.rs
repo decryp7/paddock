@@ -477,10 +477,16 @@ const FX_SIG_100: &[u8] = include_bytes!("../tests/fixtures/helper-1.0.0.sig");
 fn a_signature_is_good_only_for_the_file_name_it_was_made_for_so_an_older_helper_never_passes() {
     use paddock_service::privileged::SourceVerifier;
     let current = FamilyKey::new(Some(FX_KEY), "dyno-helper-9.9.9-aarch64-apple-darwin");
-    assert!(current.verify(FX_BIN, FX_SIG_999).unwrap().contains("dyno-helper-9.9.9-aarch64-apple-darwin"));
+    assert!(current
+        .verify(FX_BIN, FX_SIG_999)
+        .unwrap()
+        .contains("dyno-helper-9.9.9-aarch64-apple-darwin"));
     // The same bytes with the signature of an older version (a validly family-signed older helper): refused.
     let err = current.verify(FX_BIN, FX_SIG_100).unwrap_err();
-    assert!(err.contains("not made for this version") && err.contains("official download"), "{err}");
+    assert!(
+        err.contains("not made for this version") && err.contains("official download"),
+        "{err}"
+    );
     // Another architecture is refused the same way.
     let other = FamilyKey::new(Some(FX_KEY), "dyno-helper-9.9.9-x86_64-apple-darwin");
     assert!(other.verify(FX_BIN, FX_SIG_999).is_err());
@@ -491,4 +497,38 @@ fn the_name_this_build_expects_carries_its_version_and_architecture() {
     let name = crate::source_check::expected_signed_name();
     assert!(name.starts_with(&format!("dyno-helper-{}-", env!("CARGO_PKG_VERSION"))), "{name}");
     assert!(name.ends_with("-apple-darwin") || name.ends_with("-unknown"), "{name}");
+}
+
+#[test]
+fn the_source_check_runs_alone_and_leaves_no_trace_when_it_refuses() {
+    let (sys, mut files) = (FakeSystem::new(), FakeFiles::new());
+    files.put_dir("/Library/PrivilegedHelperTools", 0, 0o755);
+    files.put_file(MAC_SOURCE, SIGNED, 501, 0o755);
+    let mut trust = paddock_service::privileged::trust_fake::windows_machine(|_| paddock_service::privileged::trust_fake::locked());
+    let verifier = FamilyKey::new(Some(KEY), SIGNED_NAME);
+    let err = preflight_in_place(
+        Os::MacOs,
+        &roots(),
+        Path::new(MAC_SOURCE),
+        &mut files,
+        &mut trust,
+        &verifier,
+        &make_system(&sys),
+    )
+    .unwrap_err();
+    assert!(matches!(&err, InstallError::Refused(w) if w.contains("no signature file")), "{err}");
+    files.put_file(MAC_SIGNATURE, SIGNATURE, 501, 0o644);
+    let report = preflight_in_place(
+        Os::MacOs,
+        &roots(),
+        Path::new(MAC_SOURCE),
+        &mut files,
+        &mut trust,
+        &verifier,
+        &make_system(&sys),
+    )
+    .unwrap();
+    assert!(report.signature.is_some() && report.phases.is_empty());
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ") || c.starts_with("create_dir")));
+    assert!(sys.commands().is_empty(), "nothing was run: {:?}", sys.commands());
 }

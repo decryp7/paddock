@@ -9,7 +9,7 @@ use crate::paths::HelperPaths;
 use crate::serve::os_of;
 use dyno_core::helper_wire::HelperUser;
 use dyno_helper_service::source_check::FamilyKey;
-use dyno_helper_service::{install_in_place, install_roots, uninstall_in_place, uninstall_self_in_place};
+use dyno_helper_service::{install_in_place, install_roots, preflight_in_place, uninstall_in_place, uninstall_self_in_place};
 use paddock_env::Os;
 use paddock_service::privileged::trust_real::RealTrust;
 use paddock_service::privileged::{OsKnownFolders, ProtectedFiles, RealFiles, Report};
@@ -64,6 +64,12 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
         .map_err(|e| format!("This program's own path cannot be read: {e}"))?;
     let (host, paths) = (this_host(), helper_paths());
     let mut files = RealFiles;
+    // First of all: is this the helper that may be installed (its place on Windows, its signature on macOS)? A refusal leaves no
+    // folder made and no configuration written. The folders come from the OS, never from the environment (an elevated process
+    // may inherit a user-writable one).
+    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
+    let verifier = FamilyKey::compiled_in();
+    preflight_in_place(os_of(host), &roots, &source, &mut files, &mut RealTrust, &verifier, &system).map_err(|e| e.to_string())?;
     // Repair: the data root and its tools and staging folders are locked first; one a user made is removed (links are
     // removed, never followed), so nothing in it is trusted. Then the configuration is written into the locked root.
     #[cfg(windows)]
@@ -72,18 +78,8 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
         .map_err(|e| e.to_string())?;
     let config = HelperConfig::new(owner, crate::VERSION).with_app(crate::orphan::app_location(&source));
     write_config(&paths, &config, &mut files)?;
-    // The folders come from the OS, never from the environment (an elevated process may inherit a user-writable one).
-    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
-    let report = install_in_place(
-        os_of(host),
-        &roots,
-        &source,
-        &mut files,
-        &mut RealTrust,
-        &FamilyKey::compiled_in(),
-        &system,
-    )
-    .map_err(|e| e.to_string())?;
+    let report =
+        install_in_place(os_of(host), &roots, &source, &mut files, &mut RealTrust, &verifier, &system).map_err(|e| e.to_string())?;
     register_event_source(os_of(host), system().as_mut());
     Ok(report)
 }
