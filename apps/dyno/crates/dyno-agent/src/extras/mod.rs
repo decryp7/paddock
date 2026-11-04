@@ -72,6 +72,8 @@ pub struct ExtrasCentre {
     /// The readings the helper can give better (what keeps Windows awake, Windows Backup versions); none until the agent is
     /// composed with a helper port ([`ExtrasCentre::use_helper`]), and then everything is read on this computer as before.
     pub(crate) helper: Mutex<Option<HelperExtras>>,
+    /// The port the helper readings go through, to ask whether the helper changed since a report was made.
+    helper_port: Mutex<Option<Arc<dyn HelperPort>>>,
     /// Signalled when a backup check ends and when a job waiting for one is cancelled.
     pub(crate) backup_done: Arc<std::sync::Condvar>,
     counter: AtomicU64,
@@ -91,6 +93,7 @@ impl ExtrasCentre {
             software_thread: Mutex::new(None),
             backup: Arc::new(Mutex::new(backup_check::Slot::default())),
             helper: Mutex::new(None),
+            helper_port: Mutex::new(None),
             backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
         }
@@ -107,11 +110,17 @@ impl ExtrasCentre {
     /// Gives the extras the helper: what keeps Windows awake and the Windows Backup versions are then read helper first, and say
     /// which path answered (`blockers_via`, `BackupReport.via`). Composition calls this once (`agent.rs`).
     pub fn use_helper(&self, port: Arc<dyn HelperPort>) {
+        *lock(&self.helper_port) = Some(port.clone());
         *lock(&self.helper) = Some(HelperExtras::new(
             port,
             dyno_platform::extras::windows_wake_refused,
             dyno_platform::extras::windows_backup_refused_text,
         ));
+    }
+
+    /// Where the helper stands now: moves whenever it is turned on, off, repaired or updated (0 without a helper port).
+    pub fn helper_epoch(&self) -> u64 {
+        lock(&self.helper_port).as_ref().map_or(0, |p| p.epoch())
     }
 
     /// What keeps the computer awake and the last wakes. On Windows the blockers are read helper first.

@@ -24,6 +24,8 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Fixed
 
+- Backup health reads Windows Backup again once the administrator helper is turned on, instead of keeping the earlier "could not check" report and its missing helper note.
+- A dialog that Windows snaps to a screen half but cannot make narrower (the About window at 150 % display scale) now counts as sized by you, like any other snap.
 - Menu-bar and tray items show their metric and reading when you hover them, such as "CPU 34%", instead of "Dyno".
 - The connections map legend uses five clearly different shades that also work with colour-vision deficiency, and its tooltip names the step.
 - Health: an active alarm now lowers the health score, so the dashboard no longer shows "Health 100 Good" next to an active alarm. A Warning caps it at Fair and a Critical at Poor.
