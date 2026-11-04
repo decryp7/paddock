@@ -34,6 +34,27 @@ to it.
 - **Logs** follow ER-27: phases, durations, ids, counts and outcomes; never names, paths, queries or text. A test with
   invented, distinctive names asserts they never reach a log or a diagnostics bundle (the Dyno ADR 0029 §6 pattern).
 
+### Family role (user decision, 2026-11-04)
+
+- **Recce is the family's retrieval engine for documents, mail and files, and an MCP server.** Its tools are read-only
+  (`search`, `get_passage`, `list_sources`, and `answer` only if enabled), every hit carries its citation (source, path or
+  message id, passage range), and the server is built on the shared `paddock-mcp` crate (WP 4.2).
+- **Pitwall is an MCP client and host.** Its roadmap item "MCP and tool hosting" lets local models call tools, Recce's
+  among them.
+- **Pitwall builds no document indexing of its own.** Its roadmap item "knowledge collections (RAG)" uses Recce through
+  MCP, or the shared search crates, so the family has one retrieval engine (rules 42 and 55). A Pitwall collection maps
+  to a Recce scope (a saved set of locations and sources, WP 1.8), not to a second index of the same files. The MCP
+  route is the default; if Pitwall ever needs retrieval in-process, ADR R4 puts Recce's retrieval core (tiers, shards,
+  merge, RRF) in a shared crate instead of an app crate, and Pitwall adopts it in the same change (rule 43).
+- **Consent:** D8 still holds (MCP off until enabled; mail and M365 hidden by default). Connecting Pitwall is one
+  explicit "Allow Pitwall" per scope in Recce's MCP settings, shown in the audit log like any other client.
+- **Code search stays in Pacenotes**, which has its own read-only MCP server for code (Pitwall roadmap, phase 4); Recce's
+  code group is keyword-only by default (D22) and does not compete with it.
+- **Dependency:** Pitwall's RAG waits for Recce stage 2 (content and meaning search) and stage 4 (WP 4.2, the MCP
+  server), or for the shared crates (`paddock-embed` X55, `paddock-extract`, and the retrieval core if R4 makes it
+  shared). Pitwall's roadmap says so ([apps/pitwall/docs/roadmap.md](../../apps/pitwall/docs/roadmap.md), branch
+  `docs/pitwall-rag-via-recce`).
+
 ## 1. Scale design (added 2026-11-04)
 
 The user asked (2026-11-04): "what if the information is a lot?" The design target is a heavy single-user machine:
@@ -44,12 +65,13 @@ measures it; nothing here is a benchmark (rule 48).
 
 | Tier | What | Which items | Cost driver |
 |---|---|---|---|
-| **Names** | name, path, size, times, type, source | **every** file, mail (subject, sender, date) and app | the name table and `catalog.sqlite`; about 45 to 100 B per entry **(Everything's vendor figures, see research §5)** |
-| **Keyword** | full text in Tantivy, per passage, no stored text (D5) | **text-bearing types only**: documents, PDFs, mail bodies, text and code, notes; attachments through `paddock-extract` | extraction CPU; the Tantivy index, roughly 25 to 50 % of the extracted text **(estimate; S6 measures)** |
+| **Names** | name, path, size, times, type, source | every file in an indexed location (1.8) and, when names-only drives are on, on whole internal drives; every mail (subject, sender, date) and app | the name table and `catalog.sqlite`; about 45 to 100 B per entry **(Everything's vendor figures, see research §5)** |
+| **Keyword** | full text in Tantivy, per passage, no stored text (D5) | **text-bearing types at level content or higher (1.9), inside the content allowlist (1.8), under the size limits (1.10)**: documents, PDFs, mail bodies, text and code, notes; attachments through `paddock-extract` | extraction CPU; the Tantivy index, roughly 25 to 50 % of the extracted text **(estimate; S6 measures)** |
 | **Meaning** | Model2Vec vectors | **selected passages only**, in priority order, within the vector budget (1.2) | embedding is cheap (6,365 chunks/s on one thread, Pacenotes ADR 0001); storage and index build are not |
 
-- Non-text types (images, media, binaries, archives, disk images) stay **names-only** unless the user opts a folder or a
-  type in (OCR and media tags are confirmed bulk jobs, D13).
+- Three Settings decide which item gets which tier: **scope** (1.8, an allowlist), **type levels** (1.9) and **size
+  limits** (1.10). Non-text types (images, media, binaries, archives, disk images) stay **names-only** unless the user
+  raises their level (OCR and media tags are confirmed bulk jobs, D13).
 - Old archives (mail and folders not changed or opened for two years, PST/mbox archives) are **keyword-only by default**
   (decision D18); "Add meaning search" is one switch per source or folder.
 - Every result says which tiers covered it, so a missing meaning hit is explained ("keyword only: archive") instead of
@@ -168,6 +190,117 @@ Recommended default: **USearch (or the flat binary layout, S6 decides) + Tantivy
 | DiskANN-style | `diskann-rs` 0.5.0: Vamana, mmap, f16 and int8 (docs.rs, via search; its benchmark is 200 k × 128 only, **secondary, unverified**); Microsoft DiskANN's `main` is now Rust ("DiskANN3"), MIT, C++ kept on `cpp_main`; no published crate seen ([repo](https://github.com/microsoft/DiskANN)) | Built for indexes larger than RAM on SSD | Young crates; maintainers and releases unclear | **Watch**; a stretch row in S6 if a crate is published |
 | Postgres + pgvector | see 1.6 | Proven at large scale | A server | **Index server mode only** (1.6) |
 
+### 1.8 Scope: an explicit list of what to index (added 2026-11-04)
+
+The user asked (2026-11-04): "perhaps it is better to have a list of files to index instead of indexing all."
+Recce indexes content only in **indexed locations**, an allowlist the user sees and edits in Settings. It never indexes
+the content of everything it can read.
+
+- **Default list at first run.** A first-run screen shows the list with a quick count of names in each location
+  (names only, no file is opened) and lets the user change it before any content job starts:
+  - with content: Documents, Desktop, Downloads (downloaded PDFs and documents are often what people look for;
+    installers and media there are names-only by their type, 1.9);
+  - Pictures, Music and Movies/Videos: included, and names-only by their types (1.9), so no special case is needed;
+  - local sync folders (iCloud Drive, OneDrive, Dropbox): included; placeholders are never read or downloaded
+    (WP 1.4);
+  - mail and Microsoft 365: only the sources the user signs in to and ticks on that screen; none is preselected;
+  - apps for the launcher: always (the app catalogue, WP 1.7), not part of the list.
+- **Editing.** The user adds or removes folders, whole drives and network shares in Settings, each with a level
+  (names only, content, content plus meaning) that caps the type levels of 1.9 for that location.
+- **Exclusions inside included locations:**
+  - a built-in TOML pack (`paddock-packs`, hot-reloaded): `node_modules`, `.git` internals, `target`, `build`, `dist`,
+    `.venv`, `__pycache__`, caches (`~/Library/Caches`, `%LOCALAPPDATA%\Temp`, `~/.cache`), trash folders and OS folders;
+  - the user's own folders and glob patterns, in Settings or in their own pack;
+  - "respect `.gitignore` in repositories" as a Setting, on by default (the `ignore` crate, MIT/Unlicense **(verify
+    version and licence before use)**);
+  - an excluded folder is never opened, so its file names are not listed either; coverage shows it as "excluded" with
+    the rule that excluded it.
+- **Names only for whole drives.** A separate switch per drive: list names and file details for the whole drive, open no
+  file. It is cheap (about 45 to 100 B per entry, research §5, so roughly 0.1 to 0.5 GB for a 2 to 5 M-file system
+  volume **(estimate; S1 measures)**) and lets launching find any file, as Everything does.
+  **Recommended: on for internal fixed drives** (system folders still excluded by the pack), **off for removable and
+  network drives**, offered when one is attached. Paths outside the content allowlist are hidden from MCP by default
+  (D8), and names-only entries are never sent to answers.
+
+How this compares (sources read 2026-11-04):
+
+| Tool | Model | Default |
+|---|---|---|
+| macOS Spotlight | **Exclude list**: attached volumes are indexed unless the user adds a folder or disk under Search Privacy ([Apple Mac User Guide](https://support.apple.com/guide/mac-help/mchl1bb43b84/mac)) | Whole volumes, content included |
+| Windows Search, Classic | **Include list**: "indexed locations"; by default Documents, Pictures, Music and the desktop; more folders through Customize search locations ([Microsoft Support](https://support.microsoft.com/windows/search-indexing-in-windows-da061c83-af6b-095c-0f7a-4dfecda4d15a)) | User folders, content included |
+| Windows Search, Enhanced | The whole PC (Microsoft's FAQ; the detail rests partly on secondary sources such as [ElevenForum](https://elevenforum.com/t/turn-on-or-off-enhanced-mode-for-search-indexer-in-windows-11.2941/)) | Off; the user opts in |
+| Recoll | `topdirs` include list, `skippedNames` and `skippedPaths` excludes; `indexallfilenames` indexes names even when contents are skipped, default on ([recoll.conf(5)](https://www.mankier.com/5/recoll.conf), via search; defaults differ between versions) | The home folder |
+| **Recce** | **Names wide, content narrow**: names for whole internal drives (Everything's breadth), content only in the allowlist (Windows Classic's model), exclusions inside it (Spotlight's privacy list) | First-run list above (D20) |
+
+### 1.9 File types: levels per group (added 2026-11-04)
+
+Settings show **groups of extensions**, each with a level: **off** (not listed at all), **names only**, **content**
+(keyword), or **content plus meaning** (keyword plus vectors, within the D17 budget). A location's level (1.8) caps
+the type level. Recommended defaults (D22):
+
+| Group | Extensions (examples; the full list is in the built-in pack) | Default level | Why |
+|---|---|---|---|
+| Documents | docx, odt, rtf, epub, html | content plus meaning | The main target |
+| PDFs | pdf | content plus meaning | The main target; scanned pages need OCR (off, D13) |
+| Plain text and Markdown | txt, md, rst, org | content plus meaning | Notes |
+| Presentations | pptx, odp | content plus meaning | Short text per slide; worth meaning search |
+| Spreadsheets | xlsx, ods, csv, tsv | content | Cell text suits keywords; meaning over tables is weak and costs budget |
+| Code | rs, ts, py, cs, go, java, sh and others | content | Repositories hold many passages; meaning is opt-in (Pacenotes is the family's code-search app) |
+| Email files | eml, emlx, msg, mbox, pst, ost | content plus meaning | Old archives keyword-only by D18 |
+| Logs and data dumps | log, jsonl, ndjson, evtx | names only | Large and noisy; "Open in Debrief" (WP 2.7) is the tool for them |
+| Images | jpg, png, heic, gif, webp, raw formats | names only | OCR and tags are confirmed bulk jobs (D13) |
+| Media | mp3, m4a, flac, mp4, mov, mkv | names only | No text |
+| Archives and disk images | zip, 7z, tar, gz, dmg, iso | names only | Members are not listed by default (a later option, within `paddock-archive` caps) |
+| Apps and binaries | exe, app, dll, so, dylib | names only | Apps come from the app catalogue |
+| Unknown types | anything with no reader | names only | No content reader exists; the level cannot be raised |
+
+- **Per-extension override** in Settings (move `.mdx` to Plain text, set `.csv` to names only, and so on).
+- **A TOML pack for custom types** maps an extension to a group and an existing reader (`.tf` → code, `.adoc` → plain
+  text). A pack cannot add a reader; new readers are code in `paddock-extract`, or later a plugin contribution (ADR 0001
+  amendment, WP 4.4).
+- **Content readers exist only for supported types** (the S2 list). Groups and extensions without a reader offer only
+  "off" and "names only".
+
+**What decides the reader: the content, not the extension.** Extensions are what users see and set, because that is
+fast and understood. But files are untrusted input to the parsers, so a reader runs only when the content matches:
+- The extraction worker reads the **first 8 KB** and sniffs magic bytes (`%PDF-`; the ZIP signature, then a structure
+  check for OOXML and ODF; the OLE2 signature for `msg` and old Office; the PST signature; mbox `From ` lines; plain text
+  = valid UTF-8, or a UTF-16 BOM, with no NUL bytes in the sample). A crate such as `infer` covers the common signatures
+  **(verify licence and coverage in S2)**; the reader still validates the full structure and fails safely.
+- **Mismatch:** a `.pdf` that is not a PDF stays names-only and coverage shows "type mismatch". A `.txt` that sniffs as
+  a PDF is read as a PDF, at the PDF group's level.
+- **No extension, or an unknown one,** inside a content location: the sniffed type decides, if it is supported;
+  otherwise names only.
+- Only files already in content scope are sniffed. Names-only locations and types are never opened, so cloud
+  placeholders stay untouched and the walk stays a metadata walk.
+- **OS type information as hints only:** macOS UTI (UTType, from LaunchServices), Linux shared-mime-info (glob and
+  magic database) and Windows file associations (`PerceivedType` in the registry). They are mostly derived from the
+  extension, differ per machine and per installed app, and are missing on some Linux desktops, so they never choose a
+  reader. They are worth using for one thing: putting **unknown extensions into a display group** (image, video, audio)
+  for names-only files and the type counts. **(Verify each API in R4; not tested here.)**
+
+**Coverage shows counts per type:** per location and group, the number of files at each level, and the files skipped
+with their reason (excluded, too large, type mismatch, no reader, unreadable, quarantined).
+
+### 1.10 File size limits (added 2026-11-04)
+
+The user asked (2026-11-04): "And the file size limit to index?" Limits are Settings with these defaults (D21). Large
+files always keep the names layer.
+
+| Limit | Default | Why |
+|---|---|---|
+| Max file size for content: documents, PDFs, presentations, ebooks | **100 MB** | Files with real text are almost always smaller; above this they are mostly scans and image-heavy exports whose text is small, while parsing them costs the most memory and time, and the WP 2.1 worker caps would often stop them anyway **(reasoning, not measured; S2 measures time and footprint by file size)** |
+| Max file size: plain text, Markdown, code, CSV | **20 MB** | A bigger text file is nearly always a log or a data dump; Recoll's `textfilemaxmbs` defaults to 20 MB, meant mainly for skipping very large logs ([recoll.conf(5)](https://www.mankier.com/5/recoll.conf), via search) |
+| Max file size: spreadsheets | **50 MB** | xlsx is compressed XML that expands many times when read **(estimate)** |
+| Max extracted text per file | **10 MB** (the first 10 MB; the rest skipped) | About 10,000 passages of 1 KB; the file is marked "partly indexed" |
+| Meaning per file | **the first 256 passages** (about 256 KB of text) | One huge file cannot use up the vector budget (D17); the rest stays keyword-searchable |
+| Containers: PST, OST, mbox | **no whole-file limit**; per message 25 MB, each attachment under its own type's limit | They are read message by message (WP 3.1); the vector budget and D18 bound the total |
+| Per-file time and memory | the WP 2.1 worker caps | A safety limit, not a Setting a user normally changes |
+
+- Coverage lists "too large, names only (240 MB, limit 100 MB)" per file with **Index anyway**: one file, run as a job
+  with the soft limit lifted for that file; the worker's time and memory caps still apply and a failure shows its cause.
+- S2 adds a 1 GB generated text file and a 500 MB generated PDF to its corpus to prove the limits keep memory flat.
+
 ## 2. Spikes first (before any ADR is accepted)
 
 Each spike runs on synthetic data only (ER-14). Each records its numbers in `apps/recce/docs/performance.md` (rule 48),
@@ -176,7 +309,7 @@ uses a private `CARGO_TARGET_DIR`, and runs as a heavy job through the semaphore
 | Spike | Question | Output | Size |
 |---|---|---|---|
 | S1 | Name table: memory and per-keystroke latency for 0.5M, 2M, 5M and 10M generated paths (10M added for scale, section 1); own table against a Tantivy n-gram field; `paddock-names` matching cost; resident footprint with the snapshot mmapped | A results block, and the choice for ADR R2 | 2.5 to 3.5 |
-| S2 | Extraction: `pdfium-render`, `pdf_oxide` and `lopdf` on a generated PDF corpus; kreuzberg (features trimmed) against our own thin adapters on OOXML, PDF, eml and PST; binary size, `cargo deny`, peak RSS per file, throughput per worker | Library choice for `paddock-extract` | 3 to 4 |
+| S2 | Extraction: `pdfium-render`, `pdf_oxide` and `lopdf` on a generated PDF corpus; kreuzberg (features trimmed) against our own thin adapters on OOXML, PDF, eml and PST; binary size, `cargo deny`, peak RSS per file, throughput per worker; time and footprint by file size, with a 1 GB generated text file and a 500 MB generated PDF (1.10); the magic-byte sniffer's coverage (1.9) | Library choice for `paddock-extract`; the size limits of D21 confirmed | 3 to 4 |
 | S3 | Change feeds: macOS FSEvents history across a reboot, with a UUID check; Windows journal through an elevated test process in the VM (local only, never CI); whether the "unprivileged" journal read exists and what it returns; Linux inotify cost at 100k folders | Feed design for ADR R3 | 3 |
 | S4 | macOS: does Full Disk Access survive an ad-hoc re-signed update? (local VM, lessons.md) | Yes or no, and the Repair flow | 1 |
 | S5 | Graph: PKCE loopback sign-in with a personal account and a test tenant; delta for drive and mail; `410` and `syncStateNotFound` paths with a fake server | Connector design for ADR R5 | 2 to 3 |
@@ -296,7 +429,7 @@ Family ADRs needed (shared code):
 Sizes are agent-days and rough; ranges are wide on purpose. The "Shared" column names the shared work each package depends
 on or creates (rules 42, 43 and 55: a shared change lands with its adoption).
 
-### Stage 1: launcher and file name search (about 39 to 58 agent-days)
+### Stage 1: launcher and file name search (about 40 to 61 agent-days)
 
 The first useful release: hotkey, apps, files by name, calculator, actions, plus the agent and the shell.
 
@@ -305,25 +438,25 @@ The first useful release: hotkey, apps, files by name, calculator, actions, plus
 | 1.1 | App skeleton from the template (`scripts/new-app.mjs`): shell, settings, jobs pane, `paddock.ci.json`, workflow, CODEOWNERS | shell (ADR 0012), composition contract (ADR 0037) | Conformance green; the app starts and quits on three OS | 3 to 4 |
 | 1.2 | `recce-agent` as a login item; IPC contract with generated TypeScript; supervisor; health | `paddock-service`, `paddock-ipc`, `paddock-health` | Agent restarts after a crash; app shows Repair (rule 19) | 4 to 6 |
 | 1.3 | Name table (from S1): build, query, mmap snapshot, frecency; sized for 10 M entries (section 1) | `paddock-names` | S1 budgets met in `paddock-bench`, including 10 M entries at ≤ 30 ms p95 and the idle footprint budget | 6 to 8 |
-| 1.4 | First listing and the manifest walk with stat fields; roots and exclusions (built-in pack plus settings); network shares by scheduled rescan; cloud placeholders never read | `paddock-walk` (IG14, with Pacenotes), `paddock-packs` | 1M generated files indexed within the budget on SSD; progress and Cancel per phase | 5 to 7 |
+| 1.4 | First listing and the manifest walk with stat fields; indexed locations as an allowlist with the first-run scope screen (1.8, D20); names-only whole drives; exclusions (built-in pack, user folders and patterns, `.gitignore`); network shares by scheduled rescan; cloud placeholders never read | `paddock-walk` (IG14, with Pacenotes), `paddock-packs` | 1M generated files indexed within the budget on SSD; progress and Cancel per phase; an excluded folder is never opened (test with a counting fake file system) | 6 to 9 |
 | 1.5 | Change feeds: FSEvents history (macOS); RDCW plus manifest (Windows, no helper); inotify roots (Linux); cursors in the catalog | `paddock-watch` `ChangeFeed` (new, with Dyno ADR 0029 WP-8) | Create, rename and delete show within 2 s; a dropped-events path triggers a rescan; tests use fakes (ADR 0041) | 5 to 7 |
 | 1.6 | Launcher window: pre-created and hidden, shown on the hotkey; results as you type; keyboard only; preview pane (file metadata, Quick Look-style preview where the OS offers one **(verify)**); actions (open, reveal, copy path, open with) | `global-hotkey`, `paddock-files`, `paddock-window` | ≤ 50 ms to paint (budget); accessible (CDK listbox, rule 47) | 5 to 7 |
 | 1.7 | App catalogue per OS, including Store apps and Settings pages (L2); calculator (`fend-core`); system commands with confirmation | none | The listed apps of a VM image are found; destructive actions confirm | 3 to 5 |
 | 1.8 | Query and action model (catalogue Q2 to Q7, Q12, A1 to A4, L5 to L10, L16, E1 in part): filter syntax and chips, saved searches and scopes as a TOML pack, recent searches; action panel on every result, file buffer, Alt+1..9, run as admin; quicklinks and keyword web searches with `{query}` placeholders and keyword-only suggestions (moved here from 4.3); fallbacks, aliases, Home with pinned and recent items, compact mode, `recce://` command links, hotkey conflict check | `paddock-packs`, `paddock-siblings` (deep links) | Syntax and chips give the same query (property test); a plain query never reaches the network (test with a fake egress); every action reachable by keyboard with its shortcut shown | 5 to 8 |
-| 1.9 | Coverage and source health for local sources (C16, F4, V6): counts, last change, unreadable folders and why (no Full Disk Access, excluded, locked) with Repair; rebuild one source; pause indexing from the tray | `paddock-health`, `paddock-window` | A denied folder in the VM shows its reason and a working Repair; the invented-names test covers the view's logs | 3 to 4 |
+| 1.9 | Coverage and source health for local sources (C16, F4, V6): counts, last change, unreadable folders and why (no Full Disk Access, excluded, locked) with Repair; counts per type group and level, and skipped files with their reason (excluded, too large, type mismatch, no reader); rebuild one source; pause indexing from the tray | `paddock-health`, `paddock-window` | A denied folder in the VM shows its reason and a working Repair; the invented-names test covers the view's logs | 3 to 5 |
 
-### Stage 2: content and meaning search (about 49 to 77 agent-days)
+### Stage 2: content and meaning search (about 51 to 79 agent-days)
 
 | WP | Scope | Shared | Acceptance | Size |
 |---|---|---|---|---|
-| 2.1 | `paddock-extract`: ports, guarded worker protocol, limits (size, time, memory, zip ratio), quarantine by content hash; OOXML (moved from Pacenotes' reader), PDF (S2 choice), text, HTML, RTF | **new shared crate**; `paddock-guard`, `paddock-proc`, `paddock-archive`; safe XML from Pacenotes ADR 0010 | Fuzz targets; a hostile corpus never takes the agent down; Pacenotes adopts it in the same change (rule 55) | 8 to 12 |
+| 2.1 | `paddock-extract`: ports, guarded worker protocol, the type registry and the magic-byte sniffing that picks the reader (1.9), limits (size, time, memory, zip ratio), quarantine by content hash; OOXML (moved from Pacenotes' reader), PDF (S2 choice), text, HTML, RTF | **new shared crate**; `paddock-guard`, `paddock-proc`, `paddock-archive`; safe XML from Pacenotes ADR 0010 | Fuzz targets; a hostile corpus never takes the agent down; a renamed file whose content does not match never reaches the wrong reader; Pacenotes adopts it in the same change (rule 55) | 9 to 13 |
 | 2.2 | Tantivy content index, one per source shard (section 1.3), with the shard merge S6 chose (shared BM25 statistics or RRF), late shards merged in; schema, chunking, passage re-read from the source, deletion on change; content operators (phrase, same line or section, fields) (Q8); preview with hit highlighting and open at the match (P2, P3); "why this result" (Q11) | none | BM25 query ≤ 100 ms p95 at 1M generated documents and ≤ 150 ms p95 at 20 M passages in 24 shards (S6 budget); a stored synthetic corpus finds every planted hit (Q15) | 8 to 12 |
 | 2.3 | Embeddings through `paddock-embed` (Model2Vec default at 256 dims; multilingual model a Setting per source); the vector store and layout S6 chose (binary search codes, int8 re-score of the top k, mmapped; USearch base plus delta and tombstones with rebuild-and-swap, or flat); RRF; Qwen re-rank of the top 50 through Pitwall when it runs | **X55 `paddock-embed`** (Debrief and Pacenotes build it first) | hit@5 against a stored synthetic query set (the bar set in R4); recall@10 against exact f32 meets the S6 bar; the index record lets a model change rebuild beside and swap | 7 to 11 |
 | 2.4 | Content job: pipeline walk → extract → chunk → index → embed → vector index → swap, with stage threads as Settings (Auto); utility QoS; resumable; passage fingerprints (text hash plus model id) so unchanged content is never re-embedded; the priority queue of section 1.2 | `paddock-jobs` | Phases, counts and Cancel; idle CPU ≈ 0 after catch-up; a touch-only or move-only change makes zero embed calls (test with a counting fake embedder) | 5 to 7 |
 | 2.5 | Windows helper (journal and MFT listing, read-only) | **`paddock-helper`** extracted from Dyno's helper (ADR 0034 copies), or an app helper with a registered copy | Callers checked; installer and uninstall paths in the VM; rule 54 bundle build | 8 to 12 |
 | 2.6 | Privacy storage: no stored local text; encrypted store for remote text and clipboard; FDE check at first run; Forget a source; the privacy ledger (V3: per source what is indexed, where, its size; index size and memory cap, F3) | `paddock-secrets`, `paddock-storage` | The invented-names test passes on index, logs and diagnostics | 5 to 8 |
 | 2.7 | Deterministic natural-language filters shown as chips (Q10); browser bookmarks (C10); EPUB (C2); "Open in Debrief" for logs and bundles (G3) | `paddock-siblings` | The filter parser has a table test of phrases to chips and never calls a model | 3 to 5 |
-| 2.8 | Scale controls (section 1): tier rules (names for all, keyword for text-bearing types, meaning for selected passages; archives keyword-only by default, D18); per-source disk and CPU budgets as Settings with Auto (D17); priority order and eviction to keyword-only when a budget is full; pause on battery, user activity (one thread floor), low disk and thermal pressure (F2); coverage per source and tier in the ledger | `paddock-jobs`, `paddock-health` | A budget change evicts lowest-priority vectors first and the ledger shows it; each pause shows its reason and Resume; coverage never mixes tiers into one percent | 4 to 6 |
+| 2.8 | Scale controls (section 1): tier rules (names for all, keyword for text-bearing types, meaning for selected passages; archives keyword-only by default, D18); per-source disk and CPU budgets as Settings with Auto (D17); priority order and eviction to keyword-only when a budget is full; pause on battery, user activity (one thread floor), low disk and thermal pressure (F2); coverage per source and tier in the ledger; type groups with levels, per-extension overrides and the custom-types pack (1.9, D22); size limits with "Index anyway" (1.10, D21) | `paddock-jobs`, `paddock-health`, `paddock-packs` | A budget change evicts lowest-priority vectors first and the ledger shows it; each pause shows its reason and Resume; coverage never mixes tiers into one percent; a file over a limit keeps its name and shows "too large" with Index anyway | 5 to 7 |
 
 ### Stage 3: email and SharePoint/OneDrive (about 32 to 48 agent-days)
 
@@ -352,8 +485,9 @@ Only when a user asks for it (section 1.6, ADR R10): a server process holding sh
 its client, sign-in and TLS, and an honest view of what leaves the machine. Rough size 15 to 25 agent-days; **not in the
 total below** and not estimated firmly before R10.
 
-**Total, rough:** about 156 to 237 agent-days after the spikes (about 17 to 24, including S6), before review rounds and
-releases; the scale design added about 10 to 14 agent-days to stages 1 to 3. Firm figures
+**Total, rough:** about 159 to 242 agent-days after the spikes (about 17 to 24, including S6), before review rounds and
+releases; the scale design added about 10 to 14 agent-days to stages 1 to 3, and scope, type levels and size limits
+(1.8 to 1.10) about 3 to 5 more. Firm figures
 come with the ADRs' work packages.
 
 ## 5. Dependencies on other apps' shared work
@@ -367,6 +501,7 @@ come with the ADRs' work packages.
 | Safe XML and OOXML reading | Pacenotes ADRs 0009 and 0010 | Accepted; code in Pacenotes stage work |
 | Shell, dialogs, jobs pane, settings | ADRs 0012, 0026, 0037 | Built |
 | `paddock-mcp` spec update (2025-11-25 and later) | family | Not planned; raise separately |
+| **Depends on Recce:** Pitwall's knowledge collections (RAG) and its tool hosting for Recce's tools | Pitwall roadmap phase 3 | Pitwall waits for Recce stages 2 and 4 (WP 4.2) or the shared crates; Pitwall builds no index of its own (Family role, section 0) |
 
 ## 6. Open decisions for the user (recommended default first)
 
@@ -391,6 +526,9 @@ come with the ADRs' work packages.
 | D17 | Default vector budget (section 1.2) | **Auto = min(4 GB, 2 % of the index volume) for the vector layer in total**, binary search codes plus int8 re-score codes: about 13.9 M passages flat or 9.3 M with a graph (arithmetic); beyond it, the lowest-priority passages stay keyword-only and the ledger says so. S6 confirms the bytes per passage | 1 GB (about 3.5 M passages flat); 10 GB; unlimited; no vectors unless opted in |
 | D18 | Old archives | **Keyword-only by default** (names and full text, no vectors) for mail and folders not changed or opened for two years and for PST/mbox archives; one switch per source or folder adds meaning search | Meaning search for everything within the budget, by priority only; names-only for archives |
 | D19 | Very large data | **No index server in stages 1 to 4**; an optional, separate index server mode (Postgres + pgvector, ADR R10) only when a user asks | Plan it now as stage 5; never |
+| D20 | Default indexing scope (1.8) | **An allowlist.** Content: Documents, Desktop, Downloads and local sync folders; Pictures, Music and Videos included but names-only by type; mail and M365 only as ticked at sign-in. **Names-only whole drives on for internal drives, off for removable and network drives.** Built-in exclusion pack, and `.gitignore` respected | Content for whole drives (Spotlight's model); the allowlist only, with no names-only drives (launching misses files elsewhere) |
+| D21 | File size limits (1.10) | **100 MB** for documents, PDFs and presentations; **20 MB** for plain text, Markdown, code and CSV; **50 MB** for spreadsheets; the **first 10 MB of text** per file; vectors for the **first 256 passages** per file; containers (PST, OST, mbox) per message at 25 MB; large files keep their names; per-file "Index anyway" | 50 MB for everything; no limits (rely on the worker caps only) |
+| D22 | Default type levels (1.9) | **Content plus meaning** for documents, PDFs, plain text and Markdown, presentations and email files; **content** for spreadsheets and code; **names only** for logs and data dumps, images, media, archives, apps and unknown types. Settings by extension group, with per-extension overrides and a custom-types pack; **the reader is chosen by magic-byte sniffing of the first 8 KB, never by the extension alone** (a mismatch stays names-only and shows "type mismatch"; a missing or wrong extension is decided by the sniffed type); OS type info (UTI, shared-mime-info, Windows associations) only to group unknown extensions for display | Content plus meaning for every supported type; the reader chosen by extension (rejected: a renamed file would reach the wrong parser) |
 
 ## 7. Risks and their owners
 
