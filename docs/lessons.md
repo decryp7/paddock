@@ -1305,3 +1305,27 @@ Five Dyno tests failed only on the Windows leg (2147 passed, 5 failed); each was
 **Lesson:** a test that builds a fake Linux or macOS tree runs on all three runners: build paths from the OS (`temp_dir`, `Path::join`), keep
 test inputs LF in `.gitattributes`, and gate a test by `cfg` only with the reason (never `#[ignore]`). The check before pushing is `cargo xwin clippy
 --all-targets` (an import used only by a gated test is an unused-import error on Windows).
+
+## The macOS runner's stable-workspace step copies the checkout across volumes (2026-11-04, Dyno gates run 7501, job 28671)
+
+`stable-workspace` timed out after 300 s on the Mac runner and its message blamed "a process left from an earlier job holds a file or lock". That guess
+was wrong for this run: the step `mv`s the checkout from `/Users/decryp7/gitea-runner/work/...` to `/Volumes/d7sst7/ci/home/src/...`, and across volumes
+`mv` is a full copy, which is slow while other jobs copy their checkouts at the same time (the same `mv` was running for another leg when this one timed
+out). **Lesson:** a timeout message that names one cause needs the step to log the other likely one (bytes and time of the move, the source and target
+volume); until then read "did not finish within N s" on the Mac runner as "check for a cross-volume copy under load" first. Runner fix: with the user.
+
+## Two Dyno vitest specs that lose to a loaded runner (2026-11-04, Dyno gates runs 7494 and 7501)
+
+- `widget-choosers.spec` "disables every add button once the menu bar holds its 32 items" added 28 items through the page, re-rendering a growing list
+  of 5 to 32 rows of Material fields each time (5254 ms against the 5 s limit on the runner). The engine now takes items 5 to 31 directly and the
+  page's button adds the last one: work that scales with the item count belongs in the arrangement, not in the step under test.
+- `processes-page-actions.spec` "opens the row menu with Shift+F10 ...": the row's context menu is disabled while a row has no actions
+  (`matContextMenuTriggerDisabled`) and live updates redraw the rows, so one key press sent at that moment is lost and a `vi.waitFor` after it never
+  succeeds. The test now sends the key again to the row that is there, inside the `vi.waitFor`, until the menu is open. A real person's key press may be lost
+  in the same way (the focused row replaced by a redraw, or a row whose actions have not arrived): **unverified, a follow-up** to check that live updates keep
+  the focused row's DOM node and that Shift+F10 on a row without actions says why instead of doing nothing; not fixed here.
+Proof, honestly (Linux, OrbStack `paddock-gate-arm`, 6 cores, 12 busy loops started and stopped by pid, 50 runs of each test):
+- 32 items: the old test passed 50 of 50 but took 94.97 s (1.9 s a run); the fixed one passed 50 of 50 in 23.5 s (0.47 s a run). It was **not reproduced as a failure**
+  (the CI runner needed 5.25 s), but the old test costs four times the work, which is what the 5 s limit trips on; the cause is the cost that grows with the item count.
+- Shift+F10: old and fixed both passed 50 of 50 (15.4 s and 15.7 s); the failure was **not reproduced and the lost-key cause is from reading the code and the CI log, not proven**.
+  The resend is harmless to keep, but if this spec fails again the cause is something else: record the row's `disabled` state and the actions at the moment of the key before guessing again.

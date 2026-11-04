@@ -112,18 +112,29 @@ describe('dy-menu-bar-items', () => {
   });
 
   it('disables every add button once the menu bar holds its 32 items', async () => {
-    const { f, el } = setup(MenuBarItems);
+    const ctx = setup(MenuBarItems);
+    const { f, el } = ctx;
     await vi.waitFor(() => {
       f.detectChanges();
       expect(rows(el)).toHaveLength(4);
     });
-    for (let want = 5; want <= 32; want++) {
-      el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
-      await vi.waitFor(() => {
-        f.detectChanges();
-        expect(rows(el)).toHaveLength(want);
-      });
+    // The engine takes the first 27 items directly: adding them one by one through the page re-renders a growing list of 5 to 32 rows
+    // of Material fields 28 times, which is slow enough on a loaded runner to pass the test's 5 s (CI run 7501). The last one goes
+    // through the page's own button, so the step that reaches the limit is the one the user takes.
+    const { mock } = ctx;
+    for (let n = 5; n <= 31; n++) {
+      mock.widgets.edit({ menuBar: { add: { widget: { number: { metric: 'cpuTotal', unit: '', label: '', format: 'stacked' } }, span: null, at: null } } });
     }
+    TestBed.inject(WidgetLayouts).accept(mock.widgets.view('menuBar'));
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(31);
+    });
+    el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(32);
+    });
     const adds = [...el.querySelectorAll<HTMLButtonElement>('li.pd-wc-add button')];
     expect(adds.length).toBeGreaterThan(0);
     expect(adds.every((b) => b.disabled)).toBe(true);

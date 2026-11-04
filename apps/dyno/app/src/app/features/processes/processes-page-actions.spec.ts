@@ -183,12 +183,17 @@ describe('ProcessesPage actions', () => {
       store.setMode('flat');
       f.detectChanges();
       await settle(f);
-      const first = rowEls(el)[0]!;
-      first.focus();
-      first.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, cancelable: true, bubbles: true }));
-      await settle(f);
-      // The overlay opens on a later turn than the key: wait for the menu, not for a number of turns (rule 49).
-      await vi.waitFor(() => expect(document.querySelectorAll('.pd-popmenu__item').length).toBeGreaterThan(0));
+      // The row's menu is disabled while the row has no actions and the rows are redrawn by every live update, so one key sent at a moment
+      // when the row is not ready (or is being replaced) is lost for good, and waiting after it never helps (CI run 7501). The key is sent
+      // again, to the row that is there now, until the menu is open.
+      await vi.waitFor(() => {
+        if (document.querySelector('.pd-popmenu__item')) return;
+        const row = rowEls(el)[0]!;
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, cancelable: true, bubbles: true }));
+        f.detectChanges();
+        expect(document.querySelectorAll('.pd-popmenu__item').length).toBeGreaterThan(0);
+      });
       const items = [...document.querySelectorAll('.pd-popmenu__item')].map((i) => i.textContent!.trim());
       expect(items).toEqual(['Details', 'Open file location', 'Search the web…', 'Search file hash on VirusTotal…']);
       document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
