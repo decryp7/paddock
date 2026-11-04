@@ -109,9 +109,13 @@ pub fn uninstall() -> Result<Report, String> {
         return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
     }
     audit_run("uninstall", "");
-    let report =
-        uninstall_in_place(os_of(this_host()), &install_roots(&OsKnownFolders).map_err(|e| e.to_string())?, &mut RealFiles, &system)
-            .map_err(|e| e.to_string())?;
+    let report = uninstall_in_place(
+        os_of(this_host()),
+        &install_roots(&OsKnownFolders).map_err(|e| e.to_string())?,
+        &mut RealFiles,
+        &system,
+    )
+    .map_err(|e| e.to_string())?;
     // The program and the registration are gone: what the helper wrote next to them goes too (its log of the removal is the
     // installer's own phase list above, printed by the command).
     match remove_data_folder(&helper_paths()) {
