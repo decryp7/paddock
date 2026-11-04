@@ -1,14 +1,15 @@
 # 51. `paddock-tools`: one manager for the external tools, runtimes and model files the apps find, download and install
 
-- Status: Proposed, revision 2 (2026-11-04). The user accepted Q1 to Q4 and Q6 to Q8 of revision 1 as recommended
-  (2026-11-04, "User decisions" below). Revision 2 answers the independent review of revision 1 (`838aad1ea`, verdict
-  "needs another round": 4 P1, 11 P2, 4 P3). Open: Q5 and the new Q9. Docs only: no crate exists yet.
+- Status: Proposed, revision 3 (2026-11-04). The user accepted Q1 to Q4 and Q6 to Q8 of revision 1 as recommended
+  (2026-11-04, "User decisions" below). Revision 2 answered the independent review of revision 1 (`838aad1ea`: 4 P1,
+  11 P2, 4 P3); revision 3 answers the re-review of revision 2 (`ae487ceac`: N1 to N5 and five P3). Open: Q5, Q9, Q10 (listed
+  together at the end). Docs only: no crate exists yet.
 - Date: 2026-11-04
 - Related: ER-17 to ER-20 (long operations, progress, no UI timeouts, parallelism and cost), ER-21 / rule 40 (recurring bugs
   mean a missing design rule), ER-22 / rules 39, 42, 43 (share first, shared behaviour tested once), ER-27 (logs explain
   every failure), rule 21 (tunables are Settings, knowledge lists are TOML packs), rule 52 (no starvable QoS for waited
   work), rule 53 and ADR 0033 (never act on a reusable OS name), rule 55 and ADR 0034 (one implementation per mechanism),
-  ADR 0028 (`paddock-about` and `paddock-deps`), ADR 0030 (one browser driver), Dyno ADR 0027 §7 and its amendments,
+  ADR 0028 (`paddock-about` and `paddock-deps`), ADR 0030 ("Every unexplained browser abort names the causes it ruled out, in one driver"), Dyno ADR 0027 §7 and its amendments,
   Pacenotes README tier 3 and `pacenotes-core/src/pack.rs`, Sighter stage-2 plan SW9, SW11, SW36 and ADR 0001. Memory
   notes "avoid hard coding", "licence exceptions", "network on by default", "local test VMs", "estimate after design".
 - Number: 0051. `origin/main` (`72a5bfd1b`) holds up to 0044 and 0049; 0045 to 0048 and 0050 exist on other branches
@@ -24,7 +25,7 @@
 | U4 | Q4 package-manager queries in locate | None: locate only reads folders, the registry and `PATH` (D3) |
 | U5 | Q6 Authenticode | Checked too: the Windows helper verifies the installer's Authenticode signature against the pin before running it (D5, D9) |
 | U6 | Q8 name | `paddock-tools` |
-| U7 | Q7 delete-by tags | As proposed: Dyno's copies `dyno-v1.2.0`, Debrief's the release after 1.2 (`debrief-v1.3.0`), Pitwall's the release after 1.1 (`pitwall-v1.2.0`) (WP-0) |
+| U7 | Q7 delete-by tags | As proposed: Dyno's copies `dyno-v1.2.0`, Debrief's the release after 1.2 (`debrief-v1.3.0`), Pitwall's the release after 1.1 (`pitwall-v1.2.0`) (WP-0). Pitcrew, Pacenotes and Debrief's browser runtime were not covered by that question: Q10 |
 
 ## Context
 
@@ -98,7 +99,7 @@ server, llama-server, ffmpeg), a runtime (ONNX Runtime, a training runtime) or a
 | Jobs, phases, Cancel, clock | `paddock-jobs` |
 | Running a probe or an installer, by identity; kills | `paddock-proc` (rule 53) |
 | The login-shell `PATH` (new canonical home, D3) | `paddock-proc` (`login_env` module) |
-| SPDX expressions, licence policy, notices, the "downloaded on request" class | `paddock-deps` / `paddock-about` (ADR 0028, D9) |
+| SPDX expressions, licence policy, notices, the "downloaded on request" class | `paddock-deps` / `paddock-about` (ADR 0028, D9). `paddock-deps` is not on `main` yet (`crates/` at `72a5bfd1b`): until it lands `paddock-tools` carries a local `Spdx` newtype (syntax-checked expression text), which WP-12 replaces with `paddock-deps`' type |
 | **Locate, trust, probe, report, resolve, plan install and uninstall, the privileged port and its helper side, the layout, update checks** | **`paddock-tools`** |
 
 ```text
@@ -190,7 +191,9 @@ install = { recipe = "nsis", privileged = true, args = ["/S", "/SO", "x64,smartc
 layout = { executable = "bin/smartctl.exe" }
 evidence = [
   { kind = "openpgp", fingerprint = "0C9577FD2C4CFCB4B9A599640A30812EFF3AEFF5", verified = "2026-11-03", record = "smartmontools-7.5.pin.md" },
-  { kind = "authenticode", subject = "CN=SignPath Foundation", verified = "2026-11-03" },
+  # The helper matches the signer and root certificates by SHA-256 thumbprint; `subject` is for people only.
+  # The thumbprints are written by `./dev tools pin` (WP-10); the placeholders below are not real values.
+  { kind = "authenticode", signer_sha256 = "<leaf thumbprint>", root_sha256 = "<root thumbprint>", timestamp = "required", subject = "CN=SignPath Foundation", verified = "2026-11-03" },
 ]
 
 [[platform]]
@@ -223,6 +226,9 @@ Validation (each a failing test first):
   carry licences too), are refused unless `paddock-deps` lists a scoped exception (D9).
 - Sighter's extra weight fields (`upstream_url`, `upstream_md5`, `lineage`, `resolution`) go in a `meta` table per platform
   entry, carried through and never judged.
+- `use_as`, `license` and `programs` are **required** with no default (a missing key refuses the pack); `programs` may be
+  empty only with `use_as = "data"`.
+- Two `[[use]]` entries with the same `id` whose `platforms` overlap refuse the pack (one platform, one `needs` per use).
 
 **User packs and built-in packs merge append-only** (`paddock_packs::Origin`):
 
@@ -286,10 +292,24 @@ rules; the unprivileged app classifies trust only to report it.
    through `ToolLayout::privileged` or the built-in pack's hints, and only when protected.
 3. **Protected**, per OS (implemented in `trust.rs`, each rule with a test over a fake security descriptor or stat, and a
    real-OS test in the VMs):
-   - **Windows:** the owner of the file and of every ancestor folder is SYSTEM, Administrators or TrustedInstaller, and the
-     effective DACL of each grants no SID other than SYSTEM, Administrators and TrustedInstaller any of `FILE_WRITE_DATA`,
-     `FILE_APPEND_DATA`, `DELETE`, `FILE_DELETE_CHILD` (on folders), `WRITE_DAC` or `WRITE_OWNER` (inherited entries
-     included; a `CREATOR OWNER` entry counts as granting the creator).
+   - **Windows.** "Trusted SIDs" are SYSTEM, Administrators and TrustedInstaller; a `CREATOR OWNER` entry counts as
+     granting its rights to any user who can create there. The rule differs by position, because stock ancestors let users
+     add entries (the reviewer reports `C:\` granting Authenticated Users "create folders" and `C:\ProgramData` granting
+     Users write data, append data and write extended attributes), and adding a sibling never changes what a path
+     resolves to:
+     - **Every ancestor** (from the volume root down to the containing folder's parent): the owner is a trusted SID, and no
+       untrusted SID has `DELETE` on that component, `FILE_DELETE_CHILD` on its parent, or `WRITE_DAC` / `WRITE_OWNER` on
+       it (any of these lets a user rename or re-permission the component and swap the path below it).
+     - **The containing folder and the file itself:** all of the above, and also no untrusted SID has `FILE_ADD_FILE`,
+       `FILE_ADD_SUBDIRECTORY` (folder), `FILE_WRITE_DATA` or `FILE_APPEND_DATA` (file).
+     - **No component is a reparse point** (junction, symlink, mount point): checked from `FILE_ATTRIBUTE_REPARSE_POINT`
+       on each component opened with `FILE_FLAG_OPEN_REPARSE_POINT`. The check walks the chain of the path returned by
+       `GetFinalPathNameByHandle` on the **held** image handle (D4.5), so the checked chain is the one the handle refers to.
+     - Tests (WP-3) run the rule over fake security descriptors that are the **real default SDDL** of `C:\`,
+       `C:\ProgramData`, `C:\Program Files` and `C:\Program Files\<app>` on a stock Windows 11 VM (captured once with
+       `Get-Acl | Select Sddl` in the local test VM, stored as fixtures; no user machine is read): `C:\Program Files\x\y.exe`
+       passes, a file directly in `C:\ProgramData\Dyno\Helper\tools` with the inherited ACL fails on the containing-folder
+       rule, the same folder with the protected DACL of D4.4 passes, and a junction anywhere in the chain fails.
    - **macOS:** the path is resolved (symlinks followed to the real file, each component checked); the file and every
      ancestor are owned by root, not group- or other-writable, and carry no ACL entry that allows write, append, delete or
      change-permissions to anyone but root.
@@ -303,7 +323,11 @@ rules; the unprivileged app classifies trust only to report it.
      through `CreateProcess`, and hashes through that handle when a hash is needed; nobody can swap or delete the file while
      it is held.
    - **Linux:** `open(O_RDONLY | O_NOFOLLOW | O_CLOEXEC)`, check trust and hash on the descriptor, then
-     `execveat(fd, "", argv, envp, AT_EMPTY_PATH)`.
+     `execveat(fd, "", argv, envp, AT_EMPTY_PATH)` with `argv[0]` kept as the program's name (tools that read their own
+     `argv[0]`). Only for **native binaries** (the descriptor starts with the ELF magic): a `#!` script would be run by an
+     interpreter that reopens it by path (and fails on a descriptor opened `O_CLOEXEC`), and a snap launcher is a symlink
+     that `O_NOFOLLOW` refuses. In a privileged context such candidates are reported `Why::NotNativeExecutable` and not
+     run; in the unprivileged app they are run by path as today.
    - **macOS:** there is no exec-by-descriptor; the protected folder chain (rule 3) is what prevents a swap.
    - Revision 1's "re-check `runtime.json` before a privileged run" is **dropped**: that file is in a user-writable store
      and proves nothing to root. A privileged run trusts only the protected chain and the held image.
@@ -340,10 +364,27 @@ pub trait PrivilegedInstaller: Send + Sync {
 
 The helper side (`paddock_tools::privileged`, lifted from Dyno's `tool_install.rs`): verify the protected roots (D4.4),
 receive the staged file (D4.6) into protected staging while hashing, refuse a wrong size or hash, **check the Authenticode
-signature** of a Windows installer against the pin's `authenticode` evidence (`WinVerifyTrust` plus the expected subject;
-U5), empty the destination, run the recipe with `TEMP`/`TMP` inside staging from the held image (D4.5), confirm
+signature** of a Windows installer (U5, below), empty the destination, run the recipe with `TEMP`/`TMP` inside staging from the held image (D4.5), confirm
 `layout.executable`, clear staging on every outcome, log each phase with its duration. The helper's packs are the same
 files as the app's, compiled in with `include_str!` from one path; a contract test asserts both embed byte-identical packs.
+
+**The Authenticode check (U5).** Run on the held staged copy, after the SHA-256 check passed:
+
+- `WinVerifyTrust` with `WINTRUST_ACTION_GENERIC_VERIFY_V2`, `WTD_UI_NONE`, `fdwRevocationChecks = WTD_REVOKE_NONE` and
+  `WTD_CACHE_ONLY_URL_RETRIEVAL`: the helper makes no network request (the SHA-256 pin already binds the exact bytes, so
+  revocation adds only a network dependency to a SYSTEM process). `WTD_LIFETIME_SIGNING_FLAG` is not set.
+- **A timestamp is required** when the evidence says `timestamp = "required"`: the signature must carry an RFC 3161 (or
+  Authenticode) countersignature that falls within the signing certificate's validity, so a signature made before the
+  certificate expired stays valid (SignPath certificates are short-lived). A signature without one is refused.
+- **Match by thumbprint, not by name:** from the trust provider's state (`WTHelperProvDataFromStateData`, the signer's
+  chain) the helper compares the SHA-256 thumbprint of the leaf certificate with `signer_sha256` and of the chain's root with
+  `root_sha256`. The subject CN is logged and shown only.
+- Outcomes are typed (D6): `Why::SignatureRejected(SignatureFault)` with `SignatureFault` one of `NotSigned`, `BadDigest`,
+  `UntrustedRoot`, `WrongSigner`, `NoTimestamp`, `Expired`, next step `NextStep::DownloadAgain` (a second failure after a
+  fresh download becomes `NextStep::UpdateApp`: the pin is wrong); and `Why::SignatureUncheckable(UncheckableCause)` (the
+  trust provider failed or is unavailable, a policy error code), next step `NextStep::TryAgainLater`. Both refuse the install
+  (fail closed); the log carries the `WinVerifyTrust` HRESULT.
+- Evidence is written by `./dev tools pin` (WP-10), which reads the thumbprints and timestamp of the published file.
 
 **Bounds and Cancel (ER-17 to ER-19).** The installer runs under `paddock_proc::Supervised` with the recipe's `timeout_s`
 (default 120, at most 600); past it, the tree is ended through `paddock_proc::kill_tree` by identity, the destination is
@@ -394,18 +435,21 @@ impl ToolReport {
 ```
 
 - `InstallPhase`, `Why`, `NextStep`, `Instead` and `Note` are closed enums; `NextStep` holds variants such as
-  `TurnOnHelper`, `UpdateHelper`, `UpdateApp`, `InstallAgain`, `ClearOverride`, `AllowInSecuritySettings`,
-  `InstallWith { manager, command }`, `UninstallWith { manager, command }`; the UI words them. `Spdx` is `paddock-deps`'
+  `TurnOnHelper`, `UpdateHelper`, `UpdateApp`, `InstallAgain`, `DownloadAgain`, `TryAgainLater`, `ClearOverride`,
+  `AllowInSecuritySettings`, `InstallWith { manager, command }`, `UninstallWith { manager, command }`; the UI words them. `Spdx` is `paddock-deps`'
   parsed SPDX expression; `Version`, `ToolName` and `UseId` are newtypes.
 - `Why` includes `ProbeTimedOut`, `RefusedByOs` (Gatekeeper), `TooOld { found, needs }`, `NeedsAdmin`, `HelperOff`,
-  `NotProtected`, `HelperFolderNotProtected`, `OverrideFailed(Box<Why>)`, `NotCheckedYet`, and the version skew:
+  `NotProtected`, `NotNativeExecutable`, `HelperFolderNotProtected`, `SignatureRejected(SignatureFault)`,
+  `SignatureUncheckable(UncheckableCause)`, `OverrideFailed(Box<Why>)`, `NotCheckedYet`, and the version skew:
   `HelperTooOld { helper_pin, app_pin }` (the helper's compiled-in pack is older than the app's, so it refuses the app's
   bytes; next step `UpdateHelper`) and `AppTooOld { helper_pin, app_pin }` (next step `UpdateApp`). A test installs with a
   fake helper one pin behind and asserts that state, not a hash error.
 - **Needs and routes:** for each `[[use]]`, `needs = "user"` resolves to `Direct`; `needs = "admin"` to `ThroughHelper`
   when the helper is available and holds a protected copy, else `Unusable { NeedsAdmin, TurnOnHelper }`;
   `needs = "admin-preferred"` (Dyno's amended O2: helper first, unelevated fallback) to `ThroughHelper` when available,
-  else `Direct` with `Note::ReadingWithoutAdmin`.
+  else `Direct` with `Note::ReadingWithoutAdmin`. A Settings override applies only to the `Direct` route: when the route
+  is `ThroughHelper`, the helper runs its own protected copy and ignores the override (D4.2), and the report carries
+  `Note::OverrideNotUsedByHelper { use_id }` so the user sees why their chosen path is not the one reading.
 - **`resolve(tool, use)` never blocks.** It answers from the cached report at once; when the cache is empty or stale it
   returns the last answer (or `Unusable { NotCheckedYet, .. }`) and starts a **refresh job** (keyed per tool,
   deduplicated, phases `Locate` and `Probe`). Consumers subscribe to `paddock://tools` (or the Rust channel) and resolve
@@ -505,13 +549,20 @@ the job's phases, the places searched, "your chosen path failed" and newer-copy 
 ## Copies register (WP-0)
 
 WP-0 adds these to `docs/known-copies.toml` (docs only; the steward runs `copies --check-register` before it lands),
-delete-by tags per U7:
+delete-by tags per U7 and Q10. **An entry lands with, or after, the branch that brings its files to `main`** (a register
+path must name a tracked file). On `origin/main` (`72a5bfd1b`) today: Debrief's `debrief-video/src/runtime/{store,detect}.rs`
+and `debrief-ai/src/runtimes/store.rs`, Pitwall's `engines.rs` and `service/login_path.rs`, Pitcrew's `login_env.rs` and
+`runner_env.rs`, Dyno's `dyno-core/src/toolpath.rs` and `dyno-platform/src/toolpath.rs`; these entries land now (WP-0a).
+Not on `main`: Dyno's `tool_own_copy.rs`, `tool_download.rs`, `tool_pins.rs`, `tool_install.rs`, `dyno-helper/src/tools.rs`
+(they land with the Dyno 1.1.0 batch from `steward/dyno-1.1.0`), `smartctl_search.rs` (with `fix/dyno-windows-smart`), and
+Pacenotes' `pack.rs` (with the Pacenotes stage-1 landing); their lines are added in the same change that lands the files
+(WP-0b, one line per landing, by the landing's steward).
 
 | Mechanism id | Canonical | Copies (owner, delete-by) |
 | --- | --- | --- |
 | `runtime-store` | `paddock-runtime` (`crates/paddock-runtime/src/**`) | `apps/debrief/crates/debrief-video/src/runtime/store.rs`, `apps/debrief/crates/debrief-ai/src/runtimes/**` (debrief, `debrief-v1.3.0`); `apps/pitwall/crates/pitwall-server/src/engines.rs` (pitwall, `pitwall-v1.2.0`); `apps/dyno/crates/dyno-agent/src/{tool_own_copy,tool_download,tool_pins}.rs`, `apps/dyno/crates/dyno-platform/src/tool_install.rs`, `apps/dyno/crates/dyno-helper/src/tools.rs` (dyno, `dyno-v1.2.0`) |
-| `tool-locate` | `paddock-tools` (status "planned" until WP-2 lands) | `apps/dyno/crates/dyno-platform/src/smartctl_search.rs` once `4377d9362` lands (dyno, `dyno-v1.2.0`); `apps/debrief/crates/debrief-video/src/runtime/detect.rs` (debrief, `debrief-v1.3.0`); `apps/pacenotes/crates/pacenotes-core/src/pack.rs` symbol `Detect` (pacenotes, its first release) |
-| `login-shell-path` | `paddock-proc` `login_env` (planned, WP-14) | `apps/dyno/crates/dyno-core/src/toolpath.rs`, `apps/dyno/crates/dyno-platform/src/toolpath.rs` (dyno, `dyno-v1.2.0`); `apps/pitwall/crates/pitwall-server/src/service/login_path.rs` (pitwall, `pitwall-v1.2.0`); `apps/pitcrew/crates/pitcrew-service/src/login_env.rs`, `apps/pitcrew/crates/pitcrew-core/src/runner_env.rs` (pitcrew, its next minor) |
+| `tool-locate` | `paddock-tools` (status "planned" until WP-2 lands) | `apps/dyno/crates/dyno-platform/src/smartctl_search.rs` once `4377d9362` lands (dyno, `dyno-v1.2.0`); `apps/debrief/crates/debrief-video/src/runtime/detect.rs` (debrief, `debrief-v1.3.0`); `apps/pacenotes/crates/pacenotes-core/src/pack.rs` symbol `Detect` (pacenotes, `pacenotes-v1.0.0` proposed, Q10) |
+| `login-shell-path` | `paddock-proc` `login_env` (planned, WP-14) | `apps/dyno/crates/dyno-core/src/toolpath.rs`, `apps/dyno/crates/dyno-platform/src/toolpath.rs` (dyno, `dyno-v1.2.0`); `apps/pitwall/crates/pitwall-server/src/service/login_path.rs` (pitwall, `pitwall-v1.2.0`); `apps/pitcrew/crates/pitcrew-service/src/login_env.rs`, `apps/pitcrew/crates/pitcrew-core/src/runner_env.rs` (pitcrew, `pitcrew-v1.2.0` proposed, Q10: not `pitcrew-v1.1.0`, which is in the current release order and would be refused while the copy is there) |
 
 **Files the browser-driver mechanism already covers stay there only.** `browser-driver` (ADR 0030) registers
 `apps/spotter/crates/spotter-render/src/**` and `apps/debrief/crates/chromium-driver/src/**` whole, which includes
@@ -519,8 +570,10 @@ Spotter's `discover.rs`, `install.rs`, `manifest.rs`, `chromium-manifest.toml` a
 They are not listed again under `runtime-store` or `tool-locate` (one file, one mechanism, so a change has one set of copies
 to follow); instead the `runtime-store` and `tool-locate` entries carry a note "Chromium discovery and install: see
 `browser-driver`; its canonical `paddock-chromium` already installs through `paddock-runtime`", and the browser-driver
-consolidation deletes them with the rest of those trees. Debrief's `app/src-tauri/src/browser/runtime.rs` (the app's use of
-its driver's install) goes under `browser-driver` as `kind = "wiring"`.
+consolidation deletes them with the rest of those trees. Debrief's `app/src-tauri/src/browser/runtime.rs` (373 lines: the
+pinned release, the download job and the store; not a few lines of hook-up) goes under `browser-driver` as a **copy**
+(`kind = "copy"`), owner debrief, delete-by proposed `debrief-v1.2.0` to match that mechanism's existing Debrief copy
+(`chromium-driver`), or `debrief-v1.3.0` with the other Debrief copies of this ADR (Q10).
 
 ## Migration and adoption
 
@@ -571,16 +624,17 @@ Registered now (WP-0); they move onto `paddock-runtime` and `paddock-tools` by t
 
 ## Work packages
 
-Sizes in agent-days (S ≤ 1, M 2-3, L 4-8); firm once the review closes and Q5, Q9 are answered. WP-0 now (docs); the Dyno
+Sizes in agent-days (S ≤ 1, M 2-3, L 4-8); firm once the review closes and Q5, Q9, Q10 are answered. WP-0a now (docs); the Dyno
 trust fix now (above, outside these WPs); WP-1 to WP-12 and WP-14 after the current releases; WP-13 in Dyno's next line.
 
 | WP | Content | Days | Depends on |
 | --- | --- | --- | --- |
-| WP-0 | Register `runtime-store`, `tool-locate`, `login-shell-path` and the browser-driver notes (table above) | 1 | - |
-| WP-1 | Crate scaffold (new-crate skill); `ToolPack` with all refusals, the user-pack merge, the zero-warnings test; `ToolLayout` | 3 | - |
+| WP-0a | Register the entries whose files are on `main` and the browser-driver notes (table above) | 1 | Q10 |
+| WP-0b | One register line per landing for the files not yet on `main` (Dyno 1.1.0 batch, `fix/dyno-windows-smart`, Pacenotes stage 1), in the landing change | - (part of each landing) | those landings |
+| WP-1 | Crate scaffold (new-crate skill); `ToolPack` with all refusals, the user-pack merge, the zero-warnings test; `ToolLayout`; the local `Spdx` newtype until `paddock-deps` lands | 3 | - (`paddock-deps` optional: if ADR 0028's crate WPs have landed, use its `Spdx` instead of the local one) |
 | WP-2 | Locate: plan, sources, folder tokens through `SHGetKnownFolderPath`, registry hives and views (`windows-registry`), HKCU uninstall keys, macOS and Linux adapters, the override and its failure state, attempts; locate benchmark | 5-6 | WP-1, WP-14 |
 | WP-3 | Trust: the protected rule per OS (owner and DACL walk on Windows, owner, mode and ACL on macOS, canonical walk on Linux), protected root creation and verification, held-image run (share mode, `execveat`), staged-file and handle transfer | 6-8 | WP-1 |
-| WP-4 | Probe, `ToolState`, `Route`, `resolve` from cache with the refresh job, change events, notes, generated TypeScript; **the lint** against hand-run pack programs (conformance check) | 4-5 | WP-2, WP-3 |
+| WP-4 | Probe, `ToolState`, `Route`, `resolve` from cache with the refresh job, change events, notes, generated TypeScript (`license` as the local `Spdx` or `paddock-deps`' type, whichever WP-1 used); **the lint** against hand-run pack programs (conformance check) | 4-5 | WP-2, WP-3 |
 | WP-5 | Download and verify into `ToolLayout`'s downloads folder, `Policy` from the entry, sweep | 1-2 | WP-1 |
 | WP-6 | Privileged port and helper side: verified install, Authenticode (`WinVerifyTrust` and subject), installer bounds and kill through `paddock_proc`, version-skew states and test | 4-6 | WP-3, WP-5 |
 | WP-7 | `paddock-runtime`: single-file entries (= SW11), `prepare` hook, `with_downloads`; recipes `archive`, `single-file`, `dmg-pkg`, per-user installers | 5-7 | WP-5 |
@@ -588,7 +642,7 @@ trust fix now (above, outside these WPs); WP-1 to WP-12 and WP-14 after the curr
 | WP-9 | Tauri adapter (commands, event, health entry, settings section) and `pd-tool-card` | 3-4 | WP-4, WP-8 |
 | WP-10 | `./dev tools pin` and the "every platform entry has a record" conformance check | 2-3 | WP-1 |
 | WP-11 | Real-OS VM scenarios on Windows, macOS, Linux (Testing above) | 3-4 | WP-3, WP-6, WP-7, WP-8 |
-| WP-12 | `paddock-deps`: the "downloaded on request" class, licence checks for every `use_as`, the mirrored-source rule, About and notices | 2-3 | WP-1 |
+| WP-12 | `paddock-deps`: the "downloaded on request" class, licence checks for every `use_as`, the mirrored-source rule, About and notices; replace the local `Spdx` with `paddock-deps`' type | 2-3 | WP-1, **the `paddock-deps` crate** (ADR 0028's work packages; not on `main` yet) |
 | WP-13 | Dyno migration (table above), helper protocol bump, deletions, test counts | 5-7 | WP-1 to WP-12, Dyno 1.1.0 tag |
 | WP-14 | `paddock_proc::login_env` from the three copies (shell flags decided by tests per shell) | 2-3 | - |
 | WP-15 | Pacenotes adoption (`server.tool`, `Rustup` source, data entries, user packs without downloads) | 2-3 | WP-9, Q9 |
@@ -596,7 +650,7 @@ trust fix now (above, outside these WPs); WP-1 to WP-12 and WP-14 after the curr
 
 Sums: the crate and its shared parts, WP-1 to WP-12 plus WP-14: 3 + 5 + 6 + 4 + 1 + 4 + 5 + 2 + 3 + 2 + 3 + 2 + 2 = **42**
 to 3 + 6 + 8 + 5 + 2 + 6 + 7 + 3 + 4 + 3 + 4 + 3 + 3 = **57** agent-days (the reviewer estimated 30 to 45 for the crate
-alone; WP-12 and WP-14 add 4 to 6). Adopters WP-13, WP-15, WP-16: 5 + 2 + 2 = **9** to 7 + 3 + 3 = **13**. WP-0: 1. The
+alone; WP-12 and WP-14 add 4 to 6). Adopters WP-13, WP-15, WP-16: 5 + 2 + 2 = **9** to 7 + 3 + 3 = **13**. WP-0a: 1. The
 Debrief and Pitwall moves are sized in their own plans.
 
 ## Consequences
@@ -622,9 +676,16 @@ Debrief and Pitwall moves are sized in their own plans.
 
 ## Open questions for the user
 
+All three open questions, together (Q1 to Q4 and Q6 to Q8 are decided: U1 to U7).
+
 - **Q5. Privileged artifact size.** Will any privileged install be larger than a few MB (a driver, a runtime)? If not, the
   bytes-in-frame transfer stays the default and the handle transfer (D4.6) is built only when needed.
 - **Q9. User language packs and downloads (Pacenotes).** Under D2 a user pack may add locate hints but not downloads, so a
   user language pack can no longer offer a pinned server download (Pacenotes' `ServerPack::download` allows it today).
   Accept (recommended: downloads only from built-in packs), or allow user-pack downloads that run only unprivileged, after a
   confirmation naming the URL and hash?
+- **Q10. Delete-by tags not covered by U7.** Proposed: Pitcrew's `login-shell-path` copies `pitcrew-v1.2.0` (its next
+  minor, 1.1.0, is in the current release order and its tag would be refused while the copies exist); Pacenotes' `Detect`
+  `pacenotes-v1.0.0` (its first release; it has no shipped copy, so adoption before 1.0 is planned in WP-15); Debrief's
+  `browser/runtime.rs` under `browser-driver` either `debrief-v1.2.0` (matching that mechanism's existing Debrief copy,
+  recommended, since the browser-driver consolidation deletes them together) or `debrief-v1.3.0` (matching U7's Debrief tag).
