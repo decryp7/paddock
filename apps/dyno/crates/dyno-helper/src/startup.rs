@@ -3,6 +3,7 @@
 //! returned for the log and the daemon fails closed when a required one fails.
 
 use crate::config::HelperConfig;
+use paddock_service::privileged::trust::{parent_of, verify_chain, Style, TrustPort};
 use paddock_service::privileged::{verify_protected, FileKind, ProtectedFiles};
 use std::path::{Path, PathBuf};
 
@@ -18,7 +19,7 @@ pub struct Verdict {
 }
 
 /// Checks `program`, the data folder and the configuration file.
-pub fn verdicts(files: &mut dyn ProtectedFiles, program: &Path, data_dir: &Path, config: &Path) -> Vec<Verdict> {
+pub fn verdicts(files: &mut dyn ProtectedFiles, trust: &mut dyn TrustPort, program: &Path, data_dir: &Path, config: &Path) -> Vec<Verdict> {
     [
         ("the program", program, FileKind::File),
         ("the data folder", data_dir, FileKind::Dir),
@@ -26,10 +27,21 @@ pub fn verdicts(files: &mut dyn ProtectedFiles, program: &Path, data_dir: &Path,
     ]
     .into_iter()
     .map(|(what, path, kind)| {
-        let result = match files.facts(path) {
+        let mut result = match files.facts(path) {
             Ok(facts) => verify_protected(facts.as_ref(), kind).map_err(|v| v.to_string()),
             Err(e) => Err(format!("it could not be examined: {e}")),
         };
+        // Windows has no owner or mode in the facts: the owner and DACL of every component of the path decide (the data
+        // folder and the configuration inside the data folder's protected root, the program inside its own folder).
+        if result.is_ok() && trust.style() == Style::Windows {
+            let text = path.to_string_lossy();
+            let root = if what == "the program" {
+                parent_of(&text, Style::Windows).unwrap_or_default()
+            } else {
+                data_dir.to_string_lossy().into_owned()
+            };
+            result = verify_chain(trust, &text, kind, Some(&root), false).map_err(|u| format!("{} ({})", u.reason, u.path));
+        }
         Verdict {
             what,
             path: path.to_path_buf(),
@@ -78,7 +90,17 @@ pub fn load_config(files: &mut dyn ProtectedFiles, path: &Path) -> Result<Helper
 mod tests {
     use super::*;
     use dyno_core::helper_wire::HelperUser;
+    use paddock_service::privileged::trust_fake::*;
     use paddock_service::testing::FakeFiles;
+
+    fn unix_port() -> FakePort {
+        FakePort {
+            style: Style::Unix,
+            nodes: Default::default(),
+            links: Default::default(),
+            calls: vec![],
+        }
+    }
 
     fn disk() -> FakeFiles {
         let f = FakeFiles::new();
@@ -94,14 +116,32 @@ mod tests {
     #[test]
     fn a_protected_install_passes_and_the_first_unprotected_thing_stops_the_start() {
         let mut f = disk();
-        let v = verdicts(&mut f, Path::new("/p/dyno-helper"), Path::new("/d"), Path::new("/d/config.json"));
+        let v = verdicts(
+            &mut f,
+            &mut unix_port(),
+            Path::new("/p/dyno-helper"),
+            Path::new("/d"),
+            Path::new("/d/config.json"),
+        );
         assert_eq!(v.len(), 3);
         assert_eq!(require_all(&v), Ok(()));
         f.put_file("/p/dyno-helper", b"x", 501, 0o755);
-        let v = verdicts(&mut f, Path::new("/p/dyno-helper"), Path::new("/d"), Path::new("/d/config.json"));
+        let v = verdicts(
+            &mut f,
+            &mut unix_port(),
+            Path::new("/p/dyno-helper"),
+            Path::new("/d"),
+            Path::new("/d/config.json"),
+        );
         let e = require_all(&v).unwrap_err();
         assert!(e.contains("the program") && e.contains("not root"), "{e}");
-        let v = verdicts(&mut f, Path::new("/p/missing"), Path::new("/d"), Path::new("/d/config.json"));
+        let v = verdicts(
+            &mut f,
+            &mut unix_port(),
+            Path::new("/p/missing"),
+            Path::new("/d"),
+            Path::new("/d/config.json"),
+        );
         assert!(require_all(&v).unwrap_err().contains("not there"));
     }
 
@@ -122,5 +162,44 @@ mod tests {
         assert!(load_config(&mut f, Path::new("/d/config.json"))
             .unwrap_err()
             .contains("cannot be read"));
+    }
+}
+
+#[cfg(test)]
+mod windows_tests {
+    use super::*;
+    use paddock_service::privileged::trust_fake::*;
+    use paddock_service::testing::FakeFiles;
+
+    const DATA: &str = "C:\\ProgramData\\Dyno\\Helper";
+
+    #[test]
+    fn the_data_folder_the_unfixed_helper_left_is_not_reported_protected() {
+        // The log of the VM said: what=the data folder protected=true, for the real SDDL below (Users may add files).
+        let files = FakeFiles::windows();
+        files.put_file("C:\\Program Files\\Dyno Helper\\dyno-helper.exe", b"x", 0, 0o755);
+        files
+            .put_dir(DATA, 0, 0o700)
+            .put_file("C:\\ProgramData\\Dyno\\Helper\\config.json", b"{}", 0, 0o600);
+        let mut files = files;
+        let mut m = windows_machine(|_| locked());
+        m.put("C:\\Program Files", from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES))
+            .put("C:\\Program Files\\Dyno Helper", from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO))
+            .put(
+                "C:\\Program Files\\Dyno Helper\\dyno-helper.exe",
+                from_sddl(FileKind::File, SDDL_PROGRAM_FILES_DYNO),
+            )
+            .put(DATA, from_sddl(FileKind::Dir, SDDL_DYNO_HELPER_UNFIXED))
+            .put("C:\\ProgramData\\Dyno\\Helper\\config.json", file(locked()));
+        let program = Path::new("C:\\Program Files\\Dyno Helper\\dyno-helper.exe");
+        let config = Path::new("C:\\ProgramData\\Dyno\\Helper\\config.json");
+        let v = verdicts(&mut files, &mut m, program, Path::new(DATA), config);
+        let folder = v.iter().find(|v| v.what == "the data folder").unwrap();
+        assert!(folder.result.as_ref().unwrap_err().contains("add file"), "{folder:?}");
+        assert!(v.iter().find(|v| v.what == "the program").unwrap().result.is_ok(), "{v:?}");
+        assert!(require_all(&v).unwrap_err().contains("not protected"));
+        // Locked, it passes.
+        m.put(DATA, locked());
+        assert_eq!(require_all(&verdicts(&mut files, &mut m, program, Path::new(DATA), config)), Ok(()));
     }
 }

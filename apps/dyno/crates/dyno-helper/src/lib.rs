@@ -21,6 +21,7 @@ pub mod logfile;
 pub mod orphan;
 pub mod paths;
 pub mod policy;
+pub mod protect;
 pub mod serve;
 pub mod server;
 pub mod setup;

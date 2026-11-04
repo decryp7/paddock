@@ -19,6 +19,9 @@ pub mod elevate;
 pub mod files;
 pub mod install;
 pub mod layout;
+pub mod trust;
+pub mod trust_fake;
+pub mod trust_real;
 pub mod windows_acl;
 
 pub use assess::{Assessment, BundledHelper, InstalledHelper, UpdateReason, assess};
