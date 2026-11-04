@@ -10,6 +10,7 @@ import { ChipPackage } from './chip-package';
 import { DeviceArt, type DeviceArtKind } from './device-art';
 import { driveKind } from './device-geometry';
 import { MemorySlots } from './memory-slots';
+import { ReadingSource } from '../../core/reading-source';
 import { isAppleSilicon } from './package-geometry';
 import { toDimmSlots, toSocPackage } from './hardware-adapter';
 import { type SlotView, describeSlots, kindLabel, slotModel, speedLabel } from './slot-model';
@@ -41,7 +42,7 @@ const HINT_TONE: Record<HintKind, string> = {
 /** What is installed: the memory (slots drawn as sockets, or Apple silicon's unified memory) with upgrade hints from the engine. */
 @Component({
   selector: 'dy-inventory-page',
-  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots, PdTable, PdCell],
+  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots, PdTable, PdCell, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -52,7 +53,7 @@ const HINT_TONE: Record<HintKind, string> = {
         </div>
       </header>
 
-      <dy-async [loaded]="!!store.inventory()" [error]="store.error()" what="inventory" [rows]="4" (retry)="store.load()">
+      <dy-async [loaded]="!!store.inventory()" [error]="store.error()" what="inventory" [rows]="4">
         @if (store.inventory(); as inv) {
           <section class="card" aria-label="Memory">
             <div class="card-head">
@@ -62,6 +63,8 @@ const HINT_TONE: Record<HintKind, string> = {
                 <pd-segmented-control label="View" [options]="viewSegs" [value]="table() ? 'table' : 'slots'" (valueChange)="table.set($event === 'table')" />
               }
             </div>
+
+            <dy-reading-source [via]="inv.memoryVia" />
 
             @if (slots(); as a) {
               <dl class="stats">

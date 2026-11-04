@@ -395,3 +395,26 @@ fn without_the_helper_what_holds_this_file_is_the_agents_own_answer_marked_local
     let got = rig.lockers(&file).unwrap();
     assert_eq!((got.len(), got[0].via.clone()), (1, ReadVia::Local));
 }
+#[test]
+fn the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up() {
+    let rig = Rig::start(Caller::Owner, HelperHost::Linux, false);
+    let before = rig.inventory();
+    assert!(matches!(before.memory, MemoryLayout::TotalOnly { .. }), "{:?}", before.memory);
+    assert!(matches!(before.memory_via, ReadVia::NeedsHelper { .. }), "{:?}", before.memory_via);
+    rig.up.store(true, Ordering::SeqCst);
+    // The readiness answer is kept a few seconds: wait on the condition, not on a fixed time.
+    let until = std::time::Instant::now() + SLOW;
+    let after = loop {
+        let inv = rig.inventory();
+        if inv.memory_via == ReadVia::Helper || std::time::Instant::now() > until {
+            break inv;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(after.memory_via, ReadVia::Helper);
+    assert!(
+        matches!(&after.memory, MemoryLayout::Slots(a) if a.slots == 4),
+        "{:?}",
+        after.memory
+    );
+}
