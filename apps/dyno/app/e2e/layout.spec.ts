@@ -211,7 +211,7 @@ for (const width of WIDTHS) {
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible({ timeout: 45_000 });
     await pressMod(page, 'Mod+Comma');
     const dialog = page.getByRole('dialog');
-    await dialog.getByRole('button', { name: 'Dyno', exact: true }).dispatchEvent('click');
+    await dialog.getByRole('button', { name: 'Dyno', exact: true }).click();
     await expect(dialog.getByRole('button', { name: 'Forget saved maps' })).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expectNoButtonLabelWraps(page, `settings at ${width}`);
