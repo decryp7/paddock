@@ -236,6 +236,8 @@ export async function buttonLabelsThatWrap(page: Page): Promise<string[]> {
 /** Fails when any button label of the page wraps. */
 export async function expectNoButtonLabelWraps(page: Page, label = ''): Promise<void> {
   expect(await buttonLabelsThatWrap(page), `button label wraps${label ? ` (${label})` : ''}`).toEqual([]);
+}
+
 /**
  * Fails when a checkbox's box is clipped (a clipped or covered corner does not hit-test as the checkbox: an `overflow` ancestor, a
  * border, an accent bar, a sibling), or sits more than `tolerance` px off the centre line of the first line
