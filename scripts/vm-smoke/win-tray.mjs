@@ -3,6 +3,7 @@
 // menu's items, `rclick`/`click` act), the idle state is read with `dyno idle`. Dyno's icons are promoted to the taskbar (IsPromoted) so they have
 // a place to click.
 import { spawnSync } from 'node:child_process';
+import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog } from './win-tray-icons.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -13,7 +14,8 @@ const items = (s) => s.split('\n').map((l) => l.split('\t')).filter((c) => c[0] 
 async function openMenu(actor) {
   ssh(`Get-ChildItem 'HKCU:\\Control Panel\\NotifyIconSettings' | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.ExecutablePath -like '*dyno-app.exe') { Set-ItemProperty $_.PSPath IsPromoted 1 -Type DWord } }`);
   await sleep(2500);
-  const icons = items(await actor.send('tray Dyno'));
+  // Dyno's icons are named by their metric tooltip, never "Dyno": a search for "Dyno" finds Dyno's own window buttons (win-tray-icons.mjs).
+  const icons = dynoTrayIcons(await actor.send(TRAY_ICONS_CMD), metricsFromLog(ssh(APP_LOG_PS))).map((i) => ({ name: i.name, at: i.at.replace(',', ' ') }));
   if (!icons.length) return { icons, menu: [] };
   await actor.send(`rclick ${icons[0].at}`);
   await sleep(1500);

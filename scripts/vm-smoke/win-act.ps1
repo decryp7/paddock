@@ -1,7 +1,7 @@
 # The in-session actor of the Windows test VM: a loop (scheduled task `/it /ru paddock-test`) that executes one input or window command per
 # request file and writes the answer, so the host can drive native input while it reads the app through the DevTools port. It is the
 # `SendInput` side of win-cdp.mjs. Commands (one line in act-<n>.txt in -Dir): key <VK+VK...> | move X Y | click X Y | fg <title regex> |
-# rect <title regex> | shot <name> | windows | quit. Answers go to act-<n>.resp. Every wait is bounded by -MaxMin.
+# rect <title regex> | shot <name> | windows | trayicons <name regex> (button, centre, class, top-level class, top-level process) | quit. Answers go to act-<n>.resp. Every wait is bounded by -MaxMin.
 param([string]$Dir = 'C:\paddock-test\vmcheck\act', [int]$MaxMin = 40)
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Dir | Out-Null
@@ -52,6 +52,7 @@ while ((Get-Date) -lt $end) {
       'click' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 200; [W.A]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [W.A]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
       'fg' { $h = (Windows-List | Where-Object { ($_ -split "`t")[2] -match $a[1] } | Select-Object -First 1); if ($h) { $hh = [IntPtr][int64](($h -split "`t")[0]); [void][W.A]::ShowWindow($hh, 9); [void][W.A]::SetForegroundWindow($hh); $out = "fg $(($h -split "`t")[2])" } else { $out = 'no such window' } }
       'rect' { $h = (Windows-List | Where-Object { ($_ -split "`t")[2] -match $a[1] } | Select-Object -First 1); $out = $(if ($h) { ($h -split "`t")[3] } else { 'no such window' }) }
+      'trayicons' { $root = [Windows.Automation.AutomationElement]::RootElement; $walk = [Windows.Automation.TreeWalker]::ControlViewWalker; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))); $rows = @(); foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($e.Current.Name -match $a[1] -and $r.Width -gt 0) { $top = $e; $up = $walk.GetParent($top); while ($up -ne $null -and -not [Windows.Automation.Automation]::Compare($up, $root)) { $top = $up; $up = $walk.GetParent($top) }; $proc = (Get-Process -Id $top.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName; $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))`t$($e.Current.ClassName)`t$($top.Current.ClassName)`t$proc" } }; $out = $rows -join "`n" }
       'windows' { $out = (Windows-List) -join "`n" }
       'shot' { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm = New-Object System.Drawing.Bitmap $b.Width, $b.Height; $g = [System.Drawing.Graphics]::FromImage($bm); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bm.Save("$Dir\$($a[1]).png"); $out = "shot $($a[1])" }
       'quit' { $out = 'bye'; Set-Content "$Dir\act-$n.resp" $out; exit 0 }

@@ -6,6 +6,7 @@ import { cardText, helperOn, openSettings, ssh } from './win-helper.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
 import { Actor } from './win-act.mjs';
 import { retryOnClosed } from './reconnect.mjs';
+import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, trayLogLines } from './win-tray-icons.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -39,16 +40,28 @@ export function autoStartRecord() {
   return { run, startup, tasks, logon, procs, running: /dyno-app|dyno-agent/.test(procs) };
 }
 
-/** Dyno's tray icons: in the visible taskbar area and the overflow (UI Automation), IsPromoted per icon, and the log's "tooltip sent" lines. */
+/**
+ * Dyno's tray icons: in the visible taskbar area and the overflow (UI Automation, explorer-owned buttons named after the metrics the app
+ * log says it created, never Dyno's own window buttons: win-tray-icons.mjs), the NotifyIconSettings entries, and the app's tray log lines.
+ */
 export async function trayRecord(actor) {
-  const promoted = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "promoted=$($_.IsPromoted) tooltip=$($_.InitialTooltip)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
-  const visible = (await actor.send('tray Dyno').catch(() => '')).split('\n').map((l) => l.split('\t')[0].trim()).filter(Boolean);
-  // the overflow: open the "Show hidden icons" chevron and read again
+  const promoted = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "$($_.PSChildName) promoted=$($_.IsPromoted) tooltip=$($_.InitialTooltip) uid=$($_.UID) guid=$($_.IconGuid)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
+  const log = ssh(APP_LOG_PS);
+  const metrics = metricsFromLog(log);
+  const read = async () => (await actor.send(TRAY_ICONS_CMD).catch(() => ''));
+  const first = dynoTrayIcons(await read(), metrics);
+  const visible = first.filter((i) => i.where === 'taskbar').map((i) => i.name);
+  // the overflow: open the "Show hidden icons" chevron (an explorer button) and read again
   const chevron = (await actor.send('tray ^(Show Hidden Icons|Hidden icons|Show hidden)').catch(() => '')).split('\n')[0]?.split('\t')[1];
   let overflow = [];
-  if (chevron) { await actor.send(`click ${chevron.replace(',', ' ')}`).catch(() => {}); await sleep(1500); overflow = (await actor.send('tray Dyno').catch(() => '')).split('\n').map((l) => l.split('\t')[0].trim()).filter(Boolean).filter((n) => !visible.includes(n)); await actor.send('key ESC').catch(() => {}); }
-  const sent = ssh(`Get-ChildItem "$env:LOCALAPPDATA\\Dyno\\logs" -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Select-String -Pattern 'tooltip sent' | Select-Object -Last 8 | ForEach-Object { $_.Line }`).split('\n').filter(Boolean);
-  return { promoted, visible, overflow, sent };
+  if (chevron) {
+    await actor.send(`click ${chevron.replace(',', ' ')}`).catch(() => {});
+    await sleep(1500);
+    overflow = dynoTrayIcons(await read(), metrics).filter((i) => i.where === 'overflow' && !visible.includes(i.name)).map((i) => i.name);
+    await actor.send('key ESC').catch(() => {});
+  }
+  const lines = trayLogLines(log);
+  return { promoted, visible, overflow, metrics, logFile: (/^@@ (.*)$/m.exec(log) ?? [])[1] ?? '(none)', lines };
 }
 
 /** The new crash and removal logging: Application log entries of source "Dyno helper", and the System service events for it. */
@@ -85,7 +98,7 @@ async function restartGuest(ctx) {
   return ok;
 }
 
-const fmtTray = (r) => [`visible taskbar area (UI Automation): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `NotifyIconSettings: ${r.promoted.join(' ; ') || '-'}`, `app log "tooltip sent" lines: ${r.sent.length}`, ...r.sent.map((l) => `  ${l.slice(0, 180)}`)];
+const fmtTray = (r) => [`visible taskbar area (UI Automation, explorer buttons named after a Dyno metric): ${r.visible.length} icon(s): ${r.visible.join(' | ') || '-'}`, `overflow: ${r.overflow.length} icon(s): ${r.overflow.join(' | ') || '-'}`, `metrics the app log says it created icons for: ${r.metrics.join(', ') || '(none logged)'}`, `NotifyIconSettings (dyno-app.exe): ${r.promoted.join(' ; ') || '-'}`, `app log ${r.logFile}: ${r.lines.length} tray line(s)`, ...r.lines.slice(-60).map((l) => `  ${l.slice(0, 220)}`)];
 
 /** After a restart, before Dyno is started by hand: what (if anything) started it, by which mechanism, how long after logon; and the tray. */
 async function afterRestartRecord(actor, label) {
@@ -130,6 +143,9 @@ async function runRebootSteps(ctx, steps) {
     { ok: /On/.test(cardBefore), detail: `card: ${cardBefore.slice(0, 80)}` },
     { ok: true, detail: `Launch at login after install: ${launchDefault === 'true' ? 'ON' : launchDefault === 'false' ? 'OFF' : launchDefault}` },
     { ok: trayBefore.visible.length + trayBefore.overflow.length > 0, detail: `${trayBefore.visible.length} tray icon(s) visible, ${trayBefore.overflow.length} in the overflow` },
+    // Self-test of the tray measurement with Dyno's window open (Settings): every icon the log says was created is found, and no button of
+    // Dyno's own window is counted (the 7538 run counted "Dyno" and "Start Dyno at login" as icons).
+    { ok: trayBefore.metrics.length > 0 && trayBefore.visible.length + trayBefore.overflow.length === trayBefore.metrics.length, detail: `tray measurement self-test with Dyno's window open: ${trayBefore.visible.length + trayBefore.overflow.length} icon(s) found for ${trayBefore.metrics.length} created (${trayBefore.metrics.join(', ') || 'none logged'})` },
   ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, ...eventsDump(), '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
   // The 7521 death at app quit: read Processes through the helper, quit Dyno (File > Exit), and see whether the helper is still RUNNING 30 s later.
   try {

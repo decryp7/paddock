@@ -2,6 +2,7 @@
 // by a standard user (the 7501 release blocker: C:\ProgramData\Dyno\Helper inherited Users create rights, and the SYSTEM helper installed
 // smartctl into a user-owned tree), disk health install, Turn off. Each step returns { title, status, summary, checks, evidence }. They are `extra`
 // steps of win-ui.mjs's runUiPhase and need run-win.mjs --vnc (the VM's VNC) and --ui (the DevTools port).
+import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, trayLogLines } from './win-tray-icons.mjs';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Vnc } from './win-vnc.mjs';
@@ -233,7 +234,7 @@ export async function helperProtection() {
 
 /**
  * Tray tooltips. The registry's InitialTooltip is only what Windows recorded at registration, so it is informational. The live tooltip is read
- * through UI Automation (the taskbar button's name for each Dyno icon, from the in-session actor) and from the app's own log lines "tooltip sent".
+ * through UI Automation (the taskbar button's name for each Dyno icon, from the in-session actor) and from the app's own "tray icon ... created" log lines.
  */
 export async function trayTooltips(actor) {
   const checks = [];
@@ -245,13 +246,15 @@ export async function trayTooltips(actor) {
   if (actor) {
     ssh(`Get-ChildItem 'HKCU:\\Control Panel\\NotifyIconSettings' | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.ExecutablePath -like '*dyno-app.exe') { Set-ItemProperty $_.PSPath IsPromoted 1 -Type DWord } }`);
     await sleep(2500);
-    names = (await actor.send('tray Dyno')).split('\n').map((l) => l.split('\t')[0].trim()).filter(Boolean);
+    // Dyno's icons are named by their metric tooltip, never "Dyno" (win-tray-icons.mjs).
+    names = dynoTrayIcons(await actor.send(TRAY_ICONS_CMD), metricsFromLog(ssh(APP_LOG_PS))).map((i) => i.name);
   }
   evidence.push(`live taskbar button names (UI Automation): ${names.join(' | ') || '(none read)'}`);
-  const sent = ssh(`Get-ChildItem "$env:LOCALAPPDATA\\Dyno\\logs" -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Select-String -Pattern 'tooltip sent' | Select-Object -Last 5 | ForEach-Object { $_.Line }`).split('\n').filter(Boolean);
-  evidence.push(`app log "tooltip sent" lines: ${sent.length}`, ...sent.map((l) => l.slice(0, 200)));
+  // Dyno logs no "tooltip sent" line; the icons it made are its "tray icon dyno-... created" lines.
+  const sent = trayLogLines(ssh(APP_LOG_PS)).filter((l) => /tray icon dyno-[A-Za-z0-9-]+ created/.test(l));
+  evidence.push(`app log: ${sent.length} "tray icon ... created" line(s)`, ...sent.slice(-8).map((l) => l.slice(0, 200)));
   const live = names.filter((n) => n.length > 0);
-  checks.push({ ok: live.length > 0 || sent.length > 0, detail: live.length ? `${live.length} live tooltip(s) through UI Automation` : sent.length ? `${sent.length} "tooltip sent" log line(s)` : 'no live tooltip found through UI Automation or the app log' });
+  checks.push({ ok: live.length > 0 || sent.length > 0, detail: live.length ? `${live.length} live tooltip(s) through UI Automation` : sent.length ? `${sent.length} "tray icon ... created" log line(s)` : 'no live tooltip found through UI Automation or the app log' });
   for (const n of live) checks.push({ ok: !/[a-z]+_[a-z]+|undefined|null|NaN/.test(n), detail: `live tooltip "${n}"` });
   return result('Windows: tray icons and their live tooltips', checks, evidence, 'live tooltips are readable');
 }
