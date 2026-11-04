@@ -179,13 +179,7 @@ mod tests {
                     reason: "x".into(),
                 }],
             )))),
-            Link(Some(Ok(reply(
-                vec![SmartDisk {
-                    wear_id: None,
-                    ..nvme()
-                }],
-                vec![],
-            )))),
+            Link(Some(Ok(reply(vec![SmartDisk { wear_id: None, ..nvme() }], vec![])))),
         ] {
             let calls = Arc::new(AtomicU32::new(0));
             let mut r = HelperFirstWear::new(Box::new(link), Box::new(Counting(calls.clone())));
