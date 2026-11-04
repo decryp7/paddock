@@ -87,7 +87,7 @@ test.describe('firewall', () => {
     await page.goto(url('firewall'));
     await expect(page.getByRole('heading', { level: 1, name: 'Firewall' })).toBeVisible();
     await expect(page.locator('[data-source="applicationFirewall"]')).toContainText('Stealth mode: On');
-    await expect(page.locator('[data-source="pf"]').getByTestId('source-note')).toContainText('need the helper');
+    await expect(page.locator('[data-source="pf"]').getByTestId('reading-source-needs')).toContainText('only by an administrator');
     await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
   });
 });
