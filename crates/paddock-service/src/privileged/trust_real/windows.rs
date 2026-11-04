@@ -393,7 +393,7 @@ mod windows_tests {
     }
 
     fn icacls(args: &[&str]) {
-        let out = Command::new(crate::privileged::windows_acl::system_tool("icacls"))
+        let out = Command::new(crate::privileged::system_tool("icacls").unwrap())
             .args(args)
             .output()
             .unwrap();

@@ -97,6 +97,29 @@ pub fn verify_file(
     check_signed_version(sig.trusted_comment(), announced).map_err(invalid)
 }
 
+/// Checks `bytes` against `signature` (base64 of a minisign signature file) with the key, and returns the signed trusted
+/// comment. The same key and the same pre-hashed format as [`verify_file`], for a program that is read once into memory so
+/// that what is checked is what is then written (Dyno's elevated helper install); no version is announced for it, the
+/// comment is the caller's to judge.
+///
+/// # Errors
+/// [`VerifyError::Invalid`] for a signature that is unreadable, from another key, legacy or not valid for `bytes`.
+pub fn verify_bytes(key: &UpdateKey, bytes: &[u8], signature: &str) -> Result<String, VerifyError> {
+    let invalid = |detail: String| VerifyError::Invalid(UpdateError::SignatureInvalid { detail });
+    let text = decode_text(signature, "the signature").map_err(invalid)?;
+    let sig = Signature::decode(&text)
+        .map_err(|e| invalid(format!("the signature cannot be read ({e})")))?;
+    key.0.verify(bytes, &sig, false).map_err(|e| {
+        invalid(match e {
+            minisign_verify::Error::UnexpectedKeyId => {
+                "it was signed with another key than this app's".to_string()
+            }
+            _ => "the file does not match its signature".to_string(),
+        })
+    })?;
+    Ok(sig.trusted_comment().to_string())
+}
+
 /// Hands the file's bytes to the verifier, counting them in the job's phase; a cancel ends the copy.
 struct Feed<'a, 'k> {
     verifier: &'a mut minisign_verify::StreamVerifier<'k>,

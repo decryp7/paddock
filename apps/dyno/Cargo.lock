@@ -1440,6 +1440,7 @@ dependencies = [
  "paddock-env",
  "paddock-ipc",
  "paddock-service",
+ "paddock-updater",
 ]
 
 [[package]]

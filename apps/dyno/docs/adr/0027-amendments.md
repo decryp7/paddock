@@ -53,3 +53,27 @@ The user's decision D1 (helper first, then this computer, for every reading) is 
 - `SmartLink`, `SharedSmart` and `HelperFirstWear::new` are gone: `helper_first_wear(port, local)` builds the Smart instance.
   `READ_LOCALLY_WHEN_HELPER_OFF` is unchanged. The memory modules (Linux) are the second instance.
 - D6 (helper `Traffic` scoped to the caller, administrators see all) is WP-TRF's: the seam only carries the helper's answer.
+
+## 2026-11-04 (security review of the helper install): where the elevated install takes its folders and its program from
+
+Accepted risk until code signing, equivalent to faking the OS prompt: an attacker who can already replace the helper (the
+user-owned macOS bundle, or a Windows per-user install) before the user approves the prompt gets the user's approval for their
+program. Nothing in the install can tell the two apart without a signature the OS recognises; this is closed by code signing.
+
+What the install does about what it can control (rule 55: one implementation, `paddock-service`):
+
+- F1: elevated code never takes a system folder from the environment (a UAC-elevated process may inherit the user-writable
+  `HKCU\Environment`). `icacls`, `reg` and `sc` run from `GetSystemDirectoryW`, Program Files and ProgramData come from
+  `SHGetKnownFolderPath` (`privileged::known_folders`). The Windows install also runs the trust rule on Program Files, on the
+  helper's folder after the ACL and on the installed copy; Windows reports no file owner, so `verify_protected` alone proved nothing.
+- F2: the program is opened once, checked through that handle and written from the bytes read (never reopened by path). Windows
+  refuses a source whose chain a user can change (a per-user install: reinstall Dyno for all users). macOS verifies a minisign
+  signature of the bytes with the family update key against `dyno-helper.minisig` in the bundle; missing or bad is refused.
+- F3: the macOS prompt runs the helper under `env -i` with a fixed PATH.
+- Measured on the Windows test VM (2026-11-05): with the environment poisoned, the pre-fix install ran a program from the
+  poisoned `SystemRoot` as an elevated administrator; `ProgramFiles` could not be shown to redirect the install (Windows sets it
+  itself and the install still used `C:\Program Files`). The fix takes both from the OS regardless, since only the SystemRoot
+  bypass was demonstrated.
+- The macOS helper signature is made under the file name `dyno-helper-<version>-<target triple>`, and the helper requires its own
+  version and architecture in the signed trusted comment, so no older family-signed helper passes. The source and signature check
+  runs before the helper prepares any folder or writes its configuration.
