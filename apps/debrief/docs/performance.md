@@ -103,7 +103,7 @@ some fields; "n/s" means the source does not state them.
   | 256 KiB | 8 | 22-23 ms | 100-102 ms | 1.92 GiB | 4.37-4.47 s | 3.47-3.50 / 4.75-5.66 ms | 34.5-35.2 s |
   | 64 KiB | 8 | 22-23 ms | 96-99 ms | 631 MiB | 3.49-3.51 s | 3.31-3.32 / 3.64-3.71 ms | 27.5-27.7 s |
 
-  Verdicts, the same in every run and at every head size: CSV importer 1,953 files (619.6 MiB); text importer 773 (127.0 MiB); refused "binary file" 7,458 (5,876.9 MiB, which includes the EVTX, dump and zip files, as no plugin and no archive step ran); refused "no enabled parser reads this file" 3,770 (1,119.1 MiB); refused "empty file" 46.
+  The judge's mean is 2.4 ms a file (33.3 s over 14,000) against its p50 of 3.4 ms, because more than half the files are binary. Verdicts, the same in every run and at every head size: CSV importer 1,953 files (619.6 MiB); text importer 773 (127.0 MiB); refused "binary file" 7,458 (5,876.9 MiB, which includes the EVTX, dump and zip files, as no plugin and no archive step ran); refused "no enabled parser reads this file" 3,770 (1,119.1 MiB); refused "empty file" 46.
 
   Steps of the judge, one thread, one run, 13,954 files (the 46 empty files stop before them); this run met a cold cache (heads read in 32.0 s, 2.0 ms a file at p50), which does not change the judge's times:
 
@@ -114,7 +114,7 @@ some fields; "n/s" means the source does not state them.
   | `plan_with` | | | p50 0.10 ms, 1.25 s | 1.25 s |
 
 - **Numbers, table** (14,152 nodes; medians of 200 repetitions each; three runs gave the same to two digits): 66 bytes per node, 927,484 bytes in all; walk, stat, sort and build 37-44 ms warm (559 cold); full roll-up 0.05-0.07 ms; toggle a file 0.2 µs; toggle a top folder of 2,723 files 0.072 ms; visible order, all expanded, by name 0.01 ms, by size per folder 0.13 ms; a name and status filter with the visible order 0.25 ms; a page of 500 rows as JSON 80,389 bytes; the stand-in recommended set (2,459 files) covered by 9 prefix rules.
-- **Numbers, `pd-table` model** (Node 24.22, the copied `treePlaces` and the maps `table.ts` builds on each change of `rows`, run directly, not under `plock`): 3.7-5.5 ms per change and 0.15-0.25 ms per arrow key at 14,000 rows; 26-37 ms and 2.9-10.7 ms at 100,000.
+- **Numbers, `pd-table` model** (Node 24.22, `docs/notes/folder-table-model.mjs`: the copied `treePlaces` and the maps `table.ts` builds on each change of `rows`, run directly, not under `plock`): 3.7-5.5 ms per change and 0.15-0.25 ms per arrow key at 14,000 rows; 26-37 ms and 2.9-10.7 ms at 100,000.
 - **Budget:** ADR 0067 proposes first rows in 250 ms, the listing in 1 s and every verdict in 5 s at 14,000 files on a local disk. Verdict: met at 8 threads, 4.40-4.51 s, **in-process only**. Plugins add sniff calls (ADR 0064's measurement), which this run does not include.
 - **Memory measure:** not measured.
 - **Notes:** warm cache, apart from the one cold run; no spinning disk or network share; 95% of the judge's time is `score_text_with` on binary files, and it is nearly the same at a 64 KiB head, so the time goes into deciding that a binary file is binary, not into reading. Raw output in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/folder-dialog/` (`run.log`, `run2.log`, `run3.log`, `steps.txt`), not kept.

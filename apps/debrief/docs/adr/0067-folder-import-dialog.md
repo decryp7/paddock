@@ -1,10 +1,10 @@
 # 67. The folder import dialog: a quick scan, one judge, a tree grid and a selection by folder
 
-- Status: Proposed, ready for independent review
+- Status: Proposed, revision 2: answers the independent review of `e2402491e` (three P1s, the P2s)
 - Date: 2026-11-05
-- Related: ADR 0014 (database-first engine), ADR 0047 (time window), ADR 0048 (watched folders), ADR 0050 and 0054 (dialog registry and kinds), ADR 0051 (streaming discovery, stable source ids), ADR 0063 (binary wire); three proposed ADRs on branches, not yet on this one: ADR 0064 (one streaming import trait, `docs/debrief-streaming-trait` `0f6e482f5`), ADR 0065 (bounded replies, `docs/debrief-bounded-and-timezone` `1eaa14850`), ADR 0066 (how Debrief reads times, same branch, `2f289b4c3`); family ADRs [0018](../../../../docs/adr/0018-bounded-loading-everywhere.md), [0019](../../../../docs/adr/0019-limits-explain-themselves.md), [0043](../../../../docs/adr/0043-dialogs-size-to-content.md); Paddock rules 17, 18, 21, 39, 40, 42, 47, 48, 51, 52; ER-17, ER-18, ER-19, ER-20, ER-21, ER-23, ER-27; [bundle shapes note](../../../../docs/research/2026-11-debrief-bundle-shapes.md) (`origin/docs/debrief-bundle-shapes` `fc6bdf0b7`)
+- Related: ADR 0014 (database-first engine), ADR 0047 (time window), ADR 0048 (watched folders), ADR 0050 and 0054 (dialog registry and kinds), ADR 0051 (streaming discovery, stable source ids), ADR 0063 (binary wire); three proposed ADRs on branches, not yet on this one: ADR 0064 (one streaming import trait, revision 3, `docs/debrief-streaming-trait` `c12864566`), ADR 0065 (bounded replies, `docs/debrief-bounded-and-timezone` `1eaa14850`), ADR 0066 (how Debrief reads times, same branch, `2f289b4c3`); family ADRs [0018](../../../../docs/adr/0018-bounded-loading-everywhere.md), [0019](../../../../docs/adr/0019-limits-explain-themselves.md), [0043](../../../../docs/adr/0043-dialogs-size-to-content.md); Paddock rules 17, 18, 21, 39, 40, 42, 47, 48, 51, 52; ER-17, ER-18, ER-19, ER-20, ER-21, ER-23, ER-27; [bundle shapes note](../../../../docs/research/2026-11-debrief-bundle-shapes.md) (`origin/docs/debrief-bundle-shapes` `fc6bdf0b7`)
 - Layout: [contact sheet](../images/folder-import-dialog/contact-sheet.png) and one image per state and theme in the same folder; the drawing's review is separate (ER-23)
-- Evidence marks: **[M]** measured, in [this results block](../performance.md#2026-11-05-folder-scan-on-invented-files-adr-0067); **[S]** read in source at `origin/debrief/1.2-int` `852b35ac0`, paths below `apps/debrief/`; **[N]** from the bundle shapes note, not re-run; **[J]** judgement; **[U]** not verified. Days are judgement.
+- Evidence marks: **[M]** measured, in [this results block](../performance.md#2026-11-05-folder-scan-on-invented-files-adr-0067); **[S]** read in source at `origin/debrief/1.2-int` `852b35ac0`, paths below `apps/debrief/`; **[N]** from the bundle shapes note, not re-run; **[R]** from the folder-open reproduction on `docs/debrief-folder-repro` `875827467` (its results block "2026-11-05, opening a 7.6 GiB diagnostic-bundle folder"), not re-run; **[J]** judgement; **[U]** not verified. Days are judgement.
 
 ## Answers
 
@@ -13,12 +13,13 @@
 | What does opening a folder do today? | Imports everything at once, with no question. Each refusal becomes its own row. Nothing can be chosen beforehand ([what exists today](#what-exists-today)). |
 | What can be extended? | The walk (`discover.rs`), the detection steps inside `import_source`, the job and progress machinery, `fingerprint`, the shared journal and `pd-table`. No existing dialog picks files. |
 | How can the dialog never promise what the import refuses? | The import and the scan call one new function, `ingest::judge`, on the same bytes. Only the failures that happen after the head can differ, and those are listed, worded honestly and reported when they occur. |
-| Is the scan quick enough? | Yes for this size, in-process: 14,000 invented files are listed in about 23 ms and fully judged in 4.4 to 4.5 s at 8 threads, warm [M]. The time goes into judging, about 3.4 ms a file, and 95% of that is deciding that binary files are binary, which F1 makes cheaper. Plugin sniffs add up to about 4.5 s more at 8 threads today and about 1.6 s after ADR 0064's first fix [its M and calc]. |
+| Is the scan quick enough? | **Not yet with plugins.** In-process, 14,000 invented files are listed in about 23 ms and judged in 4.4 to 4.5 s at 8 threads, warm [M]. Plugin sniffs add about 4.5 s at 8 threads today, or about 1.6 s after ADR 0064's SI-6, so 6.0 to 6.1 s even then [calc]. 95% of the in-process judge is deciding that binary files are binary, which F1 makes cheaper. The budget (section 3) is per machine class and holds only once **both** F1's pre-check and SI-6 land and are measured; neither is measured yet. |
 | Which component? | The shared `pd-table`, which is already a Material tree grid with CDK virtual scroll. Six precise changes, after the Dyno tag ([gaps](#pd-table-what-fits-and-what-is-missing)). No new component. |
 | How is `MAX_QUERY_SOURCES` avoided? | Three ways: the UI sends a scan id and node ids, never paths; the selection is stored as path prefixes (9 rules for the invented bundle's recommended set, with a stand-in rule set); a query can name a folder instead of its source ids. |
 | Removal and undo by folder? | One bulk command, one `maintain` at its end, one journal entry. Undo reads the files again, and says so. |
+| Does it open the 7.6 GiB bundle? | **Only once memory is judged, not size.** The reproduction stopped the 2 GB store worker on a 1.43 GiB EVTX (2,914 MB) and on a 230 MB CSV export (3,102 MB), and the plugin needs about 11 MB per MB of EVTX [R]. So the dialog judges "fits in memory" from each importer's measured memory per input byte against both the plugin cap and the worker's budget ([limits](#2-one-judge)), and files that do not fit start unchecked. F12's acceptance is the reproduction's own worker tests: Enter on the invented 14,255-file bundle imports and the worker does not stop. |
 | Does a zip show the same tree? | Yes, built from its central directory without expanding it. A bundle in a zip is a folder in a file, so a single dropped zip with more than one member also opens the dialog: this bends the user's "a single dropped file skips it" and is decision D1. |
-| What did this ADR find that was not asked? | (1) `rowActivate` fires on click as well as Enter, so binding Enter to import would import on a row click. (2) The plugin cap warning can be derived from the importer's declared input (ADR 0064), not from a size list. (3) 95% of the judge's time goes into deciding that binary files are binary, in code the import shares, so one fix speeds up both ([section 4](#4-parallelism-and-cost-er-20-rule-51)). (4) Modeless `tool` is the only kind that fits a large user-sized window, and rule 17 asks pickers to be modal: decision D2. |
+| What did this ADR find that was not asked? | (1) `rowActivate` fires on click as well as Enter, so binding Enter to import would import on a row click. (2) Memory, not size, decides whether a file fits: the importer's measured memory per input byte against both the plugin cap and the store worker's budget, which shrinks to nothing as ADR 0064 makes inputs stream. (3) 95% of the judge's time goes into deciding that binary files are binary, in code the import shares, so one fix speeds up both ([section 4](#4-parallelism-and-cost-er-20-rule-51)). (4) Modeless `tool` is the only kind that fits a large user-sized window, and rule 17 asks pickers to be modal: decision D2. |
 
 ## What exists today
 
@@ -98,10 +99,24 @@ Status is never colour alone (AGENTS.md): each has its own glyph. Folders roll u
 | Time zone unknown | ADR 0066: the head gives `Stamp::Wall` and the root's `LogZone` is `AsWritten`, or its confidence is Low so it is not applied. **Not a limit once the zone is known** | "Time zone unknown: times as written", ADR 0066's own words. The row's action is Choose |
 | Date from the file time | A time-only format, ADR 0066 section 9 | "No date in the file: date taken from the file time" |
 | Day order undecided | ADR 0066 section 7: `a/b/yyyy` stamps in the head that do not decide. A later row may still decide it | "Day order not decided from the start of the file" |
-| Over a plugin cap | The importer's declared input is `Seekable` with `read_whole`, or (before ADR 0064 lands) a binary or legacy plan through a plugin, and `size` is over `performance.plugin_memory_mb` | "Too large for the plugin memory limit of 1,024 MiB" |
+| Over a memory limit | `size` times the importer's measured memory per input byte, on each side, is over that side's budget: the plugin process cap (`performance.plugin_memory_mb`, 1,024 MB by default) and the store worker's import budget under its 2,048 MB cap. See [memory per input byte](#memory-per-input-byte) | "Needs 11 GiB, limit 1 GiB", with the side (plugin or store worker) named in the tooltip; "Needs too much memory" in the totals |
 | Over another limit | Each limit in the registry of family ADR 0019 that a size can decide (`MAX_ENTRY_BYTES` until ADR 0064 retires it) | The limit's own message |
 
-A file over a plugin cap is unchecked by default. That alone stops the bundle's failure, where three EVTX quarantine the plugin. With ADR 0064's streaming EVTX, the rule stops applying to EVTX by itself, since the input is no longer whole.
+#### Memory per input byte
+
+The first review found the size guard of revision 1 wrong: it compared a file's size with the plugin cap, while the cost is a multiple of the size, on two sides [R]:
+
+| File (invented, same shape) | Side | Peak | Per input MB |
+|---|---|---:|---:|
+| 1.43 GiB EVTX | Store worker (whole read, then the guarded call's copy) | 2,914 MB, stopped at the 2,048 MB cap | about 2 |
+| 1.43 GiB EVTX, plugin cap raised to 40 GiB | Plugin | 16,013 MB | about 11 |
+| 230 MB semicolon export | Store worker (whole-file CSV adapter) | 3,102 MB, stopped | about 13.5 |
+| Same, on `debrief/stream-text` | Store worker | 820 MB | about 3.6 |
+| Three 296 MiB dumps | Store worker | 1,923 MB | passes |
+
+So each importer declares, in a data file `importers/memory.toml` (rule 21), its measured peak per input byte on the worker side and the plugin side, keyed by importer id and input kind, with the commit and results block it came from (rule 48). An importer whose input streams (ADR 0064: `Lines`, `Decoded`, `Bytes`, `Seekable` without `read_whole`) is bounded by the record budget and has no per-byte entry. A whole-file input with no measurement gets a conservative default (2 on the worker, 12 in a plugin) and the tooltip says "not measured". The engine computes `size x factor` for both sides and checks it against each budget: the plugin cap, and the worker's import budget below its 2,048 MB cap. A file that does not fit is **Limited and starts unchecked**, with the reason. The table shrinks as ADR 0064's packages make inputs stream (SI-9 for EVTX), and each such package updates its row in the same change, which a test checks against the declared input kinds.
+
+This alone keeps the default from stopping the worker on the bundle: its three EVTX, its 460 MB registry export and its 230 MB export all start unchecked until they stream. A person can still check one, and the cost strip then warns "Needs about 16 GiB in the plugin: it will be stopped".
 
 **Reading times on the head uses ADR 0066's `TimeReader` and `TimeTally`, not a second parser**, so "imports without time" and "times as written" are that ADR's facts on fewer lines. After ADR 0066 lands, the row's Limited reasons and the import's `TimeProvenance` come from one type. Until then the scan reads `plan.kind` and the parser's `assume_timezone`, and F2 moves over when ADR 0066's Z packages land. If 0066 is not accepted, the row "Time zone unknown" reads "Local clock read as UTC" and nothing else changes.
 
@@ -167,7 +182,14 @@ Rows are usable from the first listing: expand, sort, filter and check all work.
 
 The verdicts were the same in every run: 1,953 CSV logs, 773 text logs, 7,458 binary (EVTX, dumps and zips among them, as no plugin and no archive step ran), 3,770 with no parser, 46 empty [M].
 
-Budgets for a local disk at this size (rule 16): first rows on screen in at most 250 ms; listing finished in at most 1 s; all verdicts in at most 5 s. Measured: listing 22-23 ms, all verdicts 4.40-4.51 s at 8 threads, so the budget holds in-process at 8 threads, with 0.5 s to spare on a loaded machine [M]. It does not hold at 4 threads (8.6-9.3 s), which is what `Auto` picks for a remote root. Numbers for a cold cache, a spinning disk and a network share are **not measured** [U]: each file costs one `open` and one read, so a share at 2 ms per round trip adds about 7 s for the opens alone at the default pool (network: few per host, ER-20, so `Auto` picks 4 for a remote root). Progress keeps moving, and there is no timeout, so slow is honest rather than broken.
+**Budgets, per machine class**, for 14,000 files on a local SSD, warm (rule 16). The thread count is `ingest::default_threads`: CPU threads minus one, clamped to at most 8 (`ingest/parallel.rs:30-35`) [S], so a 4-core laptop gets about 3.
+
+| Machine class | Judge threads | First rows | Listing | All verdicts | Today, in-process [M] | Today, with plugins [calc] | After F1 and SI-6 [calc] |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Desktop, 8 or more cores | 8 | 250 ms | 1 s | 5 s | 4.4-4.5 s | about 9 s | about 2 s |
+| Laptop, 4 cores | 3 | 250 ms | 1 s | 10 s | about 11-12 s (4 threads: 8.6-9.3 s) | about 23 s | about 5 s |
+
+The last column assumes F1 removes most of the 31.5 s of binary decoding, so the in-process judge drops to about 3 s of thread time (`choose` 0.2 s, `plan_with` 1.3 s, the text files' scoring 1.6 s [M, step split]), and SI-6 brings plugin sniffs to about 13 s of thread time [ADR 0064, calc]. **Neither is measured.** So the budgets are a target that F1 must meet before F4 closes: F1 measures its saving with an A/B on this corpus, and F12 re-runs this table at 3, 4 and 8 threads with plugins. If either misses, the budget is restated in this ADR rather than met by a smaller head. Numbers for a cold cache, a spinning disk and a network share are **not measured** [U]: each file costs one `open` and one read, so a share at 2 ms per round trip adds about 7 s for the opens alone at the default pool (network: few per host, ER-20, so `Auto` picks 4 for a remote root). Progress keeps moving, and there is no timeout, so slow is honest rather than broken.
 
 ### 4. Parallelism and cost (ER-20, rule 51)
 
@@ -179,14 +201,14 @@ Budgets for a local disk at this size (rule 16): first rows on screen in at most
 | Heads and `judge` | Mostly small reads, CPU for the judge | `import.parse_threads` when local, 4 when the root is remote; a Setting with "Auto" | Live work: a person waits on it. Normal on Windows, may be `UTILITY` elsewhere (rule 52) |
 | Plugin sniffs | IPC | ADR 0064: one call per plugin per file, one head sent once | As above |
 
-The judge scales with threads up to 8 (34 s, 8.9 s, 4.5 s) and less beyond (3.2 s at 13, where p99 rises to 7-11 ms) [M]. So `Auto` for a local root is `parse_threads`, at most cores minus one, and nothing is gained by more walkers: listing is 23 ms.
+The judge scales with threads up to 8 (34 s, 8.9 s, 4.5 s) and less beyond (3.2 s at 13, where p99 rises to 7-11 ms) [M]. Its mean is 2.4 ms a file (33.3 s over 14,000) and its p50 3.4 ms, because more than half the files are binary and pay the decoding [M]. So `Auto` for a local root is `parse_threads`, at most cores minus one, and nothing is gained by more walkers: listing is 23 ms.
 
 **Cheaper.**
 
-- **No second open per file.** `source_slots` opens each file for 4 bytes and `fingerprint` opens it again (ADR 0064 section "Per-file costs"). The scan does one open and takes the zip check from the head.
+- **No second open per file.** `source_slots` opens each file for 4 bytes and `fingerprint` opens it again (ADR 0064 section "Per-file costs at 14,000 files", fix 3). The scan does one open and takes the zip check from the head.
 - **Deciding "binary" is the cost, and it is cheap to fix.** 95% of the judge's thread time is `score_text_with` on the 7,458 binary files: 4.3 ms each at p50, 31.5 of 33.1 s [M, step split]. It runs encoding detection and decodes up to 256 KiB before `looks_binary` can say no. `choose` takes 0.2 s for the whole folder, and `plan_with` 1.3 s. A test of the raw bytes that decides "binary" before detection, and falls through to today's path whenever it is not sure, cuts most of those 31.5 s, **for the import as much as for the scan**, as both run this code. Package F1 does it behind the agreement test, which must show the same verdicts on the whole corpus. The saving is a [calc] until F1 measures it.
 - **Head size: the import's own, `HEAD_BYTES`.** A 64 KiB head read 631 MiB instead of 3.09 GiB and finished in 3.5 s instead of 4.4 s at 8 threads, with the same verdicts on this corpus [M]. But the import plans from 1 MiB, so a smaller scan head could differ on a file whose text format shows only past 64 KiB, which is the kind of promise this design rules out. The 0.9 s are not worth a second source of truth. Reading is 105 ms of the 4.4 s warm; cold it was 2.0 ms a file at one thread [M], which more threads hide on an SSD.
-- **Sniff once.** `format_score` runs every importer's sniff for every parser whose rules pass (`parser/set.rs:247-251,308-343`). ADR 0064's memo and declared sniff apply here unchanged, and plugin processes start only for a dynamic sniff. ADR 0064 measured what plugins add: 17 sniff calls per text file, 153 µs per 64 KiB call, so about 36 s of thread time at 14,000 files today and about 13 s after its fix, or at 8 threads about 4.5 s and 1.6 s [its M and calc; here an upper bound, as a file that is not text gets the 3 binary sniffs only]. **So the budget above holds with plugins only after that ADR's first fix, which F2 depends on.**
+- **Sniff once.** `format_score` runs every importer's sniff for every parser whose rules pass (`parser/set.rs:247-251,308-343`). ADR 0064's memo and declared sniff (SI-6) apply here unchanged, and plugin processes start only for a dynamic sniff. ADR 0064 measured what plugins add: 17 sniff calls per text file, 153 µs per 64 KiB call, so about 36 s of thread time at 14,000 files today and about 13 s after its fix, or at 8 threads about 4.5 s and 1.6 s [ADR 0064 section "Per-file costs at 14,000 files", its M and calc; here an upper bound, as a file that is not text gets the 3 binary sniffs only]. **So no budget above holds with plugins until both F1's pre-check and SI-6 have landed and been measured.**
 - **No parsing of whole files, no decoding past the head, no store access.** The scan writes nothing to DuckDB.
 - **No verdict cache in this ADR.** A re-open scans again. A cache keyed on size, time and the parser set's version would save seconds locally, and it is worth adding only if a share measures badly. [J]
 - **Rows.** A page is at most 500 rows: about 80 KB of JSON. Status changes are batched in events of counts at most 4 times a second; a row's data is fetched only when it is in the window.
@@ -225,7 +247,9 @@ A person's expanded set, sort and filter are interaction state, which AGENTS.md 
 
 **Events.** `folder-scan:progress` (phase, done, total, version) at most 4 Hz. A changed `version` tells the UI to refetch the window it shows. Long folders stay smooth since a change touches only the rows in view.
 
-**Trust.** `folder_scan_start` passes `open_request`, so a path must be granted to the window, canonicalised. Everything after is relative to that root and comes from the walk: there is no input the webview can use to read elsewhere. Node ids are bounds-checked, a stale `version` is answered with the current one, and `folder_import` re-resolves each selected path against the canonical root. A link or junction that appears between scan and import is refused at open, as the walk would not have followed it (rule 53).
+**Trust.** `folder_scan_start` passes `open_request`, so a path must be granted to the window, canonicalised. Everything after is relative to that root and comes from the walk: there is no input the webview can use to read elsewhere. Node ids are bounds-checked, a stale `version` is answered with the current one, and `folder_import` re-resolves each selected path against the canonical root. A link or junction that appears between scan and import must also be refused, and today nothing would refuse it: `open_with_retry` is a plain `File::open` (`crates/debrief-core/src/workspace/mod.rs:1331`) [S]. So F7 adds an open that refuses links and checks where the handle really is: `O_NOFOLLOW` on Unix and `FILE_FLAG_OPEN_REPARSE_POINT` on Windows for the last component, then the handle's own path (`F_GETPATH` on macOS, `/proc/self/fd` on Linux, `GetFinalPathNameByHandleW` on Windows) must lie under the canonical root, or the file is refused as "Moved outside the folder". This covers links in the middle of the path as well. The import uses the same open (rule 53: act on the handle, not on a name read earlier). Tests: a symbolic link swapped in on Unix, and a directory junction on Windows (CI's Windows runner).
+
+**Text.** File names, folder names and reasons are bound as text, never through `[innerHTML]` (AGENTS.md), and reasons are words from typed `Refusal` and limit kinds rendered in the UI's i18n, so nothing from a file or an OS error is ever markup.
 
 **Sorting** is per folder: children of a folder sort among themselves, folders first when sorting by name, and a folder's size and count are its roll-up. Sort keys: name (natural order, one implementation shared with `pd-table`'s `compareValues` semantics: `Intl.Collator numeric` is mirrored by the engine's comparison and tested on a table of cases), type, status (worst first), reason, size, files. The default sort is by name, ascending.
 
@@ -251,7 +275,7 @@ reason = "Project or configuration data"
 
 [[rule]]
 id = "over-a-limit"
-when = { limit = ["plugin-cap", "entry-size"] }
+when = { limit = ["memory", "entry-size"] }
 check = false
 
 [[duplicates.same-stem-other-form]]
@@ -275,9 +299,10 @@ scope = "sibling"
 
 The strip below the tree shows selected files and bytes, disk free on the store's volume, and "Not selected" with a popover of totals by reason ([image](../images/folder-import-dialog/reasons-dark.png)). All values come from `folder_scan_totals`. Warnings:
 
-- Plugin limit: "3 files are over the plugin memory limit" with "Show them".
+- Memory: "2 files need more memory than allowed" with "Show them" ([memory per input byte](#memory-per-input-byte)); a person who checks one anyway gets the need and the side that would stop.
 - Disk: when selected bytes exceed free space, the strip warns; below `store_cap` headroom it also says so. The store's size per source byte varies by format and no measured ratio exists for this mix, so the dialog gives no estimate of what the import will use. [J, U]
 - Unreadable: "1 file could not be read" with Retry.
+- Estimated import time: "About 7 s to import", from the selected bytes and the import rate this machine last measured, falling back to the 5.3 to 5.4 s per GB recorded for the Mac mini in `performance.md` (import budget row). Shown as an estimate, rounded, and only for more than 1 GB; it never blocks anything. [J]
 
 **Totals by reason** replace per-file rows. After the import, the Explorer has a single row "11,542 files not imported" with the same popover and "Choose files…", which reopens the dialog. `WorkspaceSummary.unrecognized` then holds only what the import tried and failed, which fixes the note's 4.4 MB summary (gap 7) for this case; plan 4.2 bounds the rest.
 
@@ -326,13 +351,13 @@ A file under a live tail is not probed for duplicates. This is the only path tha
 
 ### 11. Zipped bundles
 
-A zip row is a folder row with its own glyph, and a single zip with more than one member opens the dialog with its members as the tree (D1). A zip's `central_records` (ADR 0064 moves them to reading by range) gives names and sizes without expanding anything. Phase 2 inflates only each member's first `HEAD_BYTES`, or stops at the first deflate block that passes it, so it never holds the whole archive, and judges the member as a file. A selected member is `archive!/member` (`archive::ENTRY_SEPARATOR`), which `removed` and the import already use, and a prefix rule works on a member path just as on a folder.
+A zip row is a folder row with its own glyph, and a single zip with more than one member opens the dialog with its members as the tree (D1). `paddock_archive::Members::entries()` (ADR 0064 section 3, package SI-4, after the Dyno tag) gives names and declared sizes from the central directory, read by range, without expanding anything; until then `archive.rs`'s `central_records` gives the same over a whole read of the directory. Phase 2 opens each member through `Members::open_member` and inflates only its first `HEAD_BYTES`, or stops at the first deflate block that passes it, so it never holds the whole archive, and judges the member as a file. A selected member is `archive!/member` (`archive::ENTRY_SEPARATOR`), which `removed` and the import already use, and a prefix rule works on a member path just as on a folder.
 
 - Above 4 GiB: user decision; ADR 0064 retires `MAX_ARCHIVE_BYTES`. Until then, a zip over the limit reads "Too large to expand: 4 GiB limit", Limited and unchecked, and members are still listed.
 - `gzip`: one member, no tree.
 - A zip inside a zip or inside a folder's zip: listed as one file, "Nested archive: open it separately". Not supported, and not expanded. [J]
 - Encrypted member: "Encrypted", Not supported.
-- Malformed central directory: the zip row reads "Can't read: the archive is damaged", with the error from `archive.rs`, and its siblings carry on.
+- Malformed central directory, or any other archive error: the zip row reads "Can't read: the archive is damaged". Archive errors map to typed `Refusal` kinds (`Damaged`, `Encrypted`, `TooManyEntries`, `TooLarge`) with words in the UI's i18n; the error's own text goes to the logs only, never to the row.
 - `MAX_ENTRIES` 65,536 stays and reports through a `Cut`.
 - Cost at many small members: one `inflate` of up to 1 MiB per member. It is CPU, bounded like the parse pool. Not measured here [U]; F11 measures the 14,000-member case.
 
@@ -345,7 +370,7 @@ A zip row is a folder row with its own glyph, and a single zip with more than on
 | A file is locked or unreadable | Its row: same, unchecked, disabled; retried once automatically (`open_with_retry`, as the import) | Warning, the first 20 then a count |
 | The folder disappears during a scan | The rows it had stay, marked "Gone"; the header says so; Try again | Warning |
 | A file disappears or changes after its verdict | Nothing until the import, which reports it with the rest | Info |
-| A plugin crashes on a sniff | Its rows: "Can't check: plugin stopped", Retry. The crash stays contained, and **a scan's sniff crash counts toward quarantine** as the import's does | Error with the plugin |
+| A plugin crashes on a sniff | Its rows: "Can't check: plugin stopped", Retry. The crash stays contained. By D9's recommendation it does **not** count toward quarantine; after 3 crashes in one scan that plugin is not asked again for the rest of the scan, and its rows read "Not checked: plugin stopped for this scan" | Error with the plugin |
 | A plugin is quarantined | Rows: "Plugin stopped: <name>", with a link to Plugins. Never `binary file` (bundle note, "Misleading reason") | Warning once |
 | Disk full when writing the state | The import's error applies; the scan writes nothing | |
 | Scan cancelled | Dialog closes. The state is unchanged | Info with counts |
@@ -382,7 +407,7 @@ So a diagnostic bundle alone answers why a file was or was not imported: which r
 - The cost strip.
 - The frame's footer, drawn from declared actions: Cancel, and "Import selected" as the Enter target, the one primary.
 
-**Tables that size to the window.** The grid takes all the space left in the window; `pd-table` needs a [fill mode](#pd-table-what-fits-and-what-is-missing). Columns drop by `hideBelow` with no horizontal scroll (rule 18): Reason below 760 px, where the reason moves to the Status cell's tooltip and accessible name; Type below 640 px; Files below 480 px. The [narrow image](../images/folder-import-dialog/narrow-dark.png) is 640 x 560. Size column values carry their own units since they run from `0 B` to `1 GiB`; the design guide asks for units in the header, which a human-sized column cannot do. This is a deliberate exception and a review point. [J]
+**Tables that size to the window.** The grid takes all the space left in the window; `pd-table` needs a [fill mode](#pd-table-what-fits-and-what-is-missing). Columns drop by `hideBelow` with no horizontal scroll (rule 18): Reason below 760 px, where the reason moves to the Status cell's tooltip and accessible name; Type below 640 px; Files below 480 px. The [narrow image](../images/folder-import-dialog/narrow-dark.png) is 600 x 560, below 640, so Type and Reason have dropped and Files stays. Size column values carry their own units since they run from `0 B` to `1 GiB`; the design guide asks for units in the header, which a human-sized column cannot do. This is a deliberate exception and a review point. [J]
 
 **Row actions** in the "..." cluster and right-click, per the family pattern, keyboard reachable: Check only this, Retry (a row that can't be read), Set up a format… (opens `format-wizard` with this file, then the row is judged again; a row with no parser), Parse with…, Reveal in the file manager. A folder: Check only supported files, Expand all below.
 
@@ -466,7 +491,7 @@ These moves are listed so they are not lost. They are not in this ADR's packages
 
 ## Fit with the other ADRs in progress
 
-- **ADR 0064 (streaming trait, `0f6e482f5`).** `judge` uses its `DeclaredSniff`, sniff memo and `Sniff` batch unchanged. `Head` is the plan's head. `Input::ACCESS` feeds the plugin cap limit. `Archive::entries()` (`paddock-archive`'s member reader, after the Dyno tag) feeds zip rows. Its fix 3 ("one open per file") applies to the scan and the import alike. Both ADRs change `import_source`; F1 lands on either side, moving the same lines. Its measured sniff cost is the dependency in section 4.
+- **ADR 0064 (streaming trait, revision 3, `c12864566`).** `judge` uses its `DeclaredSniff`, sniff memo and `Sniff` batch (SI-6) unchanged. `Head` is the plan's head. `Input::ACCESS` says which importers stream and so need no row in `memory.toml`; `whole_reason` names the ones that do. `paddock_archive::Members::entries()` and `open_member` (SI-4, after the Dyno tag) feed zip rows. SI-9 (EVTX streamed in the plugin) removes the largest row of the memory table. Its fix 3 ("one open per file") applies to the scan and the import alike. Both ADRs change `import_source`; F1 lands on either side, moving the same lines. Its measured sniff cost is the dependency in section 4.
 - **ADR 0065 (bounded replies, `1eaa14850`).** `folder_scan_rows` returns `Bounded<RowsPage>` from `Bounded::counted`, with `Total::Exact` and `Next::Page`. As with the events grid, the tree's scrollbar is that display, so `BOUNDED_SURFACES` lists it with that reason and no note is drawn for paging. The listing's limit is a `Bounded::first` cut with `Total::AtLeast` and `Next::Narrow`, and `folder.scan_entries` is a registry row with its `limit_case!`. The UI uses `<pd-limit-note [cuts]>`, and the logs use `Cut::describe()`. Totals by reason are a fixed set of `Refusal` kinds and go in `bounded-exempt.toml` as `fixed-set`. That ADR adds no Settings; this one adds this single one, under its rule that a limit with a Setting says so. If D1 of that ADR puts the types in `paddock-bounded`, they arrive after the Dyno tag with F10.
 - **ADR 0066 (how times are read, `2f289b4c3`).** Limits use its `TimeReader` and tally; the scan hosts its probe; the chip and its words are its own; `import_roots` is written by `folder_import`; `zone_settings` and the selection share prefix lookup; the agreement test shares its corpus. The two import-root notions agree: its "a path given to one `open_paths`" becomes "a path given to one `open_paths` or one dialog". Its order of work does not depend on this one: a scan without the probe has no chip and its rows stay "times as written".
 - **ADR 0063 (binary wire).** Pages are small JSON now, and a later move of `folder_scan_rows` to `#[wire_command]` changes nothing here. Not needed at 500 rows.
@@ -494,20 +519,26 @@ Rough days, before implementation design. Order: F1 to F4 can start now on `debr
 
 | # | Package | Paths | Days | Needs |
 |---|---|---|---|---|
-| F1 | `judge`, typed `Refusal`, import calls it; `PluginStopped` wording; the raw-byte binary check before encoding detection, with its A/B measurement | `debrief-core/src/ingest/{plan,source,encoding}.rs` | 2.5 | |
+| F1 | `judge`, typed `Refusal`, import calls it; `PluginStopped` wording; the raw-byte binary check before encoding detection, with its A/B measurement on this corpus, **which must meet the budget's precondition before F4 closes** | `debrief-core/src/ingest/{plan,source,encoding}.rs` | 2.5 | |
+| F1b | The `judge` caller check in conformance: a new whole-file caller of `choose` or `plan_with` fails | `conformance/`, `paddock.conformance.json` | 0.5 | F1 |
+| FM | Memory per input byte: `importers/memory.toml`, the two-sided check, the conservative default, the test that ties rows to declared input kinds; the reproduction's worker tests (`debrief-store-worker/tests/it/folder_open.rs`) made the measuring harness | `debrief-core/src/importers/`, `debrief-store-worker/tests/it/` | 2.5 | F1 |
 | F2 | Limits from the head and manifest; agreement test on the shared corpus; `broken_promises` in the report | `ingest/`, `debrief-plugins/tests/it/` | 2 | F1; ADR 0064's sniff memo for the budget; moves onto ADR 0066's reader when that lands |
 | F3 | `ScanTable` and view, pure, with tests | `debrief-core/src/folder_scan/` | 2.5 | |
 | F4 | The scan job: phases, pool, priority, window-first order, cancel, errors, logs, the limit | `folder_scan/run.rs`, `app/src-tauri/src/folder_scan.rs` | 2.5 | F1, F3 |
-| F5 | Rule pack, `class` declarations, duplicates, hot reload | `folder_scan/recommend*`, parser TOML, manifests | 2.5 | F3 |
+| F5 | Rule pack, `class` in parser TOML, duplicates, hot reload | `folder_scan/recommend*`, `crates/debrief-core/parsers/` | 2.5 | F3 |
+| F5b | `class` in the plugin manifest: the field, each first-party plugin's value, the host reading it, refusal of an unknown value | `debrief-plugin-api` manifest, `crates/debrief-plugin-*` | 1 | F5 |
 | F6 | Selection in the walk and state; reload, restore, tail, watch | `ingest/discover.rs`, `debrief-store-duck/src/lib.rs`, `api.rs`, `watch.rs`, `workspace/tail` | 2.5 | F3 |
-| F7 | Commands, grants, `open_plan`, dialog contract, events, generated types | `app/src-tauri`, `dialog-registry.ts`, `generated` | 1.5 | F4, F6 |
+| F7 | Commands, grants, `open_plan`, dialog contract, events, generated types; the link-refusing open with its Unix and Windows junction tests | `app/src-tauri`, `debrief-core/src/workspace/mod.rs`, `dialog-registry.ts`, `generated` | 2.5 | F4, F6 |
 | F8 | `source_folders`, `remove_sources`, undo, Explorer totals row | `query.rs`, `ports/`, `debrief-store-duck`, `shell/sidebar.ts`, journal | 3 | F6 |
-| F9 | The dialog, store, cost strip, popover, re-open; the mock | `app/src/app/import/folder/`, `core/mock/` | 3.5 | F7, F10 (or its branch) |
-| F10 | `pd-table` T1 to T6, gallery, specs, e2e, changelog, Dyno unchanged | `ui/projects/paddock-ui/table/`, `ui/projects/gallery`, `ui/e2e` | 3 | **after the Dyno tag** |
+| F9 | The dialog, store, cost strip with the time estimate, popover, re-open; the mock | `app/src/app/import/folder/`, `core/mock/` | 3.5 | F7, F10 (or its branch) |
+| F9b | i18n: every new string with its id, plurals for counts, the catalogs regenerated, the reasons' words for each `Refusal` and limit kind | `app/src/locale/`, `ui/projects/paddock-ui/i18n` for T6 | 1 | F9 |
+| F10 | `pd-table` T1, T2, T3, T5, T6, gallery, specs, changelog; Dyno's whole e2e suite, the shell demo's and `ui/e2e` on both engines | `ui/projects/paddock-ui/table/`, `ui/projects/gallery`, `ui/e2e` | 2.5 | **after the Dyno tag** |
+| F10b | `pd-table` T4, windowed rows, alone; the same suites | same | 1.5 | F10 |
 | F11 | Zip rows, member heads, 14,000-member measurement | `folder_scan/`, `paddock-archive`'s member reader (ADR 0064) | 1.5 | ADR 0064 member reader, after the Dyno tag |
-| F12 | Real-engine e2e, benchmark and budget, axe, screen readers, screenshots, independent review, docs | `app/e2e*`, `performance.md`, `user-guide.md` | 2.5 | all |
+| F12 | Acceptance: the reproduction's `folder_open` worker tests un-ignored and passing, and Enter on the invented 14,255-file bundle (`scripts/perf/bundle/gen_bundle.py`, `examples/folder_repro.rs`) importing the recommended set without the worker stopping; real-engine e2e; the budget table re-run at 3, 4 and 8 threads with plugins; axe, screen readers, screenshots, independent review, docs | `app/e2e*`, `debrief-store-worker/tests/it/`, `performance.md`, `user-guide.md` | 3 | all |
+| FR | Rule 17's amendment for D2, if the user agrees: one line, a lesson, the dialog matrix entry | `docs/rules.md`, `docs/lessons.md` | 0.25 | D2 |
 
-**Total about 29 days of raw work.** Bundle note gaps closed by it: 7 (3 days there) and part of 8 (3 days there, by choosing, not by deduplicating content) and the misleading-reason half of gap 2. What it leaves: the time zone, `ctime` and other shape gaps stay as the note's own rows; they change a row from Not supported to Supported, with no change here.
+**Total about 35 days of raw work** (revision 1 said 29; the review expected 32 to 35). Bundle note gaps closed by it: 7 (3 days there) and part of 8 (3 days there, by choosing, not by deduplicating content) and the misleading-reason half of gap 2. What it leaves: the time zone, `ctime` and other shape gaps stay as the note's own rows; they change a row from Not supported to Supported, with no change here.
 
 ## Decisions for the user
 
@@ -519,7 +550,8 @@ Rough days, before implementation design. Order: F1 to F4 can start now on `debr
 | D4 | In a re-opened dialog: does unchecking an imported file remove it, or is removal only in the Explorer? | **Explorer only.** A checkbox should not delete data; the dialog stays additive. |
 | D5 | The same folder in a new workspace: start from the recommendations, or from your last choices there? | **Recommendations.** Choices are stored in the workspace or project. Anything more is a preference file to keep and explain. |
 | D6 | Not supported rows: disabled, or checkable so the import can try and then report? | **Disabled.** It cannot import, and offering it breaks the "no promises" rule. "Set up a format…" is the way forward, and a new parser re-judges the row. |
-| D7 | Over a plugin limit: unchecked by default (safe, it might have worked), or checked with a warning? | **Unchecked**, since three failures quarantine the plugin today. Reconsider when ADR 0064's streaming lands, when this mostly stops applying. |
+| D7 | A file whose measured memory need is over the plugin cap or the store worker's budget: unchecked by default, or checked with a warning? | **Unchecked**, with the need and the limit shown. Checked, it stops the worker or the plugin on the bundle today [R]. The rows shrink as ADR 0064 makes inputs stream. |
+| D9 | Should a plugin crash during a scan's sniff count toward that plugin's quarantine, as an import's crash does? Browsing a folder could then disable a plugin before anything is imported. | **No.** The scan marks the rows "Can't check", logs the crash and, after 3 crashes in one scan, stops asking that plugin until the scan ends. Only crashes during an import count toward quarantine. |
 | D8 | Enter during a scan: import the recommended set once the scan ends, or wait until it ends to allow Enter? | **Import when it ends.** One step is the point, and the job shows both phases. |
 
 ## Alternatives considered
@@ -537,7 +569,7 @@ Rough days, before implementation design. Order: F1 to F4 can start now on `debr
 - **The scan's verdict cost with plugins is taken from ADR 0064's measurement, not run on this corpus.** F12's benchmark checks it, and if it misses, the budget and this ADR's first answer change.
 - **Files named alike across many folders** can flag false duplicates. The flag only changes a default, and it says "likely".
 - **Rule pack judgement.** A wrong default in the pack costs a person one click, or a missing file they do not notice. The totals by reason and the rule ids in the logs are the guard. Its first version needs the user's bundle to tune (by the user, never in the repo).
-- **`pd-table` is shared.** T1 to T6 are opt-in inputs. The Dyno processes e2e and the table's 1,187-line spec guard the rest. Nothing lands before the tag.
+- **`pd-table` is shared, and widely.** 37 tracked files outside specs and Markdown use it at `852b35ac0`, 25 of them in Dyno [S, counted with `git grep`]. T1 to T6 are opt-in inputs, but F10 must run Dyno's whole e2e suite (`apps/dyno/app/e2e/`, including `tables.spec.ts`), the shell demo's, `ui/e2e/data.spec.ts` and the table's 1,187-line spec, on both engines. T4 (windowed rows) touches the table's line model and is its own package, F10b, so it can be reviewed and reverted alone. Nothing lands before the tag.
 - **A mixed folder gives per-file rules**, so a worst-case selection is one rule per file. Measured for the mix, not for an adversarial one. Bounded by `folder.scan_entries`.
 - **One dialog per folder open adds a step a person might not need** on small folders; Enter keeps it to one key, and the user asked for it on every folder.
 
@@ -545,6 +577,9 @@ Rough days, before implementation design. Order: F1 to F4 can start now on `debr
 
 - The scan through plugins: the probe runs the in-process importers only, without EVTX, dump or registry sniffs over IPC; section 4 uses ADR 0064's measured cost.
 - ADR 0066's probe inside the scan, and the head tally's cost: neither exists yet.
+- The memory factors: taken from the reproduction's results [R], not re-run here, and measured for EVTX, the semicolon export and dumps only; every other whole-file importer gets the conservative default until FM measures it.
+- The link-refusing open: designed, not built; its Windows half is untested until F7.
+- F1's saving and the budgets' last column: both are [calc].
 - Any cold cache, spinning disk or network share. All numbers are warm, on one loaded machine with an external SSD.
 - `pd-table` with 14,000 tree rows in a real browser: the JS costs are the model's, without Angular's change detection or layout. Smoothness is F12's check.
 - Screen reader announcements (T6).

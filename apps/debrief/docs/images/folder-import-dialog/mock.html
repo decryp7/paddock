@@ -34,7 +34,7 @@ html,body{margin:0;height:100%;background:var(--pd-surface-1);color:var(--pd-tex
 .progress .lab{font-weight:var(--pd-weight-medium);white-space:nowrap}
 .track{flex:1;height:4px;border-radius:2px;background:var(--pd-hover);overflow:hidden}.track i{display:block;height:100%;background:var(--pd-accent-control)}
 .grid{--cols:minmax(0,2fr) 116px 148px minmax(0,1.5fr) 72px 56px 24px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;border:1px solid var(--pd-hairline);border-radius:var(--pd-radius-card);background:var(--pd-surface-1);overflow:hidden;position:relative}
-.grid.noreason{--cols:minmax(0,2fr) 116px 148px 72px 56px 24px}.grid.tiny{--cols:minmax(0,1fr) 148px 72px 24px}
+.grid.noreason{--cols:minmax(0,2fr) 116px 148px 72px 56px 24px}.grid.tiny{--cols:minmax(0,1fr) 148px 72px 56px 24px}
 .row,.head{display:grid;grid-template-columns:var(--cols);column-gap:var(--pd-space-3);align-items:center;padding:0 var(--pd-space-3);min-width:0}
 .head{flex:none;height:28px;border-bottom:1px solid var(--pd-hairline);color:var(--pd-text-muted);font-size:var(--pd-text-label);padding-inline-end:calc(var(--pd-space-3) + 12px)}
 .head .end,.cell.end{justify-content:flex-end;text-align:end;font-variant-numeric:tabular-nums}
@@ -49,7 +49,7 @@ html,body{margin:0;height:100%;background:var(--pd-surface-1);color:var(--pd-tex
 .chev{flex:none;width:16px;height:16px;display:inline-grid;place-items:center;color:var(--pd-text-muted)}
 .cb{flex:none;width:16px;height:16px;margin:0 var(--pd-space-1);border-radius:3px;border:2px solid var(--pd-border-control);display:inline-grid;place-items:center;color:var(--pd-on-accent-control)}
 .cb.on,.cb.mix{background:var(--pd-accent-control);border-color:var(--pd-accent-control)}
-.cb.off-dis{border-color:var(--pd-hairline);background:var(--pd-surface-2)}
+.cb.off-dis{border-color:var(--pd-border-strong);background:transparent;opacity:.7}
 .ico{flex:none;display:inline-grid;color:var(--pd-text-muted);margin-inline-end:2px}
 .muted2{color:var(--pd-text-muted)}.sub{color:var(--pd-text-subtle)}
 .reason{color:var(--pd-text-muted);overflow:hidden;text-overflow:ellipsis}
@@ -59,8 +59,8 @@ html,body{margin:0;height:100%;background:var(--pd-surface-1);color:var(--pd-tex
 .more{justify-content:center;color:var(--pd-row-action-rest)}.more.hot{color:var(--pd-text)}
 .chip{flex:none;height:20px;line-height:20px;padding:0 var(--pd-space-2);border-radius:var(--pd-radius-pill);background:var(--pd-surface-2);color:var(--pd-text-muted);font-size:var(--pd-text-label);white-space:nowrap}
 .link{color:var(--pd-accent);font-weight:var(--pd-weight-medium);flex:none}
-.tag{flex:none;height:18px;padding:0 var(--pd-space-1);border-radius:var(--pd-radius-tag);background:var(--pd-info-tint);color:var(--pd-info);font-size:var(--pd-text-caption);line-height:18px}
-.skel{display:block;height:10px;border-radius:3px;background:var(--pd-skeleton)}
+.tag{flex:none;display:inline-flex;align-items:center;gap:3px;height:18px;padding:0 var(--pd-space-1);border-radius:var(--pd-radius-tag);background:var(--pd-info-tint);color:var(--pd-info);font-size:var(--pd-text-caption);line-height:18px}
+.skel{display:block;height:10px;border-radius:3px;background:var(--pd-skeleton-raised)}
 .scroll{position:absolute;top:2px;right:2px;bottom:2px;width:8px}.scroll i{position:absolute;left:0;right:0;border-radius:4px;background:var(--pd-border-strong)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--pd-space-2);text-align:center;color:var(--pd-text-muted)}
 .cost{flex:none;display:flex;align-items:center;gap:var(--pd-space-4);min-height:36px;margin-top:var(--pd-space-1);white-space:nowrap;min-width:0;font-variant-numeric:tabular-nums}
@@ -94,6 +94,7 @@ const I = {
   check: svg('<path d="M3 8.5l3 3 7-7.5" stroke-width="2.2"/>', 12),
   dash: svg('<path d="M3.5 8h9" stroke-width="2.4"/>', 12),
   columns: svg('<path d="M2.5 3h11v10h-11zM6.2 3v10M9.8 3v10"/>'),
+  infos: svg('<circle cx="8" cy="8" r="6"/><path d="M8 7.4v3.4M8 5v.1"/>', 12),
   more: svg('<circle cx="3.5" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r=".9" fill="currentColor" stroke="none"/>', 16),
   sortd: svg('<path d="M8 3v9M4.5 9L8 12.5 11.5 9"/>', 12),
 };
@@ -109,18 +110,18 @@ function row(o, cols) {
   const name = `<div class="cell"><span class="name" style="padding-inline-start:${indent}px">${chev}${cb(o.c)}<span class="ico">${ic}</span><span class="t">${o.n}</span></span></div>`;
   const type = `<div class="cell muted2">${o.t === '~' ? '<span class="skel" style="width:64px"></span>' : (o.t || '')}</div>`;
   const status = `<div class="cell">${o.s || ''}</div>`;
-  const reason = `<div class="cell">${o.tag ? `<span class="tag">${o.tag}</span>` : ''}<span class="reason">${o.r || ''}</span></div>`;
+  const reason = `<div class="cell">${o.tag ? `<span class="tag">${I.infos}${o.tag}</span>` : ''}<span class="reason">${o.r || ''}</span></div>`;
   const more = `<div class="cell more ${o.focus ? 'hot' : ''}">${I.more}</div>`;
   const size = `<div class="cell end">${o.z ?? ''}</div>`;
   const count = `<div class="cell end muted2">${o.f ?? ''}</div>`;
-  const cells = cols === 'full' ? [name, type, status, reason, size, count, more] : cols === 'noreason' ? [name, type, status, size, count, more] : [name, status, size, more];
+  const cells = cols === 'full' ? [name, type, status, reason, size, count, more] : cols === 'noreason' ? [name, type, status, size, count, more] : [name, status, size, count, more];
   return `<div class="row ${o.k !== 'f' ? 'folder' : ''} ${o.focus ? 'focus' : ''} ${o.m ? 'muted' : ''}">${cells.join('')}</div>`;
 }
 function head(cols, sort = 'name') {
   const h = (k, label, end) => `<div class="${end ? 'end' : ''} ${sort === k ? 'sorted' : ''}">${end && sort === k ? I.sortd : ''}${label}${!end && sort === k ? '&nbsp;<span style="display:inline-grid;transform:rotate(180deg)">' + I.sortd + '</span>' : ''}</div>`;
   const parts = cols === 'full' ? [h('name', 'Name'), h('type', 'Type'), h('status', 'Status'), h('reason', 'Reason'), h('size', 'Size', 1), h('files', 'Files', 1), '<div></div>']
     : cols === 'noreason' ? [h('name', 'Name'), h('type', 'Type'), h('status', 'Status'), h('size', 'Size', 1), h('files', 'Files', 1), '<div></div>']
-    : [h('name', 'Name'), h('status', 'Status'), h('size', 'Size', 1), '<div></div>'];
+    : [h('name', 'Name'), h('status', 'Status'), h('size', 'Size', 1), h('files', 'Files', 1), '<div></div>'];
   return `<div class="head">${parts.join('')}</div>`;
 }
 function grid(cols, rows, opts = {}) {
@@ -131,7 +132,7 @@ const tb = (o = {}) => `<div class="bar"><div class="filter ${o.q ? 'on' : ''}">
   <span class="sel ${o.t ? 'on' : ''}"><b>Type</b> ${o.t || 'All'} ${I.caret}</span><span class="sel ${o.s ? 'on' : ''}"><b>Status</b> ${o.s || 'All'} ${I.caret}</span>
   <span class="spacer"></span><span class="count">${o.c || ''}</span><span class="tool">Select ${I.caret}</span><span class="tool" aria-label="Columns">${I.columns}</span></div>`;
 const path = (right, p = '…/Incoming/Bundle', chip = '') => `<div class="path"><span class="ico">${I.folder}</span><span class="p">${p}</span>${chip ? `<span class="chip">${chip}</span>` : ''}<span class="sum">${right}</span></div>`;
-const cost = (o) => `<div class="cost"><span class="k">Selected</span> <b>${o.n} files, ${o.b}</b><span class="k">Disk free</span> <b>${o.free || '449 GiB'}</b>${o.pend ? `<span class="k">${o.pend}</span>` : `<span class="k">Not selected</span> <span class="link">${o.left} ${I.caret.replace('width="12"','width="10"')}</span>`}${o.w ? `<span class="warnx">${I.lim}${o.w}</span> <span class="link">Retry</span>` : ''}</div>`;
+const cost = (o) => `<div class="cost"><span class="k">Selected</span> <b>${o.n} files, ${o.b}</b><span class="k">Disk free</span> <b>${o.free || '449 GiB'}</b>${o.est ? `<span class="k">${o.est}</span>` : ''}${o.pend ? `<span class="k">${o.pend}</span>` : `<span class="k">Not selected</span> <span class="link">${o.left} ${I.caret.replace('width="12"','width="10"')}</span>`}${o.w ? `<span class="warnx">${I.lim}${o.w}</span> <span class="link">Show them</span>` : ''}</div>`;
 const foot = (o = {}) => `<div class="foot">${o.msg ? `<span class="msg">${o.msg}</span>` : ''}<span class="btn">${o.cancel || 'Cancel'}</span><span class="btn primary" ${o.dis ? 'disabled' : ''}>${o.ok || 'Import selected'}</span></div>`;
 const frame = (title, inner, footer) => `<div class="title"><span class="lights"><i></i><i></i><i></i></span>${title}</div><div class="body">${inner}</div>${footer}`;
 const TITLE = 'Choose files to import';
@@ -141,14 +142,14 @@ const treeSel = [
   logs,
   { l: 2, k: 'd', c: 'on', n: 'AppA', t: 'CSV log', s: ok('610'), z: '140 MiB', f: '610' },
   { l: 2, k: 'd', c: 'on', n: 'Lifecycle', t: 'CSV log', s: ok('1,340'), z: '22 MiB', f: '1,340' },
-  { l: 2, k: 'd', open: 1, c: 'mix', n: 'History', t: 'CSV log', s: ok('713'), z: '19 MiB', f: '713' },
-  { l: 3, k: 'd', c: 'on', n: 'All', t: 'CSV log', s: ok('420'), z: '11 MiB', f: '420', focus: 1 },
-  { l: 3, k: 'd', c: 'off', n: 'Summary', tag: 'Likely duplicate', t: 'CSV log', s: ok('293'), r: 'of All', z: '8 MiB', f: '293' },
+  { l: 2, k: 'd', open: 1, c: 'mix', n: 'History', t: 'Text log', s: ok('713'), z: '19 MiB', f: '713' },
+  { l: 3, k: 'd', c: 'on', n: 'All', t: 'Text log', s: ok('420'), z: '11 MiB', f: '420', focus: 1 },
+  { l: 3, k: 'd', c: 'off', n: 'Summary', tag: 'Likely duplicate', t: 'Text log', s: ok('293'), r: 'of All', z: '8 MiB', f: '293' },
   { l: 2, k: 'd', c: 'on', n: 'Service', t: 'Text log', s: ok('60'), z: '100 MiB', f: '60' },
   { l: 1, k: 'd', c: 'dis', n: 'Project', m: 1, t: 'Mixed', s: no('8,529'), r: 'Binary project data', z: '2.97 GiB', f: '8,529' },
-  { l: 1, k: 'd', open: 1, c: 'mix', n: 'System', t: 'Mixed', s: `${ok('2')}&nbsp;${lim('3')}&nbsp;${er('1')}`, z: '3.41 GiB', f: '6' },
-  { l: 2, k: 'f', c: 'on', n: 'Event0.evtx', t: 'Windows event log', s: W.ok, z: '1,011 MiB' },
-  { l: 2, k: 'f', c: 'on', n: 'Event1.evtx', t: 'Windows event log', s: W.ok, z: '1,011 MiB' },
+  { l: 1, k: 'd', open: 1, c: 'off', n: 'System', t: 'Mixed', s: `${lim('5')}&nbsp;${er('1')}`, z: '3.41 GiB', f: '6' },
+  { l: 2, k: 'f', c: 'off', n: 'Event0.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 11 GiB, limit 1 GiB', z: '1,011 MiB' },
+  { l: 2, k: 'f', c: 'off', n: 'Event1.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 11 GiB, limit 1 GiB', z: '1,011 MiB' },
   { l: 2, k: 'f', c: 'dis', n: 'Event2.evtx', t: 'Windows event log', s: W.err, r: 'Locked by a program', z: '1,011 MiB' },
   { l: 2, k: 'd', c: 'off', n: 'Exports', tag: 'Likely duplicate', t: 'Text log', s: lim('3'), r: 'of Event*; no time', z: '458 MiB', f: '3' },
   { l: 1, k: 'd', c: 'on', n: 'Dumps', t: 'Crash dump', s: ok('22'), z: '895 MiB', f: '22' },
@@ -159,12 +160,12 @@ const dupNote = `<div class="note"><span class="ic">${I.info}</span><span class=
 const STATES = {
   selection() {
     return frame(TITLE, path('14,000 files, 7.56 GiB. Scan finished.', undefined, 'Asia/Tokyo · from neighbouring logs') + tb() + dupNote + grid('full', treeSel, { sh: 62 })
-      + cost({ n: '2,458', b: '3.12 GiB', left: '11,542 files', w: '1 file could not be read' }), foot());
+      + cost({ n: '2,456', b: '1.14 GiB', left: '11,544 files', est: 'About 7 s to import', w: '3 files need attention' }), foot());
   },
   reasons() {
     const line = (l, n, b) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 56px 64px;gap:12px;height:28px;align-items:center;padding:0 8px;border-radius:6px;font-variant-numeric:tabular-nums"><span>${l}</span><span style="text-align:end">${n}</span><span style="text-align:end;color:var(--pd-text-muted)">${b}</span></div>`;
     const pop = `<div style="position:absolute;left:300px;bottom:102px;width:356px;padding:4px;background:var(--pd-surface-3);border:1px solid var(--pd-hairline);border-radius:var(--pd-radius-popover);box-shadow:var(--pd-shadow-2);z-index:5"><div style="display:grid;grid-template-columns:minmax(0,1fr) 56px 64px;gap:12px;height:24px;align-items:center;padding:0 8px;font-size:var(--pd-text-label);color:var(--pd-text-muted)"><span>Why they are not selected</span><span style="text-align:end">Files</span><span style="text-align:end">Size</span></div>`
-      + line('Binary file', '7,429', '1.90 GiB') + line('No parser reads this file', '3,770', '1.10 GiB') + line('Likely duplicate', '296', '466 MiB') + line('Empty file', '46', '0 B') + line('Could not be read', '1', '1,011 MiB') + `</div>`;
+      + line('Binary file', '7,429', '1.90 GiB') + line('No parser reads this file', '3,770', '1.10 GiB') + line('Likely duplicate', '296', '466 MiB') + line('Needs too much memory', '2', '1.97 GiB') + line('Empty file', '46', '0 B') + line('Could not be read', '1', '1,011 MiB') + `</div>`;
     return STATES.selection().replace('<div class="foot">', pop + '<div class="foot">');
   },
   scanning() {
@@ -200,12 +201,12 @@ const STATES = {
     r.push({ l: 3, k: 'd', open: 0, c: 'dis', m: 1, n: 'W002', t: 'XML, UTF-16', s: no('44'), z: '43 MiB', f: '44' });
     r.push({ l: 3, k: 'd', open: 0, c: 'dis', m: 1, n: 'W003', t: 'XML, UTF-16', s: no('36'), z: '37 MiB', f: '36' });
     return frame(TITLE, path('14,000 files, 7.56 GiB. Scan finished.') + tb({ q: '.xaml', s: 'Not supported', c: '1,100 of 14,000 files' }) + grid('full', r, { sort: 'size', st: 3, sh: 4 })
-      + cost({ n: '2,458', b: '3.12 GiB', left: '11,542 files' }), foot({ msg: 'The filter only hides rows: the selection stays as it was.' }));
+      + cost({ n: '2,456', b: '1.14 GiB', left: '11,544 files', est: 'About 7 s to import' }), foot({ msg: 'The filter only hides rows: the selection stays as it was.' }));
   },
   cut() {
     const note = `<div class="note warn"><span class="ic">${I.warn}</span><span class="tx">Looked at the first 500,000 of more than 500,000 entries. Anything not listed is not imported.</span><span class="btn small">Open a subfolder…</span></div>`;
     const r = ['Y2024', 'Y2025', 'Y2026'].map((n, i) => ({ l: 1, k: 'd', c: 'mix', n, t: 'Mixed', s: `${ok(['41,204', '62,877', '12,330'][i])}&nbsp;${no(['102,002', '181,450', '100,137'][i])}`, z: ['88 GiB', '140 GiB', '31 GiB'][i], f: ['143,206', '244,327', '112,467'][i] }));
-    return frame(TITLE, path('more than 500,000 files. 259 GiB listed.', '…/Archive/AllStations'.replace('Stations','Machines')) + tb() + note + grid('full', r, { sh: 100 })
+    return frame(TITLE, path('More than 500,000 entries, 259 GiB listed.', '…/Archive/AllStations'.replace('Stations','Machines')) + tb() + note + grid('full', r, { sh: 100 })
       + cost({ n: '116,411', b: '41 GiB', left: '383,589 files' }), foot());
   },
   nothing() {
@@ -227,7 +228,7 @@ const STATES = {
   narrow() {
     const pick = treeSel.slice(0, 12);
     return frame(TITLE, path('14,000 files, 7.56 GiB') + `<div class="bar"><div class="filter">${I.search}<span>Filter by name</span></div><span class="sel"><b>Type</b> ${I.caret}</span><span class="sel"><b>Status</b> ${I.caret}</span><span class="spacer"></span><span class="tool">Select ${I.caret}</span></div>` + grid('tiny', pick, { sh: 40 })
-      + `<div class="cost"><b>2,458 files, 3.12 GiB</b><span class="k">449 GiB free</span><span class="link">11,542 not selected ${I.caret.replace('width="12"','width="10"')}</span></div>`, foot());
+      + `<div class="cost"><b>2,456 files, 1.14 GiB</b><span class="k">449 GiB free</span><span class="link">11,544 not selected ${I.caret.replace('width="12"','width="10"')}</span></div>`, foot());
   },
 };
 document.getElementById('win').innerHTML = STATES[state]();

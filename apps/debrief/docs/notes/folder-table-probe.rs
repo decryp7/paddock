@@ -1,4 +1,4 @@
-// Scratch probe for ADR 0066: engine-side tree table operations at 14,000 files. Rust std only. Usage: table_probe DIR
+// Scratch probe for ADR 0067: engine-side tree table operations at 14,000 files. Rust std only. Usage: table_probe DIR
 use std::path::Path;
 use std::time::Instant;
 #[derive(Clone)]

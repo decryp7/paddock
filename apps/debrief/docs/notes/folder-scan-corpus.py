@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Invented corpus for the folder scan measurement of ADR 0066: 14,000 files and about 7.6 GiB in the mix of a large
+"""Invented corpus for the folder scan measurement of ADR 0067: 14,000 files and about 7.6 GiB in the mix of a large
 diagnostic bundle. Every name and byte is made up. Files above 1.2 MiB have 1.2 MiB of real content and are sparse beyond it:
 the scan never reads further. Usage: folder-scan-corpus.py OUT [seed]"""
 import os, random, sys, zipfile

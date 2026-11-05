@@ -1,4 +1,4 @@
-//! Scratch probe for ADR 0066: what a head-only scan of a folder costs, using the import's own detection code.
+//! Scratch probe for ADR 0067: what a head-only scan of a folder costs, using the import's own detection code.
 //! Usage: folder_scan_probe DIR THREADS [HEAD_BYTES]
 use debrief_core::importers::{ImportCtx, Importers};
 use debrief_core::ingest::{plan_with, score_text_with, EncodingRequest};
