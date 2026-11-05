@@ -1,9 +1,9 @@
-// Placeholder icons for the planned family members (tools/placeholder-art.mjs): Recce (an app). The real
-// icon comes later (the user, 2026-11-04), so this builds one option, the masters and the 128 and 60 frames only:
+// Placeholder icons for the planned family members (tools/placeholder-art.mjs): Recce (an app) and Scrutineer (a tool). The real
+// icons come later (the user, 2026-11-04), so this builds one option each, the masters and the 128 and 60 frames only:
 //   node tools/placeholder-icons.mjs
 // Writes icons/alternative/<id>-placeholder/<id>-placeholder-{macos,windows}.svg (and -1024.png), -128 and -60 (svg and png);
 // docs/images/src/icons/<id>-placeholder.svg (the 60 frame the app posters inline); and the sheet
-// icons/alternative/placeholder-family-sheet.png (the family row at 128 and 60 with the placeholder, light and dark).
+// icons/alternative/placeholder-family-sheet.png (the family row at 128 and 60 with both placeholders, light and dark).
 import { Resvg } from '@resvg/resvg-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -52,7 +52,7 @@ const row = [...order.map(a => ({ name: NAMES[a], s128: png(famMaster(a, { frame
   ...Object.keys(PLACEHOLDERS).map(id => ({ name: `${NAMES[id]} (placeholder)`, s128: png(out[id].s128, 128), s60: png(out[id].s60, 60) }))];
 const img = (buf, x, y, w) => `<image x="${x}" y="${y}" width="${w}" height="${w}" href="data:image/png;base64,${buf.toString('base64')}"/>`;
 const text = (x, y, s, fill, size = 14, weight = 400, anchor = 'middle') => `<text x="${x}" y="${y}" font-family="Helvetica" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${s}</text>`;
-const W = 24 + row.length * 168, bh = 260, parts = [`<rect width="${W}" height="${60 + 2 * bh}" fill="#FFFFFF"/>`, text(24, 38, 'The family row with the Recce placeholder icon: 128 and 60, light and dark', '#1C1C1E', 18, 600, 'start')];
+const W = 24 + row.length * 168, bh = 260, parts = [`<rect width="${W}" height="${60 + 2 * bh}" fill="#FFFFFF"/>`, text(24, 38, 'The family row with the Recce and Scrutineer placeholder icons: 128 and 60, light and dark', '#1C1C1E', 18, 600, 'start')];
 [['#F2F3F5', '#1C1C1E'], ['#1E1F22', '#F2F3F5']].forEach(([bg, ink], j) => {
   const y = 60 + j * bh;
   parts.push(`<rect x="0" y="${y}" width="${W}" height="${bh}" fill="${bg}"/>`);
