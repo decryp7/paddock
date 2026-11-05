@@ -73,6 +73,24 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
     job
 }
 
+/// The `program = <path>` line of the job's own block in `launchctl print` (for the log only: decisions use the record's
+/// registered program, because `BundleProgram` jobs may print a relative `program identifier` instead).
+pub fn print_program(launchctl_print: &str) -> Option<String> {
+    let mut depth = 0usize;
+    for line in launchctl_print.lines().map(str::trim) {
+        if line == "}" {
+            depth = depth.saturating_sub(1);
+        } else if line.ends_with('{') {
+            depth += 1;
+        } else if depth <= 1
+            && let Some(p) = line.strip_prefix("program = ")
+        {
+            return Some(p.trim().to_string());
+        }
+    }
+    None
+}
+
 impl JobReport {
     /// Whether launchd holds a registration it can no longer start. macOS keeps the launch constraint of the build that
     /// was registered; every ad-hoc signed build has another cdhash, so after an update launchd refuses the new binary

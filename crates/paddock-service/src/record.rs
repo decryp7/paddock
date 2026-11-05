@@ -258,6 +258,20 @@ impl RecordFile {
         self.store(&r)
     }
 
+    /// Writes `state` and, when `program` is known, the program this copy is about to register (ADR 0056 section 8: written
+    /// with `RemovingOld`, so the next copy to look knows whose registration it sees).
+    ///
+    /// # Errors
+    /// [`ServiceError::Failed`] when it could not be saved.
+    pub fn set_state_and_program(&self, state: State, program: Option<&str>) -> Result<(), ServiceError> {
+        let mut r = self.load();
+        r.state = state;
+        if let Some(p) = program {
+            r.registered_program = Some(p.to_string());
+        }
+        self.store(&r)
+    }
+
     /// Forgets the registration (after an uninstall): nothing is registered, nothing is in progress.
     pub fn forget(&self) -> Result<(), ServiceError> {
         let mut r = self.load();
