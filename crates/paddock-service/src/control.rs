@@ -7,6 +7,7 @@
 
 use crate::error::ServiceError;
 use crate::manager::{Manager, Started};
+use crate::plan::Hold;
 use crate::repair::RepairOutcome;
 use crate::status::{Condition, ServiceStatus};
 use paddock_health::{Cause, Health};
@@ -217,8 +218,20 @@ impl ServiceControl {
     }
 
     /// Runs `what` now (blocking, bounded; see [`Manager::repair`]) and publishes the result.
+    ///
+    /// It never queues behind a start that is waiting for the service (that holds the manager for minutes): it is
+    /// refused at once with [`ServiceError::Busy`], whose words say a repair or registration is running.
     pub fn run(&self, what: Request) -> Result<RepairOutcome, ServiceError> {
-        let mut m = lock(&self.manager);
+        let mut m = match self.manager.try_lock() {
+            Ok(m) => m,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                log::info!(
+                    "a {what:?} was refused: another registration or repair holds the service"
+                );
+                return Err(ServiceError::Busy);
+            }
+        };
         let result = match what {
             Request::Repair => m.repair(&self.cancel),
             Request::Install => m.install(&self.cancel),
@@ -291,11 +304,13 @@ impl ServiceControl {
     /// The health registry's repair (on its repair thread): the user's switch opens Login Items (the switch stays theirs),
     /// anything else is a repair.
     pub fn health_repair(&self) -> Result<(), Cause> {
-        let condition = lock(&self.manager).status().condition;
+        let Some(look) = self.status() else {
+            return Err(Cause::new(ServiceError::Busy.to_string()).code("service.busy"));
+        };
+        let condition = look.condition;
         if matches!(condition, Condition::SwitchedOff | Condition::NeedsApproval) {
-            let opened = lock(&self.manager).open_login_items();
-            let status = lock(&self.manager).status();
-            self.publish(&status, None);
+            let opened = self.open_login_items().unwrap_or(false);
+            self.status();
             return Err(Cause::new(if opened {
                 "Switch the app's background item on in Login Items; it shows as running once you do."
             } else {
@@ -303,9 +318,14 @@ impl ServiceControl {
             })
             .code("service.switchOn"));
         }
-        self.run(Request::Repair)
-            .map(drop)
-            .map_err(|e| Cause::new(e.to_string()).code("service.repairFailed"))
+        self.run(Request::Repair).map(drop).map_err(|e| {
+            let code = if matches!(e, ServiceError::Busy) {
+                "service.busy"
+            } else {
+                "service.repairFailed"
+            };
+            Cause::new(e.to_string()).code(code)
+        })
     }
 
     /// Rule 24 at start: [`Manager::on_start`], published.
@@ -326,6 +346,13 @@ impl ServiceControl {
                     retryable: true,
                 })
             }
+            Started::Left(Hold::RecordUnavailable(why)) => Some(ServiceCommandError {
+                code: ServiceErrorCode::Failed,
+                message: format!(
+                    "The app changed nothing on its own because it cannot save the service's state: {why} Fix that, then press Repair."
+                ),
+                retryable: true,
+            }),
             _ => None,
         };
         self.publish(&status, error);
