@@ -43,6 +43,9 @@ pub enum IpcError {
     Protocol(String),
     /// The process answered with an error (not a failure of the process).
     Remote(RemoteError),
+    /// The host stopped the process because it used more memory than its cap (`limit` and `used`, in bytes). It
+    /// is not a crash of the process: the work was too big for the cap, so it must not count toward a quarantine.
+    OverMemoryCap { limit: u64, used: u64 },
     /// The process needs rights the user did not give (an administrator prompt was declined, or elevation is
     /// not possible here). Not a failure of the process.
     Denied(String),
@@ -52,6 +55,12 @@ impl IpcError {
     /// Whether the process itself failed (crash, hang, garbage), so it must be restarted.
     pub fn is_process_failure(&self) -> bool {
         !matches!(self, IpcError::Remote(_) | IpcError::Denied(_))
+    }
+
+    /// Whether the failure counts toward a quarantine: a process failure that is the process' own fault. A stop at
+    /// the memory cap restarts the process (it was killed) but says nothing about its health.
+    pub fn counts_as_crash(&self) -> bool {
+        self.is_process_failure() && !matches!(self, IpcError::OverMemoryCap { .. })
     }
 }
 
@@ -63,6 +72,12 @@ impl std::fmt::Display for IpcError {
             IpcError::Timeout => write!(f, "it stopped responding"),
             IpcError::Protocol(m) => write!(f, "it sent an invalid response ({m})"),
             IpcError::Remote(r) => write!(f, "{}", r.message),
+            IpcError::OverMemoryCap { limit, used } => write!(
+                f,
+                "it was stopped at its memory cap of {} MB (it had used {} MB)",
+                limit.div_ceil(1 << 20),
+                used >> 20
+            ),
             IpcError::Denied(m) => write!(f, "{m}"),
         }
     }
@@ -91,6 +106,13 @@ mod tests {
     fn errors_describe_themselves() {
         assert_eq!(IpcError::Spawn("cannot".into()).to_string(), "cannot");
         assert_eq!(IpcError::Died("x".into()).to_string(), "it crashed (x)");
+        let cap = IpcError::OverMemoryCap {
+            limit: 128 << 20,
+            used: 130 << 20,
+        };
+        assert_eq!(cap.to_string(), "it was stopped at its memory cap of 128 MB (it had used 130 MB)");
+        assert!(cap.is_process_failure() && !cap.counts_as_crash());
+        assert!(IpcError::Died("x".into()).counts_as_crash() && IpcError::Timeout.counts_as_crash());
         assert_eq!(IpcError::Timeout.to_string(), "it stopped responding");
         assert_eq!(IpcError::Protocol("p".into()).to_string(), "it sent an invalid response (p)");
         assert_eq!(IpcError::Remote(RemoteError::new(1, "r")).to_string(), "r");

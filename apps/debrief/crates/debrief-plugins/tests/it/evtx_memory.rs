@@ -178,7 +178,6 @@ fn a_256_mb_event_log_imports_within_the_default_plugin_cap() {
 }
 
 #[test]
-#[ignore = "fails today: a stop at the memory cap reaches the import as \"crashed: ... closed the connection\""]
 fn a_plugin_stopped_at_its_cap_says_so_instead_of_crashed() {
     // 16 MB of events need about 210 MB in the plugin today; a 128 MB cap stops it.
     let dir = temp("cap-text");
@@ -187,7 +186,12 @@ fn a_plugin_stopped_at_its_cap_says_so_instead_of_crashed() {
     assert!(stopped.is_some(), "the watcher stopped the plugin at its cap");
     let error = outcome.expect_err("the import failed");
     assert!(error.contains("memory cap of 128 MB"), "the import's error names the cap: {error}");
-    assert!(!error.contains("crashed"), "a stop at the cap is not a crash: {error}");
+    // The error text is a debug dump that holds the field `crashed: false`; the words of the reason must not say it.
+    assert!(
+        !error.replace("crashed: false", "").contains("crashed"),
+        "a stop at the cap is not a crash: {error}"
+    );
+    assert!(error.contains("Plugin memory cap"), "the reason says what to do next: {error}");
 }
 
 /// Resident memory of `pid` in bytes, from `ps` (measurement only).

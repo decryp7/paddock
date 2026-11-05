@@ -65,6 +65,40 @@ impl Crashed {
     }
 }
 
+/// A plugin process the host stopped because it used more memory than its cap. Not a crash: it does not count toward the
+/// quarantine ([`Health::fail`] is not called), because the next, smaller file should still import.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "{what} was stopped at its memory cap of {cap_mb} MB{reading}; this is not a crash and does not count against the plugin. {next_step}"
+)]
+pub struct CapStopped {
+    /// What was stopped: `plugin "x" (import)`.
+    pub what: String,
+    pub cap_mb: u64,
+    /// " while reading \"name\" (12.3 MB)", or empty when no file is known.
+    pub reading: String,
+    /// What the user can do next.
+    pub next_step: String,
+}
+
+impl CapStopped {
+    pub fn new(what: impl Into<String>, cap_mb: u64, file: Option<(&str, u64)>, next_step: impl Into<String>) -> CapStopped {
+        CapStopped {
+            what: what.into(),
+            cap_mb,
+            reading: file.map_or(String::new(), |(name, size)| {
+                format!(" while reading \"{name}\" ({:.1} MB)", size as f64 / 1048576.0)
+            }),
+            next_step: next_step.into(),
+        }
+    }
+
+    /// Whether an error (or one it was caused by) is a stop at the memory cap.
+    pub fn is_in(e: &anyhow::Error) -> bool {
+        e.chain().any(|c| c.is::<CapStopped>())
+    }
+}
+
 /// Runs `f`, turning a panic into an error ([`Crashed`]: "{what} crashed: ...").
 pub fn catch<T>(what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
     match catch_unwind(AssertUnwindSafe(f)) {
@@ -573,12 +607,22 @@ pub struct GuardedImporter {
     pub guard: Guard,
 }
 
+impl Guard {
+    /// Why this plugin's importers cannot be asked now (quarantined, not responding, inactive), if they cannot.
+    pub fn unavailable(&self) -> Option<String> {
+        self.health.availability(&self.owner).err()
+    }
+}
+
 impl Importer for GuardedImporter {
     fn id(&self) -> &str {
         self.inner.id()
     }
     fn sniff(&self, ctx: &ImportCtx, head: &str) -> u8 {
         self.guard.quiet(CallKind::Sniff, "sniff", 0, || self.inner.sniff(ctx, head))
+    }
+    fn unavailable(&self) -> Option<String> {
+        self.guard.unavailable()
     }
     /// Runs on a helper thread (abandoned past the import budget) when there
     /// is a budget; on this thread otherwise.
@@ -632,6 +676,9 @@ impl BinaryImporter for GuardedBinaryImporter {
     }
     fn sniff(&self, ctx: &ImportCtx, head: &[u8]) -> u8 {
         self.guard.quiet(CallKind::Sniff, "sniff", 0, || self.inner.sniff(ctx, head))
+    }
+    fn unavailable(&self) -> Option<String> {
+        self.guard.unavailable()
     }
     fn import(&self, ctx: &ImportCtx, bytes: &[u8]) -> Result<Imported> {
         if self.guard.health.admit(&self.guard.owner, CallKind::Import)?.is_none() {

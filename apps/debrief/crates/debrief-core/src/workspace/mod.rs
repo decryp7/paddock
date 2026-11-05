@@ -1236,8 +1236,8 @@ fn import_bytes(importers: &Importers, parsers: &crate::parser::ParserSet, file:
     };
     let choice = match parsers.choose(&candidate, importers) {
         Ok(c) => c,
-        Err(_) if score_text.is_none() => return Err("binary file".into()),
-        Err(reason) => return Err(reason),
+        Err(_) if score_text.is_none() => return Err(importers.refusal("binary file")),
+        Err(reason) => return Err(importers.refusal(&reason)),
     };
     let profile: &CompiledProfile = choice.profile;
     let ctx = ImportCtx { profile, path, file_date };
@@ -1255,9 +1255,9 @@ fn import_bytes(importers: &Importers, parsers: &crate::parser::ParserSet, file:
             )
         }
         None => {
-            let content = decode(bytes).ok_or("binary file")?;
+            let content = decode(bytes).ok_or_else(|| importers.refusal("binary file"))?;
             let head: String = content.chars().take(64 * 1024).collect();
-            let importer = importers.select(&ctx, &head).ok_or("no importer recognises this format")?;
+            let importer = importers.select(&ctx, &head).ok_or_else(|| importers.refusal("no importer recognises this format"))?;
             identity = importer.identity_fields();
             let imported = importer.import(&ctx, &content).map_err(|e| format!("{e:#}"))?;
             // Probe: an importer that cannot append is tailed by re-reading the file.

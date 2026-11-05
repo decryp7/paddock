@@ -10,7 +10,7 @@ use debrief_core::plugin::PluginStatus;
 use debrief_core::{PluginRegistry, Profile, Workspace};
 use debrief_ipc::IpcError;
 use debrief_plugin_api::protocol::PluginRequest;
-use debrief_plugin_host::Builtins;
+use debrief_plugin_host::{Builtins, PluginLimits};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -115,6 +115,89 @@ fn crashes_and_panics_count_against_the_plugin_and_restart_its_process() {
     let _ = ws.open(&[file(dir.path(), "crash2.log", "crash")]);
     let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
     assert_eq!(info.status, PluginStatus::Quarantined, "{info:?}");
+}
+
+/// The reasons of the files an import refused, by file name.
+fn refused(ws: &Workspace) -> Vec<(String, String)> {
+    let file_name = |n: String| Path::new(&n).file_name().map_or(n.clone(), |f| f.to_string_lossy().into_owned());
+    ws.summary()
+        .unrecognized
+        .into_iter()
+        .map(|u| (file_name(u.name), u.reason))
+        .collect()
+}
+
+#[test]
+fn a_stop_at_the_memory_cap_is_its_own_outcome_and_never_quarantines() {
+    let b = builtins();
+    b.set_limits(&PluginLimits {
+        default_memory: Some(64 << 20),
+        ..PluginLimits::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = workspace(&b);
+    // Five over-cap files in a row: more than the crash quarantine allows.
+    let big: Vec<PathBuf> = (0..5).map(|i| file(dir.path(), &format!("big{i}.log"), "alloc 300")).collect();
+    let _ = ws.open(&big);
+    let reasons = refused(&ws);
+    assert_eq!(reasons.len(), 5, "{reasons:?}");
+    for (name, reason) in &reasons {
+        assert!(reason.contains("memory cap of 64 MB"), "{name}: names the cap: {reason}");
+        assert!(reason.contains(name.as_str()), "{name}: names the file: {reason}");
+        assert!(reason.contains("Plugin memory cap"), "{name}: says what to do: {reason}");
+        assert!(!reason.contains("crashed"), "{name}: a cap stop is not a crash: {reason}");
+        assert!(!reasons.iter().any(|(_, r)| r.contains("binary file")), "{reason}");
+    }
+    let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
+    assert_eq!((info.failures, info.status), (0, PluginStatus::Active), "{info:?}");
+    // The next, smaller file still imports.
+    let small = ws.open(&[file(dir.path(), "small.log", "hello")]);
+    let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
+    small.unwrap_or_else(|e| panic!("{e}; plugin {info:?}; status {:?}", b.process(ID).unwrap().status()));
+    assert_eq!(ws.records().len(), 1);
+    // Real crashes still count and quarantine: the cap stops before them left no mark.
+    for i in 0..3 {
+        let _ = ws.open(&[file(dir.path(), &format!("crash{i}.log"), "crash")]);
+    }
+    let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
+    assert_eq!(info.status, PluginStatus::Quarantined, "{info:?}");
+    // A file refused now says why: the plugin is quarantined.
+    let _ = ws.open(&[file(dir.path(), "after.log", "hello")]);
+    let after = refused(&ws).into_iter().find(|(n, _)| n == "after.log").expect("refused").1;
+    assert!(after.contains("disabled after repeated crashes") && after.contains(ID), "{after}");
+    assert!(!after.contains("binary file"), "{after}");
+}
+
+#[test]
+fn a_file_the_cap_stopped_is_not_tried_again_until_the_cap_changes() {
+    let b = builtins();
+    let limits = |mb: u64| PluginLimits {
+        default_memory: Some(mb << 20),
+        ..PluginLimits::default()
+    };
+    b.set_limits(&limits(64));
+    let dir = tempfile::tempdir().unwrap();
+    let big = file(dir.path(), "big.log", "alloc 300");
+    // A new workspace per import: one workspace never reads a refused file twice.
+    let _ = workspace(&b).open(std::slice::from_ref(&big));
+    let first = pid(workspace(&b).registry());
+    let started = Instant::now();
+    let mut ws = workspace(&b);
+    let _ = ws.open(std::slice::from_ref(&big));
+    let again = started.elapsed();
+    assert!(refused(&ws)[0].1.contains("memory cap of 64 MB"), "{:?}", refused(&ws));
+    assert_eq!(
+        pid(ws.registry()),
+        first,
+        "the plugin was not started again for the same file and cap"
+    );
+    assert!(again < Duration::from_secs(2), "refused without running the plugin: {again:?}");
+    // A raised cap is a new question: the file is tried again (and stopped at the new cap).
+    b.set_limits(&limits(96));
+    b.process(ID).unwrap().shutdown();
+    let mut ws = workspace(&b);
+    let _ = ws.open(&[big]);
+    assert!(refused(&ws)[0].1.contains("memory cap of 96 MB"), "{:?}", refused(&ws));
 }
 
 #[test]

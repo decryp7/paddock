@@ -11,7 +11,7 @@
 use crate::process::{Lent, PluginProcess};
 use anyhow::{anyhow, Result};
 use debrief_core::config::{ConfigError, ConfigParser, ConfigTree, Limits, PARSERS_POINT};
-use debrief_core::guard::{CallKind, Health};
+use debrief_core::guard::{CallKind, CapStopped, Health};
 use debrief_core::importers::{BinaryImporter, ImportCtx, Imported, Importer};
 use debrief_core::model::Record;
 use debrief_core::plugin::annotate::{Annotation, AnnotationView, Annotator, RecordCursor};
@@ -72,7 +72,46 @@ impl Ctx {
 
     /// Turns a failed call into the plugin's error; process failures and panics count against the plugin.
     fn fail(&self, what: &str, timeout: Option<Duration>, e: IpcError) -> anyhow::Error {
+        self.fail_reading(what, timeout, e, None)
+    }
+
+    /// The error of a stop at the memory cap: a typed [`CapStopped`] naming the cap, the file and the next step.
+    fn cap_stopped(&self, what: &str, cap: u64, subject: Option<&Subject<'_>>) -> anyhow::Error {
+        let cap_mb = cap.div_ceil(1 << 20);
+        let max_mb = debrief_plugin_api::manifest::MAX_MEMORY_LIMIT >> 20;
+        let next_step = if cap_mb >= max_mb {
+            format!("The cap is already at its maximum of {max_mb} MB, so this file is too large for this plugin.")
+        } else {
+            format!("Next step: raise Settings \u{25b8} Performance \u{25b8} Plugin memory cap (now {cap_mb} MB, up to {max_mb} MB) and import it again, or import a smaller file.")
+        };
+        let file = subject.map(|s| (s.name, s.size));
+        anyhow::Error::new(CapStopped::new(
+            format!("plugin \"{}\" ({what})", self.id()),
+            cap_mb,
+            file,
+            next_step,
+        ))
+    }
+
+    /// [`Ctx::fail`] for a call that reads `subject`, which a stop at the memory cap names.
+    fn fail_reading(&self, what: &str, timeout: Option<Duration>, e: IpcError, subject: Option<&Subject<'_>>) -> anyhow::Error {
         let id = self.id();
+        if let IpcError::OverMemoryCap { limit, used } = &e {
+            // Not a failure of the plugin: no health count (so no quarantine), but the logs show it with the numbers
+            // and a repeat of the same file under the same cap is refused without running the plugin.
+            if let Some(s) = subject {
+                self.process.remember_cap_stop(s.path, s.size, *limit);
+            }
+            log::warn!(
+                target: "debrief_plugin_host::remote", Plugin = id, Call = what, CapMb = limit >> 20, UsedMb = used >> 20,
+                FileBytes = subject.map_or(0, |s| s.size);
+                "Plugin {id} ({what}) was stopped at its memory cap of {} MB (used {} MB); not counted as a crash",
+                limit >> 20, used >> 20
+            );
+            let error = self.cap_stopped(what, *limit, subject);
+            self.health.note(id, &format!("{error:#}"));
+            return error;
+        }
         match e {
             IpcError::Remote(r) if r.code != code::PANIC => anyhow!("plugin \"{id}\" ({what}): {}", r.message),
             IpcError::Denied(m) => anyhow::Error::new(ToolFailure::denied(m)),
@@ -141,14 +180,28 @@ impl Ctx {
         }
     }
 
-    /// Runs an import-like call lending `files`; collects the streamed events.
+    /// Refuses a file this plugin was already stopped over at its current memory cap, without running the plugin: the
+    /// same bytes would use the same memory again. A different file, or a raised cap, is tried.
+    fn refuse_known_cap_stop(&self, what: &str, subject: &Subject<'_>) -> Result<()> {
+        let cap = self.process.memory_cap();
+        if self.process.cap_stopped_before(subject.path, subject.size, cap) {
+            return Err(self.cap_stopped(what, cap, Some(subject)));
+        }
+        Ok(())
+    }
+
+    /// Runs an import-like call lending `files`; collects the streamed events. `subject` is the file being read.
     fn import_call<Rep: serde::de::DeserializeOwned>(
         &self,
         what: &str,
         kind: CallKind,
+        subject: Option<&Subject<'_>>,
         files: Vec<&[u8]>,
         make: impl FnOnce(&[HostFileRef]) -> PluginRequest,
     ) -> Result<(Rep, Vec<Record>)> {
+        if let Some(s) = subject {
+            self.refuse_known_cap_stop(what, s)?;
+        }
         let timeout = self.deadline(kind);
         let mut records = Vec::new();
         let lent = Lent { files, ..Lent::default() };
@@ -164,9 +217,26 @@ impl Ctx {
                     Ok(())
                 },
             )
-            .map_err(|e| self.fail(what, timeout, e));
+            .map_err(|e| self.fail_reading(what, timeout, e, subject));
         self.note_sandbox();
         Ok((rep?, records))
+    }
+}
+
+/// The file an import call reads: what a stop at the memory cap names.
+struct Subject<'a> {
+    path: &'a std::path::Path,
+    name: &'a str,
+    size: u64,
+}
+
+impl<'a> Subject<'a> {
+    fn of(ctx: &'a ImportCtx, name: &'a str, size: usize) -> Subject<'a> {
+        Subject {
+            path: ctx.path,
+            name,
+            size: size as u64,
+        }
     }
 }
 
@@ -192,12 +262,16 @@ impl Importer for RemoteImporter {
     fn import(&self, ctx: &ImportCtx, content: &str) -> Result<Imported> {
         let file = self.ctx.file_info(ctx);
         let importer = self.cap.id.clone();
+        let name = file.name.clone();
+        let subject = Subject::of(ctx, &name, content.len());
         let (done, records): (ImportDone, _) =
             self.ctx
-                .import_call("import", CallKind::Import, vec![content.as_bytes()], |refs| PluginRequest::Import {
-                    importer,
-                    file,
-                    content: refs[0],
+                .import_call("import", CallKind::Import, Some(&subject), vec![content.as_bytes()], |refs| {
+                    PluginRequest::Import {
+                        importer,
+                        file,
+                        content: refs[0],
+                    }
                 })?;
         Ok(Imported {
             records,
@@ -212,16 +286,18 @@ impl Importer for RemoteImporter {
         }
         let file = self.ctx.file_info(ctx);
         let importer = self.cap.id.clone();
-        let r: Result<(TailDone, Vec<Record>)> =
-            self.ctx
-                .import_call("import_tail", CallKind::Tail, vec![head.as_bytes(), tail.as_bytes()], |refs| {
-                    PluginRequest::ImportTail {
-                        importer,
-                        file,
-                        head: refs[0],
-                        tail: refs[1],
-                    }
-                });
+        let r: Result<(TailDone, Vec<Record>)> = self.ctx.import_call(
+            "import_tail",
+            CallKind::Tail,
+            None,
+            vec![head.as_bytes(), tail.as_bytes()],
+            |refs| PluginRequest::ImportTail {
+                importer,
+                file,
+                head: refs[0],
+                tail: refs[1],
+            },
+        );
         match r {
             Ok((done, _)) if !done.supported => None,
             Ok((done, records)) => Some(Ok(Imported {
@@ -268,13 +344,17 @@ impl BinaryImporter for RemoteBinaryImporter {
     fn import(&self, ctx: &ImportCtx, bytes: &[u8]) -> Result<Imported> {
         let file = self.ctx.file_info(ctx);
         let importer = self.cap.id.clone();
-        let (done, records): (ImportDone, _) =
-            self.ctx
-                .import_call("import", CallKind::Import, vec![bytes], |refs| PluginRequest::Import {
+        let name = file.name.clone();
+        let subject = Subject::of(ctx, &name, bytes.len());
+        let (done, records): (ImportDone, _) = self
+            .ctx
+            .import_call("import", CallKind::Import, Some(&subject), vec![bytes], |refs| {
+                PluginRequest::Import {
                     importer,
                     file,
                     content: refs[0],
-                })?;
+                }
+            })?;
         Ok(Imported {
             records,
             skipped: done.skipped as usize,

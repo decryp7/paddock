@@ -158,10 +158,10 @@ pub fn plan_with(importers: &Importers, ctx: &ImportCtx, head: &[u8], whole: boo
     let (encoding, data_start) = (detected.encoding, detected.bom_len);
     let text = decode_head(head, encoding, data_start as usize, whole);
     if looks_binary(&text) {
-        return Err("binary file".into());
+        return Err(importers.refusal("binary file"));
     }
     let select: String = text.chars().take(SELECT_CHARS).collect();
-    let importer = importers.select(ctx, &select).ok_or("no importer recognises this format")?;
+    let importer = importers.select(ctx, &select).ok_or_else(|| importers.refusal("no importer recognises this format"))?;
     let kind = match importer.id() {
         "text" => {
             let format = lines::best_format(ctx.profile, &text).ok_or("no output template or regex in the profile matches this file")?;
@@ -386,5 +386,52 @@ mod tests {
             starts,
             [ChunkStart { byte_offset: 0, line: 1 }, ChunkStart { byte_offset: 5, line: 2 }]
         );
+    }
+
+    /// A binary file that only a quarantined plugin could have read is refused with that reason, not "binary file".
+    #[test]
+    fn a_file_refused_while_its_plugin_is_quarantined_says_so() {
+        use crate::guard::{Guard, GuardedBinaryImporter, Health, QUARANTINE_AFTER};
+        use crate::importers::{BinaryImporter, Imported};
+        use std::sync::Arc;
+        struct Evtx;
+        impl BinaryImporter for Evtx {
+            fn id(&self) -> &str {
+                "evtx"
+            }
+            fn sniff(&self, _: &ImportCtx, head: &[u8]) -> u8 {
+                if head.starts_with(b"ElfFile\0") {
+                    100
+                } else {
+                    0
+                }
+            }
+            fn import(&self, _: &ImportCtx, _: &[u8]) -> anyhow::Result<Imported> {
+                Ok(Imported::default())
+            }
+        }
+        let health = Arc::new(Health::default());
+        let mut importers = Importers::default();
+        importers.register_binary(Box::new(GuardedBinaryImporter {
+            inner: Arc::new(Evtx),
+            guard: Guard::new("win", health.clone()),
+        }));
+        let p = compiled("");
+        let ctx = ImportCtx {
+            profile: &p,
+            path: Path::new("a.evtx"),
+            file_date: None,
+        };
+        let head = b"ElfFile\0\x01\x02\x03\x04\x05\x06\x07\0\0";
+        assert_eq!(plan(&importers, &ctx, head, true).unwrap().importer, "evtx");
+        for _ in 0..QUARANTINE_AFTER {
+            health.fail("win", "crashed");
+        }
+        let reason = plan(&importers, &ctx, head, true).unwrap_err();
+        assert!(
+            reason.contains("win") && reason.contains("disabled after repeated crashes"),
+            "{reason}"
+        );
+        assert!(!reason.contains("binary file"), "{reason}");
     }
 }

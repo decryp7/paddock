@@ -114,6 +114,23 @@ impl Child {
         }
     }
 
+    /// `(cap, peak)` in bytes when the host stopped the child over its memory cap (see [`ChildProcess::memory_stop`]).
+    pub fn memory_stop(&self) -> Option<(u64, u64)> {
+        match &self.process {
+            Process::Spawned(p) => p.memory_stop(),
+            Process::Elevated(_) => None,
+        }
+    }
+
+    /// Turns the failure of a call into [`IpcError::OverMemoryCap`] when the host stopped the child over its memory
+    /// cap (the broken connection is then the stop, not a crash); any other error passes through.
+    pub fn explain(&self, e: IpcError) -> IpcError {
+        match (&e, self.memory_stop()) {
+            (IpcError::Died(_), Some((limit, used))) => IpcError::OverMemoryCap { limit, used },
+            _ => e,
+        }
+    }
+
     /// How the child ended (for messages after a broken call).
     pub fn exit_text(&self) -> String {
         match &self.process {

@@ -1,7 +1,7 @@
 //! A fake plugin for the host's supervision tests (never bundled): its importer misbehaves on demand.
 //!
 //! The text importer `fake` reads the file's first line: `crash` exits at once, `hang` never answers, `panic`
-//! panics, `many <n>` returns n records, anything else one record per line. The tool `fake.tool` has `settings`
+//! panics, `alloc <mb>` holds that many MB (touched) until the host stops it, `many <n>` returns n records, anything else one record per line. The tool `fake.tool` has `settings`
 //! (the last applied value of `level`), `echo` (its arguments) and `pid` (its process id). The annotator
 //! `fake.notes` marks the time range of the records it selects through the host's view.
 
@@ -48,6 +48,16 @@ impl TextImporter for Fake {
             },
             "panic" => panic!("the fake importer panicked"),
             "fail" => bail!("a typed failure"),
+            l if l.starts_with("alloc ") => {
+                let mb: usize = l[6..].parse().unwrap_or(0);
+                let mut held = vec![0u8; mb << 20];
+                // Touch every page so the memory counts as used, then wait for the host's watcher to stop the process.
+                for i in (0..held.len()).step_by(4096) {
+                    held[i] = 1;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                bail!("not stopped at the cap ({} bytes held)", held.len())
+            }
             l if l.starts_with("many ") => {
                 let n: usize = l[5..].parse().unwrap_or(0);
                 Ok(Imported {

@@ -158,6 +158,9 @@ impl PluginLimits {
     }
 }
 
+/// Most remembered cap stops per plugin; past it the memory is dropped (the files are then tried once more).
+const MAX_CAP_STOPS: usize = 4096;
+
 /// Runs one of the plugin's elevated operations for its normal process.
 type ElevatedRunner = Box<dyn Fn(&str, &str, Json, Duration) -> Result<Json, ToolFail> + Send + Sync>;
 
@@ -406,6 +409,9 @@ pub struct PluginProcess {
     reported: Arc<Mutex<Vec<debrief_ipc::sandbox::Note>>>,
     /// Settings ▸ Performance's limits, read at every start.
     limits: Arc<Mutex<PluginLimits>>,
+    /// Files the host stopped this plugin over (path, size, cap in bytes): the same file under the same cap would
+    /// use the same memory again, so it is refused without starting the process. A raised cap is a new key.
+    cap_stops: Mutex<std::collections::HashSet<(std::path::PathBuf, u64, u64)>>,
 }
 
 impl PluginProcess {
@@ -474,6 +480,7 @@ impl PluginProcess {
             settings,
             reported,
             limits,
+            cap_stops: Mutex::default(),
         })
     }
 
@@ -485,6 +492,20 @@ impl PluginProcess {
     /// How long a start of its process may take to connect.
     pub fn connect_window(&self) -> Duration {
         self.spec.connect_window
+    }
+
+    /// Whether this file (same path and size) was already stopped at `cap` bytes.
+    pub(crate) fn cap_stopped_before(&self, path: &std::path::Path, size: u64, cap: u64) -> bool {
+        lock(&self.cap_stops).contains(&(path.to_path_buf(), size, cap))
+    }
+
+    /// Remembers that this file was stopped at `cap` bytes (see [`PluginProcess::cap_stopped_before`]).
+    pub(crate) fn remember_cap_stop(&self, path: &std::path::Path, size: u64, cap: u64) {
+        let mut stops = lock(&self.cap_stops);
+        if stops.len() >= MAX_CAP_STOPS {
+            stops.clear();
+        }
+        stops.insert((path.to_path_buf(), size, cap));
     }
 
     /// The memory cap its process gets at its next start (bytes).
@@ -637,7 +658,7 @@ impl PluginProcess {
         timeout: Option<Duration>,
         elevated: bool,
     ) -> Result<Rep, IpcError> {
-        let run = |sup: &Supervisor<Child>| sup.call(|c| c.peer().request(req, timeout));
+        let run = |sup: &Supervisor<Child>| sup.call(|c| c.peer().request(req, timeout).map_err(|e| c.explain(e)));
         if elevated {
             run(&self.elevated_sup())
         } else {
@@ -680,24 +701,27 @@ impl PluginProcess {
         let req = make(&files, ticket);
         let deadline = timeout.map(|t| std::time::Instant::now() + t);
         self.sup.call(|c| {
-            let mut stream = c.peer().stream_request(&req, CREDIT)?;
-            loop {
-                while let Ok(p) = rx.try_recv() {
-                    let _ = p.reply.send(serve_pumped(&p, lent, &file_ids));
-                }
-                if deadline.is_some_and(|d| std::time::Instant::now() > d) {
-                    // Overran its budget: a hang unless it ends the call at once.
-                    stream.cancel_and_wait()?;
-                    return Err(IpcError::Timeout);
-                }
-                match stream.next(Some(PUMP_POLL))? {
-                    StreamEvent::Idle => {}
-                    StreamEvent::Item(b) => on_item(b)?,
-                    StreamEvent::Done(b) => {
-                        return debrief_ipc::wire::decode(&b).map_err(|e| IpcError::Protocol(format!("{}: {e}", c.peer().label())));
+            (|| {
+                let mut stream = c.peer().stream_request(&req, CREDIT)?;
+                loop {
+                    while let Ok(p) = rx.try_recv() {
+                        let _ = p.reply.send(serve_pumped(&p, lent, &file_ids));
+                    }
+                    if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+                        // Overran its budget: a hang unless it ends the call at once.
+                        stream.cancel_and_wait()?;
+                        return Err(IpcError::Timeout);
+                    }
+                    match stream.next(Some(PUMP_POLL))? {
+                        StreamEvent::Idle => {}
+                        StreamEvent::Item(b) => on_item(b)?,
+                        StreamEvent::Done(b) => {
+                            return debrief_ipc::wire::decode(&b).map_err(|e| IpcError::Protocol(format!("{}: {e}", c.peer().label())));
+                        }
                     }
                 }
-            }
+            })()
+            .map_err(|e| c.explain(e))
         })
     }
 }

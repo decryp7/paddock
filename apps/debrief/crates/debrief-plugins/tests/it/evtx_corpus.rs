@@ -146,6 +146,10 @@ fn check(path: &Path) -> Option<String> {
     }
     let s = ws.summary();
     if !s.unrecognized.is_empty() {
+        // A stop at the memory cap is no crash and no failure of the plugin: it is the file's reason.
+        if s.unrecognized.iter().any(|u| u.reason.contains("memory cap")) {
+            return Some("plugin stopped at its memory cap".into());
+        }
         return Some("not imported".into());
     }
     let Some(src) = s.sources.first() else {

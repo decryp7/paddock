@@ -525,6 +525,12 @@ impl ChildProcess {
         lock(&self.child).as_mut().is_none_or(|c| matches!(c.try_wait(), Ok(Some(_))))
     }
 
+    /// The memory cap the host stopped the child over, in bytes, and the most memory the watcher saw it use; `None`
+    /// when the child was not stopped for its memory.
+    pub fn memory_stop(&self) -> Option<(u64, u64)> {
+        (*lock(&self.over_memory)).map(|limit| (limit, self.memory_peak()))
+    }
+
     /// Describes how the child ended, waiting briefly for the OS to publish its exit status.
     pub fn exit_text(&self) -> String {
         if let Some(limit) = *lock(&self.over_memory) {

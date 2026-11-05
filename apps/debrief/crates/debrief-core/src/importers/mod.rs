@@ -44,6 +44,12 @@ pub trait Importer: Send + Sync {
 
     fn import(&self, ctx: &ImportCtx, content: &str) -> Result<Imported>;
 
+    /// Why this importer cannot be asked now (its plugin is quarantined, not responding or inactive); `None` when it
+    /// can. An unavailable importer scores every file 0, so a refusal says this instead of blaming the file.
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
+
     /// Live tail: parses `tail`, text appended to a file this importer already
     /// read, whose start is `head` (for headers, the detected format and date
     /// order). Line numbers are relative to `tail`. `None` means the importer
@@ -80,6 +86,11 @@ pub trait BinaryImporter: Send + Sync {
     fn sniff(&self, ctx: &ImportCtx, head: &[u8]) -> u8;
 
     fn import(&self, ctx: &ImportCtx, bytes: &[u8]) -> Result<Imported>;
+
+    /// As [`Importer::unavailable`].
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
 
     /// As [`Importer::identity_fields`]: fields that identify who wrote an event (e.g. EVTX `Computer`,
     /// `ProcessId`). The default is none; must not fail.
@@ -158,6 +169,26 @@ impl Importers {
             .filter(|(score, _)| *score > 0)
             .reduce(|best, c| if c.0 > best.0 { c } else { best })
             .map(|(_, i)| i.as_ref())
+    }
+
+    /// The reason shown for a file nothing could read: `base`, or, when an importer could not be asked at all (its
+    /// plugin is quarantined, not responding or inactive), why that one could not check the file. The file may be
+    /// perfectly readable, so `base` ("binary file") would blame it for the plugin's state.
+    pub fn refusal(&self, base: &str) -> String {
+        let unavailable = self
+            .binary
+            .iter()
+            .filter_map(|i| i.unavailable().map(|why| (i.id().to_string(), why)))
+            .chain(
+                self.list
+                    .iter()
+                    .filter_map(|i| i.unavailable().map(|why| (i.id().to_string(), why))),
+            )
+            .next();
+        match unavailable {
+            Some((id, why)) => format!("importer \"{id}\" could not check this file: {why}"),
+            None => base.to_string(),
+        }
     }
 
     /// Picks the importer for a file: the one forced by the parser's `[format] kind`, else

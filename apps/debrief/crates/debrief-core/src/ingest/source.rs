@@ -224,8 +224,8 @@ fn import_source<R: Read + Seek>(
     };
     let choice = match env.parsers.choose(&candidate, env.importers) {
         Ok(c) => c,
-        Err(_) if text.is_none() => return unrecognized(&src.path, &src.name, "binary file"),
-        Err(reason) => return unrecognized(&src.path, &src.name, reason),
+        Err(_) if text.is_none() => return unrecognized(&src.path, &src.name, env.importers.refusal("binary file")),
+        Err(reason) => return unrecognized(&src.path, &src.name, env.importers.refusal(&reason)),
     };
     drop(text);
     let ctx = ImportCtx {

@@ -295,7 +295,11 @@ impl<C: Connection> Supervisor<C> {
         if let Some((_, conn)) = dead {
             conn.kill();
             self.ledger.count_restart();
-            self.record(e);
+            // A stop at the memory cap is the work's size, not a failure of the child: it restarts on the next call
+            // without a mark against it.
+            if e.counts_as_crash() {
+                self.record(e);
+            }
         }
     }
 
@@ -485,6 +489,36 @@ mod tests {
         assert!(killed.load(Ordering::SeqCst));
         assert_eq!(sup.status().state, ChildState::Stopped);
         assert_eq!(sup.status().crashes_in_window, 2);
+    }
+
+    #[test]
+    fn a_stop_at_the_memory_cap_restarts_the_child_without_counting_toward_quarantine() {
+        let launches = Arc::new(AtomicU64::new(0));
+        let killed = Arc::new(AtomicBool::new(false));
+        let (l2, k2) = (launches.clone(), killed.clone());
+        let sup = Supervisor::new(cfg(), move || {
+            let n = l2.fetch_add(1, Ordering::SeqCst) as u32;
+            Ok(Fake {
+                pid: 100 + n,
+                killed: k2.clone(),
+            })
+        });
+        let cap = IpcError::OverMemoryCap {
+            limit: 64 << 20,
+            used: 70 << 20,
+        };
+        for _ in 0..10 {
+            assert_eq!(sup.call(|_| Err::<(), _>(cap.clone())).unwrap_err(), cap);
+            assert!(killed.swap(false, Ordering::SeqCst), "the child is killed and restarted");
+        }
+        let status = sup.status();
+        assert_eq!((status.crashes_in_window, status.state), (0, ChildState::Stopped), "{status:?}");
+        assert_eq!(sup.call(|c| Ok(c.pid())).unwrap(), Some(110));
+        // Real crashes still quarantine after three.
+        for _ in 0..3 {
+            let _ = sup.call(|_| Err::<(), _>(IpcError::Died("x".into())));
+        }
+        assert_eq!(sup.status().state, ChildState::Quarantined);
     }
 
     #[test]
