@@ -1234,3 +1234,14 @@ Full Disk Access for the runner does not help, because the denied process is not
 belongs to the responsible process, not the parent):** keep the work folder and caches on the external disk if wanted, but put
 each job's `TMPDIR` on the internal disk (`job-tmpdir.sh` now does so on macOS when `diskutil info -plist` says Internal=false),
 and a check that finds empty output from a launchd job prints `launchctl print` and the exit state before it guesses a cause.
+
+## A check that could not see the thing passed, and a wrong cause was called confirmed (2026-11-05, Dyno 1.1.0 VM checks)
+The tray diagnosis for Dyno 1.1.0 was confirmed in 12 of 12 runs and then retracted: the VM had no menu bar, so the probe
+could not have seen a tray icon either way, and a tray count had matched the app's own window buttons. The audit of the
+VM suites found the same shape elsewhere: the Windows autostart judge passed on the agent alone, Lifespan passed on
+"helper did not answer", a reading row passed on a dead helper, and `renderResult` printed PASS on zero steps. What exposed
+it was the user asking why iStat Menus, on the same Mac, did not have the problem: nobody had compared with a known-good
+peer. **Lesson (class: a check that cannot fail):** before calling a cause confirmed or a check green, verify the
+precondition (the menu bar exists, the helper runs, at least one step ran), give the probe a positive control (show it sees
+a thing known to be there), and compare with a known-good peer. Otherwise the result is `not measured` or `check broken`
+and the release does not pass (rule 71, ER-33).
