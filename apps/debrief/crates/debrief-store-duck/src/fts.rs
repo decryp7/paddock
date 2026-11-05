@@ -18,8 +18,8 @@
 //! - The commit payload names the catalog's `fts_epoch`; an index that is missing, damaged or from another
 //!   epoch is recreated and every segment indexed again.
 
-use crate::turns::{wait_after, Turn};
 use crate::segments::SEGMENTS_DIR;
+use crate::turns::{wait_after, Turn};
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
 use debrief_core::batch::EventId;
@@ -834,8 +834,12 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
             drop_writer(s);
         }
         // A turn that found nothing waits for a wake-up; a blocked or failed one tries again soon.
-        let wait = wait_after(if turn == Turn::Idle && s.pending.load(Ordering::SeqCst) != 0 { Turn::Blocked } else { turn })
-            .unwrap_or_default();
+        let wait = wait_after(if turn == Turn::Idle && s.pending.load(Ordering::SeqCst) != 0 {
+            Turn::Blocked
+        } else {
+            turn
+        })
+        .unwrap_or_default();
         let mut woken = crate::lock(&s.wake.0);
         if !*woken {
             woken = s.wake.1.wait_timeout(woken, wait).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0);

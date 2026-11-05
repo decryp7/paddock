@@ -220,7 +220,9 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
         return Ok(Turn::Idle);
     };
     let todo = {
-        let Ok(_writing) = write_lock.try_lock() else { return Ok(Turn::Blocked) };
+        let Ok(_writing) = write_lock.try_lock() else {
+            return Ok(Turn::Blocked);
+        };
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
@@ -242,7 +244,9 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(Turn::Blocked) };
+    let Ok(_writing) = write_lock.try_lock() else {
+        return Ok(Turn::Blocked);
+    };
     s.unsaved.store(true, Ordering::SeqCst);
     if crate::shutdown::down() {
         return Ok(Turn::Idle);

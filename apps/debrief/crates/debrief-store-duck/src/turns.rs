@@ -38,7 +38,10 @@ mod tests {
     #[test]
     fn an_idle_turn_does_not_poll() {
         let idle = wait_after(Turn::Idle).unwrap();
-        assert!(idle >= Duration::from_secs(10), "an idle loop must not wake more than once in 10 s, waits {idle:?}");
+        assert!(
+            idle >= Duration::from_secs(10),
+            "an idle loop must not wake more than once in 10 s, waits {idle:?}"
+        );
     }
 
     #[test]
