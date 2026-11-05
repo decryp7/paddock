@@ -143,8 +143,8 @@ webview remain unmeasured.
    declared layout with a golden test across Rust and TypeScript. Do not migrate `query_page`, facets or others. M2 can
    overturn this if raw shows no gain.
 3. **Batch per panel, per change.** One request names all visible lanes, range and resolution, and returns one buffer. Today
-   each panel asks for all lanes with a bucket count derived from its width (`TimelineRequest.buckets`, 10 to 2000), so no key
-   ever repeats. A newer request supersedes the older one (`query_cancel.rs` has a cancel mechanism to build on).
+   each panel asks for all lanes with a bucket count derived from its width (`TimelineRequest.buckets`, 10 to 2000), on no
+   fixed grid, so a pan cannot reuse an earlier answer. A newer request supersedes the older one (`query_cancel.rs` has a cancel mechanism to build on).
 4. **`Channel` only for progressive delivery**, when a slow lane should not hold back the others: raw per-lane buffers. It is
    not the default for one-shot answers because of the extra round trip.
 

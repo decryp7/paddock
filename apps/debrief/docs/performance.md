@@ -93,7 +93,7 @@ the `perf script` importer; `e2e/scale-*.e2e.ts` check virtualisation (DOM row c
 - **Runs:** one per size, 60 frames or 2.5 s, stopping a ladder after the first rAF p95 over 50 ms. Decoding: median of 5 or 7.
 - **Probes (ER-33):** baseline rAF with no work ticked at 16.7 ms on Chromium, 17 ms on WebKit; main-thread Canvas 2D runs read
   back non-white pixels. Worker and chart runs did not check pixels. Headless rAF may not include composition.
-- **Budget, verdict:** the frame budget of ADR 0018 is not yet a number; these do not test one.
+- **Budget, verdict:** no budget tested. ADR 0018 refers to the rule 16 frame budget; one 60 Hz frame is the yardstick here.
 - **Numbers:** rAF p50/p95 ms at the last size within a frame, and at the next size.
 
   | Mechanism | WebKit | Chromium Metal | Chromium software |
