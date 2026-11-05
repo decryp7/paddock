@@ -1,16 +1,21 @@
 //! Timings of the name layers on 50,000 invented entities. Ignored by default (timings, not behaviour); run with
 //! `cargo test -p debrief-core --release --test it names_perf:: -- --ignored --nocapture`.
 
+use debrief_core::api::{Facet, FacetRequest};
 use debrief_core::catalogue::{Candidate, Scope};
+use debrief_core::catalogue::{CatalogueReply, CatalogueRequest};
 use debrief_core::entities::EntityKind;
+use debrief_core::exceptions::ExceptionGroup;
 use debrief_core::names::alias_job::{self, AliasJobConfig, AliasModel};
 use debrief_core::names::build::vocabulary_from;
 use debrief_core::names::group::group;
 use debrief_core::names::normalise::normalise;
 use debrief_core::names::resolve::{NameSettings, Resolver};
 use debrief_core::names::{NameBook, SearchContext, Vocabulary};
+use debrief_core::ports::{PageQuery, PageReply, StoreError, StoreResult, SummaryReply};
+use debrief_core::search_all::SearchSource;
 use std::collections::HashSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const A: &[&str] = &[
     "graphic", "report", "tray", "backup", "media", "sync", "print", "disk", "event", "session", "video", "font", "mail", "cache",
@@ -138,7 +143,7 @@ fn timings_at_fifty_thousand_entities() {
 /// every pair (trigram sets built per comparison), so it grows with the square of the groups. Ignored by default
 /// (timings); run with `cargo test -p debrief-core --release --test it names_perf::merge_scaling -- --ignored --nocapture`.
 #[test]
-#[ignore]
+#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package NR1, bounded name merge): merge_cooccurring over 8000 groups took 43.5 s against 500 ms"]
 fn merge_scaling() {
     use debrief_core::names::group::merge_cooccurring;
     use debrief_core::names::Cooccurrence;
@@ -156,5 +161,59 @@ fn merge_scaling() {
         let merged = merge_cooccurring(&mut groups, &cooc, 0.6);
         let d = t.elapsed();
         println!("merge_cooccurring over {n} groups: {d:?} ({merged} merges)");
+        // The bench gate (budget D7, "names rebuild <= 1 s"; NR1: 8,000 groups under half a second).
+        if n == 8_000 {
+            assert!(
+                d < Duration::from_millis(500),
+                "merge_cooccurring over {n} groups took {d:?}; it must stay under {MERGE_8000_BUDGET:?}"
+            );
+        }
     }
+}
+
+const MERGE_8000_BUDGET: Duration = Duration::from_millis(500);
+
+/// A store whose catalogue is not built yet: it counts the requests for the whole catalogue (H2).
+struct Unbuilt(std::sync::atomic::AtomicUsize);
+
+impl SearchSource for Unbuilt {
+    fn summary(&self) -> StoreResult<SummaryReply> {
+        Err(StoreError::Invalid("not part of the fixture".into()))
+    }
+    fn page(&self, _: &PageQuery) -> StoreResult<PageReply> {
+        Err(StoreError::Invalid("not part of the fixture".into()))
+    }
+    fn facet(&self, _: &FacetRequest) -> StoreResult<Facet> {
+        Err(StoreError::Invalid("not part of the fixture".into()))
+    }
+    fn exception_groups(&self) -> StoreResult<Vec<ExceptionGroup>> {
+        Err(StoreError::Invalid("not part of the fixture".into()))
+    }
+    fn catalogue(&self, req: &CatalogueRequest) -> StoreResult<CatalogueReply> {
+        if req.all {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(CatalogueReply {
+            built: false,
+            pending: 3,
+            candidates: Vec::new(),
+        })
+    }
+}
+
+/// H2: the import watcher asks every 500 ms whether the catalogue is built, and each ask read the whole catalogue.
+/// While it is not built, a refresh asks the cheap status question and never for the names.
+#[test]
+#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P3, catalogue status): 20 refreshes of an unbuilt catalogue read the whole catalogue 20 times"]
+fn a_refresh_while_the_catalogue_is_not_built_reads_no_names() {
+    let store = Unbuilt(Default::default());
+    let names = debrief_core::names::Names::default();
+    for _ in 0..20 {
+        names.refresh(&store).unwrap();
+    }
+    let asked = store.0.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        asked, 0,
+        "20 refreshes of an unbuilt catalogue read the whole catalogue {asked} times"
+    );
 }

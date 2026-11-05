@@ -59,6 +59,22 @@ fn listed(main: &tauri::WebviewWindow<MockRuntime>) -> Vec<Value> {
     ipc(main, "jobs_list", json!({})).unwrap()["jobs"].as_array().unwrap().clone()
 }
 
+/// H11 (docs/research/2026-10-28-cpu-memory.md): Summarize from the button, the menu and the palette each queued a job. A
+/// request that is already queued or running gives the same job, not a second one.
+#[test]
+#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package J1, idempotency key on jobs): the same request twice queued 2 jobs (JobId(1) against JobId(2))"]
+fn two_identical_requests_give_one_job() {
+    let app = test_app_with_commands(None);
+    let (first, _release_first) = gated_export(&app, "main", "Summarize r.log");
+    let (second, _release_second) = gated_export(&app, "main", "Summarize r.log");
+    assert_eq!(
+        first,
+        second,
+        "the same request twice queued {} jobs",
+        jobs(&app).find_active(|_| true).len()
+    );
+}
+
 #[test]
 fn the_pane_lists_running_jobs_after_two_seconds_and_the_tray_can_stop_them() {
     let app = test_app_with_commands(None);
