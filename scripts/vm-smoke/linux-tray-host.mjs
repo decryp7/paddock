@@ -6,7 +6,7 @@
 const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };
 const NOTE = /isn.t showing tray icons/i;
 // The status bar's health chip names the stopped dependency, its cause is in the chip's popover: "Tray icons: stopped".
-const HEALTH = /Tray icons: stopped/i;
+const HEALTH = /Tray icons: (stopped|not shown)/i; // 7538 worded the chip "stopped", 7550 says "not shown"
 // An indicator of Dyno in the panel is a menu of its own ("menu dyno-app", "menu tray-icon ..."); the top bar also shows the focused application's name as "label Dyno" and a "push button Dyno" around it.
 const INDICATOR = /menu\s+(dyno-app|tray-icon)/i;
 
