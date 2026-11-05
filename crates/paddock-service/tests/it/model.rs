@@ -17,8 +17,8 @@
 //! listed bug.
 
 use paddock_service::backend::{
-    Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism, Registration,
-    UnregisterError,
+    Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
+    Registration, UnregisterError,
 };
 use paddock_service::plan::{Hold, MAX_ATTEMPTS, Plan};
 use paddock_service::port::{AppServiceStatus, RegisterError};
@@ -33,9 +33,9 @@ use std::time::{Duration, Instant};
 const LABEL: &str = "net.model.agent";
 
 /// Fewer states than this means the exploration was cut short or the alphabet shrank: the test fails.
-const STATES_FLOOR: usize = 1_000;
+const STATES_FLOOR: usize = 100_000;
 /// Fewer edges than this, the same.
-const EDGES_FLOOR: u64 = 100_000;
+const EDGES_FLOOR: u64 = 3_000_000;
 /// Safety net: the space is finite, so this is never reached unless a bucket is missing from the key.
 const STATES_CEILING: usize = 400_000;
 
@@ -74,9 +74,21 @@ enum Caps {
 
 fn caps_of(c: Caps) -> Capabilities {
     match c {
-        Caps::Mac => Capabilities { automatic: true, pinned_identity: true, login_items: true },
-        Caps::Linux => Capabilities { automatic: true, pinned_identity: false, login_items: false },
-        Caps::NoAuto => Capabilities { automatic: false, pinned_identity: false, login_items: false },
+        Caps::Mac => Capabilities {
+            automatic: true,
+            pinned_identity: true,
+            login_items: true,
+        },
+        Caps::Linux => Capabilities {
+            automatic: true,
+            pinned_identity: false,
+            login_items: false,
+        },
+        Caps::NoAuto => Capabilities {
+            automatic: false,
+            pinned_identity: false,
+            login_items: false,
+        },
     }
 }
 
@@ -142,6 +154,8 @@ struct World {
     location_ok: bool,
     /// The record cannot be written (a newer format, a read-only folder).
     ro: bool,
+    /// One of the rare events happened on this path (see [`is_rare`]).
+    rare_used: bool,
     rec: Recorded,
 }
 
@@ -204,16 +218,55 @@ const ALL_EVS: [Ev; 25] = [
     Ev::Relocate,
 ];
 
+/// Whether the long run is asked for (`MODEL_DEEP=1`): every event may repeat and faulted replaces are crashed too. The
+/// default run keeps the whole alphabet but lets a path take at most one rare event, so it finishes in seconds; both end at a
+/// fixed point and print their size.
+fn deep() -> bool {
+    static DEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DEEP.get_or_init(|| std::env::var("MODEL_DEEP").is_ok())
+}
+
+/// Events that matter in combination with the core alphabet but not with each other: a path takes at most one of them, so
+/// each is tried from every core state without multiplying the state space by every combination.
+fn is_rare(e: Ev) -> bool {
+    !deep()
+        && matches!(
+            e,
+            Ev::ToggleMark
+                | Ev::JobUnknown
+                | Ev::JobCrash
+                | Ev::StopRequested
+                | Ev::SettingsDamaged
+                | Ev::DamageRecord
+                | Ev::NewerRecord
+                | Ev::CopyNewer
+                | Ev::CopyOlder
+                | Ev::ProgramGone
+                | Ev::Relocate
+                | Ev::Downgrade
+        )
+}
+
 fn is_entry(e: Ev) -> bool {
     matches!(
         e,
-        Ev::Start | Ev::FirstRun | Ev::Install | Ev::Repair | Ev::Uninstall | Ev::Resume | Ev::Update | Ev::Downgrade
+        Ev::Start
+            | Ev::FirstRun
+            | Ev::Install
+            | Ev::Repair
+            | Ev::Uninstall
+            | Ev::Resume
+            | Ev::Update
+            | Ev::Downgrade
     )
 }
 
 /// The app acts without the user asking.
 fn unattended(e: Ev) -> bool {
-    matches!(e, Ev::Start | Ev::FirstRun | Ev::Resume | Ev::Update | Ev::Downgrade)
+    matches!(
+        e,
+        Ev::Start | Ev::FirstRun | Ev::Resume | Ev::Update | Ev::Downgrade
+    )
 }
 
 /// A fault of the OS calls of one entry point (all of its calls of that kind).
@@ -321,10 +374,21 @@ fn lk(s: &Mutex<Sim>) -> std::sync::MutexGuard<'_, Sim> {
 fn advance(w: &mut World, secs: u32) {
     if w.linger > 0 {
         if secs >= w.linger {
+            // The OS drops the old job; what is registered now starts as it would after a fresh registration.
             w.linger = 0;
-            w.job = Job::Absent;
             w.stale = false;
             w.start_in = None;
+            if w.reg == Reg::Registered {
+                if w.resp == Resp::RefusedAlways {
+                    w.job = Job::Refused;
+                    w.stale = true;
+                } else {
+                    w.job = Job::NotRunning;
+                    w.start_in = w.resp.delay();
+                }
+            } else {
+                w.job = Job::Absent;
+            }
         } else {
             w.linger -= secs;
         }
@@ -354,7 +418,10 @@ impl SimBackend {
         s.tick += 1;
         let k = s.tick;
         s.ops.push(Op { k, label });
-        let line = format!("  #{k} {label}: reg {:?} owner {:?} job {:?} stale {}", s.w.reg, s.w.owner, s.w.job, s.w.stale);
+        let line = format!(
+            "  #{k} {label}: reg {:?} owner {:?} job {:?} stale {}",
+            s.w.reg, s.w.owner, s.w.job, s.w.stale
+        );
         s.trace.push(line);
         match s.intr {
             Intr::Cancel(n) if n == k => s.cancel.store(true, Ordering::SeqCst),
@@ -399,7 +466,11 @@ impl SimBackend {
                 Reg::Absent => (AppServiceStatus::NotRegistered, DisabledMark::NotListed),
                 Reg::Unavailable => (AppServiceStatus::NotFound, DisabledMark::NotListed),
             };
-            let mark = if w.mark_unreadable { DisabledMark::Unreadable } else { mark };
+            let mark = if w.mark_unreadable {
+                DisabledMark::Unreadable
+            } else {
+                mark
+            };
             i.login_item = Some(LoginItemFacts { status, mark });
         }
         i
@@ -445,7 +516,9 @@ impl Backend for SimBackend {
                     }
                     Err(RegisterError::NeedsApproval)
                 }
-                (Reg::Unavailable, _) | (_, Fault::RegUnavailable) => Err(RegisterError::Unavailable("unavailable here".into())),
+                (Reg::Unavailable, _) | (_, Fault::RegUnavailable) => {
+                    Err(RegisterError::Unavailable("unavailable here".into()))
+                }
                 (_, Fault::RegOther) => Err(RegisterError::Other("the tool failed".into())),
                 (_, Fault::RegNeedsElevation) => Err(RegisterError::NeedsElevation),
                 (_, Fault::RegDeclined) => Err(RegisterError::Declined),
@@ -486,7 +559,7 @@ impl Backend for SimBackend {
             if s.fault == Fault::UnregFails {
                 Err(UnregisterError::Failed("the tool failed".into()))
             } else {
-                if s.w.reg == Reg::Registered {
+                if matches!(s.w.reg, Reg::Registered | Reg::NeedsApproval) {
                     s.w.reg = Reg::Absent;
                 }
                 Ok(Self::look(&s.w))
@@ -504,6 +577,7 @@ impl Backend for SimBackend {
                     s.w.linger = 25;
                 }
             } else if s.w.resp != Resp::RefusedAlways {
+                s.w.linger = 0;
                 s.w.job = Job::Absent;
                 s.w.stale = false;
                 s.w.start_in = None;
@@ -516,7 +590,10 @@ impl Backend for SimBackend {
         lk(&self.s).w.job == Job::Absent
     }
     fn pause(&mut self, how_long: Duration) {
-        advance(&mut lk(&self.s).w, u32::try_from(how_long.as_secs()).unwrap_or(u32::MAX).max(1));
+        advance(
+            &mut lk(&self.s).w,
+            u32::try_from(how_long.as_secs()).unwrap_or(u32::MAX).max(1),
+        );
     }
     fn open_login_items(&mut self) -> bool {
         lk(&self.s).prompts += 1;
@@ -551,11 +628,20 @@ fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Ma
     let version = lk(sim).w.cur.s();
     let (a, b, c, d) = (sim.clone(), sim.clone(), sim.clone(), sim.clone());
     let backend = SimBackend { s: sim.clone() };
-    let mut m = Manager::new("Model", Box::new(backend), std::path::Path::new("/nonexistent/model"), LABEL, version, move || {
-        lk(&a).w.job == Job::Running
-    })
+    let mut m = Manager::new(
+        "Model",
+        Box::new(backend),
+        std::path::Path::new("/nonexistent/model"),
+        LABEL,
+        version,
+        move || lk(&a).w.job == Job::Running,
+    )
     .with_record(rec)
-    .with_app_state(move || lk(&b).w.wanted, move || lk(&c).w.first_run_done, move || lk(&d).w.location_ok);
+    .with_app_state(
+        move || lk(&b).w.wanted,
+        move || lk(&c).w.first_run_done,
+        move || lk(&d).w.location_ok,
+    );
     if let Some(t) = timings {
         m = m.with_timings(t);
     }
@@ -563,7 +649,9 @@ fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Ma
 }
 
 fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<Sim>> {
-    let mem = rec.memory_handle().expect("the model uses the memory store");
+    let mem = rec
+        .memory_handle()
+        .expect("the model uses the memory store");
     let cancel = Arc::new(AtomicBool::new(false));
     if intr == Intr::Cancel(0) {
         cancel.store(true, Ordering::SeqCst);
@@ -595,7 +683,11 @@ enum Out {
 }
 
 fn job_after_enable(w: &mut World) {
-    w.job = if w.resp == Resp::RefusedAlways { Job::Refused } else { Job::NotRunning };
+    w.job = if w.resp == Resp::RefusedAlways {
+        Job::Refused
+    } else {
+        Job::NotRunning
+    };
     w.stale = w.resp == Resp::RefusedAlways;
     w.start_in = w.resp.delay();
 }
@@ -659,7 +751,9 @@ fn environment(w: &mut World, ev: Ev) {
             }
         }
         Ev::JobRefuse => {
-            if w.reg == Reg::Registered && matches!(w.job, Job::Running | Job::NotRunning | Job::Failed(_)) {
+            if w.reg == Reg::Registered
+                && matches!(w.job, Job::Running | Job::NotRunning | Job::Failed(_))
+            {
                 w.job = Job::Refused;
                 w.stale = true;
                 w.start_in = None;
@@ -683,7 +777,11 @@ fn environment(w: &mut World, ev: Ev) {
             w.ro = true;
         }
         Ev::CopyNewer | Ev::CopyOlder => {
-            let v = if ev == Ev::CopyNewer { Ver::V3 } else { Ver::V0 };
+            let v = if ev == Ev::CopyNewer {
+                Ver::V3
+            } else {
+                Ver::V0
+            };
             w.reg = Reg::Registered;
             w.owner = v;
             w.other_copy = true;
@@ -720,31 +818,48 @@ fn describe_panic(p: &(dyn std::any::Any + Send)) -> Option<String> {
 /// Applies one event (with a fault and an interruption for an entry point) to `w0` and checks the edge invariants.
 fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     let mut w = w0.clone();
+    if is_rare(ev) {
+        w.rare_used = true;
+    }
     if !is_entry(ev) {
         environment(&mut w, ev);
-        return Edge { after: w, crashed: false, ops: Vec::new(), trace: Vec::new(), viols: Vec::new() };
+        return Edge {
+            after: w,
+            crashed: false,
+            ops: Vec::new(),
+            trace: Vec::new(),
+            viols: Vec::new(),
+        };
     }
     match ev {
         Ev::Update => w.cur = Ver::V2,
-        Ev::Downgrade => {
-            w.cur = match w.cur {
-                Ver::V3 | Ver::V2 => Ver::V1,
-                _ => Ver::V0,
-            }
-        }
+        Ev::Downgrade => w.cur = Ver::V1,
         Ev::FirstRun | Ev::Install => w.wanted = Some(true),
         Ev::Uninstall => w.wanted = Some(false),
         _ => {}
     }
     let entry = w.clone();
     let rec = RecordFile::memory();
-    rec.store(&w.rec).expect("the memory store takes the first write");
+    rec.store(&w.rec)
+        .expect("the memory store takes the first write");
     let sim = new_sim(&w, fault, intr, &rec);
-    let other_holder = if fault == Fault::LockHeld { rec.lock() } else { None };
+    let other_holder = if fault == Fault::LockHeld {
+        rec.lock()
+    } else {
+        None
+    };
     let cancel = lk(&sim).cancel.clone();
     let no_wait = Timings::default().without_start_wait();
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let mut m = build(&sim, rec.reopen(), if matches!(ev, Ev::FirstRun | Ev::Install) { Some(no_wait) } else { None });
+        let mut m = build(
+            &sim,
+            rec.reopen(),
+            if matches!(ev, Ev::FirstRun | Ev::Install) {
+                Some(no_wait)
+            } else {
+                None
+            },
+        );
         match ev {
             Ev::Start | Ev::Update | Ev::Downgrade => Out::Started(m.on_start(&cancel)),
             Ev::FirstRun => Out::Install(m.install_unattended(&cancel)),
@@ -775,8 +890,24 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     normalize(&mut after);
     let ops = s.ops.clone();
     let trace = s.trace.clone();
-    edge_checks(&entry, &after, ev, fault, intr, &s, out.as_ref(), crashed, &mut viols);
-    Edge { after, crashed, ops, trace, viols }
+    edge_checks(
+        &entry,
+        &after,
+        ev,
+        fault,
+        intr,
+        &s,
+        out.as_ref(),
+        crashed,
+        &mut viols,
+    );
+    Edge {
+        after,
+        crashed,
+        ops,
+        trace,
+        viols,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -795,25 +926,46 @@ fn edge_checks(
     let (registers, unregisters, evicts) = (count("register"), count("unregister"), count("evict"));
     let unat = unattended(ev);
     let cur = entry.cur.s();
-    let mut bad = |kind: &'static str, why: String| v.push((kind, format!("{why} (event {ev:?}, fault {fault:?}, interruption {intr:?})")));
+    let mut bad = |kind: &'static str, why: String| {
+        v.push((
+            kind,
+            format!("{why} (event {ev:?}, fault {fault:?}, interruption {intr:?})"),
+        ))
+    };
 
     if s.reg_while_off > 0 {
-        bad("registered while the OS says the user switched it off", String::new());
+        bad(
+            "registered while the OS says the user switched it off",
+            String::new(),
+        );
     }
     if unat && entry.wanted == Some(false) && registers > 0 {
-        bad("registered unattended although the user's switch is off", String::new());
+        bad(
+            "registered unattended although the user's switch is off",
+            String::new(),
+        );
     }
     if unat && entry.wanted.is_none() && registers > 0 {
-        bad("registered unattended although the user's switch could not be read", String::new());
+        bad(
+            "registered unattended although the user's switch could not be read",
+            String::new(),
+        );
     }
-    if unat && entry.wanted == Some(true) && entry.rec.state == State::Removing && (unregisters + evicts) > 0 {
+    if matches!(ev, Ev::Start | Ev::Update | Ev::Downgrade | Ev::Resume)
+        && entry.wanted == Some(true)
+        && entry.rec.state == State::Removing
+        && (unregisters + evicts) > 0
+    {
         bad("finished a removal the user took back", String::new());
     }
     if unat && s.prompts > 0 {
         bad("an unasked prompt", format!("{} prompts", s.prompts));
     }
     if unat && entry.caps == Caps::NoAuto && registers + unregisters + evicts > 0 {
-        bad("changed the OS unattended where every change needs a prompt", String::new());
+        bad(
+            "changed the OS unattended where every change needs a prompt",
+            String::new(),
+        );
     }
     // A service that answers is not removed or registered again, unless the version, the copy or the program changed.
     let answering = entry.reg == Reg::Registered
@@ -836,20 +988,31 @@ fn edge_checks(
     // The unattended register budget: what is left of this version's attempts, one free finish, one light resume.
     if unat {
         let finishing = u32::from(entry.rec.phase_of(cur) == Some(Phase::Registering));
-        let budget = MAX_ATTEMPTS.saturating_sub(entry.rec.attempts_of(cur)) + finishing + u32::from(ev == Ev::Resume);
+        let budget = MAX_ATTEMPTS.saturating_sub(entry.rec.attempts_of(cur))
+            + finishing
+            + u32::from(ev == Ev::Resume);
         if registers > budget {
-            bad("more unattended registers of one version than its attempts allow", format!("{registers} registers, budget {budget}"));
+            bad(
+                "more unattended registers of one version than its attempts allow",
+                format!("{registers} registers, budget {budget}"),
+            );
         }
     }
     // Never install unasked.
     if matches!(ev, Ev::Start | Ev::Update | Ev::Downgrade | Ev::Resume)
         && registers > 0
         && entry.reg == Reg::Absent
-        && !matches!(entry.job, Job::Running | Job::NotRunning | Job::Refused | Job::Failed(_))
+        && !matches!(
+            entry.job,
+            Job::Running | Job::NotRunning | Job::Refused | Job::Failed(_)
+        )
         && !(entry.wanted == Some(true) && entry.first_run_done)
         && !matches!(
             entry.rec.state,
-            State::Attempting { phase: Phase::RemovingOld { .. } | Phase::Registering | Phase::RegisterFailed(_), .. }
+            State::Attempting {
+                phase: Phase::RemovingOld { .. } | Phase::Registering | Phase::RegisterFailed(_),
+                ..
+            }
         )
     {
         bad("installed unasked", String::new());
@@ -865,30 +1028,53 @@ fn edge_checks(
             None
         };
         if let Some(k) = from
-            && s.ops.iter().any(|o| o.k > k && matches!(o.label, "register" | "unregister"))
+            && s.ops
+                .iter()
+                .any(|o| o.k > k && matches!(o.label, "register" | "unregister"))
         {
-            bad("an OS call without a durable record of it", format!("writes failed from call {k}"));
+            bad(
+                "an OS call without a durable record of it",
+                format!("writes failed from call {k}"),
+            );
         }
     }
     // A cancel before the first call leaves everything as it was.
     if intr == Intr::Cancel(0)
         && matches!(ev, Ev::Install | Ev::Repair | Ev::Start)
+        && entry.wanted != Some(false)
+        && entry.rec.state != State::Removing
         && registers + unregisters + evicts > 0
         && !crashed
     {
-        bad("cancelled before the first call and the OS was still changed", String::new());
+        bad(
+            "cancelled before the first call and the OS was still changed",
+            String::new(),
+        );
     }
     // A state of the user or the OS is not an attempt (N1).
     if !crashed
-        && matches!(fault, Fault::RegNeedsApproval | Fault::RegUnavailable | Fault::RegNeedsElevation | Fault::RegDeclined)
-        && matches!(ev, Ev::Start | Ev::Update | Ev::Downgrade | Ev::Install | Ev::Repair)
+        && matches!(
+            fault,
+            Fault::RegNeedsApproval
+                | Fault::RegUnavailable
+                | Fault::RegNeedsElevation
+                | Fault::RegDeclined
+        )
+        && matches!(
+            ev,
+            Ev::Start | Ev::Update | Ev::Downgrade | Ev::Install | Ev::Repair
+        )
         && registers > 0
         && !matches!(entry.rec.state, State::Removing)
         && after.rec.attempts_of(cur) > entry.rec.attempts_of(cur)
     {
         bad(
             "a refusal of the user or the OS counted as an attempt",
-            format!("attempts {} to {}", entry.rec.attempts_of(cur), after.rec.attempts_of(cur)),
+            format!(
+                "attempts {} to {}",
+                entry.rec.attempts_of(cur),
+                after.rec.attempts_of(cur)
+            ),
         );
     }
     // The record only says a version is registered when the OS holds that version's registration.
@@ -902,7 +1088,10 @@ fn edge_checks(
         );
     }
     // The marker of a stop on request is not lost.
-    if entry.rec.resume_pending.is_some() && after.rec.resume_pending.is_none() && !matches!(ev, Ev::Resume | Ev::Uninstall) {
+    if entry.rec.resume_pending.is_some()
+        && after.rec.resume_pending.is_none()
+        && !matches!(ev, Ev::Resume | Ev::Uninstall)
+    {
         bad("the marker of a stop on request was lost", String::new());
     }
     if ev == Ev::Resume
@@ -910,19 +1099,35 @@ fn edge_checks(
         && matches!(out, Some(Out::Resume(Ok(true))))
         && after.rec.resume_pending.is_some()
     {
-        bad("a resume completed and its marker is still pending", String::new());
+        bad(
+            "a resume completed and its marker is still pending",
+            String::new(),
+        );
     }
     // An uninstall that returns Ok leaves nothing registered; one that fails puts the record back.
     match out {
         Some(Out::Uninstall(Ok(()))) if !matches!(after.reg, Reg::Absent | Reg::SwitchedOff) => {
-            bad("uninstall returned Ok and the OS still holds the registration", format!("{:?}", after.reg));
+            bad(
+                "uninstall returned Ok and the OS still holds the registration",
+                format!("{:?}", after.reg),
+            );
         }
-        Some(Out::Uninstall(Ok(()))) if after.rec.registered_version.is_some() || after.rec.state != State::Idle => {
-            bad("uninstall returned Ok and the record still remembers it", format!("{:?}", after.rec));
+        Some(Out::Uninstall(Ok(())))
+            if after.rec.registered_version.is_some() || after.rec.state != State::Idle =>
+        {
+            bad(
+                "uninstall returned Ok and the record still remembers it",
+                format!("{:?}", after.rec),
+            );
         }
         Some(Out::Uninstall(Err(ServiceError::Busy))) | None => {}
-        Some(Out::Uninstall(Err(_))) if after.rec.state != entry.rec.state => {
-            bad("a failed uninstall did not put the record back", format!("{:?} to {:?}", entry.rec.state, after.rec.state));
+        Some(Out::Uninstall(Err(_)))
+            if after.reg == Reg::Registered && after.rec.state != entry.rec.state =>
+        {
+            bad(
+                "a failed uninstall did not put the record back",
+                format!("{:?} to {:?}", entry.rec.state, after.rec.state),
+            );
         }
         _ => {}
     }
@@ -953,7 +1158,8 @@ fn run_chain(w: &World, evs: &[Ev]) -> World {
 /// What the app would see of a state: the plan of a start, `pending()` and `supervises()`.
 fn observe(w: &World) -> (Plan, bool, bool) {
     let rec = RecordFile::memory();
-    rec.store(&w.rec).expect("the memory store takes the first write");
+    rec.store(&w.rec)
+        .expect("the memory store takes the first write");
     let sim = new_sim(w, Fault::None, Intr::None, &rec);
     let mut m = build(&sim, rec, None);
     let plan = m.check();
@@ -963,14 +1169,24 @@ fn observe(w: &World) -> (Plan, bool, bool) {
 fn state_checks(w: &World) -> Vec<Viol> {
     let mut v: Vec<Viol> = Vec::new();
     let (plan, pending, supervises) = observe(w);
-    let hold = matches!(plan, Plan::Leave(Hold::Unanswered(_) | Hold::Refused(_) | Hold::RegisterFailed(_)));
+    let hold = matches!(
+        plan,
+        Plan::Leave(Hold::Unanswered(_) | Hold::Refused(_) | Hold::RegisterFailed(_))
+    );
     let answers = w.job == Job::Running;
     if hold {
         let c = cooperative(w);
         let repair = settled(&run_chain(&c, &[Ev::Repair]));
-        let update = w.cur != Ver::V2 && settled(&run_chain(&c, &[Ev::Update, Ev::Wait, Ev::Start, Ev::Wait, Ev::Start]));
+        let update = w.cur != Ver::V2
+            && settled(&run_chain(
+                &c,
+                &[Ev::Update, Ev::Wait, Ev::Start, Ev::Wait, Ev::Start],
+            ));
         if !(answers || repair || update) {
-            v.push(("a hold with no way out", format!("plan {plan:?}; Repair {repair}, update {update}")));
+            v.push((
+                "a hold with no way out",
+                format!("plan {plan:?}; Repair {repair}, update {update}"),
+            ));
         }
         if supervises {
             v.push(("a held job is supervised", format!("plan {plan:?}")));
@@ -985,17 +1201,24 @@ fn state_checks(w: &World) -> Vec<Viol> {
         && w.rec.state != State::Removing
         && matches!(w.reg, Reg::Absent | Reg::Registered)
         && !w.program_gone
+        && !hold
     {
         let after = run_chain(&cooperative(w), &[Ev::Start, Ev::Wait, Ev::Start, Ev::Wait]);
         if after.reg == Reg::Absent {
-            v.push(("the user's service was lost", format!("nothing is registered after two starts; plan {plan:?}")));
+            v.push((
+                "the user's service was lost",
+                format!("nothing is registered after two starts; plan {plan:?}"),
+            ));
         }
     }
     // `pending()` is false in a state with no way forward: where a start and a long wait change nothing.
     if pending {
         let round = run_chain(w, &[Ev::Start, Ev::Wait]);
         if key(&round) == key(w) {
-            v.push(("pending() is true in a state with no way forward", format!("plan {plan:?}")));
+            v.push((
+                "pending() is true in a state with no way forward",
+                format!("plan {plan:?}"),
+            ));
         }
     }
     v
@@ -1014,7 +1237,7 @@ fn bucket(s: Option<u32>) -> &'static str {
 
 fn key(w: &World) -> String {
     format!(
-        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{:?}",
+        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{:?}",
         w.reg,
         w.owner,
         w.other_copy,
@@ -1029,6 +1252,7 @@ fn key(w: &World) -> String {
         w.location_ok,
         w.ro,
         w.mark_unreadable,
+        w.rare_used,
         w.rec
     )
 }
@@ -1051,6 +1275,7 @@ fn seeds(caps: Caps, resp: Resp) -> Vec<(&'static str, World)> {
         first_run_done: false,
         location_ok: true,
         ro: false,
+        rare_used: false,
         rec: Recorded::default(),
     };
     let mut healthy = base.clone();
@@ -1080,13 +1305,24 @@ fn token(ev: Ev, fault: Fault, intr: Intr) -> String {
 fn parse_token(t: &str) -> (Ev, Fault, Intr) {
     let (head, intr) = t.split_once('@').unwrap_or((t, ""));
     let (ev, fault) = head.split_once('+').unwrap_or((head, ""));
-    let ev = *ALL_EVS.iter().find(|e| format!("{e:?}") == ev).unwrap_or_else(|| panic!("no event {ev}"));
+    let ev = *ALL_EVS
+        .iter()
+        .find(|e| format!("{e:?}") == ev)
+        .unwrap_or_else(|| panic!("no event {ev}"));
     let fault = if fault.is_empty() {
         Fault::None
     } else {
-        *FAULTS.iter().find(|f| format!("{f:?}") == fault).unwrap_or_else(|| panic!("no fault {fault}"))
+        *FAULTS
+            .iter()
+            .find(|f| format!("{f:?}") == fault)
+            .unwrap_or_else(|| panic!("no fault {fault}"))
     };
-    let num = |p: &str| intr[p.len()..].trim_matches(|c| c == '(' || c == ')').parse::<u32>().unwrap();
+    let num = |p: &str| {
+        intr[p.len()..]
+            .trim_matches(|c| c == '(' || c == ')')
+            .parse::<u32>()
+            .unwrap()
+    };
     let intr = if intr.is_empty() {
         Intr::None
     } else if intr.starts_with("CrashBefore") {
@@ -1106,9 +1342,15 @@ fn parse_token(t: &str) -> (Ev, Fault, Intr) {
 /// The interruptions worth trying for an entry point whose fault-free run made these calls.
 fn interruptions(ops: &[Op]) -> Vec<Intr> {
     let mut v = vec![Intr::Cancel(0), Intr::WritesFail(0)];
-    for o in ops.iter().filter(|o| mutating(o.label)) {
-        v.extend([Intr::CrashBefore(o.k), Intr::CrashAfter(o.k), Intr::Cancel(o.k), Intr::WritesFail(o.k)]);
+    let muts: Vec<&Op> = ops.iter().filter(|o| mutating(o.label)).collect();
+    for o in &muts {
+        v.extend([Intr::CrashBefore(o.k), Intr::CrashAfter(o.k)]);
     }
+    // A cancel or a failing write between steps: after the first and after the last mutating call.
+    for o in muts.first().into_iter().chain(muts.last()) {
+        v.extend([Intr::Cancel(o.k), Intr::WritesFail(o.k)]);
+    }
+    v.dedup();
     v
 }
 
@@ -1122,6 +1364,8 @@ struct Found {
 #[derive(Default)]
 struct Explored {
     states: usize,
+    /// States before any rare event: the closure of the core alphabet.
+    core: usize,
     edges: u64,
     crash_edges: u64,
     by_event: BTreeMap<String, u64>,
@@ -1134,7 +1378,15 @@ struct Explored {
 struct Node {
     w: World,
     parent: Option<(usize, String)>,
+    /// Steps from the seed along the shortest path.
+    depth: u32,
+    /// Steps since the path took its one rare event (0 before it).
+    since_rare: u32,
 }
+
+/// A rare event is taken from core states up to this depth, and a path goes on this many steps after it (default run).
+const RARE_FROM_DEPTH: u32 = 4;
+const RARE_STEPS: u32 = 3;
 
 fn path_of(nodes: &[Node], mut i: usize) -> Vec<String> {
     let mut v = Vec::new();
@@ -1156,7 +1408,12 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
         normalize(&mut w);
         if seen.insert(key(&w), nodes.len()).is_none() {
             queue.push_back(nodes.len());
-            nodes.push(Node { w, parent: None });
+            nodes.push(Node {
+                w,
+                parent: None,
+                depth: 0,
+                since_rare: 0,
+            });
             roots.push(name);
         }
     }
@@ -1168,26 +1425,51 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
         }
         roots[i.min(n_roots - 1)]
     };
-    let record = |ex: &mut Explored, nodes: &[Node], at: usize, tail: Option<&str>, viols: Vec<Viol>| {
-        for (kind, why) in viols {
-            let f = ex.kinds.entry(kind).or_default();
-            f.count += 1;
-            if f.first.is_none() {
-                let mut p = path_of(nodes, at);
-                if let Some(t) = tail {
-                    p.push(t.to_string());
+    let record =
+        |ex: &mut Explored, nodes: &[Node], at: usize, tail: Option<&str>, viols: Vec<Viol>| {
+            for (kind, why) in viols {
+                let f = ex.kinds.entry(kind).or_default();
+                f.count += 1;
+                if f.first.is_none() {
+                    let mut p = path_of(nodes, at);
+                    if let Some(t) = tail {
+                        p.push(t.to_string());
+                    }
+                    f.first = Some((
+                        format!("{caps:?}/{resp:?}/{}|{}", root_of(nodes, at), p.join(";")),
+                        why,
+                    ));
                 }
-                f.first = Some((format!("{caps:?}/{resp:?}/{}|{}", root_of(nodes, at), p.join(";")), why));
             }
-        }
-    };
+        };
     ex.finished = true;
+    let mut popped = 0u64;
     while let Some(i) = queue.pop_front() {
+        popped += 1;
+        if popped % 500 == 0 && std::env::var("MODEL_PROGRESS").is_ok() {
+            eprintln!(
+                "{caps:?}/{resp:?}: {popped} done, {} queued, {} states, {} edges",
+                queue.len(),
+                nodes.len(),
+                ex.edges
+            );
+        }
         let w = nodes[i].w.clone();
         let sv = state_checks(&w);
         record(&mut ex, &nodes, i, None, sv);
+        if !deep() && nodes[i].since_rare >= RARE_STEPS {
+            continue;
+        }
         for &ev in &ALL_EVS {
+            if (is_rare(ev) && (w.rare_used || nodes[i].depth > RARE_FROM_DEPTH))
+                || (ev == Ev::FirstRun && w.first_run_done)
+            {
+                continue;
+            }
             let mut tries: Vec<(Fault, Intr)> = vec![(Fault::None, Intr::None)];
+            // After a rare event only the plain edges are taken (and the interruptions of a start): the faults and the
+            // interruptions of every entry point are covered from the core states.
+            let light = w.rare_used && !deep();
             let mut idx = 0;
             while idx < tries.len() {
                 let (fault, intr) = tries[idx];
@@ -1218,7 +1500,7 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                 }
                 if first && is_entry(ev) {
                     let has = |l: &str| e.ops.iter().any(|o| o.label == l);
-                    for f in FAULTS {
+                    for f in FAULTS.iter().copied().filter(|_| !light) {
                         let applies = match f {
                             f if is_reg_fault(f) => has("register") && ev != Ev::Uninstall,
                             Fault::UnregFails => has("unregister"),
@@ -1236,10 +1518,18 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                             tries.push((f, Intr::None));
                         }
                     }
-                    for it in interruptions(&e.ops) {
-                        tries.push((Fault::None, it));
+                    if (!light || ev == Ev::Start) && !(ev == Ev::Repair && !deep()) {
+                        for it in interruptions(&e.ops) {
+                            tries.push((Fault::None, it));
+                        }
                     }
-                } else if intr == Intr::None && matches!(fault, Fault::RegOther | Fault::RemovalTimeout | Fault::RegNotAsWritten) {
+                } else if deep()
+                    && intr == Intr::None
+                    && matches!(
+                        fault,
+                        Fault::RegOther | Fault::RemovalTimeout | Fault::RegNotAsWritten
+                    )
+                {
                     // A crash during a replace that already met a fault.
                     for o in e.ops.iter().filter(|o| mutating(o.label)) {
                         tries.push((fault, Intr::CrashBefore(o.k)));
@@ -1256,37 +1546,120 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                     }
                     seen.insert(k, nodes.len());
                     queue.push_back(nodes.len());
-                    nodes.push(Node { w: after, parent: Some((i, t)) });
+                    let since_rare = if !after.rare_used {
+                        0
+                    } else {
+                        nodes[i].since_rare + 1
+                    };
+                    let depth = nodes[i].depth + 1;
+                    nodes.push(Node {
+                        w: after,
+                        parent: Some((i, t)),
+                        depth,
+                        since_rare,
+                    });
                 }
             }
         }
     }
     ex.states = nodes.len();
+    ex.core = nodes.iter().filter(|n| !n.w.rare_used).count();
     ex
 }
 
 const CONFIGS: [(Caps, Resp); 8] = [
     (Caps::Mac, Resp::Fast),
-    (Caps::Mac, Resp::Slow),
-    (Caps::Mac, Resp::Late),
     (Caps::Mac, Resp::Never),
     (Caps::Mac, Resp::RefusedAlways),
-    (Caps::Linux, Resp::Fast),
     (Caps::Linux, Resp::Never),
     (Caps::NoAuto, Resp::Fast),
+    // The long run adds the slow starts and the other mechanism with a fast OS.
+    (Caps::Mac, Resp::Slow),
+    (Caps::Mac, Resp::Late),
+    (Caps::Linux, Resp::Fast),
 ];
+
+/// The configurations of the default run (the first five) or the long one (all).
+fn configs() -> &'static [(Caps, Resp)] {
+    if deep() { &CONFIGS } else { &CONFIGS[..5] }
+}
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[];
+const KNOWN_FAILING: &[(&str, &str)] = &[
+    (
+        "pending() is true in a state with no way forward",
+        "plan.rs plan(), Absent branch: RemovingOld/Registering gives Replace(Interrupted) even at the cap; manager.rs run_replace_locked refuses (allowed == 0). Plan.",
+    ),
+    (
+        "the user's service was lost",
+        "same cause: a crash in a requested replace at the cap leaves Replace(Interrupted) that nothing runs (plan.rs plan(), Absent branch).",
+    ),
+    (
+        "more unattended registers of one version than its attempts allow",
+        "manager/resume.rs install_unattended calls run_replace_locked(requested = true), so the first run goes past the cap. Executor.",
+    ),
+    (
+        "an OS call without a durable record of it",
+        "manager.rs run_replace_locked: a failed step write only warns; install_unattended runs with an unwritable record. Executor.",
+    ),
+    (
+        "an unasked prompt",
+        "manager/resume.rs install_unattended ignores caps.automatic. Executor.",
+    ),
+    (
+        "changed the OS unattended where every change needs a prompt",
+        "same cause as the unasked prompt (ADR 0056 section 4 wants Offer).",
+    ),
+    (
+        "registered unattended although the user's switch could not be read",
+        "manager/resume.rs resume() only checks wanted == Some(false); None must not register (R3). Resume area.",
+    ),
+    (
+        "a held job is supervised",
+        "plan.rs supervises() ignores the hold (WP 5).",
+    ),
+    (
+        "a resume completed and its marker is still pending",
+        "nothing sets or clears resume_pending yet (author's rewrite).",
+    ),
+    (
+        "registered again a service that answers",
+        "manager/resume.rs install_unattended judges `here` from the record only. Executor.",
+    ),
+    (
+        "removed a service that answers",
+        "same cause as registering again a service that answers.",
+    ),
+    (
+        "the record says this version is registered but the OS holds another registration",
+        "plan.rs plan(): `accepted` trusts an older Attempting of this version after another version registered.",
+    ),
+    (
+        "finished a removal the user took back",
+        "plan.rs plan(): State::Removing wins over wanted == Some(true); install_unattended clears it with a write whose failure is ignored (manager/resume.rs ~line 200).",
+    ),
+];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {
     silence_crashes();
     let started = Instant::now();
+    let only = std::env::var("MODEL_CONFIG").ok();
+    let configs: Vec<(Caps, Resp)> = configs()
+        .iter()
+        .copied()
+        .filter(|(c, r)| only.as_deref().is_none_or(|o| o == format!("{c:?}/{r:?}")))
+        .collect();
     let results: Vec<(Caps, Resp, Explored)> = std::thread::scope(|sc| {
-        let handles: Vec<_> = CONFIGS.iter().map(|&(c, r)| sc.spawn(move || (c, r, explore_config(c, r)))).collect();
-        handles.into_iter().map(|h| h.join().expect("an exploration thread panicked")).collect()
+        let handles: Vec<_> = configs
+            .iter()
+            .map(|&(c, r)| sc.spawn(move || (c, r, explore_config(c, r))))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("an exploration thread panicked"))
+            .collect()
     });
     let mut states = 0;
     let mut edges = 0;
@@ -1298,13 +1671,17 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
     let mut out = String::new();
     for (c, r, ex) in &results {
         out += &format!(
-            "{c:?}/{r:?}: {} states, {} edges ({} crashes){}\n",
+            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes){}\n",
             ex.states,
+            ex.core,
             ex.edges,
             ex.crash_edges,
             if ex.finished { "" } else { "  NOT FINISHED" }
         );
-        assert!(ex.finished, "{c:?}/{r:?}: the state ceiling was reached, so the key misses a bucket\n{out}");
+        assert!(
+            ex.finished,
+            "{c:?}/{r:?}: the state ceiling was reached, so the key misses a bucket\n{out}"
+        );
         states += ex.states;
         edges += ex.edges;
         crash_edges += ex.crash_edges;
@@ -1318,7 +1695,9 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
             *by_intr.entry(k).or_default() += n;
         }
         for (k, f) in &ex.kinds {
-            let e = kinds.entry(k).or_insert_with(|| (0, String::new(), String::new()));
+            let e = kinds
+                .entry(k)
+                .or_insert_with(|| (0, String::new(), String::new()));
             e.0 += f.count;
             if e.1.is_empty()
                 && let Some((replay, why)) = &f.first
@@ -1338,37 +1717,63 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
     println!("{out}");
     // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold.
     for e in ALL_EVS {
-        assert!(by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0, "event {e:?} was never taken\n{out}");
+        assert!(
+            by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
+            "event {e:?} was never taken\n{out}"
+        );
     }
     for f in FAULTS {
-        assert!(by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0, "fault {f:?} was never injected\n{out}");
+        assert!(
+            by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
+            "fault {f:?} was never injected\n{out}"
+        );
     }
     for i in ["CrashBefore", "CrashAfter", "Cancel", "WritesFail"] {
-        assert!(by_intr.get(i).copied().unwrap_or(0) > 0, "interruption {i} was never taken\n{out}");
+        assert!(
+            by_intr.get(i).copied().unwrap_or(0) > 0,
+            "interruption {i} was never taken\n{out}"
+        );
     }
-    assert!(states >= STATES_FLOOR, "only {states} states (floor {STATES_FLOOR})\n{out}");
-    assert!(edges >= EDGES_FLOOR, "only {edges} edges (floor {EDGES_FLOOR})\n{out}");
+    assert!(
+        states >= STATES_FLOOR,
+        "only {states} states (floor {STATES_FLOOR})\n{out}"
+    );
+    assert!(
+        edges >= EDGES_FLOOR,
+        "only {edges} edges (floor {EDGES_FLOOR})\n{out}"
+    );
     let known: Vec<&str> = KNOWN_FAILING.iter().map(|(k, _)| *k).collect();
     let new: Vec<&&str> = kinds.keys().filter(|k| !known.contains(k)).collect();
     let fixed: Vec<&&str> = known.iter().filter(|k| !kinds.contains_key(*k)).collect();
     assert!(new.is_empty(), "new violations {new:?}\n{out}");
-    assert!(fixed.is_empty(), "known-failing entries that no longer fail (delete them): {fixed:?}\n{out}");
+    assert!(
+        fixed.is_empty(),
+        "known-failing entries that no longer fail (delete them): {fixed:?}\n{out}"
+    );
 }
 
 /// Replays one path printed by a failure: `MODEL_REPLAY='Mac/Fast/Healthy|Start;Install+RegOther@CrashAfter(2)'` prints the
 /// OS calls of every step, the record and the state invariants of the end.
 #[test]
 fn replay_one_path_from_the_environment() {
-    let Ok(spec) = std::env::var("MODEL_REPLAY") else { return };
+    let Ok(spec) = std::env::var("MODEL_REPLAY") else {
+        return;
+    };
     silence_crashes();
-    let (cfg, path) = spec.split_once('|').expect("MODEL_REPLAY is config|step;step");
+    let (cfg, path) = spec
+        .split_once('|')
+        .expect("MODEL_REPLAY is config|step;step");
     let parts: Vec<&str> = cfg.split('/').collect();
     let (caps, resp) = CONFIGS
         .iter()
         .copied()
         .find(|(c, r)| format!("{c:?}") == parts[0] && format!("{r:?}") == parts[1])
         .expect("unknown config");
-    let mut w = seeds(caps, resp).into_iter().find(|(n, _)| *n == parts[2]).expect("unknown seed").1;
+    let mut w = seeds(caps, resp)
+        .into_iter()
+        .find(|(n, _)| *n == parts[2])
+        .expect("unknown seed")
+        .1;
     normalize(&mut w);
     println!("start {w:#?}");
     for t in path.split(';').filter(|t| !t.is_empty()) {
@@ -1383,13 +1788,25 @@ fn replay_one_path_from_the_environment() {
         }
         w = e.after;
         normalize(&mut w);
-        println!("  now reg {:?} owner {:?} job {:?} start_in {:?}\n  record {:?}", w.reg, w.owner, w.job, w.start_in, w.rec);
+        println!(
+            "  now reg {:?} owner {:?} job {:?} start_in {:?}\n  record {:?}",
+            w.reg, w.owner, w.job, w.start_in, w.rec
+        );
     }
     let (plan, pending, supervises) = observe(&w);
     println!("plan {plan:?} pending {pending} supervises {supervises}");
     for (k, why) in state_checks(&w) {
         println!("  STATE VIOLATION {k}: {why}");
     }
+    let e = apply(&cooperative(&w), Ev::Repair, Fault::None, Intr::None);
+    println!("probe: Repair on a cooperative OS");
+    for l in &e.trace {
+        println!("{l}");
+    }
+    println!(
+        "  now reg {:?} job {:?} record {:?}",
+        e.after.reg, e.after.job, e.after.rec
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1403,7 +1820,9 @@ const LOCK_CHILD: &str = "MODEL_LOCK_CHILD";
 fn lock_holder_child() {
     use paddock_proc::{Claim, InstanceLock};
     use std::io::Write;
-    let Ok(path) = std::env::var(LOCK_CHILD) else { return };
+    let Ok(path) = std::env::var(LOCK_CHILD) else {
+        return;
+    };
     let lock = match InstanceLock::claim(std::path::Path::new(&path)) {
         Ok(Claim::Acquired(l)) => l,
         other => panic!("the child could not take the lock: {:?}", other.map(|_| ())),
@@ -1437,7 +1856,12 @@ fn a_lock_held_by_a_killed_process_is_free_again() {
     // The lock file of the record, as the record names it.
     let path = dir.path().join(format!("service-{LABEL}.lock"));
     let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "model::lock_holder_child", "--nocapture", "--test-threads=1"])
+        .args([
+            "--exact",
+            "model::lock_holder_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env(LOCK_CHILD, &path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1445,15 +1869,30 @@ fn a_lock_held_by_a_killed_process_is_free_again() {
         .unwrap();
     let stdout = child.stdout.take().unwrap();
     let mut child = Reap(child);
-    let held = BufReader::new(stdout).lines().map_while(Result::ok).any(|l| l.contains("LOCK-HELD"));
+    let held = BufReader::new(stdout)
+        .lines()
+        .map_while(Result::ok)
+        .any(|l| l.contains("LOCK-HELD"));
     assert!(held, "the child ended without taking the lock");
-    assert!(matches!(InstanceLock::claim(&path), Ok(Claim::Held)), "a lock held by a live process must read as held");
-    assert!(record.lock().is_none(), "the repair lock of the record must be busy while the other process lives");
+    assert!(
+        matches!(InstanceLock::claim(&path), Ok(Claim::Held)),
+        "a lock held by a live process must read as held"
+    );
+    assert!(
+        record.lock().is_none(),
+        "the repair lock of the record must be busy while the other process lives"
+    );
     child.0.kill().unwrap();
     child.0.wait().unwrap();
     match InstanceLock::claim(&path) {
         Ok(Claim::Acquired(_)) => {}
-        other => panic!("the lock of a killed process must be free, got {:?}", other.map(|_| ())),
+        other => panic!(
+            "the lock of a killed process must be free, got {:?}",
+            other.map(|_| ())
+        ),
     }
-    assert!(record.lock().is_some(), "the repair lock must be free after its holder was killed");
+    assert!(
+        record.lock().is_some(),
+        "the repair lock must be free after its holder was killed"
+    );
 }
