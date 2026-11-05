@@ -34,6 +34,8 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Fixed
 
+- Settings: dragging a widget in Menu bar items or Popup widgets now shows the whole row as it looks in the list, with its handle, title and controls in place. Before, the picture under the pointer was drawn out of shape with a huge symbol.
+
 - Tables grow and shrink with the window instead of keeping a fixed height. The Processes table fills the page; on every other page (Firewall, Alarms, Extras, Network, Benchmarks, Issues and the rest) the page scrolls once and each table is as tall as its rows, up to the height of the visible page, so a long table never needs more than the window and its last row can always be reached. The mouse wheel passes on to the page at the end of a table.
 - Lifespan on an Apple silicon Mac now reads the internal SSD. Dyno had thrown away the long drive names that macOS gives, so it said smartctl found no drives. A USB drive is now listed as one macOS cannot read health from, and the page no longer tells you to turn on administrator readings on a Mac, where the helper is not involved.
 - Reports: the Disks card no longer spills out of its card. Long mount paths are shortened in the middle (the full path is in the tooltip) and the sizes and the forecast stay in their own columns. Empty volumes, temporary folders, system helper volumes and tiny mounted disk images (under 256 MB) are no longer listed in the report, the highlights or the exports.

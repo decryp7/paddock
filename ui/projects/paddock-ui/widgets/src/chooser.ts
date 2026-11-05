@@ -227,7 +227,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-txt { display: grid; min-width: 0; flex: 1; }
     /* A shown row is two columns: the lead (grip and kind icon, --pd-wc-text-inset wide) and the body, a wrapping line of the
        description, the app's controls and "more". A wrapped line starts at the body's edge, so it is never left of the text. */
-    .pd-widget-chooser { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-more-size: 40px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
+    /* The CDK preview is a clone of the row moved to the body, outside .pd-widget-chooser: it carries the sizes itself. */
+    .pd-widget-chooser, .cdk-drag-preview.pd-wc-row { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-more-size: 40px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
     .pd-wc-row { display: grid; grid-template-columns: var(--pd-wc-text-inset) minmax(0, 1fr); align-items: center; column-gap: 0; }
     .pd-wc-lead { display: flex; align-items: center; gap: var(--pd-space-2); height: var(--pd-control-height); align-self: start; }
     .pd-wc-body { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
