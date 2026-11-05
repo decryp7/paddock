@@ -92,8 +92,10 @@ test('macOS rows measured 2026-11-05 on run-7575: login items on Health, pf cont
   assert.equal((await readingStep(by('firewall'), 'macos', { ...driver('x'), prepare: async () => ({ ok: false, detail: 'pfctl missing' }) })).status, 'check-broken');
   // energy: the product's own sentence
   assert.equal((await mac('energy-and-thermal', 'This computer does not report CPU power (powermetrics listed none, as in a virtual machine) to software.')).status, 'pass');
-  // thermal: no page of the build shows it, so it is not measured
-  assert.equal((await mac('thermal-pressure', 'Dashboard Health CPU Memory')).status, 'not-measured');
+  // thermal: the control adds a Temperature widget; its sentence is the pass, a dashboard without it fails
+  assert.equal(by('thermal-pressure').prepare.macos, 'temp-widget');
+  assert.equal((await mac('thermal-pressure', 'Temperature — Not available. No temperature sensor was reported. macOS reports a thermal pressure level, not temperatures, to software.')).status, 'pass');
+  assert.equal((await mac('thermal-pressure', 'Dashboard Health CPU Memory')).status, 'fail');
 });
 test('macDriver pf-rule control loads the rule and checks the OS lists it; cleanup restores pf.conf only if it loaded one', async () => {
   const { macDriver } = await import('./helper-readings.mjs');
@@ -119,4 +121,19 @@ test('macDriver text polls until the row\'s own words are on the page, so a read
   assert.match(text, /2 rules/);
   reads = -1000; t = 0;
   assert.match(await macDriver(gui).text(by('firewall')), /packet filter \(pf\) 0 rules/i);
+});
+
+test('temp-widget control: the new widget is the second CPU menu and the metric is checked; failures name the missing control and still leave the editor', async () => {
+  const { addTemperatureWidget, removeTemperatureWidget } = await import('./helper-readings.mjs');
+  const calls = []; let metric = 'CPU';
+  const mk = (missing) => ({ app: 'Dyno', closeSettings: async () => {}, has: async () => true,
+    press: async (a, re, role, nth) => { calls.push(`${re}${nth ? '#' + nth : ''}`); if (missing && re.includes(missing)) return false; if (/Temperature\$/.test(re) && role === 'AXStaticText') metric = 'Temperature'; return true; },
+    waitFor: async (fn) => { const v = await fn(); return { ok: Boolean(v), value: v }; },
+    texts: async () => [{ text: 'Widget options' }, { text: metric }] });
+  assert.equal((await addTemperatureWidget(mk(null))).ok, true);
+  assert.ok(calls.includes('^Actions for CPU$#1'), 'the second CPU menu is the new widget');
+  const bad = await addTemperatureWidget(mk('Add Big number'));
+  assert.equal(bad.ok, false); assert.match(bad.detail, /no "Add Big number" button/);
+  calls.length = 0; await removeTemperatureWidget(mk(null));
+  assert.deepEqual(calls.slice(0, 3), ['^Edit layout$', '^Actions for Temperature$', '^Remove Temperature$']);
 });

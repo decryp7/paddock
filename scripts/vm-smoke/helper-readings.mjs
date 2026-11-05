@@ -58,9 +58,9 @@ export const READINGS = [
     value: { linux: [/\b(?:Fine|Needs a change)\b/] }, notMeasured: { linux: { when: (t) => /Can't tell/.test(t) && !/\b(?:Fine|Needs a change)\b/.test(t), why: 'the VM exposes no wake settings (every finding says Can\'t tell)' } } },
   { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on a Temperature widget', os: ['macos'], page: 'dashboard', fullText: 4000,
     expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i],
-    // Measured 2026-11-05 on run-7575: none of the 13 pages and their tabs shows this reason, and the dashboard's default layout has no temperature widget (the widget palette is generic: Graph, Big number, Bars, Ring, driven from the Counters page).
-    // The probe cannot see the thing (ER-33), so the row is not measured, never a pass or a fail, until a control adds a temperature counter widget.
-    notMeasured: { macos: { when: () => true, why: 'the default dashboard has no temperature widget and no control adds one; the reason text is not on any page of this build' } } },
+    // The sentence is the widget's own reason (widget-view.ts on wp-int: "Not available. <reason>" under a Big number or Graph whose metric is Temperature). The default dashboard has no
+    // such widget, so the control adds one and sets its metric (macDriver 'temp-widget'); measured 2026-11-05 on run-7575 it then reads "macOS reports a thermal pressure level, not temperatures, to software."
+    prepare: { macos: 'temp-widget' } },
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
     expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i], value: { windows: [LIFESPAN_VALUE], linux: [LIFESPAN_VALUE] },
     // The VM base has no smartmontools: the reading cannot be taken there, which is neither a pass nor a fail of the product.
@@ -163,12 +163,13 @@ export function macDriver(gui) {
   return {
     /** Controls: `pf-rule` loads one known rule into the guest's (empty) pf ruleset, without enabling pf; `cleanup` restores /etc/pf.conf. */
     async prepare(key) {
+      if (key === 'temp-widget') return addTemperatureWidget(gui);
       if (key !== 'pf-rule') return { ok: false, detail: `unknown control ${key}` };
       const r = await gui.g.exec(`echo 'block drop quick proto tcp from any to any port 59999' | sudo /sbin/pfctl -f - 2>&1; sudo /sbin/pfctl -sr 2>&1 | grep -c 59999`);
       loadedPf = /^1$/m.test(r.stdout.trim().split('\n').at(-1) ?? '');
       return loadedPf ? { ok: true, detail: 'pf rule on tcp port 59999 loaded' } : { ok: false, detail: `pfctl did not list the rule: ${r.stdout.trim().slice(-120)}` };
     },
-    async cleanup(key) { if (key === 'pf-rule' && loadedPf) { await gui.g.exec('sudo /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; true'); loadedPf = false; } },
+    async cleanup(key) { if (key === 'temp-widget') return removeTemperatureWidget(gui); if (key === 'pf-rule' && loadedPf) { await gui.g.exec('sudo /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; true'); loadedPf = false; } },
     async openPage(page, tab, reading = {}) {
       await gui.closeSettings(); // the Settings window stays open after the helper step and would be read as the page
       if (reading.minWidth && (await gui.has(gui.app, '^Collapse sidebar'))) await gui.press(gui.app, '^Collapse sidebar'); // room for the Account column
@@ -189,4 +190,41 @@ export function macDriver(gui) {
       return got.ok ? got.value : read();
     },
   };
+}
+
+/**
+ * Control for the thermal row: a Big number widget with the metric Temperature (Edit layout > Add widget > Add Big number > its Options > Metric). The new widget is the second
+ * "Actions for CPU" (the default layout has one CPU card). The option is chosen with AXPress, which was measured to change the combobox like a real click (2026-11-05: AXPress on
+ * Swap and a pointer click on Disk activity both changed it); what failed earlier was pressing the first "Actions for CPU", the card, not the new widget.
+ */
+export async function addTemperatureWidget(gui) {
+  const must = async (what, fn) => { if (!(await gui.waitFor(fn, 15_000)).ok) throw new Error(what); };
+  try {
+    await gui.closeSettings();
+    await must('no Dashboard link', () => gui.press(gui.app, '^Dashboard$', 'AXLink'));
+    if (await gui.has(gui.app, '^Collapse sidebar')) await gui.press(gui.app, '^Collapse sidebar');
+    await must('no "Edit layout" button', () => gui.press(gui.app, '^Edit layout$'));
+    await must('no "Add widget" button', () => gui.press(gui.app, '^Add widget'));
+    await must('no "Add Big number" button', () => gui.press(gui.app, '^Add Big number'));
+    await must('the new widget has no second "Actions for CPU" menu', () => gui.press(gui.app, '^Actions for CPU$', 'AXPopUpButton', 1));
+    await must('no "Options for CPU…" menu item', () => gui.press(gui.app, '^Options for CPU', 'AXMenuItem'));
+    await must('no Metric combobox in the widget options', () => gui.press(gui.app, '^Metric of', 'AXComboBox'));
+    await must('no "Temperature" option in the Metric list', () => gui.press(gui.app, '^Temperature$', 'AXStaticText'));
+    await must('the widget options did not take the metric Temperature', async () => { const t = await gui.texts(); const i = t.findIndex((x) => x.text === 'Widget options'); return i >= 0 && t[i + 1]?.text === 'Temperature'; });
+    await gui.press(gui.app, '^Done$', 'AXButton'); // the options panel
+    await gui.waitFor(() => gui.press(gui.app, '^Done$', 'AXButton'), 10_000); // the layout editor
+    return { ok: true, detail: 'a Big number widget with the metric Temperature was added to the dashboard' };
+  } catch (e) {
+    await gui.press(gui.app, '^Done$', 'AXButton').catch(() => {});
+    return { ok: false, detail: String(e.message ?? e) };
+  }
+}
+
+/** Takes the widget the control added off the dashboard again (its menu is named after its metric now). */
+export async function removeTemperatureWidget(gui) {
+  try {
+    await gui.press(gui.app, '^Edit layout$');
+    await gui.waitFor(() => gui.press(gui.app, '^Actions for Temperature$', 'AXPopUpButton'), 10_000);
+    await gui.waitFor(() => gui.press(gui.app, '^Remove Temperature$', 'AXMenuItem'), 10_000);
+  } finally { await gui.press(gui.app, '^Done$', 'AXButton').catch(() => {}); }
 }
