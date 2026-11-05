@@ -138,8 +138,9 @@ test.describe('popup widgets', () => {
     await page.goto(POPUP());
     await page.getByRole('button', { name: 'More actions' }).click();
     const items = page.getByRole('menuitem');
-    await expect(items).toHaveCount(3);
-    for (let i = 0; i < 3; i++) {
+    // Open Dyno, Quit and stop measuring, Quit Dyno and the Report a problem entry: four (the shell's menu plus Dyno's).
+    await expect(items).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
       const item = items.nth(i);
       // The panel scales in while it opens: wait for the measurement to settle on the designed size.
       await expect.poll(async () => Math.round((await item.locator('mat-icon').first().boundingBox())?.width ?? 0)).toBe(16);
