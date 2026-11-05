@@ -64,7 +64,7 @@ const NEVER = [
                 <button type="button" matIconButton class="refresh" aria-label="Refresh the preview" matTooltipPosition="left" [matTooltip]="'Refresh the preview'" (click)="store.loadPreview()"><dy-icon name="refresh" /></button>
               </div>
               <div class="tablewrap">
-                <pd-table [toolbar]="false" label="Files in the diagnostics bundle" [rows]="p.files" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="480" />
+                <pd-table [toolbar]="false" label="Files in the diagnostics bundle" [rows]="p.files" [columns]="columns" [rowKey]="fileKey" [filterable]="false" height="window" />
               </div>
             </section>
 

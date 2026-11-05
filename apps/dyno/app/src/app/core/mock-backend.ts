@@ -115,7 +115,7 @@ import {
   demoStartup,
   healthReasons,
 } from './mock/data';
-import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
+import { manyAlarms, demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
 import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
@@ -173,6 +173,8 @@ export interface MockOptions {
   holdScans?: boolean;
   /** A destination in every country on the map (`?geo=many`), to see the most arcs it draws. */
   geoMany?: boolean;
+  /** Long lists: sixty firewall rules and sixty alarms instead of a handful (`?rows=many`), to see tables taller than the window. */
+  rowsMany?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -232,6 +234,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
     ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
+    ...(q.get('rows') === 'many' ? { rowsMany: true } : {}),
     ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
     ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
@@ -331,6 +334,7 @@ export class MockBackend implements DynoBackend {
   private readonly backupVariant: MockBackupVariant;
   private helperVariant: MockHelperVariant;
   private toolInstalled = false;
+  private rowsMany = false;
   private backupCheckedAt: number;
   private readonly keepAwake: MockPower;
   private readonly powerListeners = new Set<(v: PowerView) => void>();
@@ -371,6 +375,8 @@ export class MockBackend implements DynoBackend {
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
     this.intel.many = options.geoMany ?? false;
+    this.intel.manyRules = options.rowsMany ?? false;
+    this.rowsMany = options.rowsMany ?? false;
     this.jobSink = options.jobs;
     this.jobSteps = options.jobSteps ?? 1;
     this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
@@ -988,7 +994,7 @@ export class MockBackend implements DynoBackend {
   // -------------------------------------------------------------------------------------------- alarms
 
   private alarmRows(): Alarm[] {
-    return (this.alarmList ??= demoAlarms(this.now()));
+    return (this.alarmList ??= this.rowsMany ? manyAlarms(demoAlarms(this.now()), 60) : demoAlarms(this.now()));
   }
 
   private changeAlarm(ids: number[], kind: AlarmChange['kind'], edit: (a: Alarm) => Alarm): Alarm[] {

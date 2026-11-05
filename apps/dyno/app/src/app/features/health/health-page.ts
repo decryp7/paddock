@@ -48,7 +48,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
         </div>
         <dy-async [loaded]="store.startupLoaded()" [error]="store.startupError()" [empty]="store.startup().length === 0" [emptyTitle]="emptyTitle()" [emptyText]="emptyText()" what="startup items" [rows]="4" (retry)="reload()">
           <div class="tablewrap">
-            <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" [maxHeight]="480">
+            <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" height="window">
               <ng-template pdCell="name" let-e><span class="two"><strong class="nm" [dyFullText]="e.name">{{ e.name }}</strong><small class="faint">{{ e.publisher ?? 'Unknown publisher' }}</small></span></ng-template>
               <ng-template pdCell="impact" let-e><span class="impact" [matTooltip]="impactFull(e)"><span class="dot" [attr.data-tone]="tone(e)" aria-hidden="true"></span><span class="lbl">{{ impact(e) }}</span>@if (e.impact.rating !== 'notMeasured') { <small class="faint num ell">{{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</span></ng-template>
             </pd-table>

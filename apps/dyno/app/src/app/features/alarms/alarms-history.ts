@@ -18,7 +18,7 @@ interface HistoryRow {
   template: `
     <dy-async [loaded]="store.historyLoaded()" [error]="store.historyError()" [empty]="store.history().length === 0" emptyTitle="No alarm history yet" emptyText="Every change to an alarm is listed here: raised, acknowledged, shelved and more." emptyIcon="clock" what="alarm history" [rows]="4" (retry)="store.loadHistory()">
       <p class="lead num">The last {{ store.history().length }} changes</p>
-      <pd-table [toolbar]="false" label="Alarm history" [rows]="rows()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [maxHeight]="560">
+      <pd-table [toolbar]="false" label="Alarm history" [rows]="rows()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" height="window">
         <ng-template pdCell="rule" let-r><span class="id">{{ ruleName(r.change.alarm.rule) }}</span></ng-template>
       </pd-table>
     </dy-async>

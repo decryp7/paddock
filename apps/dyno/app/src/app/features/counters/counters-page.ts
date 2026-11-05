@@ -167,7 +167,7 @@ import { MatMenuModule } from '@angular/material/menu';
                 <button type="button" matButton="text" (click)="store.setWatching([])">Clear</button>
               </div>
               <div class="tablewrap">
-                <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
+                <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" height="window" (action)="run($event)">
                   <ng-template pdCell="counter" let-p>
                     <span class="swatch" [style.background]="swatch(index(p))" aria-hidden="true"></span>
                     <span class="truncate" [dyFullText]="title(p)">{{ title(p) }}</span>

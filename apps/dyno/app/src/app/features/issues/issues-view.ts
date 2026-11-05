@@ -54,10 +54,10 @@ interface IssueLine extends Issue {
         @if (o.apps.length || o.kinds.length) {
           <div class="boards">
             @if (o.apps.length) {
-              <pd-table [toolbar]="false" label="Apps with the most issues" [rows]="appBoard()" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [selectedKey]="filter().app" (rowActivate)="toggleApp($event)" />
+              <pd-table height="window" [toolbar]="false" label="Apps with the most issues" [rows]="appBoard()" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [selectedKey]="filter().app" (rowActivate)="toggleApp($event)" />
             }
             @if (o.kinds.length) {
-              <pd-table [toolbar]="false" label="Issues by kind" [rows]="o.kinds" [columns]="kindColumns" [rowKey]="kindKey" [filterable]="false" [selectedKey]="filter().kind" (rowActivate)="toggleKind($event.kind)" />
+              <pd-table height="window" [toolbar]="false" label="Issues by kind" [rows]="o.kinds" [columns]="kindColumns" [rowKey]="kindKey" [filterable]="false" [selectedKey]="filter().kind" (rowActivate)="toggleKind($event.kind)" />
             }
           </div>
         }
@@ -81,7 +81,7 @@ interface IssueLine extends Issue {
                 <span>{{ o.total === 0 ? 'The system logs Dyno can read hold no crashes, hangs or other problems for this period.' : 'Clear the filter to see every issue again.' }}</span>
               </div>
             } @else {
-              <pd-table [toolbar]="false" label="Issues" [rows]="lines()" [columns]="columns" [rowKey]="lineKey" [filterable]="false" [maxHeight]="560" groupBy="day" [rowActions]="actions" [selectedKey]="selectedId()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedId.set(null)">
+              <pd-table [toolbar]="false" label="Issues" [rows]="lines()" [columns]="columns" [rowKey]="lineKey" [filterable]="false" height="window" groupBy="day" [rowActions]="actions" [selectedKey]="selectedId()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedId.set(null)">
                 <ng-template pdCell="kind" let-i><span class="dot" [attr.data-tone]="dotTone(i)" aria-hidden="true"></span>{{ kindLabel(i.kind) }}</ng-template>
               </pd-table>
             }

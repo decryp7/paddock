@@ -24,7 +24,7 @@ import { EXTRAS_STYLES } from './extras-styles';
         } @else if (s.blockers.length === 0) {
           <div class="none"><dy-icon name="check" /><strong>Nothing is keeping this computer awake</strong><span>It can go to sleep when it is idle.</span></div>
         } @else {
-          <pd-table [toolbar]="false" label="Keeping this computer awake" [rows]="blockerRows()" [columns]="blockerColumns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620" />
+          <pd-table [toolbar]="false" label="Keeping this computer awake" [rows]="blockerRows()" [columns]="blockerColumns" [rowKey]="rowNo" [filterable]="false" height="window" />
         }
 
         <h2 class="sec">Recent wakes @if (!s.wakesUnavailable) { <span class="faint muted">{{ plural(s.wakes.length, 'wake') }}</span> }</h2>
@@ -33,7 +33,7 @@ import { EXTRAS_STYLES } from './extras-styles';
         } @else if (s.wakes.length === 0) {
           <div class="none"><dy-icon name="clock" /><strong>No wakes recorded</strong><span>The system log holds no wake events for the recent past.</span></div>
         } @else {
-          <pd-table [toolbar]="false" label="Recent wakes" [rows]="wakeRows()" [columns]="wakeColumns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620" />
+          <pd-table [toolbar]="false" label="Recent wakes" [rows]="wakeRows()" [columns]="wakeColumns" [rowKey]="rowNo" [filterable]="false" height="window" />
         }
       }
     </dy-async>

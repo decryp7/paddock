@@ -78,7 +78,7 @@ export function fieldOf(message: string | undefined): { field: FormField; messag
                 <span>Add a computer from the ones Dyno sees on your network, or type its hardware address. Nothing is saved until you choose it.</span>
               </div>
             } @else if (v.devices.length > 0) {
-              <pd-table [toolbar]="false" label="Computers to wake" [rows]="v.devices" [columns]="columns" [rowKey]="deviceKey" [filterable]="false" [rowHeight]="44" [rowActions]="actions" (rowActivate)="edit($event)" (action)="run($event)">
+              <pd-table height="window" [toolbar]="false" label="Computers to wake" [rows]="v.devices" [columns]="columns" [rowKey]="deviceKey" [filterable]="false" [rowHeight]="44" [rowActions]="actions" (rowActivate)="edit($event)" (action)="run($event)">
                 <ng-template pdCell="name" let-d><strong class="nm">{{ d.name }}</strong>@if (d.secureOn) { <span class="chip">SecureOn</span> }</ng-template>
                 <ng-template pdCell="mac" let-d><span class="mono sel">{{ d.mac }}</span></ng-template>
                 <ng-template pdCell="ip" let-d><span class="mono muted">{{ d.lastIp ?? 'Not known' }}</span></ng-template>

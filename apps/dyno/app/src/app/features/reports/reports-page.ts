@@ -82,7 +82,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <section class="card" aria-label="Busiest apps">
                 <div class="card-head"><h2><dy-icon name="processes" /> Busiest apps</h2></div>
                 <div class="tablewrap">
-                  <pd-table [toolbar]="false" label="Busiest apps of the week" [rows]="r.topApps" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [maxHeight]="360" />
+                  <pd-table [toolbar]="false" label="Busiest apps of the week" [rows]="r.topApps" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" height="window" />
                 </div>
               </section>
             }

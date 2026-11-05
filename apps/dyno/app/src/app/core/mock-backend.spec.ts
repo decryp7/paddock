@@ -23,6 +23,18 @@ const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('proc
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('rows=many makes the firewall and the alarm list taller than a window; without it they stay short', async () => {
+    expect(mockOptionsFromUrl('?rows=many').rowsMany).toBe(true);
+    expect(mockOptionsFromUrl('?rows=few')).not.toHaveProperty('rowsMany');
+    const many = new MockBackend({ latencyMs: 0, rowsMany: true });
+    const view = await many.firewall();
+    expect(view.sources[0]?.rules).toHaveLength(60);
+    expect(view.sources[0]?.ruleCount).toBe(60);
+    expect((await many.alarms({ states: [], minSeverity: null, rule: null, includeShelved: true, limit: 500 })).length).toBeGreaterThan(40);
+    const few = new MockBackend({ latencyMs: 0 });
+    expect((await few.firewall()).sources[0]?.rules).toHaveLength(3);
+  });
+
   it('reads jobstepms as a whole number of milliseconds and ignores anything else', () => {
     expect(mockOptionsFromUrl('?jobstepms=600000').jobStepMs).toBe(600000);
     expect(mockOptionsFromUrl('?jobstepms=0').jobStepMs).toBe(0);

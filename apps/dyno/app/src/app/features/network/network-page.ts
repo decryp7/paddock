@@ -106,7 +106,7 @@ function readCollapsed(): Set<string> {
               [filterable]="false"
               [countLabel]="noCount"
               [rowHeight]="36"
-              [maxHeight]="bodyMax()"
+              height="window"
               [rowActions]="actions"
               [emptyText]="emptyText()"
               [(selectedKey)]="selectedKey"
@@ -300,9 +300,6 @@ export class NetworkPage implements OnInit, OnDestroy {
   private readonly groupedTree: PdRowTree<Row> = { level: (r) => (r.kind === 'group' ? 1 : 2), expanded: (r) => (r.kind === 'group' ? r.open : null), spans: (r) => r.kind === 'group' };
   /** Programs or remote hosts: groups at level 1, their sockets below. Ungrouped, the table is a plain grid. */
   protected readonly tree = computed(() => (this.group() === 'none' || (this.tab() === 'listening' && this.group() === 'host') ? null : this.groupedTree));
-  private readonly viewportHeight = signal(typeof window === 'undefined' ? 900 : window.innerHeight);
-  /** The rows scroll inside the table, which takes what the window leaves under the filters and the summary. */
-  protected readonly bodyMax = computed(() => Math.max(240, this.viewportHeight() - 300));
   protected readonly noCount = (): string => '';
   protected readonly emptyText = computed(() => (this.tab() === 'connections' ? 'No connections with these filters.' : 'Nothing is listening with these filters.'));
   protected readonly rowKey = (r: Row): string => r.key;
@@ -354,9 +351,6 @@ export class NetworkPage implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    const onResize = () => this.viewportHeight.set(window.innerHeight);
-    window.addEventListener('resize', onResize);
-    this.destroyRef.onDestroy(() => window.removeEventListener('resize', onResize));
     void this.store.start();
   }
 
