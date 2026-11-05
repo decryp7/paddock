@@ -216,7 +216,9 @@ impl Manager {
         // pending already, so the link does not start an agent of its own in the seconds before the start repair runs.
         let used_up = self.record.peek().0.attempts_of(&self.version) >= MAX_ATTEMPTS;
         match self.decide(false, false).2 {
-            Plan::Await(_) | Plan::Replace(_) => !used_up,
+            Plan::Await(_) => !used_up,
+            // A replace that cannot be recorded does not start (no OS call without a durable write): nothing is coming.
+            Plan::Replace(_) => !used_up && !self.record.unwritable(),
             _ => false,
         }
     }
