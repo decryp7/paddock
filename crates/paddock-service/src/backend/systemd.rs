@@ -21,6 +21,7 @@ use crate::paths::{SYSTEMCTL, systemctl_scope};
 use crate::port::{Output, RegisterError, RunError, System};
 use crate::render::systemd_unit;
 use crate::spec::{Kind, ServiceSpec};
+use crate::stop::StopMechanism;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -325,6 +326,23 @@ impl Backend for Systemd {
 
     fn definition(&self) -> Option<String> {
         Some(Self::definition(self))
+    }
+
+    /// The user unit while systemd runs it or is about to restart it (`active`, `activating`): "Quit and stop measuring" stops
+    /// it by name and keeps its registration. A unit that runs nothing, or one that cannot be asked about, has nothing to stop;
+    /// a system unit is stopped by an administrator, not by the app.
+    fn stop_mechanism(&mut self) -> Option<StopMechanism> {
+        if self.spec.kind() != Kind::UserAgent {
+            return None;
+        }
+        let unit = self.spec.unit_file_name();
+        let running = self.ctl(&["is-active", &unit]).ok().is_some_and(|o| {
+            matches!(
+                parse_is_active(&o.stdout),
+                UnitActivity::Active | UnitActivity::Changing
+            )
+        });
+        running.then_some(StopMechanism::SystemdUser { unit })
     }
 }
 

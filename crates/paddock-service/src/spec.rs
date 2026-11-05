@@ -279,7 +279,7 @@ impl SpecBuilder {
         self.spec.supervised_env = Some(var.to_string());
         self
     }
-    /// Lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`, idle I/O; launchd low-priority I/O).
+    /// Lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`, best-effort I/O at the lowest priority, never the idle class (rule 52); launchd low-priority I/O).
     pub fn low_priority(mut self) -> Self {
         self.spec.low_priority = true;
         self
