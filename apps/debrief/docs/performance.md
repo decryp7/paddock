@@ -83,6 +83,52 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
+
+- **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
+- **Why:** the nightly `store-bench` job (`debrief-bench.yml`, `worker::` with `DEBRIEF_BENCH_COPIES=20`, release) failed
+  `imports_and_queries_within_the_budgets` on every scheduled run since it moved into Paddock; the push runs skip that job,
+  so it had never passed. Querying 382–402 MB (PSS) against 320 MB:
+
+| Run (date, commit) | Measure | Idle MB | Querying MB | Result |
+|---|---|---|---|---|
+| debrief 5976 (10-22, f826f4f4) | RSS | 196 | 303 | fail (budget 300) |
+| debrief 6161 (10-23, eba53424) | RSS | 199 | 300 | pass |
+| debrief 6233 (10-24, 9e4369c2, 1.0.2 head) | RSS | 214 | 322 | fail |
+| debrief 6344 (10-25, e42bb85e, 1.1.1) | RSS | 321 | 430 | fail (idle) |
+| debrief 6396 (10-26, e42bb85e) | RSS | 298 | 444 | fail (import 778) |
+| debrief 6412 (10-27, e42bb85e) | RSS | 281 | 424 | fail |
+| paddock 6451 (10-27, 2d3476a1, dispatch) | PSS | 264 | 400 | fail |
+| paddock 6954 (10-29, 283e5067) | PSS | 294 | 382 | fail |
+| paddock 7172 (10-30, dfc9cdc9) | PSS | 284 | 402 | fail |
+| paddock 7260 (10-31, 09293bcd) | PSS | 245 | 399 | fail |
+
+  The step to about +110 MB came with 1.1 (the names catalogue) and stayed; the switch from RSS to PSS (9d802de4c,
+  10-27) took about 25 MB off. Not noise and not a regression since the move: the same failure each night.
+- **Machine:** Mac mini, Linux amd64 container (`paddock-ci:v2` under Rosetta, 4 CPUs); 1-minute load 30–50 from other
+  agents (the brief's load < 10 never came); every comparison interleaved in one container session.
+- **Build:** release, libduckdb 1.5.6; temporary per-step tracing (`/proc/<pid>/smaps_rollup`, the catalogue's pending
+  sources, `duckdb_memory()`) in `worker.rs`, not committed.
+- **Corpus:** `/samples` × 20 (585,800 events), as the job.
+- **Findings:**
+  - The test measured "idle" and "querying" while the catalogue was still being built in the background: 600–760 of
+    its sources pending at "idle"; it takes 85–120 s more for 20 copies. Idle and the query peak were a snapshot of
+    how far it had got: idle 245–288 MB, query peak 351–407 MB, as on CI.
+  - Waiting for the catalogue first: idle 397–458 MB, query peak 528–562 MB. A worker reopened on that store: idle
+    132 MB, query peak 246–265 MB. So the queries themselves cost about 115–130 MB over idle; the rest is what the
+    catalogue build leaves behind: DuckDB held 145 MB of committed catalogue rows (`duckdb_memory()`), never
+    checkpointed because the store's `checkpoint_threshold` is 1 GB and only imports checkpoint.
+  - `debrief_alloc::release()` on the catalogue thread alone changed nothing (idle 397 vs 442 MB, within noise).
+  - By copies (worker after import, catalogue still running; reopened worker): 1 copy idle 205 / 120 MB, query peak
+    263 / 186 MB; 5 copies 238 / 123, 346 / 216; 10 copies 274 / 136, 378 / 261; 20 copies 245–247 / 132,
+    372–375 / 246–265.
+- **Fix:** the catalogue checkpoints and releases freed pages when a run of builds ends, and reports itself built only
+  after that; the worker test waits for the catalogue before it measures idle (a condition, bounded at 600 s).
+- **After the fix:** not measured yet (Debrief paused for the Dyno, Spotter and Pitwall tags). The regression test
+  `a_built_catalogue_is_saved_into_the_database_file` and the A/B at 20 copies (and copies=1) are still to
+  run before this branch merges.
+- **Budget:** unchanged (Linux 320 MB, macOS 630 MB).
+
 ### 2026-10-30, `debrief report` under CPU contention: QoS background against utility (branch `fix/debrief-cli-report-hang`)
 
 - **Commit:** A/B: base dfc9cdc94 (mining and full-text pools in QoS `BACKGROUND`) → change 1c2567566 (`UTILITY`)

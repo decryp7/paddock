@@ -151,6 +151,8 @@ struct Shared {
     pending: AtomicU64,
     /// Sources whose build failed (not retried until the store is reopened).
     failed: Mutex<HashSet<u32>>,
+    /// Rows committed since the last checkpoint (see [`settle`]); the catalogue counts as built only once they are saved.
+    unsaved: AtomicBool,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -166,6 +168,7 @@ impl CatalogueService {
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
+            unsaved: AtomicBool::new(false),
         });
         let s = shared.clone();
         let handle = std::thread::Builder::new()
@@ -175,6 +178,11 @@ impl CatalogueService {
             shared,
             handle: Some(handle),
         })
+    }
+
+    /// Whether rows committed by the last builds still wait for their checkpoint.
+    pub(crate) fn saving(&self) -> bool {
+        self.shared.unsaved.load(Ordering::SeqCst)
     }
 
     pub(crate) fn wake(&self) {
@@ -219,6 +227,7 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
     let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    s.unsaved.store(true, Ordering::SeqCst);
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
     Ok(true)
@@ -230,6 +239,9 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
             Ok(true) => continue,
             Ok(false) => {}
             Err(e) => log::warn!("catalogue: {e:#}"),
+        }
+        if s.unsaved.load(Ordering::SeqCst) && settle(conn, write_lock) {
+            s.unsaved.store(false, Ordering::SeqCst);
         }
         let mut woken = lock(&s.wake.0);
         if !*woken {
@@ -244,6 +256,20 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
     }
 }
 
+/// Ends a run of builds like every other change to the store (see `open_db`): a checkpoint writes the new rows into
+/// the database file, then the run's freed pages go back to the OS. Without it a worker that had catalogued 20 copies
+/// of the samples idled at about 440 MB (130 MB once reopened), DuckDB holding 145 MB of the uncheckpointed rows
+/// (docs/performance.md, 2026-10-31).
+/// False when an import holds the write lock (it checkpoints when it ends; the next idle turn tries again).
+fn settle(conn: &Connection, write_lock: &Mutex<()>) -> bool {
+    let Ok(_writing) = write_lock.try_lock() else { return false };
+    if let Err(e) = conn.execute_batch("CHECKPOINT") {
+        log::warn!("catalogue: checkpoint failed: {e}");
+    }
+    debrief_alloc::release();
+    true
+}
+
 impl crate::Inner {
     /// Names that look like `req.text`, from the catalogue.
     pub(crate) fn catalogue(&self, req: &CatalogueRequest) -> StoreResult<CatalogueReply> {
@@ -253,7 +279,7 @@ impl crate::Inner {
         let keys = search_keys(&text);
         let squashed = squash(&text);
         let mut reply = CatalogueReply {
-            built: pending == 0,
+            built: pending == 0 && !self.catalogue.as_ref().is_some_and(|c| c.saving()),
             pending,
             candidates: Vec::new(),
         };
