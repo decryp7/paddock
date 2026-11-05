@@ -346,34 +346,48 @@ fn first_failure(name: &str, how: &str) -> bool {
 /// Most distinct (program, exit) failures remembered for [`first_failure`].
 const MAX_FAILURE_KEYS: usize = 256;
 
-/// `text` with anything that could be a user's path or file name replaced: from the first path start of a line to its end becomes
-/// `<path>` (a path may hold spaces, so there is no telling where it ends; the text before it keeps the cause readable), and a
-/// remaining word that looks like a file name (a dot and a short extension) becomes `<file>`. A path start is a `/` or `\\` after a
-/// space, quote or the line's start, `~/`, a drive letter (`C:\`, `C:/`), or a UNC `\\\\`.
+/// `text` with anything that could be a user's path or file name replaced. Per line, from the first word that holds a `/` or a `\\`
+/// (quotes and punctuation stuck to it are part of the word) to the end of the line becomes `<path>`: a path may hold spaces, so
+/// there is no telling where it ends. The words before it keep the cause readable, and a trailing `: <phrase>` survives when the phrase
+/// is one of the OS's own error texts ([`ERRNO_PHRASES`]; a match against a fixed list, never free text). A remaining word that looks
+/// like a file name (a dot and a short extension) becomes `<file>`.
 fn scrub_paths(text: &str) -> String {
     text.lines().map(scrub_line).collect::<Vec<_>>().join("\n")
 }
 
+/// The OS's error texts that may follow a removed path (no user content in any of them).
+const ERRNO_PHRASES: [&str; 14] = [
+    "Permission denied",
+    "Operation not permitted",
+    "No such file or directory",
+    "File exists",
+    "Is a directory",
+    "Not a directory",
+    "Directory not empty",
+    "Read-only file system",
+    "Device or resource busy",
+    "No space left on device",
+    "Input/output error",
+    "Too many open files",
+    "Access is denied",
+    "The system cannot find the path specified",
+];
+
 fn scrub_line(line: &str) -> String {
-    let bytes = line.as_bytes();
-    let starts_path = |i: usize| -> bool {
-        let at_boundary = i == 0
-            || matches!(
-                bytes[i - 1],
-                b' ' | b'\t' | b'"' | b'\'' | b'(' | b'=' | b':' | b'[' | b'<'
-            );
-        match bytes[i] {
-            b'/' | b'\\' => at_boundary,
-            b'~' => at_boundary && bytes.get(i + 1) == Some(&b'/'),
-            c if c.is_ascii_alphabetic() => {
-                at_boundary
-                    && bytes.get(i + 1) == Some(&b':')
-                    && matches!(bytes.get(i + 2), Some(b'\\' | b'/'))
-            }
-            _ => false,
+    // The byte index where the first word holding a separator starts.
+    let mut cut = None;
+    let mut word_start = None;
+    for (i, c) in line.char_indices() {
+        if c.is_whitespace() {
+            word_start = None;
+            continue;
         }
-    };
-    let cut = (0..bytes.len()).find(|i| line.is_char_boundary(*i) && starts_path(*i));
+        let start = *word_start.get_or_insert(i);
+        if c == '/' || c == '\\' {
+            cut = Some(start);
+            break;
+        }
+    }
     let head = &line[..cut.unwrap_or(line.len())];
     let words: Vec<String> = head
         .split_whitespace()
@@ -386,11 +400,19 @@ fn scrub_line(line: &str) -> String {
         })
         .collect();
     let mut out = words.join(" ");
-    if cut.is_some() {
+    if let Some(at) = cut {
         if !out.is_empty() {
             out.push(' ');
         }
         out.push_str("<path>");
+        let tail = line[at..].trim_end();
+        if let Some(phrase) = ERRNO_PHRASES
+            .iter()
+            .find(|p| tail.ends_with(&format!(": {p}")))
+        {
+            out.push_str(": ");
+            out.push_str(phrase);
+        }
     }
     out
 }
@@ -509,6 +531,49 @@ mod tests {
         assert!(
             !tail.contains("sam") && !tail.contains("Secret") && tail.contains("<path>"),
             "{tail}"
+        );
+    }
+
+    #[test]
+    fn a_word_with_a_separator_starts_the_cut_whatever_surrounds_it() {
+        // The six the final review found passing through, and what must be left of them.
+        for (input, want) in [
+            (
+                "rm: cannot remove \u{2018}/home/sam/My Plans/x\u{2019}: Permission denied",
+                "rm: cannot remove <path>: Permission denied",
+            ),
+            ("cannot open `/Users/sam/secret'", "cannot open <path>"),
+            ("cannot read Documents/taxes/plan", "cannot read <path>"),
+            ("open ../../Users/sam/notes failed", "open <path>"),
+            ("files a,/Users/sam/x failed", "files <path>"),
+            ("%USERPROFILE%\\Docs\\plan failed", "<path>"),
+        ] {
+            let out = scrub_paths(input);
+            assert_eq!(out, want, "from {input:?}");
+            for word in ["sam", "taxes", "Plans", "secret", "notes", "Docs", "plan"] {
+                assert!(
+                    !out.contains(word) || want.contains(word),
+                    "{word} survived in {out:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_errno_phrase_after_a_path_is_kept_and_nothing_else_is() {
+        assert_eq!(
+            scrub_paths("smartctl: /dev/disk0: Operation not permitted"),
+            "smartctl: <path>: Operation not permitted"
+        );
+        assert_eq!(
+            scrub_paths("open /x/y: No such file or directory"),
+            "open <path>: No such file or directory"
+        );
+        // Free text after the path is not a phrase from the list: it goes with the path.
+        assert_eq!(scrub_paths("open /x/y: sam's secret plans"), "open <path>");
+        assert_eq!(
+            scrub_paths("open /x/y: Permission denied for sam"),
+            "open <path>"
         );
     }
 

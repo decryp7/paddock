@@ -277,6 +277,34 @@ fn a_hidden_window_is_never_asked_about_through_the_real_tick() {
 }
 
 #[test]
+fn a_panic_in_the_report_hook_does_not_leave_the_question_open_for_ever() {
+    let seen = Shared::default();
+    let configured = Startup::builder()
+        .config(quick())
+        .asker(FakeAsker(seen.clone()))
+        .report(|_app, _label| -> Result<(), String> { panic!("the report hook panicked") })
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let w = window(&app, "w-panics");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 20_000);
+    let answer = lock(&seen).answers.pop().unwrap();
+    answer(Choice::SaveReport);
+    // The hook panics on its own thread; the window must go back to waiting, bounded by a deadline (no sleep).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while startup(&app).with(|w| w.is_asking("w-panics") || w.is_question_open("w-panics")) {
+        assert!(
+            Instant::now() < deadline,
+            "the question stayed open after the hook panicked"
+        );
+        std::thread::yield_now();
+    }
+    startup(&app).stop();
+}
+
+#[test]
 fn the_question_offers_save_report_and_stays_closed_while_the_report_is_written() {
     let seen = Shared::default();
     let (tx, rx) = std::sync::mpsc::channel::<String>();

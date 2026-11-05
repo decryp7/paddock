@@ -208,8 +208,9 @@ impl Watchdog {
         true
     }
 
-    /// The user chose Keep Waiting: a page still starting gets another full timeout before it is asked about again; an
-    /// unresponsive page gets [`Config::missed_pings`] more pings. Nothing for a window that recovered meanwhile.
+    /// The user chose Keep Waiting: a page still starting gets the next (doubled) wait before it is asked about again; an unresponsive
+    /// page gets [`Config::missed_pings`] more pings and, if it stays silent, the next (doubled) wait before the question. Nothing for a
+    /// window that recovered meanwhile.
     pub fn keep_waiting(&mut self, label: &str, now: Instant) {
         let config = self.config;
         if let Some(e) = self.windows.get_mut(label) {
@@ -217,6 +218,7 @@ impl Watchdog {
                 Phase::AskingStartup => {
                     e.phase = Phase::Waiting;
                     e.since = now;
+                    e.question_open = false;
                     e.asks = e.asks.saturating_add(1).min(config.max_doublings);
                 }
                 Phase::Unresponsive => {
@@ -323,6 +325,11 @@ impl Watchdog {
             .is_some_and(|e| matches!(e.phase, Phase::Ready | Phase::Unresponsive))
     }
 
+    /// Whether any question about window `label` is on screen and unanswered.
+    pub fn is_question_open(&self, label: &str) -> bool {
+        self.windows.get(label).is_some_and(|e| e.question_open)
+    }
+
     /// Whether the start-up question about window `label` is open (it is not asked again until it is answered).
     pub fn is_asking(&self, label: &str) -> bool {
         self.windows
@@ -371,11 +378,13 @@ impl Watchdog {
                             out.push(Action::Reload(label.clone()));
                         }
                     } else if e.visible
+                        && !e.question_open
                         && now.saturating_duration_since(e.since) >= config.ask_wait(e.asks)
                     {
                         // Only a window the user can see is asked about (a hidden one starts at login, its page may be paused by the
                         // OS), and only after the longer wait; each Keep Waiting doubles it.
                         e.phase = Phase::AskingStartup;
+                        e.question_open = true;
                         out.push(Action::AskStartup(label.clone()));
                     }
                 }

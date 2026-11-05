@@ -584,6 +584,11 @@ fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
                 Some(write) => {
                     let (app, label) = (app.clone(), label.to_string());
                     std::thread::spawn(move || {
+                        // Whatever the hook does, even panic, the window goes back to waiting (drop guard).
+                        let _done = ReportDone {
+                            app: app.clone(),
+                            label: label.clone(),
+                        };
                         match write(&app, &label) {
                             Ok(()) => {
                                 log::info!(Window = label.as_str(); "Problem report from the not-responding question finished")
@@ -592,16 +597,28 @@ fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
                                 log::error!(Window = label.as_str(); "Problem report from the not-responding question failed: {e}")
                             }
                         }
-                        if let Some(startup) = app.try_state::<Startup<R>>() {
-                            startup.with(|w| {
-                                w.question_answered(&label);
-                                w.keep_waiting(&label, Instant::now());
-                            });
-                        }
                     });
                 }
                 None => startup.with(|w| w.keep_waiting(label, Instant::now())),
             }
+        }
+    }
+}
+
+/// Ends a question whose answer was Save a problem report… when the report's thread ends in any way: the question is closed and the
+/// window waits again.
+struct ReportDone<R: Runtime> {
+    app: AppHandle<R>,
+    label: String,
+}
+
+impl<R: Runtime> Drop for ReportDone<R> {
+    fn drop(&mut self) {
+        if let Some(startup) = self.app.try_state::<Startup<R>>() {
+            startup.with(|w| {
+                w.question_answered(&self.label);
+                w.keep_waiting(&self.label, Instant::now());
+            });
         }
     }
 }

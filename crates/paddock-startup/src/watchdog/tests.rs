@@ -777,3 +777,50 @@ fn hiding_and_showing_a_window_over_and_over_does_not_keep_a_hung_start_from_bei
     );
     assert!(asked[0] < 300_000, "{asked:?}");
 }
+
+#[test]
+fn a_start_up_question_and_a_hung_page_question_are_never_open_together() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    w.page_started("main", t0);
+    let first = run_with(&mut w, t0, 0, 75_000, |_| false);
+    assert_eq!(
+        first
+            .iter()
+            .filter(|(_, a)| matches!(a, Action::AskStartup(_)))
+            .count(),
+        1,
+        "{first:?}"
+    );
+    // The page finally becomes ready while that question is still on screen, then stops answering.
+    w.ready("main", at(t0, 76_000));
+    let later = run_with(&mut w, t0, 76_000, 400_000, |_| false);
+    assert!(
+        hung_questions(&later).is_empty(),
+        "a second dialog on top of the open one: {:?}",
+        hung_questions(&later)
+    );
+    assert!(w.is_question_open("main"));
+    // Answering the one question frees the window for the other.
+    w.question_answered("main");
+    assert!(!w.is_question_open("main"));
+    let after = run_with(&mut w, t0, 400_500, 600_000, |_| false);
+    assert_eq!(hung_questions(&after).len(), 1, "{after:?}");
+}
+
+#[test]
+fn a_hung_page_question_on_screen_holds_back_the_start_up_question_of_a_reload() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    w.page_started("main", t0);
+    w.ready("main", at(t0, 100));
+    let hung = run_with(&mut w, t0, 0, 70_000, |_| false);
+    assert_eq!(hung_questions(&hung).len(), 1);
+    // The page is reloaded (by anything but the answer) and never gets ready: the open question is not joined by a second.
+    w.page_started("main", at(t0, 71_000));
+    let acts = run_with(&mut w, t0, 71_000, 300_000, |_| false);
+    assert!(
+        !acts.iter().any(|(_, a)| matches!(a, Action::AskStartup(_))),
+        "{acts:?}"
+    );
+}

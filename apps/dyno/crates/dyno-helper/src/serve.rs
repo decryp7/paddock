@@ -240,6 +240,18 @@ fn lock_folders(trust: &crate::protect::TrustGuard, paths: &HelperPaths) -> Resu
     Ok(())
 }
 
+/// Runs the self-removal with `removed` raised first: the last step of the real removal (`systemctl disable --now`, `launchctl bootout`)
+/// sends this process SIGTERM, so a `stopped` note can be written before this function would have raised it. A removal that fails left
+/// the helper's files, so the flag goes down again.
+fn remove_self_with<T>(removed: &AtomicBool, uninstall: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    removed.store(true, Ordering::SeqCst);
+    let result = uninstall();
+    if result.is_err() {
+        removed.store(false, Ordering::SeqCst);
+    }
+    result
+}
+
 /// Removes the helper after a moment (the caller of `Uninstall` gets its answer first; the removal ends with the stop of this
 /// very job).
 fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str, os_log: Option<EarlySink>) -> Arc<dyn Fn() + Send + Sync> {
@@ -255,9 +267,8 @@ fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str, os_log:
         let (paths, stop) = (paths.clone(), stop.clone());
         let spawned = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            match crate::setup::uninstall_self(os_of(paths.host)) {
-                Ok(_) => REMOVED.store(true, Ordering::SeqCst),
-                Err(e) => log::error!(error = e.as_str(); "Helper: removing itself failed"),
+            if let Err(e) = remove_self_with(&REMOVED, || crate::setup::uninstall_self(os_of(paths.host))) {
+                log::error!(error = e.as_str(); "Helper: removing itself failed");
             }
             stop.store(true, Ordering::SeqCst);
         });
@@ -330,6 +341,27 @@ fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn the_removed_flag_is_up_before_the_removal_can_stop_the_process_and_down_again_when_it_fails() {
+        let flag = AtomicBool::new(false);
+        let mut during = None;
+        let done = remove_self_with(&flag, || {
+            // The last step of the real removal (systemctl disable --now, launchctl bootout) sends this process SIGTERM: whatever
+            // runs next, `stopped` included, must already see the flag.
+            during = Some(flag.load(Ordering::SeqCst));
+            Ok(())
+        });
+        assert!(done.is_ok());
+        assert_eq!(during, Some(true), "the flag was not set while the removal ran");
+        assert!(flag.load(Ordering::SeqCst));
+        let failed = remove_self_with(&flag, || Err::<(), _>("the service manager refused".to_string()));
+        assert!(failed.is_err());
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "a removal that failed leaves the helper's files, so the stop note may be written"
+        );
+    }
 
     #[test]
     fn nothing_is_written_after_the_helper_removed_itself() {

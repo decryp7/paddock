@@ -13,7 +13,7 @@ pub struct Config {
     /// than [`Config::ready_timeout`] on purpose: a content process stopped by a limiter (App Tamer) or a machine under load at login
     /// is slow, not broken, and a question that appears on a healthy start is an annoyance.
     pub ask_timeout: Duration,
-    /// After each Keep Waiting the next wait (to ask again, or to call a page unresponsive) doubles, at most this many times.
+    /// Each question about a window (and so each Keep Waiting) doubles the next wait before it is asked about again, at most this many times.
     pub max_doublings: u8,
     /// How often the ticker looks at the windows.
     pub tick: Duration,
