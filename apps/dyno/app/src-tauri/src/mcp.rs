@@ -11,10 +11,18 @@ use dyno_core::protocol::{LiveUpdate, Reply, Request};
 use dyno_core::wol::WolView;
 use paddock_env::AppDirs;
 use paddock_jobs::time::SystemClock;
+use paddock_mcp::listener::Listener;
 use paddock_mcp::{AuditLog, Emit, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolError, ToolOutput};
 use paddock_secrets::{KeyringSecrets, MemorySecrets, Secrets};
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+/// How long a tool waits for the agent: under the tools' 10 s call limit ([`crate::mcp_readings`]), so the server never has to
+/// abandon a call that is still blocked on the link.
+pub const AGENT_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Most MCP clients connected at once.
+const MAX_CLIENTS: usize = 4;
 
 /// The longest `keep_awake` an AI client may ask for, in minutes (12 hours).
 pub const MAX_KEEP_AWAKE_MINUTES: u64 = 12 * 60;
@@ -137,10 +145,17 @@ pub fn control(
     } else {
         Arc::new(MemorySecrets::new(app_name))
     };
-    Arc::new(McpControl::new(
+    let keys = Arc::new(KeyStore::new());
+    let listener = Arc::new(Listener::new(
+        server.clone(),
+        keys.clone(),
+        paddock_mcp::listener::discovery_path(dirs.config()),
+        MAX_CLIENTS,
+    ));
+    let control = Arc::new(McpControl::new(
         server,
         log,
-        Arc::new(KeyStore::new()),
+        keys,
         Arc::new(FileSettings::new(dirs.config().join("mcp.json"))),
         secrets,
         emit,
@@ -149,7 +164,11 @@ pub fn control(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
         }),
-    ))
+    ));
+    // Serves on 127.0.0.1 while AI access is on and a key exists (ADR 0007, ADR 0032 amendment 2026-11-05); this process holds the
+    // tools (they ask the agent through the shell), so a client works while the window is closed and the app stays in the tray.
+    control.attach_listener(listener);
+    control
 }
 
 /// Every tool Dyno offers over `calls`: the power and Wake-on-LAN tools here and the reading tools of [`crate::mcp_readings`].

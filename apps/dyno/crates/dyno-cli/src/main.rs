@@ -5,6 +5,10 @@ fn main() {
     if let Some(rest) = dyno_cli::agent_args(&args) {
         std::process::exit(run_agent(rest));
     }
+    if dyno_cli::is_mcp(&args) {
+        let code = dyno_cli::run_mcp(&args, std::env::var(dyno_cli::MCP_KEY_VAR).ok(), &mut std::io::stderr().lock());
+        std::process::exit(code);
+    }
     let env = dyno_cli::Env::from_process();
     let (mut out, mut err) = (std::io::stdout().lock(), std::io::stderr().lock());
     std::process::exit(dyno_cli::run(&args, &env, &mut out, &mut err));
