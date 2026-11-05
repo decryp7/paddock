@@ -70,6 +70,8 @@ export async function runUiPhase({ log = console.error, extra = [], after = [] }
     steps.push(result('Windows: shared screenshot check on every page and dialog of the real WebView2 DOM', tour.checks, tour.evidence, `${tour.checks.length} pages and dialogs clean`));
     steps.push(await trayMenuStep(actor, { browser }).catch((e) => result('Windows: tray right-click menu', [{ ok: false, detail: e.message }])));
     steps.push(await trayCountdownStep(actor).catch((e) => result('Windows: tray menu during an idle countdown', [{ ok: false, detail: e.message }])));
+    // A native tray menu blocks the app's UI thread while it is open: make sure the page is in front and answering before the helper steps open Settings.
+    { const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id=')); await main?.bringToFront().catch(() => {}); await main?.evaluate(() => 1).catch(() => {}); }
     // Extension point: one function per wired helper reading (each `async ({ browser, actor }) => step`), run before Quit.
     for (const fn of extra) steps.push(await fn({ browser, actor }));
     steps.push(await quitViaMenu(browser));

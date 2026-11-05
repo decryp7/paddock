@@ -13,6 +13,11 @@ const ssh = (cmd, ms = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encod
 const result = makeResult;
 const items = (s) => s.split('\n').map((l) => l.split('\t')).filter((c) => c[0] && c[1]).map(([name, at]) => ({ name: name.trim(), at: at.trim().replace(',', ' ') }));
 
+/** A native popup menu blocks the app's UI thread while it is open (a later File > Settings would never open): close every level, then check nothing is left. */
+export async function closeMenus(actor) {
+  for (let i = 0; i < 3; i++) { await actor.send('key ESC').catch(() => {}); await sleep(500); }
+}
+
 async function openMenu(actor) {
   const metrics = metricsFromLog(ssh(APP_LOG_PS));
   const read = async () => dynoTrayIcons(await actor.send(TRAY_ICONS_CMD), metrics).map((i) => ({ name: i.name, at: i.at.replace(',', ' ') }));
@@ -62,7 +67,7 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   const wake = menu2.find((m) => /Wake device|Wake/i.test(m.name));
   checks.push({ ok: Boolean(wake), detail: wake ? `the menu has "${wake.name}"` : 'the menu has no Wake device entry' });
   if (wake) { await actor.send(`click ${wake.at}`); await sleep(1500); evidence.push(`Wake device submenu: ${items(await actor.send('menu')).map((m) => m.name).join(' | ')}`); }
-  await actor.send('key ESC'); await sleep(600);
+  await closeMenus(actor);
   await actor.shot('tray-menu');
   return result('Windows: tray right-click menu with the Keep awake and Wake device submenus', checks, evidence, 'both submenus are in the tray menu');
 }
@@ -86,6 +91,7 @@ export async function trayCountdownStep(actor, { idleRuleSeeded = true } = {}) {
     await actor.send(`click ${cancel.at}`); await sleep(3000);
     const after = ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String');
     checks.push({ ok: !/Counting down/.test(after), detail: !/Counting down/.test(after) ? 'Cancel in the tray stopped the countdown' : 'the countdown still runs after Cancel in the tray' });
-  } else await actor.send('key ESC');
+  } else await closeMenus(actor);
+  await closeMenus(actor);
   return result('Windows: tray menu during an idle countdown (Cancel, Snooze)', checks, evidence, 'the countdown entries are in the tray menu and Cancel works');
 }
