@@ -80,7 +80,7 @@ the `perf script` importer; `e2e/scale-*.e2e.ts` check virtualisation (DOM row c
 
 ### 2026-11-05, drawing mechanisms in Playwright's browsers (Debrief 1.2 research)
 
-- **Date, commit:** 2026-11-05, `origin/main` 87c9b8449. No product code ran: a throwaway page, not committed.
+- **Date, commit:** 2026-11-05, `origin/main` 87c9b8449. No product code ran: a spike page, [spikes/debrief-drawing](../../../spikes/debrief-drawing/README.md).
 - **Machine, load:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2. Load 14 to 20 during the run, above the threshold of about 12
   in [benchmarks.md](../../../docs/benchmarks.md): **an indication**, compare only within this block.
 - **Build:** Playwright 1.64.1 browsers, headless: WebKit 27.2; Chromium 156.0.8078.4 (`channel: 'chromium'`, Metal ANGLE);
@@ -89,7 +89,9 @@ the `perf script` importer; `e2e/scale-*.e2e.ts` check virtualisation (DOM row c
 - **Corpus, generator:** invented geometry from a fixed-seed generator: 1.5 px bars in 40 lanes of 22 px over 1600x900 at
   `deviceScaleFactor` 2, shifted every frame so nothing is cached. JSON shapes follow `Timeline.histogram` and `FlameRect`.
   Served from 127.0.0.1 with Debrief's CSP as a header, `style-src` tightened to `'self'`.
-- **Command:** `PLOCK_LANE=fix plock run draw-research -- node run.mjs` (harness in the session's scratch folder).
+- **Command:** `cd spikes/debrief-drawing && npm ci --ignore-scripts && PLOCK_LANE=fix plock run draw-research -- node run.mjs`. These
+  numbers came from the same pages before the move into the repo; the move changed only where the libraries are served from and where
+  results are written, and added `--caps-only`. After the move, only the probe was re-run, not the ladders.
 - **Runs:** one per size, 60 frames or 2.5 s, stopping a ladder after the first rAF p95 over 50 ms. Decoding: median of 5 or 7.
 - **Probes (ER-33):** baseline rAF with no work ticked at 16.7 ms on Chromium, 17 ms on WebKit; main-thread Canvas 2D runs read
   back non-white pixels. Worker and chart runs did not check pixels. Headless rAF may not include composition.
