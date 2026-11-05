@@ -671,7 +671,11 @@ impl FakeServiceManager {
     fn new(dirs: Dirs, installed: bool, supervises: bool) -> Arc<FakeServiceManager> {
         Arc::new(FakeServiceManager {
             dirs,
-            state: Mutex::new(ServiceState { installed, supervises }),
+            state: Mutex::new(ServiceState {
+                installed,
+                supervises,
+                pending: false,
+            }),
             agent: Mutex::new(None),
             refused: AtomicUsize::new(0),
             done: std::sync::atomic::AtomicBool::new(false),
@@ -685,7 +689,16 @@ impl FakeServiceManager {
     }
 
     fn set(&self, installed: bool, supervises: bool) {
-        *lock(&self.state) = ServiceState { installed, supervises };
+        *lock(&self.state) = ServiceState {
+            installed,
+            supervises,
+            pending: false,
+        };
+    }
+
+    /// A registration is under way (or over): the job is absent and the service's agent will come.
+    fn set_pending(&self, pending: bool) {
+        lock(&self.state).pending = pending;
     }
 
     /// Runs its job: starts the agent, again and again while it is refused; when the agent exits (asked to), its
@@ -756,6 +769,66 @@ fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
     assert!(!r.link.quit(), "the service's agent stays");
     handle.join().unwrap();
     assert!(manager.agent_running());
+    manager.stop();
+}
+
+/// Production-like counts, shrunk so that a few dozen looks outlast the old fallback (idle rechecks of the service) many times.
+fn pending_tuning() -> super::machine::Tuning {
+    super::machine::Tuning {
+        service_recheck: 5,
+        idle_rechecks: 2,
+        pending_recheck: 2,
+        ..patient()
+    }
+}
+
+#[test]
+fn a_pending_registration_is_waited_for_and_the_services_agent_finds_the_data_folder_free() {
+    let r = rig_with(false, pending_tuning());
+    let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+    manager.set_pending(true);
+    r.link.set_service_probe(manager.probe());
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "waiting for the registration", |s| {
+        s.phase == Phase::WaitingForService && s.stall.is_some_and(|(_, k)| k == super::Stall::RegisteringService)
+    });
+    // Many times the old fallback (two idle rechecks of five looks): the app starts nothing.
+    wait_state(&r.link, "the old fallback has passed", |s| s.looks >= 60);
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        0,
+        "the app started an agent while the service was registering"
+    );
+    // The registration ends with the service: its agent starts, and finds the folder free (an exit with code 3 is refused()).
+    manager.set(true, true);
+    manager.start_job();
+    running(&r.link, &r.statuses);
+    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 0);
+    assert!(!r.link.started_by_this_app());
+    assert_eq!(
+        manager.refused.load(Ordering::SeqCst),
+        0,
+        "the service's agent found the data folder locked"
+    );
+    assert!(!r.link.quit(), "the service's agent stays");
+    handle.join().unwrap();
+    manager.stop();
+}
+
+#[test]
+fn a_pending_registration_that_ends_with_no_service_falls_back_to_the_apps_own_agent() {
+    let r = rig_with(false, pending_tuning());
+    let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+    manager.set_pending(true);
+    r.link.set_service_probe(manager.probe());
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "waiting for the registration", |s| s.phase == Phase::WaitingForService);
+    manager.set_pending(false); // refused, switched off or used up: nothing is coming
+    running(&r.link, &r.statuses);
+    assert!(r.link.started_by_this_app(), "the app waited for a service that is not coming");
+    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+    r.link.quit();
+    handle.join().unwrap();
     manager.stop();
 }
 

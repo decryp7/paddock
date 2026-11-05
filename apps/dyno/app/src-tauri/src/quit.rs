@@ -366,14 +366,17 @@ mod tests {
     const SUPERVISED: ServiceState = ServiceState {
         installed: true,
         supervises: true,
+        pending: false,
     };
     const STOPPED_SERVICE: ServiceState = ServiceState {
         installed: true,
         supervises: false,
+        pending: false,
     };
     const NONE: ServiceState = ServiceState {
         installed: false,
         supervises: false,
+        pending: false,
     };
     const FAST: StopTimings = StopTimings {
         gone_wait: Duration::from_secs(2),

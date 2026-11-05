@@ -55,6 +55,13 @@ pub fn stall_problem(stall: Stall) -> Cause {
                  or the dyno-agent user service (Linux).",
             )
             .code("dy.agent.waiting-service"),
+        Stall::RegisteringService => Cause::new("Waiting for the background service.")
+            .hint(
+                "Dyno is setting it up and starts no agent of its own until that ends, which can take a couple of minutes. If macOS asks, \
+                 allow Dyno in System Settings, General, Login Items. Choose Retry to look again; if the service does not come, Dyno starts \
+                 its own agent by itself.",
+            )
+            .code("dy.agent.registering-service"),
         Stall::AgentNotAnswering => Cause::new("The Dyno agent is still starting.")
             .hint("A slow disk or a busy computer can take a minute. If it stays, choose Retry to end it and start it again.")
             .code("dy.agent.starting"),
@@ -257,6 +264,7 @@ mod tests {
     fn a_long_wait_is_shown_with_its_cause_and_a_way_out_but_is_not_an_error_state_of_its_own() {
         for (stall, code, word) in [
             (Stall::WaitingForService, "dy.agent.waiting-service", "login"),
+            (Stall::RegisteringService, "dy.agent.registering-service", "background service"),
             (Stall::AgentNotAnswering, "dy.agent.starting", "Retry"),
             (Stall::OtherAgentHolds, "dy.agent.other-holds", "data folder"),
             (Stall::ServiceNotAnswering, "dy.agent.system-silent", "system"),

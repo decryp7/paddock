@@ -896,6 +896,9 @@
       <trans-unit id="pd.health.state.refused" datatype="html">
         <source>refused by the system</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.registering-service" datatype="html">
+        <source>waiting for the background service</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.repairing" datatype="html">
         <source>repairing</source>
       </trans-unit>
