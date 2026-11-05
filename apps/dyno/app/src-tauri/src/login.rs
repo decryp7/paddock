@@ -738,10 +738,20 @@ mod mac {
         /// runs it (an item switched off or a list that cannot be read is left alone; a version change goes through the full repair;
         /// an enabled item of this version is registered again without removal, which macOS would announce as a new item).
         /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
+        ///
+        /// This runs before the link's first look, so nothing else is shown while it works: it does not wait for the agent to
+        /// answer (`install_timings`). A registration that was made and has not answered yet is `pending`, which the link
+        /// waits for in a labelled phase ("Waiting for the background service") instead of a silent wait of up to 120 s here.
         fn resume(&mut self) -> Result<bool, String> {
-            quiet_manager()?
-                .resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}")))
-                .map_err(|e| registration_words(&e, false))
+            let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
+            match m.resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
+                Ok(held) => Ok(held),
+                Err(_) if m.pending() => {
+                    crate::logging::info("agent service: registered again; the link waits for it to answer");
+                    Ok(true)
+                }
+                Err(e) => Err(registration_words(&e, false)),
+            }
         }
     }
 }
@@ -788,6 +798,7 @@ pub fn service_probe() -> crate::link::ServiceProbe {
         crate::link::ServiceState {
             installed: service.installed(),
             supervises: service.supervises(),
+            pending: service.pending(),
         }
     })
 }
