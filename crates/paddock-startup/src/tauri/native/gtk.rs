@@ -33,8 +33,9 @@ pub fn show<R: Runtime>(
         gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
         gtk::MessageType::Warning,
         gtk::ButtonsType::None,
-        &prompt.message,
+        &prompt.title,
     );
+    dialog.set_secondary_text(Some(&prompt.message));
     dialog.set_title(&prompt.title);
     for (i, button) in prompt.buttons.iter().enumerate() {
         dialog.add_button(button, gtk::ResponseType::Other(i as u16));

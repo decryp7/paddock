@@ -21,12 +21,17 @@ impl<T> Open<T> {
         self.0.borrow_mut().insert(label.to_string(), (seq, dialog));
     }
 
-    /// Runs `f` on the dialog of question `seq` about `label`; `None` when it is another question's or gone.
-    pub fn with<R>(&self, label: &str, seq: u64, f: impl FnOnce(&T) -> R) -> Option<R> {
-        match self.0.borrow().get(label) {
-            Some((s, d)) if *s == seq => Some(f(d)),
-            _ => None,
-        }
+    /// Runs `f` on the dialog of question `seq` about `label`; `None` when it is another question's or gone. `f` closes the dialog,
+    /// which answers it at once and so [`Open::forget`]s it again in the same call: the registry is not borrowed while `f` runs.
+    pub fn with<R>(&self, label: &str, seq: u64, f: impl FnOnce(&T) -> R) -> Option<R>
+    where
+        T: Clone,
+    {
+        let dialog = match self.0.borrow().get(label) {
+            Some((s, d)) if *s == seq => d.clone(),
+            _ => return None,
+        };
+        Some(f(&dialog))
     }
 
     /// Forgets the dialog of question `seq` about `label` (it was answered or closed). Another question's stays.
@@ -78,6 +83,20 @@ mod tests {
         assert_eq!(open.with("main", 5, |d| *d), Some("newer"));
         open.forget("main", 5);
         assert_eq!(open.with("main", 5, |d| *d), None);
+    }
+
+    #[test]
+    fn the_registry_is_not_borrowed_while_the_dialog_is_closed() {
+        // Closing a dialog answers it at once, and the answer forgets it again: on the same thread, inside the closing call.
+        let open = Open::default();
+        open.put("main", 3, "alert");
+        let closed = open.with("main", 3, |d| {
+            open.forget("main", 3);
+            *d
+        });
+        assert_eq!(closed, Some("alert"));
+        assert_eq!(open.with("main", 3, |d| *d), None, "forgotten meanwhile");
+        open.forget("main", 3); // already gone: harmless
     }
 
     #[test]

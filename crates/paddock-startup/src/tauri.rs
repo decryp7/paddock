@@ -40,6 +40,7 @@ pub const DIALOG_BASE: &[&str] = &["window_ready", "window_boot_error", "window_
 
 /// How many times a question's dialog is looked for to take it down, and how long between tries (a dialog may not be up yet).
 pub(crate) const DISMISS_TRIES: u32 = 10;
+pub(crate) const DISMISS_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 pub(crate) const DISMISS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Called with `true` when the watchdog gives up on a window's page (start-up question, or unresponsive after ready) and
@@ -452,7 +453,7 @@ impl<R: Runtime> Startup<R> {
                 if queued.is_err() {
                     break;
                 }
-                if rx.recv().unwrap_or(false) {
+                if rx.recv_timeout(DISMISS_WAIT).unwrap_or(false) {
                     log::info!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label}: dialog taken down");
                     if let Some(s) = app.try_state::<Startup<R>>() {
                         s.with(|w| w.question_dismissed(&label, seq));

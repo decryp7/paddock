@@ -56,8 +56,9 @@ pub fn show<R: Runtime>(
             answer(choice);
         }
     });
+    // Kept before the sheet starts: the handler forgets it, and must not run before it is kept.
+    OPEN.with(|o| o.put(label, seq, alert.clone()));
     alert.beginSheetModalForWindow_completionHandler(&parent, Some(&done));
-    OPEN.with(|o| o.put(label, seq, alert));
 }
 
 /// Ends question `seq`'s sheet of window `label` when it is this crate's alert and is the sheet attached to the window now. An alert
