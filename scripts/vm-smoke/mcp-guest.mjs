@@ -46,7 +46,7 @@ export function writeSettingsCommand(os, dir, json) {
 /** Where `dyno mcp` runs: stdin from `input`, the key only in the environment (never an argument). */
 export function mcpCommand(os, key, input, dyno) {
   if (os === 'windows') return `$env:DYNO_MCP_KEY = ${psq(key)}; ${psq(input)} | & ${psq(dyno)} mcp 2>&1 | Out-String; "EXIT=$LASTEXITCODE"`;
-  return `printf %s ${sq(input)} | DYNO_MCP_KEY=${sq(key)} timeout 30 ${sq(dyno)} mcp 2>&1; echo "EXIT=$?"`;
+  return `printf %s ${sq(input)} | DYNO_MCP_KEY=${sq(key)} perl -e 'alarm 30; exec @ARGV' ${sq(dyno)} mcp 2>&1; echo "EXIT=$?"`;
 }
 
 /** `... EXIT=<n>` to { code, out }. */

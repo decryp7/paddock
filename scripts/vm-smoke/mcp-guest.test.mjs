@@ -21,6 +21,7 @@ test('credential-store commands name service Dyno and account mcp:keys on every 
   assert.match(storeEntryCommand('windows', entries), /FromBase64String/);
   assert.doesNotMatch(storeEntryCommand('windows', entries), /entries|\[\{"id"/);
   assert.match(mcpCommand('linux', key, '{}', '/usr/bin/dyno'), /DYNO_MCP_KEY='pmk_/);
+  assert.doesNotMatch(mcpCommand('macos', key, '{}', '/x/dyno'), /\btimeout\b/); // macOS has no timeout(1)
   assert.doesNotMatch(mcpCommand('linux', key, '{}', '/usr/bin/dyno'), /dyno' mcp pmk_/);
   assert.match(writeSettingsCommand('macos', "/Users/a b/Library", '{}'), /> '\/Users\/a b\/Library\/mcp\.json'/);
   assert.deepEqual(splitExit('hello\nEXIT=1\n'), { code: 1, out: 'hello' });
