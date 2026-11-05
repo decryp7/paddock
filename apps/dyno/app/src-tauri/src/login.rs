@@ -340,7 +340,14 @@ impl LinuxService {
     #[cfg(target_os = "linux")]
     pub fn real() -> LinuxService {
         LinuxService::with(Box::new(|timings| {
-            dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)
+            let manager = dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)?;
+            // The app's own decisions are inputs to the plan, as on macOS (ADR 0056): the user's switch, the first run, the place
+            // the app runs from.
+            Ok(manager.with_app_state(
+                || wanted_setting(&dyno_agent::paths::Dirs::current().settings()),
+                first_run_done,
+                || current_location().is_ok(),
+            ))
         }))
     }
 
@@ -381,8 +388,15 @@ impl AgentService for LinuxService {
 
     /// After an update (or a moved program) the unit is written again once; what the user disabled is left alone and nothing is
     /// registered that the user never turned on.
-    fn repair(&mut self, _agent_answers: AnswerFn) -> Result<bool, String> {
-        dyno_agent::service::linux::ensure(&mut self.quiet()?, true)
+    fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String> {
+        // The app's own agent keeps a refused unit from being replaced while the app measures; it never settles anything.
+        let mut manager = self.quiet()?.with_cover(move || agent_answers());
+        dyno_agent::service::linux::ensure(&mut manager, true)
+    }
+
+    /// Whether a registration this app made is being waited for (the link neither starts nor retires an agent meanwhile).
+    fn pending(&mut self) -> bool {
+        self.quiet().is_ok_and(|mut m| m.pending())
     }
 
     /// The user unit, while systemd runs it (the registration is not touched by the stop).
