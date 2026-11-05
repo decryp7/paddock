@@ -78,6 +78,44 @@ the `perf script` importer; `e2e/scale-*.e2e.ts` check virtualisation (DOM row c
 
 ## Results history: engine, store and memory (newest first)
 
+### 2026-11-05, drawing mechanisms in Playwright's browsers (Debrief 1.2 research)
+
+- **Date, commit:** 2026-11-05, `origin/main` 87c9b8449. No product code ran: a throwaway page, not committed.
+- **Machine, load:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2. Load 14 to 20 during the run, above the threshold of about 12
+  in [benchmarks.md](../../../docs/benchmarks.md): **an indication**, compare only within this block.
+- **Build:** Playwright 1.64.1 browsers, headless: WebKit 27.2; Chromium 156.0.8078.4 (`channel: 'chromium'`, Metal ANGLE);
+  headless shell of the same version (SwiftShader, with Playwright's own `--enable-unsafe-swiftshader`). **Not** WKWebView,
+  WebKitGTK or WebView2. uPlot 1.6.32, ECharts 6.1.0 full bundle.
+- **Corpus, generator:** invented geometry from a fixed-seed generator: 1.5 px bars in 40 lanes of 22 px over 1600x900 at
+  `deviceScaleFactor` 2, shifted every frame so nothing is cached. JSON shapes follow `Timeline.histogram` and `FlameRect`.
+  Served from 127.0.0.1 with Debrief's CSP as a header, `style-src` tightened to `'self'`.
+- **Command:** `PLOCK_LANE=fix plock run draw-research -- node run.mjs` (harness in the session's scratch folder).
+- **Runs:** one per size, 60 frames or 2.5 s, stopping a ladder after the first rAF p95 over 50 ms. Decoding: median of 5 or 7.
+- **Probes (ER-33):** baseline rAF with no work ticked at 16.7 ms on Chromium, 17 ms on WebKit; main-thread Canvas 2D runs read
+  back non-white pixels. Worker and chart runs did not check pixels. Headless rAF may not include composition.
+- **Budget, verdict:** the frame budget of ADR 0018 is not yet a number; these do not test one.
+- **Numbers:** rAF p50/p95 ms at the last size within a frame, and at the next size.
+
+  | Mechanism | WebKit | Chromium Metal | Chromium software |
+  |---|---|---|---|
+  | `fillRect` grouped by colour | 50k 17/18; 100k 22/23 | 50k 16.7/16.7; 100k 16.7/33.3 | 25k 16.7/16.8; 50k 16.7/33.4 |
+  | One path per colour | 25k 17/18; 50k 20/24 | 200k 16.7/16.8; 400k 16.7/33.4 | 10k 16.7/16.8; 25k 50/66.7 |
+  | `fillText` | 1.6k 17/18; 3.2k 28/30 | 6.4k 16.7/16.8 (ladder end) | 3.2k 16.7/16.7; 6.4k 16.7/33.4 |
+  | Worker, OffscreenCanvas | 50k 15/16; 100k 23/25 | 50k 16.7/16.8; 100k 16.7/33.3 | 25k 16.7/16.7; 50k 16.7/33.4 |
+  | WebGL2 instancing | 1.6M 17/18; 3.2M 17/26 | 1.6M 16.7/16.8; 3.2M 33.2/33.4 | 10k 200/1150 (first step) |
+  | DOM divs with transforms | 5k 17/18; 10k 30/32 | 10k 16.7/16.7; 20k 33.3/50 | 10k 16.7/16.8; 20k 33.3/50 |
+  | SVG lanes, 2000-bucket path each frame | 10 17/18; 20 20/27 | 40 16.7/16.8; 80 16.7/33.4 | 5 16.7/16.7; 10 33.3/33.4 |
+
+  Rezoom 1M points, mean of 5, ms, WebKit / Metal / software: uPlot 15 / 17 / 91; ECharts `lttb` 15 / 17 / 61; ECharts unsampled
+  80 / 100 / 33,301. Bundle gzipped: uPlot 22 KB, ECharts full 369 KB.
+
+  `JSON.parse`, ms, WebKit / Metal / software: 480,000 small counts (1.5 MB) 4 / 3.6 / 4.3; 200,000 `FlameRect` (24.6 MB) 19 / 21.6 /
+  23.7; 1M time and value points (27.7 MB) 34 / 28.2 / 29.7. A typed view of the same data: under 0.1 ms. Binary search over 1M:
+  70 to 102 ns per lookup.
+- **Memory measure:** JS heap only, Chromium with `gc()`: 4.2 MB for the counts, 14.4 MB for the rectangles. **Not** physical
+  footprint (rule 26), so not usable as a budget.
+- **Notes:** quoted by [the drawing note](../../../docs/research/2026-11-debrief-drawing.md). Nothing here crossed Tauri's IPC.
+
 Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' builds. "Windows VM" is the shared
 24-core development VM used until 2026-10-22. Every run below was on a shared, loaded machine unless it says otherwise.
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
