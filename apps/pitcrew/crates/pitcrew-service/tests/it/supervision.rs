@@ -961,6 +961,37 @@ fn a_stop_outside_the_runners_tree_is_refused() {
     end_leftover(row.pid);
 }
 
+/// The graceful stop goes to the runner itself (`paddock_proc::ask`, SIGTERM; it was SIGTERM to the runner's whole process group), and
+/// what a job started is not left behind when the stop deadline passes: `kill_tree` ends the runner and its job children by identity.
+#[cfg(unix)]
+#[test]
+fn a_graceful_stop_reaches_the_runner_and_kill_tree_ends_the_job_children_after_the_deadline() {
+    use paddock_proc::ProcessId;
+    let mut h = Harness::new("treekill", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
+    h.until_job_processes_seen();
+    let list = h.processes();
+    let runner = list.runner_pid.unwrap();
+    let child = list.entries.iter().find(|e| e.name == "sleep").expect("the job's child").pid;
+    assert!(alive(runner) && alive(child));
+    let runner_id = ProcessId::of(runner).unwrap();
+    // The request reaches the runner, which logs it and waits for its held job: it does not end by itself.
+    pitcrew_service::launch::graceful_stop(runner_id, None).unwrap();
+    h.until("the runner got the stop request", Duration::ZERO, |h| {
+        h.log().contains("shutdown initiated")
+    });
+    assert!(alive(runner), "the held job keeps the runner alive");
+    assert!(alive(child), "the request was not sent to the job's children");
+    // The deadline passed: the whole tree ends, the job's child with the runner.
+    pitcrew_service::launch::kill_tree(runner_id);
+    let end = Instant::now() + Duration::from_secs(20);
+    while (alive(runner) || alive(child)) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!alive(runner), "the runner ended");
+    assert!(!alive(child), "the job's child was left behind");
+    h.finish();
+}
+
 fn write_config(h: &Harness, text: &str) {
     std::fs::write(h.runner_dir.join("config.yaml"), text).unwrap();
 }

@@ -264,7 +264,9 @@ pub fn set_stop_helper(exe: PathBuf) {
 }
 
 /// Asks the runner `id` to stop, if its pid still belongs to it. On Unix it is SIGTERM to the runner itself
-/// ([`paddock_proc::ask`]): the runner stops polling and finishes a running job. On Windows `session` is the user session it
+/// ([`paddock_proc::ask`]): the runner stops polling and finishes a running job. Until the waiver sweep it was SIGTERM to the
+/// runner's whole process group; `paddock_proc` has no identity-checked group-ask yet (open question for after the Dyno tag), and what a
+/// job started is ended by [`kill_tree`] when the stop deadline passes (tested in `tests/it/supervision.rs`). On Windows `session` is the user session it
 /// runs in, if any.
 pub fn graceful_stop(id: ProcessId, session: Option<u32>) -> Result<(), String> {
     #[cfg(unix)]
