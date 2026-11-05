@@ -788,7 +788,7 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
     let configured: Vec<_> = report.statuses.iter().filter(|s| s.state != BackupState::NotConfigured).collect();
     // The verdict of the tool that most needs attention: stale, then no backup yet, then healthy.
     let rank = |s: BackupState| match s {
-        BackupState::Failed | BackupState::Stale => 3,
+        BackupState::Stale => 3,
         BackupState::NoBackupYet => 2,
         BackupState::Healthy => 1,
         _ => 0,
@@ -839,8 +839,7 @@ fn backup_value(s: &crate::backup::BackupStatus, tools: usize) -> BackupValue {
     BackupValue {
         name: s.name.clone(),
         state: match s.state {
-            // A failed backup is not up to date either; the widget shows the status's own sentence for the reason.
-            BackupState::Stale | BackupState::Failed => BackupVerdict::Stale,
+            BackupState::Stale => BackupVerdict::Stale,
             BackupState::NoBackupYet => BackupVerdict::NoBackupYet,
             _ => BackupVerdict::Healthy,
         },

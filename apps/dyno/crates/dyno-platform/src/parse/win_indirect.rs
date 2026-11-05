@@ -276,6 +276,18 @@ mod tests {
     }
 
     #[test]
+    fn a_path_in_the_package_name_never_shows_and_a_remote_file_is_never_opened() {
+        let with_path = r"@{C:\Program Files\WindowsApps\Contoso.Notes_1.2_x64__abc\x?ms-resource://Contoso.Notes/Resources/N}";
+        assert_eq!(fallback(with_path), "Contoso Notes (app rule)");
+        assert_eq!(fallback("@{my rule}"), "Windows rule", "not a package string: no package name to show");
+        for unc in [r"@\\fileserver\share\x.dll,-12", "@//fileserver/share/x.dll,-12"] {
+            let (n, c, _) = names(Some("from the network"));
+            assert_eq!(n.name(unc, &mut n.budget()), "Windows rule (x 12)", "{unc}");
+            assert_eq!(c.0.load(Ordering::SeqCst), 0, "the OS is never asked to open {unc}");
+        }
+    }
+
+    #[test]
     fn a_full_cache_is_cleared_not_grown() {
         let (n, _, _) = names(Some("ok"));
         for i in 0..MAX_CACHED + 3 {

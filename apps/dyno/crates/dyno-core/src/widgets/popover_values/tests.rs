@@ -416,27 +416,6 @@ fn backup_shows_the_tool_that_needs_attention_most() {
 }
 
 #[test]
-fn a_failed_backup_outranks_a_healthy_one_in_the_widget() {
-    let r = backup_report(
-        json!([
-            status("Time Machine", "healthy", Some(NOW.0 - HOUR)),
-            status("File History", "failed", None)
-        ]),
-        true,
-        false,
-    );
-    let PopoverValue::BackupHealth(b) = value(run(&PopoverWidget::BackupHealth, |i| {
-        i.backup = Source::Ready(BackupInput { report: &r, job: None })
-    })) else {
-        panic!()
-    };
-    assert_eq!(
-        (b.name.as_str(), b.state, b.summary.as_str()),
-        ("File History", BackupVerdict::Stale, "File History failed")
-    );
-}
-
-#[test]
 fn no_backup_set_up_is_an_empty_with_the_setup_action() {
     for r in [
         backup_report(json!([]), true, false),

@@ -8,7 +8,6 @@ export const BACKUP_STATE_LABEL: Record<BackupState, string> = {
   healthy: 'Healthy',
   stale: 'Out of date',
   noBackupYet: 'No backup yet',
-  failed: 'Backup failed',
   notConfigured: 'Not set up',
   cannotCheck: 'Could not check',
 };
@@ -16,7 +15,7 @@ export const BACKUP_STATE_LABEL: Record<BackupState, string> = {
 export type DotTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export function stateTone(state: BackupState): DotTone {
-  return state === 'healthy' ? 'ok' : state === 'stale' || state === 'noBackupYet' || state === 'failed' ? 'bad' : state === 'cannotCheck' ? 'warn' : 'muted';
+  return state === 'healthy' ? 'ok' : state === 'stale' || state === 'noBackupYet' ? 'bad' : state === 'cannotCheck' ? 'warn' : 'muted';
 }
 
 /** The tools the settings can override, in the order the engine lists them. */
@@ -34,17 +33,14 @@ export const OVERRIDABLE: readonly BackupTool[] = ['restic', 'borg', 'duplicati'
 
 /** Statuses that need a look, worst first: out of date or never run, then unreadable, then not set up. */
 export function needsAttention(statuses: readonly BackupStatus[]): BackupStatus[] {
-  return statuses.filter((s) => s.state === 'stale' || s.state === 'noBackupYet' || s.state === 'failed' || s.state === 'cannotCheck');
+  return statuses.filter((s) => s.state === 'stale' || s.state === 'noBackupYet' || s.state === 'cannotCheck');
 }
 
 /** The one sentence at the top of the page. */
 export function heroText(statuses: readonly BackupStatus[]): string {
   if (statuses.length === 0) return 'No backup tool found';
-  const stale = statuses.filter((s) => s.state === 'stale' || s.state === 'noBackupYet' || s.state === 'failed');
-  if (stale.length === 1) {
-    const only = stale[0]!;
-    return only.state === 'stale' ? `${only.name} backup is out of date` : only.state === 'failed' ? `${only.name} backup failed` : `${only.name} has not made a backup yet`;
-  }
+  const stale = statuses.filter((s) => s.state === 'stale' || s.state === 'noBackupYet');
+  if (stale.length === 1) return stale[0]!.state === 'stale' ? `${stale[0]!.name} backup is out of date` : `${stale[0]!.name} has not made a backup yet`;
   if (stale.length > 1) return `${stale.length} backups need attention`;
   const unreadable = statuses.filter((s) => s.state === 'cannotCheck');
   if (unreadable.length > 0) return unreadable.length === 1 ? `Dyno could not check ${unreadable[0]!.name}` : `Dyno could not check ${unreadable.length} backup tools`;
@@ -53,7 +49,7 @@ export function heroText(statuses: readonly BackupStatus[]): string {
 
 /** The tone of the hero sentence: calm when healthy. */
 export function heroTone(statuses: readonly BackupStatus[]): DotTone {
-  if (statuses.some((s) => s.state === 'stale' || s.state === 'noBackupYet' || s.state === 'failed')) return 'bad';
+  if (statuses.some((s) => s.state === 'stale' || s.state === 'noBackupYet')) return 'bad';
   if (statuses.some((s) => s.state === 'cannotCheck')) return 'warn';
   return 'muted';
 }

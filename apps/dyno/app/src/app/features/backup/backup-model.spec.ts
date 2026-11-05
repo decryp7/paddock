@@ -1,6 +1,5 @@
 import type { BackupSettings, BackupStatus } from '../../core/api.types';
 import {
-  BACKUP_STATE_LABEL,
   BACKUP_TOOLS,
   OVERRIDABLE,
   checkedText,
@@ -27,8 +26,6 @@ describe('backup model', () => {
     expect(heroText([st('timeMachine', 'healthy'), st('restic', 'stale', 'Restic')])).toBe('Restic backup is out of date');
     expect(heroText([st('restic', 'noBackupYet', 'restic')])).toBe('restic has not made a backup yet');
     expect(heroText([st('restic', 'stale'), st('borg', 'noBackupYet')])).toBe('2 backups need attention');
-    expect(heroText([st('fileHistory', 'failed', 'File History')])).toBe('File History backup failed');
-    expect(heroText([st('fileHistory', 'failed'), st('restic', 'stale')])).toBe('2 backups need attention');
     expect(heroText([st('timeMachine', 'healthy'), st('borg', 'cannotCheck', 'BorgBackup')])).toBe('Dyno could not check BorgBackup');
     expect(heroText([st('duplicati', 'cannotCheck'), st('borg', 'cannotCheck')])).toBe('Dyno could not check 2 backup tools');
     expect(heroText([st('duplicati', 'notConfigured')])).toBe('No backup is set up yet');
@@ -38,10 +35,6 @@ describe('backup model', () => {
     expect(stateTone('healthy')).toBe('ok');
     expect(stateTone('stale')).toBe('bad');
     expect(stateTone('noBackupYet')).toBe('bad');
-    expect(stateTone('failed')).toBe('bad');
-    expect(BACKUP_STATE_LABEL.failed).toBe('Backup failed');
-    expect(heroTone([st('fileHistory', 'failed')])).toBe('bad');
-    expect(needsAttention([st('fileHistory', 'failed')])).toHaveLength(1);
     expect(stateTone('cannotCheck')).toBe('warn');
     expect(stateTone('notConfigured')).toBe('muted');
     expect(heroTone([st('restic', 'stale')])).toBe('bad');
