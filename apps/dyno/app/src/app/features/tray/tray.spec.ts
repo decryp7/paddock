@@ -47,11 +47,15 @@ describe('dy-tray', () => {
     const viewport = f.debugElement.query(By.directive(CdkVirtualScrollViewport)).componentInstance as CdkVirtualScrollViewport;
     expect(viewport.getDataLength()).toBe(200);
     // The engine's bound cuts the list, and the popover says so honestly, with the way to the full page.
-    expect(text).toContain('Showing the latest 200 of 205.');
+    expect(text).toContain('Showing the 200 most severe of 205.');
     expect([...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Open alarms')).toBe(true);
     const volumes = el.querySelector<HTMLElement>('ul[aria-label="Volumes"]')!;
     expect(volumes.getAttribute('tabindex')).toBe('0');
     expect(volumes.querySelectorAll('li')).toHaveLength(30);
+    // The virtual rows say where they are in the whole list.
+    const first = alarms.querySelector('[role="listitem"]')!;
+    expect(first.getAttribute('aria-setsize')).toBe('200');
+    expect(first.getAttribute('aria-posinset')).toBe('1');
   });
 
   it('follows a change of the layout made elsewhere, keeping the engine order', async () => {

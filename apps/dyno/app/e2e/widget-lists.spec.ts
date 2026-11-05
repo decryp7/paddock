@@ -36,6 +36,15 @@ async function wheelToEnd(page: Page, list: Locator, onStep?: () => Promise<void
   expect(await atEnd(list)).toBe(true);
 }
 
+/** Whether the rows reach the bottom of the list's viewport: a viewport the CDK did not measure again leaves blank space below its last row. */
+async function drawnToBottom(list: Locator): Promise<boolean> {
+  return list.evaluate((e) => {
+    const view = e.getBoundingClientRect();
+    const rows = [...e.querySelectorAll('[role="listitem"]')].map((r) => r.getBoundingClientRect());
+    return rows.length > 0 && Math.max(...rows.map((r) => r.bottom)) >= view.bottom - 1;
+  });
+}
+
 async function openDashboard(page: Page, width = 900, height = 700): Promise<void> {
   await page.setViewportSize({ width, height });
   await page.goto(DASHBOARD);
@@ -59,8 +68,13 @@ test.describe('widget lists on the dashboard at 900 px', () => {
     expect(await list.evaluate((e) => e.scrollHeight - e.clientHeight)).toBeGreaterThan(200);
     // Virtual: far fewer rows in the page than entries.
     expect(await page.locator('dy-events-feed .row').count()).toBeLessThan(40);
+    // Virtual rows say where they are in the whole list.
+    const total = Number(await list.locator('[role="listitem"]').first().getAttribute('aria-setsize'));
+    expect(total).toBeGreaterThanOrEqual(50);
+    expect(await list.locator('[role="listitem"]').first().getAttribute('aria-posinset')).toBe('1');
     await wheelToEnd(page, list);
     await expect(list.getByText('Dyno started')).toBeVisible();
+    expect(await list.locator('[role="listitem"]').last().getAttribute('aria-posinset')).toBe(String(total));
   });
 
   test('the wheel scrolls the list under the pointer and, at its end, passes on to the dashboard', async ({ page }) => {
@@ -126,6 +140,46 @@ test.describe('widget lists on the dashboard at 900 px', () => {
   });
 });
 
+test.describe('the viewport follows its size', () => {
+  test('a widget resized by its grip draws rows to the new bottom', async ({ page }) => {
+    // Tall, so the widget can grow by more than the rows the CDK draws beyond the old edge.
+    await openDashboard(page, 1280, 1500);
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    await expect(page.getByText('Editing layout')).toBeVisible();
+    const list = page.locator('dy-events-feed cdk-virtual-scroll-viewport');
+    await centre(page, list);
+    expect(await drawnToBottom(list)).toBe(true);
+    const before = (await list.boundingBox())!.height;
+    const grip = page.locator('[data-pd-cell]', { has: page.locator('dy-events-feed') }).locator('.pd-wg-h--se');
+    const g = (await grip.boundingBox())!;
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 40, { steps: 4 });
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 320, { steps: 16 });
+    await page.mouse.up();
+    await expect.poll(async () => (await list.boundingBox())!.height, { timeout: 15_000 }).toBeGreaterThan(before + 150);
+    await expect.poll(() => drawnToBottom(list), { timeout: 15_000 }).toBe(true);
+  });
+
+  test('events that arrive after the first draw fill the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/?latency=500&lists=long#/');
+    const list = page.locator('dy-events-feed cdk-virtual-scroll-viewport');
+    await expect(list).toBeAttached({ timeout: 45_000 });
+    await expect.poll(() => list.evaluate((e) => e.querySelectorAll('[role="listitem"]').length), { timeout: 30_000 }).toBeGreaterThan(3);
+    await centre(page, list);
+    await expect.poll(() => drawnToBottom(list), { timeout: 15_000 }).toBe(true);
+  });
+
+  test('the popup alarm list fills its viewport when the real rows replace the skeleton', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.goto('/?latency=500&lists=long#/tray');
+    const list = page.getByRole('list', { name: 'Active alarms' });
+    await expect.poll(async () => (await list.boundingBox())?.height ?? 0, { timeout: 30_000 }).toBeGreaterThan(200);
+    await expect.poll(() => drawnToBottom(list), { timeout: 15_000 }).toBe(true);
+  });
+});
+
 test.describe('widget lists in the tray popover', () => {
   test('Active alarms scrolls inside a viewport of fixed height, reaches the last alarm, and says what the engine cut', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 640 });
@@ -140,7 +194,7 @@ test.describe('widget lists in the tray popover', () => {
     await expect(list.getByText('Invented alarm 200')).toBeVisible();
     // The popover did not grow while the list scrolled.
     expect(await page.locator('pd-tray-popover').evaluate((e) => e.getBoundingClientRect().height)).toBe(height);
-    await expect(page.getByText('Showing the latest 200 of 205.')).toBeVisible();
+    await expect(page.getByText('Showing the 200 most severe of 205.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open alarms' })).toBeVisible();
   });
 

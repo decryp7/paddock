@@ -44,7 +44,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Changed
 
-- Lists in widgets show everything and scroll. Recent events and Issues on the dashboard, and Active alarms and Disk space in the tray popup, no longer end in "+N more": the list scrolls inside the widget and the popup keeps its height. Scrolling the mouse wheel moves the list under the pointer and, at its end, the dashboard. Each list is a focusable region for the keyboard. Recent events keeps the latest 200 alerts and 200 activity entries, and the popup lists up to 200 alarms or volumes; when that cuts a list, the widget says "Showing the latest 200" and the popup keeps a button to the Alarms page. Top CPU and Top memory still show their fixed top five.
+- Lists in widgets show everything and scroll. Recent events and Issues on the dashboard, and Active alarms and Disk space in the tray popup, no longer end in "+N more": the list scrolls inside the widget and the popup keeps its height. Scrolling the mouse wheel moves the list under the pointer and, at its end, the dashboard. Each list is a focusable region for the keyboard. Recent events keeps the latest 200 alerts and 200 activity entries, and the popup lists up to 200 alarms or volumes; when that cuts a list, the widget says it shows only the latest ones, and the popup says "Showing the 200 most severe of N" and keeps a button to the Alarms page. Top CPU and Top memory still show their fixed top five.
 - Lower CPU use: with no window open Dyno reads less often, redraws less, animates charts only on their first draw, and live numbers move in a few steps instead of every frame.
 - The Processes tree opens quickly even with thousands of processes.
 

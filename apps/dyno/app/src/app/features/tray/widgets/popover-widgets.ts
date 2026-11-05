@@ -1,3 +1,4 @@
+import { PdViewportFollowsSize } from '@decryp7/paddock-ui/table';
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, input, output, viewChildren } from '@angular/core';
 import { PdSkeleton, PdWidget, relativeAgo } from '@decryp7/paddock-ui/widgets';
@@ -30,13 +31,13 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   selector: 'dy-popover-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline, FullTextTip, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
+  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline, FullTextTip, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, PdViewportFollowsSize],
   template: `
     <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" let-value>
       @let a = alarms(value);
       @let rows = a?.rows ?? skAlarms;
-      <cdk-virtual-scroll-viewport class="dy-pw-viewport" [itemSize]="alarmRowPx" role="list" tabindex="0" aria-label="Active alarms" [style.--dy-n]="rows.length">
-        <div *cdkVirtualFor="let r of rows; trackBy: alarmId" class="dy-pw-item" role="listitem">
+      <cdk-virtual-scroll-viewport pdViewportFollowsSize class="dy-pw-viewport" [itemSize]="alarmRowPx" role="list" tabindex="0" aria-label="Active alarms" [style.--dy-n]="rows.length">
+        <div *cdkVirtualFor="let r of rows; trackBy: alarmId; let n = index" class="dy-pw-item" role="listitem" [attr.aria-setsize]="rows.length" [attr.aria-posinset]="n + 1">
           <button type="button" class="dy-pw-row dy-pw-alarm" (click)="open('alarms')">
             <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
             <span class="dy-pw-grow" [dyFullText]="r.title" pdSkeleton>{{ r.title }}</span>
@@ -47,7 +48,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </cdk-virtual-scroll-viewport>
       @if (a && a.rows.length > 0) {
         @if (a.more > 0) {
-          <p class="dy-pw-muted dy-pw-note">Showing the latest {{ a.rows.length }} of {{ a.rows.length + a.more }}.</p>
+          <p class="dy-pw-muted dy-pw-note">Showing the {{ a.rows.length }} most severe of {{ a.rows.length + a.more }}.</p>
         }
         <button type="button" class="dy-pw-more" (click)="open('alarms')">Open alarms</button>
       }
