@@ -673,6 +673,7 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
 
 /// What the entry point returned, for the invariants.
 #[derive(Debug)]
+#[allow(dead_code)] // the payloads are read in failure output
 enum Out {
     Started(Started),
     Install(Result<RepairOutcome, ServiceError>),
@@ -1104,7 +1105,9 @@ fn edge_checks(
     }
     // An uninstall that returns Ok leaves nothing registered; one that fails puts the record back.
     match out {
-        Some(Out::Uninstall(Ok(()))) if !matches!(after.reg, Reg::Absent | Reg::SwitchedOff) => {
+        Some(Out::Uninstall(Ok(())))
+            if !matches!(after.reg, Reg::Absent | Reg::SwitchedOff | Reg::Unavailable) =>
+        {
             bad(
                 "uninstall returned Ok and the OS still holds the registration",
                 format!("{:?}", after.reg),
@@ -1286,7 +1289,14 @@ fn seeds(caps: Caps, resp: Resp) -> Vec<(&'static str, World)> {
     old.job = Job::Refused;
     old.stale = true;
     old.rec.registered_version = Some(Ver::V0.s().into());
-    vec![("Fresh", base), ("Healthy", healthy), ("OldRefused", old)]
+    let mut unavailable = base.clone();
+    unavailable.reg = Reg::Unavailable;
+    vec![
+        ("Fresh", base),
+        ("Healthy", healthy),
+        ("OldRefused", old),
+        ("Unavailable", unavailable),
+    ]
 }
 
 fn token(ev: Ev, fault: Fault, intr: Intr) -> String {
@@ -1444,7 +1454,7 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
     let mut popped = 0u64;
     while let Some(i) = queue.pop_front() {
         popped += 1;
-        if popped % 500 == 0 && std::env::var("MODEL_PROGRESS").is_ok() {
+        if popped.is_multiple_of(500) && std::env::var("MODEL_PROGRESS").is_ok() {
             eprintln!(
                 "{caps:?}/{resp:?}: {popped} done, {} queued, {} states, {} edges",
                 queue.len(),
@@ -1537,12 +1547,12 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                 let mut after = e.after;
                 normalize(&mut after);
                 let k = key(&after);
-                if !seen.contains_key(&k) {
+                if let std::collections::hash_map::Entry::Vacant(slot) = seen.entry(k) {
                     if nodes.len() >= STATES_CEILING {
                         ex.finished = false;
                         continue;
                     }
-                    seen.insert(k, nodes.len());
+                    slot.insert(nodes.len());
                     queue.push_back(nodes.len());
                     let since_rare = if !after.rare_used {
                         0
