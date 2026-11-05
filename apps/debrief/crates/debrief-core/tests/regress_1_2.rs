@@ -154,3 +154,67 @@ fn a_3_gib_csv_imports_under_the_worker_cap() {
         3 * GIB / MB
     );
 }
+
+/// Logger for the measurement run: every log line with the time since the start and the resident memory.
+struct PhaseLog(std::time::Instant);
+impl log::Log for PhaseLog {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.target().starts_with("debrief_core::ingest")
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            eprintln!("[{:>7} ms rss {:>6} MB] {}", self.0.elapsed().as_millis(), rss() >> 20, r.args());
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// A plain text log of invented lines of at least `bytes` bytes.
+fn generate_text(path: &Path, bytes: u64) -> u64 {
+    let mut out = BufWriter::with_capacity(1 << 20, std::fs::File::create(path).unwrap());
+    let (mut written, mut n) = (0u64, 0u64);
+    while written < bytes {
+        let (s, m) = ((n / 1000) % 60, (n / 60_000) % 60);
+        let level = ["INFO", "INFO", "INFO", "WARN", "ERROR"][(n % 5) as usize];
+        let line = format!(
+            "2026-10-14 10:{m:02}:{s:02}.{:03} [{level}] svc{} request {n} handled for tenant {} in {} ms\n",
+            n % 1000,
+            n % 17,
+            n % 301,
+            n % 997
+        );
+        out.write_all(line.as_bytes()).unwrap();
+        written += line.len() as u64;
+        n += 1;
+    }
+    out.flush().unwrap();
+    n
+}
+
+/// Measures one import of a generated file (`DEBRIEF_MEASURE_MB`, default 300; `DEBRIEF_MEASURE_KIND` csv or text):
+/// phase log lines with memory, then peak memory and events per second. Run through plock, see docs/performance.md.
+#[test]
+#[ignore = "measurement, not a check: run by hand (docs/performance.md)"]
+fn measure_import_phases() {
+    let mb: u64 = std::env::var("DEBRIEF_MEASURE_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let kind = std::env::var("DEBRIEF_MEASURE_KIND").unwrap_or_else(|_| "csv".into());
+    let _ = log::set_boxed_logger(Box::new(PhaseLog(std::time::Instant::now())));
+    log::set_max_level(log::LevelFilter::Debug);
+    let dir = TempDir::new("measure");
+    let path = dir.0.join(format!("big.{}", if kind == "csv" { "csv" } else { "log" }));
+    let rows = if kind == "csv" { generate_csv(&path, mb * MB) } else { generate_text(&path, mb * MB) };
+    let size = std::fs::metadata(&path).unwrap().len();
+    let peak = Peak::start();
+    let base = rss() >> 20;
+    let t = std::time::Instant::now();
+    let events = parse_only(std::slice::from_ref(&path));
+    let secs = t.elapsed().as_secs_f64();
+    eprintln!(
+        "RESULT kind={kind} file={} MB rows={rows} events={events} base_rss={base} MB peak_rss={} MB time={secs:.2} s events_per_s={:.0} MB_per_s={:.1}",
+        size >> 20,
+        peak.mb(),
+        events as f64 / secs,
+        (size >> 20) as f64 / secs
+    );
+    assert_eq!(events as u64, rows);
+}

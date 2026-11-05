@@ -19,8 +19,12 @@ pub fn import_text_whole(
     data_start: u64,
     sink: &mut dyn EventSink,
 ) -> Result<usize> {
+    let t = std::time::Instant::now();
     let imported = importer.import(ctx, content)?;
+    log::debug!(importer = importer.id(); "legacy import: importer returned {} records in {} ms", imported.records.len(), t.elapsed().as_millis());
+    let t = std::time::Instant::now();
     let starts = line_starts(content);
+    log::debug!(importer = importer.id(); "legacy import: {} line starts in {} ms", starts.len(), t.elapsed().as_millis());
     let line_text = |n: u32| -> Option<(usize, usize)> {
         let i = (n as usize).checked_sub(1)?;
         let start = *starts.get(i)?;
@@ -45,6 +49,7 @@ pub fn import_text_whole(
         };
         sink.event(ParsedEvent { record, raw, byte_offset })?;
     }
+    log::debug!(importer = importer.id(); "legacy import: events emitted in {} ms", t.elapsed().as_millis());
     Ok(imported.skipped)
 }
 
