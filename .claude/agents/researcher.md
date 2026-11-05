@@ -11,3 +11,5 @@ Compare options on what matters to the project: licence, maintenance, platform s
 Work in your own git worktree; never write into a main checkout. Keep heavy work light on the machine (the brief's semaphore or CARGO_BUILD_JOBS=2, one heavy job at a time). Commit notes and ADRs only on the branch the brief names, without Co-Authored-By or AI attribution. Finish with a short summary, the branch, and any decisions the user must make.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
+
+If your brief arrives as an image, Grep the brief's text file (named in your prompt) for every path, branch, hash, version, port and number before you use it; never copy those from the image.

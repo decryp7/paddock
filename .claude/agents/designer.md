@@ -11,3 +11,5 @@ Show your best, not your first: iterate, compare your work side by side with the
 Do not commit unless the brief says so, and do not spawn reviewers: an independent reviewer judges your work. Put any image meant for the user on a persistent path the brief names (never a temporary scratchpad). Never add Co-Authored-By or AI attribution. Finish with a short report: what you made, where the sheet is, the measurements, and any rule you had to bend with the reason.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
+
+If your brief arrives as an image, Grep the brief's text file (named in your prompt) for every path, branch, hash, version, port and number before you use it; never copy those from the image.

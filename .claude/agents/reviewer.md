@@ -11,3 +11,5 @@ Open and look at every item, do not sample. Be specific and actionable: for each
 End with a clear verdict ("approve" / "not yet" or ship / fix / redo per item), the P1s that block, and at most a handful of top P2s. Never add Co-Authored-By or AI attribution to anything you commit.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
+
+If your brief arrives as an image, Grep the brief's text file (named in your prompt) for every path, branch, hash, version, port and number before you use it; never copy those from the image.
