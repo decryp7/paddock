@@ -16,8 +16,8 @@ How to read the evidence:
 
 ## 1. Overview
 
-Release order (user, 2026-11-05, replaces 2026-11-04): **Dyno 1.1.0, Debrief 1.2 with its full scope (all discussed features and
-fixes), Spotter 1.0, Pitwall 1.1, Pitcrew 1.1, Pacenotes, Sighter, Recce.** Slots on other apps (user, 2026-11-05): up to two design
+Release order (user, 2026-11-05, replaces 2026-11-04): **Dyno 1.1.0 as soon as possible; main focus Debrief 1.2 with its full scope (all
+discussed features and fixes); Spotter 1.0 tags when ready; Pitwall 1.1 next; then Pitcrew 1.1, Pacenotes, Sighter, Recce.** Slots on other apps (user, 2026-11-05): up to two design
 agents with no builds, code agents stay at one, heavy lane `fix`, paused under load; Dyno's agents keep priority.
 
 **Scrutineer is dropped (user, 2026-11-05):** a self-signed certificate does not help SmartScreen or Gatekeeper; nothing was built;
@@ -26,7 +26,7 @@ all apps stay unsigned and the family update key stays.
 | App | Code today | Design today | Next step | Estimate (agent-days) |
 |---|---|---|---|---|
 | **Debrief 1.2** | Tracks A and B on branches; shared tracks not started | Plan with 65 packages; predates ADRs 0052, 0053, 0054 and today's order | Amend the plan for the new order; land the fuzz fix; keep tracks A and B going; tracks C and D land after the Dyno tag | About 209 plus unplanned family work |
-| **Spotter 1.0** | Feature-complete on `spotter/1.0-prep`, not on main; no install-update pass recorded | Done | ADR 0052's 5 pre-tag days; ADR 0054 A-1; update test; own logger out; rebase on Dyno and Debrief; per-machine | About 12 to 14, starting after the Debrief tag, plus a merge of Debrief's shared changes |
+| **Spotter 1.0** | Feature-complete on `spotter/1.0-prep`, not on main; no install-update pass recorded | Done | ADR 0052's 5 pre-tag days; ADR 0054 A-1; update test; own logger out; rebase on Dyno and Debrief; per-machine | About 12 to 14 after the Dyno tag; tags when ready, beside Debrief |
 | **Pitwall 1.1** | Base on `pitwall/1.1-final`; chat not started | ADR 0023 Proposed, unreviewed, decisions not written in | Write the decisions in, independent review, put the base's work list in the repo | 43.5 to 70 (chat part 28 to 45 from the ADR) |
 | **Pitcrew 1.1** | Shell and core on `steward/pitcrew-1.1-prep`; Environment service and UI, auto-scale, headless not started | ADR 0022 Accepted, ADR 0021 Proposed, headless ADR missing, plan outside the repo | Headless ADR, ADR 0021 spike and second review, plan into the repo | About 70 to 76, firm after a re-baseline; the 30 to 45 in the notes does not add up (section 4) |
 | **Pacenotes** | Stage 1 crates on `steward/pacenotes-stage1`, not on main | Plan and ADRs 0001 to 0012; five ADRs of its plan unwritten | Land stage 1; record the answered questions | 300 to 350, re-estimated after stage 1 |
@@ -40,8 +40,8 @@ all apps stay unsigned and the family update key stays.
 plan's partial one. An expired waiver is a W001 error (`conformance/src/util/waivers.mjs:40-42`), and C36, C37, C39, C53 and C54 are all
 in Paddock's own CI run (`ci.yml:257`).
 
-**Only a landing on main clears a waiver.** A fix on an unlanded branch clears nothing, and with today's order none of these branches
-lands by 2026-12-31 except Dyno's, so every other site is fixed **on main** and its branch takes it by merging main:
+**Only a landing on main clears a waiver.** A fix on an unlanded branch clears nothing. Only Dyno's branch and possibly Spotter's can land by
+2026-12-31, and Spotter's date is not one to rely on, so every site but Dyno's is fixed **on main** and its branch takes it by merging main:
 
 - `steward/pitcrew-1.1-prep` has no row for `notify-channels/src/tests.rs` (it deletes the file); the row still binds main.
 - `spotter/1.0-prep` has no row for `apps/debrief/crates/chromium-driver/src/launch.rs` and a different file (208 changed lines by tree
@@ -52,7 +52,7 @@ run here):
 
 | Order | Owner | Sites | Size | Can land on main | Against the branches |
 |---|---|---|---|---|---|
-| 1 | Debrief, next in the release order | C36 7 crates, C39 4, C53 10, C54 1 | 4.25 to 5.75 | **Now, before the Dyno tag.** `dyno/wp-int` changes nothing in `apps/debrief` | `debrief/1.2-lean`, `search-chain-rebase` and `wip/debrief-1.2-lean-2026-11-04` change no site. `spotter/1.0-prep` also changes `health/commands/tests.rs` |
+| 1 | Debrief, the main focus | C36 7 crates, C39 4, C53 10, C54 1 | 4.25 to 5.75 | **Now, before the Dyno tag.** `dyno/wp-int` changes nothing in `apps/debrief` | `debrief/1.2-lean`, `search-chain-rebase` and `wip/debrief-1.2-lean-2026-11-04` change no site. `spotter/1.0-prep` also changes `health/commands/tests.rs` |
 | 2 | Pitcrew, ahead of its turn | C36 2 crates, C37 2 test files, C39 1, C53 8 | 2 to 2.5 | **Now.** `dyno/wp-int` changes nothing in `apps/pitcrew` | Prep changes `launch.rs`, `process.rs`, `fake_runner.rs`, `supervision.rs`, deletes the C39 file; its owner merges main the same day. `usage.rs`, `disclaim.rs`, `probe.rs`, `terminate.rs` are free. Prep already has `tests/it` for C37 |
 | 3 | Pitwall | C36 3 crates, C37 12 test files, C39 3, C53 2 | 2.25 to 2.75 | **Now.** `dyno/wp-int` changes nothing in `apps/pitwall` | `pitwall/1.1-final` changes all five sites and has 3 more test files; it takes them in its next merge from main, by its owner |
 | 4 | Spotter | C36 1 crate, C37 17 test files, C39 1 | 1.5 | **Now.** `dyno/wp-int` changes only `spotter-sources/src/folder.rs` there, not a site | `spotter/1.0-prep` changes `http_sources.rs` and has 3 more test files |
@@ -86,7 +86,7 @@ every remaining tag but Dyno's. Revisit the date when the ADR is accepted.
 | # | Work | Size | Why here |
 |---|---|---|---|
 | - | **Family logging ADR** (F3, yes): ADR 0055 on `docs/adr-family-logging`, in independent review | Written | Every app's release obligation; Debrief adopts first |
-| 1 | **Debrief:** amend the plan (section 5) for the order, the full scope and the shared tracks; review | About 1.5 | Next release; its section 8 still assumes three other apps land first |
+| 1 | **Debrief:** amend the plan (section 5) for the order, the full scope and the shared tracks; review | About 1.5 | Main focus; its section 8 still assumes three other apps land first |
 | 2 | **Spotter close-out list:** run ADR 0052 WP-S (the audit sweep) on `spotter/1.0-prep`, list findings and the tag blockers of section 2 | 1 | No design missing; feature-complete and waiting |
 | 3 | **Pitwall:** revise ADR 0023, independent review, base work list in the repo. **Running in another agent** on its own branch | About 2 | Fixes the `paddock-assistant` and `paddock-mcp` shapes that Debrief, Pacenotes and Recce inherit, so Debrief's M-packages need it first |
 | 4 | **Pitcrew:** headless ADR, ADR 0021 WP-0 on a fake server and second review, P7's design pass, re-baselined plan in the repo | About 5 | Next after Pitwall; ADR 0021 is gated on nothing else |
@@ -118,15 +118,14 @@ exceptions are marked.
 
 | Home | Change | Needed by | Source | Order |
 |---|---|---|---|---|
-| `ui/.../paddock-e2e`, `conformance/` | ADR 0052's `layoutProblems`, C87 and C88 report-only (absent at `dyno/wp-int` and `spotter/1.0-prep`; the `layoutProblems` that exists is an unrelated workbench and Debrief helper) | Debrief, Spotter, then all | ADR 0052 WP-C2, WP-B4a, WP-C1a (the ADR places them before Spotter) | Debrief |
-| `paddock-setup` and the NSIS include | Adoption; arrives with Dyno, absent on main | Debrief, Spotter, Pitwall, Pitcrew; Pacenotes, Sighter through the template | ADR 0053 "Adoption" | Debrief |
+| `ui/.../paddock-e2e`, `conformance/` | ADR 0052's `layoutProblems`, C87 and C88 report-only (absent at `dyno/wp-int` and `spotter/1.0-prep`; the `layoutProblems` that exists is an unrelated workbench and Debrief helper) | Spotter, Debrief, then all | ADR 0052 WP-C2, WP-B4a, WP-C1a | Spotter or Debrief, whichever lands first |
+| `paddock-setup` and the NSIS include | Adoption; arrives with Dyno, absent on main | Spotter, Debrief, Pitwall, Pitcrew; Pacenotes, Sighter through the template | ADR 0053 "Adoption" | Spotter or Debrief, whichever lands first |
 | `paddock-chromium`, `-jobs`, `-startup`, `-testkit`, `-dialogs`, `-download`, `-shell`, `ui` shell, `scripts/vm-smoke` | Spotter's own delta over Dyno | Spotter | Tree diff `steward/dyno-1.1.0..spotter/1.0-prep` | Spotter |
 | `paddock-service`, `-shell`, `-build`, `-updater`, `-proc`, `-pitwall`, `-window`, `ui` shell | Pitwall's own delta | Pitwall | Tree diff against main | Pitwall |
 | `paddock-assistant` | Parts, `ApprovalPolicy`, per-turn tools, native calls, store port. No Dyno or Spotter user (ADR 0023), but it regenerates TypeScript in `ui/projects/paddock-ui/workbench/assistant/generated`, in the package Dyno builds: **branch only until F6** | Debrief, Pitwall, Pacenotes | ADR 0023 WP-2 | Debrief, whichever package lands first; shape from ADR 0023 |
 | `paddock-mcp` | Client: connection, cancel, loopback, stdio; current protocol revision | Debrief's M-packages if they need it; Pitwall WP-8; Recce WP 4.2; Dyno's and Pacenotes' servers | ADR 0023 §6; Recce plan §5 | Debrief or Pitwall |
 | `paddock-log`, `-startup`, `-commands`, `-jobs`, `-proc` | `EventId`, `run.*`, `job.*`, `tool.run`, crash reports | All apps | ADR 0055 on `docs/adr-family-logging` | Debrief |
 | `paddock-about`, `paddock-deps` | About and one dependency inventory (ADR 0028, Accepted; crates absent) | All apps; ADR 0051 WP-12 | [ADR 0028](../adr/0028-about-and-deps-crates.md); user, 2026-10-29: first after the tags | Debrief |
-| `paddock-tools` | One Authenticode verifier: home to be settled in `paddock-tools` (ADR 0051 WP-6, U5); no separate signing crate | `paddock-tools` | ADR 0051 U5 | Tooling |
 | `paddock-jobs` | `Outcome`, `ReadBack`, `NextStep`, `Why`, `Stamped<T>` (**breaking**, every user in one change); J1 keys; per-thread walk hook | Debrief J1; Pitcrew tag gate and WP-6; `paddock-tools` imports the types | ADR 0052 WP-B1; Debrief plan J1; Pitcrew ADR 0022 WP-6 | Debrief |
 | `paddock-proc` | setsid and job-object kill; `login_env`; spawn logging; Debrief's P1 | Debrief, Pitcrew, `paddock-tools` | Note on Pitcrew; ADR 0051 WP-14; ADR 0052 WP-B4b | Debrief |
 | `paddock-net`, `paddock-metrics`, `paddock-health` | `probe_connect`; load and memory in `MachineProbe`; health writer | Pitcrew | Pitcrew ADRs 0021, 0022 | Pitcrew |
@@ -139,7 +138,7 @@ exceptions are marked.
 | New `paddock-video` | From `debrief-video` | Sighter SW12, Debrief | Sighter stage-2 plan §3 | After Debrief 1.2 |
 | Rules model | Plans disagree on the name: `paddock-repo-rules` (ADR 0022), `paddock-rules` (user, 2026-10-30, broader naming) | `./dev check`, Pacenotes C1 | ADR 0022 §6 | Tooling |
 | Diagrams | Same: `paddock-diagrams` (on `tools/dev-diagrams-r11`) against `paddock-drawio` (Pacenotes plan §3.3); Pacenotes DG1's writer moves there | `./dev`, Pacenotes | ADR 0022 R11 | Tooling |
-| `paddock-chromium` | Rename to `paddock-browser-driver` (user, 2026-10-30: after the Dyno and Spotter tags, before more apps adopt it); Debrief and Spotter onto one driver, ADR first | Debrief, Spotter's next | Notes only | **To re-time:** the notes say rename after the Spotter tag and move after Pitwall, but Debrief now comes first. Rename after the Dyno tag; the move's ADR before Debrief's driver work, or the move waits past 1.2 |
+| `paddock-chromium` | Rename to `paddock-browser-driver` (user, 2026-10-30: after the Dyno and Spotter tags, before more apps adopt it); Debrief and Spotter onto one driver, ADR first | Debrief, Spotter's next | Notes only | **To re-time:** the notes say rename after the Spotter tag and move after Pitwall, but Debrief 1.2 may tag later than both or earlier. Rename after the Spotter tag stands; the move's ADR before Debrief's driver work, or the move waits past 1.2 |
 | `crates` gate, CI | Per-crate coverage; ring as the crypto provider; C58 | All | User, 2026-11-04 and 2026-10-30 (note only); rule 55 (e) | First free window |
 | `.gitea/workflows/ci.yml` | Wire C51, C13, C23 into Paddock's own run. None is in the `--only` list at `ci.yml:257`; `ci.yml:245-249` gives old reasons for C13 and C23 | All | Coordinator, 2026-11-05 | Right after the Dyno tag |
 | CI capacity | Parked Mac runners `d7-mac-mini-2` and `-3` online when load is low; fix the 16-minute plan step | All | User, 2026-11-04 (note only) | Right after the Dyno tag |
@@ -168,8 +167,8 @@ Files changed, by tree diff (Spotter and Pitcrew over `steward/dyno-1.1.0`, the 
 | `scripts/affected*.mjs`, `conformance/src`, `.gitea/workflows` | yes | yes | yes | yes |
 
 - **Pitwall is the largest merge, and it grows.** Its last merge from main is 2026-11-04 and it has none of Dyno's service, updater or
-  shell changes. Spotter and Pitcrew merged an earlier Dyno state and must follow it to the tag. All three now also take Debrief's shared
-  changes (tracks C and D), which land first.
+  shell changes. Spotter and Pitcrew merged an earlier Dyno state and must follow it to the tag. Pitwall and Pitcrew, and Spotter if it tags
+  late, also take Debrief's shared changes (tracks C and D), which start landing after the Dyno tag.
 - **`paddock-jobs` WP-B1 is breaking across every app.** ADR 0052 puts it before the Pitcrew tag and this plan put it before Debrief's
   J1. With Debrief next, land WP-B1 inside Debrief's track C, before J1, with Spotter's, Pitwall's and Pitcrew's main code updated in the same
   change and their branches following by merge.
@@ -184,7 +183,7 @@ Decided, no longer open:
 
 | # | Decision |
 |---|---|
-| Order | Dyno, Debrief 1.2 with full scope, Spotter, Pitwall, Pitcrew, Pacenotes, Sighter, Recce |
+| Order | Dyno as soon as possible; main focus Debrief 1.2 with full scope; Spotter tags when ready; Pitwall next; then Pitcrew, Pacenotes, Sighter, Recce |
 | Scrutineer | Dropped. No app is signed in any planned release; the family update key stays |
 | F1 | No extension of the waivers: all 47 fixed by 2026-12-31 (above). Dyno's and shared sites wait for the Dyno tag; Pitcrew's come ahead of their turn |
 | F3 | Yes: the family logging ADR (ADR 0055) |
@@ -194,10 +193,9 @@ Decided, no longer open:
 
 **What follows from the new order, no longer as this plan had it**
 
-- Spotter is feature-complete and now waits for Debrief 1.2: about 209 agent-days, or 70 to 105 working days at the two to three agents of
-  `debrief-1-2.md` §8. That puts Spotter's start months after the Dyno tag, and its branch must keep following main meanwhile.
+- Debrief 1.2 (about 209 agent-days) and Spotter (12 to 14) run side by side after the Dyno tag, so Spotter very likely tags first. A Spotter freeze and Debrief's shared landings compete for the F6 days; the coordinator names them.
 - `debrief-1-2.md` §8 on `debrief/1.2-lean` still says Dyno, Spotter and Pitwall land first; tracks C and D now wait only for the Dyno tag.
-- ADR 0052's "before Spotter 1.0" packages and ADR 0054 A-1 name Spotter as next; they now bind Debrief first. Those ADRs are unchanged here.
+- ADR 0052's "before Spotter 1.0" packages stand; ADR 0054 A-1 needs a Debrief package. Those ADRs are unchanged here.
 
 ## 2. Spotter 1.0
 
@@ -241,14 +239,13 @@ Decided, no longer open:
 | ADR 0052 | 5 days above; the rest after the tag |
 | Rule 71 | Every VM row needs a positive control |
 | ADR 0054 | Lifecycle run gates the tag (D6), needs A-1's rows; C92, C93 not enforced |
-| Logging | New log checks in `d37f2f181`. ADR 0055's adoption: `run.*` through the shell once Debrief has landed the shared part. **Tag obligation found:** `applog.rs` is still used (12 references on the branch, not in `known-copies.toml`); ADR 0036 U5 replaces each app's own logger before its next tag: about 0.75 day |
+| Logging | New log checks in `d37f2f181`. ADR 0055's adoption: `run.*` through the shell if its shared part lands before the tag; otherwise Spotter ships on today's lines, which the reader's alias table reads. **Tag obligation found:** `applog.rs` is still used (12 references on the branch, not in `known-copies.toml`); ADR 0036 U5 replaces each app's own logger before its next tag: about 0.75 day |
 | Signing | Unsigned, as all apps; nothing to do |
 
 **Decided.** ADR 0054 D6: Spotter's tag runs under the lifecycle gate.
 
-**Estimate.** About 12 to 14 days of work, starting after the Debrief tag: the 9 to 10 working days given to the user on 2026-11-05
-(ADR 0052's 5, ADR 0053's 2 to 2.5, a VM round) left out ADR 0054 A-1 (2 to 3) and the logger (0.75). ADR 0052's 4 shared days are done
-by Debrief if it lands them first. Not counted: following Debrief's shared changes. The update test could add more if it finds the macOS
+**Estimate.** About 12 to 14 days of work after the Dyno tag: the 9 to 10 working days given to the user on 2026-11-05
+(ADR 0052's 5, ADR 0053's 2 to 2.5, a VM round) left out ADR 0054 A-1 (2 to 3) and the logger (0.75). The update test could add more if it finds the macOS
 hang again.
 
 ## 3. Pitwall 1.1
@@ -376,7 +373,7 @@ re-baseline.
 - The plan names none of ADR 0052, 0053, 0054, `paddock-diag` or the logging map (grep). Add: bundle P1, ADR 0053 adoption, tour with
   the larger profile (ADR 0052 D6), logging adoption.
 - C36 and C39 were planned inside 1.2; they go to main in the sweep, first in its order.
-- Full scope (user, 2026-11-05: all discussed features and fixes); next after Dyno. Rewrite §8's order and add ADR 0055's adoption.
+- Full scope (user, 2026-11-05: all discussed features and fixes); the main focus after Dyno. Rewrite §8's order and add ADR 0055's adoption.
 - The bounded DuckDB 2 columnar test (user, 2026-11-05) into package D-a or D-b, results in `performance.md`.
 - ADR 0051's `delete_by = debrief-v1.2.0` for `browser/runtime.rs`. Calendar in §5 is stale, as the plan says.
 
@@ -558,8 +555,7 @@ section 1. Remove `tools/scrutineer/` from main in the next docs landing (placeh
 **Family obligations.** Rule 71 and ER-27 for each ported check (`::error::`, exit codes, masked commands). Parity tests before a script
 retires. No app obligations.
 
-**Decisions.** F6 decided (section 1). ADR 0051's Q1 to Q10 and ADR 0022's G.10 are decided, except that the Authenticode verifier's home
-is to be settled in `paddock-tools` now that no signing crate comes. The caps conflict: G.7 allows two tooling agents; the 2026-11-05
+**Decisions.** F6 decided (section 1). ADR 0051's Q1 to Q10 and ADR 0022's G.10 are decided. The caps conflict: G.7 allows two tooling agents; the 2026-11-05
 code slot allows one in total across other apps. I assume one.
 
 **Estimate.** Firm from packages. ADR 0051: crate 42 to 57, adopters 9 to 13, WP-0a 1. ADR 0022: programme about 105, at least 11 weeks at
