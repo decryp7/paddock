@@ -320,6 +320,11 @@ pub fn sc_pid(sc_queryex: &str) -> Option<u32> {
         .filter(|p| *p != 0)
 }
 
+/// The pid in `systemctl show -p MainPID` output (`MainPID=1234`); `None` when the unit has no process (`0`).
+pub fn parse_main_pid(show: &str) -> Option<u32> {
+    show.lines().find_map(|l| l.trim().strip_prefix("MainPID=")).and_then(|v| v.trim().parse().ok()).filter(|p| *p != 0)
+}
+
 /// The privileges in `sc qprivs` output (`Se…Privilege` words, sorted, once each; the names do not depend on the language).
 pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
     let mut found: Vec<String> = sc_qprivs
@@ -442,6 +447,14 @@ pub mod sc_exit {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn main_pid_is_read_and_zero_means_none() {
+        assert_eq!(parse_main_pid("MainPID=4242\n"), Some(4242));
+        assert_eq!(parse_main_pid("MainPID=0\n"), None);
+        assert_eq!(parse_main_pid("MainPID=x\nOther=1\n"), None);
+        assert_eq!(parse_main_pid(""), None);
+    }
+
     #[test]
     fn the_service_process_id_is_read_from_queryex() {
         let text = "SERVICE_NAME: DynoHelper\n        TYPE               : 10  WIN32_OWN_PROCESS\n        STATE              : 4  RUNNING\n        PID                : 9884\n        FLAGS              :\n";
