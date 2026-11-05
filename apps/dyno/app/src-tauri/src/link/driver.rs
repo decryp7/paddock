@@ -89,11 +89,10 @@ impl Executor {
                             }
                             Err(e) => log::error!(LaunchMs = launch_ms, Via = l.launcher.via(), Error = e.as_str(); "Agent launch failed"),
                         }
-                        if result.is_err() {
-                            let mut held = lock(&h);
-                            if *held == Some(child) {
-                                *held = None;
-                            }
+                        // The look reads the launcher's child as this generation's only once it exists: until then the launcher still reports
+                        // the process of the one before (exited, after a Retry), which a look must not take for this one's.
+                        if result.is_ok() {
+                            *lock(&h) = Some(child);
                         }
                         deliver(&ev, Event::Launched { child, result });
                     }
@@ -187,7 +186,6 @@ impl Executor {
             }
             Command::Launch { child, .. } => {
                 logging::info("starting the agent");
-                *lock(&self.held) = Some(child);
                 deliver(&self.launcher_jobs, LauncherJob::Launch(child));
             }
             Command::EndHeldChild { child } => {
