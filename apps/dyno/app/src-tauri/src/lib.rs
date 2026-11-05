@@ -505,13 +505,20 @@ fn agent_setup<R: Runtime>(
     // Windows: no repair here (it rewrote the app's logon entry in 1.0.0); the stale entry of 1.0.0 is repaired once, with the
     // switch, when the settings first arrive (`shell::settings_changed`).
     #[cfg(not(windows))]
+    let repair_done = login::track_repair();
+    #[cfg(not(windows))]
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
+        if login::service_work_cancelled() {
+            repair_done.send(()).ok();
+            return;
+        }
         match login::platform_service().repair(std::sync::Arc::new(move || repair.connected())) {
             Ok(true) => logging::warn("registered the agent service again (a new version, or launchd refused the old registration)"),
             Ok(false) => {}
             Err(e) => logging::warn(&format!("the agent service could not be registered again: {e}")),
         }
+        repair_done.send(()).ok();
     });
     Ok(())
 }

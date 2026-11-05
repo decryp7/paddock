@@ -206,6 +206,13 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     if let Err(r) = request(i) {
         return Plan::Leave(r.into());
     }
+    // From a disk image or a translocated copy nothing is registered or removed, a half-finished removal included.
+    if !f.location_ok {
+        return Plan::Leave(Hold::Unavailable(
+            "the app runs from a place it cannot register the background service from; move it to the Applications folder and open it there"
+                .to_string(),
+        ));
+    }
     let remove = || {
         if !i.present() {
             Plan::Leave(Hold::NotInstalled)
@@ -219,12 +226,6 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     // say (`wanted` unknown) finishes it.
     if matches!(f.state, State::Removing) && f.wanted != Some(true) {
         return remove();
-    }
-    if !f.location_ok {
-        return Plan::Leave(Hold::Unavailable(
-            "the app runs from a place it cannot register the background service from; move it to the Applications folder and open it there"
-                .to_string(),
-        ));
     }
     if f.wanted == Some(false) {
         return remove();
@@ -1175,6 +1176,23 @@ mod tests {
             Plan::Replace(Reason::VersionChanged),
             "nothing is up: replaced once, as with no record"
         );
+    }
+
+    #[test]
+    fn a_half_finished_removal_is_not_finished_from_a_place_that_cannot_register() {
+        let reg = registered(Job::Running);
+        let removing = State::Removing;
+        let from_a_disk_image = Facts {
+            state: &removing,
+            location_ok: false,
+            ..facts(&reg, MAC, Some("1.0.4"))
+        };
+        assert!(matches!(plan(&from_a_disk_image), Plan::Leave(Hold::Unavailable(_))));
+        let from_applications = Facts {
+            location_ok: true,
+            ..from_a_disk_image
+        };
+        assert_eq!(plan(&from_applications), Plan::Remove);
     }
 
     #[test]

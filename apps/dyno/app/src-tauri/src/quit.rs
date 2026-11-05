@@ -329,6 +329,9 @@ pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         log::info!(Service = format!("{mechanism:?}").as_str(); "Quit and stop measuring: begin");
         // A repair or a switch that is running stops at its next step: the agent must not come back after this stop.
         crate::login::cancel_service_work();
+        if !crate::login::join_service_work(Duration::from_secs(10)) {
+            log::warn!("The start repair of the service did not stop within 10 s; the stop goes on");
+        }
         if let Err(e) = write_marker(&root, crate::link::ports::now_ms()) {
             log::warn!(Error = e.to_string().as_str(); "The stop marker could not be written");
         }

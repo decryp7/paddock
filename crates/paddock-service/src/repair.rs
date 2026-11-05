@@ -467,7 +467,7 @@ pub fn replace(
         allowed: t.max_cycles + 1,
         register_only: false,
     };
-    replace_bounded(b, answers, &bounds, t, say)
+    replace_bounded(b, answers, &bounds, t, &mut || {}, say)
 }
 
 /// How far a replace may go.
@@ -490,6 +490,7 @@ pub fn replace_bounded(
     answers: &mut dyn FnMut() -> bool,
     bounds: &Bounds<'_>,
     t: &Timings,
+    before_wait: &mut dyn FnMut(),
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
     let cancel = bounds.cancel;
@@ -516,6 +517,8 @@ pub fn replace_bounded(
         for step in next.say.drain(..) {
             if step == Step::WaitingForStart {
                 waiting_since = Some(std::time::Instant::now());
+                // The wait is long and changes nothing: the caller lets go of what it holds for it.
+                before_wait();
             }
             say(step);
         }

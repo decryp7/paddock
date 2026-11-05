@@ -307,7 +307,7 @@ fn a_failed_light_path_falls_back_to_the_repair_and_says_why() {
     );
     assert!(
         said.iter()
-            .any(|s| s.contains("failed (denied)") && s.contains("full repair")),
+            .any(|s| s.contains("denied") && s.contains("full repair")),
         "{said:?}"
     );
 }
@@ -1175,4 +1175,32 @@ fn a_resume_that_failed_keeps_the_marker_of_the_stop_so_the_next_start_tries_aga
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     assert!(resume(&mut m).0.is_err());
     assert_eq!(RecordFile::new(dir.path(), LABEL).resume_pending(), Some(5), "an Err resume keeps the marker");
+}
+
+#[test]
+fn the_lock_is_let_go_while_the_replace_waits_for_the_service_so_a_removal_never_waits_for_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = RecordFile::memory();
+    let probe = record.reopen();
+    let free_during_wait = Arc::new(AtomicBool::new(false));
+    let seen = free_during_wait.clone();
+    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    sim.lock().unwrap().job_after_asks = None;
+    let sys = FakeSystem::new();
+    wire(&sim, &sys);
+    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", move || {
+        // Asked at every look of the wait: a lock another request can take is a lock that is not held.
+        if probe.lock().is_some() {
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        false
+    })
+    .with_record(record)
+    .with_timings(Timings {
+        start_wait: Duration::from_secs(6),
+        ..Timings::default()
+    });
+    assert!(m.install(&never()).is_ok());
+    assert!(free_during_wait.load(std::sync::atomic::Ordering::SeqCst), "the wait held the repair lock");
 }

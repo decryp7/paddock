@@ -511,13 +511,6 @@ fn install_is_quiet(first_run: bool) -> bool {
     first_run
 }
 
-/// Whether the first run records that it opened Login Items: it did (not quiet) and there was something for the user to do.
-#[cfg(any(target_os = "macos", test))]
-fn marker_wanted(first_run: bool, quiet: bool, result: &Result<paddock_service::RepairOutcome, paddock_service::ServiceError>) -> bool {
-    use paddock_service::ServiceError;
-    first_run && !quiet && matches!(result, Err(ServiceError::NeedsApproval | ServiceError::SwitchedOff))
-}
-
 /// The waits of the Settings switch's registration: it returns at once (the link waits for the agent and falls back to one of
 /// its own), so it does not wait for the service to answer.
 #[cfg(any(target_os = "macos", test))]
@@ -591,11 +584,6 @@ mod mac {
     /// The process-wide cancel of the service's work.
     fn never() -> &'static AtomicBool {
         &CANCEL
-    }
-
-    /// The marker that Login Items has been opened for the first run once.
-    fn opened_marker() -> PathBuf {
-        dyno_agent::paths::Dirs::current().root().join("login-items-opened")
     }
 
     /// Dyno 1.1.0 records the registered version with the shared service record; the 1.0.0 file is of no use any more.
@@ -676,16 +664,6 @@ mod mac {
             let quiet = install_is_quiet(self.first_run);
             // A first run that lost the lock to another registration waits for it instead of leaving nothing registered.
             let result = m.install_patient(never(), quiet, 6, std::time::Duration::from_secs(5));
-            if marker_wanted(self.first_run, quiet, &result) {
-                let marker = opened_marker();
-                let written = marker
-                    .parent()
-                    .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| std::fs::write(&marker, "opened\n"));
-                if let Err(e) = written {
-                    crate::logging::warn(&format!("the Login Items marker could not be written: {e}"));
-                }
-            }
             result.map(drop).map_err(|e| registration_words(&e, !quiet))
         }
 
@@ -787,6 +765,33 @@ pub fn platform_service() -> Box<dyn AgentService> {
 #[cfg(windows)]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
+}
+
+/// Whether the user quit or changed the switch since: the service's work does not start.
+pub fn service_work_cancelled() -> bool {
+    #[cfg(target_os = "macos")]
+    return mac::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "linux")]
+    return dyno_agent::service::linux::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+    #[allow(unreachable_code)]
+    false
+}
+
+/// The start repair's thread reports here when it ends, so Quit can wait for it (it never leaves a repair writing the record
+/// beside the stop marker).
+static REPAIR_DONE: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>> = std::sync::Mutex::new(None);
+
+/// Registers the end of the start repair: the returned sender is used by its thread when it finishes.
+pub fn track_repair() -> std::sync::mpsc::Sender<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    *REPAIR_DONE.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+    tx
+}
+
+/// Waits up to `bound` for the start repair to end (after [`cancel_service_work`]); `true` when it ended or never ran.
+pub fn join_service_work(bound: std::time::Duration) -> bool {
+    let rx = REPAIR_DONE.lock().unwrap_or_else(|e| e.into_inner()).take();
+    rx.is_none_or(|rx| !matches!(rx.recv_timeout(bound), Err(std::sync::mpsc::RecvTimeoutError::Timeout)))
 }
 
 /// Asks the service's repair, registration and waits to stop at their next step (Quit and stop measuring).
@@ -923,18 +928,6 @@ mod tests {
     fn the_first_run_is_always_quiet_and_removes_nothing_and_the_settings_switch_never_is() {
         assert!(install_is_quiet(true), "nobody asked: no System Settings, no removal of a healthy registration");
         assert!(!install_is_quiet(false), "the Settings switch opens Login Items for what the user has to do");
-    }
-
-    #[test]
-    fn the_marker_is_written_only_by_a_first_run_that_opened_login_items_for_the_user() {
-        use paddock_service::{RepairOutcome, ServiceError};
-        let needs = Err(ServiceError::SwitchedOff);
-        assert!(marker_wanted(true, false, &needs));
-        assert!(marker_wanted(true, false, &Err(ServiceError::NeedsApproval)));
-        assert!(!marker_wanted(false, false, &needs), "the Settings switch does not mark");
-        assert!(!marker_wanted(true, true, &needs), "a quiet install opened nothing");
-        assert!(!marker_wanted(true, false, &Err(ServiceError::Busy)));
-        assert!(!marker_wanted(true, false, &Ok(RepairOutcome::Recovered)));
     }
 
     #[test]
