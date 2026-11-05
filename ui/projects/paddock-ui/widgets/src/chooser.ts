@@ -252,6 +252,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-addedlabel pd-status-glyph { color: var(--pd-success); }
     .pd-wc-placeholder { background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; min-height: 48px; }
+    /* The ghost leaves the kind icon out (its column stays, so the title keeps the row's offset). */
+    .cdk-drag-preview.pd-wc-row .pd-wc-kicon { visibility: hidden; }
     .cdk-drag-preview.pd-wc-item { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
     .cdk-drag-animating { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     .pd-wc-list.cdk-drop-list-dragging .pd-wc-item:not(.cdk-drag-placeholder) { transition: transform var(--pd-duration) var(--pd-ease-enter); }

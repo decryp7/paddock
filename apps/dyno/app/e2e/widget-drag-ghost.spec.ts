@@ -51,6 +51,8 @@ for (const [scheme, which] of [['light', 'first'], ['dark', 'first'], ['light', 
     inGhost.forEach((v, i) => expect(Math.abs(v - inRow[i]), `offset ${i}: ghost ${inGhost}, row ${inRow}`).toBeLessThanOrEqual(3));
     // No stray symbol: no svg in the ghost is larger than an icon.
     const biggest = await ghost.evaluate((e) => Math.max(0, ...[...e.querySelectorAll('svg')].map((v) => v.getBoundingClientRect().width)));
+    expect(await ghost.locator('.pd-wc-kicon').evaluate((e) => getComputedStyle(e).visibility), 'the ghost shows the kind icon').toBe('hidden');
+    expect(await ghost.locator('.pd-wc-grip').evaluate((e) => getComputedStyle(e).visibility), 'the grip stays').toBe('visible');
     expect(biggest, 'a symbol in the ghost is drawn huge').toBeLessThanOrEqual(32);
     if (dir) await page.screenshot({ path: `${dir}/${info.project.name}-${scheme}-${process.env['WIDGET_GHOST_TAG'] ?? 'run'}.png` });
     // The placeholder keeps the row's height, so nothing jumps.
@@ -60,6 +62,36 @@ for (const [scheme, which] of [['light', 'first'], ['dark', 'first'], ['light', 
     expect(ghostBox.width).toBeLessThan(rowBox.width * 1.1);
     expect(ghostBox.height, 'the ghost is about the row height').toBeGreaterThan(rowBox.height * 0.8);
     expect(Math.abs(ph.height - rowBox.height), 'the placeholder keeps the row height').toBeLessThanOrEqual(2);
+    await ctx.close();
+  });
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`the dashboard's Edit layout drag shows no stray symbol and keeps the widget laid out (${scheme})`, async ({ browser, baseURL }, info) => {
+    const ctx = await browser.newContext({ baseURL, viewport: { width: 1280, height: 900 }, colorScheme: scheme });
+    const page = await ctx.newPage();
+    await page.goto('/?latency=0&lists=long#/');
+    await expect(page.locator('[data-pd-cell]').first()).toBeVisible({ timeout: 45_000 });
+    await expect(page.locator('pd-widget-frame [aria-busy="true"], pd-widget-frame[aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 });
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    await expect(page.getByText('Editing layout')).toBeVisible();
+    const cell = page.locator('[data-pd-cell]', { has: page.locator('dy-events-feed') });
+    await cell.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+    const before = (await cell.boundingBox())!;
+    const [x, y] = [before.x + before.width / 2, before.y + 20];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 40, y, { steps: 5 });
+    await page.mouse.move(x + 240, y, { steps: 12 });
+    const dir = process.env['WIDGET_GHOST_SHOTS'];
+    if (dir) await page.screenshot({ path: `${dir}/${info.project.name}-${scheme}-dashboard-${process.env['WIDGET_GHOST_TAG'] ?? 'run'}.png` });
+    const mid = (await cell.boundingBox())!;
+    expect(await page.locator('.cdk-drag-preview').count(), 'a drag preview clone exists').toBe(0);
+    expect(Math.abs(mid.width - before.width) / before.width, "the widget changed width while moved").toBeLessThanOrEqual(0.04);
+    expect(Math.abs(mid.height - before.height) / before.height, "the widget changed height while moved").toBeLessThanOrEqual(0.04);
+    const stray = await page.evaluate(() => [...document.querySelectorAll('svg')].filter((v) => v.getBoundingClientRect().width > 120 && !v.closest('[data-pd-cell]')).length);
+    expect(stray, 'a large symbol outside the widgets').toBe(0);
+    await page.mouse.up();
     await ctx.close();
   });
 }
