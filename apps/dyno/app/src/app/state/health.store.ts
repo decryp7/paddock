@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, HealthReport, StartupEntry, StartupFilter, WeeklyReport } from '../core/api.types';
+import type { CommandError, HealthReport, ReadVia, StartupEntry, StartupFilter, WeeklyReport } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 
@@ -15,6 +15,8 @@ interface HealthState {
   startupLoaded: boolean;
   /** What the startup list could not read; the list is partial while this is not empty. */
   startupUnavailable: string[];
+  /** Who read the login items and background tasks (macOS). */
+  startupBtmVia: ReadVia;
   startupError: CommandError | null;
 }
 
@@ -26,6 +28,7 @@ const initial: HealthState = {
   startupCounts: { total: 0, os: 0, signed: 0 },
   startupLoaded: false,
   startupUnavailable: [],
+  startupBtmVia: 'local',
   startupError: null,
 };
 
@@ -49,7 +52,7 @@ export const HealthStore = signalStore(
         patchState(store, { startupError: null });
         try {
           const o = await backend.startupOverview(filter);
-          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true, startupUnavailable: o.unavailable });
+          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true, startupUnavailable: o.unavailable, startupBtmVia: o.btmVia });
         } catch (e) {
           patchState(store, { startupError: toCommandError(e) });
         }

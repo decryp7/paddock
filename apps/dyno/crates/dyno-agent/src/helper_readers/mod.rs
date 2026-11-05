@@ -4,6 +4,7 @@
 pub mod counters;
 pub mod extras;
 pub mod holders;
+pub mod login_items;
 pub mod memory;
 pub mod processes;
 pub mod traffic;

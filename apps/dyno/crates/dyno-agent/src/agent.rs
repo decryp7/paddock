@@ -640,6 +640,10 @@ impl Shared {
             shared
                 .firewall
                 .bind_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
+            // macOS reads login items and background tasks only through the helper; other systems' startup lists ignore the link.
+            lock(&shared.ports.startup).use_login_items(Box::new(crate::helper_readers::login_items::HelperLoginItems::new(Box::new(
+                crate::helper_first::SharedPort(Arc::downgrade(&shared)),
+            ))));
         }
         shared.disk.set_read_threads(read_threads);
         shared.disk.attach_cache(saved_maps.clone());
