@@ -1084,3 +1084,78 @@ fn an_answer_over_the_byte_bound_is_cut_to_valid_json_that_says_so() {
     super::fit(&mut small);
     assert!(small.get("truncated").is_none(), "a small answer is untouched");
 }
+
+/// All eight reading tools over a real loopback socket, with a key, against the scripted agent: each answers with plausible values
+/// and no error, and the answers hold none of the private fixtures' text (user name, host name, address).
+#[test]
+fn all_eight_reading_tools_answer_over_a_real_loopback_socket() {
+    use paddock_mcp::listener::{discovery_path, Listener};
+    use std::io::{BufRead, BufReader, Write};
+    let agent = Arc::new(FakeAgent::new());
+    let server = Arc::new(Server::new(
+        "Dyno",
+        "1.1.0",
+        Arc::new(FakeClock::at_wall_ms(1_700_000_000_000)),
+        Arc::new(AuditLog::new(50)),
+        Arc::new(paddock_log::Redactor::new()),
+    ));
+    for t in crate::mcp::tools(agent) {
+        server.add_tool(t).unwrap();
+    }
+    server.set_policy(Policy::read_only());
+    let keys = Arc::new(paddock_mcp::KeyStore::new());
+    let (_, key) = keys.issue("Pitwall", 1).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let listener = Listener::new(server, keys, discovery_path(dir.path()), 2);
+    listener.reconcile(true);
+    let addr = listener.addr().expect("listening");
+    assert!(addr.ip().is_loopback());
+
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let calls: Vec<(&str, Value)> = vec![
+        ("system_summary", json!({})),
+        ("cpu_memory", json!({"per_core": true})),
+        ("disks", json!({})),
+        ("top_processes", json!({"limit": 3})),
+        ("network_summary", json!({})),
+        ("alarms", json!({})),
+        ("history", json!({"metric": "cpu"})),
+        ("sensors", json!({})),
+    ];
+    writeln!(s, "{}", json!({"key": key})).unwrap();
+    writeln!(s, "{}", paddock_mcp::client::initialize(1, "test", "1")).unwrap();
+    writeln!(s, "{}", paddock_mcp::client::initialized()).unwrap();
+    for (i, (name, args)) in calls.iter().enumerate() {
+        writeln!(s, "{}", paddock_mcp::client::call_tool(10 + i as i64, name, args.clone())).unwrap();
+    }
+    let mut reader = BufReader::new(s);
+    let mut answers = std::collections::BTreeMap::new();
+    let mut first = String::new();
+    reader.read_line(&mut first).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&first).unwrap()["ok"], true);
+    while answers.len() < calls.len() + 1 {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).unwrap() > 0, "the connection ended early: {answers:?}");
+        let v: Value = serde_json::from_str(&line).unwrap();
+        answers.insert(v["id"].as_i64().unwrap(), v);
+    }
+    let body = |i: i64| -> Value {
+        let r = paddock_mcp::client::parse_call(answers[&i]["result"].clone()).unwrap();
+        assert!(!r.is_error, "tool {i} failed: {}", r.text());
+        serde_json::from_str(r.text()).unwrap()
+    };
+    assert_eq!(body(10)["cpu"]["percent"], 37.5);
+    assert_eq!(body(11)["cpu"]["perCore"].as_array().map(Vec::len), Some(4));
+    assert_eq!(body(12)["volumes"][0]["freeBytes"], 125_000_000_000u64);
+    assert_eq!(body(13)["processes"][0]["name"], "Editor");
+    assert_eq!(body(14)["interfaces"].as_array().is_some(), true);
+    assert_eq!(body(15)["activeCount"], 1);
+    assert!(body(16)["points"].as_array().unwrap().len() <= 120);
+    assert_eq!(body(17)["fans"]["readings"][0]["rpm"], 1800);
+    let all = answers.values().map(Value::to_string).collect::<String>();
+    for private in ["alice", "203.0.113.9", "198.51.100.7"] {
+        assert!(!all.contains(private), "{private} reached the client");
+    }
+    listener.reconcile(false);
+}
