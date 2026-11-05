@@ -25,8 +25,8 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Fixed
 
-- Lifespan on an Apple silicon Mac now reads the internal SSD. Dyno had thrown away the long drive names that macOS gives, so it said smartctl found no drives. A USB drive that macOS cannot read health from is now named as such, and the page no longer tells you to turn on administrator readings on a Mac, where the helper is not involved.
-- Reports: the Disks card no longer spills out of its card. Long mount paths are shortened in the middle (the full path is in the tooltip) and the sizes and the forecast stay in their own columns. Empty volumes, temporary folders, system helper volumes and tiny mounted disk images are no longer listed in the report, the highlights or the exports.
+- Lifespan on an Apple silicon Mac now reads the internal SSD. Dyno had thrown away the long drive names that macOS gives, so it said smartctl found no drives. A USB drive is now listed as one macOS cannot read health from, and the page no longer tells you to turn on administrator readings on a Mac, where the helper is not involved.
+- Reports: the Disks card no longer spills out of its card. Long mount paths are shortened in the middle (the full path is in the tooltip) and the sizes and the forecast stay in their own columns. Empty volumes, temporary folders, system helper volumes and tiny mounted disk images (under 256 MB) are no longer listed in the report, the highlights or the exports.
 - Backup health reads Windows Backup again once the administrator helper is turned on, instead of keeping the earlier "could not check" report and its missing helper note.
 - A dialog that Windows snaps to a screen half but cannot make narrower (the About window at 150 % display scale) now counts as sized by you, like any other snap.
 - Menu-bar and tray items show their metric and reading when you hover them, such as "CPU 34%", instead of "Dyno".

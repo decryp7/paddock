@@ -9,22 +9,13 @@ use std::path::Path;
 /// macOS: the user's data volume, joined to the sealed system volume at `/` by firmlinks.
 pub const MACOS_DATA: &str = "/System/Volumes/Data";
 
-/// Whether a macOS mount is plumbing no one manages: helper volumes, snapshots, Time Machine and VM mounts.
-fn is_plumbing(mount: &str) -> bool {
-    (mount.starts_with("/System/Volumes/") && mount != MACOS_DATA)
-        || mount.starts_with("/Volumes/.timemachine")
-        || mount.starts_with("/Volumes/com.apple.")
-        || mount.starts_with("/private/var/vm")
-        || mount.starts_with("/Library/Developer/CoreSimulator")
-}
-
 /// macOS: drops plumbing and shows the Data volume as the startup disk at `/`, scanned from the Data volume's own mount
 /// (`/` is the read-only sealed system volume; its folders reach the data through firmlinks).
 pub fn tidy_macos(mounts: Vec<RawMount>) -> Vec<RawMount> {
     let has_data = mounts.iter().any(|m| m.mount == MACOS_DATA);
     mounts
         .into_iter()
-        .filter(|m| !is_plumbing(&m.mount) && !(has_data && m.mount == "/"))
+        .filter(|m| !dyno_core::disk::volume::is_plumbing_mount(&m.mount) && !(has_data && m.mount == "/"))
         .map(|mut m| {
             if m.mount == MACOS_DATA {
                 m.mount = "/".into();

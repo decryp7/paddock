@@ -1,5 +1,6 @@
 //! The weekly health report: what the week looked like, in numbers and a few sentences.
 
+use crate::disk::volume::is_plumbing_mount;
 use crate::forecast::Forecast;
 use crate::health::Severity;
 use crate::history::{Consumer, HistoryPoint};
@@ -117,30 +118,20 @@ pub struct ReportInput<'a> {
 }
 
 /// A volume smaller than this is not a disk that fills up (mounted installer images, helper volumes): the report leaves it out.
-pub const MIN_REPORT_DISK_BYTES: u64 = 1 << 30;
+/// 256 MiB keeps every real disk, including a small decimal-GB stick, and drops the few-MB images.
+pub const MIN_REPORT_DISK_BYTES: u64 = 256 << 20;
 
-/// Mount points that are plumbing, not storage a person manages: the OS's helper mounts, temporary folders and VM files.
-const NOT_REPORTED_PREFIXES: &[&str] = &[
-    "/System/Volumes/",
-    "/Volumes/.timemachine",
-    "/Volumes/com.apple.",
-    "/private/var/vm",
-    "/Library/Developer/CoreSimulator",
-    "/private/var/folders",
-    "/var/folders",
-    "/private/tmp",
-    "/tmp",
-    "/var/tmp",
-];
+/// Temporary folders, which are never a disk to report on (the OS's plumbing mounts come from [`is_plumbing_mount`]).
+const TEMP_PREFIXES: &[&str] = &["/private/var/folders", "/var/folders", "/private/tmp", "/tmp", "/var/tmp"];
 
 /// Whether a disk of the history belongs in the report. The engine decides (the page and both exports show what the report holds):
 /// never an empty volume, a temporary folder, the OS's helper mounts or a volume too small to fill up. The startup disk is `/`.
+/// The history holds no read-only flag, so a large mounted image cannot be told from a disk here.
 pub fn is_report_disk(d: &ReportDisk) -> bool {
-    let plumbing = NOT_REPORTED_PREFIXES.iter().any(|p| {
-        let bare = p.trim_end_matches('/');
-        d.disk == bare || d.disk.starts_with(&format!("{bare}/"))
-    });
-    !plumbing && d.total >= MIN_REPORT_DISK_BYTES && d.free <= d.total
+    let temp = TEMP_PREFIXES
+        .iter()
+        .any(|p| d.disk == *p || d.disk.strip_prefix(p).is_some_and(|rest| rest.starts_with('/')));
+    !temp && !is_plumbing_mount(&d.disk) && d.total >= MIN_REPORT_DISK_BYTES && d.free <= d.total
 }
 
 /// Builds the report.
@@ -663,10 +654,11 @@ mod tests {
             disk("/Volumes/Example Helper", 8 << 20, 5 << 20, Forecast::FullInDays(2.0)),
             disk("/System/Volumes/Preboot", 500 << 30, 400 << 30, Forecast::NotFilling),
             disk("/Volumes/Backup", 4 << 40, 1 << 40, Forecast::NotFilling),
+            disk("/Volumes/Small Stick", 512 << 20, 100 << 20, Forecast::NotFilling),
         ];
         let r = weekly(i);
         let names: Vec<&str> = r.disks.iter().map(|d| d.disk.as_str()).collect();
-        assert_eq!(names, ["/", "/Volumes/Backup"]);
+        assert_eq!(names, ["/", "/Volumes/Backup", "/Volumes/Small Stick"]);
         assert!(!r.highlights.iter().any(|h| h.contains("Example Helper")), "{:?}", r.highlights);
         for text in [to_markdown(&r, UTC), to_html(&r, UTC)] {
             assert!(!text.contains("Example") && !text.contains("/private/var"), "{text}");

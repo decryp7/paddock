@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@decryp7/paddock-e2e';
+import type { Page } from '@playwright/test';
 
 /**
  * Reports > Disks (user report, Dyno 1.1.0): a long mount path pushed the numbers and the forecast out of the card. At the window

@@ -121,7 +121,8 @@ fn system_smartctl() -> Vec<PathBuf> {
     .collect()
 }
 
-fn this_host() -> HelperHost {
+/// The system this build runs on, as the words of a message need it.
+pub fn this_host() -> HelperHost {
     if cfg!(windows) {
         HelperHost::Windows
     } else if cfg!(target_os = "macos") {
@@ -717,8 +718,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(tools);
     }
 
-    /// Tests that write a script and run it take turns: a fork in another test while the script is still open for writing makes the
-    /// run fail with "Text file busy" (ETXTBSY) on Linux.
+    /// Tests that write a script and run it take turns. Without it, a test that forks while another has its script open for writing
+    /// makes that run fail with "Text file busy" (ETXTBSY) on Linux. It orders these tests among themselves only.
     #[cfg(unix)]
     fn script_tests() -> std::sync::MutexGuard<'static, ()> {
         static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -755,7 +756,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[cfg(unix)]
     #[test]
     fn apple_silicon_scan_with_three_long_names_gives_one_ssd_once() {
@@ -819,6 +819,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(only_usb);
     }
 
+    #[cfg(unix)]
     #[test]
     fn smartctl_refusals_name_the_next_step() {
         let _serial = script_tests();

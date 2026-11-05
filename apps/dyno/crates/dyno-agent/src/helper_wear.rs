@@ -27,7 +27,10 @@ pub struct SmartWear {
 impl SmartWear {
     /// The reading with `local` as the agent's own reader.
     pub fn new(local: Box<dyn DiskWearSource>) -> SmartWear {
-        SmartWear { local, host: this_host() }
+        SmartWear {
+            local,
+            host: dyno_platform::hardware::this_host(),
+        }
     }
 
     /// Reads as if on `host` (tests).
@@ -37,22 +40,12 @@ impl SmartWear {
     }
 }
 
-fn this_host() -> HelperHost {
-    if cfg!(windows) {
-        HelperHost::Windows
-    } else if cfg!(target_os = "macos") {
-        HelperHost::Macos
-    } else {
-        HelperHost::Linux
-    }
-}
-
 /// SSD wear through the seam.
 pub type HelperFirstWear = HelperFirst<SmartWear>;
 
 /// A wear reader over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says.
 pub fn helper_first_wear(port: Box<dyn crate::helper_first::HelperPort>, local: Box<dyn DiskWearSource>) -> HelperFirstWear {
-    helper_first_wear_on(this_host(), port, local)
+    helper_first_wear_on(dyno_platform::hardware::this_host(), port, local)
 }
 
 /// [`helper_first_wear`] as if on `host` (tests, so they read the same on every OS).

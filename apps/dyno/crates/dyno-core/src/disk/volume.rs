@@ -184,6 +184,19 @@ pub fn name_of_mount(mount: &str) -> String {
     trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed).to_string()
 }
 
+/// The macOS user data volume, which the startup disk is shown as.
+pub const MACOS_DATA_MOUNT: &str = "/System/Volumes/Data";
+
+/// Whether a macOS mount is plumbing no one manages: the OS's helper volumes, snapshots, Time Machine, VM and simulator mounts.
+/// The one place that says so (the disk map, the sampler and the weekly report all use it).
+pub fn is_plumbing_mount(mount: &str) -> bool {
+    (mount.starts_with("/System/Volumes/") && mount != MACOS_DATA_MOUNT)
+        || mount.starts_with("/Volumes/.timemachine")
+        || mount.starts_with("/Volumes/com.apple.")
+        || mount.starts_with("/private/var/vm")
+        || mount.starts_with("/Library/Developer/CoreSimulator")
+}
+
 /// Whether a raw mount belongs in the picker at all.
 pub fn is_listed(m: &RawMount) -> bool {
     !m.hidden && !PSEUDO.contains(&m.fs.to_ascii_lowercase().as_str()) && !m.mount.is_empty()
