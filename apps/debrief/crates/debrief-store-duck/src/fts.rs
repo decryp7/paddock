@@ -19,7 +19,7 @@
 //!   epoch is recreated and every segment indexed again.
 
 use crate::segments::SEGMENTS_DIR;
-use crate::turns::{wait_after, Turn};
+use crate::turns::{wait_after, Gate, Turn};
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
 use debrief_core::batch::EventId;
@@ -544,6 +544,8 @@ pub struct FtsShared {
     pub failure: Mutex<Option<String>>,
     /// The store's flag of a running bulk import (`Inner::bulk_import`; not a live refresh).
     bulk_import: Arc<AtomicBool>,
+    /// Whether anything changed since the last look; without news a turn runs no statement.
+    gate: Gate,
     /// Tests: the next writes through [`FtsService`] fail after their operations are queued.
     #[cfg(test)]
     pub(crate) fail_writes: AtomicBool,
@@ -563,6 +565,7 @@ impl FtsService {
         conn: Connection,
         write_lock: Arc<Mutex<()>>,
         bulk_import: Arc<AtomicBool>,
+        generation: Arc<AtomicU64>,
         budget: WriterBudget,
     ) -> Result<FtsService> {
         let epoch = match meta_u64(&conn, "fts_epoch") {
@@ -584,6 +587,7 @@ impl FtsService {
             pending: AtomicU64::new(0),
             failure: Mutex::new(None),
             bulk_import,
+            gate: Gate::new(generation),
             #[cfg(test)]
             fail_writes: AtomicBool::new(false),
         });
@@ -602,6 +606,7 @@ impl FtsService {
 
     /// Asks the thread to look for new segments.
     pub fn wake(&self) {
+        self.shared.gate.news();
         *crate::lock(&self.shared.wake.0) = true;
         self.shared.wake.1.notify_all();
     }
@@ -734,12 +739,17 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     let Some(_running) = crate::shutdown::Active::enter() else {
         return Ok(Turn::Idle);
     };
+    // Nothing changed since the last look: nothing to index (and no statement to run).
+    if !s.gate.take() {
+        return Ok(Turn::Idle);
+    }
     let Ok(_writing) = write_lock.try_lock() else {
         // An import holds the store, with its own memory budget: the index writer's heaps are given back now, so the
         // two never add up; the next step starts a new writer. A brief holder (a live refresh) keeps the writer.
         if s.bulk_import.load(Ordering::SeqCst) {
             drop_writer(s);
         }
+        s.gate.news();
         return Ok(Turn::Blocked);
     };
     let (files, ready) = todo(conn)?;
@@ -820,7 +830,10 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
         let turn = match step(s, &seg_dir, conn, write_lock, epoch) {
-            Ok(Turn::Worked) => continue,
+            Ok(Turn::Worked) => {
+                s.gate.after(Turn::Worked);
+                continue;
+            }
             Ok(t) => t,
             Err(e) => {
                 log::warn!("full-text indexing failed: {e:#}");
@@ -834,12 +847,13 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
             drop_writer(s);
         }
         // A turn that found nothing waits for a wake-up; a blocked or failed one tries again soon.
-        let wait = wait_after(if turn == Turn::Idle && s.pending.load(Ordering::SeqCst) != 0 {
+        let turn = if turn == Turn::Idle && s.pending.load(Ordering::SeqCst) != 0 {
             Turn::Blocked
         } else {
             turn
-        })
-        .unwrap_or_default();
+        };
+        s.gate.after(turn);
+        let wait = wait_after(turn).unwrap_or_default();
         let mut woken = crate::lock(&s.wake.0);
         if !*woken {
             woken = s.wake.1.wait_timeout(woken, wait).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0);
@@ -901,6 +915,7 @@ mod tests {
             pending: AtomicU64::new(1),
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
             fail_writes: AtomicBool::new(false),
         };
         let write_lock = Mutex::new(());
@@ -921,7 +936,6 @@ mod tests {
 
     /// H6: an index loop with nothing to index and no news ran a query every turn. An idle turn runs no statement.
     #[test]
-    #[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P2, store loops without polling): 100 idle index turns ran 400 statements"]
     fn a_hundred_idle_turns_run_no_statement() {
         let dir = std::env::temp_dir().join(format!("debrief-fts-idle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -945,6 +959,7 @@ mod tests {
             pending: AtomicU64::new(0),
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
             fail_writes: AtomicBool::new(false),
         };
         let write_lock = Mutex::new(());

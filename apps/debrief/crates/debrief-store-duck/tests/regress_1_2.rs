@@ -103,9 +103,8 @@ fn an_exceptions_view_with_50_000_groups_returns_at_most_its_limit_and_says_trun
         answer.result.len()
     );
     let json = serde_json::to_value(&answer).unwrap();
-    assert_eq!(
-        json["truncated"]["limit"].is_null(),
-        false,
+    assert!(
+        !json["truncated"]["limit"].is_null(),
         "the answer says it was truncated: {:?}",
         answer.coverage
     );
@@ -150,4 +149,39 @@ fn a_1_6_million_row_catalogue_is_read_within_the_query_budget() {
         reply.candidates.len(),
         debrief_core::catalogue::MAX_NAMES
     );
+}
+
+/// CPU time (user plus system, seconds) of this process so far.
+fn cpu_seconds() -> f64 {
+    let mut u = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage fills the struct it is given; RUSAGE_SELF is always valid.
+    let u = unsafe {
+        libc::getrusage(libc::RUSAGE_SELF, u.as_mut_ptr());
+        u.assume_init()
+    };
+    let t = |v: libc::timeval| v.tv_sec as f64 + v.tv_usec as f64 / 1e6;
+    t(u.ru_utime) + t(u.ru_stime)
+}
+
+/// Measurement (docs/performance.md): the statements and CPU time of an idle store, a store of the samples that has
+/// built its catalogue and its index and is then left alone for `DEBRIEF_IDLE_S` seconds (default 130, two turns of the
+/// background loops' 60 s backstop). Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "measurement: waits DEBRIEF_IDLE_S seconds (default 130); run with --ignored --nocapture"]
+fn an_idle_store_statements_and_cpu() {
+    let idle: u64 = std::env::var("DEBRIEF_IDLE_S").ok().and_then(|v| v.parse().ok()).unwrap_or(130);
+    let dir = TempDir::new("regress-idle");
+    let (store, _report) = common::store_with(&dir, Profile::default_profile(), &common::log_samples()).unwrap();
+    assert!(store.wait_for_catalogue(std::time::Duration::from_secs(120)).unwrap());
+    assert!(store.wait_for_index(std::time::Duration::from_secs(120)).unwrap().ready);
+    // Let the builds' checkpoint and the allocator release finish before the window opens.
+    std::thread::sleep(std::time::Duration::from_secs(10));
+    store.bench_sql("CALL enable_logging('QueryLog')").unwrap();
+    let cpu = cpu_seconds();
+    std::thread::sleep(std::time::Duration::from_secs(idle));
+    let used = cpu_seconds() - cpu;
+    let statements = store
+        .bench_sql("SELECT message FROM duckdb_logs WHERE type = 'QueryLog' AND message NOT LIKE '%duckdb_logs%'")
+        .unwrap();
+    eprintln!("IDLE {idle} s: {statements} statements, {used:.3} CPU-s");
 }
