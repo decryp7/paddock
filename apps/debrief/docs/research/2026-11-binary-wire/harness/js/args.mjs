@@ -1,0 +1,3 @@
+import fs from 'node:fs'; import { encode, decode } from '@msgpack/msgpack'; import { timeIt } from './bench.mjs';
+const req = JSON.parse(fs.readFileSync('../out/req.json', 'utf8')); console.log('JSON.stringify ms', timeIt(() => JSON.stringify(req), 200), 'msgpack encode ms', timeIt(() => encode(req), 200), 'bytes', JSON.stringify(req).length, encode(req).length, 'equal after round trip', JSON.stringify(decode(encode(req))) === JSON.stringify(req));
+const err = fs.readFileSync('../out/error.msgpack'); console.log('small channel message as eval text: chars', JSON.stringify([...err]).length, 'against JSON', fs.statSync('../out/error.json').size);

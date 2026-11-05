@@ -1,0 +1,12 @@
+[package]
+name = "binwire-duck"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[workspace]
+[dependencies]
+duckdb = { version = "=1.20000.0", default-features = false, features = ["appender-arrow"] }
+arrow-ipc = { version = "60", default-features = false }
+serde_json = "1"
+[profile.release]
+debug = false

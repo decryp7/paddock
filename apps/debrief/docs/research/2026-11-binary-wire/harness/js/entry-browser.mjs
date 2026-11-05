@@ -1,0 +1,2 @@
+import { runAll, formats } from './bench.mjs';
+window.__run = async () => { const violations = []; document.addEventListener('securitypolicyviolation', (e) => violations.push(e.violatedDirective + ' ' + e.blockedURI + ' ' + e.sourceFile)); const load = async (n) => new Uint8Array(await (await fetch('/out/' + n)).arrayBuffer()); const out = await runAll(load); out.violations = violations; return out; };

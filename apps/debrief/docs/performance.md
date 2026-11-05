@@ -83,6 +83,125 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, binary wire formats (Debrief ADR 0063 research)
+
+- **Commit:** `origin/main` 87c9b8449; Debrief's types read at `origin/debrief/p0-idle` a35ef28c1. No product code ran.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.
+- **Load:** 1-minute load 4.9 to 13.6 during the runs, with other agents' jobs running; slightly above the threshold of about 12 in
+  [benchmarks.md](../../../docs/benchmarks.md) near the end of the browser runs. **An indication**: compare within a column.
+- **Build:** Rust release: serde_json 1, rmp-serde 1.3.1, ciborium 0.2.2, flexbuffers and flatbuffers 25.12.19, postcard 1.1.3, arrow-ipc 60.1,
+  duckdb 1.20000.0 on prebuilt libduckdb 2.0.0. JS: Node 24.22, Playwright 1.64.1 browsers, headless: Chromium 156.0.8078.4, WebKit 27.2
+  (**not** WKWebView, WebKitGTK or WebView2). Readers: `@msgpack/msgpack` 3.1.3, msgpackr 2.1.4, cbor-x 1.6.9, flatbuffers 25.9.23, `apache-arrow`
+  21.2.0, `@uwdata/flechette` 2.7.1, ion-js 5.2.1, bson 7.3.3, bundled with esbuild 0.25. **The FlexBuffers JS reader is patched** (two lines; see
+  the harness README), because as published it throws on these payloads. **`flatc` was not run**: FlatBuffers code is hand-written against the runtime.
+- **Corpus:** invented, fixed-seed, shaped like `RecordView`, `Facet`, `Timeline` and the settings overview:
+  page of 200 and of 5,000 rows (the engine's `MAX_PAGE_ROWS`), 13 columns plus 8 fields per row out of 30 keys, messages 60 to 200 bytes, 1 % non-ASCII words,
+  5 % with a 1.2 to 1.8 KB exception; a facet of 1,000 values; lanes of 40 x 2000 x 6 = 480,000 `u32`; 12 settings sections x 8 fields with tagged kinds; one
+  `CmdError`. DuckDB run: 100,000 generated rows with a `MAP(VARCHAR, VARCHAR)` column, in memory.
+- **Command:** `PLOCK_LANE=fix plock run binary-wire -- <the harness steps>`;
+  [harness and steps](research/2026-11-binary-wire/harness/README.md).
+- **Runs:** batches for 60 ms each over 400 ms (WebKit's clock is coarse), median of the batches, one process per runtime, in the same process for all
+  formats. Rust: median over at least 15 runs. Fuzz: one run of each loop with a fixed seed.
+- **Probes (ER-33):** every reader's decoded values were compared with `JSON.parse` for page, facet, settings and error, or a row was compared by hand for
+  Arrow; each reader loaded and decoded under Debrief's CSP in its own bundle.
+- **Not measured:** the IPC step (Rust to webview), in any form; main-thread blocking; physical footprint of a webview. Memory below is the JS heap and array buffers in
+  Node, not the rule 26 measure. Those need plan M2 in a real Tauri build.
+- **Budget, verdict:** no budget tested.
+
+Decode, ms: **Chromium / WebKit / Node**. "All" builds every row as an object or touches every value; "40 rows" reads 6 cells of 40 rows; "one" reads one
+message in row 137. A JSON or MessagePack decode reads all of it in every case, so its three figures are equal within noise and only "all" is shown.
+
+| Page of 200 rows | Bytes | All | 40 rows | One |
+|---|---|---|---|---|
+| `JSON.parse` of decoded text | 145,477 | 0.18 / 0.23 / 0.25 | same | same |
+| `@msgpack/msgpack` | 128,328 | 0.38 / 0.65 / 0.41 | same | same |
+| msgpackr, `useRecords: false` | 128,328 | 0.37 / 0.63 / 0.31 | same | same |
+| cbor-x | 128,607 | 0.38 / 0.61 / 0.29 | same | same |
+| MessagePack, skip scan by a hand-written walker | 128,328 | | | 0.033 / 0.019 / 0.034 |
+| postcard, hand-written positional reader | 109,211 | 0.22 / 0.30 / 0.25 | | 0.010 / 0.018 / 0.009 |
+| FlexBuffers (patched reader) | 142,415 | 2.16 / 3.10 / 1.30 | 0.36 / 0.26 / 0.16 | 0.014 / 0.005 / 0.011 |
+| FlatBuffers, a table per message | 149,448 | 0.52 / 0.65 / 0.48 | 0.043 / 0.059 / 0.035 | under 0.001 |
+| FlatBuffers, generic `Frame` | 105,512 | 0.37 / 0.44 / 0.33 | 0.052 / 0.063 / 0.048 | 0.002 / 0.003 / 0.002 |
+| Arrow, `apache-arrow`, dictionaries, `fields` JSON text | 110,664 | 0.34 / 0.38 / 0.58 | 0.061 / 0.082 / 0.071 | 0.024 / 0.035 / 0.028 |
+| Arrow, Flechette, same bytes | 110,664 | 0.21 / 0.23 / 0.17 | 0.054 / 0.062 / 0.060 | 0.018 / 0.020 / 0.025 |
+| Arrow, Flechette, no dictionaries | 120,520 | 0.24 / 0.29 / 0.20 | 0.055 / 0.068 / 0.060 | 0.014 / 0.014 / 0.020 |
+| Arrow, Flechette, `fields` as `Map<Utf8,Utf8>` | 114,504 | 0.49 / 0.67 / 0.41 | 0.103 / 0.127 / 0.096 | 0.021 / 0.022 / 0.029 |
+| Arrow, Flechette, one column per field name | 121,864 | 0.53 / 0.56 / 0.53 | 0.061 / 0.064 / 0.070 | 0.044 / 0.046 / 0.055 |
+| BSON (`js-bson`, `onDemand`) | 143,517 | 0.48 / 0.92 / 0.53 | | 0.002 |
+| Ion (`ion-js`, reader) | 98,272 | 2.28 / 1.53 / 2.48 | | 0.021 / 0.018 / 0.020 |
+
+The Arrow "all" rows with `fields` as JSON text do **not** parse that text, so they do less work than `JSON.parse`. The same object shape, Node:
+Flechette plus `JSON.parse` of each `fields` 0.27 ms against 0.25 ms for JSON; Flechette `Map` turned into objects 0.54 ms.
+
+| Page of 5,000 rows | Bytes | All | 40 rows | One |
+|---|---|---|---|---|
+| `JSON.parse` | 3,742,705 | 6.7 / 6.8 / 7.6 | same | same |
+| `@msgpack/msgpack` | 3,306,292 | 11.3 / 17.8 / 12.5 | same | same |
+| FlexBuffers (patched reader) | 3,739,583 | 60.4 / 63.0 / 35.3 | 0.79 / 0.34 / 0.35 | 0.31 / 0.09 / 0.14 |
+| FlatBuffers, a table per message | 3,809,832 | 15.3 / 18.0 / 12.1 | 0.044 / 0.054 / 0.034 | under 0.001 |
+| FlatBuffers, generic `Frame` | 2,697,432 | 13.3 / 12.0 / 9.5 | 0.056 / 0.063 / 0.049 | 0.002 |
+| Arrow, `apache-arrow` | 2,766,280 | 9.2 / 7.2 / 12.9 | 0.059 / 0.078 / 0.072 | 0.024 / 0.032 / 0.026 |
+| Arrow, Flechette, `fields` JSON text | 2,766,280 | 4.7 / 5.9 / 3.6 | 0.053 / 0.059 / 0.059 | 0.019 / 0.020 / 0.022 |
+| Arrow, Flechette, `Map<Utf8,Utf8>` | 2,856,840 | 14.8 / 15.2 / 9.7 | 0.095 / 0.124 / 0.091 | 0.021 / 0.022 / 0.025 |
+| BSON | 3,680,208 | 15.4 / 22.3 / 14.9 | | 0.066 |
+| Ion | 2,530,684 | 58.8 / 42.0 / 73.8 | | 0.19 / 0.09 / 0.09 |
+
+Same object shape at 5,000, Node: Flechette plus `JSON.parse` of `fields` 7.5 ms, JSON 7.6 ms, Flechette `Map` into objects 14.4 ms. `useProxy: true` builds no strings
+until read, so its "all" (0.09 ms) is not a comparable row; its 40 rows cost the same as the others. Opening a Flechette table (no cell read): 0.026 ms at 200 rows and
+0.023 ms at 5,000, Node, which is the schema and dictionaries.
+
+| Other replies | Chromium / WebKit / Node |
+|---|---|
+| Facet, 1,000 values, `JSON.parse` (62,401 B) | 0.070 / 0.093 / 0.091 |
+| Facet, `@msgpack/msgpack` (53,959 B) | 0.187 / 0.264 / 0.192 |
+| Facet, Flechette, every row (47,176 B) | 0.213 / 0.232 / 0.165 |
+| Facet, Flechette, one value; 50 rows of 1,000 (Node) | 0.004; 0.010 |
+| Settings overview, `JSON.parse` (25,510 B) | 0.036 / 0.037 / 0.051 |
+| Settings, `@msgpack/msgpack` (21,152 B) | 0.086 / 0.147 / 0.090 |
+| Settings, msgpackr | 0.069 / 0.121 / 0.062 |
+| Settings, FlexBuffers `toObject` (21,516 B); one field | 0.542 / 0.645 / 0.324; 0.006 / 0.003 / 0.003 |
+| Error, `JSON.parse` (146 B) | under 0.001 |
+| Error, `@msgpack/msgpack` (128 B) | 0.001 |
+| Error, one-row Arrow batch, Flechette (1,608 B) | 0.008 / 0.007 / 0.009 |
+| Lanes, `JSON.parse` to `number[]` (1,848,255 B) | 3.4 / 4.5 / 3.5 |
+| Lanes, `JSON.parse` then `Uint32Array` | 3.5 / 4.4 / 3.7 |
+| Lanes, MessagePack number array (1,094,726 B) | 3.4 / 3.3 / 4.1 |
+| Lanes, MessagePack `bin` plus the copy alignment needs (1,920,458 B) | 0.155 / 0.087 / 0.072 |
+| Lanes, FlexBuffers blob plus copy (1,920,667 B) | 0.297 / 0.154 / 0.144 |
+| Lanes, FlatBuffers vector as a view (1,920,028 B) | under 0.001 |
+| Lanes, Arrow `UInt32`, Flechette `toArray()`, shares the reply's buffer (1,920,968 B) | 0.003 |
+| Lanes, Arrow `UInt32`, `apache-arrow` `toArray()`, shares the buffer | 0.007 / 0.009 / 0.007 |
+
+| Rust encode, ms (median) | 200 rows | 5,000 rows |
+|---|---|---|
+| `serde_json` | 0.088 | 2.46 |
+| `rmp-serde`, named | 0.050 | 1.55 |
+| flexbuffers (serde) | 0.190 | 5.33 |
+| FlatBuffers, a table per message | 0.232 | 6.29 |
+| FlatBuffers, generic `Frame` | 0.088 | 2.66 |
+| Arrow, build and write, JSON-text `fields` (write alone 0.009; 0.076) | 0.082 | 2.09 |
+| Arrow, build and write, `Map` | 0.116 | 3.25 |
+| Arrow, build and write, one column per field | 0.340 | 10.41 |
+| DuckDB `stream_arrow` then IPC write, SQL included, with `MAP` (111,688 B; 2,744,072 B) | 2.71 | 5.47 |
+| DuckDB row loop, no `MAP` column, then JSON | 2.88 | 9.34 |
+
+Other results:
+
+- **Arguments**, a `PageRequest` of 274 B in JSON: `JSON.stringify` 0.0005 ms, `@msgpack/msgpack` encode 0.0025 ms (192 B), Node. Rust decode: `serde_json` 0.0005, `rmp-serde`
+  0.0003, flexbuffers 0.0006, ciborium 0.0008 ms.
+- **Arrow overhead:** a stream with 14 columns and no rows is 3,464 B (3,848 B with `Map`). Five self-contained batches of a 200-row page are 125,544 B against 110,664 B in one batch.
+  A 128-byte MessagePack message becomes 479 characters of eval text on Tauri's small-message `Channel` path [calc].
+- **Retained memory**, 5,000 rows, per reply, Node: `JSON.parse` 5.06 MB heap; `@msgpack/msgpack` 5.32 MB; Flechette table with no row read 0.03 MB heap plus 2.64 MB buffer; with 200 rows
+  turned into objects 0.18 MB plus 2.64 MB; `Map` columns fully into arrays 8.03 MB heap.
+- **Reader size**, esbuild minified, tree-shaken, bytes raw / gzip: `apache-arrow` `tableFromIPC` 219,414 / 50,584; Flechette `tableFromIPC` 25,496 / 9,351, with writer 48,554 / 16,258;
+  `@msgpack/msgpack` decode 13,821 / 4,214, with encode 21,199 / 5,910; msgpackr 32,497 / 12,082; cbor-x 30,311 / 11,262; flatbuffers runtime 4,644 / 1,554; FlexBuffers 22,952 / 6,074;
+  ion-js 89,954 / 24,501; bson 76,548 / 22,724.
+- **Mutated input**, one `PageRequest` of 192 to 360 B by format (or a 50-row Arrow stream), 1 to 8 bytes changed, a quarter also truncated, panics caught: `serde_json` 200,000 inputs, 0 panics, slowest 25 us; `rmp-serde`
+  200,000, 0, 13 us; ciborium 200,000, 0, 25 us; **flexbuffers: input 17,092 (360 bytes) was still running after 5 s** and the watchdog stopped the run (an earlier run of the same loop hit a 120 s limit); **`arrow-ipc` `StreamReader`: 668 panics in
+  20,000**, slowest 3.4 ms.
+- **CSP**, Debrief's policy as a header, each reader alone: every reader decoded. Chromium logged a CSP error for cbor-x even with `useRecords: false`; no other reader raised one.
+- **Build:** arrow-ipc, arrow-array and flatbuffers are already in Debrief's `Cargo.lock` at 60.0.0 and 25.12.19. A clean release build of the whole harness took 93 s at `CARGO_BUILD_JOBS=2`, the DuckDB one 119 s.
+
 ### 2026-10-30, `debrief report` under CPU contention: QoS background against utility (branch `fix/debrief-cli-report-hang`)
 
 - **Commit:** A/B: base dfc9cdc94 (mining and full-text pools in QoS `BACKGROUND`) → change 1c2567566 (`UTILITY`)
