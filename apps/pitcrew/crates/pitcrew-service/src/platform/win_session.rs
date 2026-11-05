@@ -150,6 +150,8 @@ fn os_err(what: &str, e: windows::core::Error) -> String {
 struct Started {
     process: Owned,
     pid: u32,
+    /// By identity (pid plus start time), read right after the start while the open handle pins the pid.
+    id: Option<paddock_proc::ProcessId>,
     output: Option<File>,
 }
 
@@ -310,6 +312,7 @@ fn start_in_session(
     Ok(Started {
         process: Owned(pi.hProcess),
         pid: pi.dwProcessId,
+        id: paddock_proc::ProcessId::of(pi.dwProcessId),
         output,
     })
 }
@@ -358,11 +361,16 @@ impl RunnerProcess for SessionProcess {
     }
 
     fn stop_gracefully(&mut self) -> Result<(), String> {
-        crate::launch::graceful_stop(self.started.pid, Some(self.session))
+        match self.started.id {
+            Some(id) => crate::launch::graceful_stop(id, Some(self.session)),
+            None => Err("the runner's start time could not be read, so it cannot be told from another process".into()),
+        }
     }
 
     fn kill(&mut self) {
-        crate::launch::kill_tree(self.started.pid);
+        if let Some(id) = self.started.id {
+            crate::launch::kill_tree(id);
+        }
         // SAFETY: valid process handle; failure (already gone) is ignored.
         unsafe {
             // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)

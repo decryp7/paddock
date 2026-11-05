@@ -114,13 +114,6 @@ pub(crate) fn run_until(mut cmd: Command, secs: u64, mut give_up: impl FnMut(u32
     })
 }
 
-/// `taskkill.exe` in the system folder, by full path (never whatever `taskkill` the `PATH` finds first).
-#[cfg(windows)]
-pub fn taskkill_exe() -> std::path::PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    std::path::PathBuf::from(root).join("System32").join("taskkill.exe")
-}
-
 /// A tool's process tree: its own session on Unix, a kill-on-close job object on Windows.
 mod tree {
     #![allow(unsafe_code)]
@@ -147,56 +140,50 @@ mod tree {
 
     /// What ends the tree.
     pub struct Tree {
+        /// The tool by identity (pid plus start time), read right after the spawn, while nothing could have reaped it.
+        root: Option<paddock_proc::ProcessId>,
         #[cfg(windows)]
         job: Option<windows::Win32::Foundation::HANDLE>,
     }
 
     impl Tree {
         /// The tree of a just-started tool. On Windows the tool joins a kill-on-close job (a program it starts later
-        /// joins too); when that fails (an old Windows, a job that forbids it) `taskkill /T` is the fallback. The tool
-        /// joins the job only after `spawn` returned: a program it started in that moment (before its own start-up
-        /// code ran, so in practice never) would be outside the job, which is why `end` also runs `taskkill /T`.
+        /// joins too); when that fails (an old Windows, a job that forbids it) the tree is ended by identity
+        /// (`paddock_proc::kill_tree`). The tool joins the job only after `spawn` returned: a program it started in that
+        /// moment (before its own start-up code ran, so in practice never) would be outside the job, which is why `end`
+        /// also ends the tree by identity.
         #[cfg(windows)]
         pub fn of(child: &Child) -> Tree {
-            Tree { job: job_for(child) }
+            Tree {
+                root: paddock_proc::ProcessId::of(child.id()),
+                job: job_for(child),
+            }
         }
 
         #[cfg(not(windows))]
-        pub fn of(_child: &Child) -> Tree {
-            Tree {}
+        pub fn of(child: &Child) -> Tree {
+            Tree {
+                root: paddock_proc::ProcessId::of(child.id()),
+            }
         }
 
         /// The tool finished: on Windows the job is closed, which ends any helper it left running.
         pub fn close(self) {}
 
-        /// Ends the tool and everything it started, and reaps the tool.
-        #[cfg_attr(
-            unix,
-            expect(
-                clippy::disallowed_methods,
-                reason = "ADR 0033 WP-6: killpg before reaping; move to paddock_proc::Supervised"
-            )
-        )]
+        /// Ends the tool and everything it started, and reaps the tool. The tree is ended by identity: a process whose pid was
+        /// handed on since is left alone (ADR 0033).
         pub fn end(&self, child: &mut Child) {
-            #[cfg(unix)]
-            {
-                // The tool leads its own process group (`own_session`).
-                if let Ok(pid) = i32::try_from(child.id()) {
-                    let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL);
+            #[cfg(windows)]
+            if let Some(job) = self.job {
+                // SAFETY: a job handle this value owns and has not closed.
+                unsafe {
+                    // conformance: pid-kill — a job handle we own: no pid is looked up
+                    let _ = windows::Win32::System::JobObjects::TerminateJobObject(job, 1);
                 }
             }
-            #[cfg(windows)]
-            match self.job {
-                Some(job) => {
-                    // SAFETY: a job handle this value owns and has not closed.
-                    unsafe {
-                        // conformance: pid-kill — a job handle we own: no pid is looked up
-                        let _ = windows::Win32::System::JobObjects::TerminateJobObject(job, 1);
-                    }
-                    // Anything that escaped the job (see `of`) and is still in the tool's tree.
-                    taskkill_tree(child.id());
-                }
-                None => taskkill_tree(child.id()),
+            // The tool leads its own process group on Unix (`own_session`); on Windows this is what is left outside the job.
+            if let Some(root) = self.root {
+                paddock_proc::kill_tree(root);
             }
             let _ = child.kill();
             let _ = child.wait();
@@ -247,27 +234,6 @@ mod tree {
             return None;
         }
         Some(job)
-    }
-
-    /// `taskkill /PID n /T /F`, run directly (not through `run_with_timeout`, which would recurse) and waited for a few
-    /// seconds at most.
-    #[cfg(windows)]
-    fn taskkill_tree(pid: u32) {
-        use std::process::Stdio;
-        use std::time::{Duration, Instant};
-        let mut kill = super::quiet_command(&super::taskkill_exe());
-        kill.args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Ok(mut k) = kill.spawn() {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while matches!(k.try_wait(), Ok(None)) && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            let _ = k.kill();
-            let _ = k.wait();
-        }
     }
 }
 
@@ -366,29 +332,21 @@ pub(crate) mod tests {
     }
 
     #[cfg(windows)]
-    // ADR 0033 WP-6 (test): a tree by parent pids without start times; use paddock_proc::descendants
     fn tree_members(pid: u32) -> Vec<Member> {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let Some(root) = paddock_proc::ProcessId::of(pid) else {
+            return vec![];
+        };
         let mut sys = System::new();
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
-        let mut tree = vec![Pid::from_u32(pid)];
-        loop {
-            let before = tree.len();
-            for (p, proc_) in sys.processes() {
-                if !tree.contains(p) && proc_.parent().is_some_and(|pp| tree.contains(&pp)) {
-                    tree.push(*p);
-                }
-            }
-            if tree.len() == before {
-                break;
-            }
-        }
+        let mut tree = vec![root.pid()];
+        tree.extend(paddock_proc::descendants_of(root).into_iter().map(paddock_proc::ProcessId::pid));
         // `cmd` gets a console host of its own, which is not one of the tool's programs.
         tree.into_iter()
-            .filter_map(|p| sys.process(p).map(|q| (p, q)))
+            .filter_map(|p| sys.process(Pid::from_u32(p)).map(|q| (p, q)))
             .filter(|(_, q)| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
             .map(|(p, q)| Member {
-                pid: p.as_u32(),
+                pid: p,
                 mark: q.start_time(),
             })
             .collect()
@@ -433,23 +391,11 @@ pub(crate) mod tests {
         sys.process(pid).is_some_and(|p| p.start_time() == m.mark)
     }
 
-    #[cfg(unix)]
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6 (test): kills tree members found by parent pids; use paddock_proc"
-        )
-    )]
+    /// Ends a member the test found, by identity.
     fn kill_pid(pid: u32) {
-        if let Ok(p) = i32::try_from(pid) {
-            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
+        if let Some(id) = paddock_proc::ProcessId::of(pid) {
+            let _ = paddock_proc::end(id);
         }
-    }
-
-    #[cfg(windows)]
-    fn kill_pid(pid: u32) {
-        let _ = quiet_command(&taskkill_exe()).args(["/PID", &pid.to_string(), "/F"]).output();
     }
 
     #[test]

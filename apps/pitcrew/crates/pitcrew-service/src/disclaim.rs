@@ -236,13 +236,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6 (test): killpg on a recorded pid; use paddock_proc"
-        )
-    )]
     fn the_child_leads_its_own_process_group_and_a_bad_program_is_an_error() {
         let mut s = spawn(
             Path::new("/bin/sh"),
@@ -256,7 +249,9 @@ mod tests {
             nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(s.pid))).unwrap().as_raw(),
             s.pid
         );
-        nix::sys::signal::killpg(nix::unistd::Pid::from_raw(s.pid), nix::sys::signal::Signal::SIGKILL).unwrap();
+        // The child is ours and not reaped yet: its identity is read now, and its tree ended by identity.
+        let id = paddock_proc::ProcessId::of(u32::try_from(s.pid).unwrap()).expect("the child runs");
+        paddock_proc::kill_tree(id);
         let _ = nix::sys::wait::waitpid(nix::unistd::Pid::from_raw(s.pid), None);
         let mut sink = String::new();
         let _ = s.stdout.read_to_string(&mut sink);

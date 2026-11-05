@@ -5,7 +5,6 @@
 //! test waits for what the supervisor has *seen* (a job's processes in its usage, not only the "task started" line),
 //! and every wait is on a condition. A real-time job length or a fixed number of fake-clock steps that must fit into
 //! one real job made these tests fail or time out on a loaded runner (CI run 6628).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
 use pitcrew_core::health::RunnerStatus;
 use pitcrew_core::history::HistoryEvent;
@@ -26,6 +25,7 @@ use std::time::{Duration, Instant};
 
 const EXE: &str = std::env::consts::EXE_SUFFIX;
 
+#[allow(clippy::disallowed_methods, reason = "a test builds the fake runner with cargo")]
 fn fake_runner() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
@@ -177,8 +177,9 @@ impl Harness {
         }
         let me = Pid::from_u32(std::process::id());
         for pid in doomed.into_iter().filter(|p| *p != me) {
-            if let Some(p) = sys.process(pid) {
-                p.kill();
+            // By identity, read from the snapshot just taken: a pid handed on since is left alone.
+            if let Some(id) = paddock_proc::ProcessId::of(pid.as_u32()) {
+                let _ = paddock_proc::end(id);
             }
         }
     }
@@ -655,13 +656,7 @@ use pitcrew_core::runner_settings::RunnerSettings;
 /// Whether a process still runs (a zombie nobody reaped does not count).
 #[cfg(unix)]
 fn alive(pid: u32) -> bool {
-    let out = std::process::Command::new("ps")
-        .args(["-o", "stat=", "-p", &pid.to_string()])
-        .output()
-        .unwrap();
-    let s = String::from_utf8_lossy(&out.stdout);
-    let s = s.trim();
-    !s.is_empty() && !s.starts_with('Z')
+    paddock_proc::is_alive(pid)
 }
 
 // The leftover tests run on Unix only (the fake runner's leftovers are shell background jobs).
@@ -876,12 +871,15 @@ fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
     let _ = ErrorCode::Busy;
     h.ask(Request::Stop { runner: h.name.clone() });
     h.finish();
-    unsafe_kill(row.pid);
+    end_leftover(row.pid);
 }
 
+/// Ends a leftover the test's runner started, by identity.
 #[cfg(unix)]
-fn unsafe_kill(pid: u32) {
-    let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+fn end_leftover(pid: u32) {
+    if let Some(id) = paddock_proc::ProcessId::of(pid) {
+        let _ = paddock_proc::end(id);
+    }
 }
 
 #[cfg(unix)]
@@ -913,6 +911,10 @@ fn nothing_is_stopped_while_a_job_runs() {
 
 #[cfg(unix)]
 #[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test starts a stranger process that is not part of the runner's tree"
+)]
 fn a_stop_outside_the_runners_tree_is_refused() {
     let mut h = Harness::new("fence", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
@@ -956,7 +958,7 @@ fn a_stop_outside_the_runners_tree_is_refused() {
     let _ = stranger.kill();
     let _ = stranger.wait();
     h.finish();
-    unsafe_kill(row.pid);
+    end_leftover(row.pid);
 }
 
 fn write_config(h: &Harness, text: &str) {

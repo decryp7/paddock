@@ -174,7 +174,7 @@ impl ProcessWatch {
         if self.is_stopping(target.meta.pid) {
             return Ok(());
         }
-        term.ask(target.meta.pid)?;
+        term.ask(target.meta.pid, target.meta.started_ms)?;
         self.stopping.push(Stopping {
             pid: target.meta.pid,
             started_ms: target.meta.started_ms,
@@ -210,7 +210,7 @@ impl ProcessWatch {
                 StopStep::Wait => true,
                 StopStep::Kill => {
                     if !s.ended {
-                        term.end(s.pid);
+                        term.end(s.pid, s.started_ms);
                         s.ended = true;
                         // Give the kill a moment to take effect before the next check.
                         s.progress.asked_at = now;
@@ -255,14 +255,14 @@ mod tests {
     }
 
     impl Terminator for Fake {
-        fn ask(&self, pid: u32) -> Result<(), String> {
+        fn ask(&self, pid: u32, _started_ms: Option<u64>) -> Result<(), String> {
             if self.refuse {
                 return Err("denied".into());
             }
             self.asked.lock().unwrap().push(pid);
             Ok(())
         }
-        fn end(&self, pid: u32) {
+        fn end(&self, pid: u32, _started_ms: Option<u64>) {
             self.ended.lock().unwrap().push(pid);
         }
     }

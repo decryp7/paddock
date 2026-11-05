@@ -32,11 +32,15 @@ pub struct ProcessInfo {
     pub cpu_time_ms: u64,
     /// Resident memory in bytes.
     pub rss_bytes: u64,
+    /// When it started, in whole seconds since the epoch; 0 when the OS did not say.
+    pub started_s: u64,
 }
 
 /// The processes that belong to the runner with process id `root`: the root, its descendants and its process group,
 /// at most [`MAX_TREE_PROCESSES`]. Empty when `root` is not in the table (the runner is gone) or is a system pid.
-// ADR 0033 WP-6: a tree by parent pids without start times; skip a child older than its parent (paddock_proc::descendants)
+///
+/// A pid can be handed on, so a process that started before the present holder of its parent pid is not that holder's child:
+/// it is skipped (ADR 0033), unless it is in the runner's process group.
 pub fn tree_members(root: u32, table: &[ProcessInfo]) -> Vec<ProcessInfo> {
     if root <= 1 || !table.iter().any(|p| p.pid == root) {
         return Vec::new();
@@ -45,7 +49,10 @@ pub fn tree_members(root: u32, table: &[ProcessInfo]) -> Vec<ProcessInfo> {
     let mut children: HashMap<u32, Vec<usize>> = HashMap::new();
     for (i, p) in table.iter().enumerate() {
         if let Some(parent) = p.ppid {
-            if parent != p.pid {
+            let older_than_parent = by_pid
+                .get(&parent)
+                .is_some_and(|&pi| p.started_s != 0 && table[pi].started_s != 0 && p.started_s < table[pi].started_s);
+            if parent != p.pid && !older_than_parent {
                 children.entry(parent).or_default().push(i);
             }
         }
@@ -242,7 +249,26 @@ mod tests {
             pgid,
             cpu_time_ms: cpu,
             rss_bytes: rss,
+            started_s: 0,
         }
+    }
+
+    /// A process whose start is older than the present holder of its parent pid is not that holder's child: the parent pid was
+    /// handed on (ADR 0033).
+    #[test]
+    fn a_child_older_than_its_parent_is_not_followed() {
+        let at = |mut p: ProcessInfo, s: u64| {
+            p.started_s = s;
+            p
+        };
+        let table = [
+            p(1, None, None, 0, 0),
+            at(p(100, Some(1), Some(100), 0, 10), 1000),
+            at(p(101, Some(100), Some(101), 0, 10), 1100), // a real child
+            at(p(102, Some(100), Some(102), 0, 10), 500),  // started before pid 100's holder did: a stale link
+            at(p(103, Some(102), Some(103), 0, 10), 1200), // below the stale one
+        ];
+        assert_eq!(pids(&tree_members(100, &table)), vec![100, 101]);
     }
 
     fn pids(v: &[ProcessInfo]) -> Vec<u32> {

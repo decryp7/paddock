@@ -22,7 +22,7 @@
 //! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file.
 //! - Ctrl+Break / SIGTERM: logs the shutdown line and exits 0 (waiting for a running job first, a held one until it is
 //!   released).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
+#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -104,6 +104,7 @@ fn job_started(config: Option<&str>) {
 }
 
 /// Whether process `pid` runs its own program now (no longer the shell that forked it), or is gone.
+#[allow(clippy::disallowed_methods, reason = "the fake runner starts the programs of its jobs")]
 fn exec_done(pid: &str) -> bool {
     if pid.is_empty() {
         return true;
@@ -114,6 +115,7 @@ fn exec_done(pid: &str) -> bool {
     comm.is_empty() || !(comm == "sh" || comm.ends_with("/sh"))
 }
 
+#[allow(clippy::disallowed_methods, reason = "the fake runner starts the programs of its jobs")]
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let config = args.iter().position(|a| a == "--config").and_then(|i| args.get(i + 1)).cloned();

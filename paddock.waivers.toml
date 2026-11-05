@@ -22,12 +22,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C37"
-path = "apps/pitcrew/*"
-reason = "Pitcrew's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C37"
 path = "apps/pitwall/*"
 reason = "Pitwall's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
 expires = "2026-12-31"
@@ -69,54 +63,6 @@ expires = "2026-12-31"
 check = "C53"
 path = "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs"
 reason = "ADR 0033 WP-9: the process tree view shows parent pids without a start-time check (display only)"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-core/src/usage.rs"
-reason = "ADR 0033 WP-6: tree_members follows parent pids without start times (usage and leftover candidates); use paddock_proc::descendants"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/examples/fake_runner.rs"
-reason = "ADR 0033 WP-6: a file-wide allow of disallowed_methods; allow it on the items that start programs"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/src/disclaim.rs"
-reason = "ADR 0033 WP-6 (test): killpg of a recorded pid; use paddock_proc"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/src/launch.rs"
-reason = "ADR 0033 WP-6: kill_tree is taskkill /T or killpg on a pid, including adopted runners from the state file, and the macOS spawned kill ignores the reaped flag; kill by ProcessId"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/src/probe.rs"
-reason = "ADR 0033 WP-6: alive() treats a missing start time as a match, and has_job_children follows parent pids without start times"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/src/process.rs"
-reason = "ADR 0033 WP-6: the taskkill /T fallback, killpg before reaping, and test walks by parent pid; use paddock_proc::Supervised and descendants"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/src/terminate.rs"
-reason = "ADR 0033 WP-6: asks and ends pids from the last probe without a fresh start-time check; take a ProcessId and use paddock_proc::ask and end"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs"
-reason = "ADR 0033 WP-6 (test): a file-wide allow of disallowed_methods and a kill command by pid; use paddock_proc::end"
 expires = "2026-12-31"
 
 [[waiver]]
