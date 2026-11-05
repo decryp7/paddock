@@ -1,0 +1,67 @@
+//! Raw text on the plugin wire or an offset and length the host cuts: the same invented events through paddock-ipc items at credit 4.
+use paddock_ipc::{endpoint, CallCtx, Connection, FrameLimit, Handler, NoCalls, Peer, PeerOptions, RemoteError, StreamEvent};
+use serde::{Deserialize, Serialize};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::sync::Arc;
+#[derive(Serialize, Deserialize, Clone)]
+struct Ev { ts: Option<i64>, level: u8, message: String, fields: Vec<(String, String)>, line: u32, raw: Option<String>, span: Option<(u64, u32)> }
+const ITEM_EVENTS: usize = 8192; const ITEM_BYTES: usize = 4 << 20;
+fn line(n: u64) -> String { format!("2026-10-14 10:{:02}:{:02}.{:03} host-{} app-{}[{}]: request {n} handled in {} ms for path /invented/{}", (n / 60) % 60, n % 60, n % 1000, n % 7, n % 5, n % 4096, n % 1009, n % 97) }
+fn ev(n: u64, raw_text: bool, off: u64, l: &str) -> Ev {
+    Ev { ts: Some(1_790_000_000_000 + n as i64), level: 2, message: l[33..].to_string(), fields: vec![("Host".into(), format!("host-{}", n % 7)), ("App".into(), format!("app-{}", n % 5)), ("ProcId".into(), (n % 4096).to_string())], line: n as u32 + 1,
+         raw: raw_text.then(|| l.to_string()), span: (!raw_text).then_some((off, l.len() as u32)) }
+}
+struct Plugin { events: u64 }
+impl Handler for Plugin {
+    fn call(&self, ctx: &CallCtx, body: &[u8]) -> Result<Vec<u8>, RemoteError> {
+        let raw_text = body[0] == 1;
+        let (mut item, mut bytes, mut off) = (Vec::with_capacity(ITEM_EVENTS), 0usize, 0u64);
+        for n in 0..self.events {
+            let l = line(n);
+            let e = ev(n, raw_text, off, &l);
+            off += l.len() as u64 + 1;
+            bytes += 64 + e.message.len() + if raw_text { l.len() } else { 0 } + 60;
+            item.push(e);
+            if item.len() >= ITEM_EVENTS || bytes >= ITEM_BYTES {
+                ctx.send_item(postcard::to_allocvec(&item).unwrap())?;
+                item.clear(); bytes = 0;
+            }
+        }
+        if !item.is_empty() { ctx.send_item(postcard::to_allocvec(&item).unwrap())?; }
+        Ok(vec![])
+    }
+}
+fn main() {
+    let events: u64 = std::env::args().nth(2).unwrap().parse().unwrap();
+    let path = std::env::args().nth(1).unwrap();
+    { let mut w = std::io::BufWriter::new(std::fs::File::create(&path).unwrap()); for n in 0..events { w.write_all(line(n).as_bytes()).unwrap(); w.write_all(b"\n").unwrap(); } }
+    let (x, y) = endpoint::pair().unwrap();
+    let limit = FrameLimit::default();
+    let host = Peer::start(Connection::raw(x, limit), Arc::new(NoCalls) as Arc<dyn Handler>, PeerOptions::new("host")).unwrap();
+    let _p = Peer::start(Connection::raw(y, limit), Arc::new(Plugin { events }) as Arc<dyn Handler>, PeerOptions::new("plugin")).unwrap();
+    for round in 0..3 { for mode in [1u8, 0u8] {
+        let mut f = std::fs::File::open(&path).unwrap();
+        let t = std::time::Instant::now();
+        let mut s = host.stream(vec![mode], 4).unwrap();
+        let (mut n, mut wire, mut rawb, mut buf) = (0u64, 0u64, 0u64, Vec::new());
+        loop { match s.next(None).unwrap() {
+            StreamEvent::Item(b) => {
+                wire += b.len() as u64;
+                let v: Vec<Ev> = postcard::from_bytes(&b).unwrap();
+                if mode == 0 {
+                    let (a, z) = (v[0].span.unwrap(), v[v.len() - 1].span.unwrap());
+                    buf.resize((z.0 + z.1 as u64 - a.0) as usize, 0);
+                    f.seek(SeekFrom::Start(a.0)).unwrap(); f.read_exact(&mut buf).unwrap();
+                    for e in &v { let (o, l) = e.span.unwrap(); let at = (o - a.0) as usize; let raw = String::from_utf8_lossy(&buf[at..at + l as usize]).trim_end().to_string(); rawb += raw.len() as u64; std::hint::black_box(raw); }
+                } else { for e in &v { rawb += e.raw.as_ref().unwrap().len() as u64; } }
+                n += v.len() as u64;
+                std::hint::black_box(v);
+            }
+            StreamEvent::Done(_) => break,
+            StreamEvent::Idle => {}
+        } }
+        let sec = t.elapsed().as_secs_f64();
+        println!("RESULT round={round} mode={} events={n} secs={sec:.2} events_per_s={:.0} wire_mib={} raw_mib={}", if mode == 1 { "raw-on-wire" } else { "span-host-cuts" }, n as f64 / sec, wire >> 20, rawb >> 20);
+    } }
+    std::fs::remove_file(path).ok();
+}

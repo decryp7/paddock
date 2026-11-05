@@ -1,0 +1,106 @@
+//! Goes in crates/debrief-core/tests/ to run. Invented files; per-file costs and sniff calls on the reading side.
+use debrief_core::batch::{PendingBatch, SourceId};
+use debrief_core::importers::{BinaryImporter, ImportCtx, Imported, Importer, Importers};
+use debrief_core::ingest::{self, ImportEnv, NewSource, Outcome, SharedSink, SourceReport};
+use debrief_core::Profile;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+#[derive(Default)]
+struct Count { events: AtomicU64, sources: AtomicU64, max_fds: AtomicUsize }
+fn open_fds() -> usize { std::fs::read_dir("/dev/fd").map_or(0, |d| d.count()) }
+impl SharedSink for Count {
+    fn reserve_sources(&self, n: u32) -> anyhow::Result<SourceId> { Ok(SourceId(self.sources.fetch_add(n as u64, Ordering::Relaxed) as u32)) }
+    fn begin_source(&self, _s: &NewSource, id: Option<SourceId>) -> anyhow::Result<SourceId> { Ok(id.unwrap_or_else(|| SourceId(self.sources.fetch_add(1, Ordering::Relaxed) as u32))) }
+    fn write(&self, b: PendingBatch) -> anyhow::Result<()> { self.events.fetch_add(b.len() as u64, Ordering::Relaxed); self.max_fds.fetch_max(open_fds(), Ordering::Relaxed); Ok(()) }
+    fn finish_source(&self, _r: &SourceReport) -> anyhow::Result<()> { Ok(()) }
+    fn abort_source(&self, _id: SourceId) -> anyhow::Result<()> { Ok(()) }
+}
+struct T(String, Arc<AtomicU64>);
+impl Importer for T {
+    fn id(&self) -> &str { &self.0 }
+    fn sniff(&self, _c: &ImportCtx, _h: &str) -> u8 { self.1.fetch_add(1, Ordering::Relaxed); 0 }
+    fn import(&self, _c: &ImportCtx, _s: &str) -> anyhow::Result<Imported> { Ok(Imported::default()) }
+}
+struct B(String, Arc<AtomicU64>);
+impl BinaryImporter for B {
+    fn id(&self) -> &str { &self.0 }
+    fn sniff(&self, _c: &ImportCtx, _h: &[u8]) -> u8 { self.1.fetch_add(1, Ordering::Relaxed); 0 }
+    fn import(&self, _c: &ImportCtx, _s: &[u8]) -> anyhow::Result<Imported> { Ok(Imported::default()) }
+}
+fn run(root: &Path, threads: usize, fakes: bool) {
+    let calls = Arc::new(AtomicU64::new(0));
+    let bin_calls = Arc::new(AtomicU64::new(0));
+    let mut importers = Importers::new();
+    if fakes {
+        // As many proxies as the first-party plugins register today: 14 text, 3 binary.
+        for i in 0..14 { importers.register(Box::new(T(format!("fake-text-{i}"), calls.clone()))); }
+        for i in 0..3 { importers.register_binary(Box::new(B(format!("fake-bin-{i}"), bin_calls.clone()))); }
+    }
+    let registry = debrief_core::PluginRegistry::new();
+    let parsers = registry.compile_parsers(&Profile::default_profile(), &debrief_core::parser::ParserSetup::builtins()).unwrap();
+    let profile = parsers.base().clone();
+    let progress = debrief_core::workspace::ImportProgress::default();
+    let env = ImportEnv { encodings: &Default::default(), importers: &importers, parsers: &parsers, schema: Arc::new(ingest::schema_for(&profile)), cancel: progress.cancel_flag(), window: None };
+    let canonical = vec![std::fs::canonicalize(root).unwrap()];
+    let t0 = std::time::Instant::now();
+    let files = ingest::files_to_read(&canonical, &canonical, &profile, &Default::default(), &Default::default());
+    let walk = t0.elapsed().as_secs_f64();
+    let sink = Count::default();
+    let opts = ingest::ParallelOptions { threads, ..Default::default() };
+    let t = std::time::Instant::now();
+    let out = ingest::import_files_parallel(&env, &files, &Default::default(), &progress, &opts, &sink);
+    let s = t.elapsed().as_secs_f64();
+    let failed = out.iter().filter(|o| matches!(o, Outcome::Unrecognized(_))).count();
+    let n = files.len() as f64;
+    eprintln!("RESULT files={} threads={threads} fakes={fakes} walk_s={walk:.2} import_s={s:.2} us_per_file_threadtime={:.0} events={} events_per_s={:.0} failed={failed} text_sniffs_per_file={:.1} bin_sniffs_per_file={:.1} max_fds={}",
+        files.len(), s * threads as f64 * 1e6 / n, sink.events.load(Ordering::Relaxed), sink.events.load(Ordering::Relaxed) as f64 / s,
+        calls.load(Ordering::Relaxed) as f64 / n, bin_calls.load(Ordering::Relaxed) as f64 / n, sink.max_fds.load(Ordering::Relaxed));
+}
+fn line(n: u64) -> String { format!("2026-10-14 10:{:02}:{:02}.{:03} [INFO] worker-{} request {n} handled in {} ms for path /invented/{}", (n / 60) % 60, n % 60, n % 1000, n % 16, n % 97, n % 1009) }
+fn fill(p: &Path, bytes: u64, utf16: bool, start: u64) -> u64 {
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let mut w = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(p).unwrap());
+    let (mut n, mut done) = (start, 0u64);
+    if utf16 { w.write_all(&[0xFF, 0xFE]).unwrap(); }
+    while done < bytes {
+        let l = line(n) + "\n";
+        if utf16 { for u in l.encode_utf16() { w.write_all(&u.to_le_bytes()).unwrap(); } done += l.len() as u64 * 2; } else { w.write_all(l.as_bytes()).unwrap(); done += l.len() as u64; }
+        n += 1;
+    }
+    w.flush().unwrap();
+    n - start
+}
+fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("adr-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+fn env_u(k: &str, d: u64) -> u64 { std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
+#[test] #[ignore]
+fn many_small() {
+    let d = tmp("small");
+    let files = env_u("ADR_FILES", 14000);
+    for i in 0..files { fill(&d.join(format!("d{:03}/f{i:05}.log", i % 140)), 2048, false, i); }
+    for threads in [1usize, 4, 8] { run(&d, threads, false); run(&d, threads, true); }
+    std::fs::remove_dir_all(d).ok();
+}
+#[test] #[ignore]
+fn bundle_shape() {
+    let d = tmp("bundle");
+    let (total, files) = (env_u("ADR_GIB10", 76) * (1 << 30) / 10, env_u("ADR_FILES", 14000));
+    let big = 440u64 << 20;
+    let mids = 8u64 * (180 << 20);
+    fill(&d.join("reg/export.log"), big, true, 0);
+    for i in 0..8 { fill(&d.join(format!("mid/m{i}.log")), 180 << 20, false, i * 1000); }
+    let rest = total - big - mids;
+    let each = rest / (files - 9);
+    for i in 0..files - 9 { fill(&d.join(format!("d{:03}/f{i:05}.log", i % 140)), each, i % 50 == 0, i); }
+    for threads in [8usize] { run(&d, threads, false); }
+    std::fs::remove_dir_all(d).ok();
+}
+#[test] #[ignore]
+fn utf16_vs_utf8() {
+    let only = env_u("ADR_ONLY", 0);
+    if only != 16 { let d8 = tmp("u8"); fill(&d8.join("a.log"), env_u("ADR_MB", 440) << 20, false, 0);
+    run(&d8, 1, false); std::fs::remove_dir_all(d8).ok(); }
+    if only != 8 { let d16 = tmp("u16"); fill(&d16.join("a.log"), env_u("ADR_MB", 440) << 20, true, 0);
+    run(&d16, 1, false); std::fs::remove_dir_all(d16).ok(); }
+}

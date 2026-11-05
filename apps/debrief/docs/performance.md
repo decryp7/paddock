@@ -85,11 +85,11 @@ some fields; "n/s" means the source does not state them.
 
 ### 2026-11-05, streaming trait measurements (Debrief ADR 0064)
 
-- **Commit:** source at 3168b6145 (`debrief/stream-text`); `evtx` 0.15.1, default features off, as Debrief builds it. Throwaway harnesses, not committed: described here so they can be rebuilt
+- **Commit:** source at 3168b6145 (`debrief/stream-text`); `evtx` 0.15.1, default features off, as Debrief builds it. Harnesses and exact commands: [measurements/adr-0064](measurements/adr-0064/README.md), kept as text and rewritten from the run's source, not re-run
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
 - **Load:** 1-minute load about 6.7 to 11 at the marks taken; other agents running; heavy steps through `plock`. Indications only; only the A/B below is interleaved
 - **Build:** release, system allocator (not `debrief-alloc`), `CARGO_BUILD_JOBS=2`
-- **Memory measure:** maximum RSS from `/usr/bin/time -l`, labelled RSS (rule 26 asks for footprint; a comparison within one table only). A reading-side counting sink throughout: **no store writer, no plugin process**
+- **Memory measure:** maximum RSS from `/usr/bin/time -l`. **Rule 26 asks for footprint, so these are comparisons within one table only; ADR 0064's SI-0 re-runs them in footprint.** A reading-side counting sink throughout: **no store writer, no plugin process**
 - **Runs:** per table
 - **EVTX over a simulated lent file.** Corpus: the fixture `security.evtx` (MIT, one 64 KiB chunk with 4 records) repeated to 256 and 1,464 MiB. A `Read + Seek` wrapper around a file counted round trips, with pieces of at most 1 MiB and three read-ahead policies; `EvtxParser::from_read_seek`, `validate_checksums(false)`, `records_json_value`. One run per cell.
 

@@ -1,0 +1,66 @@
+//! evtx 0.15.1 from_read_seek over a simulated lent host file. Input: an invented log made of one repeated chunk.
+use evtx::{EvtxParser, ParserSettings};
+use std::cell::Cell;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::rc::Rc;
+const CHUNK: u64 = 65536; const HEADER: u64 = 4096; const PIECE: usize = 1 << 20;
+#[derive(Clone, Copy, PartialEq)] enum Policy { None, Always, Sequential }
+#[derive(Default, Clone)] struct Stats { rts: Rc<Cell<u64>>, bytes: Rc<Cell<u64>>, seeks: Rc<Cell<u64>> }
+struct Lent { f: File, len: u64, pos: u64, buf: Vec<u8>, buf_at: u64, last_end: Option<u64>, policy: Policy, st: Stats }
+impl Read for Lent {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if out.is_empty() || self.pos >= self.len { return Ok(0); }
+        let hit = self.pos >= self.buf_at && self.pos < self.buf_at + self.buf.len() as u64;
+        if !hit {
+            let seq = self.last_end == Some(self.pos);
+            let ask = match self.policy { Policy::None => out.len().min(PIECE), Policy::Always => PIECE, Policy::Sequential => if seq { PIECE } else { out.len().min(PIECE) } };
+            self.f.seek(SeekFrom::Start(self.pos))?;
+            self.buf.resize(ask, 0);
+            let mut n = 0; while n < ask { let k = self.f.read(&mut self.buf[n..])?; if k == 0 { break; } n += k; }
+            self.buf.truncate(n); self.buf_at = self.pos;
+            self.st.rts.set(self.st.rts.get() + 1); self.st.bytes.set(self.st.bytes.get() + n as u64);
+        }
+        let off = (self.pos - self.buf_at) as usize;
+        let n = out.len().min(self.buf.len() - off);
+        out[..n].copy_from_slice(&self.buf[off..off + n]);
+        self.pos += n as u64; self.last_end = Some(self.pos);
+        Ok(n)
+    }
+}
+impl Seek for Lent {
+    fn seek(&mut self, s: SeekFrom) -> std::io::Result<u64> {
+        self.pos = match s { SeekFrom::Start(p) => p, SeekFrom::End(d) => (self.len as i64 + d) as u64, SeekFrom::Current(d) => (self.pos as i64 + d) as u64 };
+        self.st.seeks.set(self.st.seeks.get() + 1);
+        Ok(self.pos)
+    }
+}
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    if a[1] == "make" {
+        let src = std::fs::read(&a[2]).unwrap();
+        let chunks: u64 = a[4].parse().unwrap();
+        let mut out = std::io::BufWriter::new(File::create(&a[3]).unwrap());
+        out.write_all(&src[..HEADER as usize]).unwrap();
+        let c = &src[HEADER as usize..(HEADER + CHUNK) as usize];
+        for _ in 0..chunks { out.write_all(c).unwrap(); }
+        out.flush().unwrap();
+        return;
+    }
+    let policy = match a[3].as_str() { "none" => Policy::None, "always" => Policy::Always, _ => Policy::Sequential };
+    let st = Stats::default();
+    let f = File::open(&a[2]).unwrap();
+    let len = f.metadata().unwrap().len();
+    let lent = Lent { f, len, pos: 0, buf: Vec::new(), buf_at: 0, last_end: None, policy, st: st.clone() };
+    let t = std::time::Instant::now();
+    let mut p = EvtxParser::from_read_seek(lent).unwrap().with_configuration(ParserSettings::new().validate_checksums(false));
+    let (mut ok, mut bad, mut first) = (0u64, 0u64, None);
+    for r in p.records_json_value() {
+        if first.is_none() { first = Some((st.rts.get(), st.bytes.get(), st.seeks.get(), t.elapsed().as_secs_f64())); }
+        match r { Ok(_) => ok += 1, Err(_) => bad += 1 }
+    }
+    let s = t.elapsed().as_secs_f64();
+    let (r0, b0, k0, t0) = first.unwrap_or_default();
+    println!("RESULT policy={} file_mib={} records={ok} bad={bad} secs={s:.1} rec_per_s={:.0} mib_per_s={:.0} | to_first_event: round_trips={r0} mib={} seeks={k0} secs={t0:.2} | total: round_trips={} mib={} seeks={}",
+        a[3], len >> 20, ok as f64 / s, (len >> 20) as f64 / s, b0 >> 20, st.rts.get(), st.bytes.get() >> 20, st.seeks.get());
+}

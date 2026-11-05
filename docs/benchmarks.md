@@ -175,7 +175,7 @@ Results of shared crates (rule 48: shared code records here), newest first.
 
 ### 2026-11-05, paddock-ipc round trip (Debrief ADR 0064)
 
-- **Commit:** source at 3168b6145 (`debrief/stream-text`). Throwaway harnesses, not committed: two `Peer`s on `endpoint::pair()` with `Connection::raw`, in one process
+- **Commit:** source at 3168b6145 (`debrief/stream-text`). Two `Peer`s on `endpoint::pair()` with `Connection::raw`, in one process. Harnesses and exact commands: [measurements/adr-0064](../apps/debrief/docs/measurements/adr-0064/README.md)
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
 - **Load:** 1-minute load about 7 to 11; other agents running; through `plock`
 - **Build:** release, system allocator
