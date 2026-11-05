@@ -2,13 +2,15 @@
 // `paddock-setup.exe apply-update` (exit 27, "not newer", nothing left in updates\), and the uninstall removes the programs, the machine-wide
 // entries and the start-at-login values. Run as the VM's administrator through the SSH admin key; the install itself (the real UAC prompt) is the suite's.
 import { ssh } from './win-helper.mjs';
+import { makeResult } from './verdict.mjs';
+import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
+
+/** What the uninstall left, judged from tri-state facts (yes, no, unreadable): see win-judges.mjs. */
+export const judgeUninstall = (f) => judgeUninstallFacts(f, PROG);
 
 const PROG = 'C:\\Program Files\\Dyno';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const result = (title, checks, evidence = [], pass = '') => {
-  const bad = checks.filter((c) => !c.ok);
-  return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence };
-};
+const result = makeResult;
 
 /** `apply-update` printed "EXIT=<n>" last. Returns the code, or null. */
 export function exitCodeOf(text) {
@@ -20,17 +22,6 @@ export function exitCodeOf(text) {
 export function semverOf(productVersion) {
   const m = /^(\d+)\.(\d+)\.(\d+)/.exec(productVersion.trim());
   return m ? `${m[1]}.${m[2]}.${m[3]}` : null;
-}
-
-/** What the uninstall left, judged from the facts read after it. */
-export function judgeUninstall(f) {
-  return [
-    { ok: !f.folder, detail: f.folder ? `${PROG} is still there after the uninstall (${f.folderFiles})` : `${PROG} is removed` },
-    { ok: !f.uninstallKey, detail: f.uninstallKey ? 'the machine-wide uninstall entry is still in the registry' : 'the machine-wide uninstall entry is removed' },
-    { ok: !f.service, detail: f.service ? 'the DynoHelper service is still registered' : 'no DynoHelper service is left' },
-    { ok: f.processes === 0, detail: f.processes === 0 ? 'no Dyno process is left' : `${f.processes} Dyno process(es) still run` },
-    { ok: !f.runValues, detail: f.runValues ? `a start-at-login value for Dyno is left: ${f.runValues}` : 'no start-at-login value for Dyno is left' },
-  ];
 }
 
 export function sameVersionRefused() {
@@ -56,22 +47,33 @@ export async function uninstall() {
   const checks = [];
   ssh('Get-Process dyno-app,dyno-agent,dyno-bench -ErrorAction SilentlyContinue | Stop-Process -Force', { admin: true });
   const un = `${PROG}\\uninstall.exe`;
-  const has = ssh(`Test-Path '${un}'`, { admin: true }) === 'True';
-  checks.push({ ok: has, detail: has ? 'uninstall.exe is in the install folder' : 'no uninstall.exe in the install folder' });
+  const hasState = triState(ssh(`Test-Path '${un}'`, { admin: true }));
+  const has = hasState === 'yes';
+  checks.push({ ok: has, ...(hasState === 'unreadable' ? { kind: 'check' } : {}), detail: has ? 'uninstall.exe is in the install folder' : hasState === 'unreadable' ? 'the install folder could not be read (SSH printed nothing)' : 'no uninstall.exe in the install folder' });
   if (!has) return result('Windows: uninstall removes the programs and the machine-wide entries', checks);
   ssh(`Start-Process '${un}' -ArgumentList '/S'`, { admin: true });
   let facts = {};
+  // Three-state reads (yes, no, unreadable): a dead SSH prints nothing and must not read as "removed". The start-at-login value of the standard
+  // user is read over the user's own SSH (that is paddock-test's HKCU, not the administrator's).
+  const adminBool = (cmd) => triState(ssh(cmd, { admin: true }));
   for (let i = 0; i < 40; i++) {
     await sleep(3000);
+    const count = ssh('(Get-Process dyno-app,dyno-agent,dyno-helper,dyno-bench -ErrorAction SilentlyContinue | Measure-Object).Count', { admin: true });
+    const runMachine = ssh("(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).PSObject.Properties | Where-Object { $_.Value -like '*Dyno*' } | ForEach-Object { $_.Name }", { admin: true });
+    const runUser = ssh("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).PSObject.Properties | Where-Object { $_.Value -like '*Dyno*' } | ForEach-Object { $_.Name }; 'END'");
     facts = {
-      folder: ssh(`Test-Path '${PROG}'`, { admin: true }) === 'True',
+      folder: adminBool(`Test-Path '${PROG}'`),
       folderFiles: ssh(`(Get-ChildItem '${PROG}' -Name -ErrorAction SilentlyContinue) -join ', '`, { admin: true }),
-      uninstallKey: ssh("Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dyno'", { admin: true }) === 'True',
-      service: ssh('[bool](Get-Service DynoHelper -ErrorAction SilentlyContinue)', { admin: true }) === 'True',
-      processes: Number(ssh('(Get-Process dyno-app,dyno-agent,dyno-helper -ErrorAction SilentlyContinue | Measure-Object).Count', { admin: true })) || 0,
-      runValues: ssh("(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).PSObject.Properties | Where-Object { $_.Value -like '*Dyno*' } | ForEach-Object { $_.Name }", { admin: true }),
+      uninstallKey: adminBool("Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dyno'"),
+      service: adminBool('[bool](Get-Service DynoHelper -ErrorAction SilentlyContinue)'),
+      processes: /^\d+$/.test(count.trim()) ? Number(count) : 'unreadable',
+      // Machine-wide Run: an empty answer from a live SSH means none; the end marker of the user read tells a dead SSH from "no values".
+      runMachine: adminBool("Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run'") === 'unreadable' ? 'unreadable' : runMachine.trim() ? 'yes' : 'no',
+      runMachineNames: runMachine.trim(),
+      runUser: /END\s*$/.test(runUser) ? (runUser.replace(/END\s*$/, '').trim() ? 'yes' : 'no') : 'unreadable',
+      runUserNames: runUser.replace(/END\s*$/, '').trim(),
     };
-    if (!facts.folder && !facts.uninstallKey) break;
+    if (facts.folder === 'no' && facts.uninstallKey === 'no') break;
   }
   checks.push(...judgeUninstall(facts));
   return result('Windows: uninstall removes the programs and the machine-wide entries', checks, [JSON.stringify(facts)], 'the programs, the uninstall entry and the start-at-login values are gone');

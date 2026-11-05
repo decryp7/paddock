@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from './win-judges.mjs';
+import { judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from './win-judges.mjs';
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -91,4 +91,20 @@ test('dead state: disk health needs a real wear value, not "Installed" and a hea
   assert.ok(bad(judgeWear('Lifespan SSD Disk life cannot be estimated')).length);
   assert.ok(bad(judgeWear('Lifespan smartctl is not installed')).length);
   assert.equal(bad(judgeWear('Lifespan SSD About 7.4 years of writes left (5.2 to 10 years)')).length, 0);
+});
+
+test('dead state: "no install button" without smartctl.exe, a timeout or a failure is not a passing install', () => {
+  assert.equal(judgeInstallOutcome('first', 'no install button', false).ok, false);
+  assert.equal(judgeInstallOutcome('first', 'no install button', false).kind, 'check');
+  assert.equal(judgeInstallOutcome('first', 'timeout', true).kind, 'check');
+  assert.equal(judgeInstallOutcome('first', 'failed', true).ok, false);
+  assert.equal(judgeInstallOutcome('first', 'failed', true).kind, undefined);
+  assert.equal(judgeInstallOutcome('first', 'finished', false).ok, false);
+  assert.equal(judgeInstallOutcome('first', 'finished', true).ok, true);
+  assert.equal(judgeInstallOutcome('second', 'no install button', true).ok, true);
+});
+test('a tray count with Dyno not running is information, never a pass', () => {
+  const r = judgeTrayCount({ metrics: ['CPU'], visible: 0, overflow: 0, running: false });
+  assert.equal(r[0].info, true);
+  assert.equal(makeResult('t', r).status, 'not-measured');
 });

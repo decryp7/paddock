@@ -249,7 +249,7 @@ export class Check {
     const ok = checks.every((c) => c.ok);
     // Duplicates are judged either way, but a handover that never registered the launchd job is not proven: say so instead of PASS.
     const proven = loaded.every(Boolean);
-    if (ok && !proven) checks.push({ ok: true, detail: `launchd never loaded ${svc.label} after "on" (launchctl print found no job): the CLI route did not register it, so the handover itself was not exercised` });
+    if (ok && !proven) checks.push({ ok: true, info: true, detail: `launchd never loaded ${svc.label} after "on" (launchctl print found no job): the CLI route did not register it, so the handover itself was not exercised` });
     const status = !ok ? 'fail' : proven ? 'pass' : 'skip';
     const summary = !ok ? checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200)
       : proven ? 'no duplicate and no illegal parent after any switch' : 'no duplicate after any switch, but the launchd job never loaded, so the handover is NOT proven: manual row (Settings > Launch at login, three times)';
@@ -290,7 +290,7 @@ export class Check {
       if (Number.isInteger(lpid)) await this.g.exec(`ps -p ${lpid} -o command= | grep -q 'vmsmoke-blackhole.pl' && sudo kill ${lpid}`);
     }
     step.checks.unshift({ ok: setup.code === 0 && listening !== '', detail: `${host} points at loopback (IPv4 and ::1) with a listener that accepts and never answers (${listening || 'listener did not start'})` });
-    step.checks.push({ ok: true, detail: contacts.length ? `the app connected to the black hole ${contacts.length} time(s) (${[...new Set(contacts)].join(', ')}) and still became ready` : 'nothing connected to the black hole during the start' });
+    step.checks.push({ ok: true, info: true, detail: contacts.length ? `the app connected to the black hole ${contacts.length} time(s) (${[...new Set(contacts)].join(', ')}) and still became ready` : 'nothing connected to the black hole during the start' });
     if (step.status === 'pass' && !contacts.length) {
       step.status = 'skip';
       step.summary = 'NOT EXERCISED: the app never contacted the update host during the start (update checks are off in this build or not on start), so a hung check could not be observed';

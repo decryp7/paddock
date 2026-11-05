@@ -75,7 +75,7 @@ export async function domTour(browser, { shotDir = null, log = () => {} } = {}) 
   await main.evaluate(() => { location.hash = '#/processes'; }); await sleep(3000);
   const hashEntry = await main.evaluate(() => { const c = [...document.querySelectorAll('button, [role=menuitem], a')].find((e) => /hash|VirusTotal/i.test((e.getAttribute('aria-label') || '') + ' ' + e.textContent)); if (c) { c.click(); return true; } return false; });
   if (hashEntry) { await sleep(2500); const hp = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes('dy.file-hash')); if (hp) await record(hp, 'dialog file hash'); else checks.push({ ok: false, detail: 'the file hash entry was clicked but no dialog opened' }); }
-  else checks.push({ ok: true, detail: 'file hash dialog: no entry point found on the Processes page without selecting a row (not checked)' });
+  else checks.push({ ok: true, info: true, detail: 'file hash dialog: no entry point found on the Processes page without selecting a row (not checked)' });
   for (const item of ['About', 'What', 'Report']) {
     const label = { About: 'About', What: 'What’s new', Report: 'Report a problem' }[item];
     const p = await openDialog(browser, 'Help', label);

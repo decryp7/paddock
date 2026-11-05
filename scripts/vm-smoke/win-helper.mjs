@@ -6,6 +6,9 @@ import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, trayLogLines
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Vnc } from './win-vnc.mjs';
+import { evidenceFile } from './evidence.mjs';
+import { makeResult } from './verdict.mjs';
+import { attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -13,10 +16,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let runPassword = null; // the per-run random password of paddock-admin (reverted with the VM); never stored or printed
 const clean = (s) => s.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 export const ssh = (cmd, { admin = false, input, ms = 90_000 } = {}) => clean(spawnSync('bash', [VMWIN, 'ssh', ...(admin ? ['--admin'] : []), cmd], { encoding: 'utf8', timeout: ms, input }).stdout ?? '');
-const result = (title, checks, evidence = [], pass = '') => {
-  const bad = checks.filter((c) => !c.ok);
-  return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence };
-};
+const result = makeResult;
 const settingsPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes('pd.settings'));
 
 export async function openSettings(browser) {
@@ -57,7 +57,8 @@ export async function answerUac(label, { vnc = new Vnc(), seenSec = 90, goneSec 
   for (let i = 0; i < seenSec / 3 && !seen; i++) { seen = prompt(); if (!seen) await sleep(1500); }
   if (!seen) return { ok: false, detail: `${label}: no UAC prompt (consent.exe) within ${seenSec} s` };
   await sleep(1500);
-  const shot = vnc.capture(`/tmp/win-uac-${label.replace(/\W+/g, '-')}.png`).code === 0 ? 'screenshot taken' : 'VNC capture failed';
+  const shotFile = evidenceFile(`win-uac-${label}`);
+  const shot = vnc.capture(shotFile).code === 0 ? `screenshot ${shotFile}` : 'VNC capture failed';
   vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
   let gone = false;
   for (let i = 0; i < goneSec / 3 && !gone; i++) { await sleep(1500); gone = !prompt(); }
@@ -73,10 +74,11 @@ export async function helperOn(browser, { vnc = new Vnc() } = {}) {
   if (!s) return result('Windows: admin helper Turn on (UAC consent over VNC)', checks);
   const pw = ensureAdminPassword();
   await s.getByRole('button', { name: /Turn on administrator readings/ }).click();
-  evidence.push('UAC: "Do you want to allow this app from an unknown publisher to make changes" (dyno-helper.exe), answered with the paddock-admin credentials over the VM VNC');
-  await sleep(6000);
-  evidence.push(`screenshot: ${vnc.capture('/tmp/win-uac.png').code === 0 ? 'taken of the UAC prompt' : 'VNC capture failed'}`);
-  vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
+  // The same answer as Repair and the install: wait for consent.exe (the UAC prompt) to exist, keep its screenshot in the evidence folder, type the credentials, wait for it to go.
+  const uac = await answerUac('turn-on', { vnc });
+  checks.push({ ok: uac.ok, detail: uac.detail });
+  evidence.push(uac.detail);
+  void pw;
   let status = '';
   for (let i = 0; i < 30 && status !== 'Running'; i++) { await sleep(3000); status = ssh('(Get-Service DynoHelper -ErrorAction SilentlyContinue).Status', { admin: true }); }
   checks.push({ ok: status === 'Running', detail: status === 'Running' ? 'the DynoHelper service is Running' : `the DynoHelper service is "${status || 'absent'}" 90 s after the UAC answer` });
@@ -92,8 +94,8 @@ export async function helperFolderAcl() {
   const evidence = [];
   const acl = ssh(`foreach ($p in "${HELPER}", "${HELPER}\\staging", "${HELPER}\\tools") { if (Test-Path $p) { "== $p owner=" + (Get-Acl $p).Owner; icacls $p | Where-Object { $_ -and $_ -notmatch 'Successfully' } } }`, { admin: true });
   evidence.push(...acl.split('\n'));
-  const probe = ssh(`$r = @(); foreach ($d in "${HELPER}", "${HELPER}\\staging") { if (Test-Path $d) { try { New-Item -ItemType File "$d\\probe-std.txt" -Value x -ErrorAction Stop | Out-Null; Remove-Item "$d\\probe-std.txt" -Force; $r += "$d CREATE-OK" } catch { $r += "$d denied" } } }; $r`);
-  for (const line of probe.split('\n').map((l) => l.trim()).filter(Boolean)) checks.push({ ok: /denied$/.test(line), detail: `standard user, ${line.replace('CREATE-OK', 'could create a file (must be denied)').replace(/denied$/, 'cannot create a file')}` });
+  const probe = ssh(`$r = @(); foreach ($d in "${HELPER}", "${HELPER}\\staging") { if (Test-Path $d) { try { New-Item -ItemType File "$d\\probe-std.txt" -Value x -ErrorAction Stop | Out-Null; Remove-Item "$d\\probe-std.txt" -Force; $r += "$d CREATE-OK" } catch [System.UnauthorizedAccessException] { $r += "$d denied" } catch { $r += "$d other:" + $_.Exception.GetType().Name } } }; $r`);
+  for (const line of probe.split('\n').map((l) => l.trim()).filter(Boolean)) checks.push({ ok: /denied$/.test(line), ...(/other:/.test(line) ? { kind: 'check' } : {}), detail: `standard user, ${line.replace('CREATE-OK', 'could create a file (must be denied)').replace(/denied$/, 'cannot create a file').replace(/ other:(\S+)$/, ' the attempt failed for another reason ($1), not a refusal')}` });
   checks.push({ ok: !/BUILTIN\\Users:\(I\)\(CI\)\(WD,AD/.test(acl), detail: /BUILTIN\\Users:\(I\)\(CI\)\(WD,AD/.test(acl) ? 'the data folder inherits BUILTIN\\Users create rights from C:\\ProgramData' : 'no inherited Users create right on the helper data folders' });
   const attack = ssh(`New-Item -ItemType Directory "${HELPER}\\tools\\smartmontools-7.5\\bin" -Force -ErrorAction SilentlyContinue | Out-Null; if (Test-Path "${HELPER}\\tools\\smartmontools-7.5\\bin") { "PRECREATE-OK owner=" + (Get-Acl "${HELPER}\\tools\\smartmontools-7.5\\bin").Owner; Remove-Item "${HELPER}\\tools\\smartmontools-7.5" -Recurse -Force -ErrorAction SilentlyContinue } else { "PRECREATE-DENIED" }`);
   checks.push({ ok: /PRECREATE-DENIED/.test(attack), detail: /PRECREATE-DENIED/.test(attack) ? 'a standard user cannot pre-create tools\\smartmontools-7.5\\bin' : `a standard user pre-created tools\\smartmontools-7.5\\bin (${attack.trim()}): the helper would install into a user-owned tree` });
@@ -119,7 +121,7 @@ export async function diskHealth(browser) {
   await sleep(6000);
   const life = (await main.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ');
   evidence.push(`Lifespan: ${life.slice(0, 300)}`);
-  checks.push({ ok: !/not installed/i.test(life), detail: /not installed/i.test(life) ? 'Lifespan says smartmontools is not installed' : 'Lifespan reads SSD wear' });
+  checks.push(...judgeWear(life)); // a real wear or forecast value, none of the failure wording (the heading alone is not a reading)
   return result('Windows: disk health install, card and Lifespan through the helper', checks, evidence, 'installed, the card names the copy, Lifespan reads');
 }
 
@@ -159,7 +161,7 @@ export async function helperOff(browser) {
   // Removing the service is a change too: the standard user is asked for the administrator again (consent.exe is the UAC prompt).
   let prompt = false;
   for (let i = 0; i < 10 && !prompt; i++) { await sleep(2000); prompt = ssh('if (Get-Process consent -ErrorAction SilentlyContinue) { "yes" } else { "no" }', { admin: true }) === 'yes'; }
-  checks.push({ ok: true, detail: prompt ? 'Turn off asked for the administrator (UAC) and was answered' : 'Turn off asked for no UAC prompt' });
+  checks.push({ ok: true, info: true, detail: prompt ? 'Turn off asked for the administrator (UAC) and was answered' : 'Turn off asked for no UAC prompt' });
   if (prompt && runPassword) { const v = new Vnc(); v.key('ctrl-a'); v.key('bsp'); v.type(runPassword); v.key('enter'); }
   let gone = false;
   for (let i = 0; i < 30 && !gone; i++) { await sleep(3000); gone = ssh('if (Get-Service DynoHelper -ErrorAction SilentlyContinue) { "present" } else { "gone" }', { admin: true }) === 'gone'; }
@@ -199,38 +201,47 @@ async function pressInstallAndWait(browser, guardSec = 120) {
 export async function helperExploit(browser) {
   const checks = [];
   const evidence = [];
+  const title = 'Windows: exploit probe, a user-owned tools tree and swaps are refused';
   ssh(`Remove-Item ${TOOLS} -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item ${HELPER}\\staging\\* -Recurse -Force -ErrorAction SilentlyContinue`, { admin: true });
-  const pre = ssh(`try { New-Item -ItemType Directory "${BIN}" -Force -ErrorAction Stop | Out-Null; Set-Content "${BIN}\\dummy-user.txt" planted -ErrorAction Stop; "PRECREATED owner=" + (Get-Acl "${BIN}").Owner } catch { "PRECREATE-DENIED" }`);
-  const preCreated = /PRECREATED/.test(pre);
-  checks.push({ ok: !preCreated, detail: preCreated ? `a standard user pre-created the tools tree (${pre.trim()}); the helper must not install into it` : 'a standard user cannot pre-create the tools tree (denied)' });
+  checks.push(judgeRefusal('pre-create the tools tree', ssh(attemptProbe(`New-Item -ItemType Directory "${BIN}" -Force -ErrorAction Stop | Out-Null; Set-Content "${BIN}\\dummy-user.txt" planted -ErrorAction Stop`))));
   const inst = await pressInstallAndWait(browser);
   evidence.push(`install: ${inst.outcome}`, ...(inst.log ? inst.log.split('\n') : []));
+  const smartctl = ssh(`Test-Path "${BIN}\\smartctl.exe"`, { admin: true }) === 'True';
+  const pre = judgeExploitPrecondition({ outcome: inst.outcome, smartctlExists: smartctl });
+  checks.push(...pre);
+  if (pre.some((c) => !c.ok)) return result(title, checks, evidence); // nothing installed: the swaps below would be "refused" because the file is not there
   const owner = ssh(`if (Test-Path "${BIN}") { (Get-Acl "${BIN}").Owner } else { "absent" }`, { admin: true });
   const userOwned = /paddock-test/i.test(owner);
   checks.push({ ok: !userOwned, detail: userOwned ? `the helper installed into a user-owned tree: bin is owned by ${owner}` : `the tools tree is not user-owned (bin owner: ${owner})` });
   const tries = [
-    ['rename smartctl.exe', `Rename-Item "${BIN}\\smartctl.exe" smartctl.exe.orig -ErrorAction Stop`],
-    ['add a file next to smartctl.exe', `Set-Content "${BIN}\\evil.dll" x -ErrorAction Stop`],
-    ['add a file next to the staging installer', `Set-Content "${HELPER}\\staging\\evil.exe" x -ErrorAction Stop`],
-    ['add a file in tools', `Set-Content "${TOOLS}\\evil.txt" x -ErrorAction Stop`],
+    ['rename smartctl.exe', (d) => `Rename-Item "${d}\\smartctl.exe" smartctl.exe.orig -ErrorAction Stop`, BIN],
+    ['add a file next to smartctl.exe', (d) => `Set-Content "${d}\\evil.dll" x -ErrorAction Stop`, BIN],
+    ['add a file next to the staging installer', (d) => `Set-Content "${d}\\evil.exe" x -ErrorAction Stop`, `${HELPER}\\staging`],
+    ['add a file in tools', (d) => `Set-Content "${d}\\evil.txt" x -ErrorAction Stop`, TOOLS],
   ];
-  for (const [what, cmd] of tries) {
-    const r = ssh(`try { ${cmd}; "OK" } catch { "DENIED" }`);
-    checks.push({ ok: /DENIED/.test(r), detail: /DENIED/.test(r) ? `standard user: ${what}: refused` : `standard user: ${what}: SUCCEEDED (must be refused)` });
+  // The control: the same probes in a folder the standard user owns must succeed, else "refused" would only mean the probe cannot work.
+  const ctl = '$env:TEMP\\vmcheck-ctl';
+  ssh(`Remove-Item "${ctl}" -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory "${ctl}" -Force | Out-Null; Set-Content "${ctl}\\smartctl.exe" x`);
+  for (const [what, cmd, dir] of tries) {
+    checks.push(judgeRefusal(what, ssh(attemptProbe(cmd(dir)))));
+    const c = judgeControl(ssh(attemptProbe(cmd(ctl))));
+    checks.push({ ...c, detail: `${what}: ${c.detail}` });
   }
+  ssh(`Remove-Item "${ctl}" -Recurse -Force -ErrorAction SilentlyContinue`);
   ssh(`Remove-Item "${BIN}\\evil.dll","${BIN}\\smartctl.exe.orig","${HELPER}\\staging\\evil.exe","${TOOLS}\\evil.txt","${BIN}\\dummy-user.txt" -Force -ErrorAction SilentlyContinue; if (Test-Path "${BIN}\\smartctl.exe.orig") { Rename-Item "${BIN}\\smartctl.exe.orig" smartctl.exe }`, { admin: true });
-  return result('Windows: exploit probe, a user-owned tools tree and swaps are refused', checks, evidence, 'every standard-user attempt was refused');
+  return result(title, checks, evidence, 'every standard-user attempt was refused (access denied) and the same probes succeed in a folder the user owns');
 }
 
 /** A second install while the first copy exists must succeed (the 7501 run failed it with Staging("entity already exists")). */
 export async function repeatInstall(browser) {
   const checks = [];
+  const smartctl = () => ssh(`Test-Path "${BIN}\\smartctl.exe"`, { admin: true }) === 'True';
   const first = await pressInstallAndWait(browser);
-  const already = first.outcome === 'no install button';
-  checks.push({ ok: first.outcome === 'finished' || already, detail: already ? 'the tool is already installed (no install button): a repeat install is not offered' : `first install: ${first.outcome}` });
+  checks.push(judgeInstallOutcome('first install', first.outcome, smartctl()));
   const second = await pressInstallAndWait(browser);
-  checks.push({ ok: second.outcome === 'finished' || second.outcome === 'no install button', detail: second.outcome === 'no install button' ? 'the card already says Installed (no second install offered)' : `repeat install: ${second.outcome}${second.outcome === 'failed' ? ' (' + (second.log.match(/Error=.*/)?.[0] ?? '') + ')' : ''}` });
-  return result('Windows: repeat install of the disk health tool', checks, [], 'a second install works');
+  checks.push(judgeInstallOutcome('repeat install', second.outcome, smartctl()));
+  if (second.outcome === 'failed') checks.push({ ok: false, detail: `repeat install: ${second.log?.match(/Error=.*/)?.[0] ?? 'failed'}` });
+  return result('Windows: repeat install of the disk health tool', checks, [`first: ${first.outcome}`, `second: ${second.outcome}`], 'a second install works and smartctl.exe is there');
 }
 
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
@@ -271,16 +282,15 @@ export async function helperProtection() {
     if (/ABSENT/.test(info)) { checks.push({ ok: f.endsWith('tools') || f.endsWith('staging'), detail: `${f} is absent (allowed only for tools and staging before a tool install)` }); continue; }
     checks.push({ ok: /owner=(BUILTIN\\Administrators|NT AUTHORITY\\SYSTEM)/.test(info), detail: `${f}: owner ${(/owner=(\S+)/.exec(info) ?? [])[1]} (must be Administrators or SYSTEM)` });
     checks.push({ ok: !/\(I\)/.test(info), detail: /\(I\)/.test(info) ? `${f}: still inherits ACL entries (protected folders must not)` : `${f}: inheritance is off` });
-    const den = ssh(`$r = @(); try { New-Item -ItemType File "${f}\\probe-std.txt" -Value x -ErrorAction Stop | Out-Null; Remove-Item "${f}\\probe-std.txt" -Force; $r += "FILE-OK" } catch { $r += "FILE-DENIED" }; $o = cmd /c mklink /J "${f}\\evil-link" C:\\Windows 2>&1; if (Test-Path "${f}\\evil-link") { cmd /c rmdir "${f}\\evil-link" | Out-Null; $r += "LINK-OK" } else { $r += "LINK-DENIED" }; $r -join ' '`);
-    checks.push({ ok: /FILE-DENIED/.test(den) && /LINK-DENIED/.test(den), detail: `${f}: standard user create file ${/FILE-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}, create junction ${/LINK-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}` });
+    const den = ssh(`$r = @(); try { New-Item -ItemType File "${f}\\probe-std.txt" -Value x -ErrorAction Stop | Out-Null; Remove-Item "${f}\\probe-std.txt" -Force; $r += "FILE-OK" } catch [System.UnauthorizedAccessException] { $r += "FILE-DENIED" } catch { $r += "FILE-OTHER" }; $o = cmd /c mklink /J "${f}\\evil-link" C:\\Windows 2>&1; if (Test-Path "${f}\\evil-link") { cmd /c rmdir "${f}\\evil-link" | Out-Null; $r += "LINK-OK" } else { $r += "LINK-DENIED" }; $r -join ' '`);
+    checks.push({ ok: /FILE-DENIED/.test(den) && /LINK-DENIED/.test(den), ...(/FILE-OTHER/.test(den) ? { kind: 'check' } : {}), detail: `${f}: standard user create file ${/FILE-DENIED/.test(den) ? 'denied' : /FILE-OTHER/.test(den) ? 'failed for another reason (not a refusal)' : 'SUCCEEDED'}, create junction ${/LINK-DENIED/.test(den) ? 'denied' : 'SUCCEEDED'}` });
   }
   // 7526 includes 450746cfd: C:\\ProgramData\\Dyno itself is locked (owner Administrators or SYSTEM, no inheritance, Users cannot create in it).
   const dyno = ssh(`"owner=" + (Get-Acl "${DYNO}").Owner; icacls "${DYNO}" | Where-Object { $_ -and $_ -notmatch 'Successfully' }`, { admin: true });
   evidence.push(`== ${DYNO} (C:\\ProgramData\\Dyno itself)`, ...dyno.split('\n'));
   checks.push({ ok: /owner=(BUILTIN\\Administrators|NT AUTHORITY\\SYSTEM)/.test(dyno), detail: `${DYNO}: owner ${(/owner=(\S+)/.exec(dyno) ?? [])[1]} (must be Administrators or SYSTEM)` });
   checks.push({ ok: !/\(I\)/.test(dyno), detail: /\(I\)/.test(dyno) ? `${DYNO}: still inherits ACL entries` : `${DYNO}: inheritance is off` });
-  const denyDyno = ssh(`try { New-Item -ItemType Directory "${DYNO}\\probe-std" -ErrorAction Stop | Out-Null; Remove-Item "${DYNO}\\probe-std" -Force; "OK" } catch { "DENIED" }`);
-  checks.push({ ok: /DENIED/.test(denyDyno), detail: `a standard user ${/DENIED/.test(denyDyno) ? 'cannot' : 'CAN'} create a folder in ${DYNO}` });
+  checks.push(judgeRefusal(`create a folder in ${DYNO}`, ssh(attemptProbe(`New-Item -ItemType Directory "${DYNO}\\probe-std" -ErrorAction Stop | Out-Null; Remove-Item "${DYNO}\\probe-std" -Force`))));
   return result('Windows: WP-SEC folder protection (owner, no inheritance, standard-user denials incl. junctions)', checks, evidence, 'owner, inheritance and denials as designed');
 }
 
@@ -293,36 +303,45 @@ export async function trayTooltips(actor) {
   const evidence = [];
   const reg = ssh(`Get-ItemProperty 'HKCU:\\Control Panel\\NotifyIconSettings\\*' -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -like '*dyno-app.exe' } | ForEach-Object { "$($_.InitialTooltip)|promoted=$($_.IsPromoted)" }`).split('\n').map((l) => l.trim()).filter(Boolean);
   evidence.push(`registry InitialTooltip (informational only): ${reg.join(' ; ')}`);
-  checks.push({ ok: reg.length > 0, detail: `${reg.length} Dyno tray icon(s) registered with Windows (their recorded initial tooltips are informational)` });
+  checks.push({ ok: reg.length > 0, detail: reg.length ? `${reg.length} Dyno tray icon(s) registered with Windows` : 'no Dyno tray icon is registered with Windows' });
   let names = [];
   if (actor) {
+    // Count first, before any icon is promoted: promoting moves icons into the taskbar and would change what is counted.
+    const { trayRecord } = await import('./win-reboot.mjs');
+    const rec = await trayRecord(actor);
+    checks.push(...judgeTrayCount({ metrics: rec.metrics, visible: rec.visible.length, overflow: rec.overflow.length, measured: rec.measured }));
+    evidence.push(`counted before promoting: ${rec.visible.length} visible, ${rec.overflow.length} overflow, ${rec.metrics.length} created (${rec.metrics.join(', ') || 'none logged'})`);
     ssh(`Get-ChildItem 'HKCU:\\Control Panel\\NotifyIconSettings' | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.ExecutablePath -like '*dyno-app.exe') { Set-ItemProperty $_.PSPath IsPromoted 1 -Type DWord } }`);
     await sleep(2500);
     // Dyno's icons are named by their metric tooltip, never "Dyno" (win-tray-icons.mjs).
-    names = dynoTrayIcons(await actor.send(TRAY_ICONS_CMD), metricsFromLog(ssh(APP_LOG_PS))).map((i) => i.name);
-  }
-  evidence.push(`live taskbar button names (UI Automation): ${names.join(' | ') || '(none read)'}`);
+    names = dynoTrayIcons(await actor.send(TRAY_ICONS_CMD), rec.metrics).map((i) => i.name);
+  } else checks.push({ ok: false, kind: 'check', detail: 'no in-session actor, so the tray was not read' });
+  evidence.push(`live taskbar button names (UI Automation, after promoting): ${names.join(' | ') || '(none read)'}`);
   // Dyno logs no "tooltip sent" line; the icons it made are its "tray icon dyno-... created" lines.
   const sent = trayLogLines(ssh(APP_LOG_PS)).filter((l) => /tray icon dyno-[A-Za-z0-9-]+ created/.test(l));
   evidence.push(`app log: ${sent.length} "tray icon ... created" line(s)`, ...sent.slice(-8).map((l) => l.slice(0, 200)));
   const live = names.filter((n) => n.length > 0);
-  checks.push({ ok: live.length > 0 || sent.length > 0, detail: live.length ? `${live.length} live tooltip(s) through UI Automation` : sent.length ? `${sent.length} "tray icon ... created" log line(s)` : 'no live tooltip found through UI Automation or the app log' });
+  checks.push({ ok: live.length > 0, detail: live.length ? `${live.length} live tooltip(s) through UI Automation` : 'no live tooltip was read through UI Automation (the log lines alone do not show what a person sees)' });
   for (const n of live) checks.push({ ok: !/[a-z]+_[a-z]+|undefined|null|NaN/.test(n), detail: `live tooltip "${n}"` });
-  return result('Windows: tray icons and their live tooltips', checks, evidence, 'live tooltips are readable');
+  return result('Windows: tray icons and their live tooltips', checks, evidence, 'every created icon is in the notification area with a readable tooltip');
 }
 
 /** The raw `wbadmin get versions` on the VM as administrator, next to what the Backup page says, so a "could not check" can be explained. */
 export function wbadminRaw() {
   const raw = ssh('wbadmin get versions 2>&1 | Out-String', { admin: true });
-  return result('Windows: raw `wbadmin get versions` (evidence for the Backup page)', [{ ok: true, detail: 'captured as administrator' }], raw.split('\n').slice(0, 25), 'captured');
+  return { title: 'Windows: raw `wbadmin get versions` (evidence for the Backup page)', status: 'info', summary: 'captured as administrator', checks: [], evidence: raw.split('\n').slice(0, 25) };
 }
 
 /** The served counts: stop the helper (a stopped service writes its final tally) and read the `served:` line of its log. */
 export function servedCounts() {
   ssh('Stop-Service DynoHelper -ErrorAction SilentlyContinue; Start-Sleep 3', { admin: true, ms: 60_000 });
   const lines = ssh(`Get-Content ${HELPER}\\helper.log -ErrorAction SilentlyContinue | Select-String -Pattern 'served:' | Select-Object -Last 3 | ForEach-Object { $_.Line }`, { admin: true }).split('\n').filter(Boolean);
-  return result('Windows: the helper reports which readings it served (served counts)', [{ ok: lines.length > 0, detail: lines.length ? `the helper log has ${lines.length} "served:" line(s)` : 'no "served:" line in helper.log after the service was stopped' }], lines, 'served counts logged');
+  // Per kind: the readings this suite took through the helper must each have a count above 0 (a bare line proves nothing). The kind names are the helper's.
+  return result('Windows: the helper reports which readings it served (served counts)', judgeServed(lines, SERVED_KINDS.windows), lines, 'every reading kind taken in this run was served');
 }
+
+/** The kinds the Windows suite reads through the helper while it is on (processes, per-program traffic, wake requests, backup versions). */
+export const SERVED_KINDS = { windows: ['processes', 'traffic', 'wake', 'backup'] };
 
 export const helperSteps = [
   async ({ browser }) => {
@@ -340,7 +359,7 @@ export const helperSteps = [
   ({ browser }) => diskHealth(browser),
   () => wbadminRaw(),
   // WP-VMH: one step per helper reading while the helper is on
-  ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser))),
+  ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser), { ssh })),
   () => scopingStep(),
   () => servedCounts(),
   ({ browser }) => helperRepair(browser),

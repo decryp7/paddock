@@ -227,7 +227,7 @@ export function renderResult(run) {
   lines.push('');
   run.steps.forEach((s, i) => {
     lines.push(`## ${i + 1}. ${s.title}: ${mark(s.status)}`, '');
-    for (const c of s.checks ?? []) lines.push(`- ${c.ok ? 'ok' : 'FAIL'}: ${c.detail}`);
+    for (const c of s.checks ?? []) lines.push(`- ${c.info ? 'info' : c.ok ? 'ok' : c.kind === 'check' ? 'CHECK BROKEN' : 'FAIL'}: ${c.detail}`);
     if (s.evidence?.length) lines.push('', '```', ...s.evidence, '```');
     lines.push('');
   });

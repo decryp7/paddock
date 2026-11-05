@@ -11,8 +11,9 @@ test('semverOf takes the first three numbers', () => {
   assert.equal(semverOf('x'), null);
 });
 test('judgeUninstall fails on a left folder and passes on a clean machine', () => {
-  const clean = { folder: false, folderFiles: '', uninstallKey: false, service: false, processes: 0, runValues: '' };
+  const clean = { folder: 'no', folderFiles: '', uninstallKey: 'no', service: 'no', processes: 0, runMachine: 'no', runUser: 'no' };
   assert.ok(judgeUninstall(clean).every((c) => c.ok));
-  const bad = judgeUninstall({ ...clean, folder: true, folderFiles: 'dyno-app.exe', runValues: 'Dyno' });
+  const bad = judgeUninstall({ ...clean, folder: 'yes', folderFiles: 'dyno-app.exe', runUser: 'yes' });
   assert.equal(bad.filter((c) => !c.ok).length, 2);
+  assert.ok(judgeUninstall({ ...clean, folder: 'unreadable' }).some((c) => !c.ok && c.kind === 'check'), 'a dead SSH is not "removed"');
 });

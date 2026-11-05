@@ -196,7 +196,7 @@ async function main(argv) {
     checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
     let offPrompt = false;
     for (let i = 0; i < 15 && !offPrompt; i++) { await sleep(2000); offPrompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
-    if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, detail: 'Turn off asked for polkit and was answered' }); }
+    if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, info: true, detail: 'Turn off asked for polkit and was answered' }); }
     // "Installed" = the service is active or enabled (or a copy of the unit sits in /etc, where a registration without the package writes it).
     // The unit file in /usr/lib/systemd/system belongs to the .deb (dpkg owns it; Turn off only disables and stops it), so it stays until the
     // package is removed. A leftover data folder is its own line, with what is in it.

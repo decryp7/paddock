@@ -176,7 +176,7 @@ async function main(argv) {
     }
     if (o.reboot && done) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
-      const waitConsole = async () => { for (let i = 0; i < 90; i++) { if (vm(['ssh', 'if ((query user) -match "console\\s+\\d+\\s+Active") {exit 0} else {exit 1}'], 30_000).code === 0) return true; await sleep(4000); } return false; };
+      const waitConsole = async (tries = 90) => { for (let i = 0; i < tries; i++) { if (vm(['ssh', 'if ((query user) -match "console\\s+\\d+\\s+Active") {exit 0} else {exit 1}'], 30_000).code === 0) return true; if (i < tries - 1) await sleep(4000); } return false; };
       const launchDyno = () => {
         ssh(`Set-Content C:\\paddock-test\\vmcheck\\launch.ps1 '$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"; Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"'; schtasks /create /tn DynoLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch.ps1" | Out-Null; schtasks /run /tn DynoLaunch | Out-Null`);
       };

@@ -62,7 +62,7 @@ export function judgeRestartService({ bootBefore, bootAfter, samples }) {
 export function judgeTrayCount({ metrics, visible, overflow, measured = true, running = true }) {
   if (!measured) return [chk(false, 'the notification area could not be read (no notification-area button at all): the tray was not measured', 'check')];
   if (!metrics.length) return [chk(false, 'the app log names no tray icon it created, so the number of icons to find is unknown (metrics = 0)', 'check')];
-  if (!running) return [chk(true, 'Dyno is not running, so no icons are expected', undefined)];
+  if (!running) return [{ ok: true, info: true, detail: 'Dyno is not running, so no icons are expected: the tray is not measured here' }];
   const n = visible + overflow;
   return [n === metrics.length
     ? chk(true, `${n} tray icon(s) found (${visible} visible, ${overflow} in the overflow) for ${metrics.length} created`)
@@ -147,4 +147,16 @@ export function judgeWear(lifeText) {
     chk(LIFESPAN_VALUE.test(t), LIFESPAN_VALUE.test(t) ? 'Lifespan shows a wear or forecast value' : 'Lifespan shows no wear or forecast value (the heading or an intro sentence is not a reading)'),
     chk(!bad, bad ? `Lifespan says ${bad}: the tool did not take the reading` : 'Lifespan has none of the failure wording'),
   ];
+}
+
+/**
+ * The outcome of pressing "Download and install" (win-helper.mjs `pressInstallAndWait`): finished is the install; "no install button" counts only
+ * when smartctl.exe is really there (a tool that is already installed), else nothing was installed and the step proves nothing; `failed` is the
+ * product's, `timeout` is not known (a broken check).
+ */
+export function judgeInstallOutcome(label, outcome, smartctlExists) {
+  if (outcome === 'finished') return chk(smartctlExists === true, smartctlExists ? `${label}: the install finished and smartctl.exe is there` : `${label}: the install finished but smartctl.exe is not there`);
+  if (outcome === 'no install button') return chk(smartctlExists === true, smartctlExists ? `${label}: the tool is already installed (no install button, smartctl.exe is there)` : `${label}: no install button, yet smartctl.exe is not there: nothing was installed`, smartctlExists === true ? undefined : 'check');
+  if (outcome === 'failed') return chk(false, `${label}: the install failed (the helper logged "InstallTool failed")`);
+  return chk(false, `${label}: the install did not finish (${outcome})`, 'check');
 }
