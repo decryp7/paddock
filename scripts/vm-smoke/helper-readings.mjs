@@ -6,56 +6,100 @@
 // A driver is { openPage(page): Promise<boolean>, text(): Promise<string>, run?(cmd): Promise<string> }:
 // Windows over the WebView2 DevTools port (win-ui.mjs), macOS through the Accessibility tree (mac-gui.mjs), Linux when its guest exists.
 
+/**
+ * Wording of a page that has NOT taken the reading (the helper is dead, a tool could not run). A reading page that says any of it never passes,
+ * whatever else is on it, unless the row names it in `allow` because the honest VM reason uses it. (The audit's false passes: Lifespan with a dead
+ * helper, Backup "could not check".)
+ */
+export const FAILURE_WORDING = [/did not answer/i, /could not check/i, /\bRepair it\b/i, /cannot be estimated/i, /Could not read what keeps/i, /needs the helper/i, /\bNeeds repair\b/i, /\bNot running\b/i];
+
+/** A real wear or lifespan value of the Lifespan page (and of the Windows disk-health step): a forecast, a progress of history, or "no wear". */
+export const LIFESPAN_VALUE = /Have \d+ of \d+ days|\b\d+(?:\.\d+)? (?:years?|months?) of writes left|Replace in about \d+|No wear (?:was )?detected|Soonest \d|Expected \d/i;
+
 /** page: a route name of Dyno's router (#/<page>), `tab`: a tab or radio label to press first. `all` must all match, `none` must not match. */
 export const READINGS = [
   { id: 'processes-all-accounts', title: 'Processes of every account', os: ['windows', 'macos', 'linux'], page: 'processes', showAll: true, fullText: 4000, shot: 'processes', minWidth: 1100,
     expect: { windows: [/Account/, /SYSTEM|NT AUTHORITY/, /Read by the administrator helper/i], macos: [/root/, /_[a-z]+/, /Read by the administrator helper/i], linux: [/root/, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'traffic-by-program', title: 'Per-program network traffic (Group by: Program)', os: ['windows'], page: 'network', groupBy: 'Program',
-    expect: { windows: [/Read by the administrator helper/i, /[↓↑]/] }, none: [/needs the helper/i] },
+    expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i], prepare: { windows: 'traffic' },
+    // A program row with a transfer size (not the column header glyph): the control generates traffic first.
+    value: { windows: [/\b[\w.-]+\.exe\b.{0,120}?\d[\d.,]*\s?(?:[KMG]i?B|B)\b/i] } },
   { id: 'wake-requests', title: 'What keeps the computer awake (wake requests)', os: ['windows'], page: 'extras', tab: 'Sleep',
-    expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i] },
+    expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i], prepare: { windows: 'awake-on' },
+    // The control holds the computer awake with `dyno awake on`, so the blockers table must list a Dyno request (not only the chip).
+    value: { windows: [/Keeping this computer awake\s+[1-9]\d* programs?/i, /Program\s+It prevents[\s\S]*\bDyno\b/i] } },
   { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup', fullText: 4000,
-    expect: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|could not check/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
+    expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i],
+    value: { windows: [/no backup of this PC|Windows Backup has \d+ versions?/i] } },
   { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Boot|Start-?up', fullText: 4000,
     expect: { macos: [/Login items|Background items/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
-    expect: { macos: [/pf/i, /rules?/i, /Read by the administrator helper/i], linux: [/nft|nftables/i, /rules?/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/Read by the administrator helper/i], linux: [/Read by the administrator helper/i] }, none: [/needs the helper/i],
+    // A source named in full and a non-zero rule count ("0 rules" read nothing). On Linux the control loads one known nft rule first (tcp dport 59999).
+    value: { macos: [/\bpacket filter \(pf\)[\s\S]*\b[1-9][\d,]* rules?\b/i], linux: [/\bLinux nftables[\s\S]*\b[1-9][\d,]* rules?\b/i, /59999/] }, prepare: { linux: 'nft-rule' } },
   { id: 'energy-and-thermal', title: 'macOS CPU energy: the VM reason on the Energy tab', os: ['macos'], page: 'power', tab: 'Energy', fullText: 4000,
-    expect: { macos: [/The helper listed no CPU power, as in a virtual machine/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/The helper listed no CPU power, as in a virtual machine/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'sockets-and-holders', title: 'Linux socket owners and file holders', os: ['linux'], page: 'network',
     expect: { linux: [/Read by the administrator helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
   { id: 'memory-modules', title: 'Linux memory modules (no DMI in a VM: the reason)', os: ['linux'], page: 'inventory',
-    expect: { linux: [/DMI|memory modules/i] }, none: [/needs the helper/i] },
+    expect: { linux: [/Memory modules|installed/i] }, none: [/needs the helper/i],
+    // Modules with a size, or the installed total with the honest reason (no DMI in a VM). The heading alone is not a reading.
+    value: { linux: [/\b\d[\d.,]*\s?(?:GB|GiB|MB|MiB)\b/i] }, allow: [/could not check/i, /Dyno could not read the individual modules/i] },
   { id: 'firewall-windows', title: 'Windows Defender Firewall is read without the helper (COM)', os: ['windows'], page: 'firewall',
     expect: { windows: [/Windows Defender Firewall/, /Domain/, /Private/, /Public/] }, none: [] },
   { id: 'wol-state', title: 'Wake devices readiness (WolState)', os: ['linux'], page: 'power', tab: 'Wake devices',
-    expect: { linux: [/readiness|Wake for network|Wake-on-LAN/i] }, none: [/needs the helper/i] },
+    expect: { linux: [/This computer/] }, none: [/needs the helper/i],
+    // At least one finding with a verdict word; only "Can't tell" is the VM saying it cannot read the settings: not measured, not a pass.
+    value: { linux: [/\b(?:Fine|Needs a change)\b/] }, notMeasured: { linux: { when: (t) => /Can't tell/.test(t) && !/\b(?:Fine|Needs a change)\b/.test(t), why: 'the VM exposes no wake settings (every finding says Can\'t tell)' } } },
   { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on the dashboard widget', os: ['macos'], page: 'dashboard', fullText: 4000,
     expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i] },
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
-    expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i],
+    expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i], value: { windows: [LIFESPAN_VALUE], linux: [LIFESPAN_VALUE] },
     // The VM base has no smartmontools: the reading cannot be taken there, which is neither a pass nor a fail of the product.
     notMeasured: { linux: { when: /smartctl[^.]*is not installed/i, why: 'smartmontools missing in base' } } },
 ];
 
-/** One reading on one OS as a step { title, status, summary, checks, evidence }. */
+/** A row's `notMeasured` entry fires on a page text: `when` is a regex or a function of the text. */
+const fires = (nm, text) => (typeof nm.when === 'function' ? nm.when(text) : nm.when.test(text));
+
+/**
+ * One reading on one OS as a step { title, status, summary, checks, evidence }. A page passes only with (1) its chip or label, (2) a real value
+ * of the row (`value`: a count, a size, a wear figure, never a heading or an intro sentence), (3) none of the failure wording the helper being
+ * dead or a tool failing puts on the page. The row's control (`prepare`) runs first when the driver has one; a control that fails makes the step
+ * `check-broken`, never a product fail.
+ */
 export async function readingStep(reading, os, driver) {
   const title = `Helper reading (${os}): ${reading.title}`;
   const checks = [];
   const evidence = [];
-  const opened = await driver.openPage(reading.page, reading.tab, reading);
-  checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
-  if (!opened) return { title, status: 'fail', summary: checks[0].detail, checks, evidence: driver.why ? [driver.why] : evidence };
-  const text = (await driver.text()).replace(/\s+/g, ' ');
-  evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
-  if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
-  const nm = reading.notMeasured?.[os];
-  if (nm && nm.when.test(text)) {
-    const detail = `not measured: ${nm.why} (the page says ${nm.when})`;
-    return { title, status: 'not-measured', summary: `not measured: ${nm.why}`, checks: [...checks, { ok: true, detail }], evidence };
+  const control = reading.prepare?.[os];
+  if (control && driver.prepare) {
+    const c = await driver.prepare(control).catch((e) => ({ ok: false, detail: String(e.message ?? e) }));
+    checks.push({ ok: c.ok, kind: 'check', detail: c.ok ? `control "${control}" ran: ${c.detail ?? 'done'}` : `the control "${control}" could not run: ${c.detail ?? ''}` });
+    if (!c.ok) return { title, status: 'check-broken', cls: 'check', summary: checks[0].detail, checks, evidence };
+  } else if (control) checks.push({ ok: true, info: true, detail: `no driver for the control "${control}": the row is judged without it` });
+  try {
+    const opened = await driver.openPage(reading.page, reading.tab, reading);
+    checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
+    if (!opened) return { title, status: 'fail', summary: checks.at(-1).detail, checks, evidence: driver.why ? [driver.why] : evidence };
+    const text = (await driver.text()).replace(/\s+/g, ' ');
+    evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
+    if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
+    const nm = reading.notMeasured?.[os];
+    if (nm && fires(nm, text)) {
+      const detail = `not measured: ${nm.why}${nm.when instanceof RegExp ? ` (the page says ${nm.when})` : ''}`;
+      return { title, status: 'not-measured', summary: `not measured: ${nm.why}`, checks: [...checks, { ok: true, info: true, detail }], evidence };
+    }
+    for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
+    for (const re of reading.value?.[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page shows a value (${re})` : `the page shows no value: nothing matches ${re}` });
+    for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
+    for (const re of FAILURE_WORDING) {
+      if ((reading.allow ?? []).some((a) => a.source === re.source) || (reading.none ?? []).some((n) => n.source === re.source)) continue;
+      checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page says ${re}: the helper did not take the reading` : `the page does not say ${re}` });
+    }
+  } finally {
+    if (control && driver.cleanup) await Promise.resolve(driver.cleanup(control)).catch(() => {});
   }
-  for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
-  for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
   const bad = checks.filter((c) => !c.ok);
   return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : 'the page shows the reading through the helper', checks, evidence };
 }
@@ -66,8 +110,16 @@ export function readingSteps(os, makeDriver) {
 }
 
 /** Windows: the driver over a Playwright page of the main window (hash routes; tabs are pressed by their label). */
-export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ?? null } = {}) {
+export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ?? null, ssh = null } = {}) {
   return {
+    /** The controls: traffic from the guest, a Dyno keep-awake request. They need the guest shell (`ssh`); without it the row is judged without a control. */
+    async prepare(key) {
+      if (!ssh) return { ok: false, detail: 'no guest shell for the control' };
+      if (key === 'traffic') { ssh('1..6 | ForEach-Object { curl.exe -s -m 8 -o NUL https://dev.decryptology.net/ }'); return { ok: true, detail: 'six requests to the update host' }; }
+      if (key === 'awake-on') { const r = ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" awake on --for 1h 2>&1 | Out-String; "EXIT=$LASTEXITCODE"'); return /EXIT=0\s*$/.test(r) ? { ok: true, detail: 'dyno awake on --for 1h' } : { ok: false, detail: `dyno awake on: ${r.slice(-120)}` }; }
+      return { ok: false, detail: `unknown control ${key}` };
+    },
+    async cleanup(key) { if (ssh && key === 'awake-on') ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" awake off 2>&1 | Out-Null'); },
     async openPage(page, tab, reading = {}) {
       if (reading.minWidth) {
         // The table needs width for its Account column: ask the window for at least that many pixels (DevTools Browser.setWindowBounds).

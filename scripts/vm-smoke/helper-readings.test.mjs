@@ -25,3 +25,50 @@ test('hooks are produced per OS', () => {
   assert.equal(readingSteps('windows', async () => driver('')).length, READINGS.filter((r) => r.os.includes('windows')).length);
   assert.ok(readingSteps('linux', async () => driver('')).length >= 4);
 });
+
+// Dead-state fixtures: pages of the audit (vmaudit/probe.mjs) that used to PASS while the helper read nothing. Each must not pass.
+const run = async (id, os, text) => readingStep(by(id), os, driver(text));
+const DEAD = [
+  ['lifespan-smart', 'windows', 'Lifespan How long your SSD and battery are likely to last. SSD Disk life cannot be estimated The helper is installed but did not answer. Repair it to start it again.'],
+  ['lifespan-smart', 'linux', 'Lifespan How long your SSD and battery are likely to last. SSD Disk life cannot be estimated'],
+  ['lifespan-smart', 'windows', 'Lifespan How long your SSD and battery are likely to last.'],
+  ['lifespan-smart', 'linux', 'Lifespan How long your SSD and battery are likely to last.'],
+  ['backup-versions', 'windows', 'Dyno could not check 2 backup tools Read by the administrator helper'],
+  ['memory-modules', 'linux', 'Inventory What is installed. Memory modules'],
+  ['traffic-by-program', 'windows', 'Network ↓ 0 B/s Read by the administrator helper'],
+  ['firewall', 'linux', 'Linux nftables Firewall: Off 0 rules Read by the administrator helper'],
+  ['wake-requests', 'windows', 'Extras Read by the administrator helper'],
+  ['wake-requests', 'windows', 'Extras Read by the administrator helper Keeping this computer awake Could not read what keeps this computer awake'],
+  ['wol-state', 'linux', 'Power Wake computers by sending them a Wake-on-LAN packet.'],
+  ['firewall', 'macos', 'Profile rule Read by the administrator helper'],
+  ['energy-and-thermal', 'macos', 'Power Energy The helper listed no CPU power, as in a virtual machine. Dyno cannot check: Repair it'],
+];
+for (const [id, os, text] of DEAD) {
+  test(`dead state must not pass: ${id} on ${os}: ${text.slice(0, 50)}`, async () => {
+    const r = await run(id, os, text);
+    assert.notEqual(r.status, 'pass', r.summary);
+  });
+}
+test('real values pass: a wear forecast, a backup count, memory modules, a traffic row, a loaded nft rule, a Dyno blocker, a verdict', async () => {
+  assert.equal((await run('lifespan-smart', 'windows', 'Lifespan SSD Samsung About 7.4 years of writes left (5.2 to 10 years)')).status, 'pass');
+  assert.equal((await run('lifespan-smart', 'linux', 'Lifespan SSD vda Not enough history for a forecast yet Have 6 of 14 days')).status, 'pass');
+  assert.equal((await run('backup-versions', 'windows', 'Backup health Windows Backup has 3 versions Read by the administrator helper')).status, 'pass');
+  assert.equal((await run('memory-modules', 'linux', 'Inventory Memory modules Slot Size Part number DIMM0 8 GB')).status, 'pass');
+  assert.equal((await run('memory-modules', 'linux', 'Inventory Memory modules 4 GB installed Dyno could not read the individual modules: no DMI data in this virtual machine')).status, 'pass');
+  assert.equal((await run('traffic-by-program', 'windows', 'Network Program ↓ ↑ curl.exe 1.2 MB 40 KB Read by the administrator helper')).status, 'pass');
+  assert.equal((await run('firewall', 'linux', 'Linux nftables 2 rules tcp dport 59999 accept Read by the administrator helper')).status, 'pass');
+  assert.equal((await run('wake-requests', 'windows', 'Extras Read by the administrator helper Keeping this computer awake 1 program Program It prevents Reason Held for Dyno The system from sleeping 4 s')).status, 'pass');
+  assert.equal((await run('wol-state', 'linux', 'Power This computer What Dyno can read Wake for network Fine')).status, 'pass');
+});
+test('a wake-state page of only "Can\'t tell" is not measured, never a pass', async () => {
+  assert.equal((await run('wol-state', 'linux', "Power This computer Wake for network Can't tell")).status, 'not-measured');
+});
+test('a control that cannot run makes the step check-broken, not a product fail, and is cleaned up', async () => {
+  const calls = [];
+  const d = { ...driver('Linux nftables 2 rules 59999 Read by the administrator helper'), prepare: async () => ({ ok: false, detail: 'sudo nft failed' }), cleanup: async (k) => calls.push(k) };
+  const r = await readingStep(by('firewall'), 'linux', d);
+  assert.equal(r.status, 'check-broken');
+  const d2 = { ...driver('Linux nftables 2 rules 59999 Read by the administrator helper'), prepare: async () => ({ ok: true }), cleanup: async (k) => calls.push(k) };
+  assert.equal((await readingStep(by('firewall'), 'linux', d2)).status, 'pass');
+  assert.deepEqual(calls, ['nft-rule']);
+});

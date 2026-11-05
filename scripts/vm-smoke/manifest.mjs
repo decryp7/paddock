@@ -52,7 +52,7 @@ const WIN_UI = [
   row('quit-exit', /^Windows: Quit \(File > Exit\)/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
 ];
 const WIN_REBOOT = [
-  row('helper-on', /^Windows: admin helper Turn on \(UAC consent over VNC\)/), row('restart-before', /^Windows restart: helper, Launch at login and tray before the restart/),
+  row('helper-on', /^Windows: admin helper Turn on/), row('restart-before', /^Windows restart: helper, Launch at login and tray before the restart/),
   row('restart-quit', /^Windows restart: the helper after Dyno is quit/), row('restart-autostart', /^Windows restart: auto start with Launch at login (ON|switched ON)/),
   row('restart-tray', /^Windows restart: tray icons after the restart/), row('restart-helper', /^Windows restart: the helper works after a real restart/),
 ];
