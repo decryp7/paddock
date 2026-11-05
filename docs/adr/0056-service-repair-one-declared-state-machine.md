@@ -198,6 +198,11 @@ an agent on an ordinary update. The invariant is stated that way: the link never
 (ER-17). On `Install` asked, the app's own agent is retired first (the existing `link/machine.rs` handover is kept: the link
 refreshes the service before the wait, not after), then the wait runs. The wait is cancelled by Quit and by a newer event.
 
+**A request on a healthy service.** A requested Install or Repair never replaces a registration that is current, answers and passes the
+identity check (the plan's `Healthy`): it leaves it alone, logs "{app}'s background service is already working." and returns
+success. Only an unhealthy, refused, missing or stale registration is replaced, so a request cannot lose a service that works
+(the model's `Install+RegOther` on a healthy service).
+
 **R1.** `Looked(answers | refused | settled)` is an event for a look during a wait, and a failed `unregister` or `evict` is an
 event too. **R2.** Settling by `Running` needs the same pid and start time on two looks of a process that started after the
 register; `Registering` is entered only on a confirmed `Unregistered` or `GoneTimedOut` (recorded which). **R3.** `wanted` is

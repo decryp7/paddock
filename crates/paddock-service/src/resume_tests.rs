@@ -1204,3 +1204,22 @@ fn the_lock_is_let_go_while_the_replace_waits_for_the_service_so_a_removal_never
     assert!(m.install(&never()).is_ok());
     assert!(free_during_wait.load(std::sync::atomic::Ordering::SeqCst), "the wait held the repair lock");
 }
+
+#[test]
+fn a_request_on_a_working_service_leaves_it_alone_and_one_on_a_refused_service_replaces_it() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.1.0");
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(matches!(m.repair(&never()), Ok(RepairOutcome::Recovered)));
+    assert!(matches!(m.install(&never()), Ok(RepairOutcome::Recovered)));
+    assert!(calls(&sim).is_empty(), "nothing is removed or registered: {:?}", calls(&sim));
+    // Refused (launchd keeps the old build's constraint): replaced, as before.
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.1.0");
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(m.repair(&never()).is_ok());
+    assert!(calls(&sim).contains(&"register".to_string()));
+}

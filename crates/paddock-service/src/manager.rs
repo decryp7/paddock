@@ -505,6 +505,12 @@ impl Manager {
             Ok(r) => r,
             Err(refused) => return Err(self.opened(refusal(refused))),
         };
+        // A registration that is current, answers and is this copy's is left alone: replacing it could only lose it (ADR 0056).
+        let (_, answers, p) = self.decide(false, false);
+        if answers && matches!(p, Plan::Leave(Hold::Healthy)) {
+            log::info!("{}", already_working(&self.app));
+            return Ok(RepairOutcome::Recovered);
+        }
         let mut lock = self.locked();
         if lock.is_none() {
             return Err(ServiceError::Busy);
@@ -650,6 +656,11 @@ fn removal_done(ms: u64, recorded: bool) -> String {
     format!("the background service was removed in {ms} ms{}", if recorded { "" } else { "; the record could not be cleared" })
 }
 
+/// What a request says when the service is current and answers: nothing is replaced.
+pub fn already_working(app: &str) -> String {
+    format!("{app}'s background service is already working.")
+}
+
 /// Why a requested repair is not done.
 fn refusal(r: Refusal) -> ServiceError {
     match r {
@@ -676,6 +687,11 @@ fn outcome_result(o: RepairOutcome) -> Result<RepairOutcome, ServiceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_words_of_a_request_on_a_working_service() {
+        assert_eq!(already_working("Dyno"), "Dyno's background service is already working.");
+    }
 
     #[test]
     fn a_removal_logs_how_it_began_and_how_it_ended() {
