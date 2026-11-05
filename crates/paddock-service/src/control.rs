@@ -389,6 +389,7 @@ impl StartChecks {
 mod tests {
     use super::*;
     use crate::backend::{LaunchdBundled, Target, WindowsRun};
+    use crate::plan::Hold;
     use crate::port::{AppServiceStatus, Output};
     use crate::spec::ServiceSpec;
     use crate::testing::{Call, FakeAppService, FakeSystem};
@@ -776,6 +777,67 @@ mod tests {
             "the repair reached the system"
         );
         drop(c);
+    }
+
+    #[test]
+    fn a_repair_pressed_while_the_start_waits_is_refused_at_once_and_says_why() {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, _) = emitter();
+        let h = health();
+        let c = ServiceControl::with_health(dyno(&sys, d.path(), true), emit, h, "agent").unwrap();
+        c.status().unwrap();
+        // `on_start` holds the manager through the whole wait; the health registry's Repair and `run` must not queue behind it.
+        let held = lock(&c.manager);
+        assert!(c.tracker.start(Instant::now()));
+        let (tx, rx) = channel();
+        let c2 = c.clone();
+        let t = std::thread::spawn(move || {
+            let run = c2.run(Request::Repair).map(drop);
+            let cause = c2.health_repair().unwrap_err();
+            let _ = tx.send((run, cause));
+        });
+        let got = rx.recv_timeout(Duration::from_secs(10));
+        drop(held);
+        let (run, cause) = got.expect("Repair queued behind the start's wait");
+        t.join().unwrap();
+        assert!(matches!(run, Err(ServiceError::Busy)), "{run:?}");
+        assert_eq!(cause.code.as_deref(), Some("service.busy"));
+        assert!(cause.message.contains("already"), "{cause:?}");
+        c.tracker.finish(&RepairOutcome::Cancelled, Instant::now());
+    }
+
+    #[test]
+    fn a_start_that_cannot_save_its_state_tells_the_ui_why_and_what_to_do() {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, seen) = emitter();
+        sys.answer(
+            "reg query",
+            Output::ok("    Dyno    REG_SZ    \"C:\\Old\\dyno-agent.exe\" run\r\n"),
+        );
+        std::fs::write(
+            d.path().join("service-net.decryptology.dyno.agent.json"),
+            r#"{"version": 99}"#,
+        )
+        .unwrap();
+        let c = ServiceControl::new(dyno(&sys, d.path(), false), emit);
+        let started = c.on_start();
+        assert!(
+            matches!(started, Started::Left(Hold::RecordUnavailable(_))),
+            "{started:?}"
+        );
+        let e = lock(&seen)
+            .last()
+            .cloned()
+            .unwrap()
+            .error
+            .expect("the UI is told");
+        assert_eq!(e.code, ServiceErrorCode::Failed);
+        assert!(
+            e.message.contains("changed nothing") && e.message.contains("Repair"),
+            "{e:?}"
+        );
     }
 
     #[test]

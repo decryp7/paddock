@@ -415,6 +415,52 @@ mod tests {
     }
 
     #[test]
+    fn every_hold_says_what_happened_and_the_next_step_that_works() {
+        // The three caps are different facts and say so; each names a way out that exists for the state.
+        let reg = with(Registration::Registered, Job::NotRunning);
+        let said = |hold: Hold, i: &Inspection| {
+            let plan = Plan::Leave(hold);
+            compose(seen(i, false, &plan))
+        };
+        let unanswered = said(Hold::Unanswered(3), &reg);
+        let refused = said(Hold::Refused(3), &reg);
+        assert!(
+            unanswered
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("did not answer")
+        );
+        assert!(
+            refused
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("refused to start")
+        );
+        assert_ne!(unanswered.message, refused.message);
+        for s in [&unanswered, &refused] {
+            assert_eq!((s.condition, s.can_repair), (Condition::NotRunning, true));
+            assert!(s.message.as_deref().unwrap().contains("press Repair"));
+        }
+        // A register that failed leaves nothing registered: that is no plain "not installed".
+        let failed = said(Hold::RegisterFailed(3), &Inspection::absent());
+        assert_eq!(
+            (failed.condition, failed.can_install),
+            (Condition::NotInstalled, true)
+        );
+        let words = failed.message.as_deref().expect("a hold with no words");
+        assert!(
+            words.contains("could not register") && words.contains("Install"),
+            "{words}"
+        );
+        assert!(!words.contains("registered 3 times"), "{words}");
+        // The health entry keeps the words and the way out for it.
+        let h = failed.health();
+        assert!(h.cause.unwrap().message.contains("could not register"));
+    }
+
+    #[test]
     fn health_has_a_repair_for_every_outage_it_can_fix() {
         let status = |condition: Condition| ServiceStatus {
             mechanism: Mechanism::SystemdUser,
