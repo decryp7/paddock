@@ -300,6 +300,7 @@ mod tests {
             .filter_map(|m| if let Message::WolChanged(v) = m { Some(v.enabled) } else { None })
             .collect();
         assert_eq!(lists, [true], "the newest wake list, once");
+        assert_eq!(got.len(), QUEUE + 1, "the other frames are all there too, after the list went out");
     }
 
     #[test]
