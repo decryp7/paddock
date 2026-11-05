@@ -688,6 +688,14 @@ export class TauriBackend implements DynoBackend {
     return this.command<void>('plugin:paddock-shell|app_quit');
   }
 
+  quitKeepsMeasuring(): Promise<boolean> {
+    return this.command<boolean>('quit_keeps_measuring');
+  }
+
+  quitAndStopAgent(): Promise<void> {
+    return this.command<void>('quit_and_stop_measuring');
+  }
+
   // ----------------------------------------------------------------------------------------------- extras, backup
 
   changes(query: ChangesQuery): Promise<ChangeTimeline> {

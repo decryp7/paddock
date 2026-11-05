@@ -19,6 +19,7 @@ pub mod login_item;
 pub mod mcp;
 pub mod popover;
 pub mod power_menu;
+pub mod quit;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -98,6 +99,10 @@ paddock_commands::command_table! {
     Query [MAIN | DIALOG] => commands::widget_choices,
     /// The page or Settings section a widget asked the main window to open (once).
     Mutation [MAIN] => commands::take_navigation,
+    /// Whether the agent keeps measuring after a plain Quit (a login service supervises it): the words of Quit.
+    Query [MAIN | TRAY | DIALOG] => commands::quit_keeps_measuring,
+    /// Quit and stop measuring: stops the agent (service job or the agent itself), checks it is gone, quits the app.
+    Mutation [MAIN | TRAY] => commands::quit_and_stop_measuring,
 }
 
 /// Where the app runs: installed (the user's folders, real ticks) or in a test (nothing outside `dir`, no native menu
@@ -276,6 +281,10 @@ pub fn app<R: Runtime>(
         .tray(move |app| {
             tauri::Manager::manage(app, tray::popovers());
             tray::tray(tray_backend).on_action(|app, id| {
+                if id == quit::QUIT_STOP_ID {
+                    quit::quit_and_stop(app);
+                    return;
+                }
                 if let Some(shell) = tauri::Manager::try_state::<Arc<shell::ShellOf<R>>>(app) {
                     shell.power_menu_chosen(id);
                     shell.wol_menu_chosen(id);
@@ -357,7 +366,12 @@ fn agent_setup<R: Runtime>(
         // The first run's registration comes first, on a worker the link waits for (it may open System Settings or wait on
         // systemctl: ER-17), so the link finds a supervising service and starts no agent of its own.
         let (first_app, first_link) = (app.clone(), link.clone());
-        link.before_first_launch(Box::new(move || login::run_first_run(&first_app, &first_link, false)));
+        link.before_first_launch(Box::new(move || {
+            // An agent stopped on request ("Quit and stop measuring") comes back now: the log says it was a request, and the service
+            // starts again when nothing supervises it, so the link finds it and starts no second agent.
+            quit::resume_at_start(first_link.dirs.root(), &*login::service_probe(), login::platform_service().as_mut());
+            login::run_first_run(&first_app, &first_link, false);
+        }));
         // Asked before the link starts an agent of its own: none beside one the login service supervises.
         link.set_service_probe(login::service_probe());
     }
@@ -370,6 +384,16 @@ fn agent_setup<R: Runtime>(
     link.spawn()?;
     if !installed {
         return Ok(());
+    }
+    // The words of Quit follow the service: "Quit Dyno (keeps measuring)" while a service supervises the agent. Asked of the OS on
+    // its own thread (the probe can take seconds), at the start and then every minute; the tray menus change only when it did.
+    #[cfg(not(test))]
+    {
+        let words = events.clone();
+        std::thread::spawn(move || loop {
+            words.set_keeps_measuring(quit::keeps_measuring(login::service_probe()()));
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        });
     }
     let beat = events.clone();
     std::thread::spawn(move || loop {

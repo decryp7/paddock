@@ -128,6 +128,8 @@ pub trait TrayPixels<R: Runtime>: Send + Sync {
     fn set_power_menu(&self, app: &AppHandle<R>, menu: Option<&crate::power_menu::Menu>);
     /// The tray menu's Wake submenu follows `menu` (`None`: the menu has none).
     fn set_wol_menu(&self, app: &AppHandle<R>, menu: Option<&crate::wol_menu::Menu>);
+    /// The tray menus' Quit says whether the agent keeps measuring after it.
+    fn set_keeps_measuring(&self, app: &AppHandle<R>, keeps: bool);
 }
 
 /// The tray icons of the menu bar or notification area.
@@ -154,6 +156,9 @@ impl TrayPixels<Wry> for NativePixels {
     fn set_wol_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::wol_menu::Menu>) {
         crate::tray::set_wol_menu(app, menu);
     }
+    fn set_keeps_measuring(&self, app: &AppHandle<Wry>, keeps: bool) {
+        crate::tray::set_keeps_measuring(app, keeps);
+    }
 }
 
 /// Draws nothing (a test: no icon reaches the desktop).
@@ -172,6 +177,7 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
     fn show_disconnected(&self, _: &AppHandle<R>, _: &[(String, crate::tray_model::Frame)]) {}
     fn set_power_menu(&self, _: &AppHandle<R>, _: Option<&crate::power_menu::Menu>) {}
     fn set_wol_menu(&self, _: &AppHandle<R>, _: Option<&crate::wol_menu::Menu>) {}
+    fn set_keeps_measuring(&self, _: &AppHandle<R>, _: bool) {}
 }
 
 /// The installed app's shell glue (the commands' state).
@@ -355,6 +361,11 @@ impl<R: Runtime> ShellOf<R> {
                 Err(e) => logging::info(&format!("wake from the tray: device {device} failed: {}", e.message)),
             }
         });
+    }
+
+    /// Whether the agent keeps measuring after a plain Quit changed: the tray menus' Quit says so.
+    pub fn set_keeps_measuring(&self, keeps: bool) {
+        self.pixels.set_keeps_measuring(&self.app, keeps);
     }
 
     /// A Keep awake entry of the tray menu was chosen: ask the agent (it answers with the new view, which is pushed back).

@@ -365,6 +365,10 @@ export interface DynoBackend {
   hideTray(): Promise<void>;
   /** Quits the Dyno app (the background agent keeps its own lifecycle). */
   quitApp(): Promise<void>;
+  /** Whether the agent keeps measuring after a plain Quit: a login service is installed and supervises it (the engine decides). */
+  quitKeepsMeasuring(): Promise<boolean>;
+  /** Quit and stop measuring: stops the agent (until Dyno is opened again or the next login), then closes the app. The engine confirms with the system that the agent is gone. */
+  quitAndStopAgent(): Promise<void>;
 }
 
 export const BACKEND = new InjectionToken<DynoBackend>('DynoBackend');

@@ -3,6 +3,7 @@ import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
+import { QuitStore } from '../../state/quit.store';
 import { Tray } from './tray';
 
 const NOW = 1_700_000_000_000;
@@ -69,7 +70,7 @@ describe('dy-tray', () => {
     more.click();
     f.detectChanges();
     const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Customize widgets…', 'Settings…', 'Quit Dyno']);
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Customize widgets…', 'Settings…', 'Quit Dyno', 'Quit and stop measuring']);
     expect(document.querySelector('.mat-mdc-menu-panel kbd')).toBeNull();
     items[0]!.click();
     await vi.waitFor(() => expect(mock.widgetActions).toContainEqual('customizeWidgets'));
@@ -92,5 +93,20 @@ describe('dy-tray', () => {
     });
     el.querySelector<HTMLButtonElement>('.pd-wa-ea')!.click();
     await vi.waitFor(() => expect(mock.widgetActions).toContainEqual('customizeWidgets'));
+  });
+
+  it('says Quit Dyno (keeps measuring) when the engine says a service keeps the agent, and Quit and stop measuring asks the engine', async () => {
+    const { f, mock, el } = await make();
+    mock.keepsMeasuring = true;
+    await TestBed.inject(QuitStore).refresh();
+    el.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!.click();
+    f.detectChanges();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((i) => i.textContent?.trim())).toContain('Quit Dyno (keeps measuring)');
+    });
+    const stop = vi.spyOn(mock, 'quitAndStopAgent');
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) => i.textContent?.includes('Quit and stop measuring'))!.click();
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
   });
 });

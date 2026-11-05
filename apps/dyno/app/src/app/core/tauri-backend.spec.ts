@@ -111,6 +111,13 @@ describe('TauriBackend: request shapes', () => {
     expect(invoke).toHaveBeenLastCalledWith('pick_folder');
   });
 
+  it('quit asks the engine whether the agent keeps measuring, and quit-and-stop is the engine’s own command', async () => {
+    const { backend, invoke } = fake();
+    await backend.quitKeepsMeasuring();
+    await backend.quitAndStopAgent();
+    expect(invoke.mock.calls).toEqual([['quit_keeps_measuring'], ['quit_and_stop_measuring']]);
+  });
+
   it('the tray popover is the shell’s window: fit, close, show the main window and quit are the shell’s commands', async () => {
     const { backend, invoke } = fake();
     await backend.fitTray(342);

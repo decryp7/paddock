@@ -147,7 +147,7 @@ describe('Dyno contributions', () => {
   it('title every palette command in sentence case, under a category', () => {
     const own = TestBed.inject(ContributionRegistry).commands().filter((c) => c.id.startsWith('dy.'));
     expect(own.map((c) => c.id)).toEqual([
-      'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.save-diagnostics', 'dy.add-alarm-rule',
+      'dy.quit-stop', 'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.save-diagnostics', 'dy.add-alarm-rule',
     ]);
     for (const c of own) {
       expect(c.category).toBeDefined();

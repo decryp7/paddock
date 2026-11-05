@@ -29,6 +29,15 @@ pub trait AgentService: Send {
     /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
     /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
     fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
+    /// The service job a stop can name (launchd job, systemd user unit), when the OS supervises the agent now; `None` where
+    /// there is none to stop (Windows, or nothing supervises). Quit and stop measuring stops it without removing the registration.
+    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+        None
+    }
+    /// Starts the service again after it was stopped on request (the next start). Returns whether it started something.
+    fn resume(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
 }
 
 pub use paddock_service::login::Autostart;
@@ -290,6 +299,32 @@ impl AgentService for CliService {
         }
         s.ensure()
     }
+
+    /// Linux: the systemd user unit, while it is supervising. Windows has no service job (the app's `Run` entry starts the agent).
+    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+        if cfg!(target_os = "linux") && self.supervises() {
+            Some(paddock_service::stop::StopMechanism::SystemdUser {
+                unit: "dyno-agent.service".into(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Linux: `systemctl --user start` of the unit that was stopped (never `enable`: Launch at login was not changed).
+    fn resume(&mut self) -> Result<bool, String> {
+        if !cfg!(target_os = "linux") || !self.installed() {
+            return Ok(false);
+        }
+        let mut sys = paddock_service::RealSystem::new().with_timeout(std::time::Duration::from_secs(10));
+        let out = paddock_service::System::run(&mut sys, "systemctl", &["--user", "start", "dyno-agent.service"])
+            .map_err(|e| format!("systemctl start {e}"))?;
+        if out.success() {
+            Ok(true)
+        } else {
+            Err(format!("systemctl --user start dyno-agent.service: {}", out.reason()))
+        }
+    }
 }
 
 /// Dyno 1.0.0 on Windows replaced the app's logon entry (`Dyno` = `dyno-app.exe --hidden`) with the agent's (`Dyno` =
@@ -545,6 +580,26 @@ mod mac {
         launchctl_output(&mut system(), args)
     }
 
+    /// The repair plan for the observed state, run; `requested` makes it replace the registration whatever launchd reports.
+    fn repair_as(agent_answers: &dyn Fn() -> bool, requested: bool) -> Result<bool, String> {
+        let registered = registered_version(&version_file());
+        let observed = Observed {
+            status: registration_status(),
+            launchd_disabled: launchd_disabled(),
+            answers: agent_answers(),
+            job: job_report(),
+            registered_version: registered.as_deref(),
+            current_version: env!("CARGO_PKG_VERSION"),
+            requested,
+        };
+        keep_registered(
+            plan(&observed),
+            &mut MacOps { answers: agent_answers },
+            &mut record_version,
+            &mut |step| crate::logging::info(&format!("agent service: {step}")),
+        )
+    }
+
     /// [`RepairOps`] over `SMAppService` and `launchctl`.
     struct MacOps<'a> {
         answers: &'a dyn Fn() -> bool,
@@ -609,22 +664,24 @@ mod mac {
         /// not answer, and once after every version change ([`crate::service_repair`]). What the user switched off in
         /// Login Items is left alone, and nothing is registered that the user never turned on.
         fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
-            let registered = registered_version(&version_file());
-            let observed = Observed {
-                status: registration_status(),
-                launchd_disabled: launchd_disabled(),
-                answers: agent_answers(),
-                job: job_report(),
-                registered_version: registered.as_deref(),
-                current_version: env!("CARGO_PKG_VERSION"),
-                requested: false,
-            };
-            keep_registered(
-                plan(&observed),
-                &mut MacOps { answers: agent_answers },
-                &mut record_version,
-                &mut |step| crate::logging::info(&format!("agent service: {step}")),
-            )
+            repair_as(agent_answers, false)
+        }
+
+        /// The launchd job `gui/<uid>/net.decryptology.dyno.agent`, while launchd holds it. The `SMAppService` registration is
+        /// not touched: `launchctl bootout` takes the job out of launchd (so `KeepAlive` cannot restart it) and the registration
+        /// loads it again at the next login.
+        fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+            let target = target()?;
+            job_report()
+                .found
+                .then_some(paddock_service::stop::StopMechanism::Launchd { target })
+        }
+
+        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded, so the registration is
+        /// replaced the way a repair does (remove the job, wait until it is gone, register, check): the same proven path.
+        /// What the user switched off in Login Items stays off ([`plan`]).
+        fn resume(&mut self) -> Result<bool, String> {
+            repair_as(&|| false, true)
         }
     }
 }

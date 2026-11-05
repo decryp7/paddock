@@ -22,6 +22,10 @@
       "title": "dy.export-report"
     },
     {
+      "id": "dy.quit-stop",
+      "title": "dy.quit-stop"
+    },
+    {
       "id": "dy.refresh-history",
       "title": "dy.refresh-history"
     },
@@ -79,6 +83,13 @@
       "group": "settings",
       "order": 100,
       "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "app",
+      "command": "dy.quit-stop",
+      "group": "quit",
+      "order": 900,
+      "accelerator": null
     },
     {
       "menu": "app",
@@ -353,6 +364,7 @@
     "dy.page.reports": "Reports",
     "dy.page.throttling": "Throttling",
     "dy.page.why-slow": "Why slow",
+    "dy.quit-stop": "Quit and stop measuring",
     "dy.refresh-history": "Refresh history",
     "dy.rescan-issues": "Read the system logs now",
     "dy.run-why-slow": "Run again",

@@ -2,6 +2,7 @@ import {
   defineCommand,
   defineDialog,
   defineHealthService,
+  defineMenuItem,
   defineNotificationKind,
   definePage,
   defineSettingsPage,
@@ -119,8 +120,16 @@ const PAGES = NAV.map((item, index) =>
 );
 
 export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
+  // Quit and stop measuring sits right above the shell's Quit in the app menu (Quit stays last: Cmd+Q) (the menu bar, and the macOS menu bar).
+  menus: [defineMenuItem({ menu: 'app', command: 'dy.quit-stop', group: 'quit', order: 900 })],
   // The palette's commands beyond capture are the pages' own buttons, named as the buttons are (the category names the page).
   commands: [
+    defineCommand<DynoContext>({
+      id: 'dy.quit-stop',
+      title: msg('dy.quit-stop', 'Quit and stop measuring'),
+      category: msg('pd.category.app', 'Application'),
+      run: (ctx) => ctx.quitAndStop(),
+    }),
     defineCommand<DynoContext>({
       id: 'dy.capture',
       title: msg('dy.capture', 'Capture the last ten minutes'),

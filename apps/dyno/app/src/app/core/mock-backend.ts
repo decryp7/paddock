@@ -173,6 +173,8 @@ export interface MockOptions {
   holdScans?: boolean;
   /** A destination in every country on the map (`?geo=many`), to see the most arcs it draws. */
   geoMany?: boolean;
+  /** The login service supervises the agent, so Quit leaves it measuring (`?keeps=1`; default off). */
+  keepsMeasuring?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -232,6 +234,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
     ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
+    ...(q.get('keeps') === '1' ? { keepsMeasuring: true } : {}),
     ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
     ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
@@ -359,6 +362,7 @@ export class MockBackend implements DynoBackend {
 
   constructor(options: MockOptions = {}) {
     this.options = options;
+    this.keepsMeasuring = options.keepsMeasuring ?? false;
     this.os = options.os ?? 'macos';
     this.trayPx = options.trayPx ?? (this.os === 'macos' ? 18 : 16);
     this.machine = options.machine ?? 'laptop';
@@ -1592,6 +1596,17 @@ export class MockBackend implements DynoBackend {
 
   quitApp(): Promise<void> {
     return this.reply('quitApp', () => undefined);
+  }
+
+  /** The mock's service state: `keepsMeasuring` is set by a test (the login service is installed and supervises the agent). */
+  keepsMeasuring = false;
+
+  quitKeepsMeasuring(): Promise<boolean> {
+    return this.reply('quitKeepsMeasuring', () => this.keepsMeasuring);
+  }
+
+  quitAndStopAgent(): Promise<void> {
+    return this.reply('quitAndStopAgent', () => undefined);
   }
 
   // ----------------------------------------------------------------------------------------- extras, backup

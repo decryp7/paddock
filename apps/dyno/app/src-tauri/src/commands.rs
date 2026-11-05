@@ -152,6 +152,22 @@ pub async fn metric_readings(shell: State<'_, Arc<Shell>>, queries: Vec<dyno_cor
         .map_err(|e| CommandError::internal(format!("The readings could not be read: {e}")))
 }
 
+/// Whether the agent keeps measuring after a plain Quit: the login service is installed and supervises it, asked of the OS now
+/// (it can take a moment, so off the UI thread). The menus show "Quit Dyno (keeps measuring)" for it.
+#[tauri::command]
+pub async fn quit_keeps_measuring() -> Result<bool, CommandError> {
+    tauri::async_runtime::spawn_blocking(|| crate::quit::keeps_measuring(crate::login::service_probe()()))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))
+}
+
+/// "Quit and stop measuring": returns at once; a worker stops the agent, checks with the system that it is gone and quits.
+#[tauri::command]
+pub async fn quit_and_stop_measuring(app: AppHandle) -> Result<(), CommandError> {
+    crate::quit::quit_and_stop(&app);
+    Ok(())
+}
+
 /// For each kind the chooser can add: a ready default widget and the metrics the engine accepts for it.
 #[tauri::command]
 pub async fn widget_choices() -> Result<Value, CommandError> {

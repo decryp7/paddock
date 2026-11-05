@@ -11,6 +11,8 @@ export const APP_COMMANDS = {
   popover_snapshot: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   popover_values: { kind: 'query', windows: ['main', 'dialog', 'tray'], limit: 262144 },
   preview_widget_layout: { kind: 'query', windows: ['main'], limit: 262144 },
+  quit_and_stop_measuring: { kind: 'mutation', windows: ['main', 'tray'], limit: 262144 },
+  quit_keeps_measuring: { kind: 'query', windows: ['main', 'dialog', 'tray'], limit: 262144 },
   run_widget_action: { kind: 'mutation', windows: ['main', 'tray'], limit: 262144 },
   save_benchmarks: { kind: 'mutation', windows: ['main'], limit: 262144 },
   save_diagnostics: { kind: 'mutation', windows: ['main'], limit: 262144 },

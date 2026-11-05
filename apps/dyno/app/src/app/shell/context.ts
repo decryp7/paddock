@@ -43,6 +43,8 @@ export interface DynoContext {
   canSaveDiagnostics(): boolean;
   /** Alarms: opens the new-rule window (reads the settings first when they are not loaded yet). */
   addAlarmRule(): Promise<void>;
+  /** Quit and stop measuring: the engine stops the agent, checks that it is gone and closes the app. */
+  quitAndStop(): Promise<void>;
 }
 
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -109,6 +111,14 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       await diagnostics.save();
     },
     canSaveDiagnostics: () => !diagnostics.saving(),
+    quitAndStop: async () => {
+      notifier.show('Stopping the agent…');
+      try {
+        await backend.quitAndStopAgent();
+      } catch (e) {
+        notifier.show(e instanceof Error ? e.message : 'The agent could not be stopped.', 'bad');
+      }
+    },
     addAlarmRule: async () => {
       await pages.goAndFocus('dy.alarms');
       if (!settings.settings()) await settings.load();
