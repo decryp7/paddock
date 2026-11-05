@@ -301,6 +301,7 @@
   },
   "healthServices": [
     "dy.agent",
+    "dy.setup",
     "dy.tray"
   ],
   "notificationKinds": {
@@ -328,6 +329,7 @@
     "dy.export-report": "Export Markdown…",
     "dy.file-hash.title": "Search the file's hash on VirusTotal",
     "dy.health.agent": "the Dyno agent",
+    "dy.health.setup": "the installer program",
     "dy.health.tray": "the tray icons",
     "dy.lockers.title": "What is locking this file?",
     "dy.notification.alarm": "Alarm",

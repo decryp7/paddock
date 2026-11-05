@@ -163,15 +163,13 @@ impl<R: Runtime> Hub<R> {
     /// The services, in the order the status bar lists them.
     pub fn services(&self) -> Vec<ServiceSpec> {
         let hub = self.clone();
-        #[allow(unused_mut)]
-        let mut specs = vec![
+        // The installer program is reported on Windows only (the per-machine install); the UI lists the service everywhere
+        // (the manifest is one file for every OS), so Rust registers it everywhere and it stays quiet elsewhere.
+        vec![
             ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
             ServiceSpec::new(TRAY, "the tray icons"),
-        ];
-        // The installer program exists in the per-machine Windows install only.
-        #[cfg(windows)]
-        specs.push(ServiceSpec::new(SETUP, "the installer program"));
-        specs
+            ServiceSpec::new(SETUP, "the installer program"),
+        ]
     }
 
     /// The repair: the link reconnects with backoff on its own, so this waits (bounded) for it and says what it found.

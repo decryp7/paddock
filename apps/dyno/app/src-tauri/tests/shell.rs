@@ -62,7 +62,7 @@ fn the_manifest_repeats_each_dialogs_contract_exactly() {
 /// Dyno's services are the ones the UI registers, in the status bar's order.
 #[test]
 fn the_services_are_the_ones_the_ui_lists() {
-    assert_eq!(builder().service_ids(), vec!["dy.agent", "dy.tray"]);
+    assert_eq!(builder().service_ids(), vec!["dy.agent", "dy.tray", "dy.setup"]);
 }
 
 /// Dyno's table never shadows a shell command.
