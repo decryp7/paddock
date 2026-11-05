@@ -1,0 +1,45 @@
+<mxfile host="app.diagrams.net" compressed="false">
+  <diagram id="04 labels and styles" name="04 labels and styles">
+    <mxGraphModel dx="988" dy="458" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <object gen_page="v1;pn:class:c4168ac93abc2cff,pn:class:af433e021d0bcaf0,pn:class:c5ef6de44705f387,pn:class:7ba8c77dc049ecad;tombstones=" id="0">
+          <mxCell />
+        </object>
+        <mxCell id="1" parent="0" />
+        <object label="&lt;b&gt;Reader&lt;/b&gt;&lt;br&gt;fn read(&amp;lt;T&amp;gt;) &amp;amp; more" gen_key="pacenotes|class:a" gen_label="582c48fd0af9f490" gen_style="8d377a71cca5b221" gen_geo="40,40,200,70" gen_parent="1" tooltip="Reads files &amp; checks &lt;limits&gt;" link="https://example.invalid/reader" tags="core hot" id="pn:class:c4168ac93abc2cff">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=14;" vertex="1">
+            <mxGeometry height="70" width="200" x="40" y="40" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Naïve ünïcode — 日本語 ✓" gen_key="pacenotes|class:b" gen_label="0133ce84aadc4828" gen_style="8d377a71cca5b221" gen_geo="340,40,220,70" gen_parent="1" id="pn:class:af433e021d0bcaf0">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=14;" vertex="1">
+            <mxGeometry height="70" width="220" x="340" y="90" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Line one&#xa;Line two" gen_key="pacenotes|class:c" gen_label="6991ce0a6fcde71f" gen_style="f25211d217c118c3" gen_geo="40,190,200,70" gen_parent="1" id="pn:class:c5ef6de44705f387">
+          <mxCell parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;" vertex="1">
+            <mxGeometry height="70" width="200" x="40" y="190" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="plain" gen_key="pacenotes|class:d" gen_label="a116c9ed46d62077" gen_style="ea886f3d898c3777" gen_geo="340,190,220,70" gen_parent="1" id="pn:class:7ba8c77dc049ecad">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;dashed=1;opacity=80;rotation=0;" vertex="1">
+            <mxGeometry height="70" width="220" x="340" y="190" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="calls" gen_key="pacenotes|calls:a-&gt;b" gen_label="f46f5990ebfadcab" gen_style="180776acc661d3ca" gen_ends="pn:class:c4168ac93abc2cff,pn:class:af433e021d0bcaf0" gen_parent="1" id="pn:edge:12161c2b47d87264">
+          <mxCell edge="1" parent="1" source="pn:class:c4168ac93abc2cff" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;dashPattern=4 4;endArrow=open;endFill=0;strokeColor=#b85450;" target="pn:class:af433e021d0bcaf0">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="uses &lt;T&gt;" gen_key="pacenotes|uses:c-&gt;d" gen_label="9109547324094373" gen_style="2cafb9f506b56573" gen_ends="pn:class:c5ef6de44705f387,pn:class:7ba8c77dc049ecad" gen_parent="1" id="pn:edge:15120149d175eb5e">
+          <mxCell edge="1" parent="1" source="pn:class:c5ef6de44705f387" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:class:7ba8c77dc049ecad">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <mxCell id="manual-note" parent="1" style="shape=note;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" value="hand-made note" vertex="1">
+          <mxGeometry height="80" width="140" x="640" y="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

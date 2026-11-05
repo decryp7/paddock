@@ -1,0 +1,33 @@
+<mxfile host="pacenotes" version="1" compressed="false">
+  <diagram id="01 canonical basic" name="01 canonical basic">
+    <mxGraphModel dx="0" dy="0" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <object id="0" gen_page="v1;pn:module:80aee5b23f6fb06f,pn:module:091dc20d972bdf55,pn:module:9b90e4ae305f0896,pn:module:e97e22232e19ce98;tombstones=">
+          <mxCell/>
+        </object>
+        <mxCell id="1" parent="0"/>
+        <object id="pn:module:80aee5b23f6fb06f" label="app" gen_key="pacenotes|module:app" gen_label="a172cedcae47474b" gen_style="748f75deec3698dd" gen_geo="40,40,120,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:091dc20d972bdf55" label="core" gen_key="pacenotes|module:core" gen_label="0d45f5fd462b8c70" gen_style="748f75deec3698dd" gen_geo="240,40,120,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="240" y="40" width="120" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:9b90e4ae305f0896" label="store" gen_key="pacenotes|module:store" gen_label="824d80d71985f082" gen_style="748f75deec3698dd" gen_geo="240,140,120,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="240" y="140" width="120" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:e97e22232e19ce98" label="util" gen_key="pacenotes|module:util" gen_label="9342af224fa264b0" gen_style="748f75deec3698dd" gen_geo="440,90,120,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="440" y="90" width="120" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:194abb6d495e4c0b" label="" gen_key="pacenotes|depends:app-&gt;core" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:80aee5b23f6fb06f,pn:module:091dc20d972bdf55" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:80aee5b23f6fb06f" target="pn:module:091dc20d972bdf55"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:f576b4c459a9c32d" label="" gen_key="pacenotes|depends:core-&gt;store" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:091dc20d972bdf55,pn:module:9b90e4ae305f0896" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:091dc20d972bdf55" target="pn:module:9b90e4ae305f0896"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:0bc9cf0831918fa0" label="" gen_key="pacenotes|depends:core-&gt;util" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:091dc20d972bdf55,pn:module:e97e22232e19ce98" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:091dc20d972bdf55" target="pn:module:e97e22232e19ce98"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

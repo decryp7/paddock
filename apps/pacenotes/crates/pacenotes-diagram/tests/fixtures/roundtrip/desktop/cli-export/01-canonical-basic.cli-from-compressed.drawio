@@ -1,0 +1,57 @@
+<mxfile host="Electron" compressed="true">
+  <diagram id="01 canonical basic" name="01 canonical basic">
+    <mxGraphModel grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="0" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <object gen_page="v1;pn:module:80aee5b23f6fb06f,pn:module:091dc20d972bdf55,pn:module:9b90e4ae305f0896,pn:module:e97e22232e19ce98;tombstones=" id="0">
+          <mxCell />
+        </object>
+        <mxCell id="1" parent="0" />
+        <object label="core" gen_key="pacenotes|module:core" gen_label="0d45f5fd462b8c70" gen_style="748f75deec3698dd" gen_geo="240,40,120,50" gen_parent="1" id="pn:module:091dc20d972bdf55">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1">
+            <mxGeometry height="50" width="120" x="240" y="40" as="geometry" />
+          </mxCell>
+        </object>
+        <mxCell id="abT8s_CNGR0tXdek_s_i-2" edge="1" parent="1" source="pn:module:9b90e4ae305f0896" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="abT8s_CNGR0tXdek_s_i-1" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <object label="store" gen_key="pacenotes|module:store" gen_label="824d80d71985f082" gen_style="748f75deec3698dd" gen_geo="240,140,120,50" gen_parent="1" id="pn:module:9b90e4ae305f0896">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1">
+            <mxGeometry height="50" width="120" x="240" y="140" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="utility helpers" gen_key="pacenotes|module:util" gen_label="9342af224fa264b0" gen_style="748f75deec3698dd" gen_geo="440,90,120,50" gen_parent="1" id="pn:module:e97e22232e19ce98">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1">
+            <mxGeometry height="50" width="120" x="440" y="190" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="" gen_key="pacenotes|depends:app-&gt;core" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:80aee5b23f6fb06f,pn:module:091dc20d972bdf55" gen_parent="1" id="pn:edge:194abb6d495e4c0b">
+          <mxCell edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:module:091dc20d972bdf55">
+            <mxGeometry relative="1" as="geometry">
+              <mxPoint x="160" y="65" as="sourcePoint" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+        <object label="" gen_key="pacenotes|depends:core-&gt;store" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:091dc20d972bdf55,pn:module:9b90e4ae305f0896" gen_parent="1" id="pn:edge:f576b4c459a9c32d">
+          <mxCell edge="1" parent="1" source="pn:module:091dc20d972bdf55" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:module:9b90e4ae305f0896">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="" gen_key="pacenotes|depends:core-&gt;util" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:091dc20d972bdf55,pn:module:e97e22232e19ce98" gen_parent="1" id="pn:edge:0bc9cf0831918fa0">
+          <mxCell edge="1" parent="1" source="pn:module:091dc20d972bdf55" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:module:e97e22232e19ce98">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="store" gen_key="pacenotes|module:store" gen_label="824d80d71985f082" gen_style="748f75deec3698dd" gen_geo="240,140,120,50" gen_parent="1" id="abT8s_CNGR0tXdek_s_i-1">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1">
+            <mxGeometry height="50" width="120" x="240" y="270" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="core" gen_key="pacenotes|module:core" gen_label="0d45f5fd462b8c70" gen_style="748f75deec3698dd" gen_geo="240,40,120,50" gen_parent="1" id="abT8s_CNGR0tXdek_s_i-3">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1">
+            <mxGeometry height="50" width="120" x="640" y="340" as="geometry" />
+          </mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

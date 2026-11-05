@@ -1,0 +1,75 @@
+<mxfile host="Electron" compressed="false">
+  <diagram id="03 c4 containers" name="03 c4 containers">
+    <mxGraphModel dx="1123" dy="543" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <object gen_page="v1;pn:person:e8986fa14c9054e2,pn:system:b9df637a7ec7e3df,pn:container:3b721f29fa184802,pn:container:abb3576b930eec2c,pn:container:79b03b2ec073d2c9,pn:external:e48b4674c50d4603;tombstones=" id="0">
+          <mxCell />
+        </object>
+        <mxCell id="1" parent="0" />
+        <mxCell id="dyVc8CX5xe_WjfJVy-lv-2" edge="1" parent="1" source="pn:person:e8986fa14c9054e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="dyVc8CX5xe_WjfJVy-lv-1" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <object label="&lt;b&gt;Reviewer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[Person]&lt;/font&gt;" gen_key="pacenotes|person:user" gen_label="bc20c89e3f24a513" gen_style="155412205de00bbd" gen_geo="40,200,160,80" gen_parent="1" id="pn:person:e8986fa14c9054e2">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427b;strokeColor=#073b6f;fontColor=#ffffff;" vertex="1">
+            <mxGeometry height="80" width="160" x="40" y="200" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Pacenotes" gen_key="pacenotes|system:pacenotes" gen_label="21b55c548cb7d253" gen_style="da0695d7637343f6" gen_geo="280,40,560,420" gen_parent="1" id="pn:system:b9df637a7ec7e3df">
+          <mxCell parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;dashed=1;container=1;collapsible=0;recursiveResize=0;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;" vertex="1">
+            <mxGeometry height="420" width="560" x="280" y="40" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="&lt;b&gt;Workbench&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[Angular]&lt;/font&gt;" gen_key="pacenotes|container:ui" gen_label="3a68651c0511c4c7" gen_style="c0561ec667055435" gen_geo="40,60,200,90" gen_parent="pn:system:b9df637a7ec7e3df" id="pn:container:3b721f29fa184802">
+          <mxCell parent="pn:system:b9df637a7ec7e3df" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;strokeColor=#0b4884;fontColor=#ffffff;" vertex="1">
+            <mxGeometry height="90" width="200" x="40" y="110" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="&lt;b&gt;Engine&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[Rust] v2&lt;/font&gt;" gen_key="pacenotes|container:engine" gen_label="ecea8a103bf28b9c" gen_style="c0561ec667055435" gen_geo="300,60,200,90" gen_parent="pn:system:b9df637a7ec7e3df" id="pn:container:abb3576b930eec2c">
+          <mxCell parent="pn:system:b9df637a7ec7e3df" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;strokeColor=#0b4884;fontColor=#ffffff;" vertex="1">
+            <mxGeometry height="90" width="200" x="300" y="60" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="&lt;b&gt;Index store&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[DuckDB]&lt;/font&gt;" gen_key="pacenotes|container:db" gen_label="ccb118595039b85c" gen_style="c0561ec667055435" gen_geo="300,260,200,90" gen_parent="pn:system:b9df637a7ec7e3df" id="pn:container:79b03b2ec073d2c9">
+          <mxCell parent="pn:system:b9df637a7ec7e3df" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;strokeColor=#0b4884;fontColor=#ffffff;" vertex="1">
+            <mxGeometry height="90" width="200" x="300" y="260" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="&lt;b&gt;Git repository&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[External]&lt;/font&gt;" gen_key="pacenotes|external:git" gen_label="baca56f9b2ccf337" gen_style="14241aff9844cc10" gen_geo="960,200,160,80" gen_parent="1" id="pn:external:e48b4674c50d4603">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#999999;strokeColor=#8a8a8a;fontColor=#ffffff;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;" vertex="1">
+            <mxGeometry height="80" width="160" x="960" y="200" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Reads findings" gen_key="pacenotes|uses:user-&gt;ui" gen_label="8f9399e155abe92d" gen_style="2cafb9f506b56573" gen_ends="pn:person:e8986fa14c9054e2,pn:container:3b721f29fa184802" gen_parent="1" id="pn:edge:0e583aa1edb402c2">
+          <mxCell edge="1" parent="1" source="pn:person:e8986fa14c9054e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:container:3b721f29fa184802">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Commands (IPC)" gen_key="pacenotes|uses:ui-&gt;engine" gen_label="503e4756d04b7fea" gen_style="2cafb9f506b56573" gen_ends="pn:container:3b721f29fa184802,pn:container:abb3576b930eec2c" gen_parent="1" id="pn:edge:e20f88e20170e763">
+          <mxCell edge="1" parent="1" source="pn:container:3b721f29fa184802" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:container:abb3576b930eec2c">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Reads and writes" gen_key="pacenotes|uses:engine-&gt;db" gen_label="cef69ea2b66d7dec" gen_style="2cafb9f506b56573" gen_ends="pn:container:abb3576b930eec2c,pn:container:79b03b2ec073d2c9" gen_parent="1" id="pn:edge:e002f2c0e4b43820">
+          <mxCell edge="1" parent="1" source="pn:container:abb3576b930eec2c" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:container:79b03b2ec073d2c9">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="Reads history" gen_key="pacenotes|uses:engine-&gt;git" gen_label="920d18fa010c91e3" gen_style="2cafb9f506b56573" gen_ends="pn:container:abb3576b930eec2c,pn:external:e48b4674c50d4603" gen_parent="1" id="pn:edge:67ffba3c7ab63419">
+          <mxCell edge="1" parent="1" source="pn:container:abb3576b930eec2c" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" target="pn:external:e48b4674c50d4603">
+            <mxGeometry relative="1" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="&lt;b&gt;Reviewer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[Person]&lt;/font&gt;" gen_key="pacenotes|person:user" gen_label="bc20c89e3f24a513" gen_style="155412205de00bbd" gen_geo="40,200,160,80" gen_parent="1" id="dyVc8CX5xe_WjfJVy-lv-1">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427b;strokeColor=#073b6f;fontColor=#ffffff;" vertex="1">
+            <mxGeometry height="80" width="160" x="40" y="360" as="geometry" />
+          </mxCell>
+        </object>
+        <object label="&lt;b&gt;Git repository&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;[External]&lt;/font&gt;" gen_key="pacenotes|external:git" gen_label="baca56f9b2ccf337" gen_style="14241aff9844cc10" gen_geo="960,200,160,80" gen_parent="1" id="dyVc8CX5xe_WjfJVy-lv-3">
+          <mxCell parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#999999;strokeColor=#8a8a8a;fontColor=#ffffff;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;" vertex="1">
+            <mxGeometry height="80" width="160" x="960" y="410" as="geometry" />
+          </mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

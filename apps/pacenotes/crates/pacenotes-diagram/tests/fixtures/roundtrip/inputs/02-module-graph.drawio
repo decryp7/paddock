@@ -1,0 +1,78 @@
+<mxfile host="pacenotes" version="1" compressed="false">
+  <diagram id="02 module graph" name="02 module graph">
+    <mxGraphModel dx="0" dy="0" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <object id="0" gen_page="v1;pn:module:7992e9de18ad5e97,pn:module:3c80dd947d15891c,pn:module:59cd9cb2b52ecc41,pn:module:f4d0f35788e00f30,pn:module:6457da7f0c5d9b60,pn:module:c2ce14dffedecbb6,pn:module:7f40ac5b75bf6c3f,pn:module:eac8dea40d00ef47,pn:module:5063158351568762,pn:module:8f79b13521e8882a;tombstones=">
+          <mxCell/>
+        </object>
+        <mxCell id="1" parent="0"/>
+        <object id="pn:module:7992e9de18ad5e97" label="pacenotes-cli" gen_key="pacenotes|module:pacenotes-cli" gen_label="2733a055f4ef51b7" gen_style="748f75deec3698dd" gen_geo="40,40,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:3c80dd947d15891c" label="pacenotes-app" gen_key="pacenotes|module:pacenotes-app" gen_label="f955380de4b30161" gen_style="748f75deec3698dd" gen_geo="220,40,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="220" y="40" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:59cd9cb2b52ecc41" label="pacenotes-api" gen_key="pacenotes|module:pacenotes-api" gen_label="db44a964dca6c473" gen_style="748f75deec3698dd" gen_geo="400,40,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="400" y="40" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:f4d0f35788e00f30" label="pacenotes-core" gen_key="pacenotes|module:pacenotes-core" gen_label="8852bd70dbd17d0b" gen_style="748f75deec3698dd" gen_geo="220,140,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="220" y="140" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:6457da7f0c5d9b60" label="pacenotes-parse" gen_key="pacenotes|module:pacenotes-parse" gen_label="d0c7a1d265f7b10c" gen_style="748f75deec3698dd" gen_geo="40,240,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="40" y="240" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:c2ce14dffedecbb6" label="pacenotes-index" gen_key="pacenotes|module:pacenotes-index" gen_label="7a28eed31bd2fc78" gen_style="748f75deec3698dd" gen_geo="220,240,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="220" y="240" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:7f40ac5b75bf6c3f" label="pacenotes-store" gen_key="pacenotes|module:pacenotes-store" gen_label="2425cc93145b1c39" gen_style="748f75deec3698dd" gen_geo="400,240,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="400" y="240" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:eac8dea40d00ef47" label="pacenotes-git" gen_key="pacenotes|module:pacenotes-git" gen_label="40e2ebe09017acfc" gen_style="748f75deec3698dd" gen_geo="580,240,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="580" y="240" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:5063158351568762" label="pacenotes-rules" gen_key="pacenotes|module:pacenotes-rules" gen_label="665f97b2fb903f92" gen_style="748f75deec3698dd" gen_geo="220,340,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="220" y="340" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:module:8f79b13521e8882a" label="pacenotes-diagram" gen_key="pacenotes|module:pacenotes-diagram" gen_label="95069d506696a323" gen_style="748f75deec3698dd" gen_geo="400,340,140,50" gen_parent="1">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1"><mxGeometry x="400" y="340" width="140" height="50" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:927d8da3794f601b" label="" gen_key="pacenotes|depends:pacenotes-cli-&gt;pacenotes-app" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:7992e9de18ad5e97,pn:module:3c80dd947d15891c" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:7992e9de18ad5e97" target="pn:module:3c80dd947d15891c"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:bae7944da6d49a8f" label="" gen_key="pacenotes|depends:pacenotes-app-&gt;pacenotes-api" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:3c80dd947d15891c,pn:module:59cd9cb2b52ecc41" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:3c80dd947d15891c" target="pn:module:59cd9cb2b52ecc41"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:1121529bb5c5feb3" label="" gen_key="pacenotes|depends:pacenotes-app-&gt;pacenotes-core" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:3c80dd947d15891c,pn:module:f4d0f35788e00f30" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:3c80dd947d15891c" target="pn:module:f4d0f35788e00f30"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:bfef053257429e67" label="" gen_key="pacenotes|depends:pacenotes-api-&gt;pacenotes-core" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:59cd9cb2b52ecc41,pn:module:f4d0f35788e00f30" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:59cd9cb2b52ecc41" target="pn:module:f4d0f35788e00f30"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:5264cbd111f72f99" label="" gen_key="pacenotes|depends:pacenotes-core-&gt;pacenotes-parse" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:f4d0f35788e00f30,pn:module:6457da7f0c5d9b60" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:f4d0f35788e00f30" target="pn:module:6457da7f0c5d9b60"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:e2153b3a1f346d0f" label="" gen_key="pacenotes|depends:pacenotes-core-&gt;pacenotes-index" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:f4d0f35788e00f30,pn:module:c2ce14dffedecbb6" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:f4d0f35788e00f30" target="pn:module:c2ce14dffedecbb6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:6efbc492fe1d328a" label="" gen_key="pacenotes|depends:pacenotes-index-&gt;pacenotes-store" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:c2ce14dffedecbb6,pn:module:7f40ac5b75bf6c3f" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:c2ce14dffedecbb6" target="pn:module:7f40ac5b75bf6c3f"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:71422ee811d9aac0" label="" gen_key="pacenotes|depends:pacenotes-index-&gt;pacenotes-git" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:c2ce14dffedecbb6,pn:module:eac8dea40d00ef47" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:c2ce14dffedecbb6" target="pn:module:eac8dea40d00ef47"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:48a1d774eb99de6d" label="" gen_key="pacenotes|depends:pacenotes-app-&gt;pacenotes-rules" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:3c80dd947d15891c,pn:module:5063158351568762" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:3c80dd947d15891c" target="pn:module:5063158351568762"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:62f6028c5a2f26a5" label="" gen_key="pacenotes|depends:pacenotes-rules-&gt;pacenotes-index" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:5063158351568762,pn:module:c2ce14dffedecbb6" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:5063158351568762" target="pn:module:c2ce14dffedecbb6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:18a72f5a4145e4f7" label="" gen_key="pacenotes|depends:pacenotes-diagram-&gt;pacenotes-index" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:8f79b13521e8882a,pn:module:c2ce14dffedecbb6" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:8f79b13521e8882a" target="pn:module:c2ce14dffedecbb6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+        <object id="pn:edge:c15c39675526a7a2" label="" gen_key="pacenotes|depends:pacenotes-parse-&gt;pacenotes-index" gen_label="e3b0c44298fc1c14" gen_style="2cafb9f506b56573" gen_ends="pn:module:6457da7f0c5d9b60,pn:module:c2ce14dffedecbb6" gen_parent="1">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="pn:module:6457da7f0c5d9b60" target="pn:module:c2ce14dffedecbb6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
