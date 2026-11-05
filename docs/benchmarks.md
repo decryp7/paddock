@@ -173,6 +173,34 @@ One line each. The dated records are in the app files.
 
 Results of shared crates (rule 48: shared code records here), newest first.
 
+### 2026-11-05, paddock-ipc round trip (Debrief ADR 0064)
+
+- **Commit:** source at 3168b6145 (`debrief/stream-text`). Throwaway harnesses, not committed: two `Peer`s on `endpoint::pair()` with `Connection::raw`, in one process
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load about 7 to 11; other agents running; through `plock`
+- **Build:** release, system allocator
+- **Corpus:** a handler answering N bytes; invented log events for the second table
+- **Runs:** one per size; three rounds per mode. In one process, so no process switch of a real child: 2.6b's benchmark replaces this per OS
+- **A call answered with N bytes:**
+
+  | Reply | Calls | Mean per call | MiB/s |
+  |---|---|---|---|
+  | 512 B | 200,000 | 33.1 µs | 15 |
+  | 4 KiB | 100,000 | 38.6 µs | 101 |
+  | 64 KiB | 40,000 | 152.7 µs | 409 |
+  | 1 MiB | 4,000 | 1,906 µs | 525 |
+  | 4 MiB | 1,000 | 7,838 µs | 510 |
+
+- **Raw text on the wire, or an offset and length the host cuts.** 4,000,000 invented events (message, 3 fields, about 96 bytes of raw text) through streamed items of at most 8,192 events or about 4 MiB, credit 4, postcard; the host decodes each item, and in span mode reads the item's range from a file and cuts each event's text.
+
+  | Mode | Events/s, 3 rounds | Wire bytes | Raw bytes delivered |
+  |---|---|---|---|
+  | Raw text in the event | 1,936,823, 1,995,495, 2,019,105 | 815 MiB | 374 MiB |
+  | Span, host cuts | 2,395,779, 2,365,876, 2,356,065 | 456 MiB | 374 MiB |
+
+- **Memory measure:** not taken
+- **Verdict:** no budget; evidence for ADR 0064
+
 ### 2026-10-29, paddock-chromium: Browser.close exit time under load (fix/flaky-browser-close)
 
 - **Commit:** 18360f145 (origin/main) with temporary probe output in `Chromium::close_gracefully` (not committed): the

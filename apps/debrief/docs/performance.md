@@ -83,6 +83,45 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, streaming trait measurements (Debrief ADR 0064)
+
+- **Commit:** source at 3168b6145 (`debrief/stream-text`); `evtx` 0.15.1, default features off, as Debrief builds it. Throwaway harnesses, not committed: described here so they can be rebuilt
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load about 6.7 to 11 at the marks taken; other agents running; heavy steps through `plock`. Indications only; only the A/B below is interleaved
+- **Build:** release, system allocator (not `debrief-alloc`), `CARGO_BUILD_JOBS=2`
+- **Memory measure:** maximum RSS from `/usr/bin/time -l`, labelled RSS (rule 26 asks for footprint; a comparison within one table only). A reading-side counting sink throughout: **no store writer, no plugin process**
+- **Runs:** per table
+- **EVTX over a simulated lent file.** Corpus: the fixture `security.evtx` (MIT, one 64 KiB chunk with 4 records) repeated to 256 and 1,464 MiB. A `Read + Seek` wrapper around a file counted round trips, with pieces of at most 1 MiB and three read-ahead policies; `EvtxParser::from_read_seek`, `validate_checksums(false)`, `records_json_value`. One run per cell.
+
+  | File, policy | To first event: round trips, bytes | Total: round trips, bytes | Records/s, MiB/s | Peak RSS |
+  |---|---|---|---|---|
+  | 256 MiB, no read-ahead | 4,101, 2 MiB | 20,481, 258 MiB | 117,531, 1,836 | 3.1 MB |
+  | 256 MiB, every read | 257, 257 MiB | 512, 512 MiB | 120,221, 1,878 | 4.0 MB |
+  | 256 MiB, sequential only | 4,084, 4 MiB | 4,339, 258 MiB | 129,204, 2,019 | 4.0 MB |
+  | 1,464 MiB, sequential only | 23,412, 13 MiB | 24,875, 1,476 MiB | 124,731, 1,949 | 4.0 MB |
+
+  Not measured: `to_record`, IPC, dense chunks (a real log holds more than 4 records per chunk).
+- **Per-file costs.** Corpus: 14,000 invented `.log` files of 2 KiB in 140 folders. Test `import_files_parallel` with the default profile and all built-in parsers; 14 text and 3 binary fake importers that count sniffs. A/B: base against a patched `ReaderChunks::fill` whose first read is 64 KiB, doubling to 8 MiB; prebuilt binaries, base, change, base, change.
+
+  | | 1 thread | 4 | 8 | Peak RSS |
+  |---|---|---|---|---|
+  | Base, import s | 2.37, 2.45 | 0.87, 0.89 | 0.62, 0.60 | 178, 174 MB |
+  | First read grows, import s | 1.96, 1.91 | 0.70, 0.73 | 0.45, 0.45 | 112, 116 MB |
+  | Base, thread time per file, µs | 169, 175 | 247, 253 | 356, 343 | |
+  | Handles seen at a write | 5 | 11 | 18-19 | |
+
+  Sniffs per file: 14 text, 3 binary. Walk: 0.03 s. Fake importers cost nothing here: in process, a counter.
+- **UTF-16 against UTF-8.** Corpus: one invented log of 440 MiB, the same lines; UTF-16LE with a BOM has half the lines. One thread, separate processes, two runs each.
+
+  | Encoding | Events | Events/s | Peak RSS |
+  |---|---|---|---|
+  | UTF-8 | 4,808,942 | 751,145, 756,655 | 159, 159 MB |
+  | UTF-16LE | 2,410,248 | 636,347, 636,787 | 134, 141 MB |
+
+  One earlier run with both files in one process peaked at 539 MB; the separate runs do not reproduce that, so read it as what the allocator kept, not what a file needs [not investigated].
+- **Bundle shape.** Corpus: 14,000 invented text files, 7.6 GiB: one UTF-16 file of 440 MiB, 8 of 180 MiB, the rest about equal, one in 50 of them UTF-16. No EVTX, no `.reg`, no archive, no plugin. One run, 8 threads: 83,660,116 events in 41.92 s, 1,995,662 events/s, 0 failed, 14 handles seen at a write, 192 MB peak RSS. Budget 768 MB: passes on the reading side only.
+- **Verdict:** evidence for ADR 0064. The IPC round trip and the raw-text comparison are in [benchmarks.md](../../../docs/benchmarks.md#2026-11-05-paddock-ipc-round-trip-debrief-adr-0064).
+
 ### 2026-11-05, streaming CSV import (branch `debrief/stream-text`, plan package 3.5 brought forward)
 
 - **Commit:** A/B: base b4bf8cb6d (`debrief/p0-idle`, the CSV read whole through the legacy adapter) against 0d3567c3e
