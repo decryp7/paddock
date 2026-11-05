@@ -804,6 +804,40 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.emit(events::ALARM, change);
     }
 
+    fn events_lost(&self, lost: dyno_core::protocol::LostEvents) {
+        logging::warn(&format!(
+            "the agent gave up events this window was too slow to take: {} activity rows, {} alerts, {} alarm changes; reading them again",
+            lost.activity, lost.alerts, lost.alarms
+        ));
+        let Some(link) = lock(&self.link).clone() else { return };
+        let app = self.app.clone();
+        // On its own thread: this runs on the link's push thread, which a request would wait on.
+        let spawned = std::thread::Builder::new().name("dyno-events-resync".into()).spawn(move || {
+            // Both lists are merged by id on the page, so showing a row again changes nothing.
+            if lost.activity > 0 {
+                match link.call(Request::Activity { limit: 100 }) {
+                    Ok(Reply::Activities(rows)) => rows.into_iter().rev().for_each(|row| {
+                        let _ = app.emit(events::ACTIVITY, row);
+                    }),
+                    Ok(_) => {}
+                    Err(e) => logging::warn(&format!("could not read the activity log again: {}", e.message)),
+                }
+            }
+            if lost.alerts > 0 {
+                match link.call(Request::Alerts { limit: 100 }) {
+                    Ok(Reply::Alerts(alerts)) => alerts.into_iter().rev().for_each(|alert| {
+                        let _ = app.emit(events::ALERT, alert);
+                    }),
+                    Ok(_) => {}
+                    Err(e) => logging::warn(&format!("could not read the alerts again: {}", e.message)),
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            logging::warn(&format!("could not start the re-read of the lost events: {e}"));
+        }
+    }
+
     fn wakes_changed(&self, view: dyno_core::power::schedule::WakesView) {
         self.emit(events::WAKES, view);
     }

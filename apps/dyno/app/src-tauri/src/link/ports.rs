@@ -452,12 +452,9 @@ pub fn describe_connect(purpose: super::machine::Purpose, handshake_ms: u64) -> 
     }
 }
 
-/// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
-pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Message>>, String> {
-    let token = d.token().ok_or("The discovery file is damaged.")?;
-    let conn = dyno_agent::wire::connect(&d.endpoint, &token).map_err(|e| format!("The agent did not answer ({e})."))?;
-    let sink = sink.clone();
-    let opts = BodyOptions::new("the agent").on_push(move |m| match m {
+/// Hands one pushed message to the sink.
+pub(super) fn deliver(sink: &dyn Sink, m: Message) {
+    match m {
         Message::Live(l) => sink.live(*l),
         Message::Alert(a) => sink.alert(a),
         Message::Activity(a) => sink.activity(a),
@@ -469,8 +466,17 @@ pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Messa
         Message::PowerChanged(view) => sink.power_changed(*view),
         Message::WolChanged(view) => sink.wol_changed(*view),
         Message::WakesChanged(view) => sink.wakes_changed(*view),
+        Message::EventsLost(lost) => sink.events_lost(lost),
         _ => {}
-    });
+    }
+}
+
+/// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
+pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Message>>, String> {
+    let token = d.token().ok_or("The discovery file is damaged.")?;
+    let conn = dyno_agent::wire::connect(&d.endpoint, &token).map_err(|e| format!("The agent did not answer ({e})."))?;
+    let sink = sink.clone();
+    let opts = BodyOptions::new("the agent").on_push(move |m| deliver(sink.as_ref(), m));
     BodyPeer::start(conn, opts).map(Arc::new).map_err(|e| e.to_string())
 }
 

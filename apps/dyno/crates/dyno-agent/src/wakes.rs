@@ -14,7 +14,7 @@ use dyno_core::power::schedule::{
     advance, armed, fire, tag_of, validate, DynoJob, Fire, LastRun, RowState, WakeInput, WakeRoute, WakeRouteState, WakeRow, WakeSchedule,
     WakesView,
 };
-use dyno_core::protocol::{AgentError, ErrorCode, Message};
+use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::Timestamp;
 use dyno_core::wake::{WakeEntry, WakeScheduler, WakeTag};
 use std::collections::HashMap;
@@ -192,7 +192,7 @@ impl WakeCentre {
     /// The view after a change, pushed to every connected app.
     fn changed(&self, shared: &Shared) -> Result<WakesView, AgentError> {
         let view = self.view(shared)?;
-        shared.broadcast(&Message::WakesChanged(Box::new(view.clone())));
+        shared.broadcast_wakes(&view);
         Ok(view)
     }
 

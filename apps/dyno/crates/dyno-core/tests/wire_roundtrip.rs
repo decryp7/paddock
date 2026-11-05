@@ -99,6 +99,7 @@ fn tag_message(v: &Message) -> &'static str {
         Message::PowerChanged(_) => "PowerChanged",
         Message::WolChanged(_) => "WolChanged",
         Message::WakesChanged(_) => "WakesChanged",
+        Message::EventsLost(_) => "EventsLost",
     }
 }
 
@@ -934,6 +935,11 @@ fn message_samples() -> Vec<Message> {
         Message::PowerChanged(Box::default()),
         Message::WolChanged(Box::new(zero())),
         Message::WakesChanged(Box::new(zero())),
+        Message::EventsLost(LostEvents {
+            activity: 3,
+            alerts: 2,
+            alarms: 1,
+        }),
     ]
 }
 

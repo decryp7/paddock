@@ -99,6 +99,9 @@ pub trait Sink: Send + Sync {
     fn wol_changed(&self, _view: dyno_core::wol::WolView) {}
     /// The scheduled wakes changed (a save, a cancel, or a schedule that ran).
     fn wakes_changed(&self, _view: dyno_core::power::schedule::WakesView) {}
+    /// The agent gave up events this connection was too slow to take (its queues are bounded): the sink logs how many and reads the
+    /// activity log, the alerts and the alarms again.
+    fn events_lost(&self, _lost: dyno_core::protocol::LostEvents) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.
