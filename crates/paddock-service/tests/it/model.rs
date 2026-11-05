@@ -153,6 +153,8 @@ struct World {
     location_ok: bool,
     /// The record cannot be written (a newer format, a read-only folder).
     ro: bool,
+    /// The record file is there but cannot be used (damaged, unreadable): the app adopts a service that answers.
+    rec_damaged: bool,
     /// One of the rare events happened on this path (see [`is_rare`]).
     rare_used: bool,
     rec: Recorded,
@@ -456,7 +458,9 @@ impl SimBackend {
         i.job = w.job;
         i.program_exists = Some(!w.program_gone);
         i.points_here = Some(!w.other_copy);
-        i.definition_current = Some(w.reg == Reg::Registered && w.owner == w.cur && !w.other_copy);
+        // LaunchdBundled (SMAppService) cannot compare a definition; systemd and the SCM can.
+        i.definition_current = (w.caps != Caps::Mac)
+            .then(|| w.reg == Reg::Registered && w.owner == w.cur && !w.other_copy);
         if caps_of(w.caps).login_items {
             let (status, mark) = match w.reg {
                 Reg::Registered => (AppServiceStatus::Enabled, DisabledMark::NotListed),
@@ -511,7 +515,11 @@ impl Backend for SimBackend {
                 }
                 (Reg::NeedsApproval, _) | (_, Fault::RegNeedsApproval) => {
                     if s.w.caps == Caps::Mac {
+                        // The item is registered by this copy and waits for the user's approval.
                         s.w.reg = Reg::NeedsApproval;
+                        s.w.owner = s.w.cur;
+                        s.w.other_copy = false;
+                        s.w.program_gone = false;
                     }
                     Err(RegisterError::NeedsApproval)
                 }
@@ -656,6 +664,7 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
         cancel.store(true, Ordering::SeqCst);
     }
     mem.fail_writes(w.ro || intr == Intr::WritesFail(0));
+    mem.set_damaged(w.rec_damaged);
     Arc::new(Mutex::new(Sim {
         w: w.clone(),
         fault,
@@ -770,9 +779,13 @@ fn environment(w: &mut World, ev: Ev) {
         Ev::SettingsOn => w.wanted = Some(true),
         Ev::SettingsOff => w.wanted = Some(false),
         Ev::SettingsDamaged => w.wanted = None,
-        Ev::DamageRecord => w.rec = Recorded::default(),
+        Ev::DamageRecord => {
+            w.rec = Recorded::default();
+            w.rec_damaged = true;
+        }
         Ev::NewerRecord => {
             w.rec = Recorded::default();
+            w.rec_damaged = true;
             w.ro = true;
         }
         Ev::CopyNewer | Ev::CopyOlder => {
@@ -882,6 +895,7 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     let s = lk(&sim);
     let mut after = s.w.clone();
     after.rec = rec.load();
+    after.rec_damaged = rec.peek().1;
     if matches!(ev, Ev::FirstRun | Ev::Install) && matches!(out, Some(Out::Install(Ok(_)))) {
         // Dyno writes its first-run marker after a registration that did not fail.
         after.first_run_done = true;
@@ -954,6 +968,9 @@ fn edge_checks(
         && entry.wanted == Some(true)
         && entry.rec.state == State::Removing
         && (unregisters + evicts) > 0
+        // A finished removal forgets the record (what uninstall does last); a replace that stops half-way leaves an attempt.
+        && after.rec.state == State::Idle
+        && after.rec.registered_version.is_none()
     {
         bad("finished a removal the user took back", String::new());
     }
@@ -973,7 +990,9 @@ fn edge_checks(
         && entry.owner == entry.cur
         && !entry.other_copy
         && !entry.program_gone
-        && entry.rec.state == State::Idle;
+        && entry.rec.state == State::Idle
+        // A record that does not know the version replaces once by design (ADR 0056 section 1); an unusable one adopts.
+        && (entry.rec.registered_version.as_deref() == Some(cur) || entry.rec_damaged);
     if matches!(ev, Ev::Start | Ev::Resume | Ev::FirstRun)
         && answering
         && entry.wanted != Some(false)
@@ -1080,6 +1099,8 @@ fn edge_checks(
     if entry.rec.registered_version.as_deref() != Some(cur)
         && after.rec.registered_version.as_deref() == Some(cur)
         && !(after.reg == Reg::Registered && after.owner == after.cur)
+        // An unusable record on a Mac: the version cannot be told, so the app adopts a service that answers (ADR 0056).
+        && !(entry.rec_damaged && entry.caps == Caps::Mac)
     {
         bad(
             "the record says this version is registered but the OS holds another registration",
@@ -1238,7 +1259,7 @@ fn bucket(s: Option<u32>) -> &'static str {
 
 fn key(w: &World) -> String {
     format!(
-        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{:?}",
+        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{:?}",
         w.reg,
         w.owner,
         w.other_copy,
@@ -1252,6 +1273,7 @@ fn key(w: &World) -> String {
         w.first_run_done,
         w.location_ok,
         w.ro,
+        w.rec_damaged,
         w.mark_unreadable,
         w.rare_used,
         w.rec
@@ -1276,6 +1298,7 @@ fn seeds(caps: Caps, resp: Resp) -> Vec<(&'static str, World)> {
         first_run_done: false,
         location_ok: true,
         ro: false,
+        rec_damaged: false,
         rare_used: false,
         rec: Recorded::default(),
     };
@@ -1594,28 +1617,10 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[
-    (
-        "the record says this version is registered but the OS holds another registration",
-        "plan.rs plan(): `accepted` trusts an older Attempting of this version after another version registered.",
-    ),
-    (
-        "finished a removal the user took back",
-        "open (author of the fixes): after Uninstall@CrashBefore(1); Install@Cancel(0) the record still says Removing and Start+RegOther runs unregister, evict and register three times (MODEL_REPLAY='Mac/Fast/Fresh|Uninstall@CrashBefore(1);Install@Cancel(0);Start+RegOther'). The plan ignores Removing when the switch is on, so the unregister calls look like the retry cycles of a register that failed (Replace(Wanted) with register_only false); the check may be counting those as a finished removal. To decide with a replay of the plan at each step.",
-    ),
-    (
-        "registered again a service that answers",
-        "the model's DamageRecord empties the record without saying it is damaged; the Manager adopts a service that answers only when RecordFile::peek says the record cannot be used. Use paddock_service::record::Memory::set_damaged(true) on the memory handle when DamageRecord happens (the flag clears with the next write), or the failure is a modelling gap (MODEL_REPLAY='Mac/Fast/Healthy|DamageRecord;Start').",
-    ),
-    (
-        "removed a service that answers",
-        "same cause as registering again a service that answers (DamageRecord without the damaged flag).",
-    ),
-    (
-        "the user's service was lost",
-        "open: MODEL_REPLAY='Mac/Fast/Fresh|Repair;Uninstall@CrashAfter(1);FirstRun@Cancel(0)': after the cancelled first run the record says Idle with the version registered and nothing is registered, and plan() says Healthy; the replay shows no OS call in the first run, so the cancel may be raised before the first look and the plan is judged on a stale view. Needs a step-by-step replay of check().",
-    ),
-];
+const KNOWN_FAILING: &[(&str, &str)] = &[(
+    "the record says this version is registered but the OS holds another registration",
+    "repair.rs (the Settled stage, `last_error.is_some() && (job == Absent || !answers)`): a failed register while the old job still answers (it outlived the removal) counts as settled, so the record says the new version is registered. MODEL_REPLAY='Mac/RefusedAlways/Healthy|Update+RegOther'. Executor (author).",
+)];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {
