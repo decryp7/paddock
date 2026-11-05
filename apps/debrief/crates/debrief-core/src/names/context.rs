@@ -123,6 +123,11 @@ impl Cooccurrence {
         }
     }
 
+    /// Whether the name appears in any counted event (case-insensitive).
+    pub fn knows(&self, name: &str) -> bool {
+        self.singles.contains_key(&name.to_lowercase())
+    }
+
     /// Events with both names, as a share of the events of the rarer one: 0..1 (0 for unknown names).
     pub fn strength(&self, a: &str, b: &str) -> f64 {
         let (a, b) = (a.to_lowercase(), b.to_lowercase());

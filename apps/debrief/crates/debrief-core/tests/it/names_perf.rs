@@ -143,7 +143,6 @@ fn timings_at_fifty_thousand_entities() {
 /// every pair (trigram sets built per comparison), so it grows with the square of the groups. Ignored by default
 /// (timings); run with `cargo test -p debrief-core --release --test it names_perf::merge_scaling -- --ignored --nocapture`.
 #[test]
-#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package NR1, bounded name merge): merge_cooccurring over 8000 groups took 43.5 s against 500 ms"]
 fn merge_scaling() {
     use debrief_core::names::group::merge_cooccurring;
     use debrief_core::names::Cooccurrence;

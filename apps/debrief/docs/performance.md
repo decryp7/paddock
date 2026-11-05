@@ -83,6 +83,43 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, NR1: the name join and the name watcher; idle after an event-log import (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 919661e7f (N2 P2s, after P3) against the NR1 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-13 during the runs; Dyno release jobs and other agents running (the runs queued behind them)
+- **Build:** release; libduckdb 2.0.0; the test processes' system allocator
+- **Corpus:** `merge_scaling`: 50,000 invented executable names, the first 8,000 groups, 200 of them in the events;
+  `idle_after_an_event_log_import`: a generated 64 MB `.evtx` (133,120 events: the MIT/Apache-2.0 sample chunk repeated,
+  see `evtx_memory.rs`), imported through the Windows plugin into the store the app ships; synthetic
+- **Command:** `cargo nextest run -p debrief-core --release --no-capture -E 'test(merge_scaling)'` and
+  `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+  (`DEBRIEF_EVTX_IDLE_MB` 64, `DEBRIEF_EVTX_IDLE_S` 60)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | NR1 | Budget | Verdict |
+  |---|---|---|---|---|
+  | `merge_cooccurring` over 500 / 1,000 / 2,000 / 4,000 / 8,000 groups | 0.17 / 0.65 / 2.6 / 10.5 / 43.5 s | 6.8 / 6.7 / 7.0 / 7.2 / 7.5 ms | 8,000 groups under 0.5 s | pass |
+  | Event-log import, in-process CPU (the plugin's process not counted) | 1.16 CPU-s in 2.2 s | 1.19 CPU-s in 2.3 s | n/a | same |
+  | Catalogue and index built | 6.65 CPU-s in 2.7 s | 6.86 CPU-s in 2.9 s | n/a | same |
+  | Name table rebuild (`Names::refresh`, 38 catalogue names, 30 groups) | 3.16 CPU-s in 2.95 s | 3.16 CPU-s in 2.94 s | rebuild at most 1 s (D7) | not met, see notes |
+  | Idle store, 60 s after all of the above: statements | 0 | 0 | 0 | pass |
+  | Idle store, 60 s: CPU time of the process | 0.010 s (0.017 % of a core) | 0.012 s (0.020 % of a core) | at most 0.5 % of a core | pass |
+
+- **Memory measure:** not measured
+- **Notes:** the generated log has only 38 distinct names (one chunk repeated), so the sample cannot show what a real
+  550 MB Event Viewer export does to the name table; the 8,000-group row is the measurement of that part, and on the
+  sample the two sides are equal because there is nothing to join. What the user saw (1-2 cores for minutes after the
+  import) came from the app: the name watcher read the whole catalogue every 500 ms while the catalogue was built
+  (P3's test: 20 whole reads in 20 refreshes, now 0), and the quadratic join ran inside it. The watcher is now a quiet job
+  ("Updating names") that blocks inside the store on `catalogue_status` until the catalogue commits, with no timer. It is
+  covered by app tests with a store double (one wait, woken once, never reading names while unbuilt), not by this
+  engine-level run, which does not start the app. The 3.2 CPU-s the rebuild takes on 30 groups is not explained:
+  it is not the join (0 comparisons), and it is the same on both sides; it is the next thing to profile for the 1 s budget.
+  The 60 s idle window shows the store itself is quiet after an import; the 60 s base wait of the loops did not hide a
+  burn at the store level (0.010 s CPU, 0 statements in the base), so the idle cost the user saw was the app's watcher.
+
 ### 2026-11-05, P3: bounded catalogue read and catalogue status (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base ee2a13899 (D-0) against the P3 change on top of it

@@ -183,14 +183,13 @@ impl Changes {
         *lock(&self.count)
     }
 
-    /// Waits until the counter is not `seen` any more, at most `max`; returns it.
-    fn wait_past(&self, seen: u64, max: Duration) -> u64 {
+    /// Waits until the counter plus the store's `generation` is not `seen` any more, at most `max`.
+    fn wait_past(&self, seen: u64, max: Duration, generation: &AtomicU64) {
         let guard = lock(&self.count);
-        let (guard, _) = self
+        let _ = self
             .moved
-            .wait_timeout_while(guard, max, |n| *n == seen)
+            .wait_timeout_while(guard, max, |n| *n + generation.load(Ordering::SeqCst) == seen)
             .unwrap_or_else(|p| p.into_inner());
-        *guard
     }
 }
 
@@ -258,9 +257,10 @@ impl CatalogueService {
         self.shared.changes.get()
     }
 
-    /// Waits until the catalogue's state changed after `seen`, at most `max`.
-    pub(crate) fn wait_for_change(&self, seen: u64, max: Duration) {
-        self.shared.changes.wait_past(seen, max);
+    /// Waits until the catalogue's state, or the store's data (`generation`), changed after `seen`, at most `max`. A
+    /// change of the data alone does not wake the wait (the loops are told by [`wake`](Self::wake)); the next call sees it.
+    pub(crate) fn wait_for_change(&self, seen: u64, max: Duration, generation: &AtomicU64) {
+        self.shared.changes.wait_past(seen, max, generation);
     }
 
     pub(crate) fn wake(&self) {
@@ -381,10 +381,12 @@ impl crate::Inner {
     /// How far the catalogue is, waiting for news when `req` asks to (see [`CatalogueStatusRequest`]).
     pub(crate) fn catalogue_status(&self, req: &CatalogueStatusRequest) -> StoreResult<CatalogueStatus> {
         if let (Some(after), Some(c)) = (req.after, self.catalogue.as_ref()) {
-            c.wait_for_change(after, Duration::from_millis(req.wait_ms.min(MAX_STATUS_WAIT_MS)));
+            c.wait_for_change(after, Duration::from_millis(req.wait_ms.min(MAX_STATUS_WAIT_MS)), &self.generation);
         }
-        // The counter is read before the state: a change after it makes the next call return at once.
-        let generation = self.catalogue.as_ref().map_or(0, |c| c.generation());
+        // Moves with the catalogue's own changes and with every change of the store's data (a removal, a refresh, a
+        // live-follow step), so a table built from it is stale exactly when the workspace changed. Read before the
+        // state: a change after it makes the next call return at once.
+        let generation = self.catalogue.as_ref().map_or(0, |c| c.generation()) + self.generation.load(Ordering::SeqCst);
         let conn = self.conn()?;
         let pending = pending(&conn).map_err(|e| engine(format!("{e:#}")))?.len() as u64;
         Ok(CatalogueStatus {
