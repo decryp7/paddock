@@ -237,7 +237,11 @@ mod tests {
         std::fs::write(&p, "t=1 starting pid=1 version=1\n".repeat(50_000)).unwrap();
         let mut f = std::fs::File::open(&p).unwrap();
         let text = read_bounded(&mut f);
-        assert!(text.len() <= 32 * 1024, "{} bytes read: the bound is 32 KiB, whatever MAX_READ is set to", text.len());
+        assert!(
+            text.len() <= 32 * 1024,
+            "{} bytes read: the bound is 32 KiB, whatever MAX_READ is set to",
+            text.len()
+        );
         assert!(text.starts_with("t=1 "), "cut at a line start: {:?}", &text[..20.min(text.len())]);
     }
 
