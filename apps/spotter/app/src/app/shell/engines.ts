@@ -7,6 +7,7 @@ import {
   type AboutBackend,
   type UpdatesBackend,
 } from '@decryp7/paddock-ui/shell/about';
+import { LOGGING_SECTION_FIXTURE, MemoryDiagnosticsBackend, TauriDiagnosticsBackend, type DiagnosticsBackend } from '@decryp7/paddock-ui/shell/diagnostics';
 import { MemoryJobsBackend, TauriJobsBackend, type JobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { MemoryNotificationCentre, MemoryServiceHealth, TauriNotificationsBackend, TauriServiceHealthBackend, type Cause } from '@decryp7/paddock-ui/shell/notify';
 import { MemorySettingsBackend, SETTINGS_OVERVIEW_FIXTURE, TauriSettingsBackend, type SettingsBackend } from '@decryp7/paddock-ui/shell/settings';
@@ -34,8 +35,11 @@ export class BrowserEngines {
   );
   readonly mockJobs = new MockJobs(Number(new URLSearchParams(globalThis.location?.search ?? '').get('jobStepMs') ?? 350));
   readonly jobs = new MemoryJobsBackend((id) => this.mockJobs.cancel(id));
-  /** Only the shell's Appearance section: Spotter's own settings are its page in the window. */
-  readonly settings = new MemorySettingsBackend({ ...SETTINGS_OVERVIEW_FIXTURE, sections: SETTINGS_OVERVIEW_FIXTURE.sections.filter((s) => s.id === 'pd.appearance') }, {});
+  /** The shell's Appearance and Logging sections: Spotter's own settings are its page in the window. */
+  readonly settings = new MemorySettingsBackend(
+    { ...SETTINGS_OVERVIEW_FIXTURE, sections: [...SETTINGS_OVERVIEW_FIXTURE.sections.filter((s) => s.id === 'pd.appearance'), LOGGING_SECTION_FIXTURE] },
+    {},
+  );
 
   constructor() {
     this.mockJobs.connect((s) => this.jobs.emit(s));
@@ -89,6 +93,23 @@ export function updatesBackend(): UpdatesBackend {
     channels: [{ id: 'stable', label: 'Stable' }],
   });
   return updates;
+}
+
+let diagnostics: DiagnosticsBackend | null = null;
+
+/** Report a problem over Tauri in the app; in the browser one in-memory engine per page, with the files a real report holds. */
+export function diagnosticsBackend(): DiagnosticsBackend {
+  const ipc = tauriIpc();
+  if (ipc) return new TauriDiagnosticsBackend(ipc);
+  diagnostics ??= new MemoryDiagnosticsBackend({
+    save: 'save',
+    files: [
+      { name: 'system-info.json', kind: 'system-info', bytes: 412, summary: 'Spotter, your operating system and processor type, no hardware serial numbers' },
+      { name: 'settings.json', kind: 'settings', bytes: 1_380, summary: 'Your settings; passwords, tokens and keys are replaced by ***' },
+      { name: 'logs/spotter.2026-11-04.log', kind: 'log', bytes: 96_100, summary: '640 log lines, the recent part of spotter.2026-11-04.log; addresses keep only their host, file contents are never logged' },
+    ],
+  });
+  return diagnostics;
 }
 
 /** Settings over Tauri in the app; in the browser the in-memory engine. */

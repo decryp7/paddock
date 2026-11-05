@@ -261,6 +261,14 @@ impl Engine {
         };
         self.inner.db.save_state(id, &snapshot)?;
         self.inner.db.count_check(id, now, ok)?;
+        let (level, text) = crate::checklog::line(&crate::checklog::Finished {
+            watch_id: &spec.id,
+            source: &watch.source,
+            took_ms,
+            new_releases: fx.new_releases.len(),
+            error: error.as_ref(),
+        });
+        log::log!(level, "{text}");
         self.after_check(&watch, &snapshot, fx.clone(), settings.digest, now, error).await?;
         Ok(CheckReport {
             watch_id: spec.id.clone(),

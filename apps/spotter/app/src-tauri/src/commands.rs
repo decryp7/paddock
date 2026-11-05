@@ -308,7 +308,10 @@ pub async fn download_release(
         .as_ref()
         .map(|d| (d.path.display().to_string(), d.size, d.verified))
         .map_err(Clone::clone);
-    let _ = state.engine.record_download(&id, &version, outcome);
+    crate::lifecycle::note_result(
+        "download: recording the result in the history",
+        state.engine.record_download(&id, &version, outcome),
+    );
     result.map(|d| d.path.display().to_string()).map_err(CommandError::unavailable)
 }
 

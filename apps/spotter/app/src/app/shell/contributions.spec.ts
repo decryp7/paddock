@@ -5,7 +5,7 @@ import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting, shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { SHELL_COMMANDS } from '@decryp7/paddock-ui/shell';
-import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
+import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS, DIALOGS } from './contributions';
 import { spotterContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { APP_COMMANDS } from '../generated/app-commands';
@@ -99,7 +99,7 @@ describe('Spotter dialogs', () => {
 
 describe('Spotter manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
-    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
+    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
     expect([...manifest.healthServices].sort()).toEqual(['sp.renderer', 'sp.scheduler', 'sp.sources']);
     const fs = await nodeFs();

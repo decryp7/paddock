@@ -12,6 +12,7 @@
 pub mod avatar;
 pub mod channels;
 pub mod check;
+mod checklog;
 pub mod clock;
 pub mod config_store;
 pub mod db;

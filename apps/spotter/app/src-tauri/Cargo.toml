@@ -26,8 +26,11 @@ spotter-render.workspace = true
 spotter-sources.workspace = true
 # The Paddock app shell (ADR 0012): the plugin and the crates whose types the app names itself (path dependencies inside the
 # monorepo; an app outside it names them from the `decryp7` registry, crates/README.md "Consuming the crates").
-paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "install"] }
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "install", "native-dialogs"] }
 paddock-commands = { path = "../../../../crates/paddock-commands", features = ["tauri"] }
+paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
+paddock-env = { path = "../../../../crates/paddock-env" }
+paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri"] }
 paddock-health = { path = "../../../../crates/paddock-health", features = ["tauri"] }
 paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["tauri"] }

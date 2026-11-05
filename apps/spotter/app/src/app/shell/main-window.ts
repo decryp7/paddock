@@ -4,6 +4,7 @@ import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
+import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
@@ -15,7 +16,7 @@ import { applyWindowChrome } from '../core/window-chrome';
 import { platformFromUserAgent } from '../core/tauri-backend';
 import { provideIcons } from '../shared/icons';
 import { provideSpotterAppearance } from './appearance';
-import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS } from './contributions';
+import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS } from './contributions';
 import { aboutBackend, jobsBackend, notifyBackends, settingsBackend, updatesBackend } from './engines';
 import { SpotterIcon } from './icon';
 import { tauriBridge, tauriIpc } from './ipc';
@@ -62,6 +63,10 @@ export function bootMainWindow(): Promise<unknown> {
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       provideContributions(ABOUT_CONTRIBUTIONS),
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
+      // Report a problem: Help > Report a problem…, the Logging settings page, and the page's own errors in the engine's log
+      // (desktop build only: the browser build has no log to send them to).
+      provideContributions(DIAGNOSTICS_CONTRIBUTIONS),
+      ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
       provideSubmenus(),

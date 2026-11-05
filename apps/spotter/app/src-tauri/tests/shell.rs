@@ -25,6 +25,14 @@ fn the_dialog_contracts_the_manifest_and_the_tables_agree() {
     assert!(problems.is_empty(), "{problems:#?}");
 }
 
+/// Report a problem is part of the installed app's start (the Help item and the dialog would reach nothing otherwise) and
+/// not of a test's place (it reads the user's folders).
+#[test]
+fn report_a_problem_is_wired_into_the_installed_start_only() {
+    assert!(!builder().diagnostics_installed());
+    assert!(spotter_app_lib::diagnostics::install(builder(), None).diagnostics_installed());
+}
+
 /// Spotter's services are the ones the UI registers, in the status bar's order.
 #[test]
 fn the_services_are_the_ones_the_ui_lists() {

@@ -135,7 +135,10 @@ impl ShellNotifier {
                 .map(|d| (d.path.display().to_string(), d.size, d.verified))
                 .map_err(Clone::clone);
             // The journal entry is the record; a failure to write it is not worth failing the action for.
-            let _ = engine.record_download(&request.watch_id, &release.version.text, outcome);
+            crate::lifecycle::note_result(
+                "download: recording the result in the history",
+                engine.record_download(&request.watch_id, &release.version.text, outcome),
+            );
         }
         result.map(|d| *downloaded = Some(d.path.display().to_string()))
     }
@@ -145,7 +148,10 @@ impl ShellNotifier {
         // A failed download is already in the journal (record_download); other actions are recorded here.
         if action != "download" {
             if let Some(engine) = self.inner.engine.get() {
-                let _ = engine.record_action_failure(&request.watch_id, action, message);
+                crate::lifecycle::note_result(
+                    "recording the failed action in the history",
+                    engine.record_action_failure(&request.watch_id, action, message),
+                );
             }
         }
         self.inner.toast.show(&format!("{}: {action} failed", request.watch_name), message);

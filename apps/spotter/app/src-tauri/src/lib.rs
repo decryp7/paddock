@@ -8,6 +8,7 @@
 pub mod applog;
 pub mod commands;
 pub mod credentials;
+pub mod diagnostics;
 pub mod dialogs;
 pub mod dto;
 pub mod health;
@@ -377,11 +378,12 @@ pub fn app<R: Runtime>(
 /// Starts the app.
 pub fn run() {
     // First: the shared crates' log lines (the start's error among them) reach Spotter's daily log file (paddock-log).
-    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+    let log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
     let hub = health::Hub::<tauri::Wry>::default();
-    let shell = shell::<tauri::Wry>(Place::Installed, &hub);
+    // Report a problem and the Logging settings: the running log is the one reported and tuned.
+    let shell = diagnostics::install(shell::<tauri::Wry>(Place::Installed, &hub), log);
     let builder = tauri::Builder::default()
         // First: a second launch shows the running app's window instead of starting another engine.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))

@@ -13,6 +13,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
+import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import type { SpotterContext } from './context';
 import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
@@ -56,10 +57,19 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
-export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, ...ABOUT_DIALOGS] as const;
+/**
+ * Report a problem: a decision that lists every file of the report with its size before the user saves it (nothing is sent).
+ * Its window boots Spotter's diagnostics providers.
+ */
+export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
+
+export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, ...ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
 
 /** About's commands, Help menu items and notice kind. */
 export const ABOUT_CONTRIBUTIONS = aboutContributions([]);
+
+/** Report a problem's command, its Help menu item and the Logging settings page (its dialog is among `DIALOGS`). */
+export const DIAGNOSTICS_CONTRIBUTIONS = diagnosticsContributions([]);
 
 export const CONTRIBUTIONS: ContributionBatch<SpotterContext> = {
   commands: [

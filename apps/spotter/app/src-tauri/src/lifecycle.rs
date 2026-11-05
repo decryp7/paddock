@@ -145,6 +145,7 @@ impl OsToast for NoToast {
 
 /// Opens the engine and starts its background work; returns the shared state.
 pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>, seams: &Seams) -> Result<Shared, String> {
+    let started = std::time::Instant::now();
     let data_dir = match &seams.data_dir {
         Some(dir) => dir.clone(),
         None => {
@@ -194,7 +195,20 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>, seams: &Seams) -> Resu
     services.clock = clock.clone();
     services.notifier = Arc::new(notifier.clone());
     services.renderer = Some(Arc::new(ChromiumRenderer::new(&data_dir, data_dir.join("cache").join("render"))));
-    let engine = Engine::open(EngineConfig::new(&data_dir, &version), services).map_err(|e| e.to_string())?;
+    let opened = std::time::Instant::now();
+    let engine = Engine::open(EngineConfig::new(&data_dir, &version), services).map_err(|e| {
+        log::error!(
+            "start: the engine could not open its data after {} ms: {e}; next: check that the data folder is writable, or report a problem",
+            opened.elapsed().as_millis()
+        );
+        e.to_string()
+    })?;
+    log::info!(
+        "start: engine opened in {} ms ({} watches, {} warnings)",
+        opened.elapsed().as_millis(),
+        engine.list_watches().len(),
+        engine.warnings().len()
+    );
     notifier.attach(engine.clone());
     for w in engine.warnings() {
         (seams.note)(&format!("start-up: {w}"));
@@ -240,6 +254,10 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>, seams: &Seams) -> Resu
             }
         }
     });
+    log::info!(
+        "start: background work running (scheduler, change push) after {} ms",
+        started.elapsed().as_millis()
+    );
     Ok(state)
 }
 
@@ -287,6 +305,7 @@ fn now_ms() -> i64 {
 
 /// A click on a tray menu item.
 pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    log::info!("tray menu: {}", menu_item_name(id));
     let Some(state) = app.try_state::<Shared>() else { return };
     let engine = state.engine.clone();
     match id {
@@ -295,16 +314,13 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
             Some(registry) => crate::jobs::spawn_check_all(&registry, engine),
             None => {
                 tauri::async_runtime::spawn(async move {
-                    let _ = engine.check_now(None).await;
+                    let reports = engine.check_now(None).await;
+                    note_result("tray: check all", reports.map(|r| r.len()));
                 });
             }
         },
-        "pause" => {
-            let _ = engine.pause_notifications(Some(60));
-        }
-        "resume" => {
-            let _ = engine.pause_notifications(None);
-        }
+        "pause" => note_result("tray: pause notifications for 60 minutes", engine.pause_notifications(Some(60))),
+        "resume" => note_result("tray: resume notifications", engine.pause_notifications(None)),
         other => {
             if let Some(watch) = tray::watch_of_item(other) {
                 let route = format!("/watches/{watch}");
@@ -316,9 +332,40 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
+/// The tray menu item as the log names it: the fixed items by name, a watch's item by kind only (never its id or name).
+fn menu_item_name(id: &str) -> &str {
+    match id {
+        "check-all" | "pause" | "resume" => id,
+        _ => "watch",
+    }
+}
+
+/// What the log says about how an action ended: a failure says why and what to do, a success only that it is done (the
+/// value is never logged).
+pub(crate) fn describe_result<T, E: std::fmt::Display>(action: &str, result: &Result<T, E>) -> (log::Level, String) {
+    match result {
+        Ok(_) => (log::Level::Info, format!("{action}: done")),
+        Err(e) => (
+            log::Level::Warn,
+            format!(
+                "{action}: failed: {}; next: try again from the window, or report a problem",
+                applog::one_line(&e.to_string())
+            ),
+        ),
+    }
+}
+
+/// Logs how an action ended, so a click or a background step that did nothing leaves a reason.
+pub(crate) fn note_result<T, E: std::fmt::Display>(action: &str, result: Result<T, E>) {
+    let (level, text) = describe_result(action, &result);
+    log::log!(level, "{text}");
+}
+
 /// Quit's teardown (a bounded step of the shell's exit): stops the background tasks, asks every running job to stop
 /// and ends any browser a render still holds, so a stuck render can neither hang Quit nor outlive the app.
 pub fn stop<R: Runtime>(app: &AppHandle<R>) {
+    let started = std::time::Instant::now();
+    log::info!("exit: stopping background work, jobs and browsers");
     if let Some(s) = app.try_state::<Shared>() {
         let _ = s.stop.send(true);
     }
@@ -326,6 +373,7 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) {
         crate::jobs::cancel_all(&registry);
     }
     spotter_render::process::end_all();
+    log::info!("exit: stopped in {} ms", started.elapsed().as_millis());
 }
 
 #[cfg(test)]
@@ -354,5 +402,29 @@ mod tests {
         if let Some(name) = clock.local_zone_name() {
             assert!(!name.is_empty() && name.len() < 64, "{name}");
         }
+    }
+    #[test]
+    fn a_finished_action_is_logged_with_its_outcome_and_a_failure_with_the_next_step() {
+        let ok: Result<usize, String> = Ok(3);
+        assert_eq!(
+            describe_result("tray: check all", &ok),
+            (log::Level::Info, "tray: check all: done".to_string())
+        );
+        let failed: Result<(), String> = Err("the settings file is read-only\nsecond line".into());
+        let (level, text) = describe_result("tray: pause notifications for 60 minutes", &failed);
+        assert_eq!(level, log::Level::Warn);
+        assert!(
+            text.starts_with("tray: pause notifications for 60 minutes: failed: the settings file is read-only"),
+            "{text}"
+        );
+        assert!(text.contains("next: "), "{text}");
+        assert!(!text.contains('\n'), "{text}");
+    }
+
+    #[test]
+    fn the_tray_menu_is_logged_by_item_kind_never_by_a_watch() {
+        assert_eq!(menu_item_name("check-all"), "check-all");
+        assert_eq!(menu_item_name("pause"), "pause");
+        assert_eq!(menu_item_name("watch:abc-123"), "watch");
     }
 }

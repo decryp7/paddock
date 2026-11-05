@@ -12,8 +12,8 @@ import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from './dialog-base';
 const ALL = DIALOGS as readonly DialogDef[];
 
 describe('Spotter dialogs boot as their windows do', () => {
-  it('are the shared confirmation, the Settings window and the shell’s About, Updates and What’s New', () => {
-    expect(ALL.map((d) => d.id).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.settings', 'pd.updates', 'pd.whats-new']);
+  it('are the shared confirmation, the Settings window and the shell’s About, Updates, What’s New and Report a problem', () => {
+    expect(ALL.map((d) => d.id).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.report-problem', 'pd.settings', 'pd.updates', 'pd.whats-new']);
   });
 
   for (const def of ALL) {

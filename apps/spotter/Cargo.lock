@@ -3297,6 +3297,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin-dialog",
  "zip",
 ]
 
@@ -3304,13 +3305,17 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
+ "windows",
 ]
 
 [[package]]
@@ -3350,6 +3355,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin-dialog",
 ]
 
 [[package]]
@@ -3508,6 +3514,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "windows",
  "windows-service",
@@ -3585,6 +3592,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tauri",
+ "tauri-plugin-dialog",
 ]
 
 [[package]]
@@ -5056,10 +5064,13 @@ dependencies = [
  "keyring",
  "log",
  "paddock-commands",
+ "paddock-diag",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-env",
  "paddock-health",
  "paddock-jobs",
+ "paddock-log",
  "paddock-settings",
  "paddock-shell",
  "paddock-startup",
@@ -5119,6 +5130,7 @@ version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "lettre",
+ "log",
  "paddock-commands",
  "paddock-widgets",
  "reqwest",
