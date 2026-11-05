@@ -419,6 +419,18 @@ pub fn install<R: Runtime>(
     Ok(updates)
 }
 
+/// One more wait slice: the time waited so far and whether a whole [`INSTALLER_WAIT_BOUND`] has now passed (then the count
+/// starts again and one line is logged). A slice that returned at once still counts a tenth of a slice, so a lock that cannot
+/// wait never spins without the line coming.
+fn advance_wait(waited: Duration, took: Duration) -> (Duration, bool) {
+    let next = waited + took.max(INSTALLER_WAIT_SLICE / 10);
+    if next >= INSTALLER_WAIT_BOUND {
+        (Duration::ZERO, true)
+    } else {
+        (next, false)
+    }
+}
+
 /// The start-up work off the main thread: the services' hook once per version change, then, until [`Updates::stop`], either the
 /// wait for an installer that is running (in slices of [`INSTALLER_WAIT_SLICE`], so a stop is noticed; each
 /// [`INSTALLER_WAIT_BOUND`] that passes is logged and the wait goes on) or the automatic check whenever it is due (looked at
@@ -444,9 +456,9 @@ pub fn background(updates: Arc<Updates>, poll: Duration) -> Option<std::thread::
                     log::warn!(Ms = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX); "The installer of a newer version stopped before it finished; shown in the Updates dialog");
                     continue;
                 }
-                waited += slice_began.elapsed().max(INSTALLER_WAIT_SLICE / 10);
-                if waited >= INSTALLER_WAIT_BOUND {
-                    waited = Duration::ZERO;
+                let (now_waited, bound_passed) = advance_wait(waited, slice_began.elapsed());
+                waited = now_waited;
+                if bound_passed {
                     log::warn!(Seconds = since.elapsed().as_secs(); "The installer of a newer version is still running; still waiting (the Updates dialog says so)");
                 }
                 if slice_began.elapsed() < INSTALLER_WAIT_SLICE / 10 {

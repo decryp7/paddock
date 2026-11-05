@@ -3,6 +3,7 @@
 
 use crate::support::*;
 
+use paddock_updater::record::FailedInstall;
 use paddock_updater::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -367,6 +368,27 @@ fn a_failure_of_a_version_that_is_installed_by_now_is_not_shown() {
     r.updater.install_at_exit();
     let newer = updater(r.dir.path(), &r.records, &FakeServer::new(), "10.0.0");
     assert_eq!(newer.status().phase, UpdatePhase::Idle);
+}
+
+#[test]
+fn a_failure_that_names_no_readable_version_is_still_shown() {
+    let dir = tempfile::tempdir().unwrap();
+    let records = Arc::new(RecordStore::new(Some(&dir.path().join("config"))));
+    let _ = records.update(|r| {
+        r.failed_install = Some(FailedInstall {
+            version: "not-a-version".into(),
+            detail: "x".into(),
+            kind: Some("declined".into()),
+        })
+    });
+    let u = updater(dir.path(), &records, &FakeServer::new(), "1.0.0");
+    assert!(matches!(
+        u.status().phase,
+        UpdatePhase::Failed {
+            error: UpdateError::Declined,
+            ..
+        }
+    ));
 }
 
 #[test]

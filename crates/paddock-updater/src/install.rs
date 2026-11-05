@@ -439,6 +439,18 @@ mod tests {
     }
 
     #[test]
+    fn the_patience_is_handed_to_the_elevator() {
+        let e = FakeElevator::new(ElevatedOutcome::Exited(0));
+        let h = ElevatedHandoff::new(r"C:\Program Files\Dyno", e.clone(), Arc::new(Contract))
+            .unwrap()
+            .with_patience(Duration::from_secs(7));
+        let m = serde_json::json!({});
+        let file = PathBuf::from(r"C:\a\b.exe");
+        h.install(&package(&file, &m), true).unwrap();
+        assert_eq!(e.seen.lock().unwrap()[0].2, Duration::from_secs(7));
+    }
+
+    #[test]
     fn a_wait_that_runs_out_is_a_hand_off_not_a_failure() {
         let (r, _) = run(ElevatedOutcome::StillRunning);
         assert_eq!(r, Ok(()));

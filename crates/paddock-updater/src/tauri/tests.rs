@@ -585,6 +585,25 @@ impl Installer for FailingInstaller {
     }
 }
 
+#[test]
+fn the_wait_log_fires_once_per_bound_and_never_spins() {
+    use crate::INSTALLER_WAIT_BOUND;
+    let slice = Duration::from_secs(5);
+    // Slices add up; at the bound the counter restarts and the log line is due once.
+    let (mut waited, mut logged) = (Duration::ZERO, 0);
+    for _ in 0..(INSTALLER_WAIT_BOUND.as_secs() / 5) {
+        let (w, log) = advance_wait(waited, slice);
+        waited = w;
+        logged += usize::from(log);
+    }
+    assert_eq!((logged, waited), (1, Duration::ZERO));
+    // A wait that returns at once still counts a tenth of a slice, so a broken lock cannot spin without the line.
+    assert_eq!(
+        advance_wait(Duration::ZERO, Duration::ZERO),
+        (Duration::from_millis(500), false)
+    );
+}
+
 struct SlowLock {
     installing: std::sync::atomic::AtomicBool,
     waits: std::sync::atomic::AtomicUsize,
