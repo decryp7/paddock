@@ -283,6 +283,7 @@ fn paging_with_anchor_and_facets() {
             query: Query::default(),
             field: "MachineName".into(),
             limit: 10,
+            search: String::new(),
         })
         .unwrap();
     let names: Vec<&str> = facet.values.iter().map(|v| v.value.as_str()).collect();

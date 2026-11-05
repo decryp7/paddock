@@ -660,10 +660,15 @@ export interface Timeline {
   truncatedLanes: number;
 }
 
+/** Most characters of `FacetRequest.search` the engine uses (`MAX_FACET_SEARCH` in debrief-core). */
+export const MAX_FACET_SEARCH = 200;
+
 export interface FacetRequest {
   query: Query;
   field: string;
   limit: number;
+  /** Only the values containing this text, ignoring case (the engine searches all values, not just the top `limit`). */
+  search?: string;
 }
 
 export interface Facet {

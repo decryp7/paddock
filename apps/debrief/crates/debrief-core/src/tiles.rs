@@ -41,6 +41,7 @@ pub fn evaluate<S: TileStore + ?Sized>(
                 query: with_ql(base, tile.query.as_deref()),
                 field: tile.field.clone().unwrap_or_default(),
                 limit: tile.limit_or(10, 100),
+                search: String::new(),
             })?,
         }),
         TileKind::Alerts => {

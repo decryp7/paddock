@@ -372,6 +372,7 @@ fn fields(
             query: Filter::default(),
             field: f.name.clone(),
             limit: MAX_DISTINCT_VALUES,
+            search: String::new(),
         }) {
             Ok(facet) => facet,
             Err(e) => {

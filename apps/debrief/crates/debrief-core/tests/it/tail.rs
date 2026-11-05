@@ -712,6 +712,7 @@ fn every_view(ws: &Workspace) -> Vec<(&'static str, serde_json::Value)> {
                     query: q.clone(),
                     field: "MachineName".into(),
                     limit: 10,
+                    search: String::new(),
                 })
                 .unwrap(),
             ),

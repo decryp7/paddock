@@ -111,6 +111,7 @@ fn calculated_fields_work_in_queries_facets_and_charts() {
             query: Query::default(),
             field: "Speed".into(),
             limit: 10,
+            search: String::new(),
         })
         .unwrap();
     let count = |v: &str| facet.values.iter().find(|x| x.value == v).map(|x| x.count);

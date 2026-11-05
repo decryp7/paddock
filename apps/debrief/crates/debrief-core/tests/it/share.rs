@@ -93,6 +93,7 @@ fn the_redacted_view_masks_pages_facets_and_context() {
             query: Query::default(),
             field: "User".into(),
             limit: 10,
+            search: String::new(),
         })
         .unwrap();
     assert_eq!(

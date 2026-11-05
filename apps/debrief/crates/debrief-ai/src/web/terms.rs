@@ -30,6 +30,7 @@ pub fn private_terms_in(store: &dyn Store) -> Vec<String> {
             query: Default::default(),
             field: f.name.clone(),
             limit: 50,
+            search: String::new(),
         }) {
             terms.extend(facet.values.into_iter().map(|v| v.value));
         }

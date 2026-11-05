@@ -518,6 +518,7 @@ fn every_query_store_is_a_search_source() {
             query: Default::default(),
             field: "@level".into(),
             limit: 5,
+            search: String::new(),
         },
     )
     .unwrap();

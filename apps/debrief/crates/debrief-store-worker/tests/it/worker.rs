@@ -293,6 +293,7 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
             query: Default::default(),
             field: "@level".into(),
             limit: 10,
+            search: String::new(),
         })
         .unwrap();
     assert!(!f.values.is_empty());

@@ -245,6 +245,7 @@ fn lanes_by_source(ws: &Workspace) -> std::collections::BTreeMap<String, std::co
                 },
                 field: "@group".into(),
                 limit: 1000,
+                search: String::new(),
             })
             .unwrap();
         out.insert(s.name.clone(), facet.values.into_iter().map(|v| v.value).collect());

@@ -349,6 +349,7 @@ fn facets() {
             query: Query::default(),
             field: "@group".into(),
             limit: 1,
+            search: String::new(),
         })
         .unwrap();
     assert_eq!(g.values.len(), 1);
@@ -358,6 +359,7 @@ fn facets() {
             query: Query::default(),
             field: "Nope".into(),
             limit: 5,
+            search: String::new(),
         })
         .unwrap();
     assert_eq!(none.total, 0);

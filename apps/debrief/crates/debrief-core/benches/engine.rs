@@ -174,6 +174,7 @@ fn queries(c: &mut Criterion) {
             query: Query::default(),
             field: field.into(),
             limit: 50,
+            search: String::new(),
         };
         group.bench_function(name, |b| b.iter(|| black_box(ws.facet(black_box(&req)).expect("facet").distinct)));
     }

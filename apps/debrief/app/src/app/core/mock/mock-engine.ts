@@ -22,6 +22,7 @@ import {
   RecordView,
   Timeline,
   TimelineRequest,
+  MAX_FACET_SEARCH,
 } from '../api.types';
 import { parseBucket, valueToString } from '../format';
 import { Condition, ExtractField, ExtractRule, ProfileModel, toJsRegex } from '../profile.model';
@@ -421,7 +422,11 @@ export class MockEngine {
       if (v === null) continue;
       counts.set(v, (counts.get(v) ?? 0) + 1);
     }
-    const values = [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+    const needle = (req.search ?? '').trim().slice(0, MAX_FACET_SEARCH).toLowerCase();
+    const values = [...counts.entries()]
+      .filter(([value]) => !needle || value.toLowerCase().includes(needle))
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count);
     return { field: req.field, values: values.slice(0, req.limit), distinct: values.length, total: ids.length };
   }
 

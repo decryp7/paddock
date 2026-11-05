@@ -13,6 +13,7 @@ mod catalogue;
 mod differential;
 mod encodings;
 mod exit;
+mod facet_search;
 mod import_phases;
 mod large_folder;
 mod layout_bakeoff;

@@ -813,6 +813,7 @@ impl Inner {
         let ctx = self.ctx(&conn)?;
         let (f, cq) = self.compile(&ctx, &req.query)?;
         let limit = req.limit.clamp(1, 1000);
+        let needle = req.needle();
         let expr = if req.field == "@group" {
             group_key_expr(&cq.group_by, cq.key_scopes(), &ctx.fields)
         } else {
@@ -821,14 +822,16 @@ impl Inner {
         if let (true, Some(expr)) = (f.exact, expr) {
             let inner = format!("SELECT {expr} AS v FROM {FROM} WHERE {}", f.all_sql());
             // One scan: the groups, with the totals over all groups alongside the top ones.
+            // The search is a bound parameter and `contains` has no wildcards, so nothing in it needs escaping. It filters
+            // the groups after the total is summed, so shares stay shares of all values; `distinct` counts the matches.
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT v, n, CAST(sum(n) OVER () AS UBIGINT) AS total, count(*) OVER () AS distinct_values FROM (SELECT v, count(*) AS n FROM ({inner}) WHERE v IS NOT NULL GROUP BY v) ORDER BY n DESC, v LIMIT {limit}"
+                    "SELECT v, n, total, count(*) OVER () AS distinct_values FROM (SELECT v, n, CAST(sum(n) OVER () AS UBIGINT) AS total FROM (SELECT v, count(*) AS n FROM ({inner}) WHERE v IS NOT NULL GROUP BY v)) WHERE contains(lower(v), ?) ORDER BY n DESC, v LIMIT {limit}"
                 ))
                 .map_err(engine)?;
             let (mut total, mut distinct) = (0u64, 0u64);
             let rows = stmt
-                .query_map([], |r| {
+                .query_map([needle.as_deref().unwrap_or("")], |r| {
                     Ok((
                         FacetValue {
                             value: r.get(0)?,
@@ -871,6 +874,9 @@ impl Inner {
             });
             ControlFlow::Continue(())
         })?;
+        if let Some(needle) = &needle {
+            counts.retain(|value, _| debrief_core::api::facet_value_matches(needle, value));
+        }
         let distinct = counts.len();
         let mut values: Vec<FacetValue> = counts.into_iter().map(|(value, count)| FacetValue { value, count }).collect();
         values.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));

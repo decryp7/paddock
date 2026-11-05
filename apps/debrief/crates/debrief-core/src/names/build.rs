@@ -288,6 +288,7 @@ mod tests {
                 query: Default::default(),
                 field: "f".into(),
                 limit: 1,
+                search: String::new(),
             })
             .is_err());
     }

@@ -221,6 +221,7 @@ fn interactive_operations_at_scale() {
                 query: Default::default(),
                 field: "MachineName".into(),
                 limit: 50,
+                search: String::new(),
             })
             .unwrap()
             .values

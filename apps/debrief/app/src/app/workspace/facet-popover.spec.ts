@@ -1,9 +1,9 @@
 import { Component, signal } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, provideTinyBackend, settle, text, tinyBackend, typeInto } from '../../testing/helpers';
 import { Facet } from '../core/api.types';
 import { MockBackend } from '../core/mock/mock-backend';
-import { FACET_LIMIT, FacetFilterEvent, FacetPopover } from './facet-popover';
+import { FACET_LIMIT, FACET_SEARCH_DEBOUNCE_MS, FacetFilterEvent, FacetPopover } from './facet-popover';
 import { LiveFeed } from '../live/live-feed';
 import { at } from '../../testing/must';
 
@@ -28,6 +28,19 @@ class Host {
   readonly numeric = signal(false);
   readonly events: string[] = [];
   readonly filters: FacetFilterEvent[] = [];
+}
+
+/** Types into the search box and lets the debounce pass on a fake clock, then waits for the engine's answer. */
+async function search(fixture: ComponentFixture<unknown>, value: string): Promise<void> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    typeInto(el<HTMLInputElement>(fixture, 'input[aria-label="Search values"]'), value);
+    TestBed.tick();
+    await vi.advanceTimersByTimeAsync(FACET_SEARCH_DEBOUNCE_MS);
+  } finally {
+    vi.useRealTimers();
+  }
+  await settle(fixture);
 }
 
 describe('FacetPopover', () => {
@@ -94,29 +107,44 @@ describe('FacetPopover', () => {
     expect(host.events).toContain('closed');
   });
 
-  it('filters as you type and says when nothing matches', async () => {
-    const { fixture } = await render();
-    typeInto(el<HTMLInputElement>(fixture, 'input[aria-label="Search values"]'), 'web02');
+  it('asks the engine to search as you type, after a pause, and says when nothing matches', async () => {
+    const { fixture, backend } = await render();
+    const spy = vi.spyOn(backend, 'queryFacet');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      for (const typed of ['w', 'we', 'web02']) {
+        typeInto(el<HTMLInputElement>(fixture, 'input[aria-label="Search values"]'), typed);
+        TestBed.tick();
+        await vi.advanceTimersByTimeAsync(FACET_SEARCH_DEBOUNCE_MS - 50);
+      }
+      expect(spy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+    } finally {
+      vi.useRealTimers();
+    }
     await settle(fixture);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ field: 'MachineName', limit: FACET_LIMIT, search: 'web02' }));
     expect(all(fixture, '.value')).toHaveLength(1);
     expect(el(fixture, '[data-testid=facet-summary]').textContent).toContain('1 match');
-    typeInto(el<HTMLInputElement>(fixture, 'input[aria-label="Search values"]'), 'zzz');
-    await settle(fixture);
+    await search(fixture, 'zzz');
     expect(text(fixture)).toContain('No value matches the search.');
+    await search(fixture, '');
+    expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ search: '' }));
+    expect(all(fixture, '.value')).toHaveLength(2);
   });
 
-  it('handles 10,000 distinct values: renders a window, searches the loaded ones, says what is shown', async () => {
+  it('finds a value beyond the top 1,000 by asking the engine, not by filtering what it loaded', async () => {
     const { fixture } = await render(new MockBackend({ latency: false, dataset: () => ({ sources: [], unrecognized: [], records: [] }), syntheticFacetValues: 10_000 }));
     expect(all(fixture, '.value').length).toBeLessThan(25);
     expect(el(fixture, '[data-testid=facet-summary]').textContent).toBe('10,000+ values in current results · top 1,000 shown');
     expect(el(fixture, '[role=list]').getAttribute('aria-label')).toBe('Values');
     expect(all(fixture, '[role=listitem]')[0]?.getAttribute('aria-setsize')).toBe('1000');
-    typeInto(el<HTMLInputElement>(fixture, 'input[aria-label="Search values"]'), '00042');
-    await settle(fixture);
+    // Value 09042 has a rank far below the 1,000 loaded ones.
+    await search(fixture, '09042');
     expect(all(fixture, '.value')).toHaveLength(1);
-    expect(text(fixture)).toContain('MachineName-value-00042');
-    typeInto(el<HTMLInputElement>(fixture, 'input[aria-label="Search values"]'), 'value-00');
-    await settle(fixture);
+    expect(text(fixture)).toContain('MachineName-value-09042');
+    await search(fixture, 'value-00');
     expect(all(fixture, '.value').length).toBeLessThan(25);
     expect(el(fixture, '[data-testid=facet-summary]').textContent).toContain('1,000 match');
   });

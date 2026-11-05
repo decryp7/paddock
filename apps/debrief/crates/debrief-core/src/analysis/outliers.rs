@@ -244,6 +244,7 @@ pub fn error_outliers(store: &dyn QueryPort, req: &OutlierRequest) -> StoreResul
             query: subset_q.clone(),
             field: field.clone(),
             limit: SUBSET_VALUES,
+            search: String::new(),
         })?;
         if in_subset.values.is_empty() {
             continue;
@@ -252,6 +253,7 @@ pub fn error_outliers(store: &dyn QueryPort, req: &OutlierRequest) -> StoreResul
             query: req.query.clone(),
             field: field.clone(),
             limit: WINDOW_VALUES,
+            search: String::new(),
         })?;
         if in_window.distinct > MAX_DISTINCT {
             continue;

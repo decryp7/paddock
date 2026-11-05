@@ -730,6 +730,7 @@ fn facet_values(
             query: Filter::default(),
             field: f.name.clone(),
             limit: MAX_DISTINCT_VALUES,
+            search: String::new(),
         })?;
         for v in &facet.values {
             if let Some(via) = via(text, words, wanted, &v.value) {

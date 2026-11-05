@@ -37,6 +37,7 @@ impl Workspace {
                 query: Filter::default(),
                 field: f.name.clone(),
                 limit: MAX_VALUES_PER_FIELD,
+                search: String::new(),
             }) else {
                 continue;
             };

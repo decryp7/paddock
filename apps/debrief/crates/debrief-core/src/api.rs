@@ -655,10 +655,32 @@ pub struct FacetRequest {
     pub field: String,
     #[serde(default = "default_facet_limit")]
     pub limit: usize,
+    /// Only the values that contain this text, ignoring case (empty: all values). The engine searches every
+    /// value of the field, not just the `limit` most frequent ones; `distinct` then counts the matching values and
+    /// `total` stays the count over all of them. Longer than [`MAX_FACET_SEARCH`] characters it is cut.
+    #[serde(default)]
+    pub search: String,
 }
+
+/// Most characters of a [`FacetRequest::search`] the engine uses.
+pub const MAX_FACET_SEARCH: usize = 200;
 
 fn default_facet_limit() -> usize {
     50
+}
+
+impl FacetRequest {
+    /// The search as the engine matches it: trimmed, cut to [`MAX_FACET_SEARCH`] characters and lower-cased;
+    /// `None` when there is nothing to search for.
+    pub fn needle(&self) -> Option<String> {
+        let t = self.search.trim();
+        (!t.is_empty()).then(|| t.chars().take(MAX_FACET_SEARCH).collect::<String>().to_lowercase())
+    }
+}
+
+/// Whether a facet value matches a [`FacetRequest::needle`].
+pub fn facet_value_matches(needle: &str, value: &str) -> bool {
+    value.to_lowercase().contains(needle)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

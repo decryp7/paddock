@@ -397,6 +397,7 @@ fn check_facets(p: &Pair) {
                 query: q.clone(),
                 field: field.into(),
                 limit: 50,
+                search: String::new(),
             };
             let w = p.ws.facet(&req).unwrap();
             let d = p.duck.facet(&req).unwrap();
@@ -527,6 +528,7 @@ fn check_operators(p: &Pair) {
             query: Filter::default(),
             field: "@group".into(),
             limit: 3,
+            search: String::new(),
         })
         .unwrap();
     cases.push((
@@ -646,6 +648,7 @@ fn answers_like_the_workspace_with_the_sample_profile() {
             query: Filter::default(),
             field: field.into(),
             limit: 20,
+            search: String::new(),
         };
         let (w, d) = (p.ws.facet(&req).unwrap(), p.duck.facet(&req).unwrap());
         assert_eq!((d.total, d.distinct), (w.total, w.distinct), "declared field {field}");
@@ -668,6 +671,7 @@ fn answers_like_the_workspace_on_a_file_of_several_products() {
             query: Filter::default(),
             field: field.into(),
             limit: 50,
+            search: String::new(),
         };
         let (w, d) = (p.ws.facet(&req).unwrap(), p.duck.facet(&req).unwrap());
         assert_eq!((d.total, d.distinct), (w.total, w.distinct), "{field}");
@@ -713,6 +717,7 @@ fn identity_fields_split_only_the_sources_of_their_parser() {
         },
         field: "@group".into(),
         limit: 50,
+        search: String::new(),
     };
     let lanes: Vec<String> = p.duck.facet(&req).unwrap().values.into_iter().map(|v| v.value).collect();
     assert_eq!(lanes, std::slice::from_ref(&source.name), "one lane for the log4net file");

@@ -13,6 +13,9 @@ import { VirtualList } from './virtual-list';
 /** The engine returns at most this many values per facet (and reports the true distinct count). */
 export const FACET_LIMIT = 1000;
 
+/** Pause after the last key before the typed search goes to the engine. */
+export const FACET_SEARCH_DEBOUNCE_MS = 250;
+
 export interface FacetFilterEvent {
   op: 'eq' | 'ne';
   value: string;
@@ -64,7 +67,7 @@ export interface FacetFilterEvent {
           </ng-template>
         </debrief-virtual-list>
       } @else {
-        <div class="faint">@if (search()) { <ng-container i18n="@@workspace.facet.noMatch">No value matches the search.</ng-container> } @else { <ng-container i18n="@@workspace.facet.noValues">No values in the current results.</ng-container> }</div>
+        <div class="faint">@if (term()) { <ng-container i18n="@@workspace.facet.noMatch">No value matches the search.</ng-container> } @else { <ng-container i18n="@@workspace.facet.noValues">No values in the current results.</ng-container> }</div>
       }
     }
   `,
@@ -97,24 +100,23 @@ export class FacetPopover {
   protected readonly emptyValue = $localize`:@@workspace.facet.empty:(empty)`;
   protected readonly facet = signal<Facet | null>(null);
   protected readonly error = signal<string | null>(null);
+  /** What is typed in the box. */
   protected readonly search = signal('');
+  /** What the engine was last asked to search for: the typed text after a short pause. The engine does the matching. */
+  private readonly term = signal('');
   private seq = 0;
 
-  protected readonly shown = computed(() => {
-    const values = this.facet()?.values ?? [];
-    const needle = this.search().trim().toLowerCase();
-    return needle ? values.filter((v) => v.value.toLowerCase().includes(needle)) : values;
-  });
+  protected readonly shown = computed(() => this.facet()?.values ?? []);
 
   protected readonly summary = computed(() => {
     const f = this.facet();
     if (this.error()) return $localize`:@@workspace.facet.unavailable:unavailable`;
     if (!f) return '…';
+    if (this.term()) return $localize`:@@workspace.facet.matches:${formatCount(f.distinct)}:count: match`;
     const loaded = f.values.length;
     const distinct = f.distinct >= 10000 ? '10,000+' : formatCount(f.distinct);
     const parts = [$localize`:@@workspace.facet.summary:${distinct}:count: values in current results`];
-    if (this.search().trim()) parts.push($localize`:@@workspace.facet.matches:${formatCount(this.shown().length)}:count: match`);
-    else if (loaded < f.distinct) parts.push($localize`:@@workspace.facet.topShown:top ${formatCount(loaded)}:count: shown`);
+    if (loaded < f.distinct) parts.push($localize`:@@workspace.facet.topShown:top ${formatCount(loaded)}:count: shown`);
     return parts.join(' · ');
   });
 
@@ -123,6 +125,20 @@ export class FacetPopover {
       this.field();
       this.store.effectiveQuery();
       untracked(() => void this.load());
+    });
+    // Typing: the engine searches all values of the field after a short pause (clearing the box answers at once).
+    // effect-state: debounce timer; the settled search text becomes the term the engine is asked for
+    effect((onCleanup) => {
+      const typed = this.search().trim();
+      if (typed === untracked(() => this.term())) return;
+      const apply = () =>
+        untracked(() => {
+          this.term.set(typed);
+          void this.load(true);
+        });
+      if (!typed) return apply();
+      const timer = setTimeout(apply, FACET_SEARCH_DEBOUNCE_MS);
+      onCleanup(() => clearTimeout(timer));
     });
     // Live tail: counts refresh in place (throttled by the feed), without flashing back to "…".
     const feed = inject(LiveFeed);
@@ -151,7 +167,7 @@ export class FacetPopover {
     this.error.set(null);
     if (!quiet) this.facet.set(null);
     try {
-      const facet = await this.backend.queryFacet({ query: this.store.effectiveQuery(), field: this.field(), limit: FACET_LIMIT });
+      const facet = await this.backend.queryFacet({ query: this.store.effectiveQuery(), field: this.field(), limit: FACET_LIMIT, search: this.term() });
       if (mine === this.seq) this.facet.set(facet);
     } catch (e) {
       if (mine === this.seq) this.error.set(describeError(e));

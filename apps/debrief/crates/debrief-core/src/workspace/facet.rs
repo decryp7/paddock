@@ -24,6 +24,9 @@ impl Workspace {
                 *counts.entry(self.view_text(&req.field, v).into_owned()).or_default() += 1;
             }
         }
+        if let Some(needle) = req.needle() {
+            counts.retain(|value, _| crate::api::facet_value_matches(&needle, value));
+        }
         let distinct = counts.len();
         let mut values: Vec<FacetValue> = counts.into_iter().map(|(value, count)| FacetValue { value, count }).collect();
         values.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));

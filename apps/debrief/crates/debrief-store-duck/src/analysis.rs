@@ -1661,6 +1661,7 @@ mod tests {
                 query: Filter::default(),
                 field: "Host".into(),
                 limit: 10,
+                search: String::new(),
             })
             .unwrap();
         assert_eq!((facet.total, facet.distinct), (n, 3));

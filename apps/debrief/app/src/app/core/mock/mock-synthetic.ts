@@ -1,4 +1,4 @@
-import { Facet, FacetRequest, LEVELS, Page, PageRequest, RecordView } from '../api.types';
+import { Facet, FacetRequest, LEVELS, MAX_FACET_SEARCH, Page, PageRequest, RecordView } from '../api.types';
 import { DEMO_START } from './mock-data';
 
 /**
@@ -44,7 +44,15 @@ export function syntheticPage(req: PageRequest, total: number): Page {
 export const FACET_LIMIT_MAX = 1000;
 
 export function syntheticFacet(req: FacetRequest, distinct: number, total = 1_000_000): Facet {
-  const shown = Math.min(distinct, Math.max(1, Math.min(req.limit, FACET_LIMIT_MAX)));
-  const values = Array.from({ length: shown }, (_, k) => ({ value: `${req.field}-value-${String(k).padStart(5, '0')}`, count: Math.max(1, distinct - k) }));
-  return { field: req.field, values, distinct, total };
+  const limit = Math.max(1, Math.min(req.limit, FACET_LIMIT_MAX));
+  const needle = (req.search ?? '').trim().slice(0, MAX_FACET_SEARCH).toLowerCase();
+  const values: Facet['values'] = [];
+  let matching = 0;
+  for (let k = 0; k < distinct; k++) {
+    const value = `${req.field}-value-${String(k).padStart(5, '0')}`;
+    if (needle && !value.toLowerCase().includes(needle)) continue;
+    matching++;
+    if (values.length < limit) values.push({ value, count: Math.max(1, distinct - k) });
+  }
+  return { field: req.field, values, distinct: matching, total };
 }

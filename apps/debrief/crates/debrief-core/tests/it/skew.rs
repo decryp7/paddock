@@ -160,6 +160,7 @@ fn manual_offset_shifts_every_view_and_keeps_earlier_ids() {
             query: ranged.clone(),
             field: "@message".into(),
             limit: 10,
+            search: String::new(),
         })
         .unwrap();
     // 22.000–23.000 now holds B 20 (at 22.350) only.
