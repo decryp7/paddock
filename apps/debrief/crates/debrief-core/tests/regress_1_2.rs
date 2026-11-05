@@ -139,7 +139,7 @@ fn parse_only(paths: &[PathBuf]) -> usize {
 }
 
 #[test]
-#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package 3.5, streaming legacy text): peak RSS 17399 MB while importing a 3072 MB CSV is over the import budget of 768 MB"]
+#[ignore = "big (3 GiB written and read): run with --ignored; fixed by the streaming CSV import (3.5), peak 17399 MB before"]
 fn a_3_gib_csv_imports_under_the_worker_cap() {
     let dir = TempDir::new("csv");
     let path = dir.0.join("big.csv");
@@ -202,7 +202,11 @@ fn measure_import_phases() {
     log::set_max_level(log::LevelFilter::Debug);
     let dir = TempDir::new("measure");
     let path = dir.0.join(format!("big.{}", if kind == "csv" { "csv" } else { "log" }));
-    let rows = if kind == "csv" { generate_csv(&path, mb * MB) } else { generate_text(&path, mb * MB) };
+    let rows = if kind == "csv" {
+        generate_csv(&path, mb * MB)
+    } else {
+        generate_text(&path, mb * MB)
+    };
     let size = std::fs::metadata(&path).unwrap().len();
     let peak = Peak::start();
     let base = rss() >> 20;
@@ -217,4 +221,81 @@ fn measure_import_phases() {
         (size >> 20) as f64 / secs
     );
     assert_eq!(events as u64, rows);
+}
+
+/// A shared sink that only counts (the reading side alone), for the parallel import.
+struct SharedCount(AtomicU64, AtomicU64);
+impl ingest::SharedSink for SharedCount {
+    fn reserve_sources(&self, n: u32) -> anyhow::Result<SourceId> {
+        Ok(SourceId(self.1.fetch_add(n as u64, Ordering::Relaxed) as u32))
+    }
+    fn begin_source(&self, _s: &NewSource, id: Option<SourceId>) -> anyhow::Result<SourceId> {
+        Ok(id.unwrap_or_else(|| SourceId(self.1.fetch_add(1, Ordering::Relaxed) as u32)))
+    }
+    fn write(&self, b: PendingBatch) -> anyhow::Result<()> {
+        self.0.fetch_add(b.len() as u64, Ordering::Relaxed);
+        Ok(())
+    }
+    fn finish_source(&self, _r: &SourceReport) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn abort_source(&self, _id: SourceId) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Measures the parallel import of `DEBRIEF_MEASURE_FILES` (default 8) generated files of `DEBRIEF_MEASURE_MB` in total on
+/// `DEBRIEF_MEASURE_THREADS` (default 1) parse threads: how a worker count scales (rule 51). Kind csv or text as above.
+#[test]
+#[ignore = "measurement, not a check: run by hand (docs/performance.md)"]
+fn measure_parallel_import() {
+    let env_num = |k: &str, d: u64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let (mb, files_n, threads) = (
+        env_num("DEBRIEF_MEASURE_MB", 300),
+        env_num("DEBRIEF_MEASURE_FILES", 8),
+        env_num("DEBRIEF_MEASURE_THREADS", 1),
+    );
+    let kind = std::env::var("DEBRIEF_MEASURE_KIND").unwrap_or_else(|_| "csv".into());
+    let dir = TempDir::new("measure-par");
+    let mut rows = 0;
+    for i in 0..files_n {
+        let p = dir.0.join(format!("f{i:02}.{}", if kind == "csv" { "csv" } else { "log" }));
+        rows += if kind == "csv" {
+            generate_csv(&p, mb * MB / files_n)
+        } else {
+            generate_text(&p, mb * MB / files_n)
+        };
+    }
+    let registry = debrief_core::PluginRegistry::new();
+    let parsers = registry
+        .compile_parsers(&Profile::default_profile(), &debrief_core::parser::ParserSetup::builtins())
+        .unwrap();
+    let profile = parsers.base().clone();
+    let progress = debrief_core::workspace::ImportProgress::default();
+    let env = ImportEnv {
+        encodings: &Default::default(),
+        importers: registry.importers(),
+        parsers: &parsers,
+        schema: Arc::new(ingest::schema_for(&profile)),
+        cancel: progress.cancel_flag(),
+        window: None,
+    };
+    let canonical = vec![std::fs::canonicalize(&dir.0).unwrap()];
+    let files = ingest::files_to_read(&canonical, &canonical, &profile, &Default::default(), &Default::default());
+    let sink = SharedCount(AtomicU64::new(0), AtomicU64::new(1));
+    let peak = Peak::start();
+    let t = std::time::Instant::now();
+    let opts = ingest::ParallelOptions {
+        threads: threads as usize,
+        ..Default::default()
+    };
+    ingest::import_files_parallel(&env, &files, &Default::default(), &progress, &opts, &sink);
+    let secs = t.elapsed().as_secs_f64();
+    let events = sink.0.load(Ordering::Relaxed);
+    eprintln!(
+        "RESULT-PAR kind={kind} files={files_n} MB={mb} threads={threads} events={events} peak_rss={} MB time={secs:.2} s events_per_s={:.0}",
+        peak.mb(),
+        events as f64 / secs
+    );
+    assert_eq!(events, rows);
 }
