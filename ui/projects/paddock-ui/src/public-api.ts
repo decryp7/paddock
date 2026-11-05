@@ -1,7 +1,7 @@
 export { SU_STATUSES, SU_STATUS_ICON, type SuStatus } from './lib/status';
 export { SuStatusPill } from './lib/status-pill';
 export { SuMetric, deltaTone, formatNumber, type SuDeltaTone, type SuGoodDirection, type SuMetricSize } from './lib/metric';
-export { SuSparkline, headroomMax, sparklineGeometry, sparklineScale, zoomRange, type SparklineGeometry, type SparklineOptions, type SparklineScale } from './lib/sparkline';
+export { SuSparkline, sparklineGeometry, type SparklineGeometry, type SparklineScaleMode } from './lib/sparkline';
 export { SuCard } from './lib/card';
 export { SuEmptyState, SuErrorState } from './lib/states';
 export { SuSkeleton, type SuSkeletonShape } from './lib/skeleton';

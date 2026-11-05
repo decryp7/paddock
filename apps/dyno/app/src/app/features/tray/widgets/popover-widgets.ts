@@ -8,6 +8,7 @@ import type { AlarmRow, AppRow, BackupValue, CounterRow, IssueValue, Level, Page
 import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
 import { formatCounter } from '../../counters/counters-model';
+import { SPARK_CAPACITY } from '../../../state/live.store';
 
 type Value<K extends string> = Extract<PopoverValue, Record<K, unknown>>[K];
 
@@ -75,7 +76,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         <div class="dy-pw-half" [attr.data-tone]="c?.cpuTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>CPU</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.cpuPercent ?? 0) }}<small>%</small></span>
-          <pd-sparkline [values]="c?.cpuMinute ?? []" [fromZero]="true" [area]="true" [max]="100" [capacity]="60" [pad]="0" [dot]="false" [height]="24" color="var(--accent)" label="CPU over the last minute" />
+          <pd-sparkline [values]="c?.cpuMinute ?? []" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="24" color="var(--accent)" label="CPU over the last minute" />
         </div>
         <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>Memory {{ memText(c) }}</span>
@@ -90,7 +91,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       <button type="button" class="dy-pw-plain" (click)="open('network')">
         <span class="dy-pw-big" pdSkeleton>↓ {{ rate(n?.rxBps ?? 0)[0] }}<small>{{ rate(n?.rxBps ?? 0)[1] }}</small></span>
         <span class="dy-pw-muted" pdSkeleton>↑ {{ rate(n?.txBps ?? 0).join(' ') }}</span>
-        <pd-sparkline [values]="n?.rxMinute ?? []" [values2]="n?.txMinute ?? null" [fromZero]="true" [area]="true" [capacity]="60" [pad]="0" [dot]="false" [height]="28" color="var(--text-3)" color2="var(--text-3)" label="Network over the last minute" />
+        <pd-sparkline [values]="n?.rxMinute ?? []" [values2]="n?.txMinute ?? null" scale="zero" [area]="true" [capacity]="sparkCapacity" [formatValue]="rateText" [pad]="0" [dot]="false" [height]="28" color="var(--text-3)" color2="var(--text-3)" label="Download over the last minute" label2="Upload" />
       </button>
     </ng-template>
 
@@ -203,6 +204,8 @@ export class DynoPopoverWidgets {
   protected readonly skBackup = SK_BACKUP;
 
   protected readonly pct = formatPercent;
+  protected readonly rateText = formatRate;
+  protected readonly sparkCapacity = SPARK_CAPACITY;
   protected readonly bytes = formatBytes;
   protected status(l: Level): PdStatus {
     return LEVEL_STATUS[l];

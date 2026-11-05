@@ -205,6 +205,12 @@ describe('dy-widget with a performance counter', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.hero b')!.textContent).toMatch(/\d/);
     expect(el.querySelector('pd-sparkline')).not.toBeNull();
+    // Wiring: a short history starts well right of the left edge (the box holds SPARK_CAPACITY samples) and has no padding.
+    const d = el.querySelector('pd-sparkline .pd-line')!.getAttribute('d')!;
+    expect(Number(/^M(\d+(\.\d+)?) /.exec(d)![1])).toBeGreaterThan(100);
+    expect(d).toContain('L120.0 ');
+    expect(el.querySelector('pd-sparkline .pd-dot')).toBeNull();
+    expect(el.querySelector('pd-sparkline svg')!.getAttribute('aria-label')).not.toMatch(/\.\d{3,}/);
 
     const gone = body('bigNumber', given('bigNumber', { perfCounter: '\\Nothing\\here' }));
     counters.track(['\\Nothing\\here']);

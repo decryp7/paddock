@@ -769,6 +769,20 @@ status = "built"
   delete_by = "pitwall-v1.1.0"
   note = "Pitwall 1.1 deletes it."
 
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/share/dashboard/dashboard-tile.ts"]
+  symbols = ["item:sparkPoints"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "sparkPoints draws a polyline for the dashboard tile; Debrief 1.2 uses pd-sparkline."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src/app/shared/geometry.ts"]
+  symbols = ["item:sparkPaths"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "sparkPaths is the geometry of Pitcrew's sparkline copy above; it goes with it."
+
 [[mechanism]]
 id = "schedule-editors"
 title = "Schedule and pause editors (days, times, quiet hours)"

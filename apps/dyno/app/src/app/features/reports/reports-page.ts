@@ -75,7 +75,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
             @if (r.scoreTrend.length > 1) {
               <section class="card" aria-label="Health score trend">
                 <div class="card-head"><h2><dy-icon name="health" /> Health score</h2></div>
-                <div class="spark"><pd-sparkline [values]="trend()" [max]="100" [capacity]="trend().length" [zoom]="true" [area]="true" [pad]="0" [dot]="false" [height]="72" color="var(--text-3)" label="Health score over the week" /></div>
+                <div class="spark"><pd-sparkline [values]="trend()" [max]="100" [capacity]="trend().length" scale="zoom" [area]="true" [pad]="0" [dot]="false" [height]="72" color="var(--text-3)" label="Health score over the week" /></div>
               </section>
             }
             @if (r.topApps.length) {

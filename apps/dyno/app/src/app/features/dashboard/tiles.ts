@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterLink } from '@angular/router';
 import { formatGhz, formatPercent, formatCount, splitValue } from '../../shared/format';
 import { coreHeat } from '../../shared/heat';
-import { LiveStore } from '../../state/live.store';
+import { LiveStore, SPARK_CAPACITY } from '../../state/live.store';
 import { Icon } from '../../shared/icon';
 import { ViewPrefs } from '../../core/view-prefs';
 import { coreGroups } from '../cpu/core-layout';
@@ -28,7 +28,7 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
         <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltipPosition="left" [matTooltip]="'CPU details'"><dy-icon name="arrow-right" /></a>
       </div>
       @if (prefs.cpuView() === 'overall') {
-        <pd-sparkline [values]="live.series().cpu" [fromZero]="true" [area]="true" [max]="100" [capacity]="60" [pad]="0" [dot]="false" [height]="32" color="var(--accent)" label="CPU use over the last minute" />
+        <pd-sparkline [values]="live.series().cpu" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="32" color="var(--accent)" label="CPU use over the last minute" />
         <div class="cores" role="img" [attr.aria-label]="coreLabel()">
           @for (v of c.perCore; track $index) {
             <span class="core" [style.background]="coreColor(v)" [matTooltip]="'Core ' + count($index) + ': ' + pct(v)"></span>
@@ -75,6 +75,8 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
 })
 export class CpuTile {
   protected readonly live = inject(LiveStore);
+  protected readonly sparkCapacity = SPARK_CAPACITY;
+  protected readonly pct = formatPercent;
   protected readonly prefs = inject(ViewPrefs);
   protected readonly cpuViews = CPU_VIEWS;
   protected readonly cpu = computed(() => this.live.system()?.cpu ?? null);
@@ -82,7 +84,6 @@ export class CpuTile {
     const c = this.cpu();
     return c ? coreGroups(c.coreKinds, c.perCore.length) : [];
   });
-  protected readonly pct = formatPercent;
   protected readonly ghz = formatGhz;
   protected readonly total = (v: number) => parts(formatPercent(v));
   protected readonly count = (i: number) => formatCount(i + 1);

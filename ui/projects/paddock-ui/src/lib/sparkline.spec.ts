@@ -35,23 +35,23 @@ describe('sparkline geometry against Dyno goldens', () => {
     sparklineGeometry(v, 100, 100, 0, s.min, s.max, { capacity, clamp: true });
 
   it('a fixed 0..100 level, right-aligned in 60 slots (CPU)', () => {
-    expectSame(draw(CPU, sparklineScale(CPU, null, { max: 100, fromZero: true }), 60).line, GOLDEN.cpu);
+    expectSame(draw(CPU, sparklineScale(CPU, null, 'zero', 100), 60).line, GOLDEN.cpu);
   });
   it('a zoomed level (memory)', () => {
-    expectSame(draw(MEM, sparklineScale(MEM, null, { max: 100, zoom: true }), 60).line, GOLDEN.mem);
+    expectSame(draw(MEM, sparklineScale(MEM, null, 'zoom', 100), 60).line, GOLDEN.mem);
   });
   it('two series share one scale with headroom (network)', () => {
-    const s = sparklineScale(RX, TX, { fromZero: true });
+    const s = sparklineScale(RX, TX, 'zero');
     expectSame(draw(RX, s, 60).line, GOLDEN.rx);
     expectSame(draw(TX, s, 60).line, GOLDEN.tx);
   });
   it('a zoomed trend that fills the box (capacity = length)', () => {
     const t = [80, 82, 90, 85, 70];
-    expectSame(draw(t, sparklineScale(t, null, { max: 100, zoom: true }), 5).line, GOLDEN.trend);
+    expectSame(draw(t, sparklineScale(t, null, 'zoom', 100), 5).line, GOLDEN.trend);
   });
   it('all zeros draw along the bottom, not the middle', () => {
     const z = [0, 0, 0];
-    expectSame(draw(z, sparklineScale(z, null, { fromZero: true }), 60).line, GOLDEN.zeros);
+    expectSame(draw(z, sparklineScale(z, null, 'zero'), 60).line, GOLDEN.zeros);
   });
 });
 
@@ -74,7 +74,8 @@ describe('sparklineGeometry options', () => {
   it('has no area for a single point', () => {
     expect(sparklineGeometry([4], 100, 30).area).toBe('');
   });
-  it('a scale with no span draws mid-height', () => {
+  it('a scale with no or a negative span draws mid-height', () => {
+    expect(sparklineGeometry([5, 5], 100, 30, 0, 5, 3).line).toBe('M0.0 15.0L100.0 15.0');
     expect(sparklineGeometry([5, 5], 100, 30, 0, 5, 5).line).toBe('M0.0 15.0L100.0 15.0');
   });
 });
@@ -117,15 +118,23 @@ describe('headroomMax', () => {
 });
 
 describe('sparklineScale', () => {
-  it('passes a fixed scale through and leaves a missing side to the data', () => {
-    expect(sparklineScale([1, 2], null, { min: 0, max: 10 })).toEqual({ min: 0, max: 10 });
-    expect(sparklineScale([1, 2], null, {})).toEqual({ min: undefined, max: undefined });
+  it('fit leaves a missing side to the data, and max overrides the top', () => {
+    expect(sparklineScale([1, 2], null, 'fit')).toEqual({ min: 1, max: 2 });
+    expect(sparklineScale([1, 2], null, 'fit', 9)).toEqual({ min: 1, max: 9 });
+    expect(sparklineScale([], [], 'fit')).toEqual({ max: undefined });
+    expect(sparklineScale([Number.NaN], undefined, 'fit', 9)).toEqual({ max: 9 });
   });
-  it('fits two series to one scale', () => {
-    expect(sparklineScale([1, 2], [0, 5], {})).toEqual({ min: 0, max: 5 });
-    expect(sparklineScale([1, 2], [0, 5], { min: 1 })).toEqual({ min: 1, max: 5 });
-    expect(sparklineScale([1, 2], [0, 5], { min: 1, max: 9 })).toEqual({ min: 1, max: 9 });
-    expect(sparklineScale([], [], {})).toEqual({ min: undefined, max: undefined });
+  it('fit puts two series on one range, with or without a max', () => {
+    expect(sparklineScale([1, 2], [0, 5], 'fit')).toEqual({ min: 0, max: 5 });
+    expect(sparklineScale([1, 2], [0, 5], 'fit', 9)).toEqual({ min: 0, max: 9 });
+  });
+  it('zero starts at 0 and counts both series in the headroom', () => {
+    expect(sparklineScale([1], [10], 'zero')).toEqual({ min: 0, max: 11.5 });
+    expect(sparklineScale([1], undefined, 'zero', 4)).toEqual({ min: 0, max: 4 });
+  });
+  it('zoom follows the first series inside the ceiling', () => {
+    expect(sparklineScale([50, 50], [99], 'zoom')).toEqual({ min: 46, max: 54 });
+    expect(sparklineScale([99, 99], null, 'zoom', 100)).toEqual({ min: 92, max: 100 });
   });
 });
 
@@ -136,35 +145,69 @@ describe('SuSparkline options', () => {
     f.detectChanges();
     return f.nativeElement as HTMLElement;
   }
-  it('draws a dashed second line only when given', () => {
+  const lines = (el: HTMLElement): string[] => Array.from(el.querySelectorAll('.pd-line')).map((p) => p.getAttribute('d') ?? '');
+  const EDGE = { pad: 0, height: 10 };
+
+  it('draws exact paths from zero to a fixed max', () => {
+    expect(lines(make({ values: [0, 10], scale: 'zero', max: 10, ...EDGE }))).toEqual(['M0.0 10.0L120.0 0.0']);
+  });
+  it('a fitted line is not clamped; a zero or zoom line is', () => {
+    expect(lines(make({ values: [-5, 50], max: 10, ...EDGE }))[0]).toBe('M0.0 10.0L120.0 -26.7');
+    expect(lines(make({ values: [-5, 50], scale: 'zero', max: 10, ...EDGE }))[0]).toBe('M0.0 10.0L120.0 0.0');
+  });
+  it('draws a dashed second line on the same scale, clamped into a zoomed range', () => {
+    const el = make({ values: [50, 52], values2: [90, 10], scale: 'zoom', pad: 0, height: 8, color2: 'rgb(1, 2, 3)' });
+    expect(lines(el)).toEqual(['M0.0 5.0L120.0 3.0', 'M0.0 0.0L120.0 8.0']);
+    expect((el.querySelector('.pd-line2') as SVGPathElement).style.stroke).toBe('rgb(1, 2, 3)');
+  });
+  it('counts the second series in the scale from zero', () => {
+    expect(lines(make({ values: [0, 5], values2: [0, 10], scale: 'zero', ...EDGE }))).toEqual(['M0.0 10.0L120.0 5.7', 'M0.0 10.0L120.0 1.3']);
+  });
+  it('has no second line without a second series', () => {
     expect(make({ values: [1, 2] }).querySelector('.pd-line2')).toBeNull();
     expect(make({ values: [1, 2], values2: [] }).querySelector('.pd-line2')).toBeNull();
-    const el = make({ values: [1, 2], values2: [2, 1], color2: 'rgb(1, 2, 3)' });
-    const p = el.querySelector('.pd-line2') as SVGPathElement;
-    expect(p.getAttribute('d')).toMatch(/^M/);
-    expect(p.style.stroke).toBe('rgb(1, 2, 3)');
+    expect(make({ values: [1, 2], values2: undefined }).querySelector('.pd-line2')).toBeNull();
   });
   it('colours the line from the colour input', () => {
     expect(make({ values: [1, 2], color: 'rgb(9, 8, 7)' }).style.color).toBe('rgb(9, 8, 7)');
     expect(make({ values: [1, 2] }).style.color).toBe('');
   });
   it('can hide the end dot and run edge to edge', () => {
-    const el = make({ values: [1, 2], dot: false, pad: 0, min: 0, max: 2, height: 10 });
+    const el = make({ values: [1, 2], dot: false, scale: 'zero', max: 2, ...EDGE });
     expect(el.querySelector('.pd-dot')).toBeNull();
-    expect(el.querySelector('.pd-line')?.getAttribute('d')).toBe('M0.0 5.0L120.0 0.0');
+    expect(lines(el)).toEqual(['M0.0 5.0L120.0 0.0']);
   });
   it('grows in from the right with a capacity', () => {
-    const el = make({ values: [1, 2], capacity: 3, pad: 0, fromZero: true, max: 2 });
-    expect(el.querySelector('.pd-line')?.getAttribute('d')).toMatch(/^M60\.0 /);
+    expect(lines(make({ values: [1, 2], capacity: 3, scale: 'zero', max: 2, ...EDGE }))).toEqual(['M60.0 5.0L120.0 0.0']);
   });
-  it('zooms and still draws an area from a zoomed range', () => {
-    const el = make({ values: [50, 52], zoom: true, area: true, pad: 0 });
+  it('draws an area under a zoomed line', () => {
+    const el = make({ values: [50, 52], scale: 'zoom', area: true, ...EDGE });
     expect(el.querySelector('.pd-area')?.getAttribute('d')).toMatch(/Z$/);
-    expect(el.querySelector('.pd-line')?.getAttribute('d')).not.toContain('100.0 ');
   });
-  it('renders a defined state for odd input', () => {
-    const el = make({ values: [Number.NaN, Number.NaN], values2: [Number.NaN], zoom: true, area: true });
-    expect(el.querySelector('svg')?.getAttribute('aria-label')).toContain('no data');
-    expect(el.querySelector('.pd-line2')).toBeNull();
+
+  it('names the latest and peak values rounded, never as raw floats', () => {
+    const name = make({ values: [50.9375, 53.43750000000001], label: 'Memory' }).querySelector('svg')?.getAttribute('aria-label') ?? '';
+    expect(name).toMatch(/^Memory: latest 53\.4, peak 53\.4$/);
+  });
+  it('formats the values with the given function and names the second series', () => {
+    const el = make({ values: [1, 4], values2: [2, 3], label: 'Down', label2: 'Up', formatValue: (v: number) => `${v} MB/s` });
+    expect(el.querySelector('svg')?.getAttribute('aria-label')).toBe('Down: latest 4 MB/s, peak 4 MB/s; Up: latest 3 MB/s, peak 3 MB/s');
+  });
+  it('leaves an empty second series out of the name', () => {
+    expect(make({ values: [1], values2: [Number.NaN], label: 'A' }).querySelector('svg')?.getAttribute('aria-label')).toBe('A: latest 1, peak 1');
+  });
+  it('says there is no data for an empty series', () => {
+    expect(make({ values: [], label: 'A' }).querySelector('svg')?.getAttribute('aria-label')).toBe('A: no data');
+  });
+
+  it('never throws or draws NaN for odd inputs', () => {
+    const odd = { values: [1, Number.NaN, 3], values2: [Number.NaN], capacity: Number.NaN, pad: Number.NaN, max: Number.NaN, height: Number.NaN, area: true };
+    for (const scale of ['fit', 'zero', 'zoom']) {
+      const el = make({ ...odd, scale });
+      expect(el.innerHTML).not.toContain('NaN');
+      expect(lines(el)[0]).toMatch(/^M/);
+    }
+    expect(make({ values: [1, 2], capacity: 0, pad: -1 }).innerHTML).not.toContain('NaN');
+    expect(make({ values: [1, 2], pad: 80 }).innerHTML).not.toContain('NaN');
   });
 });
