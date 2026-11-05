@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { PdWidgetGrid } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import { MockBackend, type MockOptions } from '../../core/mock-backend';
 import type { Cells, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { DiagnosisStore } from '../../state/diagnosis.store';
@@ -13,7 +13,9 @@ import { AlertsStore } from '../../state/alerts.store';
 import { LiveStore } from '../../state/live.store';
 import { AnimatedNumber, GLIDE_STEPS, glideSteps } from './animated-number';
 import { DASHBOARD_KINDS, WidgetBoard } from './widget-board';
-import { eventsFitting, issuesFitting, WidgetView } from './widget-view';
+import { CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { EVENTS_LOADED } from '../dashboard/events-feed';
+import { WidgetView } from './widget-view';
 import type { DyValue } from './dashboard-states';
 
 /** A dashboard placement of `kind` showing `metric`, `w` columns wide. */
@@ -34,8 +36,8 @@ function body(kind: DashboardWidget['kind'], value: DyValue | null) {
   return f;
 }
 
-function env() {
-  const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
+function env(options: MockOptions = {}) {
+  const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, ...options });
   TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([])] });
   TestBed.inject(LiveStore).receive(mock.liveUpdate('summary'));
   return mock;
@@ -101,48 +103,55 @@ describe('dy-widget', () => {
     expect(el.textContent).not.toContain('Health score');
   });
 
-  it('lists as many issues as the rows hold with "+n more" for the rest, nothing dropped silently, each name allowed a second line', async () => {
-    env();
+  it('lists every issue however short the widget, in a focusable scrolling region, and never ends in "+n more"', async () => {
+    env({ longLists: true });
     await TestBed.inject(DiagnosisStore).loadAnomalies();
     const total = TestBed.inject(DiagnosisStore).anomalies().length;
-    expect(total).toBeGreaterThan(1);
+    expect(total).toBeGreaterThanOrEqual(50);
     const at = (h: number): DyValue => ({ placement: { ...place('issues', 'cpuTotal', 3), h }, reading: null });
-    const f = body('issues', at(4));
-    const el = f.nativeElement as HTMLElement;
-    const shown = el.querySelectorAll('.issues li').length;
-    expect(shown).toBe(issuesFitting(4, total));
-    expect(shown).toBeLessThan(total);
-    expect(el.querySelector('.more')!.textContent).toBe(`+${total - shown} more`);
-    const tall = body('issues', at(20)).nativeElement as HTMLElement;
-    expect(tall.querySelectorAll('.issues li').length).toBe(total);
-    expect(tall.querySelector('.more')).toBeNull();
-    expect(tall.querySelector('.issues strong')!.classList.contains('two-lines')).toBe(true);
+    for (const h of [4, 20]) {
+      const el = body('issues', at(h)).nativeElement as HTMLElement;
+      expect(el.querySelectorAll('.issues li').length).toBe(total);
+      expect(el.textContent).not.toMatch(/\+\d+ more/);
+      const region = el.querySelector('.issues-scroll')!;
+      expect(region.getAttribute('tabindex')).toBe('0');
+      expect(region.getAttribute('aria-label')).toBe('Unusual things found');
+    }
+    const el = body('issues', at(4)).nativeElement as HTMLElement;
+    expect(el.querySelector('.issues strong')!.classList.contains('two-lines')).toBe(true);
   });
 
-  it('fits entries to the rows: all while they fit, else as many as fit beside a "+n more" line, at least one', () => {
-    expect([4, 7, 9, 14].map((r) => eventsFitting(r))).toEqual([1, 3, 5, 9]);
-    expect(eventsFitting(7, 3)).toBe(3);
-    expect(eventsFitting(7, 9)).toBe(3);
-    expect(eventsFitting(1, 5)).toBe(1);
-    expect(issuesFitting(6, 3)).toBe(2);
-    expect(issuesFitting(7, 3)).toBe(3);
-    expect(issuesFitting(2, 5)).toBe(1);
-  });
-
-  it('lists the recent events the rows hold and counts the rest as "+n more"', async () => {
-    env();
-    await TestBed.inject(ActivityStore).load();
-    await TestBed.inject(AlertsStore).load();
+  it('lists the recent events in a virtual viewport holding every entry, never ending in "+n more"', async () => {
+    env({ longLists: true });
+    await TestBed.inject(ActivityStore).load(200);
+    await TestBed.inject(AlertsStore).load(200);
     const feed = TestBed.inject(ActivityStore).entries().length + TestBed.inject(AlertsStore).alerts().length;
+    expect(feed).toBeGreaterThanOrEqual(50);
     const at = (h: number): DyValue => ({ placement: { ...place('events', 'cpuTotal', 6), h }, reading: null });
-    const short = (body('events', at(4)).nativeElement as HTMLElement);
-    const shown = short.querySelectorAll('dy-events-feed li').length;
-    expect(shown).toBe(eventsFitting(4, feed));
-    expect(shown).toBeLessThan(feed);
-    expect(short.querySelector('.more')!.textContent).toBe(`+${feed - shown} more`);
-    const tall = body('events', at(30)).nativeElement as HTMLElement;
-    expect(tall.querySelectorAll('dy-events-feed li').length).toBe(feed);
-    expect(tall.querySelector('.more')).toBeNull();
+    for (const h of [4, 30]) {
+      const f = body('events', at(h));
+      const el = f.nativeElement as HTMLElement;
+      const viewport = f.debugElement.query((d) => d.componentInstance instanceof CdkVirtualScrollViewport);
+      expect((viewport.componentInstance as CdkVirtualScrollViewport).getDataLength()).toBe(feed);
+      expect(viewport.nativeElement.getAttribute('aria-label')).toBe('Activity and alerts');
+      expect(viewport.nativeElement.getAttribute('tabindex')).toBe('0');
+      expect(el.textContent).not.toMatch(/\+\d+ more/);
+      expect(el.querySelector('.more')).toBeNull();
+    }
+  });
+
+  it('says the feed shows only the latest entries when a list is as long as the board asked for, and not before', () => {
+    env();
+    const at = (n: number) => 1_700_000_000_000 - n * 1000;
+    const entries = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, at: at(i), kind: 'system' as const, title: `Note ${i}`, detail: 'Invented.' }));
+    const store = TestBed.inject(ActivityStore);
+    for (const e of entries(EVENTS_LOADED - 1)) store.receive(e);
+    const f = body('events', { placement: { ...place('events', 'cpuTotal', 6), h: 8 }, reading: null });
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.more')).toBeNull();
+    store.receive({ id: 'last', at: at(EVENTS_LOADED), kind: 'system', title: 'One more', detail: 'Invented.' });
+    f.detectChanges();
+    expect(el.querySelector('.more')!.textContent).toContain(`Showing the latest ${EVENTS_LOADED} events`);
   });
 
   it('says why a graph has no reading instead of drawing a history for it', () => {

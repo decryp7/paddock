@@ -285,6 +285,9 @@ function clockOf(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** The most alarm or volume rows the engine sends one popup widget (`ALARM_ROWS` and `VOLUME_ROWS` in dyno-core's popover_values); the mock keeps in step. */
+export const POPOVER_LIST_MAX = 200;
+
 const STORE_KEY = 'dyno-mock-widgets';
 
 /** Options of the mock's widgets. */
@@ -295,6 +298,8 @@ export interface MockWidgetsOptions {
   popup?: Partial<Record<PopoverKind, MockWidgetState>>;
   /** Show the popup as if the agent had stopped. */
   agentStopped?: boolean;
+  /** Long alarm and volume lists, past the engine's bound (`?lists=long`). */
+  longLists?: boolean;
   /** The engine's golden cases: a dashboard whose layout is a case's items answers that case's gesture as the engine did. */
   gridCases?: readonly GridCase[];
   now?: () => number;
@@ -319,6 +324,7 @@ export class MockWidgets {
   private readonly cases: readonly GridCase[];
   private readonly states: Partial<Record<PopoverKind, MockWidgetState>>;
   private agentStopped: boolean;
+  private readonly longLists: boolean;
   private readonly layoutListeners = new Set<(s: DynoSurface) => void>();
   private readonly valueListeners = new Set<(v: PopoverSurfaceValues) => void>();
 
@@ -328,6 +334,7 @@ export class MockWidgets {
     this.cases = options.gridCases ?? [];
     this.states = { ...options.popup };
     this.agentStopped = options.agentStopped ?? false;
+    this.longLists = options.longLists ?? false;
     this.state = this.load();
     if (this.storage && typeof window !== 'undefined') {
       window.addEventListener('storage', (e) => {
@@ -672,12 +679,20 @@ export class MockWidgets {
       case 'activeAlarms':
         if (state === 'empty') return empty('No active alarms', 'All clear.', 'Open alarms', { openPage: 'alarms' }, true);
         if (state === 'error') return error("Couldn't read alarms", "The alarm store didn't answer.");
-        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }], more: 4 } }, stale);
+        if (this.longLists) {
+          const rows = Array.from({ length: POPOVER_LIST_MAX }, (_, i) => ({ id: i + 1, title: `Invented alarm ${i + 1}: a rather long title that has to be cut short on one line`, level: (['critical', 'warning', 'info'] as const)[i % 3]!, since: at - (i + 1) * 3 * 60_000, acknowledged: i % 4 === 0 }));
+          return ready({ activeAlarms: { rows, more: 5 } }, stale);
+        }
+        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }, { id: 2, title: 'Backup is out of date', level: 'info', since: at - 26 * 3_600_000, acknowledged: true }], more: 0 } }, stale);
       case 'diskSpace': {
         if (state === 'empty') return empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume', 'chooseVolume');
         if (state === 'error') return error("Couldn't read volumes", "The volume list didn't answer.");
         const GB = 1e9;
-        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }], more: 2 } }, stale);
+        if (this.longLists) {
+          const rows = Array.from({ length: 30 }, (_, i) => ({ id: `/Volumes/V${i}`, name: `Invented volume ${i + 1}`, usedPercent: (i * 7) % 100, freeBytes: (100 - ((i * 7) % 100)) * GB, totalBytes: 100 * GB, tone: 'ok' as const, reachable: true }));
+          return ready({ diskSpace: { rows, more: 0 } }, stale);
+        }
+        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }], more: 0 } }, stale);
       }
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);

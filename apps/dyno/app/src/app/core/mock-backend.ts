@@ -109,6 +109,9 @@ import type { DynoBackend, Unsubscribe } from './backend';
 import {
   demoActivity,
   demoAlerts,
+  longActivity,
+  longAlerts,
+  longAnomalies,
   demoAnomalies,
   demoPlugins,
   demoSettings,
@@ -173,6 +176,8 @@ export interface MockOptions {
   holdScans?: boolean;
   /** A destination in every country on the map (`?geo=many`), to see the most arcs it draws. */
   geoMany?: boolean;
+  /** Long activity, alert and issue lists and long popup lists (`?lists=long`), so every widget that can scroll has to. */
+  longLists?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
@@ -232,6 +237,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
     ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
+    ...(q.get('lists') === 'long' ? { longLists: true } : {}),
     ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
     ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
@@ -303,6 +309,7 @@ export class MockBackend implements DynoBackend {
   private processes: MockProcess[];
   private activityLog: ActivityEntry[];
   private alertLog: Alert[];
+  private readonly longLists: boolean;
   private settingsValue: Settings = demoSettings();
   private counters!: MockCounters;
   private startup: StartupEntry[] = demoStartup();
@@ -376,7 +383,7 @@ export class MockBackend implements DynoBackend {
     this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
-    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], ...(options.widgets ?? {}) });
+    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], longLists: options.longLists ?? false, ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
@@ -407,8 +414,9 @@ export class MockBackend implements DynoBackend {
     if (options.wake === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wake: { enabled: false } } };
     if (options.wol === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wol: { ...this.settingsValue.power.wol, enabled: false } } };
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
-    this.activityLog = demoActivity(this.start);
-    this.alertLog = demoAlerts(this.start);
+    this.longLists = options.longLists ?? false;
+    this.activityLog = this.longLists ? [...demoActivity(this.start), ...longActivity(this.start)] : demoActivity(this.start);
+    this.alertLog = this.longLists ? [...demoAlerts(this.start), ...longAlerts(this.start)] : demoAlerts(this.start);
     this.snapshotList = [
       { id: 'snap-1', at: this.start - 3 * 60 * MIN, label: 'Before the build', processCount: this.processes.length - 7 },
       { id: 'snap-2', at: this.start - 20 * MIN, label: 'Morning baseline', processCount: this.processes.length - 2 },
@@ -811,7 +819,7 @@ export class MockBackend implements DynoBackend {
   }
 
   anomalies(): Promise<Anomaly[]> {
-    return this.reply('anomalies', () => demoAnomalies(this.start));
+    return this.reply('anomalies', () => (this.longLists ? [...demoAnomalies(this.start), ...longAnomalies(this.start)] : demoAnomalies(this.start)));
   }
 
   history(range: HistoryRange, end: Timestamp | null): Promise<History> {

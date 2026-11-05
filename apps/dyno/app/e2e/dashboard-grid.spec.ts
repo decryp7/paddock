@@ -226,7 +226,13 @@ test.describe('dashboard grid', () => {
         if (!grip) continue;
         for (const el of cell.querySelectorAll<HTMLElement>('pd-widget-frame *')) {
           if (el.children.length > 0 || !(el.textContent ?? '').trim() || el.closest('.visually-hidden')) continue;
-          const r = el.getBoundingClientRect();
+          // Only what shows: a row of a scrolling list (a virtual list renders a few beyond its edge) that its viewport clips is not under the grip.
+          let r = el.getBoundingClientRect();
+          for (let up = el.parentElement; up && up !== cell; up = up.parentElement) {
+            if (getComputedStyle(up).overflowY === 'visible') continue;
+            const c = up.getBoundingClientRect();
+            r = new DOMRect(Math.max(r.left, c.left), Math.max(r.top, c.top), Math.max(0, Math.min(r.right, c.right) - Math.max(r.left, c.left)), Math.max(0, Math.min(r.bottom, c.bottom) - Math.max(r.top, c.top)));
+          }
           if (r.width === 0 || r.height === 0) continue;
           if (r.left < grip.right && r.right > grip.left && r.top < grip.bottom && r.bottom > grip.top) bad.push(`${cell.getAttribute('data-pd-cell')}: ${(el.textContent ?? '').trim().slice(0, 30)}`);
         }

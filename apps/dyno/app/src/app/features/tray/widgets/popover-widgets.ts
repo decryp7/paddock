@@ -1,7 +1,9 @@
+import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, input, output, viewChildren } from '@angular/core';
 import { PdSkeleton, PdWidget, relativeAgo } from '@decryp7/paddock-ui/widgets';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import type { AlarmRow, AppRow, BackupValue, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
+import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
 import { Sparkline } from '../../../shared/sparkline';
 import { formatCounter } from '../../counters/counters-model';
@@ -28,30 +30,32 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   selector: 'dy-popover-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline],
+  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline, FullTextTip, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
   template: `
     <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" let-value>
       @let a = alarms(value);
-      <ul class="dy-pw-list" aria-label="Active alarms">
-        @for (r of a?.rows ?? skAlarms; track r.id) {
-          <li>
-            <button type="button" class="dy-pw-row dy-pw-alarm" (click)="open('alarms')">
-              <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
-              <span class="dy-pw-grow dy-pw-wrap" pdSkeleton>{{ r.title }}</span>
-              <span class="dy-pw-muted" pdSkeleton>{{ ago(r.since) }}</span>
-              <pd-glyph class="dy-pw-chev" name="chevron-right" [size]="14" />
-            </button>
-          </li>
+      @let rows = a?.rows ?? skAlarms;
+      <cdk-virtual-scroll-viewport class="dy-pw-viewport" [itemSize]="alarmRowPx" role="list" tabindex="0" aria-label="Active alarms" [style.--dy-n]="rows.length">
+        <div *cdkVirtualFor="let r of rows; trackBy: alarmId" class="dy-pw-item" role="listitem">
+          <button type="button" class="dy-pw-row dy-pw-alarm" (click)="open('alarms')">
+            <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
+            <span class="dy-pw-grow" [dyFullText]="r.title" pdSkeleton>{{ r.title }}</span>
+            <span class="dy-pw-muted" pdSkeleton>{{ ago(r.since) }}</span>
+            <pd-glyph class="dy-pw-chev" name="chevron-right" [size]="14" />
+          </button>
+        </div>
+      </cdk-virtual-scroll-viewport>
+      @if (a && a.rows.length > 0) {
+        @if (a.more > 0) {
+          <p class="dy-pw-muted dy-pw-note">Showing the latest {{ a.rows.length }} of {{ a.rows.length + a.more }}.</p>
         }
-      </ul>
-      @if (a && a.more > 0) {
-        <button type="button" class="dy-pw-more" (click)="open('alarms')">+{{ a.more }} more</button>
+        <button type="button" class="dy-pw-more" (click)="open('alarms')">Open alarms</button>
       }
     </ng-template>
 
     <ng-template pdWidget="diskSpace" [pdWidgetOf]="witness" let-value>
       @let d = disks(value);
-      <ul class="dy-pw-list" aria-label="Volumes">
+      <ul class="dy-pw-list dy-pw-scroll" tabindex="0" aria-label="Volumes">
         @for (v of d?.rows ?? skVolumes; track v.id) {
           <li class="dy-pw-vol" [attr.data-tone]="v.tone">
             <span class="dy-pw-vname"><span class="dy-pw-grow" pdSkeleton>{{ v.name }}</span>
@@ -62,7 +66,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         }
       </ul>
       @if (d && d.more > 0) {
-        <p class="dy-pw-muted dy-pw-note">+{{ d.more }} more</p>
+        <p class="dy-pw-muted dy-pw-note">Showing the first {{ d.rows.length }} of {{ d.rows.length + d.more }} volumes.</p>
       }
     </ng-template>
 
@@ -137,14 +141,17 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-row, .dy-pw-plain, .dy-pw-more { all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--pd-radius-control); }
     .dy-pw-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
     .dy-pw-list > li { min-width: 0; }
-    /* An alarm is two lines: its level and age on the first, its title across the whole width on the second (a title squeezed beside the level wrapped to a column of words). */
-    .dy-pw-alarm { display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
+    /* The alarm list scrolls inside a viewport as tall as its rows, up to four; the popover stays as tall as that and no taller, and the wheel passes on at the ends. */
+    .dy-pw-viewport { height: min(calc(var(--dy-n, 1) * 52px), 208px); min-height: 52px; }
+    .dy-pw-viewport:focus-visible, .dy-pw-scroll:focus-visible { outline-offset: -2px; }
+    .dy-pw-item { box-sizing: border-box; height: 52px; padding-bottom: 4px; }
+    .dy-pw-scroll { max-height: 132px; overflow-y: auto; }
+    /* An alarm is two lines: its level and age on the first, its title across the whole width on the second, cut to one line (a title squeezed beside the level wrapped to a column of words). */
+    .dy-pw-alarm { height: 48px; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
     .dy-pw-alarm > .dy-pw-lvl { grid-area: lvl; justify-self: start; }
     .dy-pw-alarm > .dy-pw-muted { grid-area: ago; }
     .dy-pw-alarm > .dy-pw-chev { grid-area: chev; }
     .dy-pw-alarm > .dy-pw-grow { grid-area: title; }
-    /* A title wraps (two lines at most) instead of being cut: the time and chevron keep their place. */
-    .dy-pw-grow.dy-pw-wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .dy-pw-chev { flex: none; color: var(--pd-text-muted); }
     .dy-pw-flag[data-tone='warn'] { background: var(--pd-warning-tint); } .dy-pw-flag[data-tone='bad'] { background: var(--pd-danger-tint); }
     .dy-pw-plain { display: grid; gap: 4px; width: 100%; }
@@ -187,6 +194,9 @@ export class DynoPopoverWidgets {
   /** The type witness of every template: what the area hands each one (`pdWidgetOf`). */
   protected readonly witness: PopoverValue | null = null;
   protected readonly skAlarms = SK_ALARMS;
+  /** An alarm's row height in the virtual viewport, in px (the row, 48, and the gap below it, 4). */
+  protected readonly alarmRowPx = 52;
+  protected readonly alarmId = (_: number, r: AlarmRow) => r.id;
   protected readonly skVolumes = SK_VOLUMES;
   protected readonly skCounters = SK_COUNTERS;
   protected readonly skApps = SK_APPS;
