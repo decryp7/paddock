@@ -205,6 +205,10 @@ pub struct ShellOf<R: Runtime> {
     me: Weak<ShellOf<R>>,
     /// The newest live update, whatever the connection (the dashboard's and the previews' readings).
     last_live: Mutex<Option<LiveUpdate>>,
+    /// When `last_live` arrived, on `clock` (milliseconds); `u64::MAX` before the first.
+    last_live_at: std::sync::atomic::AtomicU64,
+    /// The injected clock (the tray's away delay and how old a reading served to an MCP client may be).
+    clock: Arc<dyn paddock_jobs::Clock>,
     /// A page or Settings section the main window was asked to open and has not taken yet (a window that is still being
     /// created misses the event, so it asks for this when it starts).
     navigation: Mutex<Option<Navigate>>,
@@ -227,6 +231,26 @@ pub struct ShellOf<R: Runtime> {
     power_drawn_at: std::sync::atomic::AtomicI64,
 }
 
+/// The oldest live update an MCP client may be given: three times the slowest pace the agent keeps with no window open (the
+/// unwatched process interval, which the live update carries), so a stopped agent is never read as the current state.
+pub const MAX_LIVE_AGE_MS: u64 = 3 * dyno_core::sampling::UNWATCHED_PROCESS_MS as u64;
+
+/// What a reading tool gets: the newest live update when the agent is connected and the update is recent enough (`age_ms` is how
+/// long ago it arrived, `None` before the first), else the words for the client. Pure, so the age bound is tested directly.
+pub fn fresh_live(connected: bool, last: Option<LiveUpdate>, age_ms: Option<u64>) -> Result<LiveUpdate, String> {
+    if !connected {
+        return Err("Dyno is not connected to its agent, so it has no current readings; try again in a moment.".into());
+    }
+    match (last, age_ms) {
+        (Some(update), Some(age)) if age <= MAX_LIVE_AGE_MS => Ok(update),
+        (Some(_), Some(age)) => Err(format!(
+            "Dyno's newest readings are {} seconds old, so they are not shown as current; try again in a moment.",
+            age / 1000
+        )),
+        _ => Err("Dyno has not received readings from its agent yet; try again in a moment.".into()),
+    }
+}
+
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
     pub fn new(
@@ -241,7 +265,9 @@ impl<R: Runtime> ShellOf<R> {
             pixels,
             tray: Mutex::new(TrayItems::new(items, crate::tray_model::Env::native())),
             open_alarms: Mutex::new(Default::default()),
-            away: crate::tray_away::AwayTimer::new(clock),
+            away: crate::tray_away::AwayTimer::new(clock.clone()),
+            clock,
+            last_live_at: std::sync::atomic::AtomicU64::new(u64::MAX),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
@@ -327,21 +353,20 @@ impl<R: Runtime> ShellOf<R> {
 
     /// Asks the agent for an MCP tool: its answer, or the words to give the client.
     pub fn call_agent(&self, request: Request) -> Result<Reply, String> {
-        let Some(link) = lock(&self.link).clone() else {
+        let Some(link) = lock(&self.link).clone().filter(|l| l.connected()) else {
             return Err("Dyno is not connected to its agent; try again in a moment.".into());
         };
-        link.call(request).map_err(|e| e.message)
+        // Inside the MCP server's own call limit, so a slow agent ends this call before the server abandons it.
+        link.call_within(request, crate::mcp::AGENT_CALL_LIMIT).map_err(|e| e.message)
     }
 
     /// The newest live update the agent pushed, for an MCP reading tool (the same values the window and the tray draw), or the
     /// words for the client when the agent is not connected or has sent none yet.
     pub fn newest_live(&self) -> Result<LiveUpdate, String> {
-        if lock(&self.link).is_none() {
-            return Err("Dyno is not connected to its agent; try again in a moment.".into());
-        }
-        lock(&self.last_live)
-            .clone()
-            .ok_or_else(|| "Dyno has not received readings from its agent yet; try again in a moment.".to_string())
+        let connected = lock(&self.link).as_ref().is_some_and(|l| l.connected());
+        let at = self.last_live_at.load(Ordering::SeqCst);
+        let age_ms = (at != u64::MAX).then(|| self.clock.now_ms().saturating_sub(at));
+        fresh_live(connected, lock(&self.last_live).clone(), age_ms)
     }
 
     /// A Wake entry of the tray menu was chosen: wake the computer (a job the agent runs) or open the Power page.
@@ -730,6 +755,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
             }
         }
         *lock(&self.last_live) = Some(update.clone());
+        self.last_live_at.store(self.clock.now_ms(), Ordering::SeqCst);
         self.popover_tick(&update);
         // With no window open nothing listens: skip serialising a (large) update for nobody.
         if !self.app.webview_windows().is_empty() {
@@ -869,6 +895,41 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
         }
+    }
+}
+
+#[cfg(test)]
+mod fresh_live_tests {
+    use super::*;
+
+    fn update() -> LiveUpdate {
+        let mut system = dyno_platform::fake::quiet_sample(dyno_core::time::Timestamp(1));
+        system.cpu.total = 7.0;
+        LiveUpdate {
+            system,
+            pressure: dyno_core::metrics::MemoryPressure::Normal,
+            top_cpu: vec![],
+            top_memory: vec![],
+            overhead: Default::default(),
+            processes: None,
+            groups: None,
+            other_users: None,
+            via: Default::default(),
+        }
+    }
+
+    #[test]
+    fn readings_are_current_only_while_the_agent_is_connected_and_the_update_is_recent() {
+        assert!(fresh_live(true, Some(update()), Some(0)).is_ok());
+        assert!(fresh_live(true, Some(update()), Some(MAX_LIVE_AGE_MS)).is_ok());
+        let old = fresh_live(true, Some(update()), Some(MAX_LIVE_AGE_MS + 1_000)).unwrap_err();
+        assert!(old.contains("not shown as current"), "{old}");
+        let gone = fresh_live(false, Some(update()), Some(0)).unwrap_err();
+        assert!(
+            gone.contains("not connected"),
+            "an agent that crashed leaves old values behind: {gone}"
+        );
+        assert!(fresh_live(true, None, None).unwrap_err().contains("not received"));
     }
 }
 

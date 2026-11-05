@@ -578,13 +578,18 @@ fn disk_health_that_needs_the_helper_says_so_instead_of_staying_silent() {
     let v = answer(&r, "disks", json!({}));
     assert_eq!(v["health"][0]["available"], json!(false));
     assert!(v["health"][0]["reason"].as_str().unwrap().contains("Administrator readings"));
-    // No forecasts at all: a reason, not an empty list.
+    // No forecasts at all: a reason, not an empty list; the administrator hint only when the helper state says so.
     let mut agent = FakeAgent::new();
     agent.lifespan.forecasts = vec![forecast("Battery", LifeSubject::Battery, 400.0)];
     let r = rig_with(agent, Policy::read_only());
     let v = answer(&r, "disks", json!({}));
     assert_eq!(v["health"]["available"], json!(false));
-    assert!(v["health"]["reason"].as_str().unwrap().contains("Administrator readings"));
+    assert!(!v["health"]["reason"].as_str().unwrap().contains("Administrator readings"), "{v}");
+    let mut agent = FakeAgent::new();
+    agent.lifespan.forecasts = vec![forecast("Battery", LifeSubject::Battery, 400.0)];
+    agent.live.as_mut().unwrap().via.processes = ReadVia::needs_admin("Needs the helper");
+    let v = answer(&rig_with(agent, Policy::read_only()), "disks", json!({}));
+    assert!(v["health"]["reason"].as_str().unwrap().contains("Administrator readings"), "{v}");
 }
 
 #[test]
@@ -991,4 +996,91 @@ fn every_call_is_audited_with_tool_arguments_size_and_outcome_but_never_the_outp
         !dump.contains("Safari") && !dump.contains("Macintosh"),
         "the audit never holds output: {dump}"
     );
+}
+
+#[test]
+fn disks_never_carry_a_user_name_from_a_mount_point_or_a_label() {
+    let mut agent = FakeAgent::new();
+    agent.live.as_mut().unwrap().system.disks = vec![
+        DiskSample {
+            id: "a".into(),
+            name: "/media/alice/KINGSTON".into(),
+            mount: "/media/alice/KINGSTON".into(),
+            total: 10,
+            free: 5,
+            removable: true,
+        },
+        DiskSample {
+            id: "b".into(),
+            name: "Home".into(),
+            mount: "/home/alice/data".into(),
+            total: 10,
+            free: 5,
+            removable: false,
+        },
+        DiskSample {
+            id: "c".into(),
+            name: "System".into(),
+            mount: "C:\\".into(),
+            total: 10,
+            free: 5,
+            removable: false,
+        },
+        DiskSample {
+            id: "d".into(),
+            name: "C:\\Users\\alice\\vol".into(),
+            mount: "/".into(),
+            total: 10,
+            free: 5,
+            removable: false,
+        },
+    ];
+    let v = answer(&rig_with(agent, Policy::read_only()), "disks", json!({}));
+    assert!(!v.to_string().to_lowercase().contains("alice"), "{v}");
+    assert!(v["volumes"][0].get("mount").is_none() && v["volumes"][1].get("mount").is_none());
+    assert_eq!(v["volumes"][2]["mount"], "C:\\");
+    assert_eq!(v["volumes"][0]["name"], "/media/<user>/KINGSTON");
+}
+
+#[test]
+fn no_volumes_or_sensor_readings_say_why_instead_of_an_empty_list() {
+    let mut agent = FakeAgent::new();
+    agent.live.as_mut().unwrap().system.disks = vec![];
+    let v = answer(&rig_with(agent, Policy::read_only()), "disks", json!({}));
+    assert_eq!(v["volumes"]["available"], json!(false));
+    let mut agent = FakeAgent::new();
+    let live = agent.live.as_mut().unwrap();
+    live.system.temperatures = Reading::Available(vec![]);
+    live.system.fans = Reading::Available(vec![]);
+    let v = answer(&rig_with(agent, Policy::read_only()), "sensors", json!({}));
+    assert_eq!(v["temperatures"]["available"], json!(false));
+    assert_eq!(v["fans"]["available"], json!(false));
+}
+
+#[test]
+fn alarm_titles_carry_no_port_number() {
+    let mut agent = FakeAgent::new();
+    agent.alarms = vec![alarm(1, "network.listener", "Editor started listening on port 8080")];
+    let v = answer(&rig_with(agent, Policy::read_only()), "alarms", json!({}));
+    assert_eq!(v["active"][0]["title"], "Editor started listening");
+}
+
+#[test]
+fn an_answer_over_the_byte_bound_is_cut_to_valid_json_that_says_so() {
+    let rows = |n: usize| {
+        (0..n)
+            .map(|i| json!({"label": format!("row {i} {}", "x".repeat(200)), "n": i}))
+            .collect::<Vec<_>>()
+    };
+    let mut v = json!({"a": {"readings": rows(200)}, "b": rows(80), "takenAtMs": 5});
+    super::fit(&mut v);
+    let text = v.to_string();
+    assert!(text.len() < super::MAX_BYTES, "{}", text.len());
+    assert!(serde_json::from_str::<Value>(&text).is_ok());
+    assert!(v["truncated"].is_string(), "the answer says it was cut");
+    assert_eq!(v["takenAtMs"], 5);
+    assert!(!v["a"]["readings"].as_array().unwrap().is_empty() && !v["b"].as_array().unwrap().is_empty());
+    let mut small = json!({"a": [1, 2, 3]});
+    super::fit(&mut small);
+    assert!(small.get("truncated").is_none(), "a small answer is untouched");
 }

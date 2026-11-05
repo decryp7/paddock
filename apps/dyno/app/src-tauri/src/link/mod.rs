@@ -421,6 +421,13 @@ impl AgentLink {
     /// Sends one request and returns the reply. A `Subscribe` is not forwarded as is: it is a window's wish
     /// ([`AgentLink::set_detail`]). Never call it on the owner thread: it may wait for the connection.
     pub fn call(&self, request: Request) -> Result<Reply, CommandError> {
+        let timeout = timeout_for(&request);
+        self.call_within(request, timeout)
+    }
+
+    /// [`AgentLink::call`] with the caller's own time limit (an MCP tool must answer inside the server's call limit, or the server
+    /// abandons the call and the thread stays blocked here).
+    pub fn call_within(&self, request: Request, timeout: Duration) -> Result<Reply, CommandError> {
         debug_assert!(
             std::thread::current().name() != Some("dyno-link"),
             "a request on the supervisor's owner thread would block it"
@@ -429,7 +436,6 @@ impl AgentLink {
         let Some(peer) = self.peer_or_wait() else {
             return Err(self.failed(&name, CommandError::unavailable(), None));
         };
-        let timeout = timeout_for(&request);
         let mut chain = None;
         let result = match peer.call(Message::Request(Box::new(request)), timeout) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),

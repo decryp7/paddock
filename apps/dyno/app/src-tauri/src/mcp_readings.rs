@@ -7,7 +7,8 @@
 //! the names, long lists cut to a bound, a reason wherever a reading is not available.
 //!
 //! What the client never gets (rule 56, the output goes to an AI client): command lines, user names, executable paths, the host
-//! name, network addresses, alarm details and alarm keys (they carry paths). Process rows hold a name, the main process id and
+//! name, network addresses, port numbers, alarm details and alarm keys (they carry paths). Free text that is the user's own (a volume
+//! label, a custom alarm rule's name) is passed through, with the user-name segment of any home or media path replaced. Process rows hold a name, the main process id and
 //! numbers. Every list has a row bound and every answer a byte bound. The server logs each call (tool, client, duration, outcome,
 //! size; never the output) and keeps it in the audit log the settings page shows.
 
@@ -153,11 +154,57 @@ fn read(
 }
 
 /// An answer: the JSON as the text a model reads and as structured data.
-fn answer(v: Value) -> ToolOutput {
+fn answer(mut v: Value) -> ToolOutput {
+    fit(&mut v);
     ToolOutput {
         text: v.to_string(),
         structured: Some(v),
         next_cursor: None,
+    }
+}
+
+/// Keeps the answer under the byte bound as valid JSON: while it is too big, the longest list is cut in half and the answer says
+/// `truncated`. (The server would otherwise cut the text mid-value.)
+fn fit(v: &mut Value) {
+    const ROOM: usize = MAX_BYTES - 512;
+    let mut cut = false;
+    while v.to_string().len() > ROOM {
+        let Some(list) = longest_list(v) else { break };
+        if list.len() <= 1 {
+            break;
+        }
+        list.truncate(list.len() / 2);
+        cut = true;
+    }
+    if cut {
+        if let Some(o) = v.as_object_mut() {
+            o.insert(
+                "truncated".into(),
+                json!("The answer was cut to fit; ask for fewer rows or a narrower query."),
+            );
+        }
+    }
+}
+
+fn longest_list(v: &mut Value) -> Option<&mut Vec<Value>> {
+    match v {
+        Value::Array(a) => {
+            let best = a.iter().map(longest_len).max().unwrap_or(0);
+            if a.len() >= best {
+                return Some(a);
+            }
+            a.iter_mut().max_by_key(|x| longest_len(x)).and_then(longest_list)
+        }
+        Value::Object(o) => o.values_mut().max_by_key(|x| longest_len(x)).and_then(longest_list),
+        _ => None,
+    }
+}
+
+fn longest_len(v: &Value) -> usize {
+    match v {
+        Value::Array(a) => a.len().max(a.iter().map(longest_len).max().unwrap_or(0)),
+        Value::Object(o) => o.values().map(longest_len).max().unwrap_or(0),
+        _ => 0,
     }
 }
 
@@ -193,7 +240,53 @@ fn word<'a>(args: &'a Value, key: &str, allowed: &[&'a str], default: &'a str) -
 
 /// Text for a client: control characters removed, cut to [`MAX_TEXT`] characters.
 fn clean(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control()).take(MAX_TEXT).collect()
+    let s: String = s.chars().filter(|c| !c.is_control()).collect();
+    hide_user(&s).chars().take(MAX_TEXT).collect()
+}
+
+/// Replaces the user-name segment of any home or media path in free text (`/Users/bob/x`, `/home/bob`, `/media/bob/DISK`,
+/// `/run/media/bob`, `C:\Users\bob`) with `<user>`: a volume label or a rule's text can carry one, and a client never gets a user name.
+fn hide_user(s: &str) -> String {
+    const PREFIXES: [&str; 5] = ["/Users/", "/home/", "/media/", "/run/media/", "\\Users\\"];
+    let mut out = s.to_string();
+    for prefix in PREFIXES {
+        let lower_prefix = prefix.to_ascii_lowercase();
+        let mut from = 0;
+        while let Some(i) = out.to_ascii_lowercase()[from..].find(&lower_prefix).map(|i| i + from) {
+            let start = i + prefix.len();
+            let end = out[start..].find(['/', '\\', ' ', '"', '\'']).map_or(out.len(), |e| start + e);
+            if start < end && &out[start..end] != "<user>" {
+                out.replace_range(start..end, "<user>");
+            }
+            from = start;
+        }
+    }
+    out
+}
+
+/// A mount point a client may see: `/` or a drive letter. Any other mount point is a path (`/media/bob/DISK`, `/Volumes/Work`)
+/// that can carry a user name or a label, so it is left out.
+fn public_mount(mount: &str) -> Option<String> {
+    let m = mount.trim();
+    let bytes = m.as_bytes();
+    let drive = bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || (bytes.len() == 3 && (bytes[2] == b'\\' || bytes[2] == b'/')));
+    (m == "/" || drive).then(|| m.to_string())
+}
+
+/// Removes " on port 1234" from an alarm's title: a client gets the program, never a port number.
+fn no_port(title: &str) -> String {
+    let mut out = title.to_string();
+    while let Some(i) = out.find(" on port ") {
+        let digits = out[i + 9..].chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 {
+            break;
+        }
+        out.replace_range(i..i + 9 + digits, "");
+    }
+    out
 }
 
 /// A number rounded to one decimal (the pages show one).
@@ -395,10 +488,14 @@ fn disks(calls: &Arc<dyn AgentCalls>) -> Result<Value, ToolError> {
         .take(MAX_ITEMS)
         .map(|d| {
             let used = d.total.saturating_sub(d.free);
-            json!({
-                "name": clean(&d.name), "mount": clean(&d.mount), "totalBytes": d.total, "freeBytes": d.free,
+            let mut v = json!({
+                "name": clean(&d.name), "totalBytes": d.total, "freeBytes": d.free,
                 "usedBytes": used, "usedPercent": percent(used, d.total), "removable": d.removable,
-            })
+            });
+            if let Some(m) = public_mount(&d.mount) {
+                v["mount"] = json!(m);
+            }
+            v
         })
         .collect();
     let health = match lifespan(calls) {
@@ -411,12 +508,23 @@ fn disks(calls: &Arc<dyn AgentCalls>) -> Result<Value, ToolError> {
                 .map(health_row)
                 .collect();
             if rows.is_empty() {
-                not_available(&format!("Dyno has no health reading for these drives. {NEEDS_ADMIN}"))
+                let extra = [&l.via.processes, &l.via.temperatures]
+                    .iter()
+                    .find_map(|v| v.reason().map(|_| NEEDS_ADMIN));
+                not_available(&format!(
+                    "Dyno has no health reading for these drives.{}",
+                    extra.map_or(String::new(), |e| format!(" {e}"))
+                ))
             } else {
                 Value::Array(rows)
             }
         }
         Err(why) => not_available(&why),
+    };
+    let volumes = if volumes.is_empty() {
+        not_available("Dyno has not found any volumes on this computer.")
+    } else {
+        Value::Array(volumes)
     };
     Ok(json!({
         "volumes": volumes,
@@ -539,7 +647,7 @@ fn network_summary(calls: &Arc<dyn AgentCalls>) -> Result<Value, ToolError> {
 
 fn alarm_row(a: &Alarm) -> Value {
     json!({
-        "id": a.id, "rule": clean(&a.rule), "severity": severity_word(a.severity), "state": state_word(a.state), "title": clean(&a.title),
+        "id": a.id, "rule": clean(&a.rule), "severity": severity_word(a.severity), "state": state_word(a.state), "title": clean(&no_port(&a.title)),
         "firstSeenMs": a.first_seen.millis(), "lastSeenMs": a.last_seen.millis(), "repeatCount": a.repeat_count,
         "currentValue": a.current_value.map(r1), "muted": a.muted, "chattering": a.chattering,
     })
@@ -548,7 +656,7 @@ fn alarm_row(a: &Alarm) -> Value {
 fn change_row(c: &AlarmChange) -> Value {
     json!({
         "atMs": c.at.millis(), "change": change_word(c.kind), "alarmId": c.alarm.id, "rule": clean(&c.alarm.rule),
-        "severity": severity_word(c.alarm.severity), "title": clean(&c.alarm.title),
+        "severity": severity_word(c.alarm.severity), "title": clean(&no_port(&c.alarm.title)),
     })
 }
 
@@ -714,6 +822,9 @@ fn sensors(calls: &Arc<dyn AgentCalls>) -> Result<Value, ToolError> {
     let l = live(calls)?;
     let s = &l.system;
     let temperatures = match &s.temperatures {
+        Reading::Available(t) if t.is_empty() => {
+            not_available(&with_via("This computer reports no temperature sensors.", &l.via.temperatures))
+        }
         Reading::Available(t) => json!({"readings": t.iter().take(MAX_ITEMS).map(|t| {
             let mut v = json!({"label": clean(&t.label), "celsius": r1(f64::from(t.celsius))});
             if let Some(c) = t.critical {
@@ -724,6 +835,7 @@ fn sensors(calls: &Arc<dyn AgentCalls>) -> Result<Value, ToolError> {
         Reading::Unavailable(why) => not_available(&with_via(why, &l.via.temperatures)),
     };
     let fans = match &s.fans {
+        Reading::Available(f) if f.is_empty() => not_available(&with_via("This computer reports no fans.", &l.via.temperatures)),
         Reading::Available(f) => {
             json!({"readings": f.iter().take(MAX_ITEMS).map(|f| json!({"label": clean(&f.label), "rpm": f.rpm})).collect::<Vec<_>>()})
         }
