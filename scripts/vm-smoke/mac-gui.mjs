@@ -17,8 +17,9 @@ export class MacGui {
   }
 
   axCmd(args) { return `${this.ax} ${args}`; }
-  async has(app, re, role = 'AXButton') { return (await this.g.exec(this.axCmd(`has ${sq(app)} ${sq(re)} ${role}`))).code === 0; }
-  async press(app, re, role = 'AXButton') { return (await this.g.exec(this.axCmd(`press ${sq(app)} ${sq(re)} ${role}`))).code === 0; }
+  async has(app, re, role = 'AXButton', nth = 0) { return (await this.g.exec(this.axCmd(`has ${sq(app)} ${sq(re)} ${role} ${nth}`))).code === 0; }
+  /** `nth`: the n-th match (0-based), for a name that two elements share (two dashboard widgets called CPU). */
+  async press(app, re, role = 'AXButton', nth = 0) { return (await this.g.exec(this.axCmd(`press ${sq(app)} ${sq(re)} ${role} ${nth}`))).code === 0; }
 
   async waitFor(fn, guardMs) {
     const t0 = this.g.now();

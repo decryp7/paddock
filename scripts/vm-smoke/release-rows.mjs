@@ -39,6 +39,13 @@ export function judgeMacReopen(f) {
 }
 
 /**
+ * THE ONE LINE: flip this to `true` when fix/dyno-mcp-keys-file has merged. The keychain row is then judged (pass = a window after the update, fail = none, with the
+ * positive control still first) and manifest.mjs requires it for a macOS power run. While `false` it is only a measurement (below) that cannot turn a run red.
+ */
+export const KEYCHAIN_ROW_REQUIRED = false;
+const rowTitle = (required) => (required ? ROW_TITLES.keychainUpdate : ROW_TITLES.keychainOtherBuild);
+
+/**
  * MEASUREMENT, not a release row: a key the app made itself in build A (so the item's partition names A's signing identity), then build B installed over it:
  * does B show a window, and how soon? Today B blocks on the keychain before any window (measured 2026-11-05: no window within 45 s, the main thread in
  * SecKeychainFindGenericPassword, a "Dyno wants to use your confidential information" sheet). That is a PRODUCT bug whose fix is coming separately.
@@ -47,9 +54,10 @@ export function judgeMacReopen(f) {
  * fix lands, its owner turns this into a judged row (pass = a window within the limit they name) and adds it to the manifest.
  * `p`: { windowSeen: boolean|null (null: the probe could not look), windowMs: number|null, sheetSeen: boolean|null, guardMs }.
  */
-export function judgeKeychainOtherBuild(p) {
-  const title = ROW_TITLES.keychainOtherBuild;
+export function judgeKeychainOtherBuild(p, required = KEYCHAIN_ROW_REQUIRED) {
+  const title = rowTitle(required);
   if (p.windowSeen === null || p.windowSeen === undefined) return { title, status: 'not-measured', cls: 'check', summary: 'not measured: the window probe could not look (check broken)', checks: [{ ok: false, kind: 'check', detail: 'the window probe returned no answer' }], evidence: [] };
+  if (required) return makeResult(title, [{ ok: p.windowSeen === true, detail: p.windowSeen ? `a window appeared ${(p.windowMs / 1000).toFixed(1)} s after the update` : `no window within ${(p.guardMs / 1000).toFixed(0)} s of the update (the keychain sheet ${p.sheetSeen ? 'WAS' : 'was not'} on screen)` }], [], 'the updated build shows a window with a key the earlier build made');
   const said = p.windowSeen ? `a window appeared after ${(p.windowMs / 1000).toFixed(1)} s` : `no window within the ${(p.guardMs / 1000).toFixed(0)} s guard`;
   const sheet = p.sheetSeen === null || p.sheetSeen === undefined ? 'the keychain sheet was not looked for' : `the keychain sheet ${p.sheetSeen ? 'WAS' : 'was not'} on screen`;
   return {
@@ -64,8 +72,8 @@ export function judgeKeychainOtherBuild(p) {
  * The POSITIVE CONTROL comes first (ER-33): build A, which made the key, is reopened and must show a window; if it does not, the probe or the key is broken and the
  * step is "check broken", never a statement about build B. Any primitive that throws is also a broken check.
  */
-export async function keychainOtherBuildStep(p, guardMs = 45_000) {
-  const broken = (why) => ({ title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${String(why).slice(0, 180)} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(why).slice(0, 220) }], evidence: [] });
+export async function keychainOtherBuildStep(p, guardMs = 45_000, required = KEYCHAIN_ROW_REQUIRED) {
+  const broken = (why) => ({ title: rowTitle(required), status: 'not-measured', cls: 'check', summary: `not measured: ${String(why).slice(0, 180)} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(why).slice(0, 220) }], evidence: [] });
   const waitWindow = async () => {
     const t0 = p.now();
     while (p.now() - t0 < guardMs) { if (await p.windowVisible()) return p.now() - t0; await p.sleep(1000); }
@@ -79,7 +87,7 @@ export async function keychainOtherBuildStep(p, guardMs = 45_000) {
     await p.installBuildB();
     await p.openApp();
     const windowMs = await waitWindow();
-    const r = judgeKeychainOtherBuild({ windowSeen: windowMs !== null, windowMs, sheetSeen: await p.sheetVisible(), guardMs });
+    const r = judgeKeychainOtherBuild({ windowSeen: windowMs !== null, windowMs, sheetSeen: await p.sheetVisible(), guardMs }, required);
     return { ...r, summary: `${r.summary}; positive control: build A's own key gave a window after ${(control / 1000).toFixed(1)} s`, checks: [{ ok: true, info: true, detail: `positive control: build A reopened with its own key, window after ${(control / 1000).toFixed(1)} s` }, ...r.checks] };
   } catch (e) {
     return broken(e.message ?? e);
@@ -99,6 +107,7 @@ export const ROW_TITLES = {
   secondUser: 'Release row: a second user\'s session sees "An update is being installed"',
   killInstaller: 'Release row: killing the installer on the fixed build gives "Not installed"',
   installAgain: 'Release row: install again works',
+  keychainUpdate: 'Release row: an update keeps the app openable with a key the earlier build made',
   keychainOtherBuild: 'Measurement (not a release row, not in the manifest): a key made by build A, build B installed over it, does B show a window',
 };
 

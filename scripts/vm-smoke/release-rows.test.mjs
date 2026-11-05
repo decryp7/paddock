@@ -74,3 +74,20 @@ test('keychain other-build driver: control first, then build B; a failed control
   assert.equal(broken.checks[0].kind, 'check');
   assert.match(broken.summary, /dmg missing/);
 });
+
+test('keychain row required mode: a window after the update passes, none fails, the control still comes first; the flag is off and the manifest ignores the row until then', async () => {
+  const { KEYCHAIN_ROW_REQUIRED } = await import('./release-rows.mjs');
+  assert.equal(KEYCHAIN_ROW_REQUIRED, false, 'flip it only when fix/dyno-mcp-keys-file has merged');
+  let t = 0, bInstalled = false;
+  const mk = (bWindow) => ({ now: () => t, sleep: async (ms) => { t += ms; }, createKeyInBuildA: async () => {}, reopenSameBuild: async () => { t = 0; }, installBuildB: async () => { bInstalled = true; t = 0; },
+    openApp: async () => { t = 0; }, windowVisible: async () => (bInstalled ? bWindow && t >= 3000 : t >= 2000), sheetVisible: async () => !bWindow });
+  const ok = await keychainOtherBuildStep(mk(true), 10_000, true);
+  assert.equal(ok.status, 'pass'); assert.match(ok.title, /^Release row: an update keeps the app openable/);
+  bInstalled = false;
+  const bad = await keychainOtherBuildStep(mk(false), 10_000, true);
+  assert.equal(bad.status, 'fail'); assert.match(bad.summary, /no window within 10 s of the update.*sheet WAS on screen/);
+  bInstalled = false;
+  const noControl = await keychainOtherBuildStep({ ...mk(true), windowVisible: async () => false }, 3000, true);
+  assert.equal(noControl.status, 'not-measured', 'a failed positive control is never a fail of the build');
+  assert.equal(noControl.cls, 'check');
+});

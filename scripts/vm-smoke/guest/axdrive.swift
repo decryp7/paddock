@@ -4,7 +4,7 @@
 //
 //   axdrive windows                      on-screen windows (owner, pid, layer, title, bounds) from CGWindowList, as TSV
 //   axdrive tree <app> [depth]           the AX tree of an app (name or bundle id or pid), for finding elements
-//   axdrive press <app> <regex> [role]   AXPress the first element (default role AXButton) whose title/description matches
+//   axdrive press <app> <regex> [role] [n]   AXPress the first element (default role AXButton) whose title/description matches
 //   axdrive has <app> <regex> [role]     exit 0 if such an element exists (prints its path), else 1
 //   axdrive trusted                      exit 0 if this process is AX-trusted
 // Build (host): swiftc -O -o axdrive axdrive.swift ; never run it on the host.
@@ -83,10 +83,11 @@ case "tree", "press", "has":
     guard args.count >= 4, let re = try? NSRegularExpression(pattern: args[3]) else { die("need a regex") }
     let role = args.count >= 5 ? args[4] : kAXButtonRole
     var found: AXUIElement?; var where_ = ""
+    var skip = args.count >= 6 ? Int(args[5]) ?? 0 : 0 // the n-th match, 0-based (a dashboard can hold two widgets with one name)
     _ = walk(root, depth: 0, maxDepth: 30, path: "") { e, p, _ in
       guard str(e, kAXRoleAttribute) == role else { return false }
       let l = label(e)
-      if matches(re, e) { found = e; where_ = "\(p)  [\(l)]"; return true }
+      if matches(re, e) { if skip == 0 { found = e; where_ = "\(p)  [\(l)]"; return true }; skip -= 1 }
       return false
     }
     guard let el = found else { print("not found"); exit(1) }
@@ -111,12 +112,13 @@ case "setfield":
   let r = AXUIElementSetAttributeValue(fields[n], kAXValueAttribute as CFString, value as CFString)
   print(r == .success ? "set" : "set failed: \(r.rawValue)"); exit(r == .success ? 0 : 5)
 case "center":
-  // axdrive center <app> <regex> <role>: prints "x y" of the element's centre in screen points.
+  // axdrive center <app> <regex> <role> [n]: prints "x y" of the element's centre in screen points.
   guard args.count >= 5, let pid = pidFor(args[2]), let re = try? NSRegularExpression(pattern: args[3]) else { die("usage: center <app> <regex> <role>") }
   var found: AXUIElement?
+  var skip = args.count >= 6 ? Int(args[5]) ?? 0 : 0 // the n-th match, 0-based (an open list repeats the text of the box that opened it)
   _ = walk(AXUIElementCreateApplication(pid), depth: 0, maxDepth: 30, path: "") { e, _, _ in
     guard str(e, kAXRoleAttribute) == args[4] else { return false }
-    if matches(re, e) { found = e; return true }; return false
+    if matches(re, e) { if skip == 0 { found = e; return true }; skip -= 1 }; return false
   }
   guard let el = found, let pv = attr(el, kAXPositionAttribute), let sv = attr(el, kAXSizeAttribute) else { print("not found"); exit(1) }
   var p = CGPoint.zero, s = CGSize.zero

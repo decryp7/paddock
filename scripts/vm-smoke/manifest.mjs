@@ -3,6 +3,7 @@
 // Adding a step to a suite adds a row here; coverage cannot shrink silently. `release` (default) requires the full set whatever the flags say;
 // `partial` requires only what the flags ask for and the result says it is not a release verdict.
 import { READINGS } from './helper-readings.mjs';
+import { KEYCHAIN_ROW_REQUIRED } from './release-rows.mjs';
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const row = (id, re) => ({ id, match: re });
@@ -13,7 +14,8 @@ const RULE71 = [row('mcp', /^Rule 71: Dyno MCP from outside/), row('quit-stop', 
 // Release rows collected for 1.1.0 (release-rows.mjs): a row nobody drives is a not-measured step with its reason, so the run is INCOMPLETE, never PASS.
 const hung = row('hung-page', /^Release row: a hung or paused visible page/);
 const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), hung, row('second-user', /^Release row: a second user/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
-const ROWS_MAC = [row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung];
+const ROWS_MAC = [row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung,
+  ...(KEYCHAIN_ROW_REQUIRED ? [row('keychain-update', /^Release row: an update keeps the app openable with a key the earlier build made/)] : [])];
 const ROWS_LINUX = [row('linux-log-dir', /^Release row: Linux uninstall leaves/), hung];
 
 const MAC_START = [

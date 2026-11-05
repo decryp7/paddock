@@ -56,7 +56,7 @@ export const READINGS = [
     expect: { linux: [/This computer/] }, none: [/needs the helper/i],
     // At least one finding with a verdict word; only "Can't tell" is the VM saying it cannot read the settings: not measured, not a pass.
     value: { linux: [/\b(?:Fine|Needs a change)\b/] }, notMeasured: { linux: { when: (t) => /Can't tell/.test(t) && !/\b(?:Fine|Needs a change)\b/.test(t), why: 'the VM exposes no wake settings (every finding says Can\'t tell)' } } },
-  { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on the dashboard widget', os: ['macos'], page: 'dashboard', fullText: 4000,
+  { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on a Temperature widget', os: ['macos'], page: 'dashboard', fullText: 4000,
     expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i],
     // Measured 2026-11-05 on run-7575: none of the 13 pages and their tabs shows this reason, and the dashboard's default layout has no temperature widget (the widget palette is generic: Graph, Big number, Bars, Ring, driven from the Counters page).
     // The probe cannot see the thing (ER-33), so the row is not measured, never a pass or a fail, until a control adds a temperature counter widget.
