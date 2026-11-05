@@ -500,11 +500,11 @@ impl AgentLink {
         let me = self.clone();
         let spawned = std::thread::Builder::new().name("dyno-detail".into()).spawn(move || {
             if let Err(e) = me.sync_detail() {
-                logging::info(&format!("the detail subscription could not be brought up to date: {}", e.message));
+                logging::warn(&format!("the detail subscription could not be brought up to date: {}", e.message));
             }
         });
         if let Err(e) = spawned {
-            logging::info(&format!("the detail thread could not be started: {e}"));
+            logging::warn(&format!("the detail thread could not be started: {e}"));
         }
     }
 
@@ -522,7 +522,7 @@ impl AgentLink {
                 let Some(instead) = older_agent_fallback(wanted, &e) else {
                     return Err(e);
                 };
-                logging::info(&format!("the agent cannot read the {wanted:?} live level; asking for {instead:?}"));
+                logging::warn(&format!("the agent cannot read the {wanted:?} live level; asking for {instead:?}"));
                 self.call(Request::Subscribe { detail: instead })?;
             }
         }
@@ -535,7 +535,7 @@ impl AgentLink {
         *lock(&self.sent) = None;
         self.sink.connection_made();
         if let Err(e) = self.sync_detail() {
-            logging::info(&format!("could not subscribe: {}", e.message));
+            logging::warn(&format!("could not subscribe: {}", e.message));
         }
         self.sink.connected(self);
     }

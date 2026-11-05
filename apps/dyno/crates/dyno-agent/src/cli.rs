@@ -259,7 +259,11 @@ fn run() -> Result<(), StartError> {
     spawn_signal_watch();
     let (platform, details) = platforms();
     // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
+    let root = dirs.root().to_path_buf();
     let running = Running::start_os(dirs, platform, details, reveal())?;
+    // The lock is held, so this is the one agent: say whether the last one died, and leave this run's marker.
+    let (run_marker, _previous) =
+        paddock_startup::run_marker::begin(&root, "agent", std::process::id(), &paddock_startup::lifecycle::os_probe);
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     log::info!(ElapsedMs = crate::logging::elapsed_ms(), Pid = running.discovery.pid; "Agent running");
     log_socket_view();
@@ -275,6 +279,7 @@ fn run() -> Result<(), StartError> {
     log::info!(Reason = reason; "Agent stopping");
     running.stop();
     STOPPED.store(true, Ordering::SeqCst);
+    run_marker.end();
     log::info!(ElapsedMs = crate::logging::elapsed_ms(); "Agent stopped");
     Ok(())
 }

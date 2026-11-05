@@ -361,7 +361,7 @@ impl Drop for Executor {
 
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
     if let Err(e) = std::thread::Builder::new().name(name.into()).spawn(f) {
-        logging::info(&format!("the {name} thread could not be started: {e}"));
+        logging::warn(&format!("the {name} thread could not be started: {e}"));
     }
 }
 

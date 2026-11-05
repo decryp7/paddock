@@ -29,6 +29,13 @@ pub fn info(message: &str) {
     log::info!(target: "dyno", "{message}");
 }
 
+/// Logs a line at warn: something failed that the app carries on from (a reading that could not be made, a registration that was
+/// refused). A failure message belongs here, not at info, so a log read at Warn shows what went wrong.
+pub fn warn(message: &str) {
+    eprintln!("dyno: {message}");
+    log::warn!(target: "dyno", "{message}");
+}
+
 /// Logs a line at debug (the log file only: it is for following one flow, such as the tray's image sets per tick).
 pub fn debug(message: &str) {
     log::debug!(target: "dyno", "{message}");
@@ -73,5 +80,18 @@ mod tests {
         super::info("connected to the agent");
         let lines = c.0.lock().unwrap();
         assert!(lines.iter().any(|l| l == "INFO dyno: connected to the agent"), "{lines:?}");
+    }
+
+    #[test]
+    fn a_failure_is_logged_at_warn() {
+        let c = capture();
+        super::warn("could not read the power state: the agent did not answer");
+        let lines = c.0.lock().unwrap();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "WARN dyno: could not read the power state: the agent did not answer"),
+            "{lines:?}"
+        );
     }
 }

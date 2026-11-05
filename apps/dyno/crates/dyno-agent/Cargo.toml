@@ -21,6 +21,8 @@ dyno-plugin-host.workspace = true
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 # One instance per data folder by a held OS lock, discovery files as hints, and the start judge (ADR 0031).
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+# "Previous run did not end cleanly" for the agent (the run marker; the OS process table says whether the old run is gone).
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["os-probe"] }
 # The clock the benchmark child loop takes (a manual one in tests).
 paddock-bench = { path = "../../../../crates/paddock-bench" }
 # The popup layout's placement ids (family ADR 0035).

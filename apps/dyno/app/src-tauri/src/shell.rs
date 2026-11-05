@@ -277,7 +277,7 @@ impl<R: Runtime> ShellOf<R> {
         if let Some(votes) = lock(&self.votes).clone() {
             let wish = crate::tray_model::shows_apps(&specs).then_some(LiveDetail::Summary);
             if let Err(e) = votes.set_vote(MENU_BAR_VOTER, wish) {
-                logging::info(&format!("could not update the menu bar's live detail: {}", e.message));
+                logging::warn(&format!("could not update the menu bar's live detail: {}", e.message));
             }
         }
         let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
@@ -288,7 +288,7 @@ impl<R: Runtime> ShellOf<R> {
                 .unwrap_or_else(|e| e.into_inner())
                 .unavailable_frames(crate::tray::dark_taskbar());
             if let Err(e) = self.pixels.sync_items(&self.app, &specs, &initial) {
-                logging::info(&format!("could not update the tray items: {e}"));
+                logging::warn(&format!("could not update the tray items: {e}"));
             }
         }
     }
@@ -352,7 +352,7 @@ impl<R: Runtime> ShellOf<R> {
         let _ = std::thread::Builder::new().name("dyno-wol-menu".into()).spawn(move || {
             match link.call(Request::WolWake { id: device, test: false }) {
                 Ok(_) => logging::info(&format!("wake from the tray: device {device} started")),
-                Err(e) => logging::info(&format!("wake from the tray: device {device} failed: {}", e.message)),
+                Err(e) => logging::warn(&format!("wake from the tray: device {device} failed: {}", e.message)),
             }
         });
     }
@@ -384,7 +384,7 @@ impl<R: Runtime> ShellOf<R> {
             .name("dyno-power-menu".into())
             .spawn(move || match link.call(request) {
                 Ok(_) => logging::info(&format!("keep awake from the tray: {id} done")),
-                Err(e) => logging::info(&format!("keep awake from the tray: {id} failed: {}", e.message)),
+                Err(e) => logging::warn(&format!("keep awake from the tray: {id} failed: {}", e.message)),
             });
     }
 
@@ -528,7 +528,7 @@ impl<R: Runtime> ShellOf<R> {
                     lock(&self.popover).on_slow(ask.generation, values.0);
                 }
                 Ok(_) => {}
-                Err(e) => logging::info(&format!("could not read the popup preview: {}", e.message)),
+                Err(e) => logging::warn(&format!("could not read the popup preview: {}", e.message)),
             }
         }
         self.popover_snapshot()
@@ -550,7 +550,7 @@ impl<R: Runtime> ShellOf<R> {
     pub fn navigate(&self, to: Navigate) {
         *lock(&self.navigation) = Some(to);
         if let Err(e) = self.app.emit_to(paddock_commands::labels::MAIN_LABEL, events::NAVIGATE, to) {
-            logging::info(&format!("could not emit {}: {e}", events::NAVIGATE));
+            logging::warn(&format!("could not emit {}: {e}", events::NAVIGATE));
         }
     }
 
@@ -608,7 +608,7 @@ impl<R: Runtime> ShellOf<R> {
                 Ok(Reply::PopoverValues(values)) => me.popover_answered(ask.generation, values.0),
                 Ok(_) => lock(&me.popover).force_refresh(),
                 Err(e) => {
-                    logging::info(&format!("could not read the popup values: {}", e.message));
+                    logging::warn(&format!("could not read the popup values: {}", e.message));
                     lock(&me.popover).force_refresh();
                 }
             }
@@ -638,7 +638,7 @@ impl<R: Runtime> ShellOf<R> {
             .spawn(move || match link.call(Request::WidgetLayout { surface }) {
                 Ok(Reply::WidgetLayout(view)) => me.layout_read(*view),
                 Ok(_) => {}
-                Err(e) => logging::info(&format!("could not read the {surface:?} layout: {}", e.message)),
+                Err(e) => logging::warn(&format!("could not read the {surface:?} layout: {}", e.message)),
             });
     }
 
@@ -674,7 +674,7 @@ impl<R: Runtime> ShellOf<R> {
 
     fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
         if let Err(e) = self.app.emit(event, payload) {
-            logging::info(&format!("could not emit {event}: {e}"));
+            logging::warn(&format!("could not emit {event}: {e}"));
         }
     }
 }
@@ -748,7 +748,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 use tauri_plugin_notification::NotificationExt;
                 let a = &change.alarm;
                 if let Err(e) = self.app.notification().builder().title(&a.title).body(&a.detail).show() {
-                    logging::info(&format!("could not show a notification: {e}"));
+                    logging::warn(&format!("could not show a notification: {e}"));
                 }
             }
         }
@@ -783,7 +783,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 .body(body)
                 .show()
             {
-                logging::info(&format!("could not show the countdown notification: {e}"));
+                logging::warn(&format!("could not show the countdown notification: {e}"));
             }
         }
         *lock(&self.power) = Some(view.clone());
@@ -843,12 +843,12 @@ impl<R: Runtime> Sink for ShellOf<R> {
         match link.call(Request::PowerState) {
             Ok(Reply::Power(v)) => self.power_changed(*v),
             Ok(_) => {}
-            Err(e) => logging::info(&format!("could not read the power state: {}", e.message)),
+            Err(e) => logging::warn(&format!("could not read the power state: {}", e.message)),
         }
         match link.call(Request::WolDevices) {
             Ok(Reply::Wol(v)) => self.wol_changed(*v),
             Ok(_) => {}
-            Err(e) => logging::info(&format!("could not read the Wake-on-LAN list: {}", e.message)),
+            Err(e) => logging::warn(&format!("could not read the Wake-on-LAN list: {}", e.message)),
         }
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
@@ -856,7 +856,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 let _ = self.settings_changed(&s, link);
             }
             Ok(_) => {}
-            Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
+            Err(e) => logging::warn(&format!("could not read the settings: {}", e.message)),
         }
     }
 }

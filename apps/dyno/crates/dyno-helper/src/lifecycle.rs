@@ -44,6 +44,26 @@ pub fn append(path: &Path, line: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Whether the lifecycle file says the previous run did not finish: its last event is `starting` or `serving` (a run that ends writes
+/// `stopped` or `refused:<kind>` last). A missing or empty file is a first run, not a crash.
+pub fn previous_run_unclean(text: &str) -> bool {
+    text.lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .and_then(|l| l.split_whitespace().nth(1))
+        .is_some_and(|event| event == "starting" || event == "serving")
+}
+
+/// Logs how the previous run ended (a warning when it did not finish); call before recording `starting`.
+pub fn log_previous_run(path: &Path) {
+    match std::fs::read_to_string(path) {
+        Ok(text) if previous_run_unclean(&text) => {
+            log::warn!("Helper: the previous run did not end cleanly (its lifecycle file ends in starting or serving); a power cut, a kill or a crash")
+        }
+        Ok(_) | Err(_) => log::debug!("Helper: the previous run ended cleanly or this is the first"),
+    }
+}
+
 /// Records `event` now; a failure is logged, never raised.
 pub fn record(path: &Path, event: &str) {
     let at = std::time::SystemTime::now()
@@ -86,6 +106,19 @@ mod tests {
         std::os::unix::fs::symlink(&target, &p).unwrap();
         assert!(append(&p, "x").is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
+    }
+
+    #[test]
+    fn a_run_that_never_wrote_stopped_is_an_unclean_previous_run() {
+        assert!(previous_run_unclean("t=1 starting pid=4 version=1\nt=2 serving pid=4 version=1\n"));
+        assert!(previous_run_unclean("t=1 starting pid=4 version=1\n"));
+        assert!(!previous_run_unclean(
+            "t=1 starting pid=4 version=1\nt=2 serving pid=4 version=1\nt=3 stopped pid=4 version=1\n"
+        ));
+        assert!(!previous_run_unclean(
+            "t=1 starting pid=4 version=1\nt=2 refused:NotProtected pid=4 version=1\n"
+        ));
+        assert!(!previous_run_unclean(""), "a first run is not a crash");
     }
 
     #[test]

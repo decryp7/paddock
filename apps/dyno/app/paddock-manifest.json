@@ -34,10 +34,6 @@
       "title": "dy.run-why-slow"
     },
     {
-      "id": "dy.save-diagnostics",
-      "title": "dy.save-diagnostics"
-    },
-    {
       "id": "pd.about.open",
       "title": "pd.about.open"
     },
@@ -318,7 +314,6 @@
     "dy.category.alarms": "Alarms",
     "dy.category.backup": "Backup health",
     "dy.category.dashboard": "Dashboard",
-    "dy.category.diagnostics": "Diagnostics",
     "dy.category.issues": "Issues",
     "dy.category.recorder": "Flight recorder",
     "dy.category.reports": "Reports",
@@ -356,7 +351,6 @@
     "dy.refresh-history": "Refresh history",
     "dy.rescan-issues": "Read the system logs now",
     "dy.run-why-slow": "Run again",
-    "dy.save-diagnostics": "Save bundle…",
     "dy.settings.general": "Dyno",
     "dy.status.agent": "The Dyno agent",
     "dy.web-search.title": "Search the web",

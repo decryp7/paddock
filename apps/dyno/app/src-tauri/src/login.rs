@@ -366,7 +366,7 @@ mod mac {
                 crate::logging::info("moved start at login from the old Dyno.plist to a Login Items entry")
             }
             Ok(_) => {}
-            Err(e) => crate::logging::info(&format!("the old start-at-login file could not be moved: {e}")),
+            Err(e) => crate::logging::warn(&format!("the old start-at-login file could not be moved: {e}")),
         }
     }
 
@@ -506,7 +506,7 @@ mod mac {
     /// Remembers that this version registered the agent (a failure only costs one more re-registration).
     fn record_version() {
         if let Err(e) = record_registered_version(&version_file(), env!("CARGO_PKG_VERSION")) {
-            crate::logging::info(&format!("could not remember the registered agent version: {e}"));
+            crate::logging::warn(&format!("could not remember the registered agent version: {e}"));
         }
     }
 

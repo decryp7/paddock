@@ -84,6 +84,7 @@ pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<Earl
     }
     let log_gate = log.install();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
+    crate::lifecycle::log_previous_run(&paths.lifecycle);
     crate::lifecycle::record(&paths.lifecycle, "starting");
     let result = start(paths, stop, &log_gate, early);
     match &result {
