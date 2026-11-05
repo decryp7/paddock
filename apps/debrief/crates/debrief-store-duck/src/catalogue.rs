@@ -13,7 +13,7 @@
 //!   remove and refresh. A source built with another [`VERSION`] is built again.
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
-use crate::turns::{wait_after, Turn};
+use crate::turns::{wait_after, Gate, Turn};
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -169,6 +169,8 @@ struct Shared {
     /// Whether the thread dropped its connection after the process began to exit (tests).
     #[cfg(test)]
     dropped_while_exiting: AtomicBool,
+    /// Whether anything changed since the last look; without news a turn runs no statement.
+    gate: Gate,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -178,7 +180,12 @@ pub(crate) struct CatalogueService {
 }
 
 impl CatalogueService {
-    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>, heavy: Arc<Mutex<()>>) -> Result<CatalogueService> {
+    pub(crate) fn start(
+        conn: Connection,
+        write_lock: Arc<Mutex<()>>,
+        heavy: Arc<Mutex<()>>,
+        generation: Arc<AtomicU64>,
+    ) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
@@ -190,6 +197,7 @@ impl CatalogueService {
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
             #[cfg(test)]
             dropped_while_exiting: AtomicBool::new(false),
+            gate: Gate::new(generation),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
@@ -221,6 +229,7 @@ impl CatalogueService {
     }
 
     pub(crate) fn wake(&self) {
+        self.shared.gate.news();
         *lock(&self.shared.wake.0) = true;
         self.shared.wake.1.notify_all();
     }
@@ -238,8 +247,13 @@ impl Drop for CatalogueService {
 
 /// One turn: tidy, then build the next source. `_running` proves the exit handler counts its statements.
 fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
+    // Nothing changed since the last look: nothing to tidy and nothing new to build (and no statement to run).
+    if !s.gate.take() {
+        return Ok(Turn::Idle);
+    }
     let todo = {
         let Ok(_writing) = write_lock.try_lock() else {
+            s.gate.news();
             return Ok(Turn::Blocked);
         };
         conn.execute_batch(
@@ -264,6 +278,7 @@ fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
     let Ok(_writing) = write_lock.try_lock() else {
+        s.gate.news();
         return Ok(Turn::Blocked);
     };
     s.unsaved.store(true, Ordering::SeqCst);
@@ -290,6 +305,7 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
                 Turn::Blocked
             }
         };
+        s.gate.after(turn);
         let Some(wait) = wait_after(turn) else { continue };
         if s.unsaved.load(Ordering::SeqCst) && settle(&running, s, conn, write_lock) {
             s.unsaved.store(false, Ordering::SeqCst);
@@ -523,7 +539,6 @@ mod tests {
     /// H6 (docs/research/2026-10-28-cpu-memory.md): a catalogue loop with nothing to do and no news ran three deletes and
     /// a query every turn. An idle turn runs no statement at all.
     #[test]
-    #[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P2, store loops without polling): 100 idle catalogue turns ran 500 statements"]
     fn a_hundred_idle_turns_run_no_statement() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
@@ -537,6 +552,7 @@ mod tests {
             heavy: Arc::new(Mutex::new(())),
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
             dropped_while_exiting: AtomicBool::new(false),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
         };
         let write_lock = Mutex::new(());
         let running = crate::shutdown::Active::enter().expect("the process is not exiting");

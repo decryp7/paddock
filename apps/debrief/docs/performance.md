@@ -83,6 +83,33 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, P2: store loops without polling (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 9a444d0a6 (the P0 tests on `debrief/1.2-int` 852b35ac0) against the P2 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 12-17 during the runs; Dyno release jobs and other agents running
+- **Build:** release; mimalloc not set in the test (the test process's system allocator); libduckdb 2.0.0
+- **Corpus:** the invented `/samples` log folders (about 38 sources), imported once; catalogue and index built
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --run-ignored only --no-capture -E 'test(an_idle_store)'`
+  (`an_idle_store_statements_and_cpu`; `DEBRIEF_IDLE_S` = 130 s, two turns of the loops' 60 s backstop)
+- **Runs:** one run per side (A then B); the 100-turn counts below are deterministic
+- **Numbers:**
+
+  | Measure | Base | P2 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Statements in 130 s of an idle store (DuckDB QueryLog, all connections) | 18 | 0 | 0 | pass |
+  | CPU time of the process in those 130 s | 0.009 s | under 0.001 s | idle at most 0.5 % of a core | pass (both) |
+  | Statements in 100 idle catalogue turns (`catalogue::tests::a_hundred_idle_turns_run_no_statement`) | 500 | 0 | 0 | pass |
+  | Statements in 100 idle index turns (`fts::tests::a_hundred_idle_turns_run_no_statement`) | 400 | 0 | 0 | pass |
+
+- **Memory measure:** not measured (not the question)
+- **Notes:** the base already waits 60 s between idle turns (the `wip/debrief-1.2-lean-2026-11-04` loops), so the CPU
+  difference is small: what P2 removes is the last statement run on a timer, three deletes and a query in the
+  catalogue loop and one in the index loop, every minute. Both loops now look at the database only after a wake-up,
+  or after the store's generation moved (every import, removal, refresh and live-follow step bumps it), or when a
+  turn has to be tried again. The 1.1.1 figure of 500 ms polling is not re-measured here. The names watcher (H2) and
+  the per-pid memory probes (H1, `paddock-proc`) are other idle costs, in P3 and P1.
+
 ### 2026-11-05, Debrief 1.2 wave 0: the failing performance and memory tests (branch `debrief/p0-idle`)
 
 - **Commit:** base `debrief/1.2-int` 852b35ac0; the tests are the P0 and 0.3 commit of `debrief/p0-idle`
