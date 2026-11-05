@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-diag`, `paddock-shell`: the report lists what the user did; every run starts with a line
+- `builtin::Trail` (added by `tauri::Setup::log`) writes `breadcrumbs.json`: the latest 100 breadcrumbs of the log (lines with an `Operation` property), oldest first.
+- `paddock_shell::logging::install` writes the first line of every run: `Starting <app>` with version, OS, architecture, process id and whether the install is portable.
+
+### `paddock-diag::export`, `paddock-startup`: a report without the window
+- New `paddock_diag::export` (`parse`, `resolve`, `write`): `<app> --export-diagnostics [<path.zip>] [--force]` writes the same redacted report as the dialog, with no window; it is the shared form of Debrief's `report/cli.rs` (Debrief migrates later).
+- `paddock_startup::Choice::SaveReport`, `ask::SAVE_REPORT_LABEL`, `Prompt::with_report` and `StartupBuilder::report(hook)`: when an app gives a report hook, the not-responding question offers "Save a problem report…" (a native dialog holds three buttons, so with Safe Mode offered closing the question is Keep Waiting). `Choice` gains a variant: a `match` on it handles `SaveReport`.
+
 ### `paddock-diag`: more personal details and secrets are removed; a crash is reported once; a log that cannot be read is said
 - `Redactor::for_machine` also asks the OS for the machine's name (`gethostname`; a GUI app's environment has no `HOSTNAME`); `Redactor::for_machine_named` takes it as an argument (tests). A profile folder is replaced up to the next separator or quote (names with a space), in any case (`C:\USERS\`) and with doubled backslashes; MAC addresses become `<mac>` (counted under `ip_addresses`).
 - Secrets: `pass`, `pw`, `sig` and `signature` keys, `session-key`, URL credentials of any scheme, the rest of a `password:` line, PEM private key blocks, `ghp_...`, `AKIA...`, `pw_...` and `sk-...` tokens. A secret-named property of a CLEF log line is masked whatever its value type, and nested objects and arrays are walked.

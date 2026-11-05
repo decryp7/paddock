@@ -641,11 +641,50 @@ paths = ["crates/paddock-diag/src/personal.rs"]
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-core/src/diagnostics.rs"]
-  symbols = ["item:Redactor", "item:RedactionCounts", "item:replace_word", "item:replace_profiles", "item:replace_emails", "item:replace_ipv4"]
+  paths = ["apps/pitcrew/crates/pitcrew-core/src/redact.rs"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Found by the 2026-11-05 bundle audit: Pitcrew's secrets and runner-id redaction; paddock-diag's secrets layer is the union of this and Debrief's. Pitcrew moves to paddock-diag's Redactor (its runner UUID pattern is a Redactor::with_pattern)."
+
+[[mechanism]]
+id = "diagnostics-zip"
+title = "Writing a diagnostics zip: files from sections, redacted, bounded, atomically replaced"
+canonical = "paddock-diag"
+paths = ["crates/paddock-diag/src/report.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src-tauri/src/diagnostics.rs"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Found by the 2026-11-05 bundle audit: Pitcrew writes its own zip of the service's sections with a second redaction pass. It becomes paddock-diag sections (the service's sections are Section implementations)."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/activity/report/cli.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Found by the 2026-11-05 bundle audit: Debrief's headless report export is the model for the shared headless export (paddock-diag), which Dyno uses first; Debrief migrates to it later."
+
+[[mechanism]]
+id = "log-tail-reading"
+title = "Reading the end of a log file without reading the file (a seek from the end, cut at a line)"
+canonical = "paddock-diag"
+paths = ["crates/paddock-diag/src/window.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-helper/src/logfile.rs"]
+  symbols = ["item:tail_of_file"]
   owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "personal.rs was ported from this file. Debrief's log redaction (redaction rules over imported logs) is product domain and not listed."
+  delete_by = "dyno-v1.2.0"
+  note = "The helper's LogTail answers lines over its wire, so it keeps its own reader (root's file, 400 character lines); it should call paddock-diag's try_tail and cut lines after."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/snapshots.rs"]
+  symbols = ["item:tail_of"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Found by the 2026-11-05 bundle audit: Debrief's log tail for a snapshot."
 
 [[mechanism]]
 id = "schedules"

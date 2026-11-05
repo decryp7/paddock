@@ -361,6 +361,40 @@ pub mod builtin {
         }
     }
 
+    /// What the user did just before: the latest breadcrumbs of the log (`breadcrumbs.json`). Entries are what was logged, already
+    /// redacted by the log's rules, and the report's redactor runs over them again like over every file.
+    pub struct Trail {
+        log: paddock_log::LogHandle,
+    }
+
+    impl Trail {
+        /// Most entries listed.
+        pub const MAX: usize = 100;
+
+        /// The trail of `log`.
+        pub fn new(log: paddock_log::LogHandle) -> Self {
+            Trail { log }
+        }
+    }
+
+    impl Section for Trail {
+        fn id(&self) -> &str {
+            "trail"
+        }
+
+        fn collect(&self, _cx: &Context<'_>) -> SectionOutput {
+            let crumbs = self.log.breadcrumbs(None, Self::MAX);
+            if crumbs.is_empty() {
+                return SectionOutput::default();
+            }
+            SectionOutput::one(SectionFile::app(
+                "breadcrumbs.json",
+                "What was done just before: the latest actions, oldest first (names and outcomes, never content)",
+                Content::Json(serde_json::to_value(crumbs).unwrap_or_default()),
+            ))
+        }
+    }
+
     /// The built-in sections, in report order.
     pub fn all() -> Vec<Arc<dyn Section>> {
         vec![

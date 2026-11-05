@@ -43,6 +43,10 @@ pub const DIALOG_BASE: &[&str] = &["window_ready", "window_boot_error", "window_
 /// OS close meanwhile (rule 19).
 pub type UnresponsiveHook<R> = dyn Fn(&AppHandle<R>, &str, bool) + Send + Sync;
 /// Restarts the app in Safe Mode for window `label` (the app's relaunch); an error is logged.
+/// Writes a problem report without the stuck window (`StartupBuilder::report`); it shows its own native save dialog, so it runs
+/// off the main thread. Returns what to tell the log.
+pub type ReportHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
+/// Restarts in Safe Mode (`StartupBuilder::safe_mode`).
 pub type SafeModeHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
 /// Restarts the whole app, keeping its session (the app's relaunch: `|app| app.restart()`, which does not return on
 /// success); an error is reported to the calling page and logged.
@@ -115,6 +119,7 @@ pub struct StartupBuilder<R: Runtime> {
     config: Config,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    report: Option<Arc<ReportHook<R>>>,
     relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
@@ -193,12 +198,23 @@ impl<R: Runtime> StartupBuilder<R> {
     }
 
     /// The state to install, or why the timings are inconsistent.
+    /// The app's way to write a problem report without the window: the questions then offer Save a problem report…, whose answer
+    /// calls `write` on its own thread (it asks where to save with a native dialog).
+    pub fn report(
+        mut self,
+        write: impl Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.report = Some(Arc::new(write));
+        self
+    }
+
     pub fn build(self) -> Result<Startup<R>, ConfigError> {
         Ok(Startup {
             dog: Mutex::new(Watchdog::new(self.config.checked()?)),
             checkpoints: Mutex::new(Checkpoints::default()),
             watch: self.watch,
             safe_mode: self.safe_mode,
+            report: self.report,
             relaunch: self.relaunch,
             unresponsive: self.unresponsive,
             on_ready: self.on_ready,
@@ -217,6 +233,7 @@ pub struct Startup<R: Runtime> {
     checkpoints: Mutex<Checkpoints>,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    report: Option<Arc<ReportHook<R>>>,
     relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
@@ -240,6 +257,7 @@ impl<R: Runtime> Startup<R> {
             config: Config::default(),
             watch: Box::new(watched_by_default),
             safe_mode: None,
+            report: None,
             relaunch: None,
             unresponsive: None,
             on_ready: None,
@@ -347,6 +365,11 @@ impl<R: Runtime> Startup<R> {
             return;
         };
         let prompt = Prompt::new(question, &app.package_info().name);
+        let prompt = if self.report.is_some() {
+            prompt.with_report()
+        } else {
+            prompt
+        };
         let answer_app = app.clone();
         let answer_label = label.clone();
         let answer: Box<dyn FnOnce(Choice) + Send> =
@@ -524,6 +547,21 @@ fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
             None => startup.with(|w| w.keep_waiting(label, Instant::now())),
         },
         Choice::Wait => startup.with(|w| w.keep_waiting(label, Instant::now())),
+        Choice::SaveReport => {
+            // Waiting again first, as for Reload: the report is written beside the stuck window, which stays watched.
+            startup.with(|w| w.keep_waiting(label, Instant::now()));
+            if let Some(write) = startup.report.clone() {
+                let (app, label) = (app.clone(), label.to_string());
+                std::thread::spawn(move || match write(&app, &label) {
+                    Ok(()) => {
+                        log::info!(Window = label.as_str(); "Problem report saved from the not-responding question")
+                    }
+                    Err(e) => {
+                        log::error!(Window = label.as_str(); "Problem report from the not-responding question failed: {e}")
+                    }
+                });
+            }
+        }
     }
 }
 

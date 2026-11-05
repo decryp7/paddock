@@ -49,9 +49,19 @@ pub fn install_in(identity: &AppIdentity, dirs: &AppDirs, panic_hook: bool) -> O
                 .with_panic_hook(panic_hook);
             Logging::new(config).install().map_err(|e| e.to_string())
         });
-    installed
+    let handle = installed
         .map_err(|why| eprintln!("{}: the log could not start ({why})", identity.name))
-        .ok()
+        .ok();
+    if handle.is_some() {
+        // The first line of every run: which build, on what, installed how (ER-27). Why it started (login, by hand, a relaunch) and
+        // the phases up to ready are the app's and the start-up contract's lines that follow.
+        log::info!(
+            Version = identity.version.as_str(), Os = std::env::consts::OS, Arch = std::env::consts::ARCH, Pid = std::process::id(),
+            Portable = dirs.source() == paddock_env::Source::Portable;
+            "Starting {}", identity.name
+        );
+    }
+    handle
 }
 
 #[cfg(test)]

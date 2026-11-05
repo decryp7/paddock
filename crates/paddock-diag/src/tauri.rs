@@ -90,6 +90,11 @@ impl Setup {
     /// The running log: pending "repeated n times" lines are written before a report is collected, and the shell's Logging
     /// section tunes its level.
     pub fn log(mut self, handle: LogHandle) -> Setup {
+        // The report lists what the user did just before (the log's breadcrumbs), once.
+        if !self.sections.iter().any(|s| s.id() == "trail") {
+            self.sections
+                .push(Arc::new(builtin::Trail::new(handle.clone())));
+        }
         self.log = Some(handle);
         self
     }
