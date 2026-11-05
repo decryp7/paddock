@@ -79,6 +79,7 @@ mod tests {
 
     #[test]
     fn dynos_lines_go_to_the_shared_log_not_to_a_file_of_their_own() {
+        let _ = super::testlog::lines(); // installs the capture before anything is logged
         super::info("connected to the agent");
         let lines = super::testlog::lines();
         assert!(lines.iter().any(|l| l == "INFO dyno: connected to the agent"), "{lines:?}");
