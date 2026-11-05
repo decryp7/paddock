@@ -23,9 +23,9 @@ choice on Windows (a service) is the wrong one for Dyno.
      After an app update launchd may keep the old code requirement and refuse the new binary ("needs LWCR update",
      spawn failed, exit 78); registering over the live job changes nothing.
      The shell therefore replaces the registration (unregister, `launchctl bootout`, wait until the job is gone,
-     register, bounded retries) once per version change (the version is recorded in `service-registered-version` in
-     the data folder) and whenever `launchctl print` reports it stale while the agent is silent
-     (`service_repair::plan`, `run_repair`; Paddock rule 24). Outside a bundle (development, the CLI) `dyno-agent
+     register, bounded retries) once per version change (the version is recorded in `service-net.decryptology.dyno.agent.json` in
+     the data folder by `paddock_service::record`) and whenever `launchctl print` reports it stale while the agent is silent
+     (`paddock_service::plan::plan`, `repair::replace`, `Manager::on_start`; Paddock rule 24; since 1.1.0 the shared crate, no Dyno copy). Outside a bundle (development, the CLI) `dyno-agent
      service install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout`,
      waits (bounded) until launchd dropped the job, then `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
    - **Linux: a systemd user unit.** `~/.config/systemd/user/dyno-agent.service`, `Restart=always`, `RestartSec=5`,

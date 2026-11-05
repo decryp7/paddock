@@ -579,17 +579,20 @@ mod tests {
         fail: bool,
     }
 
-    impl crate::login::AgentService for Svc {
-        fn installed(&mut self) -> bool {
-            true
-        }
+    impl paddock_service::login::LoginService for Svc {
         fn install(&mut self) -> Result<(), String> {
             Ok(())
         }
         fn uninstall(&mut self) -> Result<(), String> {
             Ok(())
         }
-        fn repair(&mut self, _: &dyn Fn() -> bool) -> Result<bool, String> {
+    }
+
+    impl crate::login::AgentService for Svc {
+        fn installed(&mut self) -> bool {
+            true
+        }
+        fn repair(&mut self, _: crate::login::AnswerFn) -> Result<bool, String> {
             Ok(false)
         }
         fn resume(&mut self) -> Result<bool, String> {

@@ -25,7 +25,6 @@ pub mod popover;
 pub mod power_menu;
 pub mod quit;
 pub mod report;
-pub mod service_repair;
 pub mod shell;
 pub mod supervise;
 pub mod tray;
@@ -492,7 +491,7 @@ fn agent_setup<R: Runtime>(
     });
     // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
     // keep the old job: replace the registration once per version and whenever launchd says it is stale
-    // (`service_repair`), in the background, so measuring resumes without the user's help.
+    // (`paddock_service::Manager::on_start`), in the background, so measuring resumes without the user's help.
     #[cfg(not(windows))]
     let repair = link.clone();
     // The old route (`tauri-plugin-autostart`) left `~/Library/LaunchAgents/Dyno.plist`; `SMAppService.mainApp` replaces it.
@@ -503,7 +502,7 @@ fn agent_setup<R: Runtime>(
     #[cfg(not(windows))]
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        match login::platform_service().repair(&|| repair.connected()) {
+        match login::platform_service().repair(std::sync::Arc::new(move || repair.connected())) {
             Ok(true) => logging::warn("registered the agent service again (a new version, or launchd refused the old registration)"),
             Ok(false) => {}
             Err(e) => logging::warn(&format!("the agent service could not be registered again: {e}")),
@@ -513,15 +512,15 @@ fn agent_setup<R: Runtime>(
 }
 
 /// macOS: `SMAppService.mainApp` starts the app at login without `--hidden`; macOS says it was a login start in the
-/// open-application Apple Event instead ([`login::open_event`]), which is readable only while that event is
+/// open-application Apple Event instead ([`paddock_service::apple_event::open_event`]), which is readable only while that event is
 /// being handled, i.e. inside `applicationDidFinishLaunching`. Plugin setups run earlier (in `Builder::build`), so the
 /// decision is made in the run loop's `Ready` event, which tao emits from `applicationDidFinishLaunching` right after the
 /// App's setup. The shell was told to start in the tray (`launch.hidden`); unless the flag or the login event asked for
 /// that, the main window is opened here (the tray exists by then). A missed detection shows the window, never hides one.
 #[cfg(target_os = "macos")]
 fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
-    let event = login::open_event();
-    let by = login_item::hidden_by(asked_hidden, event);
+    let event = paddock_service::apple_event::open_event();
+    let by = paddock_service::launch::launch_reason(asked_hidden, event);
     let hidden = by.is_some();
     logging::info(&format!(
         "start signal: {} (UptimeMs {})",

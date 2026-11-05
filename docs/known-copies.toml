@@ -42,12 +42,6 @@ paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/service_repair.rs"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "Ported from Pitwall on 2026-10-24. Its parser and stale() caused Dyno 1.0 blocker B4; Dyno's B4 fix changes both in this copy. The shared stale() still counts has_lwcr && !running (ADR 0034 WP-2)."
-
-  [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/service_repair.rs"]
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
@@ -76,13 +70,6 @@ status = "built"
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
 
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/login.rs"]
-  symbols = ["item:SmService"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "SMAppService.agent for the bundled agent plist."
-
 [[mechanism]]
 id = "launch-at-login"
 title = "The launch-at-login switch: the app's own login item and the start reason (login item, restored at login)"
@@ -90,13 +77,6 @@ canonical = "paddock-service"
 paths = ["crates/paddock-service/src/login.rs"]
 status = "built"
 adr = "0034"
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/login.rs", "apps/dyno/app/src-tauri/src/login_item.rs"]
-  symbols = ["item:apply_launch_at_login", "item:hidden_at_start"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "Dyno 1.0 adds SMAppService.mainApp and the lgit/rsto start reason here; they move into paddock-service::login (MainAppItem, LaunchReason) after the Dyno tag."
 
   [[mechanism.copy]]
   paths = ["apps/dyno/app/src-tauri/src/lib.rs"]

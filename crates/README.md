@@ -1592,7 +1592,8 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   starts the new one); `supervised::supervised_path` merges the login shell's `PATH` (`paddock_proc::login_path`, R05);
   `Verb` is the shared first argument (`install`, `uninstall`, `status`, `stop`, `print-unit`, `print-plist`, `--service`).
 - **Launch at login.** `login::launch_at_login_section` (`pd.login`, one switch, off by default) and
-  `apply_launch_at_login` (the app's own `Autostart` and the service together, each tried, one message).
+  `apply_launch_at_login` / `apply_launch_at_login_with` (the app's own `Autostart` and a `LoginService` together, each tried, one message; a place that will not exist after the next login registers neither: `launch::refuse_unstable_location`), `login::MainAppItem` (`SMAppService.mainApp`), and the start reason (`launch::launch_reason`, `apple_event::open_event`).
+- **After a stop on request.** `Manager::resume` (a light register of an enabled item of this version, otherwise the full repair; never touches an item switched off in Login Items, one the OS has no record of, or one whose switch list could not be read; never opens System Settings), `Manager::supervises`, `Manager::installed` and `Manager::stop_mechanism` (the launchd job while it is held; `stop::stop` judges it by read-back). The raw readings behind them are `Inspection::login_item` (`LoginItemFacts`).
 - **The Windows service host (X4b).** `scm_host::supervise` is the `--service` supervisor over a `Sessions` port: the
   logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
   found), the program started there with the user's token and environment plus the supervised variable, restarted after

@@ -31,7 +31,7 @@ Why ad-hoc signing matters: `SMAppService` and launch agents refuse a linker-sig
 launchd may keep the previous code requirement and refuse the new agent ("needs LWCR update", spawn failed, exit 78 EX_CONFIG).
 Registering again over the old job does not help, so Dyno replaces it by itself: once after every version change, and whenever
 launchd reports it stale while the agent does not answer, it unregisters, runs `launchctl bootout`, waits until launchd has
-dropped the job, registers again and retries a bounded number of times (`app/src-tauri/src/service_repair.rs`; each step is in
+dropped the job, registers again and retries a bounded number of times (`paddock_service::repair::replace`, wired in `app/src-tauri/src/login.rs`; each step is in
 Dyno's log). An item you switched off in Login Items is left alone.
 
 ## 3. Verify
