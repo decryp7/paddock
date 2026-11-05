@@ -134,6 +134,36 @@ pub fn plan(o: &Observed) -> Plan {
     Plan::Nothing
 }
 
+/// How the service comes back after "Quit and stop measuring".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumePath {
+    /// Leave it: the user switched the item off in Login Items, or the launch agent is missing. That switch is theirs.
+    Nothing,
+    /// Register the enabled item again (no removal first). Only while this version registered it: registering records the
+    /// version, so a version change must go through the full repair first, which is what notices it.
+    Light,
+    /// The full repair ([`plan`] with a request): the registration is replaced.
+    Repair,
+}
+
+/// Decides the path of a resume, before anything is called (pure, like [`plan`]).
+pub fn resume_path(
+    status: RegistrationStatus,
+    launchd_disabled: Option<bool>,
+    registered_version: Option<&str>,
+    current_version: &str,
+) -> ResumePath {
+    if status == RegistrationStatus::NotFound || disabled_in_login_items(status, launchd_disabled) {
+        ResumePath::Nothing
+    } else if registered_version != Some(current_version) {
+        ResumePath::Repair
+    } else if status == RegistrationStatus::Enabled {
+        ResumePath::Light
+    } else {
+        ResumePath::Repair
+    }
+}
+
 /// Why registering failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegisterError {
@@ -677,5 +707,22 @@ mod tests {
         assert_eq!(f.calls, ["unregister", "bootout", "register", "stale?"]);
         o.registered_version = Some("0.1.1");
         assert_eq!(plan(&o), Plan::Nothing);
+    }
+
+    #[test]
+    fn a_resume_never_touches_an_item_the_user_switched_off_and_never_hides_a_version_change() {
+        use RegistrationStatus::*;
+        // switched off in Login Items (either view): nothing is called, not even the light path
+        assert_eq!(resume_path(RequiresApproval, None, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(resume_path(Enabled, Some(true), Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(resume_path(NotRegistered, Some(true), Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(resume_path(NotFound, None, Some("1"), "1"), ResumePath::Nothing);
+        // a version change goes through the repair, which records the version itself
+        assert_eq!(resume_path(Enabled, Some(false), Some("0"), "1"), ResumePath::Repair);
+        assert_eq!(resume_path(Enabled, None, None, "1"), ResumePath::Repair);
+        // the same version, enabled: the light way
+        assert_eq!(resume_path(Enabled, Some(false), Some("1"), "1"), ResumePath::Light);
+        // not enabled and not switched off: the repair decides
+        assert_eq!(resume_path(NotRegistered, None, Some("1"), "1"), ResumePath::Repair);
     }
 }

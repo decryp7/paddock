@@ -369,8 +369,8 @@ mod mac {
     use super::*;
     use crate::login_item::OpenEvent;
     use crate::service_repair::{
-        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
-        JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
+        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, resume_path,
+        service_supervises, JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, ResumePath, REGISTERED_VERSION_FILE,
     };
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
@@ -677,22 +677,41 @@ mod mac {
                 .then_some(paddock_service::stop::StopMechanism::Launchd { target })
         }
 
-        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded, so the registration is
-        /// replaced the way a repair does (remove the job, wait until it is gone, register, check): the same proven path.
-        /// What the user switched off in Login Items stays off ([`plan`]).
+        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded. What comes back is decided
+        /// first and purely ([`resume_path`]): an item the user switched off in Login Items is left alone; a version change goes
+        /// through the full repair (which records the version); otherwise an enabled item is registered again without removing it
+        /// (a removal and a new registration is what makes macOS announce a new background item). Only when launchd still holds
+        /// no job after a wait, the full repair (remove the job, wait until it is gone, register, check) runs.
+        /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
         fn resume(&mut self) -> Result<bool, String> {
-            // First the light way: registering an item that is already enabled loads its job again without removing the login item
-            // (a removal and a new registration is what makes macOS announce a new background item). Only when launchd still holds
-            // no job after a wait, the full repair runs.
-            if status() == SMAppServiceStatus::Enabled && register(false).is_ok() {
-                for _ in 0..20 {
-                    if job_report().found {
-                        crate::logging::info("agent service: loaded again by registering the enabled item");
-                        return Ok(true);
-                    }
-                    std::thread::sleep(Duration::from_millis(500));
+            let registered = registered_version(&version_file());
+            let path = resume_path(
+                registration_status(),
+                launchd_disabled(),
+                registered.as_deref(),
+                env!("CARGO_PKG_VERSION"),
+            );
+            match path {
+                ResumePath::Nothing => {
+                    crate::logging::info("agent service: switched off in Login Items or missing; it stays as it is");
+                    return Ok(false);
                 }
-                crate::logging::info("agent service: registering the enabled item loaded no job; running the full repair");
+                ResumePath::Light => match register(false) {
+                    Ok(()) => {
+                        for _ in 0..20 {
+                            if job_report().found {
+                                crate::logging::info("agent service: launchd holds the job again after registering the enabled item");
+                                return Ok(true);
+                            }
+                            std::thread::sleep(Duration::from_millis(500));
+                        }
+                        crate::logging::info("agent service: registering the enabled item loaded no job; running the full repair");
+                    }
+                    Err(e) => crate::logging::info(&format!(
+                        "agent service: registering the enabled item failed ({e:?}); running the full repair"
+                    )),
+                },
+                ResumePath::Repair => {}
             }
             repair_as(&|| false, true)
         }

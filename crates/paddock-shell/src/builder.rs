@@ -372,22 +372,22 @@ impl<R: Runtime> Builder<R> {
     /// bar still shows its menus). Default: the shell's quit, the same path as the `app_quit` command (the window layer's
     /// exit with its teardown, or Tauri's exit without a window layer). An app with its own quit path gives it here. Any
     /// other item clicked with no window open brings the main window back, as a Dock click does.
-    /// An app's own menu item (`id`) that does its work with no window open (the app's action runs instead of the window
-    /// coming back). Quit stays [`Builder::menu_quit_without_window`].
+    pub fn menu_quit_without_window(
+        mut self,
+        f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
+    ) -> Self {
+        self.menu_quit = Some(Arc::new(f));
+        self
+    }
+
+    /// An app's own menu item (`id`) that does its work with no window open: its action runs instead of the window coming
+    /// back. Quit stays [`Builder::menu_quit_without_window`].
     pub fn menu_action_without_window(
         mut self,
         id: &str,
         f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
     ) -> Self {
         self.menu_actions.push((id.to_string(), Arc::new(f)));
-        self
-    }
-
-    pub fn menu_quit_without_window(
-        mut self,
-        f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
-    ) -> Self {
-        self.menu_quit = Some(Arc::new(f));
         self
     }
 

@@ -86,15 +86,15 @@ pub fn take_marker(root: &Path) -> Option<i64> {
 pub struct StopReport {
     /// The service manager held a job and confirmed it gone.
     pub service: Option<Stopped>,
-    /// An agent answered on the discovery file and was asked to exit.
+    /// An agent was found and asked to exit (`false`: none found).
     pub asked: bool,
 }
 
 /// How an agent that does not belong to a service is asked to exit.
 pub trait DirectAgent {
-    /// Asks the agent in the data folder to exit; `Ok(false)` when none is there.
+    /// Asks the agent in the data folder to exit; `Ok(false)` when none was found.
     fn ask_to_exit(&mut self) -> Result<bool, String>;
-    /// Whether the agent has left (the discovery file is gone).
+    /// Whether the agent that was asked has left (its process, by identity).
     fn gone(&mut self) -> bool;
 }
 
@@ -179,7 +179,7 @@ pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &
             let result = service.resume();
             let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
             match &result {
-                Ok(true) => log::info!(Ms = ms; "After a stop on request: the agent service was started again"),
+                Ok(true) => log::info!(Ms = ms; "After a stop on request: the service was started again (the system holds its job)"),
                 Ok(false) => log::info!(Ms = ms; "After a stop on request: there is no service to start; Dyno starts an agent of its own"),
                 Err(e) => {
                     log::warn!(Error = e.as_str(), Ms = ms; "After a stop on request: the agent service could not be started again; Dyno starts an agent of its own")
@@ -207,11 +207,25 @@ impl LiveAgent {
 
 impl DirectAgent for LiveAgent {
     fn ask_to_exit(&mut self) -> Result<bool, String> {
+        // The discovery file is only a hint (rule 53): the lock the agent holds says whether one runs here at all.
+        let held = dyno_agent::instance::is_held(&self.dirs);
+        let hidden = || {
+            "An agent holds this data folder, but the discovery file that names it is missing or unreadable, so Dyno cannot ask it to exit. \
+             End dyno-agent in Activity Monitor or Task Manager."
+                .to_string()
+        };
         let Some(found) = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()) else {
+            if held {
+                return Err(hidden());
+            }
+            log::info!("No agent found: no readable discovery file and the data folder's lock is free");
             return Ok(false);
         };
         let Some(id) = paddock_proc::ProcessId::of_recorded(found.pid, found.started) else {
-            log::info!(Pid = found.pid; "The discovery file names a process that is gone");
+            if held {
+                return Err(hidden());
+            }
+            log::info!(Pid = found.pid; "No agent found: the discovery file names a process that is gone and the lock is free");
             return Ok(false);
         };
         let (peer, _) = dyno_agent::cli::connect(&self.dirs).map_err(|e| {
@@ -227,7 +241,10 @@ impl DirectAgent for LiveAgent {
     }
 
     fn gone(&mut self) -> bool {
-        self.target.is_none_or(|id| !id.is_alive())
+        match self.target {
+            Some(id) => !id.is_alive(),
+            None => !dyno_agent::instance::is_held(&self.dirs),
+        }
     }
 }
 
@@ -255,11 +272,21 @@ pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         }
         link.quit();
         let mut sys = paddock_service::RealSystem::new().with_timeout(Duration::from_secs(10));
-        let result = stop_measuring(&mut sys, mechanism.as_ref(), &mut LiveAgent::new(link.dirs.clone()), StopTimings::default());
+        let result = stop_measuring(
+            &mut sys,
+            mechanism.as_ref(),
+            &mut LiveAgent::new(link.dirs.clone()),
+            StopTimings::default(),
+        );
         let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
         match result {
             Ok(report) => {
-                log::info!(Ms = ms, Service = format!("{:?}", report.service).as_str(), Asked = report.asked; "Quit and stop measuring: the agent is gone");
+                let outcome = if report.service.is_some() || report.asked {
+                    "Quit and stop measuring: the system confirms the agent is gone"
+                } else {
+                    "Quit and stop measuring: no agent was found"
+                };
+                log::info!(Ms = ms, Service = format!("{:?}", report.service).as_str(), Asked = report.asked; "{outcome}");
             }
             Err(e) => {
                 log::error!(Ms = ms, Error = e.as_str(); "Quit and stop measuring: the agent could not be confirmed gone");
@@ -643,7 +670,6 @@ mod tests {
         let mut live = LiveAgent::new(dirs.clone());
         let e = live.ask_to_exit().unwrap_err();
         assert!(e.contains("is running but does not answer"), "{e}");
-        assert!(!live.gone() || live.target.is_none());
         // a file written long before its holder started (a handed-on pid) is stale
         write_discovery(&dirs, std::process::id(), 1_000);
         assert_eq!(LiveAgent::new(dirs).ask_to_exit(), Ok(false));
@@ -655,5 +681,82 @@ mod tests {
         let flag = OnceFlag::default();
         assert!(flag.claim());
         assert!(!flag.claim());
+    }
+
+    /// A process of its own that runs until it is ended (a stand-in for the agent).
+    // A test stand-in for the agent, ended by the test itself: the app's bounded, console-less spawn helper is for real children.
+    #[allow(clippy::disallowed_methods)]
+    fn long_process() -> std::process::Child {
+        #[cfg(unix)]
+        let child = std::process::Command::new("sleep").arg("60").spawn();
+        #[cfg(windows)]
+        let child = std::process::Command::new("ping").args(["-n", "60", "127.0.0.1"]).spawn();
+        child.expect("a test process")
+    }
+
+    #[test]
+    fn gone_is_the_process_by_identity_not_the_discovery_file() {
+        let dir = temp("gone");
+        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        let mut child = long_process();
+        let now = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap();
+        // the file stays in place for the whole test, as a crashed or slow agent leaves it
+        write_discovery(&dirs, child.id(), now);
+        let mut live = LiveAgent::new(dirs.clone());
+        live.target = paddock_proc::ProcessId::of(child.id());
+        assert!(live.target.is_some());
+        assert!(!live.gone(), "the process runs, whatever the file says");
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(dirs.discovery().exists());
+        assert!(live.gone(), "the process ended although the file is still there");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_held_lock_with_no_usable_discovery_file_is_an_error_and_a_free_lock_is_none_found() {
+        let dir = temp("hidden");
+        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            LiveAgent::new(dirs.clone()).ask_to_exit(),
+            Ok(false),
+            "nothing holds the lock: none found"
+        );
+        let _agent = dyno_agent::instance::InstanceLock::acquire(&dirs).expect("the test takes the lock like an agent");
+        let e = LiveAgent::new(dirs.clone()).ask_to_exit().unwrap_err();
+        assert!(e.contains("holds this data folder") && e.contains("Activity Monitor"), "{e}");
+        std::fs::write(dirs.discovery(), "not json").unwrap();
+        assert!(
+            LiveAgent::new(dirs.clone()).ask_to_exit().is_err(),
+            "an unreadable file is no reason to call it gone"
+        );
+        let mut live = LiveAgent::new(dirs);
+        assert!(!live.gone(), "without a target the held lock says it runs");
+        drop(_agent);
+        assert!(live.gone());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The menu bar's entry is wired: the manifest the UI is checked against names its command and the menu, and the Rust side
+    /// registers an action for exactly that id.
+    #[test]
+    fn quit_and_stop_is_in_the_manifest_and_the_shell_knows_its_id() {
+        let manifest: serde_json::Value = serde_json::from_str(crate::MANIFEST).unwrap();
+        let has = |list: &str, key: &str| manifest[list].as_array().unwrap().iter().any(|e| e[key] == QUIT_STOP_COMMAND);
+        assert!(has("commands", "id"), "the command is contributed");
+        assert!(has("menus", "command"), "the command has a menu entry");
+        let lib = include_str!("lib.rs");
+        assert!(
+            lib.contains(".menu_action_without_window(quit::QUIT_STOP_COMMAND"),
+            "the shell runs it with no window open"
+        );
+        assert!(lib.contains("id == quit::QUIT_STOP_ID"), "the tray menu runs it");
     }
 }
