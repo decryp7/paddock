@@ -145,6 +145,8 @@ pub fn render(folder: &str, reports: &[Report], now: i64) -> String {
 
 /// The folders the OS keeps reports in on this platform.
 pub fn default_folders() -> Vec<Folder> {
+    // Linux has no report folder of its own here: `out` stays empty and needs no `mut` there.
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(unused_mut))]
     let mut out = Vec::new();
     #[cfg(target_os = "macos")]
     {

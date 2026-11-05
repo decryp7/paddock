@@ -46,10 +46,8 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
           </button>
         </div>
       </cdk-virtual-scroll-viewport>
-      @if (a && a.rows.length > 0) {
-        @if (a.more > 0) {
-          <p class="dy-pw-muted dy-pw-note">Showing the {{ a.rows.length }} most severe of {{ a.rows.length + a.more }}.</p>
-        }
+      @if (a && a.more > 0) {
+        <p class="dy-pw-muted dy-pw-note">Showing the {{ a.rows.length }} most severe of {{ a.rows.length + a.more }}.</p>
         <button type="button" class="dy-pw-more" (click)="open('alarms')">Open alarms</button>
       }
     </ng-template>
@@ -142,13 +140,13 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-row, .dy-pw-plain, .dy-pw-more { all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--pd-radius-control); }
     .dy-pw-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
     .dy-pw-list > li { min-width: 0; }
-    /* The alarm list scrolls inside a viewport as tall as its rows, up to four; the popover stays as tall as that and no taller, and the wheel passes on at the ends. */
-    .dy-pw-viewport { height: min(calc(var(--dy-n, 1) * 52px), 208px); min-height: 52px; }
+    /* The alarm list scrolls inside a viewport as tall as its rows, up to 208 px (the stopped-agent popup must still fit the 520 px cap, tray-fit e2e); the popover stays as tall as that and no taller, and the wheel passes on at the ends. */
+    .dy-pw-viewport { height: min(calc(var(--dy-n, 1) * 44px), 208px); min-height: 44px; }
     .dy-pw-viewport:focus-visible, .dy-pw-scroll:focus-visible { outline-offset: -2px; }
-    .dy-pw-item { box-sizing: border-box; height: 52px; padding-bottom: 4px; }
+    .dy-pw-item { box-sizing: border-box; height: 44px; padding-bottom: 4px; }
     .dy-pw-scroll { max-height: 132px; overflow-y: auto; }
     /* An alarm is two lines: its level and age on the first, its title across the whole width on the second, cut to one line (a title squeezed beside the level wrapped to a column of words). */
-    .dy-pw-alarm { height: 48px; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
+    .dy-pw-alarm { height: 40px; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
     .dy-pw-alarm > .dy-pw-lvl { grid-area: lvl; justify-self: start; }
     .dy-pw-alarm > .dy-pw-muted { grid-area: ago; }
     .dy-pw-alarm > .dy-pw-chev { grid-area: chev; }
@@ -195,8 +193,8 @@ export class DynoPopoverWidgets {
   /** The type witness of every template: what the area hands each one (`pdWidgetOf`). */
   protected readonly witness: PopoverValue | null = null;
   protected readonly skAlarms = SK_ALARMS;
-  /** An alarm's row height in the virtual viewport, in px (the row, 48, and the gap below it, 4). */
-  protected readonly alarmRowPx = 52;
+  /** An alarm's row height in the virtual viewport, in px (the row, 40, and the gap below it, 4). */
+  protected readonly alarmRowPx = 44;
   protected readonly alarmId = (_: number, r: AlarmRow) => r.id;
   protected readonly skVolumes = SK_VOLUMES;
   protected readonly skCounters = SK_COUNTERS;
