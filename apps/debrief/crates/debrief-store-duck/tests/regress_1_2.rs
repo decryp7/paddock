@@ -114,7 +114,6 @@ fn an_exceptions_view_with_50_000_groups_returns_at_most_its_limit_and_says_trun
 const CATALOGUE_ROWS: u64 = 1_600_000;
 
 #[test]
-#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P3, bounded catalogue read): catalogue(all) over 1600000 rows: Out of Memory Error: could not allocate block of size 256.0 KiB (183.0 MiB/183.1 MiB used)"]
 fn a_1_6_million_row_catalogue_is_read_within_the_query_budget() {
     let dir = TempDir::new("regress-catalogue");
     let sample = common::log_samples();
@@ -137,11 +136,17 @@ fn a_1_6_million_row_catalogue_is_read_within_the_query_budget() {
         ))
         .unwrap();
     eprintln!("{n} sources, {CATALOGUE_ROWS} catalogue rows");
+    let started = std::time::Instant::now();
     let reply = store.catalogue(&CatalogueRequest {
         all: true,
         ..CatalogueRequest::default()
     });
     let reply = reply.unwrap_or_else(|e| panic!("catalogue(all) over {CATALOGUE_ROWS} rows failed within the 192 MB query budget: {e}"));
+    eprintln!(
+        "catalogue(all) over {CATALOGUE_ROWS} rows: {} names in {:.2} s",
+        reply.candidates.len(),
+        started.elapsed().as_secs_f64()
+    );
     assert!(reply.built, "the catalogue is built");
     assert!(
         reply.candidates.len() <= debrief_core::catalogue::MAX_NAMES,

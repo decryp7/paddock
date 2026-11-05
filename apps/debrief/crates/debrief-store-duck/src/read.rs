@@ -1687,6 +1687,13 @@ impl Query for DuckStore {
     fn catalogue(&self, req: &debrief_core::catalogue::CatalogueRequest) -> StoreResult<debrief_core::catalogue::CatalogueReply> {
         self.inner.catalogue(req)
     }
+
+    fn catalogue_status(
+        &self,
+        req: &debrief_core::catalogue::CatalogueStatusRequest,
+    ) -> StoreResult<debrief_core::catalogue::CatalogueStatus> {
+        self.inner.catalogue_status(req)
+    }
 }
 
 /// The fields of a statement plus the word hits of its smart search (kept alive with the filter).

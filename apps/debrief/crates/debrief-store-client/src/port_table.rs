@@ -21,7 +21,7 @@
 
 /// The worker protocol's version. Bump it when an operation is removed, reordered or its DTO changes shape; the
 /// app and its worker ship together, and the client refuses a worker that reports another version.
-pub const WIRE_VERSION: u32 = 3;
+pub const WIRE_VERSION: u32 = 4;
 
 /// The names the table's types resolve through (the callbacks expand in other modules and crates).
 pub mod ty {
@@ -33,7 +33,7 @@ pub mod ty {
         WorkspaceState,
     };
     pub use debrief_core::batch::{EventId, SourceId};
-    pub use debrief_core::catalogue::{CatalogueReply, CatalogueRequest};
+    pub use debrief_core::catalogue::{CatalogueReply, CatalogueRequest, CatalogueStatus, CatalogueStatusRequest};
     pub use debrief_core::exceptions::ExceptionGroup;
     pub use debrief_core::ingest::ImportWindow;
     pub use debrief_core::package::ProjectManifest;
@@ -91,6 +91,7 @@ macro_rules! store_port_table {
                     call CompleteQuery: fn complete_query(req: &CompletionRequest) -> Vec<Completion>;
                     analysis Export: fn export(req: &ExportRequest) -> ExportResult;
                     call Catalogue: fn catalogue(req: &CatalogueRequest) -> CatalogueReply;
+                    call CatalogueStatus: fn catalogue_status(req: &CatalogueStatusRequest) -> CatalogueStatus;
                 }
                 custom {
                     RunQuery: fn run_query_with(req: &QueryRequest, control: &QueryControl) -> QlResult

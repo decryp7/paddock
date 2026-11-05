@@ -107,6 +107,31 @@ pub struct CatalogueReply {
     pub candidates: Vec<Candidate>,
 }
 
+/// The longest a status request may wait for news (a call stays well inside the store worker's call timeout).
+pub const MAX_STATUS_WAIT_MS: u64 = 10_000;
+
+/// Asks how far the catalogue is. With `after` (the `generation` of the last answer) the call waits until the catalogue
+/// changes, a source committed or its state moved, or `wait_ms` (at most [`MAX_STATUS_WAIT_MS`]) passed, so a caller
+/// that wants the built catalogue asks once instead of polling.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogueStatusRequest {
+    pub after: Option<u64>,
+    pub wait_ms: u64,
+}
+
+/// How far the catalogue is, without any of its names.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogueStatus {
+    /// Whether every ready source is catalogued and saved.
+    pub built: bool,
+    /// Sources not catalogued yet.
+    pub pending: u64,
+    /// Moves whenever the catalogue's state may have changed; the `after` of the next request.
+    pub generation: u64,
+}
+
 /// Letters and digits of `s` only, lower-cased.
 pub fn squash(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
