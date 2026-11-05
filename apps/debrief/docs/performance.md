@@ -78,6 +78,35 @@ the `perf script` importer; `e2e/scale-*.e2e.ts` check virtualisation (DOM row c
 
 ## Results history: engine, store and memory (newest first)
 
+### 2026-11-05, time zone libraries and re-timing (Debrief ADR 0066)
+
+- **Commit:** none of the product: small scratch crates and a script, against `chrono` 0.4.45, `chrono-tz` 0.10.4, `jiff` 0.2.39 and `jiff-tzdb` 0.1.9
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 5 to 7 at the start; another agent's job in the other `plock` slot
+- **Build:** release, `strip = true`, default system allocator, no LTO (not Debrief's `dist` profile); `rustc` 1.99.1; DuckDB 2.0.0 through its Python package, 4 threads
+- **Corpus:** synthetic. For the libraries, 10,000,000 wall times 3.1 s apart from 2026-01-01, in `Europe/Amsterdam`, plus invented zones as POSIX strings. For re-timing, one Parquet file (zstd, row groups of 131,072) of 5,000,000 invented events, 800 sources, 3 years, 45.2 MB
+- **Command:** `plock run adr-bounded-tz -- run-rust.sh`: `cargo build --release` of each crate, run each binary once; `retime.py 5000000 800`. Each `COPY (SELECT <expr> AS ts, ... FROM read_parquet(seg) ORDER BY id) TO out` ran 3 times
+- **Runs:** library timings 3 runs each; re-timing 3 runs each, median given
+
+| Library | Stripped binary | Added to a 394,048 B `chrono` baseline | tzdata inside | One wall time to instant |
+|---|---:|---:|---|---:|
+| `chrono-tz` | 1,617,600 B | 1,223,552 B (1.17 MiB) | 2025b | 19 ns |
+| `jiff`, `tzdb-bundle-always`, `tz-fat` | 936,512 B | 542,464 B (0.52 MiB) | 2026e (`jiff-tzdb` source) | 29 ns |
+
+Each of those loops also adds to a date per event. A table built with `jiff` and read with a remembered position: 0.54 to 0.65 ns per event, in a loop with no date arithmetic, possibly flattered by the compiler; treat it as "under a few ns". A 30-year table of one zone: 121 rows in 11 µs. Loading all 598 zones of the bundled database: 2.5 ms. Testing them against two `(instant, offset)` samples: 16 µs; +2 in winter with +3 in summer fits 26 zones, one sample of +9 fits 12.
+
+| Re-write of 5,000,000 rows | Median | Runs | M rows/s |
+|---|---:|---|---:|
+| Plain copy, `ts` unchanged | 0.69 s | 0.63, 0.69, 0.78 | 7.24 |
+| Today's shape: one `WHEN source = N` per source, 800 branches | 2.41 s | 2.63, 2.27, 2.41 | 2.08 |
+| One zone, 7 transitions, `source IN (800)` | 1.30 s | 1.71, 1.30, 1.22 | 3.85 |
+| One zone, 7 transitions, fold cuts for every source | 0.76 s | 1.00, 0.69, 0.76 | 6.59 |
+| Scan for run-backs in one fold (read only; the data had none) | 0.05 s | 1 run | |
+
+Semantics, read from the same run: `jiff` gives `Gap { before, after }` and `Fold { before, after }`, and its `later` in a gap equals the offset-before reading of RFC 5545; `chrono-tz` gives `LocalResult::None` in a gap with no offsets. All the gap and fold rows in ADR 0066's test table matched.
+
+**Not measured:** the store's real rewrite path (`apply_offsets`), index rebuild, ordering, events with `raw` and field columns, more than one worker, memory (physical footprint, rule 26), and Debrief's own `dist` binaries. No budget applies; this informs a choice and is not a baseline.
+
 Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' builds. "Windows VM" is the shared
 24-core development VM used until 2026-10-22. Every run below was on a shared, loaded machine unless it says otherwise.
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
