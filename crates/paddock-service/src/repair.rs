@@ -149,33 +149,288 @@ fn stop_for(e: RegisterError) -> Option<RepairOutcome> {
     }
 }
 
-/// Waits for the service to answer, bounded by `t.start_wait`; a cancel stops the wait (the registration stays).
-fn wait_for_answer(
-    b: &mut dyn Backend,
-    answers: &mut dyn FnMut() -> bool,
-    cancel: &AtomicBool,
-    t: &Timings,
-    say: &mut dyn FnMut(Step),
-) -> RepairOutcome {
-    say(Step::WaitingForStart);
-    let began = std::time::Instant::now();
-    let mut polled = Duration::ZERO;
-    loop {
-        if answers() {
-            say(Step::Answers);
-            return RepairOutcome::Recovered;
+/// What the executor does next (the OS call or the wait the [`Stepper`] asks for).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    /// `unregister`.
+    Unregister,
+    /// `evict` (`launchctl bootout`).
+    Evict,
+    /// Ask whether the OS dropped the job, polling until [`Timings::gone_wait`].
+    WaitGone,
+    /// Pause (the backoff, or the poll while waiting for the service).
+    Pause(Duration),
+    /// `register`.
+    Register,
+    /// Pause [`Timings::settle`], then look at the job (and ask the service when `ask`: a failed registration needs it).
+    Settle {
+        /// Ask the service too.
+        ask: bool,
+    },
+    /// Look at the job and ask the service.
+    Look,
+    /// The repair is over.
+    Done(RepairOutcome),
+}
+
+/// What the OS (or the clock) answered to the last [`Action`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OsResult {
+    /// `unregister` answered.
+    Unregistered(Result<(), String>),
+    /// `evict` answered.
+    Evicted(Result<(), String>),
+    /// The wait for the job to go ended; `timed_out`: the OS still held it.
+    Gone {
+        /// The OS still held the job after the bounded wait.
+        timed_out: bool,
+    },
+    /// A pause ended.
+    Paused,
+    /// `register` was accepted.
+    RegisterOk,
+    /// `register` failed.
+    RegisterErr(RegisterError),
+    /// The look after the settle pause.
+    Settled {
+        /// What the OS says about the job.
+        job: Job,
+        /// The service answers.
+        answers: bool,
+        /// The caller asked to cancel.
+        cancelled: bool,
+    },
+    /// A look during the wait for the service.
+    Looked {
+        /// The service answers now.
+        answers: bool,
+        /// What the OS says about the job now (it may be refused now).
+        job: Job,
+        /// Real time since the wait began.
+        elapsed: Duration,
+        /// The caller asked to cancel.
+        cancelled: bool,
+    },
+}
+
+/// The next action and what to say before it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Next {
+    /// Steps for the log and the UI, in order.
+    pub say: Vec<Step>,
+    /// What to do.
+    pub action: Action,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Removing,
+    Evicting,
+    Gone,
+    BeforeRegister,
+    Registering,
+    Settling,
+    Waiting,
+    Over,
+}
+
+/// The decisions of a replace as a pure state machine: given what the OS answered, what to do next (ADR 0056). The
+/// executor ([`replace_bounded`]) only performs the actions; retries, the wait and the failure text are decided here, so
+/// they are tested without an OS.
+#[derive(Debug, Clone)]
+pub struct Stepper {
+    t: Timings,
+    cycles: u32,
+    cycle: u32,
+    stage: Stage,
+    last_error: Option<String>,
+    last_job: Option<Job>,
+    polled: Duration,
+}
+
+impl Stepper {
+    /// A replace of at most `allowed` cycles (each registers once).
+    pub fn new(t: &Timings, allowed: u32) -> Self {
+        Self {
+            t: *t,
+            cycles: allowed.min(t.max_cycles + 1),
+            cycle: 0,
+            stage: Stage::Removing,
+            last_error: None,
+            last_job: None,
+            polled: Duration::ZERO,
         }
-        // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too).
-        let waited = polled.max(began.elapsed());
-        if waited >= t.start_wait || cancel.load(Ordering::Relaxed) {
-            say(Step::Note(format!(
-                "The service is registered but did not answer within {} seconds; it may still start.",
-                waited.as_secs()
-            )));
-            return RepairOutcome::Registered;
+    }
+
+    /// The first action: the removal of the old registration.
+    pub fn start(&mut self) -> Next {
+        self.stage = Stage::Removing;
+        Next {
+            say: vec![Step::Cycle(self.cycle), Step::Removing],
+            action: Action::Unregister,
         }
-        b.pause(t.start_poll);
-        polled += t.start_poll;
+    }
+
+    /// Where a replace that registered in one step goes: straight to waiting for the service.
+    pub fn registered_in_one_step(&mut self) -> Next {
+        self.stage = Stage::Waiting;
+        Next {
+            say: vec![Step::Cycle(0), Step::WaitingForStart],
+            action: Action::Look,
+        }
+    }
+
+    fn done(&mut self, mut say: Vec<Step>, outcome: RepairOutcome) -> Next {
+        self.stage = Stage::Over;
+        say.shrink_to_fit();
+        Next {
+            say,
+            action: Action::Done(outcome),
+        }
+    }
+
+    fn next_cycle(&mut self, cancelled: bool, mut say: Vec<Step>) -> Next {
+        self.cycle += 1;
+        // The previous cycle registered (possibly refused); nothing is left half-removed.
+        if cancelled {
+            return self.done(say, RepairOutcome::Cancelled);
+        }
+        if self.cycle >= self.cycles {
+            let why = match &self.last_error {
+                Some(e) => format!(
+                    "Registering failed {} times ({e}). {NEXT_STEPS}",
+                    self.cycles
+                ),
+                None => format!(
+                    "The OS still refuses the service after {} full re-registrations (observed: {}). {NEXT_STEPS}",
+                    self.cycles,
+                    self.last_job.map_or("nothing".to_string(), Job::describe)
+                ),
+            };
+            say.push(Step::Note(why.clone()));
+            return self.done(say, RepairOutcome::Failed(why));
+        }
+        say.push(Step::Cycle(self.cycle));
+        say.push(Step::Removing);
+        self.stage = Stage::Removing;
+        Next {
+            say,
+            action: Action::Unregister,
+        }
+    }
+
+    /// The decision after `result`.
+    pub fn next(&mut self, result: OsResult) -> Next {
+        let go = |say: Vec<Step>, action| Next { say, action };
+        match (self.stage, result) {
+            (Stage::Removing, OsResult::Unregistered(r)) => {
+                let say = match r {
+                    Err(e) => vec![Step::Note(format!(
+                        "Unregister did not succeed (going on): {e}"
+                    ))],
+                    Ok(()) => vec![],
+                };
+                self.stage = Stage::Evicting;
+                go(say, Action::Evict)
+            }
+            (Stage::Evicting, OsResult::Evicted(r)) => {
+                let mut say = match r {
+                    Err(e) => vec![Step::Note(format!(
+                        "Removing the job did not succeed (going on): {e}"
+                    ))],
+                    Ok(()) => vec![],
+                };
+                say.push(Step::WaitingForRemoval);
+                self.stage = Stage::Gone;
+                go(say, Action::WaitGone)
+            }
+            (Stage::Gone, OsResult::Gone { timed_out }) => {
+                let say = if timed_out {
+                    vec![Step::RemovalTimedOut]
+                } else {
+                    vec![]
+                };
+                if self.cycle > 0 {
+                    self.stage = Stage::BeforeRegister;
+                    go(say, Action::Pause(self.t.backoff * self.cycle))
+                } else {
+                    self.stage = Stage::Registering;
+                    let mut say = say;
+                    say.push(Step::Registering);
+                    go(say, Action::Register)
+                }
+            }
+            (Stage::BeforeRegister, OsResult::Paused) => {
+                self.stage = Stage::Registering;
+                go(vec![Step::Registering], Action::Register)
+            }
+            (Stage::Registering, OsResult::RegisterOk) => {
+                self.last_error = None;
+                self.stage = Stage::Settling;
+                go(vec![], Action::Settle { ask: false })
+            }
+            (Stage::Registering, OsResult::RegisterErr(e)) => {
+                if let Some(stop) = stop_for(e.clone()) {
+                    return self.done(vec![Step::Note(format!("Registering stopped: {e}"))], stop);
+                }
+                self.last_error = Some(e.to_string());
+                self.stage = Stage::Settling;
+                go(vec![Step::RegisterFailed(e.to_string())], Action::Settle { ask: true })
+            }
+            (
+                Stage::Settling,
+                OsResult::Settled {
+                    job,
+                    answers,
+                    cancelled,
+                },
+            ) => {
+                self.last_job = Some(job);
+                if job == Job::Refused
+                    || (self.last_error.is_some() && (job == Job::Absent || !answers))
+                {
+                    return self.next_cycle(cancelled, vec![]);
+                }
+                self.stage = Stage::Waiting;
+                go(vec![Step::WaitingForStart], Action::Look)
+            }
+            (
+                Stage::Waiting,
+                OsResult::Looked {
+                    answers,
+                    job,
+                    elapsed,
+                    cancelled,
+                },
+            ) => {
+                if answers {
+                    return self.done(vec![Step::Answers], RepairOutcome::Recovered);
+                }
+                self.last_job = Some(job);
+                // The OS now refuses what it accepted a moment ago: another cycle, not a longer wait.
+                if job == Job::Refused {
+                    return self.next_cycle(cancelled, vec![Step::Note("The OS now refuses the registration.".into())]);
+                }
+                // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too).
+                let waited = self.polled.max(elapsed);
+                if waited >= self.t.start_wait || cancelled {
+                    return self.done(
+                        vec![Step::Note(format!(
+                            "The service is registered but did not answer within {} seconds; it may still start.",
+                            waited.as_secs()
+                        ))],
+                        RepairOutcome::Registered,
+                    );
+                }
+                self.polled += self.t.start_poll;
+                go(vec![], Action::Pause(self.t.start_poll))
+            }
+            (Stage::Waiting, OsResult::Paused) => go(vec![], Action::Look),
+            (_, other) => {
+                let why = format!("internal: {other:?} in {:?}", self.stage);
+                self.done(vec![Step::Note(why.clone())], RepairOutcome::Failed(why))
+            }
+        }
     }
 }
 
@@ -193,7 +448,8 @@ pub fn replace(
 }
 
 /// [`replace`] with at most `allowed` cycles (each cycle registers once): an unattended replace gets what is left of the
-/// version's attempts, so a refused job costs at most [`crate::plan::MAX_ATTEMPTS`] registrations across all starts.
+/// version's attempts, so a refused job costs at most [`crate::plan::MAX_ATTEMPTS`] registrations across all starts. This is
+/// the executor of a [`Stepper`]: it performs each action and feeds back what the OS answered.
 pub fn replace_bounded(
     b: &mut dyn Backend,
     answers: &mut dyn FnMut() -> bool,
@@ -205,76 +461,75 @@ pub fn replace_bounded(
     if cancel.load(Ordering::Relaxed) {
         return RepairOutcome::Cancelled;
     }
-    if let Some(result) = b.replace_in_one_step() {
-        say(Step::Cycle(0));
-        return match result {
-            Ok(_) => wait_for_answer(b, answers, cancel, t, say),
-            Err(e) => stop_for(e.clone())
-                .unwrap_or_else(|| RepairOutcome::Failed(format!("{e}. {NEXT_STEPS}"))),
-        };
-    }
-    let mut last_error = None;
-    let cycles = allowed.min(t.max_cycles + 1);
-    for cycle in 0..cycles {
-        if cycle > 0 && cancel.load(Ordering::Relaxed) {
-            // The previous cycle registered (possibly refused); nothing is left half-removed.
-            return RepairOutcome::Cancelled;
-        }
-        say(Step::Cycle(cycle));
-        say(Step::Removing);
-        if let Err(e) = b.unregister() {
-            say(Step::Note(format!(
-                "Unregister did not succeed (going on): {e}"
-            )));
-        }
-        if let Err(e) = b.evict() {
-            say(Step::Note(format!(
-                "Removing the job did not succeed (going on): {e}"
-            )));
-        }
-        say(Step::WaitingForRemoval);
-        let mut waited = Duration::ZERO;
-        while !b.job_gone() {
-            if waited >= t.gone_wait {
-                say(Step::RemovalTimedOut);
-                break;
-            }
-            b.pause(t.gone_poll);
-            waited += t.gone_poll;
-        }
-        if cycle > 0 {
-            b.pause(t.backoff * cycle);
-        }
-        say(Step::Registering);
-        match b.register() {
-            Ok(_) => last_error = None,
+    let mut stepper = Stepper::new(t, allowed);
+    let mut next = if let Some(result) = b.replace_in_one_step() {
+        match result {
+            Ok(_) => stepper.registered_in_one_step(),
             Err(e) => {
-                if let Some(stop) = stop_for(e.clone()) {
-                    say(Step::Note(format!("Registering stopped: {e}")));
-                    return stop;
-                }
-                say(Step::RegisterFailed(e.to_string()));
-                last_error = Some(e.to_string());
+                say(Step::Cycle(0));
+                return stop_for(e.clone())
+                    .unwrap_or_else(|| RepairOutcome::Failed(format!("{e}. {NEXT_STEPS}")));
             }
         }
-        b.pause(t.settle);
-        let job = b.inspect().job;
-        if job == Job::Refused || (last_error.is_some() && (job == Job::Absent || !answers())) {
-            continue;
-        }
-        return wait_for_answer(b, answers, cancel, t, say);
-    }
-    let why = match last_error {
-        Some(e) => format!(
-            "Registering failed {cycles} times ({e}). {NEXT_STEPS}"
-        ),
-        None => format!(
-            "The OS still refuses the service after {cycles} full re-registrations (observed: {}). {NEXT_STEPS}",
-            b.inspect().job.describe()
-        ),
+    } else {
+        stepper.start()
     };
-    say(Step::Note(why.clone()));
-    RepairOutcome::Failed(why)
+    let mut waiting_since: Option<std::time::Instant> = None;
+    loop {
+        for step in next.say.drain(..) {
+            if step == Step::WaitingForStart {
+                waiting_since = Some(std::time::Instant::now());
+            }
+            say(step);
+        }
+        let result = match next.action {
+            Action::Done(outcome) => return outcome,
+            Action::Unregister => OsResult::Unregistered(b.unregister().map(drop).map_err(|e| e.to_string())),
+            Action::Evict => OsResult::Evicted(b.evict()),
+            Action::WaitGone => {
+                let began = std::time::Instant::now();
+                let mut polled = Duration::ZERO;
+                let mut timed_out = false;
+                while !b.job_gone() {
+                    if polled.max(began.elapsed()) >= t.gone_wait {
+                        timed_out = true;
+                        break;
+                    }
+                    b.pause(t.gone_poll);
+                    polled += t.gone_poll;
+                }
+                OsResult::Gone { timed_out }
+            }
+            Action::Pause(how_long) => {
+                b.pause(how_long);
+                OsResult::Paused
+            }
+            Action::Register => match b.register() {
+                Ok(_) => OsResult::RegisterOk,
+                Err(e) => OsResult::RegisterErr(e),
+            },
+            Action::Settle { ask } => {
+                b.pause(t.settle);
+                let job = b.inspect().job;
+                OsResult::Settled {
+                    job,
+                    answers: ask && answers(),
+                    cancelled: cancel.load(Ordering::Relaxed),
+                }
+            }
+            Action::Look => {
+                let answered = answers();
+                let job = if answered { Job::Running } else { b.inspect().job };
+                OsResult::Looked {
+                    answers: answered,
+                    job,
+                    elapsed: waiting_since.map_or(Duration::ZERO, |s| s.elapsed()),
+                    cancelled: cancel.load(Ordering::Relaxed),
+                }
+            }
+        };
+        next = stepper.next(result);
+    }
 }
 
 #[cfg(test)]

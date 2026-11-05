@@ -130,6 +130,8 @@ pub struct Facts<'a> {
     pub first_run_done: bool,
     /// The app runs from a place it can register from (not a disk image or a translocated copy).
     pub location_ok: bool,
+    /// The state file is there but cannot be used (damaged, unreadable, a newer app's): a service that answers is adopted.
+    pub record_damaged: bool,
 }
 
 /// How many register calls are allowed per version before the service is held.
@@ -224,6 +226,10 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     }
     if f.wanted == Some(false) {
         return remove();
+    }
+    // A record that cannot be used says nothing about the version: a service that is up is adopted, never replaced.
+    if f.record_damaged && (f.answers || i.job == Job::Running) {
+        return Plan::MarkCurrent;
     }
     let (tries, phase) = match f.state {
         State::Attempting {
@@ -488,6 +494,7 @@ mod tests {
             wanted: Some(true),
             first_run_done: false,
             location_ok: true,
+            record_damaged: false,
         }
     }
 
@@ -863,6 +870,7 @@ mod tests {
                 wanted: Some(true),
                 first_run_done: false,
                 location_ok: true,
+                record_damaged: false,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -939,6 +947,7 @@ mod tests {
                 wanted: Some(true),
                 first_run_done: false,
                 location_ok: true,
+                record_damaged: false,
             })
         };
         let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
@@ -1029,6 +1038,7 @@ mod tests {
                 wanted: Some(true),
                 first_run_done: false,
                 location_ok: true,
+                record_damaged: false,
             })
         };
         assert_eq!(with(UAC), Plan::MarkCurrent, "a current definition needs no replacement");
@@ -1051,10 +1061,30 @@ mod tests {
                 wanted: Some(true),
                 first_run_done: false,
                 location_ok: true,
+                record_damaged: false,
             })
         };
         assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));
         assert_eq!(stale_with(LINUX), Plan::Replace(Reason::VersionChanged));
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_used_adopts_a_service_that_answers_and_replaces_nothing() {
+        let up = registered(Job::Running);
+        let damaged = |i: &Inspection, answers| {
+            plan(&Facts {
+                record_damaged: true,
+                answers,
+                ..facts(i, MAC, None)
+            })
+        };
+        assert_eq!(damaged(&up, false), Plan::MarkCurrent);
+        assert_eq!(damaged(&registered(Job::NotRunning), true), Plan::MarkCurrent);
+        assert_eq!(
+            damaged(&registered(Job::NotRunning), false),
+            Plan::Replace(Reason::VersionChanged),
+            "nothing is up: replaced once, as with no record"
+        );
     }
 
     #[test]

@@ -218,6 +218,41 @@ impl RecordFile {
         }
     }
 
+    /// Reads the record without writing anything (queries must not quarantine, restore or migrate a file: only a writer under
+    /// the lock does). The flag says the file is there but cannot be used (damaged, unreadable, or written by a newer app), so
+    /// the caller adopts a service that answers instead of replacing it.
+    pub fn peek(&self) -> (Recorded, bool) {
+        match &self.store {
+            Store::Memory(_) => (self.load(), false),
+            Store::File { file, .. } => {
+                let bytes = match std::fs::read(file.path()) {
+                    Ok(b) => b,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        return (Recorded::default(), false);
+                    }
+                    Err(_) => return (Recorded::default(), true),
+                };
+                let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                    return (Recorded::default(), true);
+                };
+                let version = value.get("version").and_then(serde_json::Value::as_u64).unwrap_or(1);
+                if version > u64::from(FORMAT) {
+                    return (Recorded::default(), true);
+                }
+                if version == 1 {
+                    match migrate_1(value) {
+                        Ok(v) => value = v,
+                        Err(_) => return (Recorded::default(), true),
+                    }
+                }
+                match serde_json::from_value::<Recorded>(value) {
+                    Ok(r) => (r, false),
+                    Err(_) => (Recorded::default(), true),
+                }
+            }
+        }
+    }
+
     /// Writes the whole record.
     ///
     /// # Errors
@@ -255,6 +290,21 @@ impl RecordFile {
     pub fn set_state(&self, state: State) -> Result<(), ServiceError> {
         let mut r = self.load();
         r.state = state;
+        self.store(&r)
+    }
+
+    /// "Quit and stop measuring" happened at this time (milliseconds since the Unix epoch) and the service was not resumed since.
+    pub fn resume_pending(&self) -> Option<u64> {
+        self.load().resume_pending
+    }
+
+    /// Records (or, with `None`, clears) that the service was stopped on request, keeping the rest.
+    ///
+    /// # Errors
+    /// [`ServiceError::Failed`] when it could not be saved.
+    pub fn set_resume_pending(&self, at: Option<u64>) -> Result<(), ServiceError> {
+        let mut r = self.load();
+        r.resume_pending = at;
         self.store(&r)
     }
 
@@ -403,6 +453,25 @@ mod tests {
         let missing = RecordFile::new(&d.path().join("lock-file"), "net.a.b");
         std::fs::write(d.path().join("lock-file"), "x").unwrap();
         assert!(missing.lock().is_some());
+    }
+
+    #[test]
+    fn peeking_never_writes_and_says_when_the_file_cannot_be_used() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("service-net.a.b.json");
+        let r = RecordFile::new(d.path(), "net.a.b");
+        assert_eq!(r.peek(), (Recorded::default(), false));
+        assert!(!path.exists());
+        std::fs::write(&path, "{ not json").unwrap();
+        assert_eq!(r.peek(), (Recorded::default(), true));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json", "nothing quarantined or restored");
+        std::fs::write(&path, r#"{"version": 99}"#).unwrap();
+        assert!(r.peek().1, "a newer app's file");
+        std::fs::write(&path, r#"{"version": 1, "registeredVersion": "1.0.0", "attemptedVersion": "1.1.0", "attempts": 2}"#).unwrap();
+        let (rec, damaged) = r.peek();
+        assert!(!damaged);
+        assert_eq!(rec.attempts_of("1.1.0"), 2);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("attemptedVersion"), "not migrated by a query");
     }
 
     #[test]

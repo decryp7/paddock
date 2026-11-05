@@ -165,6 +165,7 @@ impl Manager {
         tries: u32,
         pause: Duration,
     ) -> Result<RepairOutcome, ServiceError> {
+        let mut tried = 0u32;
         let mut result = if quiet {
             self.install_unattended(cancel)
         } else {
@@ -174,6 +175,8 @@ impl Manager {
             if !matches!(result, Err(ServiceError::Busy)) {
                 break;
             }
+            tried += 1;
+            log::info!(tried = tried, tries = tries; "another registration or repair holds the lock; the install looks again shortly");
             self.backend.pause(pause);
             result = if quiet {
                 self.install_unattended(cancel)

@@ -895,9 +895,10 @@ fn a_first_run_then_the_start_repair_waits_for_a_slow_job_and_registers_once() {
     );
     let before = count(&sim, "register");
     assert_eq!(before, 1);
-    assert_eq!(
-        m.on_start_patient(&never(), 3, Duration::from_secs(5)),
-        Started::Marked
+    let next = m.on_start_patient(&never(), 3, Duration::from_secs(5));
+    assert!(
+        matches!(next, Started::Marked | Started::Left(Hold::Healthy)),
+        "settled without a second registration: {next:?}"
     );
     assert_eq!(
         count(&sim, "register"),

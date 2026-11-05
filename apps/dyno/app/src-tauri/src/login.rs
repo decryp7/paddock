@@ -30,6 +30,11 @@ pub trait AgentService: paddock_service::login::LoginService + Send {
     /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
     /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
     fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String>;
+    /// Whether a registration this app made is being waited for, or is about to be made (ADR 0056): the link neither starts an
+    /// agent of its own nor retires one while this is true. False where nothing waits and in every state with no way forward.
+    fn pending(&mut self) -> bool {
+        false
+    }
     /// The service job a stop can name (launchd job, systemd user unit), when the OS supervises the agent now; `None` where
     /// there is none to stop (Windows, or nothing supervises). Quit and stop measuring stops it without removing the registration.
     fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
@@ -113,6 +118,24 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
     settings.unwrap_or_default().launch_at_login
 }
 
+/// The user's switch as the service manager needs it (ADR 0056): the settings file's `launchAtLogin`; a missing file is a fresh
+/// install (the default, on); a file that cannot be read is `None`, so nothing is registered unattended until it can.
+pub fn wanted_setting(settings_file: &std::path::Path) -> Option<bool> {
+    let (settings, warning) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    if warning.is_some() {
+        return None;
+    }
+    Some(settings.unwrap_or_default().launch_at_login)
+}
+
+/// Where the first-run marker is (set when the first run looks at it; the service manager asks whether it is there).
+static FIRST_RUN_MARKER_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Whether the first run has been done: its marker is there.
+pub fn first_run_done() -> bool {
+    FIRST_RUN_MARKER_PATH.get().is_some_and(|p| p.exists())
+}
+
 /// Whether the first-run registration has been tried in this process. A failed attempt is not repeated in the same run
 /// (each try may open System Settings or wait on `systemctl`); the missing marker makes the next start try again.
 pub struct FirstRunAttempt(std::sync::atomic::AtomicBool);
@@ -166,6 +189,7 @@ pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate:
     let mut service = first_run_service();
     let mut autostart = platform_autostart(app);
     let marker = paddock_service::login::FirstRunMarker::new(data.join(FIRST_RUN_MARKER));
+    FIRST_RUN_MARKER_PATH.set(data.join(FIRST_RUN_MARKER)).ok();
     let mut sys = paddock_service::RealSystem::new();
     let began = std::time::Instant::now();
     match apply_first_run_once(
@@ -497,6 +521,11 @@ mod mac {
             move || paddock_service::launchctl::job_running(&mut system(), &target),
         )
         .with_cover(move || agent_answers())
+        .with_app_state(
+            || super::wanted_setting(&dyno_agent::paths::Dirs::current().settings()),
+            super::first_run_done,
+            || super::current_location().is_ok(),
+        )
         .with_timings(timings))
     }
 
@@ -551,6 +580,10 @@ mod mac {
     impl AgentService for SmService {
         fn installed(&mut self) -> bool {
             quiet_manager().is_ok_and(|mut m| m.installed())
+        }
+
+        fn pending(&mut self) -> bool {
+            quiet_manager().is_ok_and(|mut m| m.pending())
         }
 
         /// Enabled, not switched off in Login Items and loaded in launchd: it runs the job (`RunAtLoad`, `KeepAlive`).
@@ -618,6 +651,11 @@ pub fn first_run_service() -> Box<dyn AgentService> {
 #[cfg(not(target_os = "macos"))]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
+}
+
+/// Whether the app is waiting for a registration it made (see [`AgentService::pending`]).
+pub fn service_pending() -> bool {
+    platform_service().pending()
 }
 
 /// The probe the agent link asks before it starts an agent of its own (see [`crate::link::ServiceState`]).
@@ -688,6 +726,17 @@ impl Autostart for NoAutostart {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_switch_as_the_service_manager_reads_it_missing_is_on_damaged_is_unknown() {
+        let dir = std::env::temp_dir().join(format!("dyno-wanted-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        assert_eq!(wanted_setting(&file), Some(true), "a fresh install: the default");
+        std::fs::write(&file, "{ not json").unwrap();
+        assert_eq!(wanted_setting(&file), None, "unreadable: nothing is registered unattended");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn the_first_run_is_quiet_only_once_login_items_has_been_opened_for_it() {
         assert!(!install_is_quiet(false, true), "the Settings switch always opens it");

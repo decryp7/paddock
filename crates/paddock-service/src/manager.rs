@@ -152,14 +152,14 @@ impl Manager {
 
     /// What the state file remembers.
     pub fn recorded(&self) -> Recorded {
-        self.record.load()
+        self.record.peek().0
     }
 
     fn decide(&mut self, waited: bool, resuming: bool) -> (Inspection, bool, Plan) {
         let answers = (self.answers)();
         let covered = (self.cover)();
         let inspection = self.backend.inspect();
-        let recorded = self.record.load();
+        let (recorded, record_damaged) = self.record.peek();
         let p = plan(&Facts {
             inspection: &inspection,
             answers,
@@ -173,6 +173,7 @@ impl Manager {
             wanted: (self.wanted)(),
             first_run_done: (self.first_run_done)(),
             location_ok: (self.location_ok)(),
+            record_damaged,
         });
         (inspection, answers, p)
     }
@@ -201,7 +202,7 @@ impl Manager {
     /// pending, the location is refused, the attempts are used up), so the app starts an agent of its own then. The
     /// link neither starts nor retires an agent of its own while this is true.
     pub fn pending(&mut self) -> bool {
-        let in_progress = matches!(self.record.load().state, State::Attempting { .. });
+        let in_progress = matches!(self.record.peek().0.state, State::Attempting { .. });
         match self.decide(false, false).2 {
             Plan::Await(_) => true,
             Plan::Replace(_) => in_progress,
