@@ -104,3 +104,42 @@ test('Firewall: at the edge of the table the wheel scrolls the page, not a secon
   }).toBeGreaterThan(0);
   expect(await body.evaluate((b) => b.scrollTop)).toBe(0);
 });
+
+for (const open of [false, true]) {
+  test(`Processes at 900x600 with the details panel ${open ? 'open' : 'closed'}: the last row is reachable and not clipped`, async ({ page }) => {
+    await page.setViewportSize(SIZES[0]);
+    await page.goto(url('/processes'));
+    await page.getByRole('radio', { name: 'All', exact: true }).click();
+    const grid = page.getByRole('treegrid', { name: 'Processes' });
+    await expect(grid).toBeVisible();
+    const rows = grid.locator('.pd-body [role=row][data-index]');
+    await expect(rows.first()).toBeVisible();
+    if (open) {
+      await rows.first().focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('complementary', { name: 'Process details' })).toBeVisible();
+    }
+    // The body keeps its minimum and the pane around it grows to hold it (the page scrolls), so nothing is cut by the pane.
+    // One measure per poll (the rows are drawn again when the panel narrows the columns): scroll to the end, then ask where the last row is.
+    await expect
+      .poll(async () =>
+        grid.evaluate((g) => {
+          const body = g.querySelector<HTMLElement>('.pd-body')!;
+          body.scrollTop = body.scrollHeight;
+          // The virtual body draws only the rows near the scroll position: the last row is the one whose index is the grid's row count.
+          const row = body.querySelector<HTMLElement>(`[role=row][aria-rowindex="${g.getAttribute('aria-rowcount')}"]`);
+          if (!row) return 'last row not drawn yet';
+          const pane = g.closest('section.table')!.getBoundingClientRect();
+          const main = document.querySelector('#pd-main')!;
+          const main_ = main.getBoundingClientRect();
+          const r = row.getBoundingClientRect();
+          if (body.clientHeight < 240) return `body ${body.clientHeight} px, below its minimum`;
+          // Cut by the pane (overflow hidden), or beyond the page area with no way to scroll to it.
+          if (r.bottom > pane.bottom + 1) return 'cut by the table pane';
+          if (r.bottom > main_.bottom + 1 && main.scrollHeight - main.scrollTop - main.clientHeight < 1) return 'beyond the page';
+          return 'ok';
+        }),
+      )
+      .toBe('ok');
+  });
+}

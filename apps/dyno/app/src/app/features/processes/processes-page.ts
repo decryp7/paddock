@@ -150,8 +150,9 @@ import { MatMenuModule } from '@angular/material/menu';
     .banner span { flex: 1; } .banner small { display: block; color: var(--text-2); }
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
     .body.open { grid-template-columns: minmax(0, 1fr) 380px; }
-    /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. */
-    @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(240px, 45%); } }
+    /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. The table row never gets
+       less than its body's minimum (240 px) plus the table's header and frame, and the pane scrolls when both rows do not fit. */
+    @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) minmax(240px, 45%); overflow-y: auto; } }
     .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-2); }
     .nm-cell { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
     .nm { min-width: 0; }
