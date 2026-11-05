@@ -60,6 +60,7 @@ pub mod apple_event;
 pub mod backend;
 pub mod control;
 mod error;
+pub mod fake_systemd;
 pub mod hardening;
 pub mod launch;
 pub mod launchctl;

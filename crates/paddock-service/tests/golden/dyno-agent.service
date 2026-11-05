@@ -14,7 +14,8 @@ StandardError=journal
 SyslogIdentifier=dyno-agent
 Nice=10
 CPUWeight=20
-IOSchedulingClass=idle
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 MemoryHigh=256M
 
 [Install]

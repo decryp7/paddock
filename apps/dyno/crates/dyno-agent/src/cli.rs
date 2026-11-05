@@ -6,7 +6,6 @@
 
 use crate::discovery::Discovery;
 use crate::paths::Dirs;
-use crate::service::{Service, Status};
 use crate::wire;
 use crate::{Running, StartError};
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
@@ -353,29 +352,8 @@ fn once() -> Result<(), String> {
 fn service(cmd: &str) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("Could not find this program: {e}"))?;
     crate::service::refuse_inside_app_bundle(crate::service::Os::current(), &exe)?;
-    let mut svc = Service::for_current_user(exe)?;
-    match cmd {
-        "install" => svc.install().map(|()| println!("installed and started")),
-        "uninstall" => svc.uninstall().map(|()| println!("removed")),
-        "ensure" => svc
-            .ensure()
-            .map(|changed| println!("{}", if changed { "registered again" } else { "nothing to do" })),
-        "status" => {
-            println!(
-                "{}",
-                match svc.status() {
-                    Status::NotInstalled => "not installed".to_string(),
-                    Status::Installed { running, current } => format!(
-                        "installed, {}{}",
-                        if running { "running" } else { "not running" },
-                        if current { "" } else { ", registered for another executable" }
-                    ),
-                }
-            );
-            Ok(())
-        }
-        _ => Err("service takes install, uninstall, status or ensure".into()),
-    }
+    let mut verbs = crate::service::verbs_for_current_user(exe)?;
+    crate::service::run_verb(cmd, verbs.as_mut()).map(|line| println!("{line}"))
 }
 
 /// Runs the agent in-process against this machine with a subscriber asking for the processes (the heaviest case the

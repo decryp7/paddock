@@ -323,23 +323,99 @@ pub fn agent_override(debug_build: bool, value: Option<&std::ffi::OsStr>) -> Opt
     value.filter(|_| debug_build)
 }
 
-// ---------------------------------------------------------------------------------------------------- Linux, Windows
+// ----------------------------------------------------------------------------------------------------------- Linux
 
-/// The agent's own service registration (`dyno_agent::service`): a systemd user unit or the per-user `Run` entry.
-#[cfg(not(target_os = "macos"))]
+/// The agent's systemd user unit through the shared service manager (`dyno_agent::service::linux`, ADR 0056): the Settings
+/// switch, the repair at start, Quit and the resume are thin callers of `Manager`, so a `systemctl --user disable` is the user's
+/// switch and nothing here writes, enables or starts a unit by itself. `make` builds the manager for the waits a call wants
+/// (the real one in the app, one over the fake systemd in the tests).
+#[cfg(any(target_os = "linux", test))]
+pub struct LinuxService {
+    make: dyno_agent::service::linux::ManagerFactory,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl LinuxService {
+    /// The service of this user: the real `systemctl`, Dyno's data folder and the agent program next to the app.
+    #[cfg(target_os = "linux")]
+    pub fn real() -> LinuxService {
+        LinuxService::with(Box::new(|timings| {
+            dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)
+        }))
+    }
+
+    /// A service whose manager comes from `make` (tests).
+    pub fn with(make: dyno_agent::service::linux::ManagerFactory) -> LinuxService {
+        LinuxService { make }
+    }
+
+    /// A manager that is only asked what it sees or told to stop or resume.
+    fn quiet(&self) -> Result<paddock_service::Manager, String> {
+        (self.make)(paddock_service::Timings::default())
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl paddock_service::login::LoginService for LinuxService {
+    /// Registers the unit without waiting for the agent to answer (the link waits for it and falls back to one of its own).
+    fn install(&mut self) -> Result<(), String> {
+        let mut m = (self.make)(dyno_agent::service::linux::install_timings())?;
+        dyno_agent::service::linux::install(&mut m)
+    }
+
+    fn uninstall(&mut self) -> Result<(), String> {
+        dyno_agent::service::linux::uninstall(&mut self.quiet()?)
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl AgentService for LinuxService {
+    fn installed(&mut self) -> bool {
+        self.quiet().is_ok_and(|mut m| m.installed())
+    }
+
+    /// Registered, not disabled by the user and systemd runs the unit or is about to restart it.
+    fn supervises(&mut self) -> bool {
+        self.quiet().is_ok_and(|mut m| m.supervises())
+    }
+
+    /// After an update (or a moved program) the unit is written again once; what the user disabled is left alone and nothing is
+    /// registered that the user never turned on.
+    fn repair(&mut self, _agent_answers: AnswerFn) -> Result<bool, String> {
+        dyno_agent::service::linux::ensure(&mut self.quiet()?, true)
+    }
+
+    /// The user unit, while systemd runs it (the registration is not touched by the stop).
+    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+        self.quiet().ok()?.stop_mechanism()
+    }
+
+    /// After a stop on request: the shared resume starts the unit again unless the user switched it off meanwhile.
+    fn resume(&mut self) -> Result<bool, String> {
+        self.quiet()?
+            .resume(&std::sync::atomic::AtomicBool::new(false), &mut |step| {
+                crate::logging::info(&format!("agent service: {step}"))
+            })
+            .map_err(|e| dyno_agent::service::linux::words(&e))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------- Windows
+
+/// On Windows the app's own `Run` value is the logon entry and the app starts the agent hidden: the agent is not registered
+/// separately (an entry that started only the agent opened a console and left no tray icon, Dyno 1.0.0), so `install` only
+/// removes the stale agent entry 1.0.0 wrote, and `repair` does the same and says whether it was there.
+#[cfg(windows)]
 pub struct CliService;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 impl CliService {
     fn service(&self) -> Result<dyno_agent::service::Service, String> {
         dyno_agent::service::Service::for_current_user(agent_program()?)
     }
 }
 
-/// On Windows the app's own `Run` value is the logon entry and the app starts the agent hidden: the agent is not registered
-/// separately (an entry that started only the agent opened a console and left no tray icon, Dyno 1.0.0), so `install` only
-/// removes the stale agent entry 1.0.0 wrote, and `repair` does the same and says whether it was there.
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 impl paddock_service::login::LoginService for CliService {
     fn install(&mut self) -> Result<(), String> {
         let mut s = self.service()?;
@@ -354,15 +430,10 @@ impl paddock_service::login::LoginService for CliService {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 impl AgentService for CliService {
     fn installed(&mut self) -> bool {
-        self.service()
-            .is_ok_and(|mut s| !s.app_is_logon_entry() && !matches!(s.status(), dyno_agent::service::Status::NotInstalled))
-    }
-
-    fn supervises(&mut self) -> bool {
-        self.service().is_ok_and(|mut s| s.supervised())
+        false
     }
 
     fn repair(&mut self, _agent_answers: AnswerFn) -> Result<bool, String> {
@@ -371,32 +442,6 @@ impl AgentService for CliService {
             return s.clear_stale_run_entry();
         }
         s.ensure()
-    }
-
-    /// Linux: the systemd user unit, while it is supervising. Windows has no service job (the app's `Run` entry starts the agent).
-    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
-        if cfg!(target_os = "linux") && self.supervises() {
-            Some(paddock_service::stop::StopMechanism::SystemdUser {
-                unit: "dyno-agent.service".into(),
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Linux: `systemctl --user start` of the unit that was stopped (never `enable`: Launch at login was not changed).
-    fn resume(&mut self) -> Result<bool, String> {
-        if !cfg!(target_os = "linux") || !self.installed() {
-            return Ok(false);
-        }
-        let mut sys = paddock_service::RealSystem::new().with_timeout(std::time::Duration::from_secs(10));
-        let out = paddock_service::System::run(&mut sys, "systemctl", &["--user", "start", "dyno-agent.service"])
-            .map_err(|e| format!("systemctl start {e}"))?;
-        if out.success() {
-            Ok(true)
-        } else {
-            Err(format!("systemctl --user start dyno-agent.service: {}", out.reason()))
-        }
     }
 }
 
@@ -706,7 +751,13 @@ pub fn first_run_service() -> Box<dyn AgentService> {
 }
 
 /// The platform's agent service.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub fn platform_service() -> Box<dyn AgentService> {
+    Box::new(LinuxService::real())
+}
+
+/// The platform's agent service.
+#[cfg(windows)]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
 }
@@ -892,6 +943,110 @@ mod tests {
             "a release build ignores it"
         );
         assert_eq!(super::agent_override(true, None), None);
+    }
+
+    /// The wiring of the app's Linux service (`LinuxService`) over the shared simulator: what the transition decides is tested in
+    /// `paddock-service` (its model and `model_linux`); here the Settings switch, the repair at start, Quit and the resume reach
+    /// it with Dyno's unit, its paths and its words.
+    mod linux_wiring {
+        use super::super::*;
+        use dyno_agent::service::linux;
+        use paddock_env::MapVars;
+        use paddock_service::Timings;
+        use paddock_service::fake_systemd::{Active, FakeSystemd};
+        use paddock_service::login::LoginService;
+        use paddock_service::testing::FakeSystem;
+
+        const EXE: &str = "/opt/dyno/dyno-agent";
+
+        struct Rig {
+            sys: FakeSystem,
+            ctl: FakeSystemd,
+            unit: PathBuf,
+            data: tempfile::TempDir,
+        }
+
+        impl Rig {
+            fn new() -> Rig {
+                let vars = MapVars::new().with("HOME", "/home/ana");
+                let unit = linux::unit_path(&vars).unwrap();
+                let sys = FakeSystem::new();
+                sys.put_program(EXE);
+                let ctl = FakeSystemd::new(&sys, "dyno-agent.service", &unit);
+                Rig { sys, ctl, unit, data: tempfile::tempdir().unwrap() }
+            }
+
+            fn service(&self) -> LinuxService {
+                let (sys, data) = (self.sys.clone(), self.data.path().to_path_buf());
+                LinuxService::with(Box::new(move |timings: Timings| {
+                    let sys = sys.clone();
+                    let factory: linux::SystemFactory = Box::new(move || Box::new(sys.clone()));
+                    linux::manager(
+                        std::path::Path::new(EXE),
+                        &MapVars::new().with("HOME", "/home/ana"),
+                        &data,
+                        "1.1.0",
+                        &factory,
+                        timings,
+                    )
+                }))
+            }
+        }
+
+        #[test]
+        fn the_settings_switch_registers_and_removes_the_unit() {
+            let rig = Rig::new();
+            let mut s = rig.service();
+            assert!(!s.installed());
+            s.install().unwrap();
+            assert!(rig.sys.file(&rig.unit).is_some() && rig.ctl.enabled());
+            assert_eq!(rig.ctl.active(), Active::Active);
+            assert!(s.installed() && s.supervises());
+            s.uninstall().unwrap();
+            assert!(rig.sys.file(&rig.unit).is_none() && !rig.ctl.enabled());
+            assert!(!s.installed() && !s.supervises());
+        }
+
+        #[test]
+        fn the_repair_at_start_replaces_a_stale_unit_and_leaves_a_missing_or_disabled_one_alone() {
+            let rig = Rig::new();
+            let mut s = rig.service();
+            let answers: AnswerFn = std::sync::Arc::new(|| true);
+            assert_eq!(s.repair(answers.clone()), Ok(false), "never installed unasked");
+            assert!(rig.sys.file(&rig.unit).is_none());
+            s.install().unwrap();
+            rig.sys.put_file(&rig.unit, "[Service]\nExecStart=/old/dyno-agent run\n");
+            assert_eq!(s.repair(answers.clone()), Ok(true));
+            assert!(rig.sys.file(&rig.unit).unwrap().contains(EXE));
+            rig.ctl.user_disables();
+            rig.sys.put_file(&rig.unit, "[Service]\nExecStart=/old/dyno-agent run\n");
+            assert_eq!(s.repair(answers), Ok(false), "the user's disable is theirs");
+            assert!(!s.supervises(), "a disabled unit supervises nothing: the app starts its own agent");
+        }
+
+        #[test]
+        fn quit_and_stop_names_the_unit_and_the_next_start_resumes_it_unless_the_user_disabled_it() {
+            let rig = Rig::new();
+            let mut s = rig.service();
+            assert!(s.stop_mechanism().is_none(), "nothing runs, nothing to stop");
+            s.install().unwrap();
+            let how = s.stop_mechanism().expect("the running unit");
+            assert_eq!(
+                how,
+                paddock_service::stop::StopMechanism::SystemdUser { unit: "dyno-agent.service".into() }
+            );
+            let mut sys = rig.sys.clone();
+            paddock_service::stop::stop(&mut sys, &how, paddock_service::stop::StopTimings::default()).unwrap();
+            assert_eq!(rig.ctl.active(), Active::Inactive);
+            assert_eq!(s.resume(), Ok(true));
+            assert_eq!(rig.ctl.active(), Active::Active);
+            // Stopped, then disabled by the user: the resume leaves it.
+            let mut sys = rig.sys.clone();
+            paddock_service::stop::stop(&mut sys, &how, paddock_service::stop::StopTimings::default()).unwrap();
+            rig.ctl.user_disables();
+            assert_eq!(s.resume(), Ok(false));
+            assert_eq!(rig.ctl.active(), Active::Inactive);
+        }
     }
 
     use super::*;
