@@ -41,7 +41,8 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   const evidence = [];
   // The probe must be able to see a native menu (ER-33): close the dialogs that cover the shell, give the shell the foreground, count the app's own "tray click: Right Up" lines
   // before and after, and take a screenshot while the menu is open.
-  if (browser) for (const p of browser.contexts().flatMap((c) => c.pages())) if (p.url().includes('dialog?id=')) await p.close().catch(() => {});
+  // Escape, never page.close(): closing the DevTools target leaves the native dialog window open but invisible to the next step (the dry4 run: "focusing the open window d-main-3 of pd.settings" and a Settings page the script could not find).
+  if (browser) for (const p of browser.contexts().flatMap((c) => c.pages())) if (p.url().includes('dialog?id=')) { await p.keyboard.press('Escape').catch(() => {}); await sleep(500); }
   await actor.send('fg Dyno').catch(() => {});
   await sleep(1000);
   const logBefore = rightClicksInLog(ssh(APP_LOG_PS));
