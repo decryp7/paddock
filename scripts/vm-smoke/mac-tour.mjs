@@ -4,6 +4,7 @@
 // need a DOM (clipped text, status chips) cannot run here and are not claimed.
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { menuBarFacts, judgeMenuBar } from './mac-menubar.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
@@ -43,13 +44,17 @@ export class MacTour {
 
   /** The menu-bar items: Dyno's status items are windows of the menu bar owner named net.decryptology.dyno.menubar.*. */
   async menuBar() {
-    const r = await this.g.exec('/usr/local/bin/axdrive windows');
-    const items = r.stdout.split('\n').map((l) => l.split('\t')).filter((c) => /net\.decryptology\.dyno\.menubar/.test(c[3] ?? ''));
-    const checks = [{ ok: items.length > 0, detail: `${items.length} Dyno menu-bar item(s): ${items.map((c) => `${c[3].split('.').pop()} ${c[4]}`).join(', ') || 'none'}` }];
-    const wide = items.filter((c) => Number(c[4].split(',')[2].split('x')[0]) >= 20);
-    checks.push({ ok: wide.length === items.length && items.length > 0, detail: 'every item is at least 20 points wide (a number is readable, not a sliver)' });
-    const shot = await this.gui.shot('menu-bar');
-    return this.result('GUI: menu-bar items', checks, [`screenshot: ${shot}`, ...r.stdout.split('\n').filter((l) => /dyno/.test(l))]);
+    const mb = await menuBarFacts(this.g);
+    const items = mb.tsv.split('\n').map((l) => l.split('\t')).filter((c) => /net\.decryptology\.dyno\.menubar/.test(c[3] ?? ''));
+    const shot = await this.gui.shot('menu-bar'); // always, as evidence (a guest without a menu bar shows no clock)
+    const j = judgeMenuBar({ ...mb, items: items.length });
+    const checks = [...j.checks];
+    if (mb.menubar && items.length) {
+      const wide = items.filter((c) => Number(c[4].split(',')[2].split('x')[0]) >= 20);
+      checks.push({ ok: wide.length === items.length, detail: `${items.map((c) => `${c[3].split('.').pop()} ${c[4]}`).join(', ')}: every item is at least 20 points wide (a number is readable, not a sliver)` });
+    }
+    const bad = checks.filter((c) => !c.ok);
+    return { title: 'GUI: menu-bar items', status: bad.length || j.status === 'fail' ? 'fail' : j.status, summary: j.status === 'not-measured' ? j.summary : bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : j.summary, checks, evidence: [`screenshot: ${shot}`, ...mb.tsv.split('\n').filter((l) => /dyno/.test(l))] };
   }
 
   /** Widget titles in the order the dashboard lists them (the AX groups of the web area whose name is a widget title). */

@@ -1,6 +1,7 @@
 // The restart check on a macOS guest (the user's real-PC finding): helper on and Launch at login on, record the helper's start-at-boot state
 // (launchd RunAtLoad and KeepAlive), restart the guest for real and log in, then without Repair record the helper, the card, whether Dyno started
 // itself (SMAppService login item) and how long after login, the menu-bar icons and one helper reading.
+import { menuBarFacts, judgeMenuBar } from './mac-menubar.mjs';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LABEL = 'net.decryptology.dyno.helper';
 const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };
@@ -161,10 +162,14 @@ export function macRebootCheck({ waitReady }) {
       diag = [...diag, ...d2.lines, '--- window owners (count, owner, title)', ...owners.split('\n'), '--- lsappinfo', ...lsapp.split('\n'), '--- Control Center / SystemUIServer items', ...ccItems.split('\n'), '--- app log tray lines', ...log.split('\n'), `--- after "open -a Dyno" (25 s): ${after.length} Dyno window(s), ${items2.length} menu-bar item(s)`, ...after];
     }
     const wanted = d1.shown.filter((s) => !s.unnamed);
-    steps.push(result('Restart check: menu-bar icons after the restart', [
-      { ok: win.length > 0, detail: win.length ? `${win.length} Dyno menu-bar item(s) after the restart (appeared ${took} s after the check began, about 1 min after the autostart)` : 'no Dyno menu-bar item 90 s after the autostart' },
-      { ok: wanted.length > 0 && wanted.every((s) => s.shown), detail: `shown test: ${wanted.filter((s) => s.shown).length} of ${wanted.length} autosave name(s) on screen under Control Center; start signal ${d1.facts.startSignal ?? 'none'}; ControlCenter blocked lines ${d1.ccf.blocked.length}` },
-    ], [...win, ...diag], 'menu-bar items present'));
+    // A guest without a menu bar measures nothing: look for the Menubar window first, always take a screenshot, record dyno-app and its crash reports.
+    const mb = await menuBarFacts(g);
+    const shot = await gui.shot('menu-bar-after-restart');
+    const j = judgeMenuBar({ ...mb, items: win.length });
+    const mbChecks = [...j.checks];
+    if (mb.menubar && win.length) mbChecks.push({ ok: wanted.length > 0 && wanted.every((s) => s.shown), detail: `shown test: ${wanted.filter((s) => s.shown).length} of ${wanted.length} autosave name(s) on screen under Control Center; start signal ${d1.facts.startSignal ?? 'none'}; ControlCenter blocked lines ${d1.ccf.blocked.length}` });
+    const mbBad = mbChecks.filter((c) => !c.ok);
+    steps.push({ title: 'Restart check: menu-bar icons after the restart', status: mbBad.length || j.status === 'fail' ? 'fail' : j.status, summary: j.status === 'not-measured' ? j.summary : mbBad.length ? mbBad.map((c) => c.detail).join('; ').slice(0, 240) : j.summary, checks: mbChecks, evidence: [`screenshot: ${shot}`, `appeared ${win.length ? `${took} s after the check began` : 'never within 90 s'}`, ...win, ...diag] });
     // An autostarted Dyno may be hidden in the tray: bring its window up the way a click on the Dock or the menu bar does.
     await g.exec('open -a /Applications/Dyno.app'); await sleep(20_000);
     await gui.closeSettings();
