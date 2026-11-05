@@ -16,7 +16,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 ### Removed
 
 - **AI:** Pitwall is now the only AI engine. Debrief no longer downloads or runs its own models: the set-up wizard, the model manager, the inference runtimes, their update checks and manual downloads, the engine choice and the AI worker's memory cap are gone, and every AI feature runs on the model Pitwall serves. Install Pitwall and connect Debrief to it in Settings ▸ AI; Debrief's own model and runtime files stay on disk until you remove them. The AI download proxy and connection settings are gone too: the FFmpeg download now follows your system's proxy settings (HTTPS_PROXY, NO_PROXY or the operating system's)
-- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
+- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them If you had switched "AI aliases for names" off, aliases an earlier version learned now count again in name matching; each is labelled and removable.
 
 ### Changed
 
