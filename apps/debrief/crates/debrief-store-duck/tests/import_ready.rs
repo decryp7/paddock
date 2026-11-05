@@ -65,8 +65,9 @@ fn import_until_search_is_ready() {
     };
     let store_dir = PathBuf::from(std::env::var_os("DEBRIEF_READY_STORE").expect("DEBRIEF_READY_STORE: a new store folder"));
     let reindex = std::env::var_os("DEBRIEF_READY_REINDEX").is_some();
+    let recatalogue = std::env::var_os("DEBRIEF_READY_RECATALOGUE").is_some();
     assert!(
-        reindex || !store_dir.join("data.duckdb").exists(),
+        reindex || recatalogue || !store_dir.join("data.duckdb").exists(),
         "DEBRIEF_READY_STORE must be a new folder"
     );
     let sampler = Sampler::start();
@@ -87,6 +88,10 @@ fn import_until_search_is_ready() {
             heap: mb.parse::<usize>().expect("DEBRIEF_READY_INDEX heap MB") << 20,
         };
     }
+    // `DEBRIEF_READY_CATALOGUE_WORKERS` (sources the catalogue builds at the same time; 0 = automatic).
+    if let Some(n) = std::env::var("DEBRIEF_READY_CATALOGUE_WORKERS").ok().and_then(|v| v.parse().ok()) {
+        options.catalogue_workers = n;
+    }
     // `DEBRIEF_READY_DUCK` (DuckDB threads).
     if let Some(n) = std::env::var("DEBRIEF_READY_DUCK").ok().and_then(|v| v.parse().ok()) {
         options.duck_threads = n;
@@ -99,6 +104,23 @@ fn import_until_search_is_ready() {
     // `DEBRIEF_READY_REINDEX=1`: no import; DEBRIEF_READY_STORE is a kept store whose index is removed and built again
     // from its segments (the index phase alone, the same segments every run; the catalogue builds beside it as after an
     // import).
+    // `DEBRIEF_READY_RECATALOGUE=1`: no import; DEBRIEF_READY_STORE is a kept store whose catalogue is forgotten (the
+    // `catalogue_sources` rows) and built again from its segments: the catalogue phase alone.
+    if recatalogue {
+        {
+            let conn = duckdb::Connection::open(store_dir.join("data.duckdb")).unwrap();
+            conn.execute_batch("DELETE FROM catalogue_sources").unwrap();
+        }
+        let started = Instant::now();
+        let store = DuckStore::open_with(&store_dir, Profile::default_profile(), PluginRegistry::new(), options).unwrap();
+        let built = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
+        let s = started.elapsed().as_secs_f64();
+        eprintln!(
+            "ready: recatalogue built={built} in {s:.1} s, peak RSS {} MB",
+            sampler.take_peak_mb()
+        );
+        return;
+    }
     if reindex {
         let _ = std::fs::remove_dir_all(store_dir.join("index"));
         let started = Instant::now();

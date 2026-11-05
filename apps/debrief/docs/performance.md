@@ -734,6 +734,41 @@ does the time go? Every block below gives the date, build, machine, load, corpus
 
 Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
 
+### 2026-11-05, catalogue workers (plan SR3, branch `debrief/import-search`)
+
+- **Commit:** base = `debrief/p0-idle` merged into the branch (one catalogue thread, rows read one by one through
+  `Row::get`) → the SR3 commit (Arrow batches instead of rows; `catalogue_workers` sources built at the same time, each
+  worker on its own connection, claiming the next source when free; the aggregate still under the store's `heavy` lock;
+  writes one at a time under the write lock; a round ends at about 100,000 written rows so the checkpoint rule stays).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; shared with other agents, **not quiet**.
+- **Corpus:** the `large10` store of the SR1 block (56,152,132 events, 618 sources to catalogue), its
+  `catalogue_sources` rows deleted, then opened: the catalogue phase alone (the index exists and is not rebuilt).
+- **Command:** `DEBRIEF_READY_STORE=<kept store> DEBRIEF_READY_RECATALOGUE=1 DEBRIEF_READY_CATALOGUE_WORKERS=<n>
+  import_ready --nocapture` (release; the harness times `wait_for_catalogue`). One run per row.
+- **Numbers:**
+
+  | Build | Workers | Load at start | Catalogue built | Peak RSS (harness) |
+  |---|---|---|---|---|
+  | base (rows) | 1 | 14.9 | 200.8 s | 904 MB |
+  | change (Arrow) | 1 | 7.3 | 160.5 s | 361 MB |
+  | change | 4 | 5.3 | 65.6 s | 483 MB |
+  | change | 8 | 5.9 | 58.7 s | 681 MB |
+
+- **Verdict against the budget** (at least 3x sooner at 56M): 4 workers are 3.06x the base, but the base ran at load 14.9
+  against 5.3, so it is a direction, not a pass; the same build with 1 worker is 1.25x the base. Going from 4 to 8
+  workers gains 10% for 200 MB more, so 4 would be the pick.
+- **Default stays 1 (open decision):** with more than one worker `building_the_catalogue_keeps_its_unsaved_rows_bounded`
+  (D-0, bound 16 MB) measures 20 to 24 MB in 8 runs at 2 and 4 workers (12 to 16 MB with one, rows or Arrow reads), whatever
+  the round size (rounds of a quarter and of a sixteenth of the row limit, and writes through one connection, were tried: no
+  change). The peak looks like a per-connection cost, not rows; why is not found. `AUTO_WORKERS` is 1 until the bound or
+  the cost is decided; `catalogue_workers` (option, harness `DEBRIEF_READY_CATALOGUE_WORKERS`) turns the workers on.
+- **Equality:** the test `four_workers_build_the_same_catalogue_as_one` compares every catalogue row of the invented
+  samples built with 1 and with 4 workers. It is a guard, not a red test; the large store's rows were not compared.
+- **Not done (parked with the tee and `source_chunks`, ADR 0062 WP-6):** the names queue from the import and the build of
+  one large source in chunks: a store with one huge source gets no speed-up from this.
+- **Raw output:** `c1-base.txt`, `c2-w1.txt`, `c2-w4.txt`, `c2-w8.txt`, `runs.txt` in
+  `/Volumes/d7sst7/dev-targets/scratch/debrief-search/`.
+
 ### 2026-11-05, length of an index step (follow-up to the SR1 block)
 
 - **Cause (ER-28):** the step stopped starting segments after its deadline, but the pipeline holds about seven chunks

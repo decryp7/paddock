@@ -84,6 +84,8 @@ pub struct StoreOptions {
     pub memory_limit: String,
     /// The full-text index writer's heap and threads (applies when the store opens).
     pub index: fts::WriterBudget,
+    /// Sources the catalogue builds at the same time (applies when the store opens); 0 is automatic.
+    pub catalogue_workers: usize,
     /// DuckDB's memory limit while an import compacts and orders the events ([`IMPORT_MEMORY_LIMIT`]).
     pub import_memory_limit: String,
     /// Where DuckDB spills beyond its memory limit: a folder per store below this one (see [`spill_folder`]);
@@ -105,6 +107,7 @@ impl Default for StoreOptions {
             duck_threads: DUCK_THREADS,
             memory_limit: MEMORY_LIMIT.to_string(),
             index: fts::WriterBudget::default(),
+            catalogue_workers: 0,
             import_memory_limit: IMPORT_MEMORY_LIMIT.to_string(),
             spill_dir: None,
             max_spill: None,
@@ -986,7 +989,9 @@ impl DuckStore {
         let catalogue = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone(), heavy.clone(), generation.clone()))
+            .and_then(|c| {
+                catalogue::CatalogueService::start(c, write_lock.clone(), heavy.clone(), generation.clone(), opts.catalogue_workers)
+            })
             .map_err(|e| log::warn!("the catalogue is unavailable: {e:#}"))
             .ok();
         DuckStore {

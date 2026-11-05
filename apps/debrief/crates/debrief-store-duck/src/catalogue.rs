@@ -25,6 +25,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+/// Sources built at the same time when the option says automatic: one. Four workers built the catalogue of `large10`
+/// about 2.4 times sooner than one (performance.md, "catalogue workers"), but with more than one connection the
+/// regression test `building_the_catalogue_keeps_its_unsaved_rows_bounded` measures 20 to 24 MB of unsaved rows against
+/// its 16 MB bound (12 to 16 MB with one), whatever the round size, so the default waits for a decision on that bound.
+const AUTO_WORKERS: usize = 1;
+
 /// Layout and extraction version; sources built with another are built again.
 pub const VERSION: u32 = 1;
 
@@ -60,22 +66,43 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64)> {
     let mut tally = Tally::default();
     {
+        use duckdb::arrow::array::{Array, AsArray, RecordBatch, StructArray};
+        use duckdb::arrow::datatypes::{Int64Type, UInt64Type};
         let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
-        let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
-        while let Some(r) = rows.next()? {
+        let _ = stmt.stream_arrow(params![source, MAX_EVENTS_SCANNED as u64])?;
+        // Batches, not rows: the texts are borrowed from the Arrow arrays instead of copied into a String each.
+        while let Some(chunk) = stmt.step()? {
             // The process is exiting: stop reading (the source is catalogued again next time).
             if crate::shutdown::down() {
                 anyhow::bail!("the process is exiting");
             }
-            let (id, ts): (u64, Option<i64>) = (r.get(0)?, r.get(1)?);
-            let message: String = r.get(2)?;
-            let exception: Option<String> = r.get(3)?;
-            let mut texts = vec![message.as_str()];
-            if let Some(e) = exception.as_deref() {
-                texts.push(e);
+            let rb = RecordBatch::from(&chunk as &StructArray);
+            let ids = rb
+                .column(0)
+                .as_primitive_opt::<UInt64Type>()
+                .ok_or_else(|| anyhow::anyhow!("id type"))?;
+            let ts = rb
+                .column(1)
+                .as_primitive_opt::<Int64Type>()
+                .ok_or_else(|| anyhow::anyhow!("ts type"))?;
+            let msg = rb.column(2).as_string_opt::<i32>().ok_or_else(|| anyhow::anyhow!("message type"))?;
+            let exc = rb
+                .column(3)
+                .as_string_opt::<i32>()
+                .ok_or_else(|| anyhow::anyhow!("exception type"))?;
+            for i in 0..rb.num_rows() {
+                let mut texts = [""; 2];
+                let mut n = 1;
+                if !msg.is_null(i) {
+                    texts[0] = msg.value(i);
+                }
+                if !exc.is_null(i) {
+                    texts[1] = exc.value(i);
+                    n = 2;
+                }
+                let found = extract(&texts[..n]);
+                tally.add_event(&found, ids.value(i), (!ts.is_null(i)).then(|| ts.value(i)));
             }
-            let found = extract(&texts);
-            tally.add_event(&found, id, ts);
         }
     }
     let sql = format!(
@@ -206,6 +233,8 @@ struct Shared {
     unsaved_rows: AtomicU64,
     /// The store's lock of heavy DuckDB work (`Inner::heavy`).
     heavy: Arc<Mutex<()>>,
+    /// Sources built at the same time (at least 1).
+    workers: usize,
     /// Whether anything changed since the last look; without news a turn runs no statement.
     gate: Gate,
     /// What status callers wait on.
@@ -224,6 +253,7 @@ impl CatalogueService {
         write_lock: Arc<Mutex<()>>,
         heavy: Arc<Mutex<()>>,
         generation: Arc<AtomicU64>,
+        workers: usize,
     ) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
@@ -233,6 +263,7 @@ impl CatalogueService {
             unsaved: AtomicBool::new(false),
             unsaved_rows: AtomicU64::new(0),
             heavy,
+            workers: if workers == 0 { AUTO_WORKERS } else { workers },
             gate: Gate::new(generation),
             changes: Changes::new(),
         });
@@ -306,37 +337,141 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     let failed = lock(&s.failed).clone();
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
-    let Some(&source) = todo.first() else { return Ok(Turn::Idle) };
-    let built = match build(conn, source, &s.heavy) {
-        Ok(b) => b,
-        Err(e) => {
-            // A source whose events cannot be read now (compaction swapped its files) is tried again later.
-            lock(&s.failed).insert(source);
-            return Err(e.context(format!("cataloguing source {source}")));
-        }
-    };
-    let (entries, dropped, guids) = built;
-    // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(writing) = write_lock.try_lock() else {
-        s.gate.news();
-        return Ok(Turn::Blocked);
-    };
-    s.unsaved.store(true, Ordering::SeqCst);
-    if crate::shutdown::down() {
+    if todo.is_empty() {
         return Ok(Turn::Idle);
     }
-    let written = commit(conn, source, &entries, dropped, guids)?;
-    drop(writing);
-    s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
-    s.changes.bump();
+    let began = std::time::Instant::now();
+    let round = build_round(s, conn, write_lock, &todo);
+    s.pending.store(todo.len() as u64 - round.committed, Ordering::SeqCst);
+    if round.committed > 0 {
+        log::debug!(
+            "catalogue: {} of {} pending sources built by {} workers in {:.2?}, {} rows",
+            round.committed,
+            todo.len(),
+            s.workers,
+            began.elapsed(),
+            round.rows
+        );
+    }
     // A long run of builds does not keep its rows in memory until it ends.
-    let unsaved = s.unsaved_rows.fetch_add(written.unwrap_or(0), Ordering::SeqCst) + written.unwrap_or(0);
-    if unsaved >= CHECKPOINT_AFTER_ROWS && settle(conn, write_lock) {
+    let unsaved = s.unsaved_rows.fetch_add(round.rows, Ordering::SeqCst) + round.rows;
+    if unsaved >= round_limit(s.workers) && settle(conn, write_lock) {
         s.unsaved_rows.store(0, Ordering::SeqCst);
         s.unsaved.store(false, Ordering::SeqCst);
         s.changes.bump();
     }
-    Ok(Turn::Worked)
+    if let Some(e) = round.error {
+        return Err(e);
+    }
+    Ok(if round.blocked { Turn::Blocked } else { Turn::Worked })
+}
+
+/// Rows a round writes, and that end a run of builds with a checkpoint: each worker's share of [`CHECKPOINT_AFTER_ROWS`],
+/// since the sources already being built when the limit is reached still write theirs.
+fn round_limit(workers: usize) -> u64 {
+    (CHECKPOINT_AFTER_ROWS / workers.max(1) as u64).max(1)
+}
+
+/// What one round of builds did.
+#[derive(Default)]
+struct Round {
+    /// Sources written.
+    committed: u64,
+    /// Rows written.
+    rows: u64,
+    /// An import held the write lock: the next turn tries again.
+    blocked: bool,
+    error: Option<anyhow::Error>,
+}
+
+/// Builds sources of `todo` on `s.workers` threads, each with its own connection, claiming the next source when it is
+/// free (so one large source does not hold the others back), until about [`CHECKPOINT_AFTER_ROWS`] rows are written (a share of it for each worker)
+/// (the caller then checkpoints, so a long run keeps its rows out of memory). Reading and extraction run in parallel;
+/// the aggregate holds the store's `heavy` lock, and the writes go one at a time under the store's write lock, which
+/// is taken without waiting for an import. The rows are those of building one source after the other.
+fn build_round(s: &Shared, conn: &Connection, write_lock: &Mutex<()>, todo: &[u32]) -> Round {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let round = Mutex::new(Round::default());
+    let committing = Mutex::new(());
+    // Sources already being built when the limit is reached still write their rows: the share keeps the total near the limit.
+    let round_rows = round_limit(s.workers);
+    let work = |c: &Connection| loop {
+        {
+            let r = lock(&round);
+            if r.blocked || r.error.is_some() || r.rows >= round_rows {
+                return;
+            }
+        }
+        if s.stop.load(Ordering::SeqCst) || crate::shutdown::down() {
+            return;
+        }
+        let Some(&source) = todo.get(next.fetch_add(1, Ordering::SeqCst)) else {
+            return;
+        };
+        let (entries, dropped, guids) = match build(c, source, &s.heavy) {
+            Ok(b) => b,
+            Err(e) => {
+                // A source whose events cannot be read now (compaction swapped its files) is tried again later.
+                lock(&s.failed).insert(source);
+                lock(&round).error.get_or_insert(e.context(format!("cataloguing source {source}")));
+                return;
+            }
+        };
+        let _one = lock(&committing);
+        // The write lock is taken without waiting for an import: the next turn tries again.
+        let Ok(writing) = write_lock.try_lock() else {
+            s.gate.news();
+            lock(&round).blocked = true;
+            return;
+        };
+        s.unsaved.store(true, Ordering::SeqCst);
+        if crate::shutdown::down() {
+            return;
+        }
+        match commit(c, source, &entries, dropped, guids) {
+            Ok(written) => {
+                drop(writing);
+                s.changes.bump();
+                let mut r = lock(&round);
+                r.committed += 1;
+                r.rows += written.unwrap_or(0);
+            }
+            Err(e) => {
+                lock(&round).error.get_or_insert(e);
+                return;
+            }
+        }
+    };
+    if s.workers <= 1 {
+        work(conn);
+    } else {
+        std::thread::scope(|sc| {
+            for i in 1..s.workers {
+                let clone = match conn.try_clone() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::warn!("catalogue: no connection for worker {i}: {e}");
+                        break;
+                    }
+                };
+                crate::shutdown::interrupt_on_exit(&clone);
+                let work = &work;
+                let spawned = std::thread::Builder::new()
+                    .name(format!("debrief-catalogue-{i}"))
+                    .spawn_scoped(sc, move || {
+                        debrief_core::threads::lower_priority();
+                        work(&clone)
+                    });
+                if let Err(e) = spawned {
+                    log::warn!("catalogue: worker {i} did not start: {e}");
+                    break;
+                }
+            }
+            // This thread is the first worker, so a round never waits for a thread that could not start.
+            work(conn);
+        });
+    }
+    round.into_inner().unwrap_or_else(|p| p.into_inner())
 }
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
@@ -525,6 +660,7 @@ mod tests {
             unsaved: AtomicBool::new(false),
             unsaved_rows: AtomicU64::new(0),
             heavy: Arc::new(Mutex::new(())),
+            workers: 1,
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
             changes: Changes::new(),
         };
@@ -588,5 +724,56 @@ mod tests {
             "the status call waited {waited:?}, a whole wait; a commit has to wake it"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// SR3: several workers write the rows of building the sources one after the other, whatever the order they finish in.
+    /// The event ids are left out: two imports of the same files hand out their id blocks in a different order.
+    #[test]
+    fn four_workers_build_the_same_catalogue_as_one() {
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples");
+        let rows = |workers: usize| {
+            let dir = std::env::temp_dir().join(format!("debrief-catalogue-workers-{workers}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let opts = crate::StoreOptions {
+                catalogue_workers: workers,
+                ..Default::default()
+            };
+            let store = DuckStore::create_with(&dir, Profile::default_profile(), PluginRegistry::new(), opts).unwrap();
+            store.open(std::slice::from_ref(&samples)).unwrap().wait().unwrap();
+            assert!(store.wait_for_catalogue(Duration::from_secs(120)).unwrap());
+            let conn = store.inner.conn().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT source, scope, name, n, first_ts, last_ts FROM catalogue
+                     ORDER BY source, scope, name",
+                )
+                .unwrap();
+            let out: Vec<String> = stmt
+                .query_map([], |r| {
+                    Ok(format!(
+                        "{:?}",
+                        (
+                            r.get::<_, u32>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                            r.get::<_, u64>(3)?,
+                            r.get::<_, Option<i64>>(4)?,
+                            r.get::<_, Option<i64>>(5)?
+                        )
+                    ))
+                })
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            drop(stmt);
+            drop(conn);
+            drop(store);
+            let _ = std::fs::remove_dir_all(&dir);
+            out
+        };
+        let one = rows(1);
+        assert!(one.len() > 100, "the samples have names: {}", one.len());
+        assert_eq!(one, rows(4));
     }
 }
