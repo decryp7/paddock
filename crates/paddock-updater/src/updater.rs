@@ -448,6 +448,7 @@ impl Updater {
     /// The check, as a job body: fetches the channel's release information, validates it and picks this system's package.
     /// A failed check is the job's failure and the status's [`UpdatePhase::Failed`].
     pub fn run_check(&self, ctx: &JobContext, ticket: Ticket) -> Result<(), JobError> {
+        let began = std::time::Instant::now();
         ctx.phase(Phase::items(CHECK_PHASE, "Checking for updates", 1));
         let endpoint = {
             let inner = self.lock();
@@ -467,6 +468,18 @@ impl Updater {
             Ok(m) => self.compare(m),
         };
         ctx.add(1);
+        let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
+        match &result {
+            Ok(Some((info, _))) => {
+                log::info!(Version = info.version.as_str(), Current = self.config.current_version.as_str(), Ms = ms; "update.check: a newer version is available")
+            }
+            Ok(None) => {
+                log::info!(Current = self.config.current_version.as_str(), Ms = ms; "update.check: up to date")
+            }
+            Err(e) => {
+                log::warn!(Why = e.to_string().chars().take(300).collect::<String>().as_str(), Ms = ms; "update.check failed; the feed or the network did not answer as expected")
+            }
+        }
         let now = (self.now)();
         let outcome = result
             .as_ref()
@@ -579,8 +592,11 @@ impl Updater {
             return Err(JobError::Failed(e.to_string()));
         };
         let dest = self.package_path(&found);
+        let began = std::time::Instant::now();
+        log::info!(Version = found.manifest.version.to_string().as_str(), Size = found.platform.size.unwrap_or(0); "update.download started");
         let fail = |e: UpdateError| {
             let msg = e.to_string();
+            log::warn!(Why = msg.chars().take(300).collect::<String>().as_str(), Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "update.download failed; the update stays available to try again");
             self.apply_for(ticket, Event::Downloaded(Err(e)), |_| {});
             JobError::Failed(msg)
         };
@@ -614,6 +630,7 @@ impl Updater {
             Some(ctx),
         ) {
             Ok(()) => {
+                log::info!(Bytes = downloaded.bytes, Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "update.download verified; ready to install");
                 self.apply_for(ticket, Event::Downloaded(Ok(())), |inner| {
                     inner.ready = Some(downloaded.path.clone())
                 });

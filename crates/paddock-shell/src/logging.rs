@@ -72,16 +72,57 @@ fn install_in_with(
         // the phases up to ready are the app's and the start-up contract's lines that follow.
         log::info!(
             Version = identity.version.as_str(), Commit = commit, Os = std::env::consts::OS, Arch = std::env::consts::ARCH, Pid = std::process::id(),
-            Portable = dirs.source() == paddock_env::Source::Portable;
+            Portable = dirs.source() == paddock_env::Source::Portable, BootSecs = sysinfo::System::uptime(),
+            Flags = launch_flags(std::env::args().skip(1)).as_str();
             "Starting {}", identity.name
         );
     }
     handle
 }
 
+/// The names of the command-line flags (`--hidden --new-instance`), never their values or any other argument: how this run was asked to
+/// start (a login item starts hidden; a person starts by hand with none).
+pub fn launch_flags(args: impl Iterator<Item = String>) -> String {
+    let names: Vec<String> = args
+        .take_while(|a| a != "--")
+        .filter(|a| a.starts_with("--"))
+        .map(|a| {
+            a.split('=')
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(32)
+                .collect::<String>()
+        })
+        .take(8)
+        .collect();
+    if names.is_empty() {
+        "none".into()
+    } else {
+        names.join(" ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_start_line_names_flags_but_never_values_or_files() {
+        let args = [
+            "--hidden",
+            "/Users/sam/secret.txt",
+            "--export-diagnostics=/Users/sam/r.zip",
+            "--",
+            "--after",
+        ]
+        .map(String::from);
+        assert_eq!(
+            launch_flags(args.into_iter()),
+            "--hidden --export-diagnostics"
+        );
+        assert_eq!(launch_flags(std::iter::empty()), "none");
+    }
 
     #[test]
     fn the_running_apps_shell_file_is_in_its_config_folder_under_its_own_name() {

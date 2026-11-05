@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Logs that explain: unclean exits, pauses, tool runs, update outcomes
+- New `paddock_startup::run_marker` (`begin`, `RunMarker::end`): for a process without a session to restore (a background agent, a tool), a marker file left by a run that never ended says "Previous run did not end cleanly" at the next start (warn). Dyno's app and agent use it; the helper reads the same fact from its lifecycle file.
+- `Watchdog::due` logs `process.paused` (warn, with the gap) when the app process was not running between two ticks, the case that explains a slow start or a missed ping.
+- `paddock_proc::run_bounded` logs `tool.run` for every run: the program name and argument count (never the arguments), the exit (code, signal, timeout, output cap), the time, and the last 200 characters of its error output when it failed (warn; a success is a debug line).
+- `paddock_updater` logs `update.check` (newer version, up to date, or why it failed) and `update.download` (started, verified, or why it failed). `log` is now a plain dependency of the crate.
+- `paddock_shell::logging` `Starting` also carries the seconds since boot and the names of the launch flags (never their values).
+- The 30-day `paddock-log` default (above) applies to every app that uses the shared log; the total cap keeps the disk use bounded, and an app that wants the old week sets `keep_files`.
+
 ### `paddock-log`: a month of history, 100 MB per process in all
 - `LogSettings::default().keep_files` is 30 (was 7) for every app, and `DailyFiles` keeps at most `TOTAL_CAP_BYTES` (100 MB) of a process's daily files: the oldest days go first, today's file is never removed. Debug and Trace lines may use only half of a day's budget, so a Debug session cannot crowd out the Info, Warn and Error lines. The longer default is a plain improvement for all apps because the total cap bounds the disk; an app that wants the old week sets `keep_files`.
 

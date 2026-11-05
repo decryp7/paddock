@@ -208,6 +208,62 @@ fn a_page_that_reports_ready_gets_a_plain_reply_and_the_hooks_hear_it() {
 }
 
 #[test]
+fn a_paused_process_is_said_in_the_log_and_does_not_start_a_question() {
+    let (app, seen) = app();
+    let w = window(&app, "w-paused");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 1_000);
+    // No tick for a minute: the process was suspended. The page's clock restarts instead of timing out at once.
+    startup(&app).tick(app.handle(), t0 + Duration::from_secs(60));
+    assert!(lock(&seen).asked.is_empty() && lock(&seen).unresponsive.is_empty());
+    assert!(
+        lock(&LOGGED)
+            .iter()
+            .any(|(l, _, m)| *l == log::Level::Warn && m.starts_with("process.paused")),
+        "the pause is in the log"
+    );
+    startup(&app).stop();
+}
+
+#[test]
+fn the_question_offers_save_report_and_its_answer_runs_the_hook_off_the_thread_and_keeps_waiting() {
+    let seen = Shared::default();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let tx = Mutex::new(tx);
+    let configured = Startup::builder()
+        .asker(FakeAsker(seen.clone()))
+        .report(move |_app, label| {
+            let _ = lock(&tx).send(label.to_string());
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let w = window(&app, "w-report");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 10_000);
+    tick(&app, t0, 10_500, 20_000);
+    let buttons = lock(&seen).asked[0].1.buttons.clone();
+    assert!(
+        buttons.contains(&crate::ask::SAVE_REPORT_LABEL),
+        "{buttons:?}"
+    );
+    let answer = lock(&seen).answers.pop().unwrap();
+    answer(Choice::SaveReport);
+    // The hook runs on its own thread: waited on by its signal (bounded), never by a sleep.
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        "w-report"
+    );
+    // Waiting again first: the stuck window is asked again after another full timeout.
+    tick(&app, t0, 20_500, 30_000);
+    assert_eq!(lock(&seen).asked.len(), 2, "Save report keeps waiting");
+    startup(&app).stop();
+}
+
+#[test]
 fn a_silent_window_is_reloaded_once_then_the_user_is_asked_and_each_answer_is_applied() {
     let (app, seen) = app();
     let w = window(&app, "w-2");

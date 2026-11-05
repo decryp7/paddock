@@ -3885,6 +3885,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin",
  "tauri-utils",

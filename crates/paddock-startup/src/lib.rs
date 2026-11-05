@@ -34,6 +34,7 @@ pub mod boot_error;
 pub mod checkpoint;
 pub mod config;
 pub mod lifecycle;
+pub mod run_marker;
 pub mod safe_mode;
 pub mod session;
 pub mod watchdog;

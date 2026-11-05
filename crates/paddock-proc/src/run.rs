@@ -304,12 +304,49 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
         out.map(|c| take(&c)).unwrap_or_default(),
         err.map(|c| take(&c)).unwrap_or_default(),
     );
-    Ok(Output {
+    let output = Output {
         outcome,
         truncated: o.truncated || e.truncated,
         stdout: o.bytes,
         stderr: e.bytes,
-    })
+    };
+    log_tool_run(&name, cmd.get_args().count(), started.elapsed(), &output);
+    Ok(output)
+}
+
+/// The `tool.run` line (ER-27): the program's name (never its arguments, which can hold paths and secrets) and how many there were,
+/// how it ended (exit code, timeout or output cap), how long it took, and the last of its error output when it did not succeed. A run
+/// that succeeded is a debug line (tools run on every poll); one that did not is a warning.
+fn log_tool_run(name: &str, args: usize, took: Duration, output: &Output) {
+    let ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+    let (how, tail) = describe_run(output);
+    if output.success() {
+        log::debug!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(); "tool.run");
+    } else {
+        log::warn!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(), StderrTail = tail.as_str(); "tool.run failed");
+    }
+}
+
+/// How a run ended in a word (`0`, `3`, `signal`, `timeout`, `output-cap`) and the last 200 characters of its error output.
+fn describe_run(output: &Output) -> (String, String) {
+    let how = match &output.outcome {
+        Outcome::Exited(s) => s
+            .code()
+            .map_or_else(|| "signal".to_string(), |c| c.to_string()),
+        Outcome::TimedOut => "timeout".into(),
+        Outcome::OutputCap => "output-cap".into(),
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let tail: String = stderr
+        .trim()
+        .chars()
+        .rev()
+        .take(200)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    (how, tail)
 }
 
 #[cfg(test)]
@@ -325,6 +362,22 @@ mod tests {
     fn a_lowered_run_ends_like_any_other() {
         let o = run_bounded(child(Mode::Exit3), limits().lowered()).unwrap();
         assert!(matches!(o.outcome, Outcome::Exited(s) if s.code() == Some(3)));
+    }
+
+    #[test]
+    fn a_run_is_described_by_its_exit_and_the_tail_of_its_error_output() {
+        let o = run_bounded(child(Mode::Exit3), limits()).unwrap();
+        let (how, tail) = describe_run(&o);
+        assert_eq!(how, "3");
+        assert!(tail.chars().count() <= 200);
+        let long = Output {
+            outcome: Outcome::TimedOut,
+            stdout: vec![],
+            stderr: "e".repeat(1000).into_bytes(),
+            truncated: false,
+        };
+        let (how, tail) = describe_run(&long);
+        assert_eq!((how.as_str(), tail.chars().count()), ("timeout", 200));
     }
 
     #[test]

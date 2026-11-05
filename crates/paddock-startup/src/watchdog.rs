@@ -290,6 +290,16 @@ impl Watchdog {
         let paused = self
             .last_tick
             .is_some_and(|t| now.saturating_duration_since(t) > self.config.pause_gap);
+        if paused {
+            // The silent case that explains a "slow" start or a missed ping: the process itself was not running (ER-27).
+            let gap = self
+                .last_tick
+                .map_or(0, |t| now.saturating_duration_since(t).as_millis());
+            log::warn!(
+                GapMs = u64::try_from(gap).unwrap_or(u64::MAX), LimitMs = self.config.pause_gap.as_millis() as u64;
+                "process.paused: the app was not running between two watchdog ticks (suspended, stopped by a CPU limiter or the machine slept); start-up and liveness clocks restart"
+            );
+        }
         self.last_tick = Some(now);
         let config = self.config;
         let mut out = Vec::new();
