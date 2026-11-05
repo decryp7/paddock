@@ -49,7 +49,7 @@ html,body{margin:0;height:100%;background:var(--pd-surface-1);color:var(--pd-tex
 .chev{flex:none;width:16px;height:16px;display:inline-grid;place-items:center;color:var(--pd-text-muted)}
 .cb{flex:none;width:16px;height:16px;margin:0 var(--pd-space-1);border-radius:3px;border:2px solid var(--pd-border-control);display:inline-grid;place-items:center;color:var(--pd-on-accent-control)}
 .cb.on,.cb.mix{background:var(--pd-accent-control);border-color:var(--pd-accent-control)}
-.cb.off-dis{border-color:var(--pd-border-strong);background:transparent;opacity:.7}
+.cb-none{flex:none;width:16px;margin:0 var(--pd-space-1);text-align:center;color:var(--pd-text-subtle);line-height:16px}
 .ico{flex:none;display:inline-grid;color:var(--pd-text-muted);margin-inline-end:2px}
 .muted2{color:var(--pd-text-muted)}.sub{color:var(--pd-text-subtle)}
 .reason{color:var(--pd-text-muted);overflow:hidden;text-overflow:ellipsis}
@@ -63,7 +63,7 @@ html,body{margin:0;height:100%;background:var(--pd-surface-1);color:var(--pd-tex
 .skel{display:block;height:10px;border-radius:3px;background:var(--pd-skeleton-raised)}
 .scroll{position:absolute;top:2px;right:2px;bottom:2px;width:8px}.scroll i{position:absolute;left:0;right:0;border-radius:4px;background:var(--pd-border-strong)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--pd-space-2);text-align:center;color:var(--pd-text-muted)}
-.cost{flex:none;display:flex;align-items:center;gap:var(--pd-space-4);min-height:36px;margin-top:var(--pd-space-1);white-space:nowrap;min-width:0;font-variant-numeric:tabular-nums}
+.cost{flex:none;display:flex;flex-wrap:wrap;row-gap:0;align-items:center;gap:var(--pd-space-4);min-height:36px;margin-top:var(--pd-space-1);white-space:nowrap;min-width:0;font-variant-numeric:tabular-nums}
 .cost b{font-weight:var(--pd-weight-semibold);color:var(--pd-text)}.cost .k{color:var(--pd-text-muted)}
 .cost .warnx{display:inline-flex;align-items:center;gap:var(--pd-space-1);min-width:0;overflow:hidden;text-overflow:ellipsis}.cost .warnx svg{color:var(--pd-warning);flex:none}
 .foot{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:var(--pd-space-2);padding:var(--pd-space-3) var(--pd-space-4);border-top:1px solid var(--pd-hairline);background:var(--pd-surface-1);margin-top:var(--pd-space-1)}
@@ -98,7 +98,7 @@ const I = {
   more: svg('<circle cx="3.5" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r=".9" fill="currentColor" stroke="none"/>', 16),
   sortd: svg('<path d="M8 3v9M4.5 9L8 12.5 11.5 9"/>', 12),
 };
-const cb = (v) => v === 'on' ? `<span class="cb on">${I.check}</span>` : v === 'mix' ? `<span class="cb mix">${I.dash}</span>` : v === 'dis' ? '<span class="cb off-dis"></span>' : '<span class="cb"></span>';
+const cb = (v) => v === 'on' ? `<span class="cb on">${I.check}</span>` : v === 'mix' ? `<span class="cb mix">${I.dash}</span>` : v === 'dis' ? '<span class="cb-none" aria-hidden="true">–</span>' : '<span class="cb"></span>';
 const stat = (kind, n, w) => `<span class="st ${kind}">${I[kind]}${n != null ? `<span class="w">${n}</span>` : ''}${w ? `<span class="w">${w}</span>` : ''}</span>`;
 const ok = (n) => stat('ok', n), lim = (n) => stat('lim', n), no = (n) => stat('no', n), er = (n) => stat('err', n);
 const W = { ok: stat('ok', null, 'Supported'), lim: stat('lim', null, 'Limited'), no: stat('no', null, 'Not supported'), err: stat('err', null, 'Can’t read'), wait: stat('wait', null, 'Scanning…') };
@@ -148,8 +148,8 @@ const treeSel = [
   { l: 2, k: 'd', c: 'on', n: 'Service', t: 'Text log', s: ok('60'), z: '100 MiB', f: '60' },
   { l: 1, k: 'd', c: 'dis', n: 'Project', m: 1, t: 'Mixed', s: no('8,529'), r: 'Binary project data', z: '2.97 GiB', f: '8,529' },
   { l: 1, k: 'd', open: 1, c: 'off', n: 'System', t: 'Mixed', s: `${lim('5')}&nbsp;${er('1')}`, z: '3.41 GiB', f: '6' },
-  { l: 2, k: 'f', c: 'off', n: 'Event0.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 11 GiB, limit 1 GiB', z: '1,011 MiB' },
-  { l: 2, k: 'f', c: 'off', n: 'Event1.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 11 GiB, limit 1 GiB', z: '1,011 MiB' },
+  { l: 2, k: 'f', c: 'off', n: 'Event0.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 10 GiB, limit 1 GiB', z: '1,011 MiB' },
+  { l: 2, k: 'f', c: 'off', n: 'Event1.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 10 GiB, limit 1 GiB', z: '1,011 MiB' },
   { l: 2, k: 'f', c: 'dis', n: 'Event2.evtx', t: 'Windows event log', s: W.err, r: 'Locked by a program', z: '1,011 MiB' },
   { l: 2, k: 'd', c: 'off', n: 'Exports', tag: 'Likely duplicate', t: 'Text log', s: lim('3'), r: 'of Event*; no time', z: '458 MiB', f: '3' },
   { l: 1, k: 'd', c: 'on', n: 'Dumps', t: 'Crash dump', s: ok('22'), z: '895 MiB', f: '22' },
@@ -165,7 +165,7 @@ const STATES = {
   reasons() {
     const line = (l, n, b) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 56px 64px;gap:12px;height:28px;align-items:center;padding:0 8px;border-radius:6px;font-variant-numeric:tabular-nums"><span>${l}</span><span style="text-align:end">${n}</span><span style="text-align:end;color:var(--pd-text-muted)">${b}</span></div>`;
     const pop = `<div style="position:absolute;left:300px;bottom:102px;width:356px;padding:4px;background:var(--pd-surface-3);border:1px solid var(--pd-hairline);border-radius:var(--pd-radius-popover);box-shadow:var(--pd-shadow-2);z-index:5"><div style="display:grid;grid-template-columns:minmax(0,1fr) 56px 64px;gap:12px;height:24px;align-items:center;padding:0 8px;font-size:var(--pd-text-label);color:var(--pd-text-muted)"><span>Why they are not selected</span><span style="text-align:end">Files</span><span style="text-align:end">Size</span></div>`
-      + line('Binary file', '7,429', '1.90 GiB') + line('No parser reads this file', '3,770', '1.10 GiB') + line('Likely duplicate', '296', '466 MiB') + line('Needs too much memory', '2', '1.97 GiB') + line('Empty file', '46', '0 B') + line('Could not be read', '1', '1,011 MiB') + `</div>`;
+      + line('Could not be read', '1', '1,011 MiB') + line('Needs too much memory', '2', '1.97 GiB') + line('Likely duplicate', '296', '466 MiB') + line('No parser reads this file', '3,770', '1.10 GiB') + line('Binary file', '7,429', '1.90 GiB') + line('Empty file', '46', '0 B') + `</div>`;
     return STATES.selection().replace('<div class="foot">', pop + '<div class="foot">');
   },
   scanning() {
@@ -228,7 +228,7 @@ const STATES = {
   narrow() {
     const pick = treeSel.slice(0, 12);
     return frame(TITLE, path('14,000 files, 7.56 GiB') + `<div class="bar"><div class="filter">${I.search}<span>Filter by name</span></div><span class="sel"><b>Type</b> ${I.caret}</span><span class="sel"><b>Status</b> ${I.caret}</span><span class="spacer"></span><span class="tool">Select ${I.caret}</span></div>` + grid('tiny', pick, { sh: 40 })
-      + `<div class="cost"><b>2,456 files, 1.14 GiB</b><span class="k">449 GiB free</span><span class="link">11,544 not selected ${I.caret.replace('width="12"','width="10"')}</span></div>`, foot());
+      + `<div class="cost"><b>2,456 files, 1.14 GiB</b><span class="k">449 GiB free</span><span class="link">11,544 not selected ${I.caret.replace('width="12"','width="10"')}</span><span class="warnx">${I.lim}3 need attention</span></div>`, foot());
   },
 };
 document.getElementById('win').innerHTML = STATES[state]();
