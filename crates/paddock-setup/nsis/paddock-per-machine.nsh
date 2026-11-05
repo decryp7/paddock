@@ -10,8 +10,10 @@
 ;   NSIS_HOOK_POSTINSTALL     <app steps>, PADDOCK_INSTALL_SETUP, PADDOCK_CLEAN_RUN_VALUES, PADDOCK_FINISH_INSTALL
 ;   NSIS_HOOK_PREUNINSTALL    PADDOCK_INSTALLING, PADDOCK_REINSTALL_AS_UPDATE, PADDOCK_STOP_ALL, <app steps>,
 ;                             PADDOCK_CLEAN_RUN_VALUES, PADDOCK_REMOVE_PROGRAM_FILES
+;   NSIS_HOOK_POSTUNINSTALL   PADDOCK_FINISH_UNINSTALL
 ;
-; Registers: the macros use $0 to $3 and $R4 to $R9, and nothing else ($R6 and $R7 also by the test harness's log lines). The
+; Registers: the macros use $0 to $3 and $R4 to $R9 (PADDOCK_FINISH_UNINSTALL, the uninstaller's last step, also $4 to $7 and $R0 to $R3),
+; and nothing else ($R6 and $R7 also by the test harness's log lines). The
 ; template's pages use $R0 to $R7 but do not run inside a section; its CheckIfAppIsRunning uses $R0 to $R3. $PaddockHaveSetup (1 or 0) says whether paddock-setup.exe was available to this run.
 ;
 ; Where paddock-setup.exe runs from: the installer extracts its embedded copy to $PLUGINSDIR; the uninstaller cannot `File`, so
@@ -43,7 +45,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "2"
+!define PADDOCK_INCLUDE_VERSION "3"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -373,6 +375,94 @@ Var PaddockHaveSetup
 ; Last in POSTINSTALL: delete the staged update that is not in use (the next apply-update removes the rest).
 !macro PADDOCK_FINISH_INSTALL
   !insertmacro _PADDOCK_RUN 'clean-staging --dir "$R5" --keep "$R4"'
+!macroend
+
+; Last in NSIS_HOOK_POSTUNINSTALL (the template runs it after its own `Delete "$INSTDIR\uninstall.exe"` and `RMDir "$INSTDIR"`):
+; a Delete that lost to a transient lock (measured on the Windows 11 Arm VM: 16 of 36 first uninstalls after a fresh start; Restart Manager named
+; the holder in 13 of those 16: XtaCache, the x86 emulation cache service of Windows on Arm, which reads a freshly run x64 program for
+; up to about 3 s; no holder is expected on x64 hardware; the launcher process is gone by then and the file is not the running copy,
+; which lives in %TEMP%\~nsu.tmp) leaves
+; uninstall.exe and so the folder. This retries the Delete, polling the file's state every 100 ms for at most 5 s, then removes
+; the folder (not recursive: a folder that holds anything else stays, that is the answer, not a failure). Only if the file is
+; still there after the bound it is left in place and the tool's note says why (no /REBOOTOK: a restart would delete the uninstall.exe
+; of a reinstall made before it, and the reboot flag would ask the user to restart). The first failed attempt records why (an exclusive
+; open's error code and how many programs Restart Manager lists as using the file). The outcome goes to the installer's details;
+; the note goes to $INSTDIR\updates\setup.log only in that case (the folder stays then, so the log has a place).
+; Outcomes: removed | removed-after-retries | kept-other-files | left-in-place | skipped-update.
+!macro PADDOCK_FINISH_UNINSTALL
+  ${If} $UpdateMode == 1
+    !insertmacro _PADDOCK_TEST_LOG "FINISH_UNINSTALL outcome=skipped-update"
+  ${Else}
+    ; $R0 and $R1: why the file is held; $R2: the outcome; $R3: the start tick; $R4: tries; $0 to $7: scratch.
+    System::Call 'kernel32::GetTickCount()i.R3'
+    StrCpy $R4 0
+    StrCpy $R0 ""
+    StrCpy $R1 ""
+    ${While} ${FileExists} "$INSTDIR\uninstall.exe"
+      Delete "$INSTDIR\uninstall.exe"
+      ${IfNot} ${FileExists} "$INSTDIR\uninstall.exe"
+        ${ExitWhile}
+      ${EndIf}
+      ${If} $R4 == 0
+        ; The cause, once: can the file be opened with no sharing, and how many programs does Restart Manager list as using it?
+        System::Call 'kernel32::CreateFileW(w "$INSTDIR\uninstall.exe", i 0x80000000, i 0, p 0, i 3, i 0, p 0) p.r6 ?e'
+        Pop $7
+        ${If} $6 == -1
+          StrCpy $R0 "open-error-$7"
+        ${Else}
+          System::Call 'kernel32::CloseHandle(p r6)'
+          StrCpy $R0 "opened-exclusive"
+        ${EndIf}
+        !insertmacro RestartManager_StartSession $R8
+        ${If} $R8 != ""
+          !insertmacro RestartManager_RegisterFile $R8 "$INSTDIR\uninstall.exe"
+          System::Alloc 4096
+          Pop $5
+          StrCpy $2 1
+          StrCpy $6 ""
+          StrCpy $7 ""
+          System::Call 'RSTRTMGR::RmGetList(i $R8, *i .r1, *i r2r2, p r5, *i .r3) i .r0'
+          ${If} $2 > 0
+            System::Call '*$5(i .r6, l, &w256 .r7)'
+          ${EndIf}
+          System::Free $5
+          !insertmacro RestartManager_EndSession $R8
+          StrCpy $R1 "rm-holders-$1 pid-$6 $7"
+        ${EndIf}
+      ${EndIf}
+      IntOp $R4 $R4 + 1
+      ${If} $R4 >= 50
+        ${ExitWhile}
+      ${EndIf}
+      Sleep 100
+    ${EndWhile}
+    System::Call 'kernel32::GetTickCount()i.r2'
+    IntOp $2 $2 - $R3
+    ${If} ${FileExists} "$INSTDIR\uninstall.exe"
+      ; Still held after the bound: it stays. No /REBOOTOK: a restart would delete whatever is at that path then, including the
+      ; uninstall.exe of a reinstall made before it, and the flag would ask the user to restart. The tool writes why into
+      ; $INSTDIR\updates\setup.log (the folder stays, so the log has a place); a reinstall over it overwrites the file.
+      ${If} $PaddockHaveSetup == 1
+        !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
+        nsExec::ExecToLog '"${PADDOCK_SETUP}" note --dir "$R5" --text "uninstall.exe could not be removed after $R4 tries ($2 ms, $R0, $R1): left in place"'
+        Pop $0
+      ${EndIf}
+      StrCpy $R2 "left-in-place"
+    ${Else}
+      RMDir "$INSTDIR"
+      ${If} ${FileExists} "$INSTDIR\*.*"
+        StrCpy $R2 "kept-other-files"
+      ${ElseIf} $R4 == 0
+        StrCpy $R2 "removed"
+      ${Else}
+        StrCpy $R2 "removed-after-retries"
+      ${EndIf}
+    ${EndIf}
+    DetailPrint "uninstall: $INSTDIR $R2 (tries $R4, $2 ms, $R0, $R1)"
+    ; The harness line is written last: its macro uses $R6 and $R7, so the values go in first.
+    StrCpy $R5 "FINISH_UNINSTALL outcome=$R2 tries=$R4 ms=$2 $R0 $R1"
+    !insertmacro _PADDOCK_TEST_LOG "$R5"
+  ${EndIf}
 !macroend
 
 ; Last in PREUNINSTALL: the template's RMDir "$INSTDIR" is not recursive, so what the include added goes first. A reinstall
