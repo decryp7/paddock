@@ -67,7 +67,12 @@ fn idle_after_an_event_log_import() {
             cancelled: &|| false,
             progress: &|p| {
                 if last.replace(Some(p.phase)) != Some(p.phase) {
-                    eprintln!("  REBUILD {:?} starts at {:.2} s", p.phase, started.elapsed().as_secs_f64());
+                    eprintln!(
+                        "  REBUILD {:?} ({} items) starts at {:.2} s",
+                        p.phase,
+                        p.total,
+                        started.elapsed().as_secs_f64()
+                    );
                 }
             },
         };
@@ -85,6 +90,49 @@ fn idle_after_an_event_log_import() {
         .candidates
         .len();
     eprintln!("NAMES {candidates} catalogue names, {groups} groups");
+    // What one look-alike read costs, by the kind of text search (the rebuild reads the first events of each name).
+    {
+        use debrief_core::ports::{Filter, PageQuery};
+        use debrief_core::query::TextMode;
+        let sample = store
+            .catalogue(&CatalogueRequest {
+                all: true,
+                ..CatalogueRequest::default()
+            })
+            .unwrap()
+            .candidates
+            .into_iter()
+            .take(3)
+            .map(|c| c.name)
+            .collect::<Vec<_>>();
+        for (label, mode, quote) in [("words (phrase)", TextMode::Words, true), ("substring", TextMode::Substring, false)] {
+            let started = Instant::now();
+            let mut rows = 0;
+            for name in &sample {
+                let text = if quote { format!("\"{name}\"") } else { name.clone() };
+                let page = Query::page(
+                    &store,
+                    &PageQuery {
+                        query: Filter {
+                            text,
+                            text_mode: mode,
+                            ..Filter::default()
+                        },
+                        offset: 0,
+                        limit: 30,
+                        ..PageQuery::default()
+                    },
+                )
+                .unwrap();
+                rows += page.rows.len();
+            }
+            eprintln!(
+                "READ {label}: {} reads, {rows} rows, {:.0} ms each",
+                sample.len(),
+                started.elapsed().as_secs_f64() * 1000.0 / sample.len() as f64
+            );
+        }
+    }
     // Let the builds' checkpoint and the allocator release finish before the window opens.
     std::thread::sleep(Duration::from_secs(10));
     store.bench_sql("CALL enable_logging('QueryLog')").unwrap();
