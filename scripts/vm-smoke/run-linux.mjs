@@ -15,6 +15,8 @@ import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
 import { readingSteps } from './helper-readings.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
+import { judgeCard, judgeLoginSwitch, parseSwitchState } from './linux-judges.mjs';
+import { makeResult } from './verdict.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -38,7 +40,7 @@ export function parseArgs(argv) {
 }
 
 const sh = (cmd, args, ms, input) => { const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: ms, input, env: { ...process.env, TART_HOME } }); return { code: r.status ?? 124, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }; };
-const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };
+const result = makeResult;
 
 async function main(argv) {
   const o = parseArgs(argv);
@@ -152,10 +154,14 @@ async function main(argv) {
       // record the helper, the card, whether Dyno started itself (XDG autostart) and how long after login, the tray, and one reading.
       const boot = () => g('echo "is-enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; echo "is-active: $(systemctl is-active dyno-helper.service)"; systemctl cat dyno-helper.service 2>&1 | grep -E "^(WantedBy|Restart|RestartSec|ExecStart|\\[)" ; ls -l ~/.config/autostart/ /etc/xdg/autostart/ 2>&1 | grep -i dyno').stdout.trim().split('\n');
       press('^Dyno$');
-      const toggled = atspi('press dyno "Start Dyno at login" "check box|toggle button|switch"').code === 0;
+      // "Start Dyno at login" is ON by default: read the state first, press only when it is OFF, read it again (a blind press turned the default off).
+      const SW = '"Start Dyno at login" "check box|toggle button|switch"';
+      const swBefore = parseSwitchState(atspi(`state dyno ${SW}`).stdout);
+      const pressedSw = swBefore === 'off' ? atspi(`press dyno ${SW}`).code === 0 : false;
       await sleep(3000);
+      const swAfter = parseSwitchState(atspi(`state dyno ${SW}`).stdout);
       const preBoot = boot();
-      steps.push(result('Restart check: before the reboot (helper on, Launch at login on)', [{ ok: toggled, detail: toggled ? 'switched "Start Dyno at login" on' : 'no "Start Dyno at login" control found' }, { ok: /is-enabled: enabled/.test(preBoot.join('\n')), detail: `start-at-boot: ${preBoot[0]}; ${preBoot[1]}` }], preBoot, 'enabled at boot'));
+      steps.push(result('Restart check: before the reboot (helper on, Launch at login on)', [...judgeLoginSwitch({ before: swBefore, after: swAfter, pressed: pressedSw }), { ok: /is-enabled: enabled/.test(preBoot.join('\n')), detail: `start-at-boot: ${preBoot[0]}; ${preBoot[1]}` }], preBoot, 'enabled at boot'));
       log('rebooting the guest');
       g('sudo systemctl reboot', 30_000);
       await sleep(40_000);
@@ -183,7 +189,7 @@ async function main(argv) {
       const cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim();
       press('^Processes$', 'link'); await sleep(4000);
       const procPage = atspi('tree dyno 80').stdout;
-      steps.push(result('Restart check: card and a helper reading after the reboot', [{ ok: /Turn off administrator readings/.test(cardTxt) || !/Turn on administrator readings/.test(cardTxt), detail: `card: ${cardTxt.split('\n').slice(0, 3).join(' | ') || '(window not up)'}` }, { ok: /Read by the administrator helper/i.test(procPage), detail: /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
+      steps.push(result('Restart check: card and a helper reading after the reboot', [judgeCard(cardTxt), { ok: /Read by the administrator helper/i.test(procPage), detail: /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
       void t0;
     }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.

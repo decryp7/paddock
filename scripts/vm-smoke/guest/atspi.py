@@ -5,6 +5,7 @@
                                          interface) prints its text instead
   atspi.py has <app regex> <name regex> [role]    exit 0 if such an element exists
   atspi.py press <app regex> <name regex> [role]  do the first action (click/press/activate) of the first such element
+  atspi.py state <app regex> <name regex> [role]  print the element's states and `checked: yes|no` (a switch or check box)
   atspi.py text <app regex> <name regex> <value>  set the text of a text field (read from the argument)
 Run in the user's graphical session (DISPLAY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR); needs toolkit-accessibility on.
 """
@@ -84,6 +85,13 @@ elif cmd in ("has", "press"):
         print("pressed: " + name(e))
     else:
         print("found: " + role(e) + " " + name(e))
+elif cmd == "state":
+    e = find(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
+    if e is None:
+        print("not found"); sys.exit(1)
+    ss = e.get_state_set()
+    print("states: " + " ".join(sorted(s.value_nick for s in ss.get_states())))
+    print("checked: " + ("yes" if ss.contains(Atspi.StateType.CHECKED) else "no"))
 elif cmd == "text":
     e = find(sys.argv[2], sys.argv[3], "entry|text|password")
     if e is None: print("not found"); sys.exit(1)

@@ -3,7 +3,9 @@
 // 2. extension OFF: the note appears in Settings > Menu bar and as the status-bar health line, and a `--hidden` start opens the window;
 // 3. extension turned back ON while Dyno runs: the icons appear without restarting Dyno (same pid).
 // `h` = { g, ses, atspi, press, sleep, log }: guest commands as root-ish (g) and in the user's session (ses), AT-SPI helper and a press(name, role) helper.
-const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };
+import { makeResult } from './verdict.mjs';
+import { judgeTrayNote } from './linux-judges.mjs';
+const result = makeResult;
 const NOTE = /isn.t showing tray icons/i;
 // The status bar's health chip names the stopped dependency, its cause is in the chip's popover: "Tray icons: stopped".
 const HEALTH = /Tray icons: (stopped|not shown)/i; // 7538 worded the chip "stopped", 7550 says "not shown"
@@ -29,7 +31,7 @@ export async function trayHostChecks(h) {
   let bar = topBar(), text = await settingsText(), log = trayLog();
   steps.push(result('Linux tray host: AppIndicator extension ON', [
     { ok: INDICATOR.test(bar), detail: INDICATOR.test(bar) ? 'Dyno indicators are in the GNOME top bar' : 'no Dyno indicator in the GNOME top bar with the extension on' },
-    { ok: !NOTE.test(text), detail: NOTE.test(text) ? 'Settings > Menu bar shows the "no tray icons" note although a host is present' : 'no "no tray icons" note in Settings > Menu bar' },
+    ...judgeTrayNote(text, false), // absence counts only when the reader saw the Menu bar card
     { ok: /tray host:/i.test(log), detail: /tray host:/i.test(log) ? 'the log has "tray host:" lines' : 'no "tray host:" line in the log' },
   ], [`extension: ${ext}`, '--- top bar', bar, '--- log', log], 'icons shown, no note, tray host logged'));
   closeSettings();
@@ -41,7 +43,7 @@ export async function trayHostChecks(h) {
   text = await settingsText(); bar = topBar();
   const health = atspi('tree dyno 80 2>&1 | grep -i -E "tray icons|menu bar" | head -4').stdout.trim();
   steps.push(result('Linux tray host: AppIndicator extension OFF', [
-    { ok: NOTE.test(text), detail: NOTE.test(text) ? 'Settings > Menu bar shows the "Your desktop isn\'t showing tray icons" note' : 'no note in Settings > Menu bar with the extension off' },
+    ...judgeTrayNote(text, true),
     { ok: HEALTH.test(health) || NOTE.test(health), detail: HEALTH.test(health) || NOTE.test(health) ? 'the status-bar health chip says the tray icons stopped' : 'the status-bar health chip "Tray icons: stopped" was not found' },
     { ok: /frame/i.test(win), detail: /frame/i.test(win) ? 'a --hidden start opened the window (there is no tray to find it in)' : 'a --hidden start left Dyno with no window and no tray' },
     { ok: !INDICATOR.test(bar), detail: INDICATOR.test(bar) ? 'a Dyno indicator is in the top bar although the extension is off' : 'no Dyno indicator in the top bar with the extension off' },
