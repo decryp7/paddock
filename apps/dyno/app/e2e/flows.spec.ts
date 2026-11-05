@@ -429,10 +429,14 @@ test.describe('notifications', () => {
     await page.getByRole('button', { name: 'Copy as text' }).click();
     await page.getByRole('button', { name: /notifications/i }).first().click();
     const selects = page.locator('[data-testid^=notice-select-] input');
+    await expect(selects).toHaveCount(0);
+    await page.getByTestId('notices-select-toggle').click();
     await expect(selects).toHaveCount(2);
     await selects.first().check();
     await page.getByTestId('notices-delete-selected').click();
     await expect(selects).toHaveCount(1);
+    await page.getByTestId('notices-select-toggle').click();
+    await expect(selects).toHaveCount(0);
     await page.getByTestId('notices-delete-all').click();
     const decision = page.getByRole('alertdialog', { name: 'Delete all notifications?' });
     await expect(decision).toBeVisible();

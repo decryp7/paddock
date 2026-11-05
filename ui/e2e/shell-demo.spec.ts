@@ -450,6 +450,13 @@ test.describe('notifications and service health (plan S4)', () => {
     await page.getByRole('button', { name: 'Break the search index' }).click();
     const centre = await app.notifications.openCentre();
     await expect(centre.locator('.pd-notice .pd-body').first()).toBeVisible();
+    // No checkboxes until Select; Done hides them again.
+    await expect(centre.locator('[data-testid^=notice-select-]')).toHaveCount(0);
+    await expect(centre.getByTestId('notices-select-all')).toHaveCount(0);
+    const toggle = centre.getByTestId('notices-select-toggle');
+    await toggle.click();
+    await expect(toggle).toHaveText('Done');
+    await expect(centre.locator('[data-testid^=notice-select-]').first()).toBeVisible();
     for (const density of ['comfortable', 'standard', 'compact'] as const) {
       await page.evaluate((d) => document.documentElement.setAttribute('data-density', d), density);
       expect(await checkboxLayoutProblems(centre), `density ${density}`).toEqual([]);
@@ -468,6 +475,9 @@ test.describe('notifications and service health (plan S4)', () => {
     const del1 = centre.getByTestId('notices-delete-selected');
     await expect(del1).toBeVisible();
     expect((await del1.boundingBox())!.height).toBeLessThan(40);
+    await toggle.click();
+    await expect(centre.locator('[data-testid^=notice-select-]')).toHaveCount(0);
+    await expect(del1).toHaveCount(0);
     // Delete all is not a loud filled or outlined danger button: destructive actions are not the visual default.
     const del = centre.getByTestId('notices-delete-all');
     expect(await del.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgba(0, 0, 0, 0)');

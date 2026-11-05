@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/shell/notify`: the notification centre selects only in selection mode
+- `pd-notifications-panel` shows no checkboxes, select-all row or "Delete selected (n)" by default. A new "Select" button in its toolbar (`notices-select-toggle`, `aria-pressed`) turns selection mode on and becomes "Done"; Done leaves the mode and clears the selection. Shift-click and Shift+Space ranges, filters and Mark all read are unchanged.
+- In selection mode a click on a message's text toggles its checkbox; outside it nothing changes. The mode ends when the list becomes empty or the panel closes, and the button is hidden with no messages. Focus goes to the first checkbox on entry, back to Select on Done, and after a delete to the next message's checkbox (its Dismiss button outside the mode).
+- New ids `pd.notifications.select-mode` and `pd.notifications.select-mode-done`.
+
 ### `paddock-service`: registrations are read back; `service_main` is the one service entry point (ADR 0054)
 - `Backend::register` and `replace_in_one_step` return the `Inspection` read back after the write; a read-back that disagrees is `RegisterError::NotAsWritten(Inspection)`, never `Ok`. A `LaunchdBundled` registration that reads back "needs approval" is now `RegisterError::NeedsApproval` at `register` (it was found at the next `inspect`). An implementation of `Backend` returns the inspection; a match on `RegisterError` handles `NotAsWritten`.
 - `Inspection` has `last_exit`, `restarts` and `unit`; `Job` has `Failed(LastExit)`. A stop by SIGHUP, SIGINT, SIGPIPE or SIGTERM, systemd's `Result=success` and a Windows service that has not started since boot (1077) are not failures.
