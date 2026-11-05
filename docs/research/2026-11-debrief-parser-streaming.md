@@ -195,7 +195,7 @@ way and are not quoted. What holds in Debrief: third-party parsers run in plugin
 readers 3 GiB, `debrief-plugin-dumps/src/plugin.rs:27`), so a panic or an abort is contained and reported as a crash.
 In-process core importers run under `catch_unwind` (`debrief-core/src/guard.rs:70`). **Gaps:** an OOM in the engine is not
 caught, so `csv`, `flate2` and `zip` in `debrief-core` need the budget before they read from disk. And of the formats above,
-PDB and `.nfo` have no fuzz target.
+PDB has no fuzz target (`.nfo` is covered by `fuzz_perfmon_csv`).
 
 ## What the trait must support
 
@@ -254,7 +254,7 @@ zip, CSV, JSON arrays, **3.4** host side. The rest appear not to be covered:
 | S3 | HAR visitor, including a test with a large body and a `data:` URL | S |
 | S4 | Minidump summary through `source::load`; land the handle guard | S |
 | S5 | `.etl`: path grant, no temp copy, NetTrace read through S7. `.blg`: stream the temp CSV. Needs the Windows runner | S |
-| S6 | Capped `pdb::Source`; `fuzz_pdb`, `fuzz_nfo` | S |
+| S6 | Capped `pdb::Source`; `fuzz_pdb` | S |
 | S7 | `.nettrace` by block; Chrome trace framer; UMDH, folded and perf by line; `ProfileImporter` takes `Input` | M |
 | S8 | `paddock-plugin-test`'s "memory does not grow with input" over every record importer, and a truncating and failing fake `Read` | S |
 | Later | `evtx` file-order setting if measured; PML importer; `pdb2` swap | - |
