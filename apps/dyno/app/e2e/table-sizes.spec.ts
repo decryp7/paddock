@@ -72,9 +72,6 @@ for (const p of PAGES) {
     // The last row is reachable in the smallest window.
     await page.setViewportSize(SIZES[0]);
     await expect.poll(async () => (await measure(page, grid)).body).toBe(bodies[0]);
-    // The page area keeps whatever scroll offset the last resize left (WebKit and Chromium leave different ones): bring the whole
-    // table into view first, as a person would, then scroll its rows to their end. The table fits the area, so all of it can show.
-    await grid.evaluate((g) => g.scrollIntoView({ block: 'nearest' }));
     await grid.locator('.pd-body').evaluate((b) => (b.scrollTop = b.scrollHeight));
     const last = rows.last();
     await expect(last).toBeInViewport({ ratio: 0.99 });

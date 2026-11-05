@@ -22,6 +22,9 @@ const HOOKS_OK = `!include "\${__FILEDIR__}\\paddock-per-machine.generated.nsh"
   !insertmacro PADDOCK_CLEAN_RUN_VALUES
   !insertmacro PADDOCK_REMOVE_PROGRAM_FILES
 !macroend
+!macro NSIS_HOOK_POSTUNINSTALL
+  !insertmacro PADDOCK_FINISH_UNINSTALL
+!macroend
 `;
 
 const conf = (mode, hooks = './windows/installer-hooks.nsh') =>

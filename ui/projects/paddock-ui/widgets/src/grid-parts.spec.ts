@@ -220,18 +220,6 @@ describe('pdGridGesture', () => {
     expect(cell.classList.contains('pd-wg-lifted')).toBe(false);
   });
 
-  it('drops where the pointer was released even when no frame ran since the last move (a release within one frame)', () => {
-    down(200, 100);
-    move(210, 100);
-    sched.flush();
-    // The pointer travels two cells to the right and is released before the next frame: the drop is where it was, not where the last frame left it.
-    move(420, 100);
-    expect(sched.queue.size).toBe(1);
-    up();
-    expect(f.componentInstance.log.at(-1)).toEqual(['drop', { id: 'a', kind: 'move', rect: { x: 2, y: 0, w: 2, h: 2 } }]);
-    expect(sched.queue.size).toBe(0);
-  });
-
   it('follows the pointer without the lift scale in reduced motion', () => {
     document.documentElement.setAttribute('data-motion', 'reduce');
     down(200, 100);

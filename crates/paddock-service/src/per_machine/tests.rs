@@ -242,8 +242,10 @@ fn canonical_include() -> String {
 #[test]
 fn the_include_has_no_unfiltered_listing_and_no_check_on_every_keystroke() {
     let t = canonical_include();
+    // Restart Manager's list is only a diagnostic of the uninstaller's last step, never what decides whether programs still run.
+    let outside = t.split("!macro PADDOCK_FINISH_UNINSTALL").next().unwrap();
     assert!(
-        !t.contains("RmGetList"),
+        !outside.contains("RmGetList"),
         "stop-all's exit 11 decides, not an unfiltered list"
     );
     assert!(
@@ -338,4 +340,52 @@ fn refusals_have_their_own_exit_levels_and_note_into_the_protected_log() {
         !t.contains("$TEMP"),
         "nothing is written under %TEMP% while elevated"
     );
+}
+
+/// The uninstaller's last step retries a Delete that lost to a transient lock, never recurses, never registers a restart and
+/// never raises the reboot flag (a restart would delete the uninstall.exe of a reinstall made before it).
+#[test]
+fn the_uninstall_finish_retries_without_recursion_or_reboot_flags() {
+    let t = canonical_include();
+    let code: Vec<&str> = t
+        .lines()
+        .filter(|l| !l.trim_start().starts_with(';'))
+        .collect();
+    let start = code
+        .iter()
+        .position(|l| l.contains("!macro PADDOCK_FINISH_UNINSTALL"))
+        .expect("the macro exists");
+    let end = start
+        + code[start..]
+            .iter()
+            .position(|l| l.contains("!macroend"))
+            .unwrap();
+    let body = code[start..=end].join("\n");
+    assert!(
+        body.contains("${While}")
+            && body.contains("Delete \"$INSTDIR\\uninstall.exe\"")
+            && body.contains("Sleep 100"),
+        "a bounded retry"
+    );
+    assert!(body.contains("$R4 >= 50"), "bounded: 50 tries of 100 ms");
+    assert!(
+        body.contains("RMDir \"$INSTDIR\"") && !body.contains("/r"),
+        "RMDir only, never recursive"
+    );
+    assert!(
+        !body.contains("REBOOTOK") && !body.contains("SetRebootFlag"),
+        "no restart registration, no flag"
+    );
+    assert!(
+        body.contains("CreateFileW") && body.contains("RmGetList"),
+        "the cause is recorded: an exclusive open and Restart Manager"
+    );
+    for outcome in [
+        "removed",
+        "removed-after-retries",
+        "kept-other-files",
+        "left-in-place",
+    ] {
+        assert!(body.contains(outcome), "{outcome}");
+    }
 }

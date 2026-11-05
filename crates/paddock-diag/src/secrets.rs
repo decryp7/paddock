@@ -52,7 +52,7 @@ fn patterns() -> &'static Patterns {
         keyed_short: compile(r#"(?i)(\b(?:pass|pw|sig|signature)["']?\s*[:=]\s*["']?)[^\s"',;&]+"#),
         password_line: compile(r#"(?i)(\b(?:password|passwd)\s*:\s*\[redacted\])[ \t]+[^\r\n"']+"#),
         pem: compile(r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
-        prefixed: compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|(?:pw|pmk)_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{16,})"),
+        prefixed: compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|pw_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{16,})"),
     })
 }
 

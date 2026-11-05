@@ -130,9 +130,6 @@ export class PdGridGesture {
 
   private up(): void {
     const s = this.session as Session;
-    // A release within the frame of the last move drops where the pointer is, not where the last frame left the cell: the frame
-    // that would have placed it never runs once the session ends (a webview that paints late, or a fast flick, lost the last move).
-    if (s.active && s.frame !== null) this.place(s);
     const done = s.active ? this.targetOf(s, s.last) : null;
     this.end();
     if (done) this.dropped.emit(done);
@@ -154,12 +151,6 @@ export class PdGridGesture {
     const s = this.session as Session;
     s.frame = null;
     const scrolled = this.autoScroll(s);
-    this.place(s);
-    if (scrolled) this.schedule();
-  }
-
-  /** Puts the cell where the pointer is now (its transform or size) and reports the cell it would drop into when that changed. */
-  private place(s: Session): void {
     const g = this.pdGridGeometry()();
     const dx = s.px - s.px0;
     const dy = s.py - s.py0;
@@ -183,6 +174,7 @@ export class PdGridGesture {
       s.last = rect;
       this.targetChange.emit(this.targetOf(s, rect));
     }
+    if (scrolled) this.schedule();
   }
 
   /** Scrolls the container a little when the pointer is within 48 px of its top or bottom; true when it moved. */

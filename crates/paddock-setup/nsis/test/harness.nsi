@@ -51,4 +51,5 @@ Section Uninstall
   Delete "$INSTDIR\uninstall.exe"
   DeleteRegKey HKLM "${UNINSTKEY}"
   RMDir "$INSTDIR"
+  !insertmacro NSIS_HOOK_POSTUNINSTALL
 SectionEnd
