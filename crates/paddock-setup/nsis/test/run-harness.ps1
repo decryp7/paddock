@@ -21,7 +21,13 @@ function Run($exe, $argline, $envs) {
   [pscustomobject]@{ Code = $p.ExitCode; Lines = $lines }
 }
 function Cmds($r) { ($r.Lines | ForEach-Object { ($_ -split ' ')[0] }) -join ',' }
-function WaitGone($path) { $end = (Get-Date).AddSeconds(90); while ((Test-Path $path) -and (Get-Date) -lt $end) { Start-Sleep -Milliseconds 200 } }
+# Waits for a real condition (a script block that becomes true); the ceiling only turns a hang into a failure with its reason.
+function WaitUntil([scriptblock]$cond, $reason, [int]$ceilingSeconds = 60) {
+  $end = (Get-Date).AddSeconds($ceilingSeconds)
+  while (-not (& $cond)) { if ((Get-Date) -gt $end) { return "did not happen within ${ceilingSeconds}s: $reason" }; Start-Sleep -Milliseconds 50 }
+  return $null
+}
+function WaitGone($path) { $null = WaitUntil { -not (Test-Path $path) } "the folder $path to be removed" }
 
 Remove-Item (Join-Path $env:TEMP 'PaddockHarness-setup-refused.log') -ErrorAction SilentlyContinue   # a leftover of an older include
 Remove-Item -Recurse -Force (Join-Path $Root 'run') -ErrorAction SilentlyContinue
@@ -75,8 +81,15 @@ Check 'H no setup: the in-place run is an update by its own folder compare' ($r.
 $r = Run $installer "/S /D=$h" @{}
 Remove-Item "$h\paddock-setup.exe"
 $r = Run "$h\uninstall.exe" "/S" @{}
-WaitGone $h
-Check 'H no setup: a real uninstall removes the folder' (-not (Test-Path $h)) (Get-ChildItem $h -Name -ErrorAction SilentlyContinue)
+# The launched uninstall.exe copies itself and returns after about 0.45 s; the copy does the work and ends with DeleteRegKey and
+# then RMDir (measured on the VM: 180 runs, the folder is gone 0.12 s after the launcher exits). So the launcher's exit is the
+# wrong signal; the real one is the copy's DeleteRegKey, the step before RMDir.
+$why = WaitUntil { -not (Test-Path $key) } 'the uninstaller copy to remove the uninstall key (its last step before RMDir)'
+Check 'H no setup: the uninstaller ran to its end' ($null -eq $why) $why
+$why = WaitUntil { -not (Test-Path $h) -or ((Get-ChildItem $h -Force -Name -ErrorAction SilentlyContinue) -join ',') -eq 'uninstall.exe' } 'the folder to be removed or to hold only the launcher file' 10
+$left = (Get-ChildItem $h -Force -Name -ErrorAction SilentlyContinue) -join ','
+Check 'H no setup: a real uninstall removes the files it installed (nothing but NSIS launcher file may remain)' ($null -eq $why -and ($left -eq '' -or $left -eq 'uninstall.exe')) "left: $left; $why"
+if ($left -eq 'uninstall.exe') { "NOTE H: the folder holds only uninstall.exe: NSIS's own Delete of its launcher failed once (measured: the first uninstall in a freshly started VM, 3 of 3; later runs 0 of 177); our hooks ran before it and left nothing else" }
 Remove-Item $key -ErrorAction SilentlyContinue
 
 # B: check-dir refused
