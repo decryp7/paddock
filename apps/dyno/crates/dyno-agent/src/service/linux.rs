@@ -122,6 +122,17 @@ pub fn install(m: &mut Manager) -> Result<(), String> {
         .map_err(|e| words(&e))
 }
 
+/// The Settings switch on: the same registration, but another change that holds the lock is answered with Busy at once
+/// instead of waited for (the save does not wait; the verbs above keep their patience).
+pub fn install_without_waiting(m: &mut Manager) -> Result<(), String> {
+    m.install_patient(never(), false, 0, Duration::ZERO).map(drop).map_err(|e| words(&e))
+}
+
+/// The Settings switch off, without waiting for another change.
+pub fn uninstall_without_waiting(m: &mut Manager) -> Result<(), String> {
+    m.uninstall().map_err(|e| words(&e))
+}
+
 /// `dyno-agent service uninstall` and Launch at login switched off: stops, disables and removes the unit. Removing what is
 /// not there succeeds.
 pub fn uninstall(m: &mut Manager) -> Result<(), String> {

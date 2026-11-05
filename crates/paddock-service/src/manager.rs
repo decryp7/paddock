@@ -557,7 +557,7 @@ impl Manager {
             return Err(ServiceError::Busy);
         }
         let began = Instant::now();
-        log::info!(mechanism:? = self.backend.mechanism(); "removing the background service's registration");
+        log::info!("{}", removal_began(self.backend.mechanism()));
         let before = self.record.load().state;
         // No OS call without a durable write, for the user's own removal too.
         if let Err(e) = self.write_state(State::Removing) {
@@ -586,7 +586,7 @@ impl Manager {
             )));
         }
         let forgotten = self.record.forget();
-        log::info!(ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX), ok = forgotten.is_ok(); "the background service was removed");
+        log::info!("{}", removal_done(u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX), forgotten.is_ok()));
         forgotten
     }
 
@@ -640,6 +640,16 @@ fn allowed_registers(requested: bool, max_cycles: u32, attempts: u32, finishing:
     }
 }
 
+/// The log line that begins a removal (a user can read from a bundle which registration was taken out).
+fn removal_began(mechanism: Mechanism) -> String {
+    format!("removing the background service's registration ({})", mechanism.describe())
+}
+
+/// The log line that ends a removal, with how long it took and whether the record was forgotten.
+fn removal_done(ms: u64, recorded: bool) -> String {
+    format!("the background service was removed in {ms} ms{}", if recorded { "" } else { "; the record could not be cleared" })
+}
+
 /// Why a requested repair is not done.
 fn refusal(r: Refusal) -> ServiceError {
     match r {
@@ -666,6 +676,13 @@ fn outcome_result(o: RepairOutcome) -> Result<RepairOutcome, ServiceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_removal_logs_how_it_began_and_how_it_ended() {
+        assert!(removal_began(Mechanism::SystemdUser).contains("systemd user service"));
+        assert_eq!(removal_done(12, true), "the background service was removed in 12 ms");
+        assert!(removal_done(12, false).contains("record could not be cleared"));
+    }
 
     #[test]
     fn a_request_runs_its_cycles_and_an_unattended_replace_gets_what_is_left_of_the_attempts() {

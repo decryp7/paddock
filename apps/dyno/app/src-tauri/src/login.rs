@@ -386,11 +386,11 @@ impl paddock_service::login::LoginService for LinuxService {
     /// Registers the unit without waiting for the agent to answer (the link waits for it and falls back to one of its own).
     fn install(&mut self) -> Result<(), String> {
         let mut m = (self.make)(dyno_agent::service::linux::install_timings())?;
-        dyno_agent::service::linux::install(&mut m)
+        dyno_agent::service::linux::install_without_waiting(&mut m)
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
-        dyno_agent::service::linux::uninstall(&mut self.quiet()?)
+        dyno_agent::service::linux::uninstall_without_waiting(&mut self.quiet()?)
     }
 }
 
@@ -519,6 +519,7 @@ fn registration_words(e: &paddock_service::ServiceError, opened: bool) -> String
         ServiceError::SwitchedOff => {
             format!("Dyno is switched off in System Settings > General > Login Items{shown}: switch it on there")
         }
+        ServiceError::Busy => "Another change is still running; try again in a moment.".to_string(),
         other => other.to_string(),
     }
 }
@@ -676,21 +677,22 @@ mod mac {
 
     impl LoginService for SmService {
         /// Registers the agent without waiting for it to answer (`install_timings`): the link waits for it and falls back to an
-        /// agent of its own. This call itself can still take long (a lost lock is waited for up to 30 s, and each registration
-        /// cycle about 24 s), so the Settings switch must show it as busy.
+        /// agent of its own. A change that finds another one running answers Busy after the lock's own look (about 0.4 s); the
+        /// registration itself runs on the switch's worker, off the save.
         fn install(&mut self) -> Result<(), String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
             let quiet = install_is_quiet(self.first_run);
             // A first run that lost the lock to another registration waits for it instead of leaving nothing registered.
-            let result = m.install_patient(never(), quiet, 6, std::time::Duration::from_secs(5));
+            // The Settings switch never waits for another change (it answers Busy at once, after the lock's own short look); the
+            // first run waits for one, so a first run that lost the lock does not end with nothing registered.
+            let (tries, pause) = if self.first_run { (6, 5) } else { (0, 0) };
+            let result = m.install_patient(never(), quiet, tries, std::time::Duration::from_secs(pause));
             result.map(drop).map_err(|e| registration_words(&e, !quiet))
         }
 
         fn uninstall(&mut self) -> Result<(), String> {
-            // Another registration or repair may hold the lock: wait for it as the install does.
-            quiet_manager()?
-                .uninstall_patient(6, std::time::Duration::from_secs(5))
-                .map_err(|e| e.to_string())
+            // Another change that holds the lock is answered with Busy (the switch does not wait for it).
+            quiet_manager()?.uninstall().map_err(|e| registration_words(&e, false))
         }
     }
 
@@ -1046,6 +1048,10 @@ mod tests {
         use paddock_service::ServiceError;
         assert!(registration_words(&ServiceError::NeedsApproval, true).ends_with("(opened for you)"));
         assert!(!registration_words(&ServiceError::SwitchedOff, false).contains("opened for you"));
+        assert_eq!(
+            registration_words(&ServiceError::Busy, false),
+            "Another change is still running; try again in a moment."
+        );
     }
 
     #[test]
