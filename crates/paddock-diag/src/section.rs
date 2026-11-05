@@ -89,6 +89,9 @@ pub trait Section: Send + Sync {
     fn id(&self) -> &str;
     /// Collects the section's files. Redaction is applied by the caller.
     fn collect(&self, cx: &Context<'_>) -> SectionOutput;
+    /// Called once the user saved a report that holds this section's files (the crash section clears the markers it reported).
+    /// The default does nothing.
+    fn reported(&self, _cx: &Context<'_>) {}
 }
 
 pub mod builtin {
@@ -96,7 +99,7 @@ pub mod builtin {
 
     use super::{Content, Context, Section, SectionFile, SectionOutput};
     use crate::manifest::FileKind;
-    use crate::window::{LOG_WINDOW, log_window};
+    use crate::window::{LOG_WINDOW, log_window_report};
     use paddock_log::CrashMarker;
     use serde_json::json;
     use std::sync::Arc;
@@ -233,16 +236,28 @@ pub mod builtin {
         }
 
         fn collect(&self, cx: &Context<'_>) -> SectionOutput {
-            let files = log_window(cx.dirs.logs(), cx.app.id.as_str(), self.window);
-            if files.is_empty() {
+            let found = log_window_report(cx.dirs.logs(), cx.app.id.as_str(), self.window);
+            let mut notes = Vec::new();
+            if let Some(why) = &found.folder_error {
+                notes.push(format!(
+                    "The log folder cannot be read ({why}), so no logs are in this report."
+                ));
+            }
+            for (name, why) in &found.skipped {
+                notes.push(format!(
+                    "The log {name} cannot be read ({why}) and was left out."
+                ));
+            }
+            if found.files.is_empty() && notes.is_empty() {
                 return SectionOutput::note("There are no log files yet.");
             }
             SectionOutput {
-                notes: Vec::new(),
-                files: files
+                notes,
+                files: found
+                    .files
                     .into_iter()
                     .map(|(name, bytes, cut)| {
-                        let lines = bytes.iter().filter(|b| **b == b'\n').count();
+                        let lines = bytes.iter().filter(|b| **b == b'\n').count().max(1);
                         let part = if cut { "the recent part of" } else { "all of" };
                         SectionFile {
                             name: format!("logs/{name}"),
@@ -258,8 +273,12 @@ pub mod builtin {
         }
     }
 
-    /// The marker a crashed run left (`crash-app.json`), when there is one.
-    pub struct Crash;
+    /// The markers crashed runs left (`crash-<process>.json`, one per process: the app, a helper, an agent), when there are any.
+    /// Each is cleared once a report that holds it was saved (a crash is reported once, not at every later report).
+    #[derive(Default)]
+    pub struct Crash {
+        reported: std::sync::Mutex<Vec<std::path::PathBuf>>,
+    }
 
     impl Section for Crash {
         fn id(&self) -> &str {
@@ -267,20 +286,77 @@ pub mod builtin {
         }
 
         fn collect(&self, cx: &Context<'_>) -> SectionOutput {
-            let path = CrashMarker::path_for(cx.dirs.data(), "app");
-            if !path.exists() {
-                return SectionOutput::default();
+            let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(cx.dirs.data())
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .map(|e| e.path())
+                        .filter(|p| {
+                            let n = p
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            n.starts_with("crash-") && n.ends_with(".json")
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            paths.sort();
+            let mut out = SectionOutput::default();
+            let mut taken = Vec::new();
+            for path in paths {
+                let process = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+                    .trim_start_matches("crash-")
+                    .trim_end_matches(".json")
+                    .to_string();
+                if process.is_empty()
+                    || !process
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    continue;
+                }
+                match CrashMarker::read(&path) {
+                    Some(marker) => {
+                        let when = marker.time.clone();
+                        out.files.push(SectionFile {
+                            name: if process == "app" { "crash.json".into() } else { format!("crash-{process}.json") },
+                            kind: FileKind::Crash,
+                            summary: format!("A run of {process} ended in a crash at {when}: which thread and where"),
+                            content: Content::Json(serde_json::to_value(marker).unwrap_or_default()),
+                        });
+                    }
+                    None => out.notes.push(format!(
+                        "The crash marker{} is damaged; a crash happened but its details are lost.",
+                        if process == "app" {
+                            String::new()
+                        } else {
+                            format!(" of {process}")
+                        }
+                    )),
+                }
+                taken.push(path);
             }
-            match CrashMarker::read(&path) {
-                Some(marker) => SectionOutput::one(SectionFile {
-                    name: "crash.json".into(),
-                    kind: FileKind::Crash,
-                    summary: "The last run ended in a crash: when, which thread and where".into(),
-                    content: Content::Json(serde_json::to_value(marker).unwrap_or_default()),
-                }),
-                None => SectionOutput::note(
-                    "The crash marker is damaged; a crash happened but its details are lost.",
-                ),
+            *self
+                .reported
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = taken;
+            out
+        }
+
+        fn reported(&self, _cx: &Context<'_>) {
+            let taken = std::mem::take(
+                &mut *self
+                    .reported
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+            for path in taken {
+                // A marker that cannot be removed is reported again next time; nothing else depends on it.
+                let _ = CrashMarker::clear(&path);
             }
         }
     }
@@ -290,7 +366,7 @@ pub mod builtin {
         vec![
             Arc::new(SystemInfo),
             Arc::new(Settings::default()),
-            Arc::new(Crash),
+            Arc::new(Crash::default()),
             Arc::new(Logs::new()),
         ]
     }

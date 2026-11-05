@@ -320,6 +320,15 @@ describe('the Report a Problem dialog', () => {
     expect(el.querySelector('[data-testid="diag-removed"]')).not.toBeNull();
   });
 
+  it('warns that issue reports are public and lists what is not in the report and what may remain', async () => {
+    const { el } = await open();
+    expect(text(el.querySelector('[data-testid="diag-public"]') as HTMLElement)).toBe('Issue reports are public. Look through the zip first.');
+    const notIn = text(el.querySelector('[data-testid="diag-not-in"]') as HTMLElement);
+    expect(notIn).toContain('Not in the report');
+    expect(notIn).toContain('File names outside your home folder may remain');
+    expect(el.querySelectorAll('[data-testid="diag-not-in"] li')).toHaveLength(3);
+  });
+
   it('styles every class its template uses (the Size column stays on one line, long cells break)', async () => {
     const { el } = await open();
     const used = new Set([...el.querySelectorAll('[class*="pd-diag__"]')].flatMap((n) => [...n.classList].filter((c) => c.startsWith('pd-diag__'))));

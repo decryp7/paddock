@@ -220,6 +220,19 @@ impl Diagnostics {
         }
     }
 
+    /// Tells the sections a report was saved (the crash section clears the markers that report held).
+    fn mark_reported(&self) {
+        let cx = crate::Context {
+            app: &self.app,
+            dirs: &self.dirs,
+            now: paddock_log::now_utc(&*self.clock),
+        };
+        for section in &self.sections {
+            let _ =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| section.reported(&cx)));
+        }
+    }
+
     /// The log handle the app gave, for the Logging settings section.
     pub fn log_handle(&self) -> Option<LogHandle> {
         self.log.clone()
@@ -365,6 +378,9 @@ fn start_save<R: Runtime>(
     // The save blocks on the native dialog, so it runs on the blocking pool, never on the IPC or main thread.
     ::tauri::async_runtime::spawn_blocking(move || {
         let outcome = run_save(ctx, picker.as_ref(), &label, &suggested, &report);
+        if matches!(outcome, SaveOutcome::Saved(_)) {
+            state.mark_reported();
+        }
         {
             let mut active = lock(&state.active);
             active.saving = false;

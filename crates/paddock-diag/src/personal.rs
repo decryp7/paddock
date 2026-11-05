@@ -119,7 +119,7 @@ fn replace_prefix(text: &str, prefix: &str, with: &str) -> (String, u32) {
         let after_ok = text[end..]
             .chars()
             .next()
-            .is_none_or(|c| c == '/' || c == '\\' || !is_word(c));
+            .is_none_or(|c| c == '/' || c == '\\' || (c != ' ' && !is_word(c)));
         let before_ok = text[..start]
             .chars()
             .next_back()
@@ -136,41 +136,86 @@ fn replace_prefix(text: &str, prefix: &str, with: &str) -> (String, u32) {
     (out, count)
 }
 
-/// Replaces the owner segment of `/Users/<x>`, `/home/<x>` and `C:\Users\<x>` with `<user>`.
+fn is_sep(c: char) -> bool {
+    c == '/' || c == '\\'
+}
+
+/// At `rest`'s start: one or two separators, `users` or `home` in any case, one or two separators (`/Users/`, `\\Users\\`,
+/// `\USERS\`). Returns the byte length of that marker.
+fn profile_marker(rest: &str) -> Option<usize> {
+    let seps = |s: &str| s.chars().take_while(|c| is_sep(*c)).count().min(2);
+    let lead = seps(rest);
+    if lead == 0 {
+        return None;
+    }
+    let after = &rest[lead..];
+    let word = ["users", "home"]
+        .iter()
+        .find(|w| {
+            after
+                .get(..w.len())
+                .is_some_and(|x| x.eq_ignore_ascii_case(w))
+        })?
+        .len();
+    let tail = seps(&after[word..]);
+    (tail > 0).then_some(lead + word + tail)
+}
+
+/// The owner segment after a marker: up to the next separator or quote (spaces included: `Alex Doe`), at most four words; with
+/// no separator or quote after it (the end of a sentence) the first word only, so a sentence is not swallowed.
+fn profile_segment(after: &str) -> usize {
+    let stop = |c: char| is_sep(c) || matches!(c, '"' | '\'' | '\n' | '\r');
+    match after.find(stop) {
+        Some(i) if after[i..].starts_with(is_sep) || after[i..].starts_with(['"', '\'']) => {
+            if after[..i].split(' ').count() <= 4 {
+                i
+            } else {
+                after.find(' ').unwrap_or(i)
+            }
+        }
+        _ => after.find([' ', '\n', '\r']).unwrap_or(after.len()),
+    }
+}
+
+/// Replaces the owner segment of `/Users/<x>`, `/home/<x>` and `C:\Users\<x>` (any case, doubled separators too) with `<user>`.
 fn replace_profiles(text: &str) -> (String, u32) {
     let mut out = String::with_capacity(text.len());
     let mut count = 0;
     let mut rest = text;
-    'outer: while !rest.is_empty() {
-        for marker in [
-            "/Users/",
-            "\\Users\\",
-            "/home/",
-            "\\home\\",
-            "/users/",
-            "\\users\\",
-        ] {
-            if let Some(stripped) = rest.strip_prefix(marker) {
-                let seg_len = stripped
-                    .find(['/', '\\', ' ', '"', '\'', '\n'])
-                    .unwrap_or(stripped.len());
-                let seg = &stripped[..seg_len];
-                out.push_str(marker);
-                if !seg.is_empty() && seg != "<user>" && seg != "Shared" && seg != "Public" {
-                    out.push_str("<user>");
-                    count += 1;
-                } else {
-                    out.push_str(seg);
-                }
-                rest = &stripped[seg_len..];
-                continue 'outer;
+    while !rest.is_empty() {
+        if let Some(m) = profile_marker(rest) {
+            let after = &rest[m..];
+            let seg = &after[..profile_segment(after)];
+            out.push_str(&rest[..m]);
+            if !seg.is_empty()
+                && !["<user>", "shared", "public", "~"]
+                    .iter()
+                    .any(|k| seg.eq_ignore_ascii_case(k))
+            {
+                out.push_str("<user>");
+                count += 1;
+            } else {
+                out.push_str(seg);
             }
+            rest = &after[seg.len()..];
+            continue;
         }
         let c = rest.chars().next().unwrap_or(' ');
         out.push(c);
         rest = &rest[c.len_utf8()..];
     }
     (out, count)
+}
+
+/// Replaces MAC addresses (`aa:bb:cc:dd:ee:ff`) with `<mac>`.
+fn replace_macs(text: &str) -> (String, u32) {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b")
+            .unwrap_or_else(|e| panic!("mac pattern: {e}"))
+    });
+    let n = re.find_iter(text).count() as u32;
+    (re.replace_all(text, "<mac>").into_owned(), n)
 }
 
 fn replace_emails(text: &str) -> (String, u32) {
@@ -329,6 +374,9 @@ impl Personal {
             s = t;
             c.user_names += n;
         }
+        let (t, n) = replace_macs(&s);
+        s = t;
+        c.ip_addresses += n;
         let (t, n) = replace_ipv4(&s);
         s = t;
         c.ip_addresses += n;

@@ -673,3 +673,77 @@ fn a_named_settings_file_is_reported_and_the_default_one_is_left_alone() {
         foreign
     );
 }
+
+/// A helper or agent crashes too (`crash-<process>.json`), not only the app: every marker is in the report, and a reported
+/// crash is cleared once the user saved the report (it used to stay for ever).
+#[test]
+fn every_crash_marker_is_reported_once_and_cleared_when_saved() {
+    let (_root, d) = machine();
+    std::fs::write(
+        d.data().join("crash-agent.json"),
+        json!({"version":1,"process":"agent","pid":9,"time":"2026-10-23T23:00:00Z","thread":"poller","message":"boom","location":"src/y.rs:2"}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(d.data().join("crash-helper.json"), "not json").unwrap();
+    let sections = builtin::all();
+    let c = Collected::collect(&app_info(), &d, &sections, &redactor(), now());
+    let names: Vec<String> = c
+        .assemble("x")
+        .preview()
+        .files
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+    assert!(
+        names.contains(&"crash.json".to_string())
+            && names.contains(&"crash-agent.json".to_string()),
+        "{names:?}"
+    );
+    assert!(
+        c.notes()
+            .iter()
+            .any(|n| n.contains("helper") && n.contains("damaged")),
+        "{:?}",
+        c.notes()
+    );
+    let cx = Context {
+        app: &app_info(),
+        dirs: &d,
+        now: now(),
+    };
+    for s in &sections {
+        s.reported(&cx);
+    }
+    assert!(
+        !d.data().join("crash-app.json").exists() && !d.data().join("crash-agent.json").exists()
+    );
+    let again = Collected::collect(&app_info(), &d, &sections, &redactor(), now());
+    assert!(
+        !again
+            .assemble("x")
+            .preview()
+            .files
+            .iter()
+            .any(|f| f.name.starts_with("crash"))
+    );
+}
+
+/// A log folder that cannot be listed must not say "There are no log files yet".
+#[test]
+fn an_unreadable_log_folder_is_not_reported_as_empty() {
+    let (_root, d) = machine();
+    std::fs::remove_dir_all(d.logs()).unwrap();
+    std::fs::write(d.logs(), "a file where the folder should be").unwrap();
+    let c = Collected::collect(
+        &app_info(),
+        &d,
+        &[Arc::new(builtin::Logs::new())],
+        &redactor(),
+        now(),
+    );
+    let notes = c.notes().join(" | ");
+    assert!(
+        notes.contains("cannot be read") && !notes.contains("no log files yet"),
+        "{notes}"
+    );
+}
