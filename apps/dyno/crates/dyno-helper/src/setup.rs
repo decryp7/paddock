@@ -83,6 +83,65 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     Ok(report)
 }
 
+/// What `refresh` does, decided from the version the installed helper recorded in its `config.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refresh {
+    /// No configuration: the helper is not installed. A refresh never turns the helper on.
+    NotInstalled,
+    /// The installed helper is this version or newer: nothing to do.
+    Current,
+    /// The installed helper is older (or its version is unreadable): install this program in its place.
+    Refresh {
+        /// The version the installed helper recorded.
+        from: String,
+    },
+}
+
+/// The refresh decision: `recorded` is the version in `config.json` (`None`: no configuration), `this` the version of this
+/// program.
+pub fn refresh_decision(recorded: Option<&str>, this: &str) -> Refresh {
+    match recorded {
+        None => Refresh::NotInstalled,
+        Some(r) if dyno_core::helper_wire::version_at_least(r, this) => Refresh::Current,
+        Some(r) => Refresh::Refresh { from: r.to_string() },
+    }
+}
+
+/// The elevated refresh after an update (`dyno-helper refresh`, run by the installer from the newly installed copy): when the
+/// helper is installed and older than this program, installs this program over it for the owner recorded in `config.json`
+/// (the policy file and the data folder stay). Nothing recorded means nothing installed: nothing is done and the helper is not
+/// turned on. The same trust checks as `install` apply (the program must be in its place on Windows, signed on macOS).
+///
+/// # Errors
+/// What went wrong, with the next step; the installer logs it and carries on (a failed refresh never fails the update).
+pub fn refresh() -> Result<Report, String> {
+    let paths = helper_paths();
+    let recorded = match HelperConfig::load(&paths.config) {
+        Ok(c) => Some(c),
+        Err(crate::config::ConfigError::Unreadable(why)) => {
+            log::info!(why = why.as_str(); "refresh: no helper configuration, nothing to refresh");
+            None
+        }
+        Err(e @ crate::config::ConfigError::Invalid(_)) => {
+            return Err(format!(
+                "{e} The helper was left as it is; turn it off and on again in Settings > Helper."
+            ));
+        }
+    };
+    match refresh_decision(recorded.as_ref().map(|c| c.version.as_str()), crate::VERSION) {
+        Refresh::NotInstalled => Ok(Report::default()),
+        Refresh::Current => {
+            log::info!("refresh: the installed helper is current");
+            Ok(Report::default())
+        }
+        Refresh::Refresh { from } => {
+            let owner = recorded.map(|c| c.owner).ok_or("The helper's owner is not recorded.")?;
+            log::warn!(from = from.as_str(), to = crate::VERSION; "refresh: replacing the installed helper");
+            install(owner)
+        }
+    }
+}
+
 /// Says in the log and the OS log that an elevated `install` or `uninstall` is running, and from which program: a service
 /// that vanishes after a restart is only explained by knowing who asked for its removal or replacement (ER-27).
 fn audit_run(verb: &str, what: &str) {
@@ -492,5 +551,31 @@ mod tests {
         std::fs::write(&paths.endpoint, b"not a socket").unwrap();
         assert!(remove_endpoint(&paths).unwrap().starts_with("left in place"));
         assert!(std::path::Path::new(&paths.endpoint).exists());
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_recorded_means_the_helper_is_not_installed_and_is_never_turned_on() {
+        assert_eq!(refresh_decision(None, "1.1.0"), Refresh::NotInstalled);
+    }
+
+    #[test]
+    fn the_same_version_is_current_and_left_alone() {
+        assert_eq!(refresh_decision(Some("1.1.0"), "1.1.0"), Refresh::Current);
+    }
+
+    #[test]
+    fn an_older_or_unreadable_recorded_version_is_refreshed() {
+        assert_eq!(refresh_decision(Some("1.0.0"), "1.1.0"), Refresh::Refresh { from: "1.0.0".into() });
+        assert_eq!(refresh_decision(Some("junk"), "1.1.0"), Refresh::Refresh { from: "junk".into() });
+    }
+
+    #[test]
+    fn a_newer_recorded_version_is_not_downgraded() {
+        assert_eq!(refresh_decision(Some("1.2.0"), "1.1.0"), Refresh::Current);
     }
 }
