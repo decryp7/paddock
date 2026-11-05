@@ -124,9 +124,10 @@ Registering, absent means just register, there means wait.
 - Registering goes to Awaiting answer when the OS accepted it, and to Register failed on `Other` or `NotAsWritten`; Register
   failed retries while attempts are under 3. Declined, cancelled, needs approval or elevation and unavailable return to the
   state before.
-- Awaiting answer goes back to Removing old with no answer while attempts are under 3, and to Held at 3. Held ends on
-  "Answers" (back to Idle), on a new version or on Repair.
+- Awaiting answer goes back to Removing old with no answer while attempts are under 3, and to Held at 3, as does
+  Register failed. A hold has these ways out: "Answers" (back to Idle), a new version, Repair or Install; the last two run
+  past 3 attempts, and a failed Repair returns to Held. The job of an old build never settles during Removing old.
 - Uninstall or the switch turned off, from any state, writes Removing and then returns to Idle.
 
 Every entry point (start, install, repair, resume, uninstall) goes through one transition function; a start never installs
-one unasked.
+one unasked. Windows Dyno has no agent service.
