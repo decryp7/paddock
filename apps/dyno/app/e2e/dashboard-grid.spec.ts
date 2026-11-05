@@ -134,7 +134,7 @@ test.describe('dashboard grid', () => {
     await page.mouse.up();
   });
 
-  test('edit mode: the segmented controls and checkboxes of the bodies keep full strength (no dimming of the cards), before, during and after', async ({ page }) => {
+  test('edit mode: the segmented controls and checkboxes of the bodies read at reduced emphasis, and at full strength again after Done', async ({ page }) => {
     await open(page);
     const strength = () =>
       page.evaluate(() =>
@@ -145,7 +145,7 @@ test.describe('dashboard grid', () => {
     expect(normal.every((o) => o === 1)).toBe(true);
     await page.getByRole('button', { name: 'Edit layout' }).click();
     await expect(page.getByText('Editing layout')).toBeVisible();
-    expect((await strength()).every((o) => o === 1)).toBe(true);
+    expect((await strength()).every((o) => o < 1 && o >= 0.6)).toBe(true);
     await page.getByRole('button', { name: 'Done' }).click();
     await expect(page.getByText('Editing layout')).toHaveCount(0);
     expect((await strength()).every((o) => o === 1)).toBe(true);
