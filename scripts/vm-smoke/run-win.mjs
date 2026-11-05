@@ -97,6 +97,8 @@ async function main(argv) {
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
     // UAC and actor screenshots go to the run's evidence folder, next to the result (the host /tmp was overwritten by the next run).
     process.env.PADDOCK_EVIDENCE_DIR = join(resultFolder(out, { run: o.run, installerSha256: sha256File(exe) }), 'evidence');
+    // --ui needs @playwright/test (the root npm workspace: `npm ci` in the worktree, or a worktree with node_modules): fail before a VM is touched, not 13 minutes in.
+    if (o.ui) { try { await import('@playwright/test'); } catch { throw new Error('--ui needs @playwright/test, which this checkout cannot load: run `npm ci` at the repository root (or use a worktree that has node_modules) first'); } }
     // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
     if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
     started = true;
@@ -216,7 +218,7 @@ async function main(argv) {
     const required = requiredSteps({ os: 'windows', ui: Boolean(o.ui), reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
     const { file, exit } = finalizeRun({
       out, started: started_, meta: { label: o.reboot && !o.ui ? 'windows-restart' : 'windows-ui', os: 'windows', run: o.run ?? null },
-      run: { app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial, required, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
+      run: { app: 'Dyno', version: steps[0]?.evidence?.find((e) => /^version \d/.test(e))?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial, required, guest: `VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot ${SNAPSHOT}), interactive session, x64 installer under emulation`, started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
     });
     mkdirSync(join(dirname(file), 'evidence'), { recursive: true });
     for (const f of readdirSync(dest)) if (f.endsWith('.png') || /^setup-log-.*\.txt$|^run\.log$/.test(f)) writeFileSync(join(dirname(file), 'evidence', `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
