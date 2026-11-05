@@ -33,7 +33,12 @@ pub enum JobEnd {
 /// Why a submit was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    QueueFull { kind: JobKind, cap: usize },
+    QueueFull {
+        kind: JobKind,
+        cap: usize,
+    },
+    /// A keyed spec was given to a call whose handle cannot follow a job it joins (see `Jobs::submit`).
+    KeyedWithHandle,
 }
 
 impl std::fmt::Display for Refusal {
@@ -44,6 +49,7 @@ impl std::fmt::Display for Refusal {
                 "{cap} {} jobs are already waiting; wait for some to finish or cancel one in the Jobs pane",
                 kind.as_str()
             ),
+            Refusal::KeyedWithHandle => write!(f, "a keyed job cannot hand its value to a waiter: use submit_work"),
         }
     }
 }
@@ -82,6 +88,14 @@ pub enum Cancel {
     Running,
     NotCancellable,
     AlreadyFinished,
+}
+
+/// What [`JobQueue::submit_or_existing`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Submission {
+    pub id: JobId,
+    /// False when an equal keyed job was already active and `id` is that job.
+    pub created: bool,
 }
 
 /// A job that just ended.
@@ -229,8 +243,24 @@ impl JobQueue {
         id
     }
 
-    /// Queues a job; refused when its kind already has [`QUEUE_CAP`] waiting.
+    /// Queues a job; refused when its kind already has [`QUEUE_CAP`] waiting. A keyed spec whose kind and key match a queued or
+    /// running job returns that job's id instead (see [`JobSpec::key`]).
+    #[cfg(test)]
     pub fn submit(&mut self, spec: JobSpec, now: i64) -> Result<JobId, Refusal> {
+        self.submit_or_existing(spec, now).map(|s| s.id)
+    }
+
+    /// As [`submit`](Self::submit), saying whether a job was added.
+    pub fn submit_or_existing(&mut self, spec: JobSpec, now: i64) -> Result<Submission, Refusal> {
+        if let Some(key) = &spec.key {
+            if let Some(j) = self
+                .active
+                .iter()
+                .find(|j| j.kind == spec.kind && j.key.as_ref() == Some(key) && !j.state().is_finished())
+            {
+                return Ok(Submission { id: j.id, created: false });
+            }
+        }
         let waiting = self
             .active
             .iter()
@@ -263,9 +293,16 @@ impl JobQueue {
             error: None,
             seen: false,
             request: spec.request,
+            quiet: spec.quiet,
+            key: spec.key,
             retry_of: None,
         });
-        Ok(id)
+        Ok(Submission { id, created: true })
+    }
+
+    /// The id the next new job gets: a job with a smaller id existed before.
+    pub fn next_id(&self) -> JobId {
+        JobId(self.next_id)
     }
 
     /// Marks the job as a retry of `of`.
@@ -536,6 +573,32 @@ mod tests {
         JobSpec::new(JobKind::Ai, title).window("main")
     }
 
+    #[test]
+    fn equal_keys_share_one_active_job_and_a_finished_job_frees_its_key() {
+        let mut q = JobQueue::new(4);
+        let a = q.submit(ai("a").keyed("main|x"), 0).unwrap();
+        assert_eq!(q.submit(ai("a again").keyed("main|x"), 0).unwrap(), a);
+        let other = q.submit(ai("b").keyed("main|y"), 0).unwrap();
+        assert_ne!(other, a);
+        // Another kind with the same key is its own job; unkeyed specs are never merged.
+        let exp = q.submit(JobSpec::new(JobKind::Export, "e").keyed("main|x"), 0).unwrap();
+        assert_ne!(exp, a);
+        let u1 = q.submit(ai("u"), 0).unwrap();
+        let u2 = q.submit(ai("u"), 0).unwrap();
+        assert_ne!(u1, u2);
+        assert_eq!(
+            q.submit_or_existing(ai("a").keyed("main|x"), 0).unwrap(),
+            Submission { id: a, created: false }
+        );
+        // Still shared while running.
+        q.start(a, 1).unwrap();
+        assert_eq!(q.submit(ai("a").keyed("main|x"), 2).unwrap(), a);
+        // A finished job frees the key.
+        q.finish(a, JobEnd::Done(None), 3).unwrap();
+        let again = q.submit(ai("a").keyed("main|x"), 4).unwrap();
+        assert_ne!(again, a);
+    }
+
     fn states(q: &JobQueue, now: i64) -> Vec<(String, JobState)> {
         q.snapshot(Some("main"), now).jobs.into_iter().map(|j| (j.title, j.state)).collect()
     }
@@ -568,6 +631,25 @@ mod tests {
         q.finish(i1, JobEnd::Done(None), 5).unwrap();
         assert_eq!(q.startable(), vec![a2, i2]);
         assert!(!start.contains(&x[3]) && !start.contains(&e[2]));
+    }
+
+    /// A name table waiting for the catalogue is a job: it must not hold the one Maintenance slot (storage clearing,
+    /// store actions), and one window's waiting must not hold another window's.
+    #[test]
+    fn a_names_job_waiting_for_the_catalogue_blocks_neither_maintenance_nor_other_windows() {
+        let mut q = JobQueue::new(4);
+        let n1 = q.submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0).unwrap();
+        let n2 = q.submit(JobSpec::new(JobKind::Names, "Updating names").window("w-2").quiet(), 0).unwrap();
+        let m = q.submit(JobSpec::new(JobKind::Maintenance, "Clear storage").window("main"), 0).unwrap();
+        assert_eq!(q.startable(), vec![n1, n2, m], "all three run at once");
+        for id in [n1, n2, m] {
+            q.start(id, 1).unwrap();
+        }
+        // The same window's second names job waits for the first (single flight is also kept by the window).
+        let again = q.submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 2).unwrap();
+        assert!(q.startable().is_empty(), "{again:?} waits behind the running one of its window");
+        q.finish(n1, JobEnd::Done(None), 5).unwrap();
+        assert_eq!(q.startable(), vec![again]);
     }
 
     #[test]

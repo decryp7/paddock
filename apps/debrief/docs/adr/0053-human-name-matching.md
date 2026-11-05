@@ -88,3 +88,17 @@ Paddock rule 46 (no LLM for large jobs) and the research note
   of 24 while the rule still had its four-entry table), no false suggestion, none of the 18 negatives matched, and
   still 22 of 24 with 2,000 distractor names in the book. The evaluation asserts this without layer 2 now; synonyms
   still need an alias or the user.
+- **The name table is rebuilt by a job, never by a request.** `Names::rebuild` runs in phases with progress (reading
+  names, grouping, comparing look-alikes, joining, replacing the table), stops at the next step on Cancel and swaps the
+  new table in only at the end. The shell queues it as a quiet job of its own kind (`names`, one per window, so it never
+  holds the one Maintenance slot), "Updating names", after an import and when a search or chat turn finds the table
+  older than the workspace; the job is keyed by the window, so one rebuild is queued or running at a time, and a
+  request answers from the last table at once. The job first waits for the catalogue to be built, woken by the store's
+  own signal (`catalogue_status` with the generation of the last answer blocks inside the store until the catalogue
+  commits or moves): no polling, and the whole-catalogue read never runs while sources are pending. The join compares
+  only groups that appear in the events read for the look-alikes, found through an index of their trigrams computed
+  once, so it follows the number of those groups (a few hundred), not of all groups: `merge_cooccurring` over 8,000
+  groups takes 7.5 ms against 43.5 s before (`names_perf::merge_scaling`, release build, Mac mini M4 Pro, 2026-11-05;
+  recorded in `docs/performance.md`). A table is current while the store's generation is the one it was built from;
+  the generation moves with the catalogue's own commits and with every change of the store's data (an import, a
+  removal, a refresh, a live-follow step).

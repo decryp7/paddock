@@ -30,6 +30,9 @@ serde_json.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
+# The idle measurement after an event-log import (tests/it/evtx_idle.rs) imports through the store the app ships.
+debrief-store-duck = { path = "../debrief-store-duck" }
+libc.workspace = true
 debrief-core = { path = "../debrief-core" }
 debrief-plugin-host = { path = "../debrief-plugin-host" }
 debrief-profile = { path = "../debrief-profile" }

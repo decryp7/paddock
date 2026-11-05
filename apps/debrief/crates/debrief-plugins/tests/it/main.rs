@@ -8,6 +8,7 @@ mod synth_minidump;
 mod dumps;
 mod engine;
 mod evtx_corpus;
+mod evtx_idle;
 mod evtx_memory;
 mod formats_samples;
 mod native_profiling;

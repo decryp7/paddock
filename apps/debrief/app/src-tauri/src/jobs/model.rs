@@ -41,6 +41,9 @@ pub enum JobKind {
     Capture,
     /// Storage clean-up.
     Maintenance,
+    /// A window's name table rebuilding (waits for the catalogue, then rebuilds): its own kind, one per window, so
+    /// waiting for the catalogue never holds the one Maintenance slot.
+    Names,
 }
 
 /// Captures recorded at once (each records another process).
@@ -48,7 +51,7 @@ pub const CAPTURES: usize = 4;
 
 impl JobKind {
     #[cfg(test)]
-    pub const ALL: [JobKind; 9] = [
+    pub const ALL: [JobKind; 10] = [
         JobKind::Ai,
         JobKind::Research,
         JobKind::Analysis,
@@ -58,12 +61,13 @@ impl JobKind {
         JobKind::Collection,
         JobKind::Capture,
         JobKind::Maintenance,
+        JobKind::Names,
     ];
 
     /// How many jobs of this kind run at once (for [`JobKind::Import`]: per window).
     pub fn limit(self, cores: usize) -> usize {
         match self {
-            JobKind::Ai | JobKind::Research | JobKind::Import | JobKind::Collection | JobKind::Maintenance => 1,
+            JobKind::Ai | JobKind::Research | JobKind::Import | JobKind::Collection | JobKind::Maintenance | JobKind::Names => 1,
             JobKind::Analysis => cores.saturating_sub(1).max(1),
             JobKind::Export | JobKind::Download => 2,
             JobKind::Capture => CAPTURES,
@@ -80,7 +84,7 @@ impl JobKind {
 
     /// Whether the limit counts per window instead of app-wide.
     pub fn per_window(self) -> bool {
-        self == JobKind::Import
+        matches!(self, JobKind::Import | JobKind::Names)
     }
 
     /// Whether queued jobs of this kind can be moved up and down.
@@ -99,6 +103,7 @@ impl JobKind {
             JobKind::Collection => "collection",
             JobKind::Capture => "capture",
             JobKind::Maintenance => "maintenance",
+            JobKind::Names => "names",
         }
     }
 }
@@ -410,6 +415,11 @@ pub struct JobSpec {
     pub cancellable: bool,
     /// What Retry runs again (parsed by the producer's retry handler); `None`: not retryable.
     pub request: Option<Value>,
+    /// Background housekeeping nobody waits for: it ends without a message or notification (it still shows in the pane).
+    pub quiet: bool,
+    /// Idempotency key (ADR 0024 rule 3): while a queued or running job of the same kind has an equal key, submitting
+    /// returns that job instead of adding one. `None`: never deduplicated. Retry builds its spec the same way, so it keeps the key.
+    pub key: Option<String>,
 }
 
 impl JobSpec {
@@ -421,6 +431,23 @@ impl JobSpec {
             cancellable: true,
             request: None,
         }
+    }
+
+            quiet: false,
+            key: None,
+        }
+    }
+
+    /// Makes the spec idempotent (see [`JobSpec::key`]); the caller builds the key from the window and the request.
+    pub fn keyed(mut self, key: impl Into<String>) -> JobSpec {
+        self.key = Some(key.into());
+        self
+    }
+
+    /// Ends without a message or notification (see [`JobSpec::quiet`]).
+    pub fn quiet(mut self) -> JobSpec {
+        self.quiet = true;
+        self
     }
 
     pub fn window(mut self, window: &str) -> JobSpec {
@@ -471,6 +498,12 @@ pub struct Job {
     pub seen: bool,
     #[serde(default)]
     pub request: Option<Value>,
+    /// Ends without a message or notification.
+    #[serde(default)]
+    pub quiet: bool,
+    /// The idempotency key it was submitted with (see [`JobSpec::key`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
     /// The job this one retries.
     #[serde(default)]
     pub retry_of: Option<JobId>,
@@ -517,6 +550,8 @@ impl Job {
             error: None,
             seen: false,
             request: spec.request,
+            quiet: spec.quiet,
+            key: spec.key,
             retry_of: None,
         }
     }
@@ -556,10 +591,10 @@ mod tests {
         assert_eq!(JobKind::Analysis.limit(0), 1);
         assert_eq!(JobKind::Export.limit(8), 2);
         assert_eq!(JobKind::Download.limit(8), 2);
-        for k in [JobKind::Import, JobKind::Collection, JobKind::Maintenance] {
+        for k in [JobKind::Import, JobKind::Collection, JobKind::Maintenance, JobKind::Names] {
             assert_eq!(k.limit(8), 1);
         }
-        assert!(JobKind::Import.per_window() && !JobKind::Ai.per_window());
+        assert!(JobKind::Import.per_window() && JobKind::Names.per_window() && !JobKind::Ai.per_window());
         assert!(JobKind::Ai.reorderable() && !JobKind::Export.reorderable());
         let names: Vec<_> = JobKind::ALL.iter().map(|k| k.as_str()).collect();
         assert_eq!(
@@ -573,7 +608,8 @@ mod tests {
                 "download",
                 "collection",
                 "capture",
-                "maintenance"
+                "maintenance",
+                "names"
             ]
         );
         assert_eq!(JobKind::Research.limit(8), 1);
