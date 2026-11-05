@@ -1,0 +1,105 @@
+name: Bug report
+about: Something in an app doesn't work as it should.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is public. Don't paste logs or attach a diagnostic bundle here unless you've read it: paths and names on your computer may be in it. Say here that you have a bundle, and send it privately.
+  - type: dropdown
+    id: app
+    attributes:
+      label: App
+      options:
+        - Dyno
+        - Debrief
+        - Pitwall
+        - Pitcrew
+        - Spotter
+        - Sighter
+        - Pacenotes
+        - Recce
+        - Scrutineer
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Find it under Help > About.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      description: For example macOS 15.2 or Windows 11 24H2. On Windows, also say the CPU type (x64 or Arm).
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install type
+      options:
+        - Installer for all users
+        - Installer for the current user only
+        - .dmg
+        - .deb
+        - AppImage
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List what you did, step by step.
+    validations:
+      required: true
+  - type: dropdown
+    id: when
+    attributes:
+      label: When it happens
+      options:
+        - Always
+        - After a restart
+        - At login
+        - After an update
+        - Sometimes
+    validations:
+      required: true
+  - type: dropdown
+    id: running
+    attributes:
+      label: Is the app running when it happens?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Optional. Check that nothing private shows in them before you attach them.
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Diagnostic bundle
+      description: "This repository is public. Don't paste logs or attach a diagnostic bundle here unless you've read it: paths and names on your computer may be in it. Say here that you have a bundle, and send it privately."

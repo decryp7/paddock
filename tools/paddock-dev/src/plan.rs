@@ -50,9 +50,15 @@ static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(
 
 /// Editor and VCS metadata: marks nothing.
 static META: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [r"(^|/)\.gitignore$", r"^\.editorconfig$", r"(^|/)\.DS_Store$", r"^lefthook\.yml$"]
-        .map(re)
-        .into()
+    [
+        r"(^|/)\.gitignore$",
+        r"^\.editorconfig$",
+        r"(^|/)\.DS_Store$",
+        r"^lefthook\.yml$",
+        r"^\.gitea/ISSUE_TEMPLATE/",
+    ]
+    .map(re)
+    .into()
 });
 
 /// Documentation: marks only the link check, except declared inputs.
@@ -609,6 +615,9 @@ mod tests {
     fn docs_meta_workflows_and_declared_inputs() {
         assert_eq!(plan(&["docs/x.md", ".gitignore"])["docs"], true);
         assert_eq!(plan(&[".gitignore"])["crates"], false);
+        let t = plan(&[".gitea/ISSUE_TEMPLATE/bug.yaml", ".gitea/ISSUE_TEMPLATE/config.yaml"]);
+        assert_eq!(t["all"], false);
+        assert_eq!(t["apps"], json!([]));
         let w = plan(&[".gitea/workflows/dyno.yml"]);
         assert_eq!(w["apps"], json!(["dyno"]));
         assert_eq!(plan(&["docs/rules.md"])["conformance"], true);
