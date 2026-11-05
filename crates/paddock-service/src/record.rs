@@ -280,6 +280,19 @@ impl RecordFile {
         }
     }
 
+    /// Whether a write cannot succeed (a memory store that refuses writes, a file written by a newer app, which is left alone).
+    /// Reads only, so a query can ask it.
+    pub fn unwritable(&self) -> bool {
+        match &self.store {
+            Store::Memory(m) => m.fail_writes.load(Ordering::SeqCst) || m.writes_left.load(Ordering::SeqCst) == 0,
+            Store::File { file, .. } => std::fs::read(file.path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .and_then(|v| v.get("version").and_then(serde_json::Value::as_u64))
+                .is_some_and(|v| v > u64::from(FORMAT)),
+        }
+    }
+
     /// Writes the whole record.
     ///
     /// # Errors
