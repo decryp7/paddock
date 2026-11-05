@@ -51,3 +51,16 @@ network and loopback go direct.
 - **A proxy's login** (the operating system's settings carry none) can only come from the environment, and only file downloads send it; the listings and checksums that go with them do not, so a proxy that needs a login for those is not supported. An address of the form `http://user:password@host:port` in
   the environment is a cleartext (HTTP Basic) login to the proxy: it is sent unencrypted when the proxy itself is an
   `http://` address, so use an `https://` proxy address, or one on a network you trust.
+
+## Report a problem and the log
+
+Help > Report a problem builds a diagnostics zip from the system facts, the shell's settings, the crash marker and the
+newest part of Spotter's log, shows every file with its size and a short description, and saves it where you choose. Nothing
+is sent anywhere. Before the files are counted, shown or written, secrets, your user name, home folder and machine name are
+removed, and every address keeps only its scheme and host: the path, the query values and the fragment of a feed or page
+address can hold a private token, so they are replaced (`https://git.example.org/feeds/…?token=***`). Your watches
+(`spotter.toml`) and their stored secrets are never part of a report.
+
+The log records, with times: the start (how long the engine took to open, how many watches), every check (the watch's id,
+the kind of source, the outcome, and for a failure its class, the reason and the next step), what the tray menu was asked to
+do and how it ended, and the exit. The lines carry no watch names and no fetched text; the reason a network error gives can name an address, which a report cuts to its host as above. Settings > Logging sets its level.

@@ -168,3 +168,11 @@ not cover what runs before the shell plugin's set-up: Tauri's build and the set-
 (single instance, notification, opener, dialog, updater, autostart). A hang there still shows only in `sample`.
 
 The 2026-10-29 hang was the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release and verified on 2026-10-30 (above). The update steps (runbook `spotter-1.0-vm-runbook.md`, section 1 step 5) still have to be run on the CI-built bundles before the tag.
+
+## Report a problem on the VMs (rules 54 and 71)
+
+Part of the VM pass for a Spotter release, on macOS and on Windows, with the installed build:
+
+- [ ] Add a watch for a feed on a closed local port whose address carries a planted token (`https://127.0.0.1:9/feeds/PLANTEDTOKEN/atom?key=PLANTEDKEY`), check it, and read `app.log`: the `check finished ... class=unreachable` line is there. The probe counts only if the raw log (or the error reason in it) shows `PLANTEDTOKEN`; if it does not, record "not measured" for this row (rule 71), because a report that never saw the token proves nothing.
+- [ ] Help > Report a problem lists the files with sizes; Save report… opens the system's save dialog, the zip is written where chosen, and neither `PLANTEDTOKEN` nor `PLANTEDKEY` is in any file of it, while the host `127.0.0.1` and the `check finished` line are.
+- [ ] Settings > Logging changes the level and the next log lines follow it.
