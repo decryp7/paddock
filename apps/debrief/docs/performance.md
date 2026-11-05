@@ -83,6 +83,42 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, folder scan on invented files (ADR 0067)
+
+- **Commit:** `852b35ac0` (`origin/debrief/1.2-int`) with two probes kept as text in `docs/notes/`: `folder-scan-probe.rs`, run as `examples/folder_scan_probe.rs` of `debrief-core` (it calls `score_text_with`, `ParserSet::choose` and `plan_with` in `import_source`'s order), and `folder-table-probe.rs` (Rust std only, a stand-in for ADR 0067's `ScanTable`, built with `rustc -O`)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; corpus on an external USB SSD (`/Volumes/d7sst7`)
+- **Load:** 1-minute load 5.4 to 7.3 for the scan runs, 13.0 for the table runs; other agents' builds running
+- **Build:** release, rustc 1.99.1, default features; in-process importers and the built-in parser library only, **no plugins**
+- **Corpus:** `docs/notes/folder-scan-corpus.py OUT 7`: 14,000 invented files, 152 folders, 7.56 GiB apparent (3.3 GiB on disk; files over 1.2 MiB are sparse past their head), in the bundle note's mix (CSV logs with offsets, 8-bit history CSV, text logs, binary project data, UTF-16 XAML and INI, images, empty files, 3 EVTX-headed and 22 dump-headed files, 4 zips); synthetic
+- **Command:** `plock run folder-dialog -- run.sh`, which runs `folder_scan_probe CORPUS <threads> <head bytes>` for threads 1, 4, 8, 13 at 1 MiB and threads 8 at 64 KiB and 256 KiB, three rounds; `table_probe CORPUS` three times; `PROBE_STEPS=1 folder_scan_probe CORPUS 1 1048576` once for the step split (`run3.sh`)
+- **Runs:** 3 rounds, interleaved by setting; ranges reported. The first round's first run met a cold cache; every other run is warm
+- **Numbers, scan** (list and stat is the probe's own serial walk; "read and judge" opens each file, reads its head and judges it on a rayon pool):
+
+  | Head | Threads | List and stat | Heads read only | Bytes read | Read and judge | Judge per file p50 / p99 | Judge thread time |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | 1 MiB | 1 | 22-23 ms (417 cold) | 438-443 ms (18,951 cold) | 3.09 GiB | 33.9-34.2 s | 3.37-3.44 / 4.60-4.63 ms | 33.3-33.6 s |
+  | 1 MiB | 4 | 23 ms | 152-184 ms | 3.09 GiB | 8.6-9.3 s | 3.44-3.45 / 4.64-4.70 ms | 33.9-34.2 s |
+  | 1 MiB | 8 | 22-23 ms | 105-111 ms | 3.09 GiB | 4.40-4.51 s | 3.48-3.49 / 4.74-4.95 ms | 34.5-34.9 s |
+  | 1 MiB | 13 | 22-23 ms | 125-129 ms | 3.09 GiB | 3.05-3.26 s | 3.66-3.68 / 7.05-10.6 ms | 38.9-41.5 s |
+  | 256 KiB | 8 | 22-23 ms | 100-102 ms | 1.92 GiB | 4.37-4.47 s | 3.47-3.50 / 4.75-5.66 ms | 34.5-35.2 s |
+  | 64 KiB | 8 | 22-23 ms | 96-99 ms | 631 MiB | 3.49-3.51 s | 3.31-3.32 / 3.64-3.71 ms | 27.5-27.7 s |
+
+  Verdicts, the same in every run and at every head size: CSV importer 1,953 files (619.6 MiB); text importer 773 (127.0 MiB); refused "binary file" 7,458 (5,876.9 MiB, which includes the EVTX, dump and zip files, as no plugin and no archive step ran); refused "no enabled parser reads this file" 3,770 (1,119.1 MiB); refused "empty file" 46.
+
+  Steps of the judge, one thread, one run, 13,954 files (the 46 empty files stop before them); this run met a cold cache (heads read in 32.0 s, 2.0 ms a file at p50), which does not change the judge's times:
+
+  | Step | Binary files (7,458) | Text refused (3,770) | Imported (2,726) | All, thread time |
+  |---|---:|---:|---:|---:|
+  | `score_text_with` (encoding detection, decoding up to 256 KiB, the binary check) | p50 4.32 ms, 31.54 s | p50 0.14 ms, 0.66 s | p50 0.10 ms, 0.94 s | 33.14 s |
+  | `ParserSet::choose` | p50 2 µs, 0.01 s | p50 22 µs, 0.09 s | p50 35 µs, 0.11 s | 0.22 s |
+  | `plan_with` | | | p50 0.10 ms, 1.25 s | 1.25 s |
+
+- **Numbers, table** (14,152 nodes; medians of 200 repetitions each; three runs gave the same to two digits): 66 bytes per node, 927,484 bytes in all; walk, stat, sort and build 37-44 ms warm (559 cold); full roll-up 0.05-0.07 ms; toggle a file 0.2 µs; toggle a top folder of 2,723 files 0.072 ms; visible order, all expanded, by name 0.01 ms, by size per folder 0.13 ms; a name and status filter with the visible order 0.25 ms; a page of 500 rows as JSON 80,389 bytes; the stand-in recommended set (2,459 files) covered by 9 prefix rules.
+- **Numbers, `pd-table` model** (Node 24.22, the copied `treePlaces` and the maps `table.ts` builds on each change of `rows`, run directly, not under `plock`): 3.7-5.5 ms per change and 0.15-0.25 ms per arrow key at 14,000 rows; 26-37 ms and 2.9-10.7 ms at 100,000.
+- **Budget:** ADR 0067 proposes first rows in 250 ms, the listing in 1 s and every verdict in 5 s at 14,000 files on a local disk. Verdict: met at 8 threads, 4.40-4.51 s, **in-process only**. Plugins add sniff calls (ADR 0064's measurement), which this run does not include.
+- **Memory measure:** not measured.
+- **Notes:** warm cache, apart from the one cold run; no spinning disk or network share; 95% of the judge's time is `score_text_with` on binary files, and it is nearly the same at a 64 KiB head, so the time goes into deciding that a binary file is binary, not into reading. Raw output in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/folder-dialog/` (`run.log`, `run2.log`, `run3.log`, `steps.txt`), not kept.
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
