@@ -734,6 +734,19 @@ does the time go? Every block below gives the date, build, machine, load, corpus
 
 Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
 
+### 2026-11-05, length of an index step (follow-up to the SR1 block)
+
+- **Cause (ER-28):** the step stopped starting segments after its deadline, but the pipeline holds about seven chunks
+  (two row groups each) read ahead of the writer; the 3.6 to 7.9 s steps of the SR1 block were 2 s plus the time to add
+  what was already read. Measured by the step log lines: change at 4 writer threads, 33 steps, read-and-add median 3.02 s,
+  p90 3.44 s, max 4.29 s.
+- **Fix:** a segment is started only if the groups already read but not yet added, at the speed of those added so far,
+  still end before the deadline (`out_of_time`; test `a_step_counts_the_groups_waiting_in_the_pipeline_against_its_time`,
+  red before: `assertion failed: out_of_time(deadline, began, now, 6, 2)`).
+- **After:** one run at 4 writer threads (load 12.4 at the start): 101 steps, read-and-add median 1.16 s, p90 1.23 s,
+  max 2.15 s, commit 0.17 to 0.9 s; the index was ready in 143.4 s (136 s before at lower load: no slowdown shown, one run
+  each). The commit now follows every second instead of every 3 s.
+
 ### 2026-11-05, index feed: row groups read in parallel, commit by the clock (plan SR1, branch `debrief/import-search`)
 
 - **Commit:** base 852b35ac0 (`debrief/1.2-int`: one in-order reader, 4-thread docs pool, a commit every 4 segments) →

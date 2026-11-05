@@ -31,7 +31,7 @@ use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions, Parq
 use parquet::arrow::ProjectionMask;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
@@ -369,7 +369,8 @@ impl Fts {
         } = feed;
         let ts_field = self.index.schema().get_field("ts")?;
         let keys: Vec<u64> = files.iter().map(|f| segment_key(f)).collect();
-        let mut units = SegmentUnits::new(seg_dir, files, deadline);
+        let committed = AtomicUsize::new(0);
+        let mut units = SegmentUnits::new(seg_dir, files, deadline, &committed);
         // Reading stops once the process exits (the exit handler waits for running steps only so long).
         let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { units.next_unit() });
         let mut first_error: Option<anyhow::Error> = None;
@@ -382,6 +383,7 @@ impl Fts {
                     .with_context(|| format!("reading {}", files[unit.file]))
             },
             |unit, docs, _| {
+                committed.fetch_add(1, Ordering::Relaxed);
                 let file = unit.file;
                 if first_error.is_some() {
                     return;
@@ -486,6 +488,15 @@ struct Feed<'a> {
     deadline: Option<Instant>,
 }
 
+/// Whether a step that began at `began` should start no further segment at `now`. The row groups already read but not
+/// yet added (`emitted - committed`) wait in the pipeline and each takes about as long to add as the ones added so far,
+/// so the step would end at about `now + ahead * per group`, which must stay within `deadline`.
+fn out_of_time(deadline: Instant, began: Instant, now: Instant, emitted: usize, committed: usize) -> bool {
+    let per_group = now.saturating_duration_since(began) / committed.max(1) as u32;
+    let ahead = emitted.saturating_sub(committed) as u32;
+    now + per_group * ahead >= deadline
+}
+
 /// Rows decoded at a time inside a row group.
 const DOC_BATCH_ROWS: usize = 8192;
 
@@ -507,6 +518,10 @@ struct SegmentUnits<'a> {
     dir: &'a Path,
     files: &'a [String],
     deadline: Option<Instant>,
+    began: Instant,
+    /// Row groups handed out, and added to the index so far (the difference waits in the pipeline).
+    emitted: usize,
+    committed: &'a AtomicUsize,
     next_file: usize,
     /// The file being cut into groups: its index, footer, mask and the next group.
     current: Option<(usize, ArrowReaderMetadata, ProjectionMask, usize)>,
@@ -514,11 +529,14 @@ struct SegmentUnits<'a> {
 }
 
 impl<'a> SegmentUnits<'a> {
-    fn new(dir: &'a Path, files: &'a [String], deadline: Option<Instant>) -> Self {
+    fn new(dir: &'a Path, files: &'a [String], deadline: Option<Instant>, committed: &'a AtomicUsize) -> Self {
         SegmentUnits {
             dir,
             files,
             deadline,
+            began: Instant::now(),
+            emitted: 0,
+            committed,
             next_file: 0,
             current: None,
             failed: None,
@@ -556,13 +574,18 @@ impl<'a> SegmentUnits<'a> {
                         group: *group,
                     };
                     *group += 1;
+                    self.emitted += 1;
                     return Some(unit);
                 }
                 self.current = None;
             }
             let i = self.next_file;
             let file = self.files.get(i)?;
-            if i > 0 && self.deadline.is_some_and(|d| Instant::now() >= d) {
+            if i > 0
+                && self
+                    .deadline
+                    .is_some_and(|d| out_of_time(d, self.began, Instant::now(), self.emitted, self.committed.load(Ordering::Relaxed)))
+            {
                 return None;
             }
             self.next_file += 1;
@@ -1346,5 +1369,20 @@ mod tests {
         assert_eq!(store.inner.fts.as_ref().unwrap().shared.fts.docs(), rows as u64, "every event once");
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The read-ahead of the pipeline counts against a step's time: groups read but not yet added are as good as spent.
+    #[test]
+    fn a_step_counts_the_groups_waiting_in_the_pipeline_against_its_time() {
+        let began = Instant::now();
+        let now = began + Duration::from_secs(1);
+        let deadline = began + Duration::from_millis(2500);
+        // 2 groups added in 1 s, 4 more waiting: about 2 s more, past the deadline.
+        assert!(out_of_time(deadline, began, now, 6, 2));
+        // Nothing waiting: time left.
+        assert!(!out_of_time(deadline, began, now, 2, 2));
+        // Nothing added yet counts the whole time so far per group.
+        assert!(out_of_time(deadline, began, now, 3, 0));
+        assert!(out_of_time(deadline, began, deadline, 0, 0));
     }
 }
