@@ -577,6 +577,48 @@ does the time go? Every block below gives the date, build, machine, load, corpus
 
 Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
 
+### 2026-11-05, index feed: row groups read in parallel, commit by the clock (plan SR1, branch `debrief/import-search`)
+
+- **Commit:** base 852b35ac0 (`debrief/1.2-int`: one in-order reader, 4-thread docs pool, a commit every 4 segments) →
+  the SR1 commit (the index feed cut into row groups read and turned into documents on the pool, in order; the commit
+  after about 2 s of segments, `STEP_TIME`, instead of every 4 segments; the pool up to 8 threads).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; shared with other agents and **not quiet** (see Load).
+- **Corpus:** `large10` (7.2 GB, invented, `gen_large.py`) imported once by the base build
+  (56,152,132 events, 443 segments, 2.81 GB; the import took 76.7 s at load 7.5 to 9.7, so not a throughput number).
+  Every row below indexes that same kept store again.
+- **Build:** release, `import_ready` of the base and of the change (two binaries, same store).
+- **Command:** `DEBRIEF_READY_CORPUS=…/large10 DEBRIEF_READY_STORE=<kept store> DEBRIEF_READY_REINDEX=1
+  DEBRIEF_READY_INDEX=<threads>,<MB> import_ready --nocapture` (the index phase alone; the catalogue builds beside it as
+  after an import), 64 MB heap per writer thread, one run per row, runs alternated base and change, each through the
+  shared lane lock.
+- **Load:** 1-minute load at the start of each run is in the table; **none was below 5**, several above 13. One run per
+  row, so differences under about 30% are noise; the rows are an order of magnitude, not a verdict.
+- **Numbers** (index ready, 56.15M docs; peak RSS is the harness process; segments are Tantivy segments right after):
+
+  | Build | Writer threads | Load at start | Index ready | Docs/s | Peak RSS | Index | Segments |
+  |---|---|---|---|---|---|---|---|
+  | base | 2 | 9.7 | 227.4 s | 247k | 1,447 MB | 1,395 MB | 10 |
+  | base | 4 | 14.9 | 237.7 s | 236k | 990 MB | 1,422 MB | 26 |
+  | change | 2 | 5.1 | 174.7 s | 321k | 2,155 MB | 1,743 MB | 31 |
+  | change | 4 | 6.5 | 135.9 s | 413k | 2,363 MB | 1,421 MB | 20 |
+  | change | 6 | 13.7 | 225.7 s | 249k | 1,918 MB | 1,735 MB | 31 |
+  | change | 8 | 13.3 | 126.2 s | 445k | 1,741 MB | 1,458 MB | 28 |
+  | change | 13 | 10.4 | 334.7 s | 168k | 1,457 MB | 1,469 MB | 57 |
+
+  `MAX_AUTO_WRITER_THREADS` stays 4: the 6 and 8 thread rows ran at different loads and do not order, and 13 threads were the slowest of all (57 index segments), as in the earlier round.
+- **Verdict against the plan's budget** (index ready at least 2x faster than with 2 threads on a quiet machine): **not
+  shown.** The best clean pair is change at 4 threads (135.9 s) against base at 2 (227.4 s), 1.67x, with the change run at
+  the lower load; it is a direction, not a pass. Base at 4 threads is no faster than base at 2, which agrees with the
+  earlier finding that the single reader, not the writer, was the limit.
+- **Not measured:** word-search p50 against today's. The harness times searches right after the index is ready, while
+  Tantivy's merges and the catalogue still run; those values ranged from 150 to 650 ms across rows with no relation to the
+  build (for "timeout", 3.7M hits: base 361 and 204 ms, change 154, 653 and 412 ms), so no comparison is claimed. The
+  budget "common-word search p50 not worse" is open. Peak RSS is higher with the change (up to 2.4 GB against 1.0 to 1.4
+  GB): row groups of up to 65,536 rows wait in the feed; the footprint (rule 26) of the store worker was not measured.
+- **Not done:** merges held off during the bulk load with one at the end; lifting the Auto cap; the step's time budget is
+  a target (steps of 11 to 13 segments took 4.2 to 7.9 s read and added in the 2-thread run's log, `full-text index step` lines; the read-ahead of the feed is the likely cause, not checked).
+- **Files:** `runs.txt` and `r1-*.txt` under `/Volumes/d7sst7/dev-targets/scratch/debrief-search/`.
+
 ### 2026-10-31, ordering without the second sort (plan SR4, branch `debrief/1.2-wp3`)
 
 - **Commit:** base 3310fa25b (window ordered by the key, then `ORDER BY pos`) → change: the SR4 commit (the ids sorted

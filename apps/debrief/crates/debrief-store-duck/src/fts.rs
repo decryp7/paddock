@@ -27,12 +27,13 @@ use debrief_core::stages::Stages;
 use debrief_core::threads::{lower_priority, threads, WorkKind};
 use debrief_core::words::WordQuery;
 use duckdb::{params, Connection};
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder};
 use parquet::arrow::ProjectionMask;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
 use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST, INDEXED};
@@ -353,34 +354,35 @@ impl Fts {
         Ok((ids.len() <= cap).then_some(ids))
     }
 
-    /// Indexes the rows of ready sources of `files` (segment files, in order) as one pipeline: the files are read
-    /// batch by batch (IO, on this thread), the documents are built on `stages`' pool (CPU), and they are added to
-    /// the writer in the order of the files (so the result does not depend on the pool). `done` is called with the
-    /// number of files finished so far. Stops when `stages` is cancelled (the caller rolls back).
-    fn index_files(
-        &self,
-        w: &mut IndexWriter,
-        seg_dir: &Path,
-        files: &[String],
-        ready: &HashSet<u32>,
-        stages: &Stages<'_>,
-        mut done: impl FnMut(usize) + Send,
-    ) -> Result<()> {
+    /// Indexes the rows of ready sources of `files` (segment files, in order) as one pipeline: the files are cut into
+    /// row groups, each group is read and its documents built on `stages`' pool (IO and CPU, in parallel, ADR 0062
+    /// prototype A), and the documents are added to the writer in the order of the files and groups (so the result does
+    /// not depend on the pool). No further file is started once `deadline` has passed and one was started (the caller
+    /// commits by the clock). `done` is called with the number of files finished so far. Returns how many files it
+    /// started, all of them finished; stops when `stages` is cancelled (the caller rolls back).
+    fn index_files(&self, w: &mut IndexWriter, feed: Feed<'_>, stages: &Stages<'_>, mut done: impl FnMut(usize) + Send) -> Result<usize> {
+        let Feed {
+            seg_dir,
+            files,
+            ready,
+            deadline,
+        } = feed;
         let ts_field = self.index.schema().get_field("ts")?;
         let keys: Vec<u64> = files.iter().map(|f| segment_key(f)).collect();
-        let mut batches = SegmentBatches::new(seg_dir, files);
+        let mut units = SegmentUnits::new(seg_dir, files, deadline);
         // Reading stops once the process exits (the exit handler waits for running steps only so long).
-        let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { batches.next_batch() });
+        let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { units.next_unit() });
         let mut first_error: Option<anyhow::Error> = None;
         let mut finished = 0usize;
         let mut seen = vec![false; files.len()];
         let completed = stages.run(
             input,
-            |(file, rb)| match rb {
-                Ok(rb) => self.documents(rb, keys[*file], ts_field, ready),
-                Err(e) => Err(anyhow::anyhow!("{e:#}")),
+            |unit| {
+                self.documents(unit, keys[unit.file], ts_field, ready)
+                    .with_context(|| format!("reading {}", files[unit.file]))
             },
-            |(file, _), docs, _| {
+            |unit, docs, _| {
+                let file = unit.file;
                 if first_error.is_some() {
                     return;
                 }
@@ -400,30 +402,47 @@ impl Fts {
         if let Some(e) = first_error {
             return Err(e);
         }
-        if let Some(e) = batches.error() {
+        if let Some(e) = units.error() {
             return Err(e);
         }
         if !completed {
             anyhow::bail!("indexing was stopped");
         }
-        // Files without a single batch were never "seen" (empty segments): their old documents still go.
-        for (file, seen) in seen.iter().enumerate() {
+        let started = units.started();
+        // Files without a single row group were never "seen" (empty segments): their old documents still go.
+        for (file, seen) in seen.iter().enumerate().take(started) {
             if !seen {
                 w.delete_term(Term::from_field_u64(self.f.seg, keys[file]));
             }
         }
-        done(files.len());
-        Ok(())
+        done(started);
+        Ok(started)
     }
 
-    /// The documents of the ready rows of one batch of a segment (pure in the batch: any thread).
-    fn documents(
+    /// The documents of the ready rows of one row group of a segment (pure in the unit: any thread).
+    fn documents(&self, unit: &Unit, key: u64, ts_field: Field, ready: &HashSet<u32>) -> Result<Vec<tantivy::TantivyDocument>> {
+        let file = std::fs::File::open(&unit.path).with_context(|| format!("opening {}", unit.path.display()))?;
+        let reader = ParquetRecordBatchReaderBuilder::new_with_metadata(file, unit.meta.clone())
+            .with_projection(unit.mask.clone())
+            .with_row_groups(vec![unit.group])
+            .with_batch_size(DOC_BATCH_ROWS)
+            .build()?;
+        let mut out = Vec::new();
+        for rb in reader {
+            self.documents_of(&rb?, key, ts_field, ready, &mut out)?;
+        }
+        Ok(out)
+    }
+
+    /// Appends the documents of the ready rows of one record batch.
+    fn documents_of(
         &self,
         rb: &duckdb::arrow::record_batch::RecordBatch,
         key: u64,
         ts_field: Field,
         ready: &HashSet<u32>,
-    ) -> Result<Vec<tantivy::TantivyDocument>> {
+        out: &mut Vec<tantivy::TantivyDocument>,
+    ) -> Result<()> {
         use duckdb::arrow::array::{Array, AsArray};
         use duckdb::arrow::datatypes::{Int64Type, UInt32Type, UInt64Type};
         let col = |name: &str| rb.column_by_name(name).with_context(|| format!("column {name}"));
@@ -433,7 +452,7 @@ impl Fts {
         let msg = col("message")?.as_string_opt::<i32>().context("message type")?;
         let exc = col("exception")?.as_string_opt::<i32>().context("exception type")?;
         let tpl = col("template")?.as_string_opt::<i32>().context("template type")?;
-        let mut out = Vec::with_capacity(rb.num_rows());
+        out.reserve(rb.num_rows());
         for i in 0..rb.num_rows() {
             if !ready.contains(&src.value(i)) {
                 continue;
@@ -453,77 +472,113 @@ impl Fts {
             }
             out.push(d);
         }
-        Ok(out)
+        Ok(())
     }
 }
 
-type Batch = duckdb::arrow::record_batch::RecordBatch;
+/// What a step feeds the index: segment files (in `seg_dir`, in order), the ready sources, and the time after which no
+/// further file is started.
+#[derive(Clone, Copy)]
+struct Feed<'a> {
+    seg_dir: &'a Path,
+    files: &'a [String],
+    ready: &'a HashSet<u32>,
+    deadline: Option<Instant>,
+}
 
-/// The projected record batches of several segment files, one after the other, tagged with the file's index.
-/// A read failure ends the iteration and is kept for [`SegmentBatches::error`].
-struct SegmentBatches<'a> {
+/// Rows decoded at a time inside a row group.
+const DOC_BATCH_ROWS: usize = 8192;
+
+/// One row group of one segment file: the unit of reading (and of parallelism) of the index feed.
+struct Unit {
+    /// Index of the file in the step's list.
+    file: usize,
+    path: PathBuf,
+    /// The file's footer, read once for all its groups.
+    meta: ArrowReaderMetadata,
+    /// The columns the index needs.
+    mask: ProjectionMask,
+    group: usize,
+}
+
+/// The row groups of several segment files, one after the other. A file whose footer cannot be read ends the
+/// iteration and is kept for [`SegmentUnits::error`]. After `deadline` no further file is started (the first always is).
+struct SegmentUnits<'a> {
     dir: &'a Path,
     files: &'a [String],
+    deadline: Option<Instant>,
     next_file: usize,
-    current: Option<(usize, parquet::arrow::arrow_reader::ParquetRecordBatchReader)>,
+    /// The file being cut into groups: its index, footer, mask and the next group.
+    current: Option<(usize, ArrowReaderMetadata, ProjectionMask, usize)>,
     failed: Option<anyhow::Error>,
 }
 
-impl<'a> SegmentBatches<'a> {
-    fn new(dir: &'a Path, files: &'a [String]) -> Self {
-        SegmentBatches {
+impl<'a> SegmentUnits<'a> {
+    fn new(dir: &'a Path, files: &'a [String], deadline: Option<Instant>) -> Self {
+        SegmentUnits {
             dir,
             files,
+            deadline,
             next_file: 0,
             current: None,
             failed: None,
         }
     }
 
-    fn open(&self, file: &str) -> Result<parquet::arrow::arrow_reader::ParquetRecordBatchReader> {
-        let builder = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(self.dir.join(file))?)?;
+    fn open(&self, file: &str) -> Result<(ArrowReaderMetadata, ProjectionMask)> {
+        let f = std::fs::File::open(self.dir.join(file))?;
+        let meta = ArrowReaderMetadata::load(&f, ArrowReaderOptions::new())?;
         let names = ["id", "ts", "source", "message", "exception", "template"];
-        let schema = builder.parquet_schema();
         let roots: Vec<usize> = names
             .iter()
             .map(|n| {
-                builder
-                    .schema()
+                meta.schema()
                     .index_of(n)
                     .with_context(|| format!("segment {file} has no column {n}"))
             })
             .collect::<Result<_>>()?;
-        let mask = ProjectionMask::roots(schema, roots);
-        Ok(builder.with_projection(mask).with_batch_size(8192).build()?)
+        let mask = ProjectionMask::roots(meta.parquet_schema(), roots);
+        Ok((meta, mask))
     }
 
-    fn next_batch(&mut self) -> Option<(usize, Result<Batch, anyhow::Error>)> {
+    fn next_unit(&mut self) -> Option<Unit> {
         if self.failed.is_some() {
             return None;
         }
         loop {
-            if let Some((i, reader)) = &mut self.current {
-                match reader.next() {
-                    Some(Ok(rb)) => return Some((*i, Ok(rb))),
-                    Some(Err(e)) => {
-                        let i = *i;
-                        self.failed = Some(anyhow::Error::new(e).context(format!("reading {}", self.files[i])));
-                        return None;
-                    }
-                    None => self.current = None,
+            if let Some((file, meta, mask, group)) = &mut self.current {
+                if *group < meta.metadata().num_row_groups() {
+                    let unit = Unit {
+                        file: *file,
+                        path: self.dir.join(&self.files[*file]),
+                        meta: meta.clone(),
+                        mask: mask.clone(),
+                        group: *group,
+                    };
+                    *group += 1;
+                    return Some(unit);
                 }
+                self.current = None;
             }
             let i = self.next_file;
             let file = self.files.get(i)?;
+            if i > 0 && self.deadline.is_some_and(|d| Instant::now() >= d) {
+                return None;
+            }
             self.next_file += 1;
             match self.open(file) {
-                Ok(r) => self.current = Some((i, r)),
+                Ok((meta, mask)) => self.current = Some((i, meta, mask, 0)),
                 Err(e) => {
                     self.failed = Some(e.context(format!("opening {file}")));
                     return None;
                 }
             }
         }
+    }
+
+    /// Files started so far (all of them, once the iteration ended).
+    fn started(&self) -> usize {
+        self.next_file
     }
 
     fn error(&mut self) -> Option<anyhow::Error> {
@@ -704,14 +759,24 @@ fn todo(conn: &Connection) -> Result<(Vec<String>, HashSet<u32>)> {
 }
 
 /// Segments indexed under one lock and one commit at most (the lock is held that long; imports and compaction wait).
-const SEGMENTS_PER_STEP: usize = 4;
+const MAX_SEGMENTS_PER_STEP: usize = 64;
 
-/// The pipeline of the indexer: batches of rows are read in order, their documents built on a small shared pool.
+/// The time a step keeps starting segments: the commit follows the clock, so a faster feed does not commit more often
+/// (every commit leaves a small index segment per writer thread for the merges) and a slower one still lets imports in.
+const STEP_TIME: Duration = Duration::from_secs(2);
+
+/// Most threads reading row groups and building documents.
+const MAX_READ_THREADS: usize = 8;
+
+/// Row groups per chunk of the feed (a group is up to 65,536 rows).
+const READ_CHUNK: usize = 2;
+
+/// The pipeline of the indexer: row groups are read and turned into documents on a shared pool, committed in order.
 fn stages(cancel: &AtomicBool) -> Stages<'_> {
     static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
     let pool = POOL.get_or_init(|| {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(threads(WorkKind::Cpu, None).clamp(1, 4))
+            .num_threads(threads(WorkKind::Cpu, None).clamp(1, MAX_READ_THREADS))
             .thread_name(|i| format!("debrief-fts-docs-{i}"))
             .start_handler(|_| {
                 lower_priority();
@@ -721,12 +786,12 @@ fn stages(cancel: &AtomicBool) -> Stages<'_> {
     });
     Stages {
         pool,
-        chunk: 4,
+        chunk: READ_CHUNK,
         cancel: Some(cancel),
     }
 }
 
-/// Indexes the next segments (up to [`SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
+/// Indexes the next segments (as many as [`STEP_TIME`] allows, at most [`MAX_SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
 /// some.
 fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<Turn> {
     // Counted by the exit handler like a borrowed connection: no step starts once the process exits, and a running
@@ -747,34 +812,54 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     if files.is_empty() {
         return Ok(Turn::Idle);
     }
-    let batch = &files[..files.len().min(SEGMENTS_PER_STEP)];
+    let batch = &files[..files.len().min(MAX_SEGMENTS_PER_STEP)];
     let mut slot = crate::lock(&s.writer);
     let w = match slot.as_mut() {
         Some(w) => w,
         None => slot.insert(s.fts.writer()?),
     };
     let total = files.len() as u64;
-    let result = s.fts.index_files(w, seg_dir, batch, &ready, &stages(&s.stop), |n| {
-        s.pending.store(total - n as u64, Ordering::SeqCst)
-    });
-    if let Err(e) = result {
-        let _ = w.rollback();
-        if s.stop.load(Ordering::SeqCst) {
-            return Ok(Turn::Idle);
+    let fed_at = Instant::now();
+    let result = s.fts.index_files(
+        w,
+        Feed {
+            seg_dir,
+            files: batch,
+            ready: &ready,
+            deadline: Some(Instant::now() + STEP_TIME),
+        },
+        &stages(&s.stop),
+        |n| s.pending.store(total - n as u64, Ordering::SeqCst),
+    );
+    let fed = fed_at.elapsed();
+    let started = match result {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = w.rollback();
+            if s.stop.load(Ordering::SeqCst) {
+                return Ok(Turn::Idle);
+            }
+            // Not retried in a loop: a segment that cannot be indexed stays unsearchable and the failure is reported;
+            // the others of the batch are tried again.
+            let bad = failing_segment(&e, batch).unwrap_or(&batch[0]);
+            conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![bad])?;
+            return Err(e.context(format!("indexing {bad}")));
         }
-        // Not retried in a loop: a segment that cannot be indexed stays unsearchable and the failure is reported;
-        // the others of the batch are tried again.
-        let bad = failing_segment(&e, batch).unwrap_or(&batch[0]);
-        conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![bad])?;
-        return Err(e.context(format!("indexing {bad}")));
-    }
+    };
+    let batch = &batch[..started];
     // The process is exiting: nothing more is written (the documents added go with the writer and the segments stay
     // unindexed, so they are indexed again next time).
     if crate::shutdown::down() {
         let _ = w.rollback();
         return Ok(Turn::Idle);
     }
+    let committing = Instant::now();
     s.fts.commit(w, epoch)?;
+    log::debug!(
+        "full-text index step: {} segments, read and added in {fed:.2?}, committed in {:.2?}",
+        batch.len(),
+        committing.elapsed()
+    );
     // One statement (one commit, one write-ahead-log sync) for the step's segments, not one per segment.
     let marks = vec!["?"; batch.len()].join(", ");
     conn.execute(
@@ -1128,5 +1213,77 @@ mod tests {
             moved.iter().all(|id| !hits.contains(id)),
             "old documents of the moved events: {hits:?}"
         );
+    }
+
+    /// A step that has used its time stops at a segment boundary, after at least one segment, and says how many it
+    /// finished: the commit follows the clock, not a segment count.
+    #[test]
+    fn a_step_out_of_time_stops_after_the_segment_it_is_in() {
+        let t = Indexed::new("deadline");
+        let conn = t.store.inner.conn().unwrap();
+        let files: Vec<String> = conn
+            .prepare("SELECT file FROM segments ORDER BY first_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        // The same file three times: one segment is all a small store has.
+        let files = vec![files[0].clone(), files[0].clone(), files[0].clone()];
+        let s = &t.fts().shared;
+        let seg_dir = t.dir.join("store").join(SEGMENTS_DIR);
+        let cancel = AtomicBool::new(false);
+        let ready: HashSet<u32> = [t.source("a.log"), t.source("b.log")].into_iter().collect();
+        let mut w = s.fts.writer().unwrap();
+        let feed = |deadline| Feed {
+            seg_dir: &seg_dir,
+            files: &files,
+            ready: &ready,
+            deadline,
+        };
+        let spent = std::time::Instant::now();
+        let n = s.fts.index_files(&mut w, feed(Some(spent)), &stages(&cancel), |_| {}).unwrap();
+        assert_eq!(n, 1, "the deadline had passed: one segment, not {}", files.len());
+        let n = s.fts.index_files(&mut w, feed(None), &stages(&cancel), |_| {}).unwrap();
+        assert_eq!(n, files.len(), "no deadline: all of them");
+    }
+
+    /// A segment of several row groups (read in parallel) is indexed whole and in order: every event once.
+    #[test]
+    fn a_segment_of_several_row_groups_is_indexed_whole_and_once() {
+        use debrief_core::ports::Ingest;
+        let dir = std::env::temp_dir().join(format!("debrief-fts-groups-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let logs = dir.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let rows = crate::segments::ROW_GROUP_ROWS * 3 + 1_000;
+        let mut text = String::new();
+        for i in 0..rows {
+            text.push_str(&format!("2026-10-14 10:{:02}:{:02} INFO alpha line{i}\n", (i / 60) % 60, i % 60));
+        }
+        std::fs::write(logs.join("big.log"), text).unwrap();
+        let store = crate::DuckStore::create(
+            &dir.join("store"),
+            debrief_core::Profile::default_profile(),
+            debrief_core::PluginRegistry::new(),
+        )
+        .unwrap();
+        store.open(&[logs]).unwrap().wait().unwrap();
+        assert!(store.wait_for_index(Duration::from_secs(120)).unwrap().ready);
+        let file: String = store
+            .inner
+            .conn()
+            .unwrap()
+            .query_row("SELECT file FROM segments ORDER BY first_id LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        let reader = parquet::file::reader::SerializedFileReader::new(
+            std::fs::File::open(dir.join("store").join(SEGMENTS_DIR).join(&file)).unwrap(),
+        )
+        .unwrap();
+        let groups = parquet::file::reader::FileReader::metadata(&reader).num_row_groups();
+        assert!(groups >= 2, "the segment has several row groups: {groups}");
+        assert_eq!(store.inner.fts.as_ref().unwrap().shared.fts.docs(), rows as u64, "every event once");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
