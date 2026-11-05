@@ -15,6 +15,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
 - **Research profile:** clearing the kept research profile right after the AI browser closed no longer fails with "in use"
 - **Process monitor:** a new run's live charts wait until its output is open instead of briefly charting the earlier runs; when the output cannot be opened the panel and the monitor say so, and a failed first load stays shown until you retry
+- **Process monitor:** every monitoring run (the debrief-monitor command and the agent's monitor action) now ends its log with "Monitoring stopped after … ms", the reason (stopped, or the error) and how many samples and stats events it wrote, so a short or empty monitor log says why
 
 ## 1.1.1 (2026-10-24)
 
