@@ -137,9 +137,10 @@ mod tests {
         let text = String::from_utf8_lossy(&out.stdout);
         let pid: i32 = text.trim().parse().unwrap_or(0);
         if pid > 0 {
-            // Ends the test's own `sleep` grandchild.
-            #[allow(clippy::disallowed_methods)]
-            let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
+            // Ends the test's own `sleep` grandchild, by identity.
+            if let Some(id) = u32::try_from(pid).ok().and_then(paddock_proc::ProcessId::of) {
+                let _ = paddock_proc::end(id);
+            }
         }
         assert!(pid > 0, "what it wrote is kept: {text:?}");
         assert!(elapsed < Duration::from_secs(10), "answered after {elapsed:?}");

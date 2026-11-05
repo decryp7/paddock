@@ -311,10 +311,6 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
 }
 
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "ADR 0033 WP-5 (test): kills the worker by the pid it reported; use paddock_proc::end"
-)]
 fn errors_pass_through_and_a_crash_is_recovered() {
     let logs = TempDir::new("crash-logs");
     std::fs::write(
@@ -344,10 +340,7 @@ fn errors_pass_through_and_a_crash_is_recovered() {
     );
     // The worker dies: the next call fails (retryable) or already runs on a new worker; then all is back.
     let pid = w.status().pid.unwrap();
-    let mut sys = sysinfo::System::new();
-    let p = sysinfo::Pid::from_u32(pid);
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
-    assert!(sys.process(p).unwrap().kill());
+    end_by_identity(pid);
     std::thread::sleep(Duration::from_millis(200));
     match store.summary() {
         Ok(s) => assert_eq!(s.total, 2),
@@ -410,17 +403,17 @@ fn a_project_exported_through_the_worker_opens_without_its_logs() {
     w.shutdown();
 }
 
+/// Ends the worker `pid` as a crash would: by identity (pid plus start time, read while the supervisor still holds the child
+/// unreaped), so a pid handed on to another process is never signalled.
+fn end_by_identity(pid: u32) {
+    let id = paddock_proc::ProcessId::of(pid).expect("the worker runs");
+    assert_eq!(paddock_proc::end(id), paddock_proc::Ending::Ended);
+}
+
 /// Kills the worker process (as a crash would).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "ADR 0033 WP-5 (test): kills the worker by the pid it reported; use paddock_proc::end"
-)]
 fn kill(w: &StoreWorker) -> u32 {
     let pid = w.status().pid.unwrap();
-    let mut sys = sysinfo::System::new();
-    let p = sysinfo::Pid::from_u32(pid);
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
-    assert!(sys.process(p).unwrap().kill());
+    end_by_identity(pid);
     pid
 }
 

@@ -80,6 +80,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 tempfile.workspace = true
 # A test process stopped by nextest's timeout (SIGTERM) or Ctrl-C removes its temp folders (`test_support::own`).
 ctrlc = { workspace = true, features = ["termination"] }

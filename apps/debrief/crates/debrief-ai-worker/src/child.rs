@@ -84,43 +84,38 @@ fn summarize(tail: &[u8]) -> String {
 #[cfg(unix)]
 mod reaper {
     //! Kills the children still registered when the worker exits normally (including the `exit` the
-    //! worker calls when Debrief closes its stdin).
+    //! worker calls when Debrief closes its stdin). Children are registered by identity (pid plus start time), so
+    //! one that was reaped and whose pid was handed on is never signalled (ADR 0033).
+    use paddock_proc::ProcessId;
     use std::sync::{Mutex, Once};
 
-    static PIDS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    static CHILDREN: Mutex<Vec<ProcessId>> = Mutex::new(Vec::new());
     static HOOK: Once = Once::new();
 
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-5: the exit reaper SIGKILLs registered pids that try_wait may have reaped; register ProcessIds"
-        )
-    )]
     extern "C" fn kill_all() {
         // try_lock: never block in an exit hook.
-        if let Ok(pids) = PIDS.try_lock() {
-            for pid in pids.iter() {
-                // SAFETY: kill takes plain integers; the pid is a child we started and have not reaped.
-                unsafe {
-                    libc::kill(*pid, libc::SIGKILL);
-                }
+        if let Ok(children) = CHILDREN.try_lock() {
+            for id in children.iter() {
+                let _ = paddock_proc::end(*id);
             }
         }
     }
 
-    pub fn register(pid: i32) {
+    /// Registers the child `pid` (started by this process, not reaped yet) by its identity.
+    pub fn register(pid: u32) {
         HOOK.call_once(|| {
             // SAFETY: registers a plain extern "C" function without captured state.
             unsafe {
                 libc::atexit(kill_all);
             }
         });
-        PIDS.lock().unwrap_or_else(|p| p.into_inner()).push(pid);
+        if let Some(id) = ProcessId::of(pid) {
+            CHILDREN.lock().unwrap_or_else(|p| p.into_inner()).push(id);
+        }
     }
 
-    pub fn unregister(pid: i32) {
-        PIDS.lock().unwrap_or_else(|p| p.into_inner()).retain(|p| *p != pid);
+    pub fn unregister(pid: u32) {
+        CHILDREN.lock().unwrap_or_else(|p| p.into_inner()).retain(|id| id.pid() != pid);
     }
 }
 
@@ -386,7 +381,7 @@ impl ServerChild {
             })
         })?;
         #[cfg(unix)]
-        reaper::register(child.id() as i32);
+        reaper::register(child.id());
         #[cfg(windows)]
         let job = job::JobGuard::assign(&child);
         forward_event(&format!("start {}", child.id()));
@@ -503,7 +498,7 @@ impl ServerChild {
         }
         if let Some(mut c) = self.child.take() {
             #[cfg(unix)]
-            reaper::unregister(c.id() as i32);
+            reaper::unregister(c.id());
             let pid = c.id();
             let _ = c.kill();
             let _ = c.wait();

@@ -22,6 +22,7 @@ minidump = "0.27"
 windows = { workspace = true, features = ["Win32_System_EventLog"] }
 
 [dev-dependencies]
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Snapshot tests of the importers against /samples (tests/samples.rs, snapshots in tests/snapshots/).
 insta.workspace = true
 proptest.workspace = true

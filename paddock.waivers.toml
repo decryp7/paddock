@@ -79,66 +79,6 @@ expires = "2026-12-31"
 # each a dated follow-up with its work package.
 [[waiver]]
 check = "C53"
-path = "apps/debrief/app/src-tauri/src/health/commands/tests.rs"
-reason = "ADR 0033 WP-5 (test): sysinfo kill of the worker by the pid the supervisor reported; use paddock_proc::end with a ProcessId"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/chromium-driver/src/launch.rs"
-reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch, also after is_running() reaped the browser; move to paddock-chromium"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/chromium-driver/src/process.rs"
-reason = "ADR 0033 WP-5: killpg and taskkill /T after try_wait may have reaped the leader, and a signal-0 liveness probe; replace with paddock_proc::Supervised"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
-reason = "ADR 0033 WP-5: the exit reaper SIGKILLs registered pids that try_wait may have reaped; register ProcessIds"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-collect/src/runner.rs"
-reason = "ADR 0033 WP-5 (test): kill -9 of a grandchild by the pid it printed; use paddock_proc::end"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-ipc/src/process.rs"
-reason = "ADR 0033 WP-5: OsChild::kill_group killpg()s after try_wait may have reaped the leader; tests probe and kill by pid; go through a ProcessId"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-monitor/src/source.rs"
-reason = "ADR 0033 WP-5: expand_children follows parent pids without start times (display only); skip a child older than its parent"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs"
-reason = "ADR 0033 WP-5 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-plugin-windows/src/command.rs"
-reason = "ADR 0033 WP-5 (test): kill -9 of a grandchild by the pid it printed; use paddock_proc::end"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs"
-reason = "ADR 0033 WP-5 (test): sysinfo kill of the worker by the pid it reported; use paddock_proc::end with a ProcessId"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
 path = "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs"
 reason = "ADR 0033 WP-9: the process tree view shows parent pids without a start-time check (display only)"
 expires = "2026-12-31"
