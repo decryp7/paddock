@@ -136,12 +136,16 @@ return at once.
 
 ### 6. Linux and Windows in Dyno
 
-Windows Dyno has no agent service (the agent is started from the per-user `Run` entry by the app); the shared `WindowsRun`
-backend is covered by the crate's model, and Dyno changes nothing there. **Linux Dyno is excluded from this change:** it
-uses `dyno_agent::service` (`ensure`, `uninstall`, `systemctl --user start`) and the `dyno-agent install|uninstall|ensure`
-verbs, an unregistered copy of the mechanism `service-registration`. It is registered in `docs/known-copies.toml` with
-delete-by `dyno-v1.2.0` and the reason (moving it onto `Manager` + `Systemd` is 0.5 to 1 day and is its own change with its
-own VM round); the invariants are claimed for macOS only in 1.1.0.
+**Dyno on Linux moves onto `Manager` + `Systemd` in this change** (user decision, 2026-11-05). `CliService`
+(`login.rs`), `dyno_agent::service` (`ensure`, `uninstall`, the direct `systemctl --user start`) and the
+`dyno-agent install|uninstall|ensure` verbs (`cli.rs`) all go through the transition; what nothing needs is deleted, so there
+is no copy to register. The verbs stay as thin callers of `Manager` (`install` = `Install { unattended: false }`, `ensure` =
+`Start`, `uninstall` = `Uninstall`) with the same exit codes and output, because the packages' post-install scripts and the
+docs call them; their tests move to the shared simulator plus one wiring test each. The invariants are claimed for macOS
+**and** Linux; the simulator has the systemd scenarios (`Caps::Linux`: no pinned identity, `automatic`, a definition that is
+compared, `disable`, `stop`, a crash and a restart loop, logout without lingering). Windows Dyno has no agent service (the
+agent is started from the per-user `Run` entry by the app); the `WindowsRun` backend is covered by the crate's model and
+Dyno changes nothing there.
 
 ### 7. The check
 
@@ -182,15 +186,16 @@ and the lock that outlives its holder. Each reproduced finding is listed in the 
 | 6 | Two-copy identity (`program =`, `points_here`, `with_program`) | 1 |
 | 7 | Dyno: `login.rs`, `quit.rs`, `lib.rs`, `shell.rs` reconcile, Settings busy state | 1.5 |
 | 8 | Rewrite the 56 tests of `scenarios.rs` and `resume_tests.rs` against the 99% gate, `control.rs`, shell-demo, paddock-shell tests, README, redraw `uml-state-service` (ER-23) | 2 |
-| 9 | Linux register entry, docs, lessons | 0.25 |
+| 9 | Dyno on Linux: `CliService`, `dyno_agent::service`, the `dyno-agent` verbs onto `Manager` + `Systemd`, their tests and docs, Linux scenarios in the model | 1.25 |
+| 10 | Rules, lessons, docs | 0.25 |
 
-About 13.75 days, plus a VM round of 1.5 days. The Dyno 1.1.0 tag waits for WP 1 to 8.
+About 15 days, plus a VM round of 2 days (macOS and the systemd rows). The Dyno 1.1.0 tag waits for WP 1 to 9. WP 9 can start as soon as WP 3 (the transition and the `Manager` entry points) has landed, and can run in parallel with WP 4 to 8 by another agent from this ADR and a brief naming `crates/paddock-service/src/backend/systemd.rs`, `apps/dyno/app/src-tauri/src/login.rs` and `apps/dyno/agent` (`service`, `cli.rs`).
 
 **VM rows** (left for the VM round): `SMAppService` lag and real start time; the number of Background Items Added notices per
 path; EX_CONFIG after a real update; a register with the old job lingering; a kill in each phase; a disk image and a
 translocated launch, then /Applications; two copies and `program =`; Login Items off and on, `RequiresApproval`; stop,
 resume, login; a slow service against the link's fallback; an update from a real 1.0.0; logout and reboot in `Awaiting`
-and with a hold; systemd disable, stop, crash (Linux, if moved); Windows UAC declined, a crash in the elevated step, no
+and with a hold; systemd `disable`, `stop`, a crash and a restart loop, logout with and without lingering (Linux); Windows UAC declined, a crash in the elevated step, no
 prompt on an unattended start.
 
 **Pitwall and Pitcrew.** Adoption: construct a `Manager` with the backend, a service-only answer, `with_program` and the
@@ -200,7 +205,7 @@ under the same type. The copies are deleted by their registered tags.
 
 **Rule 55.** The mechanisms `launchd-job-report` and `service-registration` change in their canonical files and the Dyno
 wiring in one change; the commits touching the members carry `Copies-waived:` trailers (never `approved:`) for Pitwall and
-Pitcrew, and Linux Dyno is registered as above.
+Pitcrew. Linux Dyno leaves the copies: nothing is registered for it.
 
 ## Consequences
 
