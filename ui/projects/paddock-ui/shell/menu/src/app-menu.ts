@@ -52,6 +52,12 @@ export const MENU_OS = new InjectionToken<MenuOs>('PADDOCK_MENU_OS', {
   factory: () => currentOs(),
 });
 
+/**
+ * The words of the Quit item, when the app says more than "Quit": `Quit Dyno (keeps measuring)`, so the menu tells what Quit does
+ * (null: the shell's own "Quit", "Exit" on Windows). Read when the menu is built, so a signal that changes updates every menu.
+ */
+export const QUIT_TITLE = new InjectionToken<Signal<string | null>>('PADDOCK_QUIT_TITLE', { providedIn: 'root', factory: () => computed(() => null) });
+
 export const MENU_CONFIG = new InjectionToken<MenuConfig>('PADDOCK_MENU_CONFIG', { providedIn: 'root', factory: () => ({ appName: 'App' }) });
 
 /** A condition that defaults to true: absent, or not askable yet (context not loaded), it holds; throwing, it does not. */
@@ -73,6 +79,7 @@ export class AppMenu {
   private readonly config = inject(MENU_CONFIG);
   readonly mode = inject(MENU_MODE);
   private readonly os = inject(MENU_OS);
+  private readonly quitTitle = inject(QUIT_TITLE);
 
   /** Everything the model is built from, as one value that changes when any of it does. */
   private readonly source = computed<MenuSource>(() => {
@@ -81,13 +88,14 @@ export class AppMenu {
     // Read every key now, so the source changes with the bindings.
     const keys = new Map<string, string>();
     for (const b of this.keymap.bindings()) if (b.scope === 'window' && !keys.has(b.command)) keys.set(b.command, b.key);
+    const quitTitle = this.quitTitle();
     return {
       items: this.registry.menus(),
       submenus: this.registry.items<SubmenuDef>('submenus'),
       command: (id) => {
         const c = available.get(id);
         if (!c) return null;
-        return { title: c.id === QUIT_COMMAND && this.mode === 'in-app' && this.os === 'windows' ? msg('pd.app.exit', 'Exit').text : c.title.text, enabled: this.commands.isEnabled(c), ...(c.checked ? { checked: this.commands.isChecked(c) } : {}) };
+        return { title: c.id === QUIT_COMMAND && quitTitle ? quitTitle : c.id === QUIT_COMMAND && this.mode === 'in-app' && this.os === 'windows' ? msg('pd.app.exit', 'Exit').text : c.title.text, enabled: this.commands.isEnabled(c), ...(c.checked ? { checked: this.commands.isChecked(c) } : {}) };
       },
       shown: (entry) => holds(entry.when as Live<object, boolean> | undefined, ctx),
       keyFor: (command) => keys.get(command),
