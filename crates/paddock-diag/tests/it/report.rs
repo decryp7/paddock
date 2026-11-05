@@ -747,3 +747,13 @@ fn an_unreadable_log_folder_is_not_reported_as_empty() {
         "{notes}"
     );
 }
+
+/// A VM run or a bug report binds to a build: the build commit is in `system-info.json`.
+#[test]
+fn the_system_info_names_the_build_commit() {
+    let (_root, d) = machine();
+    let c = Collected::collect(&app_info(), &d, &builtin::all(), &redactor(), now());
+    let info = c.files().iter().find(|f| f.name == "system-info.json").expect("system-info.json");
+    let v: serde_json::Value = serde_json::from_slice(&info.data).unwrap();
+    assert_eq!(v["app"]["commit"], "abc1234", "{v}");
+}
