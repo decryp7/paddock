@@ -56,7 +56,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 paddock-log = { path = "../../../../crates/paddock-log" }
 # Dyno's MCP tools: two reads and two actions behind the user's opt-in (ADR 0032, D7).
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
-paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
 # The shared launchd readers and the repair decision (a pending or running job is never stale).
 paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }

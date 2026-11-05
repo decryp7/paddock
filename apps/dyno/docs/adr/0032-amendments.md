@@ -50,4 +50,10 @@ Decided and built for 1.1.0:
   than 30 s (three times the slowest no-window pace); tool calls wait at most 8 s for the agent (under the 10 s call limit); an answer over
   its byte bound is shortened to valid JSON that says it was cut; a mount point is only `/` or a drive letter and the user-name segment of
   paths in labels is replaced; alarm titles carry no port.
+- **Keys in a file, not the Keychain (2026-11-05).** The key list (id, client name, SHA-256, time, revoked flag; never a key) is
+  `mcp-keys.json` in the config folder, a `VersionedFile` written owner-only (0600 on Unix; on Windows the per-user config folder is
+  already private). Opening a Keychain item that another ad-hoc signed build created blocks the process in
+  `SecKeychainFindGenericPassword` behind a SecurityAgent prompt before the first window (measured in a macOS VM). A damaged,
+  unreadable or newer file means no key works and the log says why; a damaged file is kept aside and never restored from its backup,
+  which may still hold a revoked key. There is no migration: AI access is new in 1.1.0 and 1.0.0 has no such entry.
 - **Logging (ER-27).** Start, stop and failure of the listener are `paddock_mcp` log lines with the port, the discovery file and the duration.

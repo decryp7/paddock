@@ -12,8 +12,7 @@ use dyno_core::wol::WolView;
 use paddock_env::AppDirs;
 use paddock_jobs::time::SystemClock;
 use paddock_mcp::listener::Listener;
-use paddock_mcp::{AuditLog, Emit, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolError, ToolOutput};
-use paddock_secrets::{KeyringSecrets, MemorySecrets, Secrets};
+use paddock_mcp::{AuditLog, Emit, FileKeys, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolError, ToolOutput};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -118,15 +117,8 @@ fn find_device(v: &WolView, wanted: &str) -> Result<u64, ToolError> {
 
 /// Builds the AI access control the shell manages (`Builder::mcp`): the server with Dyno's tools (off until the user switches it on in
 /// Settings > AI access, every action off until allowed by name), the settings in the config folder, the client keys in the
-/// credential store (a memory vault when `real_secrets` is false: a test never reaches the real one, ER-14) and the audit log.
-pub fn control(
-    dirs: &AppDirs,
-    app_name: &str,
-    version: &str,
-    real_secrets: bool,
-    emit: Emit,
-    calls: Arc<dyn AgentCalls>,
-) -> Arc<McpControl> {
+/// owner-only `mcp-keys.json` beside them (a hash per key, never the key, and never the OS credential store: opening a Keychain item of another build blocks the app before its window) and the audit log.
+pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit, calls: Arc<dyn AgentCalls>) -> Arc<McpControl> {
     let log = Arc::new(AuditLog::new(500));
     let sink = McpControl::announcing_sink(log.clone(), emit.clone());
     let server = Arc::new(
@@ -140,11 +132,6 @@ pub fn control(
             log::error!("a Dyno MCP tool was refused: {e}");
         }
     }
-    let secrets: Arc<dyn Secrets> = if real_secrets {
-        Arc::new(KeyringSecrets::os(app_name))
-    } else {
-        Arc::new(MemorySecrets::new(app_name))
-    };
     let keys = Arc::new(KeyStore::new());
     let listener = Arc::new(Listener::new(
         server.clone(),
@@ -157,7 +144,7 @@ pub fn control(
         log,
         keys,
         Arc::new(FileSettings::new(dirs.config().join("mcp.json"))),
-        secrets,
+        Arc::new(FileKeys::new(dirs.config().join("mcp-keys.json"))),
         emit,
         Arc::new(|| {
             std::time::SystemTime::now()

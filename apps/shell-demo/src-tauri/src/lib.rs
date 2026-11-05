@@ -252,7 +252,6 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
             &dirs,
             APP_NAME,
             VERSION,
-            mcp_dir.is_none(),
             emit,
         ))
     });

@@ -6,6 +6,7 @@ mod common;
 mod behaviour;
 mod contract;
 mod control;
+mod key_file;
 mod listener;
 mod never_panics;
 mod transports;

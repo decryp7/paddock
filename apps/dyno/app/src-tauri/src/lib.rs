@@ -213,7 +213,7 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
             None => paddock_env::AppDirs::for_app(&id)?,
         };
         let calls = Arc::new(mcp::ShellCalls(app.clone()));
-        Ok(mcp::control(&dirs, APP_NAME, VERSION, mcp_dir.is_none(), emit, calls))
+        Ok(mcp::control(&dirs, APP_NAME, VERSION, emit, calls))
     });
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {

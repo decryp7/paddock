@@ -80,7 +80,7 @@ pub async fn mcp_audit_clear(state: Managed<'_>) -> Result<(), McpError> {
     .await
 }
 
-/// Runs quick, bounded work (a file, the credential store) off the IPC thread.
+/// Runs quick, bounded work (a file) off the IPC thread.
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, McpError> + Send + 'static,
 ) -> Result<T, McpError> {

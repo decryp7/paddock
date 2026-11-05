@@ -46,7 +46,7 @@ fn control(dir: &std::path::Path) -> (Arc<McpControl>, paddock_env::AppDirs) {
     )
     .unwrap();
     (
-        mcp::control(&dirs, "Dyno", "1.1.0", false, Arc::new(|_| {}), Arc::new(Script)),
+        mcp::control(&dirs, "Dyno", "1.1.0", Arc::new(|_| {}), Arc::new(Script)),
         dirs,
     )
 }
@@ -144,10 +144,11 @@ fn a_saved_on_setting_starts_the_listener_when_the_app_starts() {
             ..McpSettings::default()
         })
         .unwrap();
-    let key_present = first.issue_key("a").is_ok();
-    assert!(key_present);
+    let key = first.issue_key("a").unwrap().key;
     drop(first);
-    // Keys live in the credential store (memory here), so a fresh control has settings but no key: it says so.
+    // The keys are in the owner-only file beside the settings, so a fresh control (the next start) listens at once and the key works.
     let (second, _) = control(dir.path());
-    assert_eq!(second.get().listener, ListenerView::NoKey);
+    let p = port(&second);
+    let replies = ask(p, &key, &[client::initialize(1, "test", "1")]);
+    assert_eq!(replies[0]["client"], "a");
 }
