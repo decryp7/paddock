@@ -380,11 +380,8 @@ impl Manager {
             RepairOutcome::Failed(_) => self.write_state(State::Attempting {
                 version: self.version.clone(),
                 attempts,
-                phase: if register_failed {
-                    Phase::RegisterFailed(crate::record::FailKind::Other)
-                } else {
-                    removing
-                },
+                // Not an interrupted removal (that one finishes for free): the attempts were used and failed.
+                phase: Phase::RegisterFailed(crate::record::FailKind::Other),
             }),
             // Nothing was counted: back to what it was.
             // A register that was made and then cancelled stays counted (the registration may be there): waiting for it.

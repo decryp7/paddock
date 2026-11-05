@@ -1699,16 +1699,12 @@ fn configs() -> &'static [(Caps, Resp)] {
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
 const KNOWN_FAILING: &[(&str, &str)] = &[
     (
-        "more unattended registers across starts than the cap allows",
-        "a consequence of P1-4: the lingering old job makes the update settle wrongly (record Idle with the new version), which resets the attempts, so the later registers of that version add up past the cap. MODEL_REPLAY='Mac/Never/Healthy|Update+RemovalTimeout;Install+RegUnavailable;Start+RegNotAsWritten'. Re-check when P1-4 lands.",
-    ),
-    (
         "the record says this version is registered but the OS holds another registration",
-        "P1-4 (review): the settle check does not tell the new registration's job from the old build's job that outlived the removal and still answers (RemovalTimeout or LingeringJob). The pid plus start time check is being built. MODEL_REPLAY='Mac/Fast/Healthy|Update+RemovalTimeout'. Executor (repair.rs).",
+        "P1-4 on the simulator side: MODEL_REPLAY='Mac/Fast/Healthy|Update+RemovalTimeout' leaves the old build's job answering while the record says V2 registered; the settle check (same process across 2 looks, started after the register) needs the simulator to answer `job_process` with the lingering job's identity.",
     ),
     (
         "the user's service was lost",
-        "Install (requested) on a healthy service removes it first (R03: a register over a live job does nothing), so when every register fails there is nothing left and the hold is RegisterFailed(3). No code can keep the old registration then; the choice is a design one (skip the replace of a healthy, current, answering registration, or accept the hold, whose way out is Repair). MODEL_REPLAY='Mac/Fast/Healthy|Install+RegOther'.",
+        "open decision: MODEL_REPLAY='Mac/Fast/Healthy|Update+RegOther': a new version replaces a healthy old build's service (the removal comes first on macOS, R03) and every register then fails, so nothing is left. Either the invariant exempts a version-change replace whose register keeps failing (and the hold says so), or the replace registers before it removes where the OS allows it.",
     ),
 ];
 
