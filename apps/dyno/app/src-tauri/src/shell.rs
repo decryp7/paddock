@@ -183,10 +183,9 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
 /// The installed app's shell glue (the commands' state).
 pub type Shell = ShellOf<Wry>;
 
-/// The job id and sequence the Start-at-login switch reports under (the UI keeps the highest sequence per id).
-const LOGIN_JOB_ID: u64 = 0x4c4f_4749_4e00;
-static LOGIN_JOB_SEQ: AtomicU64 = AtomicU64::new(1);
-static LOGIN_JOB_BEGAN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+/// The first id of the app's own jobs (the Start-at-login switch). The agent's jobs, which the Jobs view lists with them,
+/// count from 1, so the two never share an id.
+const APP_JOB_ID_BASE: u64 = 0x4c4f_4749_4e00;
 
 /// The shell's state shared by the link, the commands and the tray.
 pub struct ShellOf<R: Runtime> {
@@ -273,6 +272,9 @@ impl<R: Runtime> ShellOf<R> {
         items: Vec<crate::tray_model::ItemSpec>,
         clock: Arc<dyn paddock_jobs::Clock>,
     ) -> Arc<ShellOf<R>> {
+        if let Some(jobs) = app.try_state::<paddock_jobs::tauri::Jobs>() {
+            jobs.registry().start_ids_at(APP_JOB_ID_BASE);
+        }
         Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
@@ -508,26 +510,10 @@ impl<R: Runtime> ShellOf<R> {
                 // recorded first (it decides what a quit does), then the agent is handed over to the service just registered,
                 // or taken back from the one just removed; a death in between is put right at the next start (`wanted`).
                 let (app, value) = (self.app.clone(), self.launch_at_login.clone());
-                let reporter = self.app.clone();
-                let report: Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync> = Arc::new(move |state| {
-                    let began = *LOGIN_JOB_BEGAN.get_or_init(std::time::Instant::now);
-                    let snapshot = paddock_jobs::JobSnapshot {
-                        id: paddock_jobs::JobId(LOGIN_JOB_ID),
-                        kind: paddock_jobs::JobKind::new("start-at-login"),
-                        title: "Start Dyno at login".to_string(),
-                        subject: None,
-                        state,
-                        seq: LOGIN_JOB_SEQ.fetch_add(1, Ordering::SeqCst),
-                        elapsed_ms: u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
-                        eta_ms: None,
-                        cancellable: false,
-                        not_cancellable_reason: Some("Setting up the service cannot be interrupted.".to_string()),
-                    };
-                    if let Err(e) = reporter.emit(paddock_jobs::EVENT_NAME, snapshot) {
-                        logging::warn(&format!("could not emit the start-at-login job: {e}"));
-                    }
-                });
-                self.login_switch.start(report, move |_cancel| {
+                // The shell plugin manages the app's jobs; its Jobs view lists this one and its Cancel stops it.
+        let jobs = self.app.state::<paddock_jobs::tauri::Jobs>().registry().clone();
+        let register = move || jobs.register("start-at-login", "Start Dyno at login", None);
+        self.login_switch.start(register, move |_cancel| {
                     let mut service = login::platform_service();
                     let mut autostart = login::platform_autostart(&app);
                     let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
