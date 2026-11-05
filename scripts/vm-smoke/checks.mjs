@@ -99,7 +99,7 @@ export class Check {
     const counts = j.checks.filter((c) => c.id.startsWith('count:')).every((c) => c.ok);
     if (!counts) return false;
     for (const f of this.config.stateFiles ?? []) {
-      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle);
+      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle, this.config.processes.find((p) => p.name === f.helper));
       if (!s.present || !s.live) return false;
     }
     if (this.config.ready) {
@@ -136,7 +136,7 @@ export class Check {
     const checks = [{ ok: cleaned.gone, detail: `guest clean before the start (${cleaned.ended} leftover(s) of an earlier step ended${cleaned.gone ? '' : ', but some did not go away'})` },
       { ok: ready.ok, detail: ready.ok ? `ready after ${(ready.tookMs / 1000).toFixed(0)} s (all processes up, discovery file names the live helper, ready command answers)` : `not ready within the ${this.config.readyTimeoutSec} s guard` }, ...whole.checks.filter((x) => x.id.startsWith('peak:') || x.id.startsWith('parent:')), ...judgeDistinct(this.trace, this.config, this.bundle)];
     for (const f of this.config.stateFiles ?? []) {
-      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle);
+      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle, this.config.processes.find((p) => p.name === f.helper));
       checks.push({ ok: s.present && s.live, detail: `${f.path}: ${s.present ? `names pid ${s.pid}, ${s.live ? 'a live ' + f.helper : 'NOT a live ' + f.helper + ' (stale)'}` : 'absent'}` });
     }
     const ok = checks.every((c) => c.ok);

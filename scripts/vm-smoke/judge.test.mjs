@@ -193,3 +193,13 @@ test('a reading the VM base cannot take is NOT MEASURED, not pass or fail', asyn
   assert.equal((await readingStep(r, 'linux', { openPage: async () => true, text: async () => 'Lifespan SSD Disk life Have 14 of 14 days' })).status, 'pass');
   assert.match(renderResult({ app: 'Dyno', steps: [s] }), /NOT MEASURED/);
 });
+
+test('the state file names the launchd-run helper: judged with the full process spec (loginJob), it is live; without the job it is stale', () => {
+  const rows = [[438, 1, '01:00', `${BUNDLE}/Contents/MacOS/dyno-app`], [500, 1, '01:00', 'dyno-agent run']];
+  const procs = withJob(ps(rows), 500);
+  const stateSpec = loginConfig.processes[1] && { helper: 'dyno-agent', jsonPidField: 'pid' };
+  assert.equal(judgeStateFile('{"pid":500}', procs, stateSpec, BUNDLE, loginConfig.processes[1]).live, true);
+  assert.equal(judgeStateFile('{"pid":500}', procs, stateSpec, BUNDLE).live, false, 'the bare name alone is not identity');
+  assert.equal(judgeStateFile('{"pid":501}', procs, stateSpec, BUNDLE, loginConfig.processes[1]).stale, true);
+  assert.equal(judgeStateFile('{"pid":500}', ps(rows), stateSpec, BUNDLE, loginConfig.processes[1]).live, false, 'launchd does not report the job with this pid');
+});

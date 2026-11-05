@@ -182,9 +182,11 @@ export function parseLaunchctlPrint(text) {
 /**
  * The discovery file (agent.json and the like) against the live helper instances: the pid it names must be one of them, and a
  * file that names a dead pid is stale. `content` null: the file is absent.
+ * `helperSpec` is the helper's full process spec from the config (with its `loginJob`/`parentJob`): the helper started by launchd or SMAppService shows in
+ * ps as a bare `dyno-agent run`, and counts only through that spec and `procs.jobs`; without it the state file of a launchd-run helper read as stale.
  * @returns {{present:boolean, pid:number|null, live:boolean, stale:boolean}}
  */
-export function judgeStateFile(content, procs, spec, bundleDir) {
+export function judgeStateFile(content, procs, spec, bundleDir, helperSpec = { name: spec.helper }) {
   if (content == null || content === '') return { present: false, pid: null, live: false, stale: false };
   let pid = null;
   try {
@@ -193,8 +195,7 @@ export function judgeStateFile(content, procs, spec, bundleDir) {
   } catch {
     pid = null;
   }
-  const helper = { name: spec.helper };
-  const live = pid !== null && instancesOf(procs, helper, bundleDir).some((p) => p.pid === pid);
+  const live = pid !== null && instancesOf(procs, helperSpec, bundleDir).some((p) => p.pid === pid);
   return { present: true, pid, live, stale: !live };
 }
 
