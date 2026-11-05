@@ -563,7 +563,9 @@ mod tests {
     use std::io::Write;
 
     fn report_zip(d: &Path) -> PathBuf {
-        let inputs = inputs_in(d);
+        let mut inputs = inputs_in(d);
+        // The tests open the snapshot's image, which a report holds only when asked for.
+        inputs.include_screenshots = true;
         let out = d.join("debrief-diagnostics-test.zip");
         crate::activity::report::write(&inputs, "It froze", &out).unwrap();
         out
