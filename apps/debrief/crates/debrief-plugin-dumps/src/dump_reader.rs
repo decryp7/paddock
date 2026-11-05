@@ -10,7 +10,7 @@ use debrief_dump::model::*;
 use debrief_dump::{DumpError, ErrorCode, Limits, Result};
 use minidump::system_info::{Cpu, PointerWidth};
 use minidump::{
-    Minidump, MinidumpException, MinidumpHandleDataStream, MinidumpMemoryInfoList, MinidumpMiscInfo, MinidumpModuleList,
+    Minidump, MinidumpException, MinidumpHandleDataStream, MinidumpMemoryInfoList, MinidumpMiscInfo, MinidumpModuleList, MinidumpStream,
     MinidumpSystemInfo, MinidumpThreadList, MinidumpThreadNames, MinidumpUnloadedModuleList, Module as _, UnifiedMemory,
 };
 use minidump_unwind::{CallStack, FrameTrust, MultiSymbolProvider};
@@ -257,7 +257,13 @@ pub fn read_dump(src: &dyn Source, limits: &Limits) -> Result<Dump> {
                 .collect()
         })
         .unwrap_or_default();
-    let handles = dump.get_stream::<MinidumpHandleDataStream>().ok().map(|h| handles(&h, limits));
+    let handles = read_handles(&dump).and_then(|r| match r {
+        Ok(h) => Some(handles(&h, limits)),
+        Err(why) => {
+            notes.add(why);
+            None
+        }
+    });
     let memory_summary = dump.get_stream::<MinidumpMemoryInfoList>().ok().map(|m| memory_info(&m));
     let dotnet = dotnet(&out_modules);
     Ok(Dump {
@@ -342,6 +348,30 @@ fn process(
         started_ms: created.map(|c| c as i64 * 1000),
         uptime_s: created.and_then(|c| u64::from(dump_time).checked_sub(c)).filter(|_| dump_time != 0),
     })
+}
+
+/// Smallest handle descriptor rust-minidump accepts (`MINIDUMP_HANDLE_DESCRIPTOR`; the v2 one is 40 bytes).
+const MIN_HANDLE_DESCRIPTOR: u32 = 32;
+
+/// The handle stream, if present and sane. rust-minidump 0.27 sizes its allocation by the stream's descriptor count
+/// but checks the count against the descriptor size the file declares, so a declared size of 0 lets a count of 2^32
+/// reserve about 90 GB (fuzz_dump_minidump OOM, 2026-11-05). The header is checked here first: the descriptor size
+/// must be a real one and `count * size` must fit in the stream.
+fn read_handles(dump: &Minidump<'_, &[u8]>) -> Option<std::result::Result<MinidumpHandleDataStream, String>> {
+    let raw = dump.get_raw_stream(MinidumpHandleDataStream::STREAM_TYPE).ok()?;
+    let (header, size, count) = (u32_at_raw(raw, 0)?, u32_at_raw(raw, 4)?, u32_at_raw(raw, 8)?);
+    let fits = size >= MIN_HANDLE_DESCRIPTOR && u64::from(count) * u64::from(size) + u64::from(header) <= raw.len() as u64;
+    if !fits {
+        return Some(Err("The handle list is damaged: its header does not match its size.".into()));
+    }
+    Some(
+        dump.get_stream::<MinidumpHandleDataStream>()
+            .map_err(|e| format!("The handle list is damaged: {e}")),
+    )
+}
+
+fn u32_at_raw(b: &[u8], at: usize) -> Option<u32> {
+    b.get(at..at + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
 }
 
 fn handles(h: &MinidumpHandleDataStream, limits: &Limits) -> HandleSummary {
@@ -509,5 +539,23 @@ mod tests {
             ErrorCode::NotADump
         );
         assert!(block_on(std::future::pending::<()>()).is_none());
+    }
+
+    /// Fuzz artifact oom-812c4e5f (2026-11-05 nightly): a size read from the file must not become a huge allocation.
+    #[test]
+    fn fuzz_oom_input_with_an_impossible_handle_count_is_noted_not_allocated() {
+        let bytes = include_bytes!("../tests/data/oom-812c4e5f.bin").to_vec();
+        let limits = Limits {
+            max_threads: 64,
+            max_frames: 64,
+            ..Limits::default()
+        };
+        let d = read_dump(&bytes, &limits).unwrap();
+        assert!(
+            d.notes.iter().any(|n| n.contains("its header does not match its size")),
+            "{:?}",
+            d.notes
+        );
+        assert!(d.handles.is_none());
     }
 }
