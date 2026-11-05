@@ -83,6 +83,34 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, D-0: the catalogue's unsaved rows (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base c0642f80c (P2) against the D-0 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 5-13 during the runs; other agents running
+- **Build:** release; libduckdb 2.0.0; DuckDB's allocator (no mimalloc in the test process)
+- **Corpus:** `common::corpus` of 300,000 events (346 sources), generated from the invented samples; synthetic
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --no-capture -E 'test(building_the_catalogue)'`
+  (polls `duckdb_memory()` for the `IN_MEMORY_TABLE` tag every few ms while the catalogue builds, in steps of 4 MB)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | D-0 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Most memory held by committed, not yet checkpointed catalogue rows while the catalogue builds | 56 MB | 8 MB | 16 MB | pass |
+
+- **Memory measure:** DuckDB's own accounting (`duckdb_memory()`, tag `IN_MEMORY_TABLE`), not RSS
+- **Cause (ER-28):** the store sets `checkpoint_threshold` to 1 GB (`open_db`), and the catalogue loop checkpointed only
+  once it ran out of sources, so each commit's rows (about 60 bytes per name or trigram row) stayed in memory, counted
+  against the 192 MB limit (64 MB in `analysis_memory`), until the whole build ended. The 1M-event corpus of
+  `analysis_memory` has 1,137 sources; at the point of its measurements the catalogue had written 153 of them and held
+  25 MB (`IN_MEMORY_TABLE`, measured with the D-0 probe of `wt/debrief-d0-catalogue`) beside 61 MB of limit. The fix checkpoints
+  after 100,000 rows. With it removed the red test fails again (56 MB); with it, 8 MB.
+- **Not measured:** the Linux CI numbers the plan quotes (338 MB against 315, and `compare` out of memory at 64 MB):
+  `analysis_memory` passes on this Mac (anomalies +79 MB, moment +3 MB, compare +7 MB) before and after, so the
+  step's `continue-on-error` (`debrief.yml:228`) stays until a Linux run (CI or a local container) shows it passing. The 7.6 GB
+  catalogue itself is not measured.
+
 ### 2026-11-05, P2: store loops without polling (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base 9a444d0a6 (the P0 tests on `debrief/1.2-int` 852b35ac0) against the P2 change on top of it

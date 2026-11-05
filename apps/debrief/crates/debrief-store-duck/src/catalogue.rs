@@ -99,16 +99,22 @@ SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
     Ok((tally.finish(), dropped, guids))
 }
 
-/// Writes the rows of a source (replacing older ones) if it is still ready; false when it is not.
-fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids: u64) -> Result<bool> {
+/// Rows (names and trigrams) committed since the last checkpoint that end a run of builds early: the store's own
+/// checkpoint threshold is 1 GB (`open_db`), so without this every row of a long build stayed in memory, counted against
+/// DuckDB's memory limit, until the build ended (about 60 bytes a row: 56 MB for 346 sources, over 190 MB at 7.6 GB).
+const CHECKPOINT_AFTER_ROWS: u64 = 100_000;
+
+/// Writes the rows of a source (replacing older ones) if it is still ready; the rows written, or `None` when it is not.
+fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids: u64) -> Result<Option<u64>> {
     let ready: bool = conn.query_row("SELECT count(*) > 0 FROM sources WHERE id = ? AND ready", params![source], |r| {
         r.get(0)
     })?;
     if !ready {
-        return Ok(false);
+        return Ok(None);
     }
     conn.execute_batch("BEGIN TRANSACTION")?;
-    let written = (|| -> Result<()> {
+    let written = (|| -> Result<u64> {
+        let mut rows = entries.len() as u64;
         for sql in DELETE_SQL {
             conn.execute(sql, params![source])?;
         }
@@ -131,6 +137,7 @@ fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids
         for e in entries {
             for t in trigram_keys(&squash(&e.name)) {
                 app.append_row(params![source, t, e.scope.encode(), e.name])?;
+                rows += 1;
             }
         }
         app.flush()?;
@@ -138,12 +145,12 @@ fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids
             "INSERT INTO catalogue_sources VALUES (?, ?, ?, ?, ?)",
             params![source, entries.len() as u64, dropped, guids, VERSION],
         )?;
-        Ok(())
+        Ok(rows)
     })();
     match written {
-        Ok(()) => {
+        Ok(rows) => {
             conn.execute_batch("COMMIT")?;
-            Ok(true)
+            Ok(Some(rows))
         }
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK");
@@ -161,6 +168,8 @@ struct Shared {
     failed: Mutex<HashSet<u32>>,
     /// Rows committed since the last checkpoint (see [`settle`]); the catalogue counts as built only once they are saved.
     unsaved: AtomicBool,
+    /// How many rows they are ([`CHECKPOINT_AFTER_ROWS`]).
+    unsaved_rows: AtomicU64,
     /// The store's lock of heavy DuckDB work (`Inner::heavy`).
     heavy: Arc<Mutex<()>>,
     /// Checkpoints run under / outside an [`crate::shutdown::Active`] guard (tests: the exit handler must count each).
@@ -192,6 +201,7 @@ impl CatalogueService {
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
+            unsaved_rows: AtomicU64::new(0),
             heavy,
             #[cfg(test)]
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
@@ -277,7 +287,7 @@ fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else {
+    let Ok(writing) = write_lock.try_lock() else {
         s.gate.news();
         return Ok(Turn::Blocked);
     };
@@ -285,8 +295,15 @@ fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write
     if crate::shutdown::down() {
         return Ok(Turn::Idle);
     }
-    commit(conn, source, &entries, dropped, guids)?;
+    let written = commit(conn, source, &entries, dropped, guids)?;
+    drop(writing);
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
+    // A long run of builds does not keep its rows in memory until it ends.
+    let unsaved = s.unsaved_rows.fetch_add(written.unwrap_or(0), Ordering::SeqCst) + written.unwrap_or(0);
+    if unsaved >= CHECKPOINT_AFTER_ROWS && settle(conn, write_lock) {
+        s.unsaved_rows.store(0, Ordering::SeqCst);
+        s.unsaved.store(false, Ordering::SeqCst);
+    }
     Ok(Turn::Worked)
 }
 
@@ -309,6 +326,7 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
         let Some(wait) = wait_after(turn) else { continue };
         if s.unsaved.load(Ordering::SeqCst) && settle(&running, s, conn, write_lock) {
             s.unsaved.store(false, Ordering::SeqCst);
+            s.unsaved_rows.store(0, Ordering::SeqCst);
         }
         // Not held while waiting: the exit handler waits for statements, never for an idle thread.
         drop(running);
@@ -549,6 +567,7 @@ mod tests {
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
+            unsaved_rows: AtomicU64::new(0),
             heavy: Arc::new(Mutex::new(())),
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
             dropped_while_exiting: AtomicBool::new(false),

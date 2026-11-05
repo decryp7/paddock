@@ -11,7 +11,7 @@ use common::rss::Sampler;
 use common::TempDir;
 use debrief_core::api::QueryRequest;
 use debrief_core::catalogue::CatalogueRequest;
-use debrief_core::ports::{Analysis, Query};
+use debrief_core::ports::{Analysis, Ingest, Query};
 use debrief_core::Profile;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -184,4 +184,47 @@ fn an_idle_store_statements_and_cpu() {
         .bench_sql("SELECT message FROM duckdb_logs WHERE type = 'QueryLog' AND message NOT LIKE '%duckdb_logs%'")
         .unwrap();
     eprintln!("IDLE {idle} s: {statements} statements, {used:.3} CPU-s");
+}
+
+/// Most memory the catalogue's committed but not yet checkpointed rows may hold (DuckDB's `IN_MEMORY_TABLE`) while it
+/// builds (D-0: the store's checkpoint threshold is 1 GB, so they all stayed in memory until the build ended).
+const UNSAVED_CATALOGUE_MB: u64 = 16;
+
+/// The most `IN_MEMORY_TABLE` memory (in MB, in steps of 4) the store held at any poll while its catalogue was built.
+fn peak_unsaved_mb_while_cataloguing(store: &debrief_store_duck::DuckStore) -> u64 {
+    let mut peak = 0;
+    loop {
+        for mb in (peak / 4 + 1..=64).map(|i| i * 4) {
+            let over = store
+                .bench_sql(&format!(
+                    "SELECT 1 WHERE (SELECT coalesce(sum(memory_usage_bytes), 0) FROM duckdb_memory() WHERE tag = 'IN_MEMORY_TABLE') > {}",
+                    mb << 20
+                ))
+                .unwrap();
+            if over == 0 {
+                break;
+            }
+            peak = mb;
+        }
+        if store.catalogue(&CatalogueRequest::default()).unwrap().built {
+            return peak;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn building_the_catalogue_keeps_its_unsaved_rows_bounded() {
+    let base = TempDir::new("regress-unsaved-corpus");
+    let dir = TempDir::new("regress-unsaved");
+    let corpus = common::corpus::corpus(&base.0.join("corpus"), 300_000);
+    let store = debrief_store_duck::DuckStore::create(&dir.0, Profile::default_profile(), debrief_core::PluginRegistry::new()).unwrap();
+    store.open(&[corpus]).unwrap().wait().unwrap();
+    let peak = peak_unsaved_mb_while_cataloguing(&store);
+    let sources = store.summary().unwrap().sources.len();
+    eprintln!("{sources} sources catalogued; unsaved catalogue rows held up to {peak} MB");
+    assert!(
+        peak <= UNSAVED_CATALOGUE_MB,
+        "building the catalogue of {sources} sources held {peak} MB of unsaved rows in memory; the bound is {UNSAVED_CATALOGUE_MB} MB"
+    );
 }
