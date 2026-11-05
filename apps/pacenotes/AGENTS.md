@@ -2,7 +2,7 @@
 
 Pacenotes understands code (main use case: understand any new codebase, in any language, in tiers: text, syntax, semantic): it indexes a repository, navigates and reviews it, draws and traces it, and serves all of
 that to local AI over MCP. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI.
-**No product code exists yet**; the design is `docs/proposal.md` (open questions pending) and the structure is in
+**Product code is being built crate by crate** (stage 1 of `docs/plans/2026-10-29-first-release-plan.md`: pure Rust crates under `crates/`); the design is `docs/proposal.md` (open questions pending) and the structure is in
 `docs/architecture-direction.md`. Read both and `docs/suite-lessons.md` before building.
 
 ## Paddock rules (binding)
@@ -49,13 +49,17 @@ Apply these deliberately. They are not decoration:
 - **Vector search is for Pacenotes only, and hybrid.** Decision of 2026-10-23: Pacenotes keeps a local, per-repository, opt-in vector index for semantic code
   search, fused with text and structural search and behind a `VectorIndex` port; embeddings come from Pitwall, a small local model, or not at all. Debrief
   deliberately has no vector search. Everything stays local.
-- **Plugin architecture.** The functions (Understand, Review, Diagrams, Requirements, Tests & coverage, Debrief bridge,
-  language packs) are out-of-process Rust plugins that follow Debrief's ADR 0017 model: a plugin depends on the plugin
-  API crate alone, talks to the core over the one versioned IPC (length-prefixed postcard frames on a private local
-  stream), is guarded (timeouts, memory caps, panics become errors attributed to the plugin), is quarantined after
-  repeated faults, and is signed. Plugins contribute declarative views that the core renders; **a plugin never supplies
-  web code**. The shared plugin host and IPC are to be extracted into Paddock; copy Debrief's approach and do not depend
-  on Debrief crates. No SDKs for other languages, no gRPC and no in-process plugins.
+- **Plugin architecture: in the engine first, plugins later** (decided 2026-10-29, plan section 7.1 item 3). The functions
+  (Understand, Review, Diagrams, Requirements, Tests & coverage, Debrief bridge, language packs) run in the engine first,
+  behind the **function port** (`pacenotes-function-api`: contributions, host calls, serialisable messages, typed
+  errors). The port boundary is strict: a function crate depends on the port alone, never on the host, a store, a
+  window or another function, and everything it needs from outside is a host call with a budget and a cancel token, so
+  that packaging a function as an out-of-process plugin later is mechanical. That later form follows Debrief's ADR 0017
+  model on the shared `paddock-plugin-*` crates: length-prefixed postcard frames on a private local stream, guarded
+  (timeouts, memory caps, panics become errors attributed to the plugin), quarantined after repeated faults and signed.
+  Until then v1 claims in-process panic attribution, quarantine, a time budget and cooperative cancel only; hang and
+  memory containment tests come with the packaging. Functions contribute declarative views that the core renders; **a
+  function never supplies web code**. No SDKs for other languages, no gRPC. Do not depend on Debrief crates.
 - **Licences of code and rules.** No GPL, AGPL, LGPL or source-available code or rule sets: no Semgrep rules, no
   SonarQube analyzers, no universal-ctags, no Doxygen, no Serena app (GPL), no Qodo Cover, no Doorstop, no PlantUML.
   drawio-desktop may only be launched as an external program, never linked or bundled. Record the licence of every
@@ -105,14 +109,21 @@ development and UI tests only; features are not done until they work against the
 
 - Every change ships with tests; every bug fix starts with a failing regression test. Targets: core ≥ 99% lines,
   Angular ≥ 80% overall and near 100% for stores, services and pure utilities. Coverage is necessary, not sufficient.
-- Before committing, once the code exists, these must pass:
+- The trap repository (`tests/trap`, audit finding PN1) is generated, never committed; an indexer must run nothing, leak
+  nothing and read nothing outside the workspace on it. The test lives in `pacenotes-index` (`tests/it/trap.rs`) and runs
+  always; the secret denylist (ADR 0005) stands in front of the index, `ReadAt` (`GuardedHistory`) and everything served
+  to a client (`redact`, `Indexer::chunk_texts`).
+- Before committing, these must pass:
 
   ```sh
   cargo fmt --all --check
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
+  cargo llvm-cov nextest -p pacenotes-core -p pacenotes-function-api -p pacenotes-git --profile ci --summary-only \
+    --ignore-filename-regex 'contract\.rs|wire_tests\.rs' --fail-under-lines 99   # product code only; CI runs it on main and the nightly
+  # pacenotes-parse, -index, -worker, -engine, -rules, -req, -cover and -xml: the same command once per package, --fail-under-lines 95 and
+  # 'pacenotes-worker/src/bin/|pacenotes-worker/src/hooks\.rs' added to the ignore regex (see paddock.ci.json for the reasons)
   cargo deny --workspace check
-  node --test scripts/release/publish.test.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```
 
@@ -123,7 +134,7 @@ development and UI tests only; features are not done until they work against the
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). **Never add a
   Co-Authored-By trailer or any AI attribution** to commits or PRs.
 - **Never run `npx prettier --write`**: the TypeScript is not prettier-formatted and it reformats whole files.
-- Releases are `pacenotes-v*` tags following semver, published with `scripts/release/publish.mjs`. Never tag a `[skip ci]` commit;
+- Releases are `pacenotes-v*` tags following semver, published by the shared `conformance/release/publish.mjs` (no copy in the app; conformance C08). Never tag a `[skip ci]` commit;
   read the release lessons in `docs/suite-lessons.md`.
 - Record significant architecture decisions as ADRs in `docs/adr/`.
 

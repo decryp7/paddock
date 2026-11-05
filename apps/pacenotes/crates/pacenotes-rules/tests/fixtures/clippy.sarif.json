@@ -1,0 +1,75 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "clippy",
+          "version": "0.1.99",
+          "informationUri": "https://rust-lang.github.io/rust-clippy/",
+          "rules": [
+            {
+              "id": "clippy::needless_return",
+              "shortDescription": { "text": "needless_return" },
+              "help": { "text": "Remove the `return` and the `;`. The last expression of a function is its value." },
+              "helpUri": "https://rust-lang.github.io/rust-clippy/master/index.html#needless_return",
+              "defaultConfiguration": { "level": "warning" }
+            },
+            {
+              "id": "clippy::redundant_clone",
+              "fullDescription": { "text": "Drop the `.clone()`; the value is not used again. Cloning costs an allocation." },
+              "defaultConfiguration": { "level": "warning" }
+            },
+            {
+              "id": "clippy::unwrap_used",
+              "defaultConfiguration": { "level": "error" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "clippy::needless_return",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": { "text": "unneeded `return` statement" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib.rs", "uriBaseId": "%SRCROOT%" },
+                "region": { "startLine": 3, "startColumn": 20, "endLine": 3, "endColumn": 28 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "clippy::redundant_clone",
+          "ruleIndex": 1,
+          "message": { "text": "redundant clone" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib.rs", "uriBaseId": "%SRCROOT%" },
+                "region": { "startLine": 2, "startColumn": 13, "endLine": 2, "endColumn": 14 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "clippy::unwrap_used",
+          "ruleIndex": 2,
+          "message": { "text": "used `unwrap()` on an `Option` value" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib.rs", "uriBaseId": "%SRCROOT%" },
+                "region": { "startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 4 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

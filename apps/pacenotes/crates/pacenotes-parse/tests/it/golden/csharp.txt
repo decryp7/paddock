@@ -1,0 +1,20 @@
+symbol Module Sample 4-31
+symbol Class Sample.Account 6-21
+symbol Field Sample.Account.balance 8-8
+symbol Property Sample.Account.Id 9-9
+symbol Constructor Sample.Account.Account 11-14
+symbol Method Sample.Account.Deposit 16-20
+symbol Interface Sample.IGreeter 23-26
+symbol Method Sample.IGreeter.Greet 25-25
+symbol Enum Sample.Mode 28-28
+symbol Constant Sample.Mode.Fast 28-28
+symbol Constant Sample.Mode.Slow 28-28
+symbol Struct Sample.Pair 30-30
+import System
+import System.Collections.Generic
+call Sample.Account.Deposit -> Max
+chunk Sample.Account.Account 0 11-14
+chunk Sample.Account.Deposit 0 16-20
+chunk Sample.IGreeter.Greet 0 25-25
+chunk Sample.Mode 0 28-28
+chunk Sample.Pair 0 30-30

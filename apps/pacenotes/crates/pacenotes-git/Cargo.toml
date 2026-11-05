@@ -1,0 +1,23 @@
+[package]
+name = "pacenotes-git"
+description = "Pacenotes' history adapter: gix behind the History port (read at a revision, changed files, the log), and pure churn and hot-spot ranking. Never runs the git binary and never runs anything a repository configures."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pacenotes-core = { workspace = true }
+paddock-jobs = { workspace = true }
+gix = { version = "0.90", default-features = false, features = ["sha1", "revision", "parallel", "blame"] }
+thiserror = "2"
+
+[dev-dependencies]
+pacenotes-trap = { workspace = true }
+pacenotes-core = { workspace = true, features = ["testing"] }
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+symbol Macro LIMIT 4-4
+symbol Macro SQUARE 5-5
+symbol Struct point 7-10
+symbol Enum color 12-12
+symbol TypeAlias point_t 14-14
+symbol Function helper 16-18
+symbol Function main 20-23
+import stdio.h
+import local.h
+call main -> printf
+call main -> helper
+chunk point 0 7-10
+chunk color 0 12-12
+chunk helper 0 16-18
+chunk main 0 20-23

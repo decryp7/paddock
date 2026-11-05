@@ -1,0 +1,35 @@
+[package]
+name = "pacenotes-worker"
+description = "Pacenotes' parser worker (ADR 0006): the program that runs tree-sitter in its own process so a crash in a grammar's C scanner costs one file, its protocol, and the host side that pools workers, judges stalls without wall clocks and quarantines the file a worker died on."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# Hooks that make the worker abort, spin, block or exit on files with a magic suffix, for the crash tests. Never in a release build.
+test-hooks = []
+
+[[bin]]
+name = "pacenotes-parse-worker"
+path = "src/bin/pacenotes-parse-worker.rs"
+
+[dependencies]
+pacenotes-core = { workspace = true }
+pacenotes-index = { workspace = true }
+pacenotes-parse = { workspace = true }
+paddock-ipc = { path = "../../../../crates/paddock-ipc" }
+paddock-jobs = { workspace = true }
+paddock-proc = { path = "../../../../crates/paddock-proc" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+pacenotes-worker = { path = ".", features = ["test-hooks"] }
+pacenotes-trap = { workspace = true }
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true

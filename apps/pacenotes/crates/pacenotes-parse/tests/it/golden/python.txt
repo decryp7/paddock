@@ -1,0 +1,14 @@
+symbol Class Account 6-11
+symbol Method Account.__init__ 7-8
+symbol Method Account.deposit 10-11
+symbol Function top_level 14-15
+import os
+import sys as system
+import collections
+call Account.deposit -> join
+call Account.deposit -> str
+call top_level -> deposit
+call top_level -> Account
+chunk Account.__init__ 0 7-8
+chunk Account.deposit 0 10-11
+chunk top_level 0 14-15

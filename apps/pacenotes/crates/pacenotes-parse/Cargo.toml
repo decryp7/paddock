@@ -1,0 +1,31 @@
+[package]
+name = "pacenotes-parse"
+description = "Pacenotes' tier-2 parser library: tree-sitter grammars (ADR 0003) turned into symbols, outline, imports, call candidates and chunks, with limits. Not crash-isolated: the worker process of A3 will own that."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pacenotes-core = { workspace = true }
+paddock-jobs = { workspace = true }
+thiserror = "2"
+tree-sitter = "=0.27.1"
+tree-sitter-go = "=0.25.0"
+tree-sitter-java = "=0.23.5"
+tree-sitter-kotlin-ng = "=1.1.0"
+tree-sitter-c = "=0.24.2"
+tree-sitter-cpp = "=0.23.4"
+tree-sitter-c-sharp = "=0.23.5"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-python = "=0.25.0"
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true

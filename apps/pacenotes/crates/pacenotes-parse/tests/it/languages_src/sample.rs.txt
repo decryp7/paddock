@@ -1,0 +1,44 @@
+use std::collections::HashMap;
+use crate::util::helper;
+
+const LIMIT: usize = 3;
+
+pub struct Rect {
+    w: u32,
+    h: u32,
+}
+
+pub enum Mode {
+    Fast,
+    Slow,
+}
+
+pub trait Shape {
+    fn area(&self) -> u32;
+}
+
+impl Shape for Rect {
+    fn area(&self) -> u32 {
+        helper(self.w) * self.h
+    }
+}
+
+impl<T> Wrapper<T> {
+    pub fn new() -> Self {
+        let m: HashMap<u32, u32> = HashMap::new();
+        println!("{}", m.len());
+        Wrapper
+    }
+}
+
+mod inner {
+    pub fn deep() {}
+}
+
+macro_rules! twice {
+    ($x:expr) => { $x * 2 };
+}
+
+pub fn top(x: u32) -> u32 {
+    x + 1
+}
