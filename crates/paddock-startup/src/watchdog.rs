@@ -2,6 +2,7 @@
 //! caller passes the time, so every decision is a unit test with a fake clock; the Tauri adapter's ticker only applies
 //! the [`Action`]s.
 
+use crate::Choice;
 use crate::config::Config;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -71,6 +72,17 @@ enum Phase {
     Unresponsive,
 }
 
+/// Where a question about a window stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuestionState {
+    /// No question about the window.
+    Closed,
+    /// The dialog is on screen waiting for a button.
+    Showing,
+    /// A button was pressed and its answer is being carried out (the problem report is being written): no dialog is up.
+    Answered,
+}
+
 /// The liveness of a ready window: pings sent and answered.
 #[derive(Debug, Clone, Default)]
 struct Liveness {
@@ -112,8 +124,10 @@ struct Entry {
     asks: u8,
     /// Questions raised about this ready page since it was last healthy for a long time: each doubles the next wait.
     hangs: u8,
-    /// A question about this window is on screen and unanswered: no second one is raised.
-    question_open: bool,
+    /// The state of the question about this window: no second one is raised while one is not [`QuestionState::Closed`].
+    question: QuestionState,
+    /// The identity of the latest question raised about this window (counts up), so an answer to an older one is recognised.
+    question_seq: u64,
     /// Since when the page has been healthy (ready, or answering again); `None` while it is unresponsive.
     healthy_since: Option<Instant>,
     /// When the window was last hidden (`None` while visible).
@@ -166,7 +180,8 @@ impl Watchdog {
             live: Liveness::default(),
             asks: 0,
             hangs: 0,
-            question_open: false,
+            question: QuestionState::Closed,
+            question_seq: 0,
             healthy_since: None,
             hidden_at: None,
         });
@@ -218,13 +233,13 @@ impl Watchdog {
                 Phase::AskingStartup => {
                     e.phase = Phase::Waiting;
                     e.since = now;
-                    e.question_open = false;
+                    e.question = QuestionState::Closed;
                     e.asks = e.asks.saturating_add(1).min(config.max_doublings);
                 }
                 Phase::Unresponsive => {
                     e.phase = Phase::Ready;
                     e.live.restart(now, &config);
-                    e.question_open = false;
+                    e.question = QuestionState::Closed;
                 }
                 Phase::Waiting | Phase::Ready => {}
             }
@@ -234,7 +249,45 @@ impl Watchdog {
     /// The user answered the question about `label` (any answer): it may be asked about again later.
     pub fn question_answered(&mut self, label: &str) {
         if let Some(e) = self.windows.get_mut(label) {
-            e.question_open = false;
+            e.question = QuestionState::Closed;
+        }
+    }
+
+    /// The page recovered or became ready: the question about `label` that is on screen waiting for a button is closed.
+    /// Returns whether there was one (the caller then takes the dialog down). A question whose answer is being carried out (the
+    /// problem report is being saved) is not on screen any more and stays as it is.
+    pub fn close_question(&mut self, label: &str) -> bool {
+        match self.windows.get_mut(label) {
+            Some(e) if e.question == QuestionState::Showing => {
+                e.question = QuestionState::Closed;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The identity of the question about `label` that is on screen waiting for a button (`None`: none).
+    pub fn question_seq(&self, label: &str) -> Option<u64> {
+        self.windows
+            .get(label)
+            .filter(|e| e.question == QuestionState::Showing)
+            .map(|e| e.question_seq)
+    }
+
+    /// The user pressed `choice` on question `seq` about `label`. Returns whether that question is still the one on screen: an
+    /// answer to a question that was closed meanwhile (the page recovered) is stale and must not be carried out. Save a problem
+    /// report keeps the window from being asked again until [`Watchdog::question_answered`]; every other choice frees it.
+    pub fn accept_answer(&mut self, label: &str, seq: u64, choice: Choice) -> bool {
+        match self.windows.get_mut(label) {
+            Some(e) if e.question == QuestionState::Showing && e.question_seq == seq => {
+                e.question = if choice == Choice::SaveReport {
+                    QuestionState::Answered
+                } else {
+                    QuestionState::Closed
+                };
+                true
+            }
+            _ => false,
         }
     }
 
@@ -327,7 +380,7 @@ impl Watchdog {
 
     /// Whether any question about window `label` is on screen and unanswered.
     pub fn is_question_open(&self, label: &str) -> bool {
-        self.windows.get(label).is_some_and(|e| e.question_open)
+        self.windows.get(label).is_some_and(|e| e.question != QuestionState::Closed)
     }
 
     /// Whether the start-up question about window `label` is open (it is not asked again until it is answered).
@@ -378,13 +431,14 @@ impl Watchdog {
                             out.push(Action::Reload(label.clone()));
                         }
                     } else if e.visible
-                        && !e.question_open
+                        && e.question == QuestionState::Closed
                         && now.saturating_duration_since(e.since) >= config.ask_wait(e.asks)
                     {
                         // Only a window the user can see is asked about (a hidden one starts at login, its page may be paused by the
                         // OS), and only after the longer wait; each Keep Waiting doubles it.
                         e.phase = Phase::AskingStartup;
-                        e.question_open = true;
+                        e.question = QuestionState::Showing;
+                        e.question_seq = e.question_seq.saturating_add(1);
                         out.push(Action::AskStartup(label.clone()));
                     }
                 }
@@ -418,11 +472,12 @@ impl Watchdog {
                     }
                     // The question comes after the long wait, only one at a time, and counts even when the page recovers meanwhile.
                     if e.phase == Phase::Unresponsive
-                        && !e.question_open
+                        && e.question == QuestionState::Closed
                         && config.ping_interval.saturating_mul(e.live.misses)
                             >= config.ask_wait(e.hangs)
                     {
-                        e.question_open = true;
+                        e.question = QuestionState::Showing;
+                        e.question_seq = e.question_seq.saturating_add(1);
                         e.hangs = e.hangs.saturating_add(1).min(config.max_doublings);
                         out.push(Action::AskHung(label.clone()));
                     }

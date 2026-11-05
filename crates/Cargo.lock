@@ -3923,7 +3923,9 @@ dependencies = [
 name = "paddock-startup"
 version = "0.2.0"
 dependencies = [
+ "gtk",
  "log",
+ "objc2-app-kit",
  "paddock-commands",
  "paddock-env",
  "paddock-log",
@@ -3936,6 +3938,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "ts-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

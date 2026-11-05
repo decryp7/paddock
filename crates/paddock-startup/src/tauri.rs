@@ -68,6 +68,11 @@ pub trait Asker<R: Runtime>: Send + Sync + 'static {
         prompt: Prompt,
         answer: Box<dyn FnOnce(Choice) + Send>,
     );
+
+    /// Takes down the question shown for window `label` because it is no longer needed (the page recovered). Runs on the main
+    /// thread. The answer of a dismissed question is ignored whatever it says, so an asker that cannot dismiss (the default) leaves a
+    /// harmless dialog on screen.
+    fn dismiss(&self, _app: &AppHandle<R>, _label: &str) {}
 }
 
 /// Why a start-up command failed (the command's error; camelCase on the wire).
@@ -385,6 +390,10 @@ impl<R: Runtime> Startup<R> {
             log::warn!(Window = label.as_str(); "No asker is installed; window {label} keeps waiting");
             return;
         };
+        let Some(seq) = self.with(|w| w.question_seq(&label)) else {
+            log::info!(Window = label.as_str(); "Question about window {label} was closed before it was shown");
+            return;
+        };
         let prompt = Prompt::new(question, &app.package_info().name);
         let prompt = if self.report.is_some() {
             prompt.with_report()
@@ -394,10 +403,25 @@ impl<R: Runtime> Startup<R> {
         let answer_app = app.clone();
         let answer_label = label.clone();
         let answer: Box<dyn FnOnce(Choice) + Send> =
-            Box::new(move |choice| answered(&answer_app, &answer_label, choice));
+            Box::new(move |choice| answered(&answer_app, &answer_label, seq, choice));
         let app2 = app.clone();
         let shown = app.run_on_main_thread(move || asker.ask(&app2, &label, prompt, answer));
         logged(shown, "", "Could not show the not-responding question");
+    }
+
+    /// The page of window `label` is fine again (`why`): a question about it that is still on screen is closed and taken down. Its
+    /// answer, if the user pressed a button just before, is ignored ([`answered`]).
+    fn question_closed(&self, app: &AppHandle<R>, label: &str, why: &str) {
+        if !self.with(|w| w.close_question(label)) {
+            return;
+        }
+        log::info!(Window = label; "Question about window {label} closed: {why}");
+        let Some(asker) = self.asker.clone() else {
+            return;
+        };
+        let (app2, label2) = (app.clone(), label.to_string());
+        let queued = app.run_on_main_thread(move || asker.dismiss(&app2, &label2));
+        logged(queued, label, "Could not take the not-responding question down");
     }
 
     /// The page in `webview` reported ready: the reply, the hooks, the log line.
@@ -408,6 +432,7 @@ impl<R: Runtime> Startup<R> {
             self.with(|w| ready_reply(w, &checkpoints, &label, Instant::now()))
         };
         self.hook(webview.app_handle(), &label, false);
+        self.question_closed(webview.app_handle(), &label, "the page is ready");
         if let Some(h) = &self.on_ready {
             h(webview, reply.recovered);
         }
@@ -421,6 +446,7 @@ impl<R: Runtime> Startup<R> {
         if self.with(|w| w.pong(label, seq, Instant::now())) == Pong::Recovered {
             log::info!(Window = label; "Window {label} responds again");
             self.hook(webview.app_handle(), label, false);
+            self.question_closed(webview.app_handle(), label, "the page responds again");
         }
     }
 
@@ -554,14 +580,20 @@ pub fn visibility(is_visible: Option<bool>, is_minimized: Option<bool>) -> bool 
 }
 
 /// The user's answer to the question about window `label`.
-fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
-    log::info!(Window = label, Choice = format!("{choice:?}").as_str(); "Not-responding question answered");
+///
+/// `seq` names the question the button belonged to. When that question was closed meanwhile (the page recovered, or answered
+/// already) the answer is stale and does nothing: pressing Reload as the page comes back must not reload a healthy page.
+fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, seq: u64, choice: Choice) {
+    let choice_name = format!("{choice:?}");
     let Some(startup) = app.try_state::<Startup<R>>() else {
+        log::info!(Window = label, Choice = choice_name.as_str(); "Not-responding question answered");
         return;
     };
-    if choice != Choice::SaveReport {
-        startup.with(|w| w.question_answered(label));
+    if !startup.with(|w| w.accept_answer(label, seq, choice)) {
+        log::info!(Window = label, Choice = choice_name.as_str(); "Answer {choice_name} to a question that was closed is ignored");
+        return;
     }
+    log::info!(Window = label, Choice = choice_name.as_str(); "Not-responding question answered");
     match choice {
         Choice::Reload => {
             // Waiting again first: if the reload never starts a page, the watchdog still sees it.

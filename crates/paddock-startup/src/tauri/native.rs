@@ -2,6 +2,8 @@
 //! window, with custom button labels (macOS and Windows; the GTK backend shows Yes/No/Cancel or Ok/Cancel, which map to
 //! the same choices in order).
 
+mod dismiss;
+
 use super::Asker;
 use crate::{Choice, Prompt};
 use ::tauri::{AppHandle, Manager, Runtime};
@@ -76,6 +78,11 @@ impl<R: Runtime> Asker<R> for NativeAsker {
                 answer(Choice::Wait);
             }
         }
+    }
+
+    fn dismiss(&self, app: &AppHandle<R>, label: &str) {
+        let found = dismiss::dismiss(app, label);
+        log::info!(Window = label, Found = found; "Not-responding question dialog of window {label}: {}", if found { "asked to close" } else { "none found to close; its answer will be ignored" });
     }
 }
 

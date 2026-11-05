@@ -13,7 +13,7 @@ tauri = ["dep:tauri", "os-probe", "paddock-commands/tauri"]
 # The OS process table behind `lifecycle::os_probe` (is the process of a left-behind running marker still alive?).
 os-probe = ["dep:sysinfo"]
 # The native question through `tauri-plugin-dialog` (`paddock_startup::tauri::NativeAsker`); the app registers the plugin.
-dialog = ["tauri", "dep:tauri-plugin-dialog"]
+dialog = ["tauri", "dep:tauri-plugin-dialog", "dep:objc2-app-kit", "dep:windows-sys", "dep:gtk"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -26,6 +26,15 @@ paddock-log = { workspace = true }
 sysinfo = { version = "0.39", default-features = false, features = ["system"], optional = true }
 tauri-plugin-dialog = { version = "2.8", optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# What closes the question's dialog from outside (`tauri::native::dismiss`): the sheet of the window (macOS), its enabled popup
+# (Windows), its transient message dialog (GTK). `tauri-plugin-dialog` has no handle for it.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSResponder"], optional = true }
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"], optional = true }
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
 
 [dev-dependencies]
 # The never-panics test of the parsers (conformance check C36).

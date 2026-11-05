@@ -2,6 +2,7 @@
 //! §11).
 
 use super::*;
+use crate::Choice;
 use std::time::Duration;
 
 /// The timings of the first design: a reloaded page is asked about after one more `ready_timeout` and Keep Waiting does not lengthen
@@ -823,4 +824,96 @@ fn a_hung_page_question_on_screen_holds_back_the_start_up_question_of_a_reload()
         !acts.iter().any(|(_, a)| matches!(a, Action::AskStartup(_))),
         "{acts:?}"
     );
+}
+
+/// Opens the question about a hung page "main" and returns its identity; the watchdog is `ready` at 100 ms and silent until 70 s.
+fn hung_with_question(w: &mut Watchdog, t0: Instant) -> u64 {
+    w.page_started("main", t0);
+    w.ready("main", at(t0, 100));
+    let acts = run_with(w, t0, 0, 70_000, |_| false);
+    assert_eq!(hung_questions(&acts).len(), 1, "{acts:?}");
+    w.question_seq("main").expect("the question is on screen")
+}
+
+#[test]
+fn a_question_on_screen_is_closed_when_the_page_answers_again_and_its_late_answer_is_stale() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    let seq = hung_with_question(&mut w, t0);
+    assert!(w.is_question_open("main"));
+    // The page answers its latest ping: it recovered (the dialog was put up at about 62 s and is still there).
+    let sent = run_all(&mut w, t0, 70_500, 71_000)
+        .into_iter()
+        .find_map(|(_, a)| match a {
+            Action::Ping { seq, .. } => Some(seq),
+            _ => None,
+        })
+        .expect("a ping");
+    assert_eq!(w.pong("main", sent, at(t0, 71_000)), Pong::Recovered);
+    assert!(
+        w.close_question("main"),
+        "the dialog is still up: it must be taken down"
+    );
+    assert!(!w.is_question_open("main"));
+    assert_eq!(w.question_seq("main"), None);
+    assert!(!w.close_question("main"), "taken down once");
+    // The person's click raced the recovery: Reload now would reload a healthy page by surprise.
+    assert!(
+        !w.accept_answer("main", seq, Choice::Reload),
+        "a stale answer is not carried out"
+    );
+}
+
+#[test]
+fn closing_the_question_on_recovery_keeps_the_doubling_of_the_next_wait() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    hung_with_question(&mut w, t0);
+    // Healthy for a short while (the question was closed by the recovery), then stopped again.
+    run_with(&mut w, t0, 70_500, 80_000, |_| true);
+    assert!(w.close_question("main"));
+    let again = run_with(&mut w, t0, 80_500, 400_000, |_| false);
+    let q = hung_questions(&again);
+    assert_eq!(q.len(), 1, "{q:?}");
+    assert!(
+        q[0] - 80_500 >= 110_000,
+        "the earlier question still counts: asked again after only {} ms",
+        q[0] - 80_500
+    );
+}
+
+#[test]
+fn only_the_current_question_takes_an_answer_and_a_report_in_progress_is_not_closed_by_recovery() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    let seq = hung_with_question(&mut w, t0);
+    assert!(!w.accept_answer("main", seq + 1, Choice::Wait), "another question's answer");
+    assert!(w.is_question_open("main"), "a stale answer changes nothing");
+    assert!(w.accept_answer("main", seq, Choice::SaveReport));
+    assert!(!w.accept_answer("main", seq, Choice::Wait), "answered once");
+    // The question is answered (the report's own save dialog is up): there is no question dialog to take down.
+    assert!(w.is_question_open("main"), "no second question while the report is written");
+    assert_eq!(w.question_seq("main"), None);
+    assert!(!w.close_question("main"));
+    w.question_answered("main");
+    assert!(!w.is_question_open("main"));
+    // A plain answer closes the question.
+    let mut v = Watchdog::default();
+    let seq = hung_with_question(&mut v, t0);
+    assert!(v.accept_answer("main", seq, Choice::Wait));
+    assert!(!v.is_question_open("main"));
+}
+
+#[test]
+fn each_question_has_its_own_identity() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    let first = hung_with_question(&mut w, t0);
+    assert!(w.accept_answer("main", first, Choice::Wait));
+    w.keep_waiting("main", at(t0, 70_500));
+    let acts = run_with(&mut w, t0, 70_500, 400_000, |_| false);
+    assert_eq!(hung_questions(&acts).len(), 1, "{acts:?}");
+    let second = w.question_seq("main").unwrap();
+    assert_ne!(first, second);
+    assert!(!w.accept_answer("main", first, Choice::Reload));
 }

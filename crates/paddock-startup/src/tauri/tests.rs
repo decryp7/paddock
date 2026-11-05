@@ -62,6 +62,7 @@ struct Seen {
     relaunch: Vec<String>,
     asked: Vec<(String, Prompt)>,
     answers: Vec<Box<dyn FnOnce(Choice) + Send>>,
+    dismissed: Vec<String>,
 }
 
 type Shared = Arc<Mutex<Seen>>;
@@ -79,6 +80,10 @@ impl Asker<MockRuntime> for FakeAsker {
         let mut seen = lock(&self.0);
         seen.asked.push((label.to_string(), prompt));
         seen.answers.push(answer);
+    }
+
+    fn dismiss(&self, _app: &AppHandle<MockRuntime>, label: &str) {
+        lock(&self.0).dismissed.push(label.to_string());
     }
 }
 
@@ -694,7 +699,7 @@ fn commands_fail_plainly_when_the_contract_is_not_installed() {
     page_load(w.as_ref(), PageLoadEvent::Started);
     web_content_terminated(w.as_ref());
     assert!(start(app.handle()).is_none());
-    answered(app.handle(), "main", Choice::Reload);
+    answered(app.handle(), "main", 0, Choice::Reload);
 }
 
 #[test]
@@ -859,4 +864,73 @@ fn a_window_can_ask_for_the_whole_app_to_restart_and_is_told_when_it_cannot() {
         invoke(&w, "app_relaunch", json!({})).unwrap_err()["code"],
         "relaunchUnavailable"
     );
+}
+
+#[test]
+fn the_not_responding_question_closes_by_itself_when_the_page_answers_again() {
+    let (app, seen) = app();
+    let got = pings(&app);
+    let w = window(&app, "w-71");
+    page_load(w.as_ref(), PageLoadEvent::Started);
+    invoke(&w, "window_ready", json!({})).unwrap();
+    let t0 = Instant::now();
+    tick(&app, t0, 0, 20_000);
+    assert_eq!(lock(&seen).asked.len(), 1);
+    assert!(lock(&seen).dismissed.is_empty());
+    // The page answers its latest ping: it recovered, and the question on screen is taken down.
+    let seq = *lock(&got).last().unwrap();
+    invoke(&w, "window_pong", json!({ "seq": seq })).unwrap();
+    assert_eq!(lock(&seen).dismissed, ["w-71"]);
+    assert!(!startup(&app).with(|d| d.is_question_open("w-71")));
+    assert!(
+        log_of("w-71").iter().any(|(l, m)| *l == log::Level::Info
+            && m == "Question about window w-71 closed: the page responds again"),
+        "{:?}",
+        log_of("w-71")
+    );
+    // Pressing Reload just as it recovered must not reload the healthy page.
+    let answer = lock(&seen).answers.pop().unwrap();
+    answer(Choice::Reload);
+    assert!(
+        log_of("w-71")
+            .iter()
+            .any(|(_, m)| m == "Answer Reload to a question that was closed is ignored"),
+        "{:?}",
+        log_of("w-71")
+    );
+    assert!(
+        !log_of("w-71")
+            .iter()
+            .any(|(_, m)| m == "Not-responding question answered"),
+        "a stale answer is not carried out"
+    );
+    assert!(startup(&app).with(|d| d.is_ready("w-71")));
+    startup(&app).stop();
+}
+
+#[test]
+fn the_start_up_question_closes_by_itself_when_the_page_becomes_ready() {
+    let (app, seen) = app();
+    let w = window(&app, "w-72");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 20_000);
+    assert_eq!(lock(&seen).asked.len(), 1);
+    invoke(&w, "window_ready", json!({})).unwrap();
+    assert_eq!(lock(&seen).dismissed, ["w-72"]);
+    assert!(
+        log_of("w-72")
+            .iter()
+            .any(|(_, m)| m == "Question about window w-72 closed: the page is ready"),
+        "{:?}",
+        log_of("w-72")
+    );
+    // Restart in Safe Mode, chosen just as the page became ready, is not carried out.
+    let answer = lock(&seen).answers.pop().unwrap();
+    answer(Choice::SafeMode);
+    assert!(lock(&seen).safe_mode.is_empty());
+    // A ready page with no question open takes nothing down.
+    invoke(&w, "window_ready", json!({})).unwrap();
+    assert_eq!(lock(&seen).dismissed.len(), 1);
+    startup(&app).stop();
 }
