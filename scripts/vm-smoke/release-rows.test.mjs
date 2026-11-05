@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, judgeLinuxHelperLogDir, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { btmEnabled, NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, judgeLinuxHelperLogDir, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
 import { deriveVerdict } from './verdict.mjs';
 
 const bad = (c) => c.filter((x) => !x.ok);
@@ -32,4 +32,11 @@ test('a row that is not driven is NOT MEASURED with its reason and keeps the run
   assert.equal(v.verdict, 'INCOMPLETE');
   assert.equal(rowStep('x', [{ ok: true, detail: 'a' }], 'p').status, 'pass');
   for (const k of Object.keys(NOT_DRIVEN)) assert.ok(ROW_TITLES[k], k);
+});
+
+test('btmEnabled reads the Dyno entry of sfltool dumpbtm; no entry is null', () => {
+  assert.equal(btmEnabled(' #1:\n   Name: Dyno\n   Identifier: net.decryptology.dyno.agent\n   Disposition: [enabled, allowed, visible, notified]\n\n #2:\n   Name: Other\n   Disposition: [disabled]'), true);
+  assert.equal(btmEnabled(' #1:\n   Name: Dyno\n   Disposition: [disabled, allowed, visible, notified]'), false);
+  assert.equal(btmEnabled(' #1:\n   Name: Other\n   Disposition: [enabled]'), null);
+  assert.equal(btmEnabled(''), null);
 });

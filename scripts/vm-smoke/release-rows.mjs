@@ -63,3 +63,14 @@ export const NOT_DRIVEN = {
   killInstaller: 'needs the installer killed mid-run and the app\'s "Not installed" text read; the kill point and the text are not specified',
   installAgain: 'needs a second install with its own UAC prompt answered over VNC (the suite answers only the first)',
 };
+
+/** `sfltool dumpbtm` text to whether Dyno's login item is enabled: true, false, or null when no Dyno entry (or no disposition) is in the text. */
+export function btmEnabled(text) {
+  const blocks = String(text ?? '').split(/\n\s*\n|(?=\n\s*#\d+:)/);
+  for (const b of blocks) {
+    if (!/net\.decryptology\.dyno|Dyno/i.test(b)) continue;
+    const m = /Disposition:\s*\[([^\]]*)\]/.exec(b);
+    if (m) return /\benabled\b/.test(m[1]);
+  }
+  return null;
+}

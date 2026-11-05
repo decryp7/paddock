@@ -19,6 +19,7 @@ import { judgeCard, judgeLoginSwitch, parseSwitchState } from './linux-judges.mj
 import { makeResult } from './verdict.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep, quitStopStep } from './mcp-judges.mjs';
+import { hungPageStep } from './hung-page.mjs';
 import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -258,15 +259,34 @@ async function main(argv) {
       push(await quitStopStep({
         now: () => Date.now(), sleep,
         trigger: async () => { await startApp(); press('^File$', 'menu item'); await sleep(1000); if (!press('^Quit and stop measuring', 'menu item')) throw new Error('no "Quit and stop measuring" menu item under File (AT-SPI)'); await sleep(5000); },
-        count, reopen: async () => { await startApp(); return count(); }, reboot: async () => null, // the reboot is covered by the Restart check rows; not tried here
+        count, reopen: async () => { await startApp(); return count(); }, reboot: async () => {
+          // The reboot half: after Quit and stop and a reopen, a real reboot must bring the agent back by itself (the service was stopped, not removed).
+          g('sudo systemctl reboot', 30_000); await sleep(40_000);
+          for (let n = 0; n < 75 && g('true', 20_000).code !== 0; n++) await sleep(4000);
+          for (let n = 0; n < 60 && !/gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); n++) await sleep(3000);
+          await sleep(45_000);
+          return count();
+        },
       }));
+    }
+    // Hung or paused visible page (watchdog design, crates/paddock-startup): the WebKit content process is stopped with SIGSTOP; the app log and AT-SPI show the question.
+    {
+      const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-hung${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(15_000); };
+      await startApp();
+      const count = () => Number(atspi('tree . 12 | grep -c "Keep Waiting"').stdout.trim()) || 0;
+      push(await hungPageStep({
+        now: () => Date.now() / 1000, sleep,
+        suspend: async () => { if (g('pgrep -f WebKitWebProcess >/dev/null').code !== 0) throw new Error('no WebKitWebProcess is running'); g('pkill -STOP -f WebKitWebProcess'); },
+        resume: async () => { g('pkill -CONT -f WebKitWebProcess'); },
+        logLines: async () => ses('f=$(find ~/.local ~/.cache -name "*.log" -path "*yno*" -not -name "*agent*" 2>/dev/null | xargs ls -t 2>/dev/null | head -1); tail -n 400 "$f" 2>/dev/null').stdout.split('\n'),
+        questions: async () => count(), keepWaiting: async () => atspi('press . "Keep Waiting" "push button"').code === 0, shot: async () => null,
+      }, ROW_TITLES.hungPage));
     }
     // Release rows: the Linux uninstall must leave the helper's log folder; the rest are not driven here.
     {
       g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; true', 300_000);
       const ls = g('ls /var/log/dyno-helper 2>&1');
       push(rowStep(ROW_TITLES.linuxLogDir, judgeLinuxHelperLogDir({ code: ls.code, out: ls.stdout }), 'the helper log folder survives the uninstall'));
-      push(notDriven(ROW_TITLES.hungPage, NOT_DRIVEN.hungPage));
     }
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();

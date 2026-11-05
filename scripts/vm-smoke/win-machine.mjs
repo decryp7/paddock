@@ -4,6 +4,9 @@
 import { ssh, answerUac } from './win-helper.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
+import { hungPageStep } from './hung-page.mjs';
+import { Actor } from './win-act.mjs';
+import { APP_LOG_PS } from './win-tray-icons.mjs';
 import { judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { makeResult } from './verdict.mjs';
@@ -133,7 +136,28 @@ export async function installRows() {
   return steps;
 }
 
-export const notDrivenWinRows = () => [notDriven(ROW_TITLES.winFirstUninstall, 'its definition (gone, or the noted reboot fallback) lands with fix/uninstall-cold-leftover, which is not pushed yet'), notDriven(ROW_TITLES.hungPage, NOT_DRIVEN.hungPage), notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
+export const notDrivenWinRows = () => [notDriven(ROW_TITLES.winFirstUninstall, 'its definition (gone, or the noted reboot fallback) lands with fix/uninstall-cold-leftover, which is not pushed yet'), notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
+
+const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
+const renderers = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match 'dyno' } | ForEach-Object { $_.ProcessId }); `;
+
+/** A hung or paused visible page on Windows: the WebView2 renderer of dyno-app is suspended (NtSuspendProcess, no debugger); the question is read from the window list. Keep Waiting cannot be pressed here (no button lookup in the actor), so the doubling stays a broken check. */
+export async function winHung() {
+  ssh('Set-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 \'Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"\'; schtasks /create /tn DynoHungLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch-hung.ps1" | Out-Null; schtasks /run /tn DynoHungLaunch | Out-Null');
+  await sleep(30_000);
+  const actor = new Actor(); actor.start(); await sleep(6000);
+  const r = await hungPageStep({
+    now: () => Date.now() / 1000, sleep,
+    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error('no WebView2 renderer of dyno-app was found'); },
+    resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`); },
+    logLines: async () => ssh(APP_LOG_PS).split('\\n'),
+    questions: async (phase) => { const n = (await actor.send('windows').catch(() => '')).split('\\n').filter((l) => /not responding|Keep Waiting/i.test(l)).length; return phase === 'open' && n === 0 ? null : n; },
+    keepWaiting: async () => false, shot: async (name) => actor.shot(name),
+  }, ROW_TITLES.hungPage);
+  await actor.send('quit', 5000).catch(() => {});
+  ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force');
+  return r;
+}
 
 /** "Quit and stop measuring" as the LAST step of the run (it ends the app and the agent): menu click over the DevTools port, 60 s of no Dyno process, reopen. The reboot half is not tried here. */
 export async function winQuitStop() {
@@ -161,4 +185,4 @@ export async function winQuitStop() {
   });
 }
 
-export const afterQuitSteps = [() => sameVersionRefused(), () => uninstall(), () => installRows(), () => notDrivenWinRows(), () => winQuitStop()];
+export const afterQuitSteps = [() => sameVersionRefused(), () => uninstall(), () => installRows(), () => notDrivenWinRows(), () => winHung(), () => winQuitStop()];

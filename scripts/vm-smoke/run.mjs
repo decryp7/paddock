@@ -21,7 +21,9 @@ import { macDriver, readingSteps } from './helper-readings.mjs';
 import { macRebootCheck } from './mac-reboot.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
-import { NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, notDriven, rowStep } from './release-rows.mjs';
+import { NOT_DRIVEN, ROW_TITLES, btmEnabled, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { hungPageStep } from './hung-page.mjs';
+import { quitStopStep } from './mcp-judges.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -289,11 +291,31 @@ async function main(argv) {
           const mcp = await mcpStep(mg);
           const lg = await exec(`sudo -u nobody head -5 '/Library/Application Support/Dyno/helper-lifecycle.log' 2>&1; echo "EXIT=$?"`);
           const m = /EXIT=(\d+)\s*$/.exec(lg.stdout);
-          return [mcp,
-            notDriven('Rule 71: Quit and stop measuring stops the agent and it comes back', NOT_DRIVEN.macReopen),
-            notDriven(ROW_TITLES.macReopen, NOT_DRIVEN.macReopen),
+          // Quit and stop measuring, then reopen (menu item over AX), with the Login Items state before and after and the Background Items notice from the unified log.
+          const count = async () => Number((await exec('ps -axo comm= | grep -cE "dyno-(app|agent)$"')).stdout.trim()) || 0;
+          const btm = async () => btmEnabled((await exec('sudo sfltool dumpbtm 2>&1 | head -400')).stdout);
+          const wasEnabled = await btm();
+          const t0 = new Date(Date.now() - 5000).toISOString().replace('T', ' ').slice(0, 19);
+          const qs = await quitStopStep({
+            now: () => Date.now(), sleep: sleepMs,
+            trigger: async () => { await exec(`open -a ${bundle}`); await sleepMs(15_000); if (!(await gui.press(gui.app, '^Quit and stop measuring', 'AXMenuItem'))) throw new Error('no "Quit and stop measuring" menu item (AX)'); await sleepMs(5000); },
+            count, reopen: async () => { await exec(`open -a ${bundle}`); await sleepMs(30_000); return count(); }, reboot: async () => null, // the reboot is the restart suite's
+          });
+          const back = (await exec('pgrep -x dyno-agent >/dev/null')).code === 0;
+          const notice = (await exec(`log show --start "${t0}" --info --style compact --predicate 'eventMessage CONTAINS[c] "Background Items Added" OR eventMessage CONTAINS[c] "background item" AND eventMessage CONTAINS[c] "dyno"' 2>&1 | grep -c -i "background item"`)).stdout.trim();
+          const nowEnabled = await btm();
+          const reopen = rowStep(ROW_TITLES.macReopen, judgeMacReopen({ agentBack: back, notificationSeen: /^\d+$/.test(notice) ? Number(notice) > 0 : null, loginItemWasOff: wasEnabled === null ? null : !wasEnabled, loginItemNowOff: nowEnabled === null ? null : !nowEnabled }), 'the agent is back, the Login Items choice held');
+          // Hung or paused page: the WebContent process is stopped; the question is read through AX.
+          const hung = await hungPageStep({
+            now: () => Date.now() / 1000, sleep: sleepMs,
+            suspend: async () => { if ((await exec('pgrep -f com.apple.WebKit.WebContent >/dev/null')).code !== 0) throw new Error('no WebContent process'); await exec('pkill -STOP -f com.apple.WebKit.WebContent'); },
+            resume: async () => { await exec('pkill -CONT -f com.apple.WebKit.WebContent'); },
+            logLines: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | tail -n 400')).stdout.split('\n'),
+            questions: async () => (await gui.texts()).filter((t) => /Keep Waiting/.test(t.text)).length, keepWaiting: async () => gui.press(gui.app, '^Keep Waiting', 'AXButton'), shot: async (n) => gui.shot(n),
+          }, ROW_TITLES.hungPage);
+          return [mcp, qs, reopen,
             rowStep(ROW_TITLES.macLifecycleLog, judgeLifecycleLog({ code: m ? Number(m[1]) : null, out: lg.stdout.replace(/EXIT=\d+\s*$/, '') }), 'a standard user reads the lifecycle log'),
-            notDriven(ROW_TITLES.hungPage, NOT_DRIVEN.hungPage)];
+            hung];
         };
         const rowFns = o.suite === 'power' ? [macRows] : [];
         return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
