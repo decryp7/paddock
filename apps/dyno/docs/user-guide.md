@@ -37,6 +37,7 @@ one; **Launch at login** is on by default: the first time Dyno runs it registers
   later one. Dyno cannot end, suspend or change a process; use your system's own task manager for that.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
   tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
+- **Windows 11: new tray icons start under the ^ arrow** until you drag them onto the taskbar. Windows remembers where you put them.
 - **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer.
   **Run again** checks anew; **Copy as text** puts the result on the clipboard.
 - **Reports** shows a summary of the week (pick the week at the top): health score and trend, the busiest apps, disk space and
