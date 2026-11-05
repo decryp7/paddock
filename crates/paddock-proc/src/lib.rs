@@ -50,6 +50,28 @@ mod watch;
 #[cfg(test)]
 mod testchild;
 
+/// The effective user id of this process (Unix only), for checks that a file belongs to whoever runs the app.
+#[cfg(unix)]
+pub fn effective_uid() -> u32 {
+    sys::effective_uid()
+}
+
+#[cfg(all(test, unix))]
+mod uid_tests {
+    use std::os::unix::fs::MetadataExt;
+
+    #[test]
+    fn the_effective_uid_owns_the_files_this_process_creates() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mine");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().uid(),
+            super::effective_uid()
+        );
+    }
+}
+
 pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
 pub use identity::{Ending, Holder, ProcessId, StartTime, holder};
 pub use instance::{Claim, HeldState, InstanceError, InstanceLock, held_state, is_held};

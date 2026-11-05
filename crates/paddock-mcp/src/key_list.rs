@@ -50,13 +50,16 @@ const RESTART: &str =
 /// Largest list read to compare (sixteen keys are a few KB).
 const MAX_LIST_BYTES: u64 = 1 << 20;
 
+/// Why a Unix list is not trusted: it is not owned by the user running the app, other users can write it, or other users can write its
+/// folder (so they could swap the file) and the folder has no sticky bit.
 #[cfg(unix)]
-/// Why a Unix list is not trusted: other users can write it, or another user owns it (not the owner of its folder).
-fn distrust(mode: u32, uid: u32, folder_uid: Option<u32>) -> Option<String> {
-    if mode & 0o022 != 0 {
-        Some(format!("can be changed by other users (mode {mode:o})"))
-    } else if folder_uid.is_some_and(|f| f != uid) {
+fn distrust(mode: u32, owner: u32, running_user: u32, folder_mode: Option<u32>) -> Option<String> {
+    if owner != running_user {
         Some("is owned by another user".into())
+    } else if mode & 0o022 != 0 {
+        Some(format!("can be changed by other users (mode {mode:o})"))
+    } else if folder_mode.is_some_and(|m| m & 0o022 != 0 && m & 0o1000 == 0) {
+        Some("is in a folder that other users can change".into())
     } else {
         None
     }
@@ -66,11 +69,16 @@ fn distrust(mode: u32, uid: u32, folder_uid: Option<u32>) -> Option<String> {
 fn untrusted(path: &Path) -> Option<String> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let meta = std::fs::metadata(path).ok()?;
-    let folder_uid = path
+    let folder_mode = path
         .parent()
         .and_then(|p| std::fs::metadata(p).ok())
-        .map(|m| m.uid());
-    distrust(meta.permissions().mode() & 0o777, meta.uid(), folder_uid)
+        .map(|m| m.permissions().mode() & 0o7777);
+    distrust(
+        meta.permissions().mode() & 0o777,
+        meta.uid(),
+        paddock_proc::effective_uid(),
+        folder_mode,
+    )
 }
 
 #[cfg(not(unix))]
@@ -111,7 +119,7 @@ impl FileKeys {
             return KeysLoad {
                 entries: Vec::new(),
                 problem: Some(format!(
-                    "The AI access key list ({}) {why}, so it is not trusted. Fix its owner, run chmod 600 on it, or move it away, \
+                    "The AI access key list ({}) {why}, so it is not trusted. Fix its owner or mode (chmod 600), or its folder's mode, or move it away, \
                      then restart the app. No client can connect until then.",
                     self.path.display()
                 )),
@@ -234,32 +242,54 @@ mod tests {
     use super::distrust;
 
     #[test]
-    fn a_list_is_trusted_only_when_others_cannot_write_it_and_its_owner_owns_the_folder() {
-        assert_eq!(distrust(0o600, 501, Some(501)), None);
+    fn a_list_is_trusted_only_for_its_user_with_no_write_for_others_in_it_or_its_folder() {
+        assert_eq!(distrust(0o600, 501, 501, Some(0o700)), None);
         assert_eq!(
-            distrust(0o644, 501, Some(501)),
+            distrust(0o644, 501, 501, Some(0o755)),
             None,
             "others may read a list of hashes"
         );
-        assert!(
-            distrust(0o666, 501, Some(501))
-                .unwrap()
-                .contains("other users")
-        );
-        assert!(
-            distrust(0o620, 501, Some(501))
-                .unwrap()
-                .contains("other users")
-        );
-        assert!(
-            distrust(0o644, 502, Some(501))
-                .unwrap()
-                .contains("owned by another user")
-        );
         assert_eq!(
-            distrust(0o644, 502, None),
+            distrust(0o600, 501, 501, None),
             None,
             "a folder that cannot be read says nothing"
+        );
+        assert!(
+            distrust(0o666, 501, 501, Some(0o700))
+                .unwrap()
+                .contains("other users")
+        );
+        assert!(
+            distrust(0o620, 501, 501, Some(0o700))
+                .unwrap()
+                .contains("other users")
+        );
+        assert!(
+            distrust(0o644, 502, 501, Some(0o700))
+                .unwrap()
+                .contains("owned by another user"),
+            "not the running user"
+        );
+        assert!(
+            distrust(0o600, 501, 0, Some(0o700))
+                .unwrap()
+                .contains("owned by another user"),
+            "root running, user's file"
+        );
+        assert!(
+            distrust(0o600, 501, 501, Some(0o777))
+                .unwrap()
+                .contains("folder")
+        );
+        assert!(
+            distrust(0o600, 501, 501, Some(0o770))
+                .unwrap()
+                .contains("folder")
+        );
+        assert_eq!(
+            distrust(0o600, 501, 501, Some(0o1777)),
+            None,
+            "a sticky folder keeps others from swapping the file"
         );
     }
 }

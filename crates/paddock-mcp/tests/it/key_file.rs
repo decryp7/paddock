@@ -387,3 +387,37 @@ fn a_plain_write_failure_says_what_failed_not_that_the_file_changed() {
         e.message
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_list_in_a_folder_that_others_can_change_is_not_trusted_unless_the_folder_is_sticky() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, path) = keys_file();
+    let key = control(&path).issue_key("Pitwall").unwrap();
+    let mode =
+        |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
+    for m in [0o777, 0o770, 0o722] {
+        mode(m);
+        let c = control(&path);
+        assert_eq!(
+            c.keys().verify(&key.key),
+            None,
+            "folder mode {m:o} is refused"
+        );
+        assert!(
+            c.get()
+                .keys_problem
+                .unwrap_or_default()
+                .contains("folder that other users can change")
+        );
+    }
+    for m in [0o1777, 0o700, 0o755] {
+        mode(m);
+        assert_eq!(
+            control(&path).keys().verify(&key.key).as_deref(),
+            Some("Pitwall"),
+            "folder mode {m:o} is accepted"
+        );
+    }
+    mode(0o700);
+}
