@@ -90,6 +90,12 @@ const HOSTILE: &[(&str, &str, &str, Verdict)] = &[
         Removed,
     ),
     (
+        "MAC address, Windows form",
+        "adapter AA-BB-CC-DD-EE-FF up",
+        "AA-BB-CC-DD-EE-FF",
+        Removed,
+    ),
+    (
         "machine or hardware UUID",
         "machine id 123e4567-e89b-12d3-a456-426614174000",
         "123e4567",

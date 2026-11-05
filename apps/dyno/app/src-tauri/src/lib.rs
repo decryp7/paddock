@@ -116,11 +116,12 @@ pub enum Place {
 /// The start-up watchdog with a visible question, for the installed app only (a test place has no real folders and no dialog: the shell's
 /// default watchdog has no asker, so nothing is ever shown). The question offers Save a problem report… (written without the stuck window).
 ///
-/// When it can appear (it used to be only logged, so this is new): a window's page did not report ready within
-/// `Config::ready_timeout` (10 s) after it started loading, was reloaded, and did not report ready within another 10 s. So never
-/// earlier than [`first_question_after`] (20 s) after the page began loading, and never for a window whose app process was paused
-/// (the watchdog restarts its clocks after a gap of more than `pause_gap`, 3 s, between two ticks: a limiter or a sleeping laptop). A
-/// healthy start that reports ready within 20 s, even after one reload, is never asked.
+/// When it can appear (it used to be only logged, so this is new): a window the user can see (a hidden one, started at login, is
+/// never asked about) whose page did not report ready within `Config::ready_timeout` (10 s) after it started loading, was reloaded,
+/// and was still silent `Config::ask_timeout` (60 s) after the reload. So never earlier than [`first_question_after`] (70 s) after the
+/// page began loading; each Keep Waiting doubles the next wait (120, 240, 480 s); and never for an app process that was paused (the
+/// watchdog restarts its clocks after a gap of more than `pause_gap`, 3 s, between two ticks). A content process stopped by a limiter
+/// while the app keeps ticking is covered by the long wait and by asking only about visible windows, not by `pause_gap`.
 fn watchdog<R: Runtime>(place: &Place) -> Option<Result<paddock_startup::tauri::Startup<R>, paddock_startup::ConfigError>> {
     matches!(place, Place::Installed).then(|| {
         paddock_startup::tauri::Startup::<R>::builder()
@@ -133,9 +134,9 @@ fn watchdog<R: Runtime>(place: &Place) -> Option<Result<paddock_startup::tauri::
     })
 }
 
-/// The earliest a question can follow the start of a page load: one reload after the first timeout, then the second timeout.
+/// The earliest a question can follow the start of a page load: the reload after the first timeout, then the longer wait.
 pub fn first_question_after(config: &paddock_startup::Config) -> std::time::Duration {
-    config.ready_timeout * 2
+    config.ready_timeout + config.ask_timeout
 }
 
 /// The shell plugin with Dyno's parts.
@@ -569,7 +570,7 @@ mod diagnostics_tests {
     use super::*;
 
     #[test]
-    fn the_watchdog_question_exists_for_the_installed_app_only_and_never_before_twenty_seconds() {
+    fn the_watchdog_question_exists_for_the_installed_app_only_and_never_before_seventy_seconds() {
         let test = Place::Test {
             dir: std::path::PathBuf::from("/nonexistent/dyno-test"),
         };
@@ -580,8 +581,8 @@ mod diagnostics_tests {
         assert!(watchdog::<tauri::test::MockRuntime>(&Place::Installed).is_some_and(|s| s.is_ok()));
         let config = paddock_startup::Config::default();
         assert!(
-            first_question_after(&config) >= std::time::Duration::from_secs(20),
-            "a healthy slow start that is ready within two timeouts is never asked"
+            first_question_after(&config) >= std::time::Duration::from_secs(70),
+            "a healthy slow start that is ready within 70 s is never asked"
         );
         assert!(
             config.pause_gap >= std::time::Duration::from_secs(3),

@@ -27,6 +27,11 @@ use serde::{Deserialize, Serialize};
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
 ///
+/// 5: the problem report replaced the agent's own bundle. `Request::{DiagnosticsPreview, SaveDiagnostics}` and
+///   `Reply::{DiagnosticsPreview, DiagnosticsSaved}` are gone and `Request::DiagnosticsFiles` / `Reply::DiagnosticsFiles` took their
+///   place at the end of the diagnostics group, so every variant after them moved (positional postcard: an agent built before this
+///   change reads the app's requests wrongly, which the handshake now refuses).
+///
 /// 4 (unreleased; one bump for everything below; the protocol is positional postcard, so an older peer reads these wrongly):
 /// - learning: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`);
 /// - saved disk maps (ADR 0029): `DiskScanStatus` gained `origin`, `changed_bytes`, `replaces` and `not_saved`, `StartDiskScan`
@@ -57,7 +62,7 @@ use serde::{Deserialize, Serialize};
 /// - helper wiring (unreleased, so no bump): the reply types of the readings the helper can give carry a `via: ReadVia` (`read_via`):
 ///   `FirewallSource`, `StartupOverview.btm_via`, `NetworkSnapshot.{traffic_via, owners_via}`, `Locker`, `SystemInventory.memory_via`,
 ///   `SleepReport.blockers_via`, `BackupReport` and `LiveUpdate.via`.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
 /// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the

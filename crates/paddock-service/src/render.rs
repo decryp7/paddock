@@ -277,6 +277,9 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox, unit: &str) {
     if let Some(d) = s.runtime_directory() {
         let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");
     }
+    if let Some(d) = s.logs_directory() {
+        let _ = writeln!(o, "LogsDirectory={d}\nLogsDirectoryMode=0755");
+    }
 }
 
 /// Quotes one argument the way the C runtime (`CommandLineToArgvW`) splits it back.

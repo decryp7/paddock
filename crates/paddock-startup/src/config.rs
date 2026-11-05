@@ -9,6 +9,12 @@ use std::time::Duration;
 pub struct Config {
     /// How long a page may take from starting to load until it reports ready.
     pub ready_timeout: Duration,
+    /// How long a visible page that was reloaded may still be silent before the user is asked (counted from the reload). Longer
+    /// than [`Config::ready_timeout`] on purpose: a content process stopped by a limiter (App Tamer) or a machine under load at login
+    /// is slow, not broken, and a question that appears on a healthy start is an annoyance.
+    pub ask_timeout: Duration,
+    /// After each Keep Waiting the next wait (to ask again, or to call a page unresponsive) doubles, at most this many times.
+    pub max_doublings: u8,
     /// How often the ticker looks at the windows.
     pub tick: Duration,
     /// A gap between two ticks longer than this means the app process itself was paused: clocks restart.
@@ -35,6 +41,8 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             ready_timeout: Duration::from_secs(10),
+            ask_timeout: Duration::from_secs(60),
+            max_doublings: 3,
             tick: Duration::from_millis(500),
             pause_gap: Duration::from_secs(3),
             ping_interval: Duration::from_secs(2),
@@ -61,6 +69,8 @@ pub enum ConfigError {
     PingIntervalNotBelowPauseGap,
     /// No missed ping, no terminate reload, no boot error or no error text allowed: the limit must be at least one.
     ZeroLimit,
+    /// The question would come before the reload has had its chance (`ask_timeout` shorter than `ready_timeout`).
+    AskBeforeReload,
     /// The dialog show deadline is zero (the window would show before its page could answer) or not shorter than the
     /// ready timeout (the watchdog would give up first).
     BadDialogShowDeadline,
@@ -77,6 +87,7 @@ impl fmt::Display for ConfigError {
             ConfigError::PingIntervalNotBelowPauseGap => {
                 "the ping interval must be shorter than the pause gap"
             }
+            ConfigError::AskBeforeReload => "the time before the question must be at least the ready timeout",
             ConfigError::BadDialogShowDeadline => {
                 "the dialog show deadline must be longer than zero and shorter than the ready timeout"
             }
@@ -90,6 +101,16 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl Config {
+    /// The longest one wait is allowed to grow to (ten minutes): doubling stops there.
+    pub const MAX_WAIT: Duration = Duration::from_secs(600);
+
+    /// How long a visible, reloaded page may stay silent before the question, after `asks` Keep Waiting answers.
+    pub fn ask_wait(&self, asks: u8) -> Duration {
+        self.ask_timeout
+            .saturating_mul(1u32 << asks.min(self.max_doublings).min(16))
+            .min(Self::MAX_WAIT.max(self.ask_timeout))
+    }
+
     /// The config if it is consistent.
     pub fn checked(self) -> Result<Config, ConfigError> {
         if self.tick.is_zero() {
@@ -100,6 +121,9 @@ impl Config {
         }
         if self.ready_timeout < self.tick || self.ping_interval < self.tick {
             return Err(ConfigError::ShorterThanTick);
+        }
+        if self.ask_timeout < self.ready_timeout {
+            return Err(ConfigError::AskBeforeReload);
         }
         if self.ping_interval >= self.pause_gap {
             return Err(ConfigError::PingIntervalNotBelowPauseGap);

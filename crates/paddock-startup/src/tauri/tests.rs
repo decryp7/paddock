@@ -82,9 +82,20 @@ impl Asker<MockRuntime> for FakeAsker {
     }
 }
 
+/// The first design's timings (a reloaded page is asked about after one more `ready_timeout`, Keep Waiting does not lengthen the wait),
+/// so the flows below read in short times; the longer waits are tested on the watchdog itself.
+fn quick() -> Config {
+    Config {
+        ask_timeout: Config::default().ready_timeout,
+        max_doublings: 0,
+        ..Config::default()
+    }
+}
+
 fn builder(seen: &Shared) -> StartupBuilder<MockRuntime> {
     let (a, b, c, d) = (seen.clone(), seen.clone(), seen.clone(), seen.clone());
     Startup::builder()
+        .config(quick())
         .on_unresponsive(move |_app, label, on| lock(&a).unresponsive.push((label.to_string(), on)))
         .on_ready(move |webview, why| lock(&b).ready.push((webview.label().to_string(), why)))
         .safe_mode(move |_app, label| {
@@ -227,14 +238,18 @@ fn a_paused_process_is_said_in_the_log_and_does_not_start_a_question() {
 }
 
 #[test]
-fn the_question_offers_save_report_and_its_answer_runs_the_hook_off_the_thread_and_keeps_waiting() {
+fn the_question_offers_save_report_and_stays_closed_while_the_report_is_written() {
     let seen = Shared::default();
     let (tx, rx) = std::sync::mpsc::channel::<String>();
-    let tx = Mutex::new(tx);
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (tx, released) = (Mutex::new(tx), Mutex::new(released));
     let configured = Startup::builder()
+        .config(quick())
         .asker(FakeAsker(seen.clone()))
         .report(move |_app, label| {
             let _ = lock(&tx).send(label.to_string());
+            // The save dialog is open until the test lets go.
+            let _ = lock(&released).recv();
             Ok(())
         })
         .build()
@@ -257,9 +272,21 @@ fn the_question_offers_save_report_and_its_answer_runs_the_hook_off_the_thread_a
         rx.recv_timeout(Duration::from_secs(10)).unwrap(),
         "w-report"
     );
-    // Waiting again first: the stuck window is asked again after another full timeout.
-    tick(&app, t0, 20_500, 30_000);
-    assert_eq!(lock(&seen).asked.len(), 2, "Save report keeps waiting");
+    // The dialog is still open for minutes: the window is not asked again meanwhile.
+    tick(&app, t0, 20_500, 200_000);
+    assert_eq!(
+        lock(&seen).asked.len(),
+        1,
+        "no second question while the report is being saved"
+    );
+    assert!(startup(&app).with(|w| w.is_asking("w-report")));
+    release.send(()).unwrap();
+    let mut tries = 0;
+    while startup(&app).with(|w| w.is_asking("w-report")) {
+        tries += 1;
+        assert!(tries < 5_000_000, "the window never went back to waiting");
+        std::thread::yield_now();
+    }
     startup(&app).stop();
 }
 
@@ -335,6 +362,7 @@ fn a_failing_safe_mode_restart_is_logged_and_without_one_the_question_has_no_saf
     let seen2 = Shared::default();
     let app2 = app_with(
         Startup::builder()
+            .config(quick())
             .asker(FakeAsker(seen2.clone()))
             .build()
             .unwrap(),
@@ -354,7 +382,7 @@ fn a_failing_safe_mode_restart_is_logged_and_without_one_the_question_has_no_saf
 
 #[test]
 fn without_an_asker_the_question_is_logged_and_the_window_keeps_waiting() {
-    let app = app_with(Startup::builder().build().unwrap());
+    let app = app_with(Startup::builder().config(quick()).build().unwrap());
     let w = window(&app, "w-noask");
     let t0 = Instant::now();
     page_started(&app, &w, t0);

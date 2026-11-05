@@ -357,7 +357,7 @@ export function nextStep(k: NoticeKind | null): string {
     case 'safety':
       return 'Let it cool, then run again.';
     case 'failed':
-      return 'Run it again; if it fails again, save the diagnostics bundle from Diagnostics.';
+      return 'Run it again; if it fails again, send a problem report from Help, Report a problem.';
     default:
       return '';
   }

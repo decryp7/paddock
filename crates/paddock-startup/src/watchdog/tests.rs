@@ -4,6 +4,16 @@
 use super::*;
 use std::time::Duration;
 
+/// The timings of the first design: a reloaded page is asked about after one more `ready_timeout` and Keep Waiting does not lengthen
+/// the wait. The tests below that are not about the longer waits use them, so their numbers stay readable.
+fn quick() -> Config {
+    Config {
+        ask_timeout: Config::default().ready_timeout,
+        max_doublings: 0,
+        ..Config::default()
+    }
+}
+
 fn at(t0: Instant, ms: u64) -> Instant {
     t0 + Duration::from_millis(ms)
 }
@@ -54,7 +64,7 @@ fn ready_at(w: &mut Watchdog, label: &str, t: Instant) {
 #[test]
 fn a_window_that_reports_ready_in_time_is_left_alone() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("main", t0);
     assert!(!w.is_ready("main"));
     assert!(run(&mut w, t0, 0, 9_500).is_empty());
@@ -66,7 +76,7 @@ fn a_window_that_reports_ready_in_time_is_left_alone() {
 #[test]
 fn a_silent_window_is_reloaded_once_then_the_user_is_asked() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("main", t0);
     assert_eq!(
         run(&mut w, t0, 0, 30_000),
@@ -82,7 +92,7 @@ fn a_silent_window_is_reloaded_once_then_the_user_is_asked() {
 #[test]
 fn the_reloaded_page_starting_restarts_its_clock_and_hears_why_once_ready() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("main", t0);
     assert_eq!(run(&mut w, t0, 0, 10_000).len(), 1);
     w.page_started("main", at(t0, 10_200));
@@ -106,7 +116,7 @@ fn the_reloaded_page_starting_restarts_its_clock_and_hears_why_once_ready() {
 #[test]
 fn keep_waiting_gives_another_timeout_before_asking_again() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("d-main-1", t0);
     run(&mut w, t0, 0, 20_000);
     w.keep_waiting("d-main-1", at(t0, 25_000));
@@ -119,7 +129,7 @@ fn keep_waiting_gives_another_timeout_before_asking_again() {
 #[test]
 fn keep_waiting_does_nothing_for_a_window_that_is_not_asked_about() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("main", t0);
     w.keep_waiting("main", at(t0, 9_000));
     assert_eq!(
@@ -137,7 +147,7 @@ fn a_long_pause_of_the_app_itself_restarts_the_clocks_instead_of_firing() {
     // The app process stopped for 20 s (CPU limiter) right after the window started loading: on resume the window
     // must get its full timeout, not be reloaded at once.
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("main", t0);
     assert!(run(&mut w, t0, 0, 2_000).is_empty());
     assert!(
@@ -153,7 +163,7 @@ fn a_paused_webview_that_resumes_before_the_deadline_is_not_reloaded() {
     // Only the content process is paused (the app keeps ticking): if it resumes and reports ready within the timeout,
     // nothing happens; the watchdog is in the app process, which the webview's pause cannot stop.
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("main", t0);
     assert!(run(&mut w, t0, 0, 9_000).is_empty());
     assert_eq!(w.ready("main", at(t0, 9_000)), None);
@@ -163,7 +173,7 @@ fn a_paused_webview_that_resumes_before_the_deadline_is_not_reloaded() {
 #[test]
 fn a_terminated_content_process_is_reported_to_the_reloaded_page() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert!(w.terminated("main", at(t0, 5_000)));
     assert!(!w.is_ready("main"));
@@ -174,7 +184,7 @@ fn a_terminated_content_process_is_reported_to_the_reloaded_page() {
 #[test]
 fn terminated_reloads_are_rate_limited_per_window() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     let allowed: Vec<bool> = (0..5)
         .map(|i| w.terminated("w-crashy", at(t0, i * 1_000)))
         .collect();
@@ -194,7 +204,7 @@ fn terminated_reloads_are_rate_limited_per_window() {
 #[test]
 fn closed_windows_and_unknown_labels_are_ignored() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("w-2", t0);
     w.closed("w-2");
     assert!(run_all(&mut w, t0, 0, 30_000).is_empty());
@@ -210,7 +220,7 @@ fn closed_windows_and_unknown_labels_are_ignored() {
 #[test]
 fn several_windows_time_out_in_label_order() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     for l in ["w-3", "main", "d-main-1"] {
         w.page_started(l, t0);
     }
@@ -250,7 +260,7 @@ fn boot_errors_are_capped_per_page_load() {
 #[test]
 fn a_ready_window_is_pinged_every_interval_with_rising_numbers() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     let pings: Vec<(u64, Action)> = run_all(&mut w, t0, 500, 6_000)
         .into_iter()
@@ -291,7 +301,7 @@ fn a_ready_window_is_pinged_every_interval_with_rising_numbers() {
 #[test]
 fn a_page_that_stops_answering_after_ready_is_marked_unresponsive() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     // Answers the first two pings, then hangs.
     for (t, a) in run_all(&mut w, t0, 500, 4_000) {
@@ -329,7 +339,7 @@ fn a_page_that_stops_answering_after_ready_is_marked_unresponsive() {
 #[test]
 fn an_unresponsive_page_the_user_reloads_hears_why() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert_eq!(
         run(&mut w, t0, 500, 20_000),
@@ -348,7 +358,7 @@ fn an_unresponsive_page_the_user_reloads_hears_why() {
 #[test]
 fn keep_waiting_on_an_unresponsive_page_gives_it_as_many_pings_again() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert_eq!(run(&mut w, t0, 500, 12_000).len(), 1);
     w.keep_waiting("main", at(t0, 13_000));
@@ -362,7 +372,7 @@ fn keep_waiting_on_an_unresponsive_page_gives_it_as_many_pings_again() {
 #[test]
 fn stale_and_unknown_pongs_change_nothing() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert_eq!(w.pong("main", 1, t0), Pong::Alive, "not sent yet");
     let pings = run_all(&mut w, t0, 500, 2_000);
@@ -381,7 +391,7 @@ fn a_paused_app_process_does_not_mark_its_windows_unresponsive() {
     // The app process (the one that pings) is stopped for 30 s: on resume no window has "missed" pings; they start
     // again one interval later.
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     ready_at(&mut w, "w-2", t0);
     assert!(run_answering(&mut w, t0, 500, 3_000).is_empty());
@@ -397,7 +407,7 @@ fn a_paused_app_process_does_not_mark_its_windows_unresponsive() {
 #[test]
 fn a_paused_app_process_with_a_hung_page_still_notices_the_hang_after_resume() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert!(run(&mut w, t0, 500, 7_000).is_empty());
     assert!(
@@ -413,7 +423,7 @@ fn a_paused_app_process_with_a_hung_page_still_notices_the_hang_after_resume() {
 #[test]
 fn hidden_windows_are_not_pinged_and_start_again_when_shown() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert_eq!(
         run_all(&mut w, t0, 500, 3_000).len(),
@@ -447,7 +457,7 @@ fn hidden_windows_are_not_pinged_and_start_again_when_shown() {
 #[test]
 fn a_window_hidden_while_starting_is_pinged_only_once_shown() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("w-2", t0);
     w.set_visible("w-2", false, t0);
     assert_eq!(w.ready("w-2", at(t0, 1_000)), None);
@@ -468,7 +478,7 @@ fn a_window_hidden_while_starting_is_pinged_only_once_shown() {
 #[test]
 fn a_window_shown_again_while_still_starting_keeps_its_start_up_clock() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     w.page_started("w-2", t0);
     w.set_visible("w-2", false, at(t0, 1_000));
     w.set_visible("w-2", true, at(t0, 2_000));
@@ -481,7 +491,7 @@ fn a_window_shown_again_while_still_starting_keeps_its_start_up_clock() {
 #[test]
 fn several_unresponsive_windows_come_in_label_order_each_before_its_ping() {
     let t0 = Instant::now();
-    let mut w = Watchdog::default();
+    let mut w = Watchdog::new(quick());
     ready_at(&mut w, "w-2", t0);
     ready_at(&mut w, "main", t0);
     let at12 = run_all(&mut w, t0, 500, 12_000)
@@ -503,5 +513,113 @@ fn several_unresponsive_windows_come_in_label_order_each_before_its_ping() {
                 seq: 6
             },
         ]
+    );
+}
+
+fn visible_default() -> Watchdog {
+    Watchdog::default()
+}
+
+#[test]
+fn the_default_asks_a_visible_window_no_earlier_than_seventy_seconds_after_its_page_began_loading()
+{
+    let t0 = Instant::now();
+    let mut w = visible_default();
+    w.page_started("main", t0);
+    // Reloaded at 10 s; then 60 s more before the question.
+    assert_eq!(
+        run(&mut w, t0, 0, 80_000),
+        vec![
+            (10_000, Action::Reload("main".into())),
+            (70_000, Action::AskStartup("main".into()))
+        ]
+    );
+}
+
+#[test]
+fn a_hidden_window_is_never_asked_about_and_gets_a_fresh_wait_when_it_is_shown() {
+    let t0 = Instant::now();
+    let mut w = visible_default();
+    w.page_started("main", t0);
+    w.set_visible("main", false, t0);
+    // Ten minutes hidden (a login start): reloaded once, never asked.
+    let acts = run(&mut w, t0, 0, 600_000);
+    assert_eq!(acts, vec![(10_000, Action::Reload("main".into()))]);
+    // Shown at 600 s: the wait starts then, not at once.
+    w.set_visible("main", true, at(t0, 600_000));
+    assert!(run(&mut w, t0, 600_500, 659_000).is_empty());
+    assert_eq!(
+        run(&mut w, t0, 659_500, 661_000),
+        vec![(660_000, Action::AskStartup("main".into()))]
+    );
+}
+
+#[test]
+fn each_keep_waiting_doubles_the_next_wait_up_to_the_limit() {
+    let t0 = Instant::now();
+    let mut w = visible_default();
+    w.page_started("main", t0);
+    let mut asked_at = at(t0, 0);
+    let mut waits = Vec::new();
+    let mut now_ms = 0;
+    // Reload at 10 s, then four questions, each answered with Keep Waiting.
+    for _ in 0..5 {
+        loop {
+            now_ms += 500;
+            let now = at(t0, now_ms);
+            let acts = w.due(now);
+            if acts.iter().any(|a| matches!(a, Action::AskStartup(_))) {
+                waits.push(now.duration_since(asked_at).as_secs());
+                asked_at = now;
+                w.keep_waiting("main", now);
+                break;
+            }
+            assert!(now_ms < 3_000_000, "never asked");
+        }
+    }
+    // 70 s from the start (10 s to the reload counted in the first), then 120, 240, 480 and 480 (three doublings at most).
+    assert_eq!(waits, [70, 120, 240, 480, 480], "{waits:?}");
+}
+
+#[test]
+fn a_page_that_becomes_ready_forgets_the_doubling() {
+    let t0 = Instant::now();
+    let mut w = visible_default();
+    w.page_started("main", t0);
+    run(&mut w, t0, 0, 70_500);
+    w.keep_waiting("main", at(t0, 70_500));
+    assert_eq!(
+        w.ready("main", at(t0, 71_000)),
+        Some(Recovery::Unresponsive)
+    );
+    w.page_started("main", at(t0, 100_000));
+    // A fresh page load starts from the first wait again.
+    let acts = run(&mut w, t0, 100_000, 180_000);
+    assert_eq!(
+        acts.iter()
+            .filter(|(_, a)| matches!(a, Action::AskStartup(_)))
+            .count(),
+        1,
+        "{acts:?}"
+    );
+    assert!(
+        acts.iter()
+            .any(|(t, a)| *t == 170_000 && matches!(a, Action::AskStartup(_))),
+        "{acts:?}"
+    );
+}
+
+#[test]
+fn inconsistent_ask_timeouts_are_refused() {
+    let bad = Config {
+        ask_timeout: Duration::from_secs(1),
+        ..Config::default()
+    };
+    assert_eq!(bad.checked(), Err(crate::ConfigError::AskBeforeReload));
+    assert_eq!(Config::default().ask_wait(0), Duration::from_secs(60));
+    assert_eq!(
+        Config::default().ask_wait(9),
+        Duration::from_secs(480),
+        "the doubling stops at the limit"
     );
 }

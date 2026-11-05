@@ -151,6 +151,15 @@ pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
 /// What could not be removed.
 pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> Result<String, String> {
     quiesce_log();
+    // The lifecycle file lives beside the data folder (macOS) or in the logs folder (Linux): it goes with the helper, before the
+    // folder above it is tried.
+    if let Some(file) = &paths.lifecycle {
+        crate::lifecycle::remove(file).map_err(|e| format!("{} could not be removed: {e}", file.display()))?;
+        if let Some(parent) = file.parent().filter(|p| p.file_name().is_some_and(|n| n == "dyno-helper")) {
+            // Linux: the unit's LogsDirectory (empty now); a folder with something else in it stays.
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
     let dir = &paths.data_dir;
     let meta = match std::fs::symlink_metadata(dir) {
         Ok(m) => m,
@@ -266,7 +275,22 @@ mod tests {
         );
         p.data_dir = dir.join("data");
         p.config = dir.join("data").join("config.json");
+        // Never the machine's real lifecycle file (ER-14): removal tests delete it.
+        p.lifecycle = Some(dir.join("lifecycle").join("lifecycle.log"));
         p
+    }
+
+    #[test]
+    fn uninstall_removes_the_lifecycle_file_and_its_empty_logs_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let file = paths.lifecycle.clone().unwrap();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "t=1 stopped pid=1 version=1\n").unwrap();
+        remove_data_folder_with(&paths, &|| {}).unwrap();
+        assert!(!file.exists());
+        // A missing file is fine (a second uninstall).
+        remove_data_folder_with(&paths, &|| {}).unwrap();
     }
 
     #[test]

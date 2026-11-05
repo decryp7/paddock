@@ -548,18 +548,26 @@ fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
         },
         Choice::Wait => startup.with(|w| w.keep_waiting(label, Instant::now())),
         Choice::SaveReport => {
-            // Waiting again first, as for Reload: the report is written beside the stuck window, which stays watched.
-            startup.with(|w| w.keep_waiting(label, Instant::now()));
-            if let Some(write) = startup.report.clone() {
-                let (app, label) = (app.clone(), label.to_string());
-                std::thread::spawn(move || match write(&app, &label) {
-                    Ok(()) => {
-                        log::info!(Window = label.as_str(); "Problem report saved from the not-responding question")
-                    }
-                    Err(e) => {
-                        log::error!(Window = label.as_str(); "Problem report from the not-responding question failed: {e}")
-                    }
-                });
+            // The question stays open (the window is not asked again) while the report is written and its save dialog is up; only
+            // when the hook returns does the window go back to waiting, with the longer wait.
+            match startup.report.clone() {
+                Some(write) => {
+                    let (app, label) = (app.clone(), label.to_string());
+                    std::thread::spawn(move || {
+                        match write(&app, &label) {
+                            Ok(()) => {
+                                log::info!(Window = label.as_str(); "Problem report from the not-responding question finished")
+                            }
+                            Err(e) => {
+                                log::error!(Window = label.as_str(); "Problem report from the not-responding question failed: {e}")
+                            }
+                        }
+                        if let Some(startup) = app.try_state::<Startup<R>>() {
+                            startup.with(|w| w.keep_waiting(&label, Instant::now()));
+                        }
+                    });
+                }
+                None => startup.with(|w| w.keep_waiting(label, Instant::now())),
             }
         }
     }

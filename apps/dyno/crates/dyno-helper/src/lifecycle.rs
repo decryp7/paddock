@@ -17,31 +17,96 @@ pub fn line(at: i64, event: &str, pid: u32, version: &str) -> String {
     format!("t={at} {event} pid={pid} version={version}")
 }
 
-/// Appends `line` to `path`, keeping the newest [`MAX_LINES`], and makes the file readable by everyone (Unix 0644).
+/// The most bytes of the file ever read (its newest part): a planted huge file costs a bounded read.
+const MAX_READ: u64 = 32 * 1024;
+
+/// Opens the file for reading and writing without following a link and refuses anything but a regular file with one name (a hard
+/// link would let a write reach a file elsewhere). The parent folder must not be a link either.
+fn open_checked(path: &Path) -> std::io::Result<std::fs::File> {
+    let refuse = |why: &str| std::io::Error::new(std::io::ErrorKind::InvalidInput, why.to_string());
+    if let Some(parent) = path.parent() {
+        if std::fs::symlink_metadata(parent).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(refuse("the lifecycle file's folder is a link; it was not written"));
+        }
+    }
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(refuse("the lifecycle file is a link; it was not written"));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o644).custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(refuse("the lifecycle file is not a regular file"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.nlink() > 1 {
+            return Err(refuse(
+                "the lifecycle file has more than one name (a hard link); it was not written",
+            ));
+        }
+    }
+    Ok(file)
+}
+
+/// The newest part of the file (at most [`MAX_READ`] bytes), cut to whole lines.
+fn read_bounded(file: &mut std::fs::File) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let len = file.metadata().map_or(0, |m| m.len());
+    let start = len.saturating_sub(MAX_READ);
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(start)).is_err() || file.take(MAX_READ).read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if start > 0 {
+        text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default()
+    } else {
+        text
+    }
+}
+
+/// Appends `line` to `path`, keeping the newest [`MAX_LINES`], and makes the file readable by everyone (Unix 0644). Never through a
+/// link, never to a file with another name, never in a folder that is a link.
 ///
 /// # Errors
 /// The I/O error; callers log it and carry on.
 pub fn append(path: &Path, line: &str) -> std::io::Result<()> {
-    let existing = match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => {
-            return Err(std::io::Error::other("the lifecycle file is a link; it was not written"));
-        }
-        Ok(_) => std::fs::read_to_string(path).unwrap_or_default(),
-        Err(_) => String::new(),
-    };
+    use std::io::{Seek, SeekFrom};
+    let mut file = open_checked(path)?;
+    let existing = read_bounded(&mut file);
     let mut lines: Vec<&str> = existing.lines().collect();
     lines.push(line);
     let keep = lines.len().saturating_sub(MAX_LINES);
     let mut text = lines[keep..].join("\n");
     text.push('\n');
-    let mut file = std::fs::File::create(path)?;
+    file.set_len(0)?;
+    file.seek(SeekFrom::Start(0))?;
     file.write_all(text.as_bytes())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o644))?;
     }
     Ok(())
+}
+
+/// Removes the file (Uninstall); a missing file is fine, a link is removed as a link and never followed.
+///
+/// # Errors
+/// The I/O error other than "not found".
+pub fn remove(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// Whether the lifecycle file says the previous run did not finish: its last event is `starting` or `serving` (a run that ends writes
@@ -56,11 +121,12 @@ pub fn previous_run_unclean(text: &str) -> bool {
 
 /// Logs how the previous run ended (a warning when it did not finish); call before recording `starting`.
 pub fn log_previous_run(path: &Path) {
-    match std::fs::read_to_string(path) {
-        Ok(text) if previous_run_unclean(&text) => {
+    let text = std::fs::File::open(path).ok().map(|mut f| read_bounded(&mut f));
+    match text {
+        Some(text) if previous_run_unclean(&text) => {
             log::warn!("Helper: the previous run did not end cleanly (its lifecycle file ends in starting or serving); a power cut, a kill or a crash")
         }
-        Ok(_) | Err(_) => log::debug!("Helper: the previous run ended cleanly or this is the first"),
+        _ => log::debug!("Helper: the previous run ended cleanly or this is the first"),
     }
 }
 
@@ -94,6 +160,39 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o644);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_link_a_planted_folder_and_a_huge_file_are_handled() {
+        let dir = tempfile::tempdir().unwrap();
+        // A hard link to a file elsewhere: refused, the other file is untouched.
+        let other = dir.path().join("other");
+        std::fs::write(&other, "keep\n").unwrap();
+        let p = dir.path().join("lifecycle.log");
+        std::fs::hard_link(&other, &p).unwrap();
+        assert!(append(&p, "x").is_err());
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "keep\n");
+        // A folder planted as a link to somewhere else: nothing is written through it.
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let planted = dir.path().join("planted");
+        std::os::unix::fs::symlink(&real, &planted).unwrap();
+        assert!(append(&planted.join("lifecycle.log"), "x").is_err());
+        assert!(!real.join("lifecycle.log").exists());
+        // A huge file costs a bounded read and is cut back to the newest lines.
+        let big = dir.path().join("big.log");
+        std::fs::write(&big, "t=1 starting pid=1 version=1\n".repeat(200_000)).unwrap();
+        append(&big, "t=2 stopped pid=1 version=1").unwrap();
+        let text = std::fs::read_to_string(&big).unwrap();
+        assert!(
+            text.lines().count() <= MAX_LINES && text.ends_with("t=2 stopped pid=1 version=1\n"),
+            "{}",
+            text.len()
+        );
+        remove(&big).unwrap();
+        remove(&big).unwrap();
+        assert!(!big.exists());
     }
 
     #[cfg(unix)]

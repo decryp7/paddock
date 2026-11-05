@@ -51,7 +51,7 @@ pub fn begin(
         PreviousRun::Clean => log::debug!(Process = process; "Previous run ended cleanly"),
         PreviousRun::Crashed => log::warn!(
             Process = process;
-            "Previous run did not end cleanly (no clean-exit mark was left); look for a crash marker or the OS's crash report next to it"
+            "Previous run did not end cleanly (no clean-exit mark was left): a crash, a power cut, or a stop that was not answered in time and ended in a kill (its 'stopping' line, if any, is just before this run in the log); look for a crash marker or the OS's crash report"
         ),
         PreviousRun::StillRunning => {
             log::info!(Process = process; "Another run of this process is still alive")

@@ -100,7 +100,8 @@ fn dyno_helper() -> ServiceSpec {
                     .capabilities(["CAP_SYS_PTRACE", "CAP_DAC_READ_SEARCH", "CAP_SYS_RAWIO", "CAP_SYS_ADMIN", "CAP_NET_ADMIN"])
                     .address_families(["AF_UNIX", "AF_NETLINK"])
                     .state_dir("dyno-helper")
-                    .runtime_dir("dyno-helper"),
+                    .runtime_dir("dyno-helper")
+                    .logs_dir("dyno-helper"),
             ),
         )
         .build()

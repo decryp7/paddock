@@ -20,6 +20,9 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock_shell::logging::install` writes the first line of every run: `Starting <app>` with version, OS, architecture, process id and whether the install is portable.
 
 ### `paddock-diag::export`, `paddock-startup`: a report without the window
+- A not-responding question is asked only about a window the user can see, after a longer wait (`Config::ask_timeout`, 60 s after the reload), and each Keep Waiting doubles the next wait (`Config::max_doublings`, up to 8 minutes; the same for the missed-ping count of a page that stopped answering); a window shown after a reload gets a fresh wait. `Config` gains `ask_timeout` and `max_doublings`, and `ConfigError::AskBeforeReload`. While a report is being written from the question it is not asked again.
+- `paddock-service`: `Sandbox::logs_dir` renders `LogsDirectory=` (0755), the one folder `ProtectSystem=strict` leaves a system service to write that everyone can read; Dyno's helper keeps its lifecycle file there.
+- `paddock_proc::run_bounded`'s `tool.run` replaces any word of the error output that looks like a path with `<path>` and warns once per program and exit.
 - New `paddock_diag::export` (`parse`, `resolve`, `write`): `<app> --export-diagnostics [<path.zip>] [--force]` writes the same redacted report as the dialog, with no window; it is the shared form of Debrief's `report/cli.rs` (Debrief migrates later).
 - `paddock_startup::Choice::SaveReport`, `ask::SAVE_REPORT_LABEL`, `Prompt::with_report` and `StartupBuilder::report(hook)`: when an app gives a report hook, the not-responding question offers "Save a problem report…" (a native dialog holds three buttons, so with Safe Mode offered closing the question is Keep Waiting). `Choice` gains a variant: a `match` on it handles `SaveReport`.
 

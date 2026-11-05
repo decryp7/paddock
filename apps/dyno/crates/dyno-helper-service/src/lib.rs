@@ -64,7 +64,8 @@ pub fn spec() -> ServiceSpec {
                 ])
                 .address_families(["AF_UNIX", "AF_NETLINK"])
                 .state_dir("dyno-helper")
-                .runtime_dir("dyno-helper"),
+                .runtime_dir("dyno-helper")
+                .logs_dir("dyno-helper"),
         );
     ServiceSpec::builder(LABEL, SERVICE_NAME, PROGRAM)
         .unit(PROGRAM)

@@ -59,6 +59,16 @@ pub fn os_of(host: HelperHost) -> Os {
     }
 }
 
+/// The lifecycle file (macOS and Linux; there is none on Windows, where a standard user can make the folder and the Event Log says the
+/// same): `None` event reads how the last run ended, `Some` records one.
+fn note(paths: &HelperPaths, event: Option<&str>) {
+    let Some(path) = &paths.lifecycle else { return };
+    match event {
+        None => crate::lifecycle::log_previous_run(path),
+        Some(event) => crate::lifecycle::record(path, event),
+    }
+}
+
 /// Opens the system endpoint and serves until `stop` is set. Before that it checks, by the facts of the open objects, that the
 /// program, the data folder and the configuration are protected (fail closed), reads the policy file (defaults and a note
 /// when it is not usable), starts the helper's log and the orphan watch. The endpoint is bound as the first instance in a
@@ -84,12 +94,12 @@ pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<Earl
     }
     let log_gate = log.install();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
-    crate::lifecycle::log_previous_run(&paths.lifecycle);
-    crate::lifecycle::record(&paths.lifecycle, "starting");
+    note(paths, None);
+    note(paths, Some("starting"));
     let result = start(paths, stop, &log_gate, early);
     match &result {
-        Ok(()) => crate::lifecycle::record(&paths.lifecycle, "stopped"),
-        Err(e) => crate::lifecycle::record(&paths.lifecycle, &format!("refused:{:?}", e.failure)),
+        Ok(()) => note(paths, Some("stopped")),
+        Err(e) => note(paths, Some(&format!("refused:{:?}", e.failure))),
     }
     // A refusal is written once, by `service_main`, with its cause chain, code and next step.
     result
@@ -157,7 +167,7 @@ fn start(
         )
     })?;
     log::info!(endpoint = paths.endpoint.as_str(), owner = config.owner.to_arg().as_str(), version = crate::VERSION; "Helper: serving");
-    crate::lifecycle::record(&paths.lifecycle, "serving");
+    note(paths, Some("serving"));
     let remove = removal(paths.clone(), stop.clone(), "an Uninstall request from the app", os_log.clone());
     let orphan_remove = removal(paths.clone(), stop.clone(), "the app it serves has been gone for an hour", os_log);
     let _orphan = start_orphan_watch(config.app.clone(), orphan_remove);

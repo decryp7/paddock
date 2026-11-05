@@ -102,6 +102,8 @@ struct Entry {
     recovered: Option<Recovery>,
     visible: bool,
     live: Liveness,
+    /// Keep Waiting answers since the window was last ready: each doubles the next wait (up to [`Config::max_doublings`]).
+    asks: u8,
 }
 
 /// The per-window start-up and liveness state (pure: the caller passes the time).
@@ -148,6 +150,7 @@ impl Watchdog {
             recovered: None,
             visible: true,
             live: Liveness::default(),
+            asks: 0,
         });
         e.phase = Phase::Waiting;
         e.since = now;
@@ -161,6 +164,7 @@ impl Watchdog {
         let e = self.windows.get_mut(label)?;
         e.phase = Phase::Ready;
         e.reloads = 0;
+        e.asks = 0;
         if e.visible {
             e.live.restart(now, &self.config);
         }
@@ -194,10 +198,12 @@ impl Watchdog {
                 Phase::AskingStartup => {
                     e.phase = Phase::Waiting;
                     e.since = now;
+                    e.asks = e.asks.saturating_add(1).min(config.max_doublings);
                 }
                 Phase::Unresponsive => {
                     e.phase = Phase::Ready;
                     e.live.restart(now, &config);
+                    e.asks = e.asks.saturating_add(1).min(config.max_doublings);
                 }
                 Phase::Waiting | Phase::Ready => {}
             }
@@ -235,6 +241,10 @@ impl Watchdog {
             return;
         }
         e.visible = visible;
+        // A window shown after its reload gets a fresh wait: it was never asked about while hidden.
+        if visible && e.phase == Phase::Waiting && e.reloads > 0 {
+            e.since = now;
+        }
         if !matches!(e.phase, Phase::Ready | Phase::Unresponsive) {
             return;
         }
@@ -276,6 +286,13 @@ impl Watchdog {
             .is_some_and(|e| matches!(e.phase, Phase::Ready | Phase::Unresponsive))
     }
 
+    /// Whether the start-up question about window `label` is open (it is not asked again until it is answered).
+    pub fn is_asking(&self, label: &str) -> bool {
+        self.windows
+            .get(label)
+            .is_some_and(|e| e.phase == Phase::AskingStartup)
+    }
+
     /// Whether window `label` is marked unresponsive.
     pub fn is_unresponsive(&self, label: &str) -> bool {
         self.windows
@@ -309,16 +326,20 @@ impl Watchdog {
                 Phase::Waiting => {
                     if paused {
                         e.since = now;
-                    } else if now.saturating_duration_since(e.since) >= config.ready_timeout {
-                        if e.reloads == 0 {
+                    } else if e.reloads == 0 {
+                        if now.saturating_duration_since(e.since) >= config.ready_timeout {
                             e.reloads = 1;
                             e.since = now;
                             e.recovered = Some(Recovery::Unresponsive);
                             out.push(Action::Reload(label.clone()));
-                        } else {
-                            e.phase = Phase::AskingStartup;
-                            out.push(Action::AskStartup(label.clone()));
                         }
+                    } else if e.visible
+                        && now.saturating_duration_since(e.since) >= config.ask_wait(e.asks)
+                    {
+                        // Only a window the user can see is asked about (a hidden one starts at login, its page may be paused by the
+                        // OS), and only after the longer wait; each Keep Waiting doubles it.
+                        e.phase = Phase::AskingStartup;
+                        out.push(Action::AskStartup(label.clone()));
                     }
                 }
                 Phase::Ready | Phase::Unresponsive => {
@@ -336,7 +357,10 @@ impl Watchdog {
                     if e.live.sent > e.live.answered {
                         e.live.misses = e.live.misses.saturating_add(1);
                     }
-                    if e.phase == Phase::Ready && e.live.misses >= config.missed_pings {
+                    if e.phase == Phase::Ready
+                        && e.live.misses
+                            >= config.missed_pings.saturating_mul(1u32 << e.asks.min(16))
+                    {
                         e.phase = Phase::Unresponsive;
                         e.recovered = Some(Recovery::Hung);
                         out.push(Action::Unresponsive(label.clone()));

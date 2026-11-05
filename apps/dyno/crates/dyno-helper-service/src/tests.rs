@@ -34,6 +34,7 @@ fn the_spec_is_valid_and_carries_the_adrs_hardening() {
         "RestrictAddressFamilies=AF_UNIX AF_NETLINK",
         "StateDirectory=dyno-helper",
         "RuntimeDirectory=dyno-helper",
+        "LogsDirectory=dyno-helper\nLogsDirectoryMode=0755",
         "ExecStart=\"/usr/bin/dyno-helper\" \"serve\"",
         "Restart=on-failure",
     ] {

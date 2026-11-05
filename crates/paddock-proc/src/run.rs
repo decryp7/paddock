@@ -322,9 +322,37 @@ fn log_tool_run(name: &str, args: usize, took: Duration, output: &Output) {
     let (how, tail) = describe_run(output);
     if output.success() {
         log::debug!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(); "tool.run");
-    } else {
+    } else if first_failure(name, &how) {
         log::warn!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(), StderrTail = tail.as_str(); "tool.run failed");
+    } else {
+        // The same program failing the same way again (a poll every few seconds) is told once; the repeats are debug lines.
+        log::debug!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(); "tool.run failed again");
     }
+}
+
+/// Whether this program has not yet failed with this exit in this run of the process. Bounded: past [`MAX_FAILURE_KEYS`] distinct pairs
+/// every further failure counts as seen.
+fn first_failure(name: &str, how: &str) -> bool {
+    use std::collections::HashSet;
+    static SEEN: Mutex<Option<HashSet<(String, String)>>> = Mutex::new(None);
+    let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+    let set = seen.get_or_insert_with(HashSet::new);
+    if set.len() >= MAX_FAILURE_KEYS {
+        return false;
+    }
+    set.insert((name.to_string(), how.to_string()))
+}
+
+/// Most distinct (program, exit) failures remembered for [`first_failure`].
+const MAX_FAILURE_KEYS: usize = 256;
+
+/// `text` with every word that looks like a path (it holds a `/` or a `\`) replaced by `<path>`: an error output names files and
+/// folders of the user, and a log must not (the report's redactor is a second line of defence, not the first).
+fn scrub_paths(text: &str) -> String {
+    text.split_whitespace()
+        .map(|w| if w.contains(['/', '\\']) { "<path>" } else { w })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// How a run ended in a word (`0`, `3`, `signal`, `timeout`, `output-cap`) and the last 200 characters of its error output.
@@ -337,8 +365,8 @@ fn describe_run(output: &Output) -> (String, String) {
         Outcome::OutputCap => "output-cap".into(),
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let tail: String = stderr
-        .trim()
+    let scrubbed = scrub_paths(stderr.trim());
+    let tail: String = scrubbed
         .chars()
         .rev()
         .take(200)
@@ -378,6 +406,41 @@ mod tests {
         };
         let (how, tail) = describe_run(&long);
         assert_eq!((how.as_str(), tail.chars().count()), ("timeout", 200));
+    }
+
+    #[test]
+    fn paths_in_the_error_output_never_reach_the_log() {
+        assert_eq!(
+            scrub_paths(
+                "smartctl: cannot open /dev/disk0 and C:\\Users\\alex\\x.txt (permission denied)"
+            ),
+            "smartctl: cannot open <path> and <path> (permission denied)"
+        );
+        let o = Output {
+            outcome: Outcome::TimedOut,
+            stdout: vec![],
+            stderr: b"failed on /Users/sam/secret.doc".to_vec(),
+            truncated: false,
+        };
+        let (_, tail) = describe_run(&o);
+        assert!(!tail.contains("sam") && tail.contains("<path>"), "{tail}");
+    }
+
+    #[test]
+    fn the_same_failure_of_the_same_program_is_told_once() {
+        assert!(first_failure("tool-a-for-the-test", "3"));
+        assert!(
+            !first_failure("tool-a-for-the-test", "3"),
+            "the repeat is not a warning"
+        );
+        assert!(
+            first_failure("tool-a-for-the-test", "4"),
+            "another exit is new"
+        );
+        assert!(
+            first_failure("tool-b-for-the-test", "3"),
+            "another program is new"
+        );
     }
 
     #[test]

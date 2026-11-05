@@ -143,10 +143,12 @@ fn default_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-/// `dyno --export-diagnostics [<path.zip>] [--force]`: the report without a window, for a window that failed to start. `None` when
+/// `dyno-app --export-diagnostics [<path.zip>] [--force]`: the report without a window, for a window that failed to start. `None` when
 /// the arguments do not ask for it; else the exit code (0, or 1 with the reason printed and logged).
 pub fn export_cli(args: &[String], app: &paddock_diag::AppInfo) -> Option<i32> {
     let parsed = paddock_diag::export::parse(args)?;
+    // A release build on Windows has no console: started from a terminal it would print nothing (shared with `dyno-agent`).
+    paddock_proc::console::attach_parent_console();
     let outcome = parsed.and_then(|a| {
         let id = paddock_env::AppId::new(&app.id, &app.name).map_err(|e| e.to_string())?;
         let dirs = paddock_env::AppDirs::for_app(&id).map_err(|e| e.to_string())?;
@@ -175,9 +177,38 @@ pub fn export_cli(args: &[String], app: &paddock_diag::AppInfo) -> Option<i32> {
     })
 }
 
+/// Only one report from the question is written at a time, and the question is not answered again while it is: the save dialog is
+/// modal to nobody, so a second click would open a second dialog.
+static SAVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Tells the person in a native message that the report could not be saved (the question's own flow has no other place to say it).
+fn tell_failed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    app.dialog()
+        .message(format!(
+            "The problem report could not be saved.\n\n{why}\n\nChoose a different folder, or try again."
+        ))
+        .title("Dyno could not save the report")
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
+}
+
 /// The watchdog question's Save a problem report…: a native save dialog (its own thread, never the stuck window), then the report
 /// as `--export-diagnostics` writes it, plus the agent's files when the agent answers.
 pub fn save_report_from_question<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_info: &paddock_diag::AppInfo) -> Result<(), String> {
+    if SAVING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::info!("A problem report is already being saved; the second request was ignored");
+        return Ok(());
+    }
+    let outcome = save_report_inner(app, app_info);
+    SAVING.store(false, std::sync::atomic::Ordering::SeqCst);
+    if let Err(why) = &outcome {
+        tell_failed(app, why);
+    }
+    outcome
+}
+
+fn save_report_inner<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_info: &paddock_diag::AppInfo) -> Result<(), String> {
     use tauri_plugin_dialog::DialogExt;
     let now = chrono::Utc::now();
     let Some(chosen) = app
@@ -287,6 +318,13 @@ fn run_report(runner: &dyn ToolRunner, label: &str, t: &Tool) -> String {
     format!("== {label} ==\n$ {line}\n{body}\n")
 }
 
+/// The newest `max` bytes of a text file, cut to whole lines; the error kind when it cannot be read.
+fn bounded_text(path: &Path, max: u64) -> Result<String, std::io::ErrorKind> {
+    paddock_diag::window::try_tail(path, max)
+        .map(|(bytes, _)| String::from_utf8_lossy(&bytes).into_owned())
+        .map_err(|e| e.kind())
+}
+
 /// The administrator helper, explained without the helper: the status the agent sees (state, message, detail, the last audit
 /// entries), the OS's own view of the registration, the lifecycle file the helper writes for exactly this, and (Windows) the
 /// Event Log entries of the service. Each part that cannot be read says why in the report.
@@ -294,12 +332,12 @@ pub struct HelperReport {
     agent: Arc<dyn AgentPort>,
     runner: Arc<dyn ToolRunner>,
     host: HelperHost,
-    lifecycle: PathBuf,
+    lifecycle: Option<PathBuf>,
 }
 
 impl HelperReport {
     /// The section for `host`, reading the lifecycle file at `lifecycle`.
-    pub fn new(agent: Arc<dyn AgentPort>, runner: Arc<dyn ToolRunner>, host: HelperHost, lifecycle: PathBuf) -> Self {
+    pub fn new(agent: Arc<dyn AgentPort>, runner: Arc<dyn ToolRunner>, host: HelperHost, lifecycle: Option<PathBuf>) -> Self {
         HelperReport {
             agent,
             runner,
@@ -335,16 +373,20 @@ impl Section for HelperReport {
             "What the operating system says about the helper's registration (read as you, no administrator rights)",
             Content::Text(state),
         ));
-        match std::fs::read_to_string(&self.lifecycle) {
-            Ok(text) => out.files.push(SectionFile::app(
-                "helper/lifecycle.txt",
-                "When the helper started, served and stopped, and why it refused to start (t= is seconds since 1970)",
-                Content::Text(text),
-            )),
-            Err(e) => out.notes.push(format!(
-                "The helper's lifecycle file is not readable ({:?}): it has never started on this computer, or it was removed.",
-                e.kind()
-            )),
+        match &self.lifecycle {
+            // Windows has no lifecycle file (a standard user can make the folder a SYSTEM service would write in): the Event Log
+            // entries below say when the service started, stopped and failed.
+            None => out.notes.push("There is no lifecycle file on this system; the Windows Event Log entries show when the helper started and stopped.".into()),
+            Some(path) => match bounded_text(path, 32 * 1024) {
+                Ok(text) => out.files.push(SectionFile::app(
+                    "helper/lifecycle.txt",
+                    "When the helper started, served and stopped, and why it refused to start (t= is seconds since 1970)",
+                    Content::Text(text),
+                )),
+                Err(kind) => out.notes.push(format!(
+                    "The helper's lifecycle file is not readable ({kind:?}). If the folder it lives in does not exist, the helper has never started on this computer; otherwise it was removed or its rights were changed."
+                )),
+            },
         }
         if self.host == HelperHost::Windows {
             let lines = dyno_platform::issues::windows::source_events(self.runner.as_ref(), WINDOWS_SERVICE, EVENT_HOURS, EVENT_MAX);
@@ -468,7 +510,7 @@ impl Section for StartupReport {
 }
 
 /// The install's own logs: the installer's `updates/setup.log` (and the rotated one). The OS's crash report names are the
-/// `os-crash-reports` section of `crash_reports.rs` (one copy, not two).
+/// section the tray login work adds (one copy, not two).
 pub struct InstallReport {
     install_dir: Option<PathBuf>,
 }
@@ -611,7 +653,7 @@ mod tests {
                 }
             },
         });
-        let section = HelperReport::new(agent, tools.clone(), HelperHost::Windows, lifecycle);
+        let section = HelperReport::new(agent, tools.clone(), HelperHost::Windows, Some(lifecycle));
         let c = collect(vec![Arc::new(section)], root.path());
         let st = file_text(&c, "helper/status.json").expect("status.json");
         assert!(st.contains("notRunning") && st.contains("connection refused"), "{st}");
@@ -621,6 +663,33 @@ mod tests {
         let ev = file_text(&c, "helper/event-log.txt").unwrap();
         assert!(ev.contains("Application") && ev.contains("System"), "{ev}");
         assert!(tools.calls.lock().unwrap().iter().any(|l| l.starts_with("wevtutil.exe")));
+    }
+
+    #[test]
+    fn windows_has_no_lifecycle_file_and_says_where_to_look_instead() {
+        let root = tempfile::tempdir().unwrap();
+        let agent = Arc::new(Agent {
+            files: Ok(DiagnosticsFiles::default()),
+            status: Ok(status()),
+        });
+        let tools = Arc::new(Tools {
+            calls: Mutex::new(vec![]),
+            answer: |_| ok(""),
+        });
+        let c = collect(
+            vec![Arc::new(HelperReport::new(agent, tools, HelperHost::Windows, None))],
+            root.path(),
+        );
+        assert!(file_text(&c, "helper/lifecycle.txt").is_none());
+        assert!(
+            c.notes().iter().any(|n| n.contains("no lifecycle file") && n.contains("Event Log")),
+            "{:?}",
+            c.notes()
+        );
+        assert!(
+            file_text(&c, "helper/event-log.txt").is_some(),
+            "the Event Log entries carry the history instead"
+        );
     }
 
     #[test]
@@ -640,7 +709,7 @@ mod tests {
                     agent.clone(),
                     tools,
                     HelperHost::Linux,
-                    root.path().join("missing"),
+                    Some(root.path().join("missing")),
                 )),
                 Arc::new(AgentFiles::new(agent)),
             ],
@@ -758,7 +827,12 @@ mod tests {
         });
         let mut sections = paddock_diag::builtin::all();
         sections.push(Arc::new(AgentFiles::new(agent.clone())));
-        sections.push(Arc::new(HelperReport::new(agent, tools.clone(), HelperHost::Macos, lifecycle)));
+        sections.push(Arc::new(HelperReport::new(
+            agent,
+            tools.clone(),
+            HelperHost::Macos,
+            Some(lifecycle),
+        )));
         sections.push(Arc::new(StartupReport::new(
             tools,
             HelperHost::Macos,

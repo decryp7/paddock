@@ -207,11 +207,11 @@ fn replace_profiles(text: &str) -> (String, u32) {
     (out, count)
 }
 
-/// Replaces MAC addresses (`aa:bb:cc:dd:ee:ff`) with `<mac>`.
+/// Replaces MAC addresses (`aa:bb:cc:dd:ee:ff`, and Windows' `AA-BB-CC-DD-EE-FF`) with `<mac>`.
 fn replace_macs(text: &str) -> (String, u32) {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r"\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b")
+        regex::Regex::new(r"\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b")
             .unwrap_or_else(|e| panic!("mac pattern: {e}"))
     });
     let n = re.find_iter(text).count() as u32;
