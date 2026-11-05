@@ -7,7 +7,7 @@
 //! start (a launch daemon or a system unit needs root or polkit), so there it reports [`Revival::NotSupported`].
 //! Every step is logged with its duration (ER-27).
 
-use crate::parse::{SC_RUNNING, SC_STOPPED, sc_exit, sc_state};
+use crate::parse::{has_last_exit, SC_RUNNING, SC_STOPPED, sc_exit, sc_state};
 use crate::paths::SC;
 use crate::port::System;
 use paddock_env::Os;
@@ -27,7 +27,7 @@ pub const DEFAULT_BUDGET: Duration = Duration::from_secs(15);
 /// What the SCM says about the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceRun {
-    /// Stopped. `win32` is the exit code it stopped with (0: never started or stopped cleanly; 1066: it ended with its own
+    /// Stopped. `win32` is the exit code it stopped with (0 or 1077 (never started since boot): not a failure; 1066: it ended with its own
     /// code, `specific`).
     Stopped {
         /// `WIN32_EXIT_CODE`.
@@ -48,7 +48,7 @@ pub enum ServiceRun {
 impl ServiceRun {
     /// Stopped with an error rather than cleanly.
     pub fn failed(self) -> bool {
-        matches!(self, ServiceRun::Stopped { win32, .. } if win32 != 0)
+        matches!(self, ServiceRun::Stopped { win32, .. } if win32 != 0 && has_last_exit(win32))
     }
 }
 
@@ -411,5 +411,47 @@ mod tests {
         assert_eq!(parse_run("nothing"), ServiceRun::Other(0));
         assert!(parse_run(&query_text("1  STOPPED", 1066, 3).stdout).failed());
         assert!(!parse_run(&query_text("1  STOPPED", 0, 0).stdout).failed());
+    }
+}
+
+#[cfg(test)]
+mod research_never_started {
+    use super::*;
+    use crate::port::Output;
+    use crate::testing::FakeSystem;
+
+    // ERROR_SERVICE_NEVER_STARTED: what `sc query` prints for a service that has not started since boot (parse.rs SC_NEVER_STARTED).
+    #[test]
+    fn a_service_that_never_started_since_boot_is_not_failed() {
+        let text = "SERVICE_NAME: DynoHelper\r\n        STATE              : 1  STOPPED\r\n        WIN32_EXIT_CODE    : 1077  (0x435)\r\n        SERVICE_EXIT_CODE  : 0  (0x0)\r\n";
+        assert!(!parse_run(text).failed());
+    }
+
+    struct Pause(FakeSystem);
+    impl Pace for Pause {
+        fn elapsed(&mut self) -> Duration {
+            self.0.now()
+        }
+        fn pause(&mut self, how_long: Duration) {
+            let mut s = self.0.clone();
+            System::pause(&mut s, how_long);
+        }
+    }
+
+    #[test]
+    fn a_service_that_never_started_since_boot_is_started_without_elevation() {
+        let sys = FakeSystem::new();
+        sys.answer(
+            "sc query",
+            Output::ok("SERVICE_NAME: DynoHelper\r\n        STATE              : 1  STOPPED\r\n        WIN32_EXIT_CODE    : 1077  (0x435)\r\n        SERVICE_EXIT_CODE  : 0  (0x0)\r\n"),
+        );
+        sys.answer("sc start", Output::ok("STATE : 2  START_PENDING"));
+        let mut pace = Pause(sys.clone());
+        let mut s = sys.clone();
+        let probe = sys.clone();
+        let out = revive(&mut s, Os::Windows, "DynoHelper", Duration::from_secs(4), &mut pace, &|_| None, &mut || {
+            probe.commands().iter().any(|c| c.ends_with("sc start DynoHelper"))
+        });
+        assert_eq!(out, Revival::Up, "{:?}", sys.commands());
     }
 }

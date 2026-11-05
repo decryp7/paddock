@@ -373,6 +373,12 @@ pub fn sc_exit_codes(sc_query: &str) -> Option<(u32, u32)> {
 /// `ERROR_SERVICE_NEVER_STARTED`: stopped because it has not started since boot (demand or delayed start, or just created);
 /// there is no last exit, and it is not a failure.
 pub const SC_NEVER_STARTED: u32 = 1077;
+
+/// Whether a stopped service's `WIN32_EXIT_CODE` is a last exit at all: a service that never started since boot
+/// ([`SC_NEVER_STARTED`]) has none. The one check for the backend's read-back and for the unelevated start (rule 55).
+pub fn has_last_exit(win32: u32) -> bool {
+    win32 != SC_NEVER_STARTED
+}
 /// `ERROR_SERVICE_SPECIFIC_ERROR`: the real code is `SERVICE_EXIT_CODE`.
 pub const SC_SERVICE_SPECIFIC: u32 = 1066;
 /// `SERVICE_DEMAND_START` start type.
