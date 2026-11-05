@@ -52,7 +52,7 @@ export async function trayCountdownStep(actor, { idleRuleSeeded = true } = {}) {
   const checks = [];
   const evidence = [];
   let running = false;
-  for (let i = 0; i < 50 && !running; i++) { running = /Counting down/.test(ssh('& "$env:LOCALAPPDATA\\Dyno\\dyno.exe" idle 2>&1 | Out-String')); if (!running) await sleep(4000); }
+  for (let i = 0; i < 50 && !running; i++) { running = /Counting down/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String')); if (!running) await sleep(4000); }
   checks.push({ ok: running, detail: running ? 'an idle countdown is running' : `no idle countdown within 200 s${idleRuleSeeded ? '' : ' (no idle rule seeded)'}` });
   if (!running) return result('Windows: tray menu during an idle countdown (Cancel, Snooze)', checks, evidence);
   const { menu } = await openMenu(actor);
@@ -64,7 +64,7 @@ export async function trayCountdownStep(actor, { idleRuleSeeded = true } = {}) {
   checks.push({ ok: Boolean(cancel), detail: cancel ? `the menu has "${cancel.name}"` : 'the menu has no Cancel entry' });
   if (cancel) {
     await actor.send(`click ${cancel.at}`); await sleep(3000);
-    const after = ssh('& "$env:LOCALAPPDATA\\Dyno\\dyno.exe" idle 2>&1 | Out-String');
+    const after = ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String');
     checks.push({ ok: !/Counting down/.test(after), detail: !/Counting down/.test(after) ? 'Cancel in the tray stopped the countdown' : 'the countdown still runs after Cancel in the tray' });
   } else await actor.send('key ESC');
   return result('Windows: tray menu during an idle countdown (Cancel, Snooze)', checks, evidence, 'the countdown entries are in the tray menu and Cancel works');

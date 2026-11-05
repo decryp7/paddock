@@ -54,7 +54,7 @@ export async function quitViaMenu(browser) {
   return result('Windows: Quit (File > Exit) leaves nothing running', checks, [], 'File > Exit ended the app and the agent');
 }
 
-export async function runUiPhase({ log = console.error, extra = [] } = {}) {
+export async function runUiPhase({ log = console.error, extra = [], after = [] } = {}) {
   const steps = [];
   const actor = new Actor();
   actor.start();
@@ -72,6 +72,8 @@ export async function runUiPhase({ log = console.error, extra = [] } = {}) {
     for (const fn of extra) steps.push(await fn({ browser, actor }));
     steps.push(await quitViaMenu(browser));
     await browser.close().catch(() => {});
+    // After Quit: steps that need the app gone (the same-version update, the uninstall).
+    for (const fn of after) steps.push(await fn());
   } catch (e) {
     steps.push(result('Windows: UI phase', [{ ok: false, detail: e.message }]));
   } finally { t.close(); await actor.send('quit', 5000).catch(() => {}); }

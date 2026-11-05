@@ -14,7 +14,7 @@ export async function scopingStep() {
   const checks = [];
   const evidence = [];
   const pw = randomBytes(12).toString('hex').replace(/[a-f]*$/, '') + 'zq' + randomBytes(4).toString('hex'); // lowercase and digits, never stored
-  const dyno = 'C:\\Users\\paddock-test\\AppData\\Local\\Dyno';
+  const dyno = 'C:\\Program Files\\Dyno'; // the per-machine install (family ADR 0053)
   // The owner: a probe process with a name nobody else has, and the owner's own view (the positive control).
   // A busy probe (a copy of powershell.exe under a unique name) so it ranks in `dyno top` by CPU.
   ssh(`Copy-Item "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" "C:\\Users\\paddock-test\\owner-secret-probe.exe" -Force; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -ArgumentList "-NoProfile","-Command","while($true){ }" -WindowStyle Hidden`);

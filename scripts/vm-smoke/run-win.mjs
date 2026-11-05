@@ -6,13 +6,14 @@
 //
 //   node scripts/vm-smoke/run-win.mjs --app dyno (--installer <setup.exe> | --run <ci run id>) [--out <dir>]
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderResult } from './judge.mjs';
 import { runUiPhase } from './win-ui.mjs';
-import { helperSteps } from './win-helper.mjs';
+import { helperSteps, answerUac } from './win-helper.mjs';
+import { afterQuitSteps } from './win-machine.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
 import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
 
@@ -26,6 +27,8 @@ export const VNC_PORT = 5995;
 const GUEST = 'C:\\paddock-test\\vmcheck';
 const VNC_PW = process.env.PADDOCK_VNC_PW ?? Math.random().toString(36).slice(2, 10); // a per-run password, never printed
 process.env.PADDOCK_VNC_PW ??= VNC_PW; // win-vnc.mjs reads it
+/** The vmx is never edited in place: a temporary file next to it, then a rename (the VM is stopped when this is called). */
+const writeVmx = (text) => { const tmp = `${VMX}.tmp-${process.pid}`; writeFileSync(tmp, text); renameSync(tmp, VMX); };
 const log = (m) => console.error(`vm-smoke(win): ${m}`);
 
 export function parseArgs(argv) {
@@ -79,20 +82,21 @@ async function main(argv) {
     else if (started) {
       log(`reverting the VM to ${SNAPSHOT}`);
       vm(['stop'], 200_000);
-      if (vnc) { writeFileSync(VMX, fixDiskName(stripVnc(readFileSync(VMX, 'utf8')), readdirSync(dirname(VMX)))); log('vmx: VNC lines removed from the current file (no old copy is ever restored)'); }
+      if (vnc) { writeVmx(fixDiskName(stripVnc(readFileSync(VMX, 'utf8')), readdirSync(dirname(VMX)))); log('vmx: VNC lines removed from the current file (no old copy is ever restored)'); }
       vm(['revert', SNAPSHOT], 300_000);
     }
     rmSync(scratch, { recursive: true, force: true });
   };
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
   try {
+    if (!o.vnc) throw new Error('the per-machine installer asks for an administrator: run with --vnc (the UAC prompt is answered over the VM VNC)');
     const exe = o.installer ? resolve(o.installer) : await download(o.run, 'dyno-Windows', scratch);
     if (!existsSync(exe)) throw new Error(`${exe} is not a file`);
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
     // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
     if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
     started = true;
-    { const cur = readFileSync(VMX, 'utf8'); const fixed = fixDiskName(cur, readdirSync(dirname(VMX))); if (fixed !== cur) { writeFileSync(VMX, fixed); log('vmx named a missing redo log: pointed at the newest existing one'); } }
+    { const cur = readFileSync(VMX, 'utf8'); const fixed = fixDiskName(cur, readdirSync(dirname(VMX))); if (fixed !== cur) { writeVmx(fixed); log('vmx named a missing redo log: pointed at the newest existing one'); } }
     {
       // Preflight, logged: the vmx parses, no key twice, the disk it names exists; stale lock folders are only reported (VMware clears its own on a start; never deleted here).
       const dir = dirname(VMX); const files = readdirSync(dir); const c = vmxCheck(readFileSync(VMX, 'utf8'), files);
@@ -105,7 +109,7 @@ async function main(argv) {
       // VNC for the UAC consent (secure desktop). Only between revert and start, on the CURRENT vmx: only the RemoteDisplay.vnc.* lines are added and removed.
       vnc = true;
       vm(['stop'], 200_000);
-      writeFileSync(VMX, withVnc(fixDiskName(readFileSync(VMX, 'utf8'), readdirSync(dirname(VMX))), VNC_PORT, VNC_PW));
+      writeVmx(withVnc(fixDiskName(readFileSync(VMX, 'utf8'), readdirSync(dirname(VMX))), VNC_PORT, VNC_PW));
       log(`vmx: VNC on port ${VNC_PORT} for this run (backup kept until the end)`);
     }
     log('start (bounded 10 min)'); if (vm(['start'], 600_000).code !== 0) throw new Error('the VM did not start or SSH did not answer');
@@ -133,17 +137,20 @@ async function main(argv) {
     ssh(`Remove-Item ${GUEST} -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force ${GUEST}\\out | Out-Null`);
     const guestExe = `${GUEST}\\setup.exe`;
     if (scp(exe, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe`).code !== 0) throw new Error('copying the installer failed');
+    if (existsSync(`${exe}.sig`)) scp(`${exe}.sig`, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe.sig`);
     if (scp(join(HERE, 'win-suite.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-suite.ps1`).code !== 0) throw new Error('copying win-suite.ps1 failed');
     log('running the suite in the interactive session (bounded 40 min)');
     ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot ? ' -KeepRunning' : ''}${o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
     let done = false;
     const answered = new Set();
+    const uacNotes = [];
     for (let i = 0; i < 480 && !done; i++) {
       // The suite asks for administrator-only readings (powercfg) through request files; this host has the paddock-admin key.
-      const listing = clean(ssh(`Get-ChildItem ${GUEST}\\out -Name -Filter 'req-*.txt' -ErrorAction SilentlyContinue; if (Test-Path ${GUEST}\\out\\done.txt) { 'DONE' }`, 60_000).stdout);
-      for (const f of listing.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^req-\d+\.txt$/.test(x))) {
+      const listing = clean(ssh(`Get-ChildItem ${GUEST}\\out -Name -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(req|uac)-\\d+\\.txt$' }; if (Test-Path ${GUEST}\\out\\done.txt) { 'DONE' }`, 60_000).stdout);
+      for (const f of listing.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^(req|uac)-\d+\.txt$/.test(x))) {
         if (answered.has(f)) continue;
         answered.add(f);
+        if (f.startsWith('uac-')) { const u = await answerUac(f.replace(/\.txt$/, '')); log(`${f}: ${u.detail}`); uacNotes.push(u); continue; }
         const cmd = clean(ssh(`Get-Content ${GUEST}\\out\\${f}`, 30_000).stdout).trim();
         if (!/^powercfg \/(requests|waketimers|a)$/.test(cmd)) { ssh(`Set-Content ${GUEST}\\out\\${f.replace('req', 'resp')} 'refused: ${cmd.replace(/'/g, '')}'`, 30_000); continue; }
         // The administrator's answer goes back through the standard user's own shell (base64), so the file is the user's and readable by the suite.
@@ -160,13 +167,13 @@ async function main(argv) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       log('UI phase: snap check, screenshot check on the WebView2 DOM, Quit (bounded)');
       process.env.PADDOCK_WIN_SHOTS = join(out, `${new Date().toISOString().replace(/[:.]/g, '-')}-win-dom-shots`);
-      uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [] });
+      uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [], after: o.vnc ? afterQuitSteps : [] });
     }
     if (o.reboot && done) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       const waitConsole = async () => { for (let i = 0; i < 90; i++) { if (vm(['ssh', 'if ((query user) -match "console\\s+\\d+\\s+Active") {exit 0} else {exit 1}'], 30_000).code === 0) return true; await sleep(4000); } return false; };
       const launchDyno = () => {
-        ssh(`Set-Content C:\\paddock-test\\vmcheck\\launch.ps1 '$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"; Start-Process "$env:LOCALAPPDATA\\Dyno\\dyno-app.exe"'; schtasks /create /tn DynoLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch.ps1" | Out-Null; schtasks /run /tn DynoLaunch | Out-Null`);
+        ssh(`Set-Content C:\\paddock-test\\vmcheck\\launch.ps1 '$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"; Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"'; schtasks /create /tn DynoLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch.ps1" | Out-Null; schtasks /run /tn DynoLaunch | Out-Null`);
       };
       log('restart check: helper on, record, real restart, record again without Repair');
       uiSteps = await runRebootPhase({ vm, waitConsole, launchDyno, log });
@@ -178,6 +185,7 @@ async function main(argv) {
     if (!existsSync(stepsFile)) throw new Error('the suite wrote no steps.json (see run.log: ' + (existsSync(join(dest, 'run.log')) ? readFileSync(join(dest, 'run.log'), 'utf8').slice(-300) : 'absent') + ')');
     const raw = JSON.parse(readFileSync(stepsFile, 'utf8').replace(/^\uFEFF/, ''));
     const steps = (Array.isArray(raw) ? raw : [raw]).map((s) => ({ ...s, checks: s.checks ?? [], evidence: [].concat(s.evidence ?? []).map(String) }));
+    if (steps[0]) { steps[0].evidence.push(...uacNotes.map((u) => `UAC: ${u.detail}`)); const badUac = uacNotes.filter((u) => !u.ok); if (badUac.length) { steps[0].status = 'fail'; steps[0].checks.push(...badUac.map((u) => ({ ok: false, detail: u.detail }))); } }
     if (!done) steps.push({ title: 'Suite finished', status: 'fail', summary: 'the suite did not finish within 40 minutes', checks: [], evidence: [] });
     steps.push(...uiSteps);
     steps.push({ title: 'Tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });

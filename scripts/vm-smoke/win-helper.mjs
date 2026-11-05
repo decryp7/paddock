@@ -37,6 +37,33 @@ export async function openSettings(browser) {
 
 export const cardText = (s, heading) => s.evaluate((n) => { const h = [...document.querySelectorAll('h1,h2,h3,h4')].find((e) => e.textContent.trim().startsWith(n)); const c = h?.closest('section,article,div[class*=card],pd-card') ?? h?.parentElement?.parentElement; return (c?.innerText ?? '').replace(/\s+/g, ' '); }, heading);
 
+/** The per-run password of paddock-admin: lowercase and digits (VNC typing drops the shift state), set once, never stored or printed. */
+export function ensureAdminPassword() {
+  if (runPassword) return runPassword;
+  const pw = randomBytes(12).toString('hex').replace(/[A-F]/g, '').slice(0, 20) + 'x';
+  ssh('$p = [Console]::In.ReadLine(); net user paddock-admin $p | Out-Null', { admin: true, input: `${pw}\n` });
+  runPassword = pw;
+  return pw;
+}
+
+/**
+ * Answers the UAC credential prompt (consent.exe on the secure desktop) over the VM's VNC with the administrator's per-run password: waits (bounded)
+ * for the prompt, takes a screenshot as evidence, types the credentials, and waits (bounded) for the prompt to go. Returns { ok, detail }.
+ */
+export async function answerUac(label, { vnc = new Vnc(), seenSec = 90, goneSec = 60 } = {}) {
+  const pw = ensureAdminPassword();
+  const prompt = () => ssh('if (Get-Process consent -ErrorAction SilentlyContinue) { "yes" } else { "no" }', { admin: true }) === 'yes';
+  let seen = false;
+  for (let i = 0; i < seenSec / 3 && !seen; i++) { seen = prompt(); if (!seen) await sleep(1500); }
+  if (!seen) return { ok: false, detail: `${label}: no UAC prompt (consent.exe) within ${seenSec} s` };
+  await sleep(1500);
+  const shot = vnc.capture(`/tmp/win-uac-${label.replace(/\W+/g, '-')}.png`).code === 0 ? 'screenshot taken' : 'VNC capture failed';
+  vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
+  let gone = false;
+  for (let i = 0; i < goneSec / 3 && !gone; i++) { await sleep(1500); gone = !prompt(); }
+  return { ok: gone, detail: gone ? `${label}: the UAC prompt appeared (${shot}) and was answered over VNC` : `${label}: the UAC prompt was still there ${goneSec} s after the answer (${shot})` };
+}
+
 /** Turn on: the UAC credential prompt (the test account is a standard user) is answered over VNC with a per-run password for paddock-admin. */
 export async function helperOn(browser, { vnc = new Vnc() } = {}) {
   const checks = [];
@@ -44,9 +71,7 @@ export async function helperOn(browser, { vnc = new Vnc() } = {}) {
   const s = await openSettings(browser);
   checks.push({ ok: Boolean(s), detail: s ? 'opened Settings > Dyno' : 'the Settings dialog did not open' });
   if (!s) return result('Windows: admin helper Turn on (UAC consent over VNC)', checks);
-  const pw = randomBytes(12).toString('hex').replace(/[A-F]/g, '').slice(0, 20) + 'x'; // lowercase and digits: VNC typing drops the shift state
-  ssh('$p = [Console]::In.ReadLine(); net user paddock-admin $p | Out-Null', { admin: true, input: `${pw}\n` });
-  runPassword = pw;
+  const pw = ensureAdminPassword();
   await s.getByRole('button', { name: /Turn on administrator readings/ }).click();
   evidence.push('UAC: "Do you want to allow this app from an unknown publisher to make changes" (dyno-helper.exe), answered with the paddock-admin credentials over the VM VNC');
   await sleep(6000);
@@ -96,6 +121,33 @@ export async function diskHealth(browser) {
   evidence.push(`Lifespan: ${life.slice(0, 300)}`);
   checks.push({ ok: !/not installed/i.test(life), detail: /not installed/i.test(life) ? 'Lifespan says smartmontools is not installed' : 'Lifespan reads SSD wear' });
   return result('Windows: disk health install, card and Lifespan through the helper', checks, evidence, 'installed, the card names the copy, Lifespan reads');
+}
+
+/**
+ * Repair through the card: the service is stopped (as the servedCounts step leaves it), so the card says "Not running" and offers "Repair the helper";
+ * pressing it asks for the administrator (UAC, answered over VNC) and the service runs again with the card "On".
+ */
+export async function helperRepair(browser) {
+  const checks = [];
+  const evidence = [];
+  ssh('Stop-Service DynoHelper -ErrorAction SilentlyContinue', { admin: true, ms: 60_000 });
+  const s = await openSettings(browser);
+  let card = '';
+  for (let i = 0; i < 10; i++) { await s.getByRole('button', { name: /^Check again$/ }).first().click().catch(() => {}); await sleep(3000); card = await cardText(s, 'Administrator readings'); if (/Not running|Needs repair|Repair/.test(card)) break; }
+  evidence.push(`card before: ${card.slice(0, 200)}`);
+  const btn = s.getByRole('button', { name: /Repair the helper/ });
+  checks.push({ ok: (await btn.count()) > 0, detail: (await btn.count()) > 0 ? `the card offers "Repair the helper" (${card.slice(0, 60)})` : `no "Repair the helper" button; the card says: ${card.slice(0, 80)}` });
+  if (!(await btn.count())) return result('Windows: Repair through the card (real UAC)', checks, evidence);
+  await btn.first().click();
+  const uac = await answerUac('repair');
+  checks.push({ ok: uac.ok, detail: uac.detail });
+  let status = '';
+  for (let i = 0; i < 30 && status !== 'Running'; i++) { await sleep(3000); status = ssh('(Get-Service DynoHelper -ErrorAction SilentlyContinue).Status', { admin: true }); }
+  checks.push({ ok: status === 'Running', detail: status === 'Running' ? 'the DynoHelper service is Running again' : `the DynoHelper service is "${status || 'absent'}" 90 s after Repair` });
+  for (let i = 0; i < 10; i++) { await s.getByRole('button', { name: /^Check again$/ }).first().click().catch(() => {}); await sleep(3000); card = await cardText(s, 'Administrator readings'); if (/^Administrator readings On/.test(card)) break; }
+  evidence.push(`card after: ${card.slice(0, 200)}`);
+  checks.push({ ok: /^Administrator readings On/.test(card), detail: /^Administrator readings On/.test(card) ? 'the card reads "On" after Repair' : `the card says: ${card.slice(0, 80)}` });
+  return result('Windows: Repair through the card (real UAC)', checks, evidence, 'Repair asked for the administrator, the service runs, the card reads On');
 }
 
 /** Turn off: the service and the helper's data folder are gone. */
@@ -291,5 +343,6 @@ export const helperSteps = [
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser))),
   () => scopingStep(),
   () => servedCounts(),
+  ({ browser }) => helperRepair(browser),
   ({ browser }) => helperOff(browser),
 ];

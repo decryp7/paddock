@@ -7,8 +7,11 @@ param([string]$Installer, [string]$Out = 'C:\paddock-test\vmcheck\out', [int]$Cd
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Out | Out-Null
 $steps = New-Object System.Collections.ArrayList
+# Dyno 1.1.0 installs once for every user of the PC (family ADR 0053): the programs are under Program Files ($prog); the user's own data
+# (settings.json, agent.json, logs) stays under %LOCALAPPDATA%\Dyno ($bin).
 $bin = Join-Path $env:LOCALAPPDATA 'Dyno'
-$dyno = Join-Path $bin 'dyno.exe'
+$prog = Join-Path $env:ProgramFiles 'Dyno'
+$dyno = Join-Path $prog 'dyno.exe'
 function Log($m) { "$(Get-Date -Format o) $m" | Add-Content "$Out\run.log" }
 function New-Step($title) { [pscustomobject]@{ title = $title; status = 'pass'; summary = ''; checks = New-Object System.Collections.ArrayList; evidence = New-Object System.Collections.ArrayList } }
 function Check($s, [bool]$ok, $detail) { [void]$s.checks.Add(@{ ok = $ok; detail = "$detail" }); if (-not $ok) { $s.status = 'fail' } }
@@ -29,7 +32,7 @@ function Procs { Get-CimInstance Win32_Process -Filter "Name like 'dyno%'" | Sel
 function Stop-All { Get-Process dyno-app, dyno-agent, dyno-bench -ErrorAction SilentlyContinue | Stop-Process -Force; Wait-Until { -not (Get-Process dyno-app, dyno-agent -ErrorAction SilentlyContinue) } 20 | Out-Null }
 function Start-App([switch]$Cdp) {
   if ($Cdp) { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$CdpPort" } else { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
-  Start-Process (Join-Path $bin 'dyno-app.exe')
+  Start-Process (Join-Path $prog 'dyno-app.exe')
 }
 # `powercfg /requests`, `/waketimers` and `/a` need an administrator; the suite runs as the standard user (like a person), so it asks the host
 # (which has the paddock-admin SSH key) through a request file and waits, bounded, for the answer file.
@@ -47,16 +50,29 @@ function Write-Json($Path, $Obj) { [IO.File]::WriteAllText($Path, ($Obj | Conver
 function Ready { Wait-Until { (Dyno 'status').code -eq 0 } 120 2000 }
 
 Log "start suite, installer=$Installer"
-# 1. Install: per user, silent, no UAC.
-$s = New-Step 'Install (per-user NSIS, silent)'
+# 1. Install: per machine, silent. The installer asks for an administrator (a standard user types the administrator's credentials): the host answers
+# that UAC prompt over the VM's VNC when it sees uac-N.txt (run-win.mjs --vnc). Without the host's answer the install waits 5 minutes and fails.
+$s = New-Step 'Install (per-machine NSIS, silent, UAC over VNC)'
 Stop-All
-$p = Start-Process $Installer -ArgumentList '/S' -PassThru -Wait
-Check $s ($p.ExitCode -eq 0) "installer exit code $($p.ExitCode)"
-foreach ($f in 'dyno-app.exe', 'dyno-agent.exe', 'dyno.exe') { Check $s (Test-Path (Join-Path $bin $f)) "$f present under $bin" }
-$ver = (Get-Item (Join-Path $bin 'dyno-app.exe')).VersionInfo.ProductVersion
+Set-Content (Join-Path $Out 'uac-1.txt') 'install'
+$p = Start-Process $Installer -ArgumentList '/S' -PassThru
+$uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Dyno'
+$installed = Wait-Until { if ((Test-Path (Join-Path $prog 'dyno-app.exe')) -and (Test-Path $uk) -and -not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { $true } } 300 2000
+$code = try { $p.ExitCode } catch { 'unreadable' }
+Check $s ([bool]$installed) $(if ($installed) { "installer ended (exit code $code)" } else { 'the installer did not finish in 300 s (no UAC answer?)' })
+if ($code -ne 'unreadable') { Check $s ($code -eq 0) "installer exit code $code" }
+foreach ($f in 'dyno-app.exe', 'dyno-agent.exe', 'dyno.exe') { Check $s (Test-Path (Join-Path $prog $f)) "$f present under $prog" }
+Check $s ($prog -like "$env:ProgramFiles*") "installed under Program Files ($prog)"
+Check $s (Test-Path $uk) 'the machine-wide (HKLM) uninstall entry exists'
+Check $s (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Dyno\dyno-app.exe'))) 'no per-user copy under %LOCALAPPDATA%\Dyno'
+$acl = (icacls $prog | Out-String)
+Check $s (-not ($acl -match 'BUILTIN\\Users:.*\((W|M|F)')) 'a standard user has no write right in the install folder'
+[void]$s.evidence.Add((($acl -split "`r?`n" | Where-Object { $_ } | Select-Object -First 8) -join ' | '))
+$ver = (Get-Item (Join-Path $prog 'dyno-app.exe')).VersionInfo.ProductVersion
 Check $s ($ver -match '^\d+\.\d+\.\d+') "dyno-app.exe version $ver"
 [void]$s.evidence.Add("version $ver")
-Finish $s "installed $ver without an administrator prompt"
+Stop-All   # the installer starts the app for the desktop user when it ends; the cold start below begins from nothing
+Finish $s "installed $ver under Program Files after a real UAC prompt"
 
 # 2. Cold start: one app, one agent, the agent's parent is the app, the discovery file names the live agent.
 $s = New-Step 'Cold start, one instance'
@@ -83,7 +99,7 @@ Finish $s 'one app, one agent under it, agent.json names it'
 # 3. Second launch while running: the same pids.
 $s = New-Step 'Second launch while running'
 $before = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
-Start-Process (Join-Path $bin 'dyno-app.exe'); Start-Sleep -Seconds 8
+Start-Process (Join-Path $prog 'dyno-app.exe'); Start-Sleep -Seconds 8
 $after = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
 Check $s (($before -join ',') -eq ($after -join ',')) "processes before [$($before -join ',')] and after [$($after -join ',')]"
 Finish $s 'single instance: no new process'
