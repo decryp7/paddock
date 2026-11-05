@@ -38,6 +38,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - macOS: the Network page lists every program's connections, also when Start at login is off.
 - "Is this normal?" now counts days by your own calendar and tells you when it will be ready.
 - macOS: the menu-bar icons no longer flash on and off.
+- macOS: Dyno no longer removes and makes its menu-bar items again when its own check thinks they are not on screen. In one test run that re-make was followed by a crash of the app. The cause of items missing after a login is not found yet: the log now records whether the session has a menu bar, ControlCenter's start, and whether an earlier run ended in a crash, and Report a problem lists the names and times of the system's crash reports for Dyno.
 - Windows: after a restart the administrator helper starts with the computer, and when it cannot start, the log and the Windows Event Log say why.
 
 ### Changed

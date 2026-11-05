@@ -103,5 +103,4 @@ Measured on macOS 26.6.2 (Tart guest, the tray-research runs of 2026-11-04/05): 
 Position ...` or `NSStatusItem Visible ...` key for Dyno's items, so `tray_position::save` copies nothing ("0 key(s) ... saved" in the
 log) and `restore` has nothing to put back. ControlCenter, not the app's defaults, keeps the position on macOS 26. The mechanism above
 therefore does not keep an item's place there. It is not redesigned in 1.1.0: the places are still unproven on macOS 26 and the
-copy is harmless. Separately, the autosave name is now set before the status item connects (vendored `tray-icon`, PATCHES.md), and a
-hidden start activates the app once so ControlCenter shows the items at all (lessons.md, 2026-11-05).
+copy is harmless. Separately, the autosave name is now set before the status item connects (vendored `tray-icon`, PATCHES.md); this is housekeeping with no measured effect on whether the items show.
