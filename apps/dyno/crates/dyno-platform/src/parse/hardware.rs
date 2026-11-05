@@ -50,6 +50,9 @@ pub enum Refusal {
     Access,
     /// The drive does not expose SMART data to apps.
     Unsupported,
+    /// smartctl could not open this one drive for a reason that is not rights (macOS: a USB drive, which has no SMART passthrough
+    /// without a third-party driver). A per-drive fact, not a failure of the reading.
+    OpenFailed,
 }
 
 /// Why a `smartctl` run produced no data, as a kind; `None` when it produced data or said nothing useful.
@@ -68,6 +71,8 @@ pub fn smartctl_refusal_kind(json: &str) -> Option<Refusal> {
         Some(Refusal::Access)
     } else if joined.contains("unsupported") || joined.contains("unknown usb bridge") || joined.contains("smart support is: unavailable") {
         Some(Refusal::Unsupported)
+    } else if joined.contains("iocreateplugininterface") || (joined.contains("open device") && joined.contains("failed")) {
+        Some(Refusal::OpenFailed)
     } else {
         None
     }
@@ -78,6 +83,7 @@ pub fn smartctl_refusal(json: &str) -> Option<String> {
     smartctl_refusal_kind(json).map(|k| match k {
         Refusal::Access => "Reading SSD wear needs administrator rights.".to_string(),
         Refusal::Unsupported => "This drive does not expose SMART data to apps.".to_string(),
+        Refusal::OpenFailed => "smartctl could not open this drive.".to_string(),
     })
 }
 

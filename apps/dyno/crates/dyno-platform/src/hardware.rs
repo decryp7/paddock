@@ -8,7 +8,7 @@
 )]
 
 use crate::parse::hardware::{parse_smartctl_ssd, smartctl_refusal_kind, Refusal};
-use crate::parse::smart::{parse_scan, ScanDevice};
+use crate::parse::smart::{scan_devices, ScanDevice};
 use crate::smartctl_search::{self, SearchEnv, SystemEnv};
 use dyno_core::hardware::{BatteryCapacity, DiskWear, OsThrottle};
 use dyno_core::helper::HelperHost;
@@ -121,7 +121,8 @@ fn system_smartctl() -> Vec<PathBuf> {
     .collect()
 }
 
-fn this_host() -> HelperHost {
+/// The system this build runs on, as the words of a message need it.
+pub fn this_host() -> HelperHost {
     if cfg!(windows) {
         HelperHost::Windows
     } else if cfg!(target_os = "macos") {
@@ -334,6 +335,25 @@ impl SmartctlWear {
     }
 }
 
+/// Why one drive could not be opened, in plain words for this system.
+fn open_failed_reason(host: HelperHost, name: &str) -> String {
+    if host == HelperHost::Macos && name.to_ascii_lowercase().contains("usb") {
+        "macOS cannot read health from USB drives.".into()
+    } else {
+        "smartctl could not open one of the drives.".into()
+    }
+}
+
+/// A device name for the log: the first characters (an Apple silicon name is a path of several hundred).
+fn short(name: &str) -> String {
+    let head: String = name.chars().take(48).collect();
+    if head.len() < name.len() {
+        format!("{head}... ({} characters)", name.len())
+    } else {
+        head
+    }
+}
+
 /// The arguments for one drive of the scan: `-a -j [-d <type>] <name>`.
 fn drive_args(d: &ScanDevice) -> Vec<&str> {
     let mut args = vec!["-a", "-j"];
@@ -361,35 +381,53 @@ impl DiskWearSource for SmartctlWear {
                 return Reading::unavailable(format!("smartctl could not list the drives: {e}"));
             }
         };
-        let devices = parse_scan(&scan, MAX_DRIVES);
+        let (devices, rejected) = scan_devices(&scan, MAX_DRIVES);
+        log::info!(target: "dyno::hardware", "SSD wear: the scan listed {} drive(s), {rejected} left out as unusable names", devices.len());
         if devices.is_empty() {
-            return Reading::unavailable("smartctl found no drives it can read.");
+            return Reading::unavailable(if rejected > 0 {
+                "smartctl listed drives, but none with a name Dyno can pass to it safely."
+            } else {
+                "smartctl found no drives it can read."
+            });
         }
         let (mut found, mut denied, mut other) = (Vec::new(), Vec::new(), None::<String>);
+        // Per-drive reasons of drives that cannot be read for a reason that is no failure of the whole reading (USB on macOS).
+        let mut unreadable: Vec<String> = Vec::new();
         for d in &devices {
             let run = match self.run(&program, &drive_args(d)) {
                 Ok(r) => r,
                 Err(e) => {
-                    log::warn!(target: "dyno::hardware", "SSD wear: {} skipped, smartctl did not run: {e}", d.name);
+                    log::warn!(target: "dyno::hardware", "SSD wear: {} skipped, smartctl did not run: {e}", short(&d.name));
                     other = other.or(Some(e));
                     continue;
                 }
             };
             match parse_smartctl_ssd(&run.stdout) {
                 Some(w) => {
-                    log::info!(target: "dyno::hardware", "SSD wear: {} read (exit {:?}, {} ms)", d.name, run.code, run.ms);
-                    found.push(w);
+                    // One SSD can be listed several times (Apple silicon: a namespace each): it counts once.
+                    let again = found.iter().any(|f: &DiskWear| f.id == w.id);
+                    log::info!(target: "dyno::hardware", "SSD wear: {} read (exit {:?}, {} ms){}", short(&d.name), run.code, run.ms, if again { ", the same SSD as an earlier entry" } else { "" });
+                    if !again {
+                        found.push(w);
+                    }
                 }
                 None => {
                     let why = match smartctl_refusal_kind(&run.stdout) {
                         Some(Refusal::Access) => {
-                            denied.push(d.name.clone());
+                            denied.push(short(&d.name));
                             "the OS withheld it from this account (needs Administrator readings)"
                         }
                         Some(Refusal::Unsupported) => "it does not expose SMART data to apps",
+                        Some(Refusal::OpenFailed) => {
+                            let reason = open_failed_reason(self.host, &d.name);
+                            if !unreadable.contains(&reason) {
+                                unreadable.push(reason);
+                            }
+                            "smartctl could not open this drive (not a failure of the other drives)"
+                        }
                         None => "it reports no SSD wear counters (a hard disk, or no counters)",
                     };
-                    log::info!(target: "dyno::hardware", "SSD wear: {} skipped (exit {:?}, {} ms): {why}", d.name, run.code, run.ms);
+                    log::info!(target: "dyno::hardware", "SSD wear: {} skipped (exit {:?}, {} ms): {why}", short(&d.name), run.code, run.ms);
                 }
             }
         }
@@ -402,6 +440,8 @@ impl DiskWearSource for SmartctlWear {
                 needs_admin_text(self.host, &denied)
             } else if let Some(e) = other {
                 format!("smartctl could not read the drives: {e}")
+            } else if !unreadable.is_empty() {
+                unreadable.join(" ")
             } else {
                 "No SSD reports wear counters to apps.".into()
             })
@@ -660,6 +700,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_copy_installed_after_the_reader_was_made_is_found_without_a_restart() {
+        let _serial = script_tests();
         let work = temp("late-tools");
         let tool = fake_smartctl(
             &work,
@@ -675,6 +716,14 @@ mod tests {
         assert_eq!(reader.read().value().unwrap()[0].percent_used, Some(3.0));
         let _ = std::fs::remove_dir_all(work);
         let _ = std::fs::remove_dir_all(tools);
+    }
+
+    /// Tests that write a script and run it take turns. Without it, a test that forks while another has its script open for writing
+    /// makes that run fail with "Text file busy" (ETXTBSY) on Linux. It orders these tests among themselves only.
+    #[cfg(unix)]
+    fn script_tests() -> std::sync::MutexGuard<'static, ()> {
+        static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[cfg(unix)]
@@ -698,6 +747,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn smartctl_output_is_read_even_though_its_exit_status_is_a_bit_mask() {
+        let _serial = script_tests();
         let dir = temp("smart");
         let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/nvme0"}]}"#, crate::parse::hardware::tests_nvme());
         let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing"), tool]).read();
@@ -708,7 +758,71 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn apple_silicon_scan_with_three_long_names_gives_one_ssd_once() {
+        let _serial = script_tests();
+        let dir = temp("smart-ios");
+        let scan = crate::parse::smart::tests::apple_silicon_scan();
+        let tool = fake_smartctl(&dir, &scan, crate::parse::hardware::tests_nvme());
+        let r = SmartctlWear::new(vec![tool]).with_host(HelperHost::Macos).read();
+        let all = r.value().unwrap_or_else(|| panic!("a read with data is a success, got {r:?}"));
+        assert_eq!(all.len(), 1, "three namespaces of one SSD are one disk: {all:?}");
+        assert_eq!(all[0].percent_used, Some(3.0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A smartctl that answers per drive: the USB entries fail to open (as on macOS, no USB SMART passthrough), the rest read.
+    #[cfg(unix)]
+    fn usb_failing_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let usb = r#"{"smartctl":{"exit_status":2,"messages":[{"string":"Smartctl open device: IOService:/x/usb-drd1@B000000/IOBlockStorageServices failed: IOCreatePlugInInterfaceForService failed","severity":"error"}]}}"#;
+        std::fs::write(dir.join("scan.json"), scan).unwrap();
+        std::fs::write(dir.join("drive.json"), drive).unwrap();
+        std::fs::write(dir.join("usb.json"), usb).unwrap();
+        let script = dir.join("smartctl");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}/scan.json'; exit 0; fi\ncase \"$*\" in *usb-*) cat '{0}/usb.json'; exit 2;; *) cat '{0}/drive.json'; exit 4;; esac\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_usb_drive_does_not_hide_the_internal_ssd_and_is_explained_truthfully() {
+        let _serial = script_tests();
+        let dir = temp("smart-usb");
+        let scan = crate::parse::smart::tests::internal_and_usb_scan();
+        let tool = usb_failing_smartctl(&dir, &scan, crate::parse::hardware::tests_nvme());
+        let r = SmartctlWear::new(vec![tool]).with_host(HelperHost::Macos).read();
+        let all = r.value().unwrap_or_else(|| panic!("the internal SSD reads, got {r:?}"));
+        assert_eq!((all.len(), all[0].percent_used), (1, Some(3.0)));
+        // Only USB drives: the reason is about USB on macOS, and never sends a person to the helper or administrator rights.
+        let only_usb = temp("smart-usb-only");
+        let usb_scan = scan.replace(
+            "ans@A000000/AppleANS3NVMeController/NS_01@1",
+            "usb-drd0@B000000/IOBlockStorageServices",
+        );
+        let tool = usb_failing_smartctl(&only_usb, &usb_scan, "{}");
+        let r = SmartctlWear::new(vec![tool]).with_host(HelperHost::Macos).read();
+        let Reading::Unavailable(m) = r else { panic!("{r:?}") };
+        assert!(m.contains("USB"), "{m}");
+        assert!(
+            !m.contains("helper") && !m.contains("Administrator") && !m.contains("administrator"),
+            "{m}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(only_usb);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn smartctl_refusals_name_the_next_step() {
+        let _serial = script_tests();
         let dir = temp("smartdeny");
         let denied = r#"{"smartctl":{"messages":[{"string":"open device failed: Permission denied"}]}}"#;
         let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/disk0"}]}"#, denied);
@@ -749,6 +863,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_device_type_of_the_scan_is_passed_to_smartctl() {
+        let _serial = script_tests();
         use std::os::unix::fs::PermissionsExt;
         let dir = temp("smart-d");
         let script = dir.join("smartctl");
@@ -777,6 +892,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_drive_that_prints_nothing_is_explained() {
+        let _serial = script_tests();
         use std::os::unix::fs::PermissionsExt;
         let dir = temp("smart-run");
         let script = dir.join("smartctl");

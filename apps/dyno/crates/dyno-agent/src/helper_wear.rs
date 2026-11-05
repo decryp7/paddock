@@ -8,6 +8,7 @@
 use crate::helper_first::{HelperCalls, HelperFirst, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::hardware::DiskWear;
+use dyno_core::helper::HelperHost;
 use dyno_core::helper_requests::SmartQuery;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::{DiskWearSource, PlatformError};
@@ -20,12 +21,22 @@ pub const READ_LOCALLY_WHEN_HELPER_OFF: bool = true;
 /// The wear reading: the helper's `Smart` request, or the agent's own reader.
 pub struct SmartWear {
     local: Box<dyn DiskWearSource>,
+    host: HelperHost,
 }
 
 impl SmartWear {
     /// The reading with `local` as the agent's own reader.
     pub fn new(local: Box<dyn DiskWearSource>) -> SmartWear {
-        SmartWear { local }
+        SmartWear {
+            local,
+            host: dyno_platform::hardware::this_host(),
+        }
+    }
+
+    /// Reads as if on `host` (tests).
+    pub fn with_host(mut self, host: HelperHost) -> SmartWear {
+        self.host = host;
+        self
     }
 }
 
@@ -34,7 +45,16 @@ pub type HelperFirstWear = HelperFirst<SmartWear>;
 
 /// A wear reader over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says.
 pub fn helper_first_wear(port: Box<dyn crate::helper_first::HelperPort>, local: Box<dyn DiskWearSource>) -> HelperFirstWear {
-    HelperFirst::new(SmartWear::new(local), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
+    helper_first_wear_on(dyno_platform::hardware::this_host(), port, local)
+}
+
+/// [`helper_first_wear`] as if on `host` (tests, so they read the same on every OS).
+pub fn helper_first_wear_on(
+    host: HelperHost,
+    port: Box<dyn crate::helper_first::HelperPort>,
+    local: Box<dyn DiskWearSource>,
+) -> HelperFirstWear {
+    HelperFirst::new(SmartWear::new(local).with_host(host), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
 }
 
 impl HelperReading for SmartWear {
@@ -47,6 +67,11 @@ impl HelperReading for SmartWear {
     fn class(&self) -> ReadClass {
         // smartctl takes as long as it takes, and the transport gives the kind minutes: never the 2 s of a live reading.
         ReadClass::Bulk
+    }
+
+    fn helper_applies(&self) -> bool {
+        // On macOS the helper has no smartctl: the agent's own copy runs as the person (the helper's `NotHere`).
+        self.host != HelperHost::Macos
     }
 
     fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Vec<DiskWear>, CallError> {
@@ -90,6 +115,7 @@ impl DiskWearSource for HelperFirstWear {
 mod tests {
     use super::*;
     use crate::helper_first::testkit::{centre, port, Net};
+    use dyno_core::helper::HelperHost;
     use dyno_core::helper_wire::HelperReply;
     use dyno_core::read_via::ReadVia;
     use dyno_core::smart::{SmartReply, SmartSkip};
@@ -135,7 +161,10 @@ mod tests {
     fn wear(up: bool, answers: Vec<Result<HelperReply, crate::helper_link::TransportError>>) -> (HelperFirstWear, Arc<AtomicU32>) {
         let calls = Arc::new(AtomicU32::new(0));
         let c = centre(&Net::new(up, answers), &FakeClock::new());
-        (helper_first_wear(port(&c), Box::new(Counting(calls.clone()))), calls)
+        (
+            helper_first_wear_on(HelperHost::Linux, port(&c), Box::new(Counting(calls.clone()))),
+            calls,
+        )
     }
 
     #[test]
@@ -183,7 +212,7 @@ mod tests {
         assert!(matches!(DiskWearSource::read(&mut r), Reading::Unavailable(m) if m.contains("Administrator readings")));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         let c = centre(&Net::new(false, vec![]), &FakeClock::new());
-        let mut ok = helper_first_wear(port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
+        let mut ok = helper_first_wear_on(HelperHost::Linux, port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
         assert!(DiskWearSource::read(&mut ok).value().is_some());
     }
 
@@ -191,7 +220,7 @@ mod tests {
     fn a_smart_read_gets_no_live_deadline_because_smartctl_takes_as_long_as_it_takes() {
         let net = Net::new(true, vec![Ok(reply(vec![nvme()], vec![]))]);
         let c = centre(&net, &FakeClock::new());
-        let mut r = helper_first_wear(port(&c), Box::new(Counting(Arc::default())));
+        let mut r = helper_first_wear_on(HelperHost::Linux, port(&c), Box::new(Counting(Arc::default())));
         assert_eq!(HelperFirst::read(&mut r).via, ReadVia::Helper);
         let maxes = net.maxes.lock().unwrap().clone();
         assert_eq!(maxes.last(), Some(&None), "the Smart call: {maxes:?}");
@@ -206,7 +235,37 @@ mod tests {
         let (mut r, _) = wear(true, vec![Ok(reply(vec![nvme()], vec![]))]);
         assert_eq!(HelperFirst::read(&mut r).via, ReadVia::Helper);
         let c = centre(&Net::new(false, vec![]), &FakeClock::new());
-        let mut local = helper_first_wear(port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
+        let mut local = helper_first_wear_on(HelperHost::Linux, port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
         assert_eq!(HelperFirst::read(&mut local).via, ReadVia::Local);
+    }
+
+    /// On macOS the agent runs its own smartctl as the person: the helper is never asked and no reason sends the person to turn it on.
+    #[test]
+    fn on_macos_the_helper_is_never_asked_and_no_reason_says_to_turn_it_on() {
+        use crate::helper_first::testkit::{centre, port, Net};
+        for up in [true, false] {
+            let net = Net::new(up, vec![]);
+            let c = centre(&net, &FakeClock::new());
+            let local = FakeWear(Reading::unavailable("smartctl found no drives it can read."));
+            let mut r = helper_first_wear_on(HelperHost::Macos, port(&c), Box::new(local));
+            let got = HelperFirst::read(&mut r);
+            let text = match &got.value {
+                Reading::Unavailable(m) => m.clone(),
+                other => panic!("{other:?}"),
+            };
+            assert!(text.contains("no drives"), "{text}");
+            assert!(
+                !text.contains("Administrator readings") && !text.contains("helper"),
+                "helper up={up}: {text}"
+            );
+            assert!(
+                !matches!(got.via, ReadVia::NeedsHelper { .. }) && !format!("{:?}", got.via).contains("OpenSettings"),
+                "helper up={up}: {:?}",
+                got.via
+            );
+        }
+        let c = centre(&Net::new(true, vec![]), &FakeClock::new());
+        let mut ok = helper_first_wear_on(HelperHost::Macos, port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
+        assert_eq!(HelperFirst::read(&mut ok).via, ReadVia::Local);
     }
 }
