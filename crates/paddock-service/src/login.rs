@@ -266,6 +266,35 @@ impl Autostart for AppServiceAutostart {
     }
 }
 
+/// The app itself as a login item on macOS: `SMAppService.mainApp` (one row in Login Items, nothing under
+/// `~/Library/LaunchAgents`), through [`AppServiceAutostart`] and the real [`crate::native::SmAppService`].
+#[cfg(target_os = "macos")]
+pub struct MainAppItem(AppServiceAutostart);
+
+#[cfg(target_os = "macos")]
+impl MainAppItem {
+    /// The app's own login item.
+    pub fn new() -> Self {
+        Self(AppServiceAutostart::new(Box::new(
+            crate::native::SmAppService::main_app(),
+        )))
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Default for MainAppItem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Autostart for MainAppItem {
+    fn set(&mut self, on: bool) -> Result<(), String> {
+        self.0.set(on)
+    }
+}
+
 /// The app's start-at-login entry on Linux: an XDG autostart file `<config>/autostart/<stem>.desktop` that starts
 /// `exe args` (with the hidden flag, so it opens in the tray), written through the [`System`] port. The desktop session
 /// reads it at login (GNOME, KDE, Xfce and the others). A write is read back; the outcome is logged.
@@ -398,42 +427,129 @@ pub fn launch_at_login_section(app: &str, with_service: bool) -> SettingsSection
         )
 }
 
+/// The background service as the launch-at-login switch sees it: registered when the switch goes on, removed when it
+/// goes off. [`Manager`] is one ([`ManagerService`]); an app whose service is registered another way (Dyno's
+/// Linux and Windows agent) implements it.
+pub trait LoginService {
+    /// Registers (and starts) the service.
+    ///
+    /// # Errors
+    /// The reason, in words.
+    fn install(&mut self) -> Result<(), String>;
+    /// Stops and removes the service.
+    ///
+    /// # Errors
+    /// The reason, in words.
+    fn uninstall(&mut self) -> Result<(), String>;
+}
+
+/// A [`Manager`] as a [`LoginService`].
+pub struct ManagerService<'a> {
+    /// The manager.
+    pub manager: &'a mut Manager,
+    /// The repair's cancel flag.
+    pub cancel: &'a AtomicBool,
+}
+
+impl LoginService for ManagerService<'_> {
+    fn install(&mut self) -> Result<(), String> {
+        self.manager
+            .install(self.cancel)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+
+    fn uninstall(&mut self) -> Result<(), String> {
+        self.manager.uninstall().map_err(|e| e.to_string())
+    }
+}
+
+/// The words of the message [`apply_launch_at_login_with`] returns, so each app's message names its own things.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginWords {
+    /// The start of the message: what is saved.
+    pub saved: String,
+    /// The background service, as the user knows it ("the background agent").
+    pub service: String,
+    /// The app, as the user knows it ("Dyno").
+    pub app: String,
+}
+
+impl Default for LoginWords {
+    fn default() -> Self {
+        Self {
+            saved: "Your setting is saved".into(),
+            service: "the background service".into(),
+            app: "the app".into(),
+        }
+    }
+}
+
 /// Applies the switch to both registrations. Each is attempted even if the other fails; the error names what did not
 /// work and what to do (the setting itself stays saved).
-pub fn apply_launch_at_login(
+///
+/// Turning it on from a place that will not exist after the next login (`location`, see
+/// [`crate::launch::refuse_unstable_location`]) registers neither and says where to move the app; turning it off always runs.
+///
+/// # Errors
+/// The message to show the user.
+pub fn apply_launch_at_login_with(
     on: bool,
-    service: Option<&mut Manager>,
+    location: Result<(), String>,
+    service: Option<&mut dyn LoginService>,
     autostart: &mut dyn Autostart,
-    cancel: &AtomicBool,
+    words: &LoginWords,
 ) -> Result<(), String> {
+    if let (true, Err(e)) = (on, location) {
+        return Err(format!(
+            "{}, but start at login was not turned on: {e}",
+            words.saved
+        ));
+    }
     let mut problems = Vec::new();
-    if let Some(m) = service {
+    if let Some(service) = service {
         let result = if on {
-            m.install(cancel).map(drop)
+            service.install()
         } else {
-            m.uninstall()
+            service.uninstall()
         };
         if let Err(e) = result {
             problems.push(format!(
-                "the background service could not be {}: {e}",
+                "{} could not be {}: {e}",
+                words.service,
                 if on { "registered" } else { "removed" }
             ));
         }
     }
     if let Err(e) = autostart.set(on) {
         problems.push(format!(
-            "the app could not be {} the login items: {e}",
+            "{} could not be {} the login items: {e}",
+            words.app,
             if on { "added to" } else { "removed from" }
         ));
     }
     if problems.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "Your setting is saved, but {}.",
-            problems.join("; and ")
-        ))
+        Err(format!("{}, but {}.", words.saved, problems.join("; and ")))
     }
+}
+
+/// [`apply_launch_at_login_with`] for a [`Manager`] and the default words, from a place that is always fine.
+pub fn apply_launch_at_login(
+    on: bool,
+    service: Option<&mut Manager>,
+    autostart: &mut dyn Autostart,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    let mut adapter = service.map(|manager| ManagerService { manager, cancel });
+    apply_launch_at_login_with(
+        on,
+        Ok(()),
+        adapter.as_mut().map(|a| a as &mut dyn LoginService),
+        autostart,
+        &LoginWords::default(),
+    )
 }
 
 #[cfg(test)]
@@ -745,5 +861,141 @@ mod tests {
             e.contains("could not be registered") && e.contains("; and "),
             "{e}"
         );
+    }
+
+    // ---- moved from Dyno's login.rs (the app's wiring keeps only the first-run and legacy-file tests)
+
+    struct Svc {
+        log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        fail: bool,
+    }
+
+    impl LoginService for Svc {
+        fn install(&mut self) -> Result<(), String> {
+            self.log.lock().unwrap().push("service install".into());
+            if self.fail { Err("no".into()) } else { Ok(()) }
+        }
+        fn uninstall(&mut self) -> Result<(), String> {
+            self.log.lock().unwrap().push("service uninstall".into());
+            Ok(())
+        }
+    }
+
+    struct Rec {
+        log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        fail: bool,
+    }
+
+    impl Autostart for Rec {
+        fn set(&mut self, on: bool) -> Result<(), String> {
+            self.log.lock().unwrap().push(format!("autostart {on}"));
+            if self.fail {
+                Err("denied".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn dyno_words() -> LoginWords {
+        LoginWords {
+            saved: "Your settings are saved".into(),
+            service: "the background agent".into(),
+            app: "Dyno".into(),
+        }
+    }
+
+    fn apply(
+        on: bool,
+        location: Result<(), String>,
+        service_fails: bool,
+        autostart_fails: bool,
+    ) -> (Result<(), String>, Vec<String>) {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut s = Svc {
+            log: log.clone(),
+            fail: service_fails,
+        };
+        let mut a = Rec {
+            log: log.clone(),
+            fail: autostart_fails,
+        };
+        let r = apply_launch_at_login_with(on, location, Some(&mut s), &mut a, &dyno_words());
+        let calls = log.lock().unwrap().clone();
+        (r, calls)
+    }
+
+    #[test]
+    fn the_switch_registers_or_removes_both_in_order() {
+        assert_eq!(
+            apply(true, Ok(()), false, false),
+            (
+                Ok(()),
+                vec!["service install".into(), "autostart true".into()]
+            )
+        );
+        assert_eq!(
+            apply(false, Ok(()), false, false),
+            (
+                Ok(()),
+                vec!["service uninstall".into(), "autostart false".into()]
+            )
+        );
+    }
+
+    #[test]
+    fn one_failing_does_not_stop_the_other_and_the_message_says_what_to_do() {
+        let (r, log) = apply(true, Ok(()), true, false);
+        assert_eq!(log.len(), 2, "autostart is still attempted");
+        let m = r.unwrap_err();
+        assert!(
+            m.starts_with("Your settings are saved")
+                && m.contains("the background agent could not be registered: no"),
+            "{m}"
+        );
+        let (r, _) = apply(true, Ok(()), true, true);
+        assert!(r.unwrap_err().contains("; and "));
+        let m = apply(false, Ok(()), false, true).0.unwrap_err();
+        assert!(
+            m.contains("Dyno could not be removed from the login items: denied"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn an_unstable_location_registers_neither_but_turning_off_always_runs() {
+        let bad = || Err("move Dyno to Applications".to_string());
+        let (r, log) = apply(true, bad(), false, false);
+        let m = r.unwrap_err();
+        assert!(
+            m.contains("move Dyno to Applications") && m.starts_with("Your settings are saved"),
+            "{m}"
+        );
+        assert!(m.contains("start at login was not turned on"), "{m}");
+        assert!(log.is_empty(), "nothing was registered: {log:?}");
+        let (r, log) = apply(false, bad(), false, false);
+        assert_eq!(r, Ok(()));
+        assert_eq!(log.len(), 2, "both were removed");
+    }
+
+    #[test]
+    fn an_app_without_a_service_still_registers_its_own_item() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut a = Rec {
+            log: log.clone(),
+            fail: false,
+        };
+        assert_eq!(
+            apply_launch_at_login_with(true, Ok(()), None, &mut a, &LoginWords::default()),
+            Ok(())
+        );
+        assert_eq!(*log.lock().unwrap(), ["autostart true"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_main_app_item_is_an_autostart() {
+        fn takes(_: &mut dyn Autostart) {}
+        takes(&mut MainAppItem::new());
     }
 }

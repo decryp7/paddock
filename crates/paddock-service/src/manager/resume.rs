@@ -7,9 +7,9 @@
 //! full repair (the pinned build identity is new); and it never opens System Settings, whatever the repair meets.
 
 use super::{Manager, outcome_result, refusal};
-use crate::error::ServiceError;
 use crate::backend::DisabledMark;
-use crate::plan::{ResumePath, request, resume_path, supervises};
+use crate::error::ServiceError;
+use crate::plan::{ResumePath, installed, request, resume_path, supervises};
 use crate::stop::StopMechanism;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -20,6 +20,12 @@ pub const LIGHT_LOOKS: u32 = 20;
 pub const LIGHT_POLL: Duration = Duration::from_millis(500);
 
 impl Manager {
+    /// Whether the service is registered (or waiting for the user's approval): the app has set it up
+    /// ([`installed`]).
+    pub fn installed(&mut self) -> bool {
+        installed(&self.backend.inspect())
+    }
+
     /// Whether the OS starts the job now and restarts it, so the app must wait for it instead of running its own agent
     /// ([`supervises`]).
     pub fn supervises(&mut self) -> bool {
@@ -38,19 +44,29 @@ impl Manager {
     /// # Errors
     /// [`ServiceError`] when the full repair could not put the service back (another repair running is
     /// [`ServiceError::Busy`]).
-    pub fn resume(&mut self, cancel: &AtomicBool, say: &mut dyn FnMut(&str)) -> Result<bool, ServiceError> {
+    pub fn resume(
+        &mut self,
+        cancel: &AtomicBool,
+        say: &mut dyn FnMut(&str),
+    ) -> Result<bool, ServiceError> {
         let inspection = self.backend.inspect();
         let recorded = self.record.load();
-        match resume_path(&inspection, recorded.registered_version.as_deref(), &self.version) {
+        match resume_path(
+            &inspection,
+            recorded.registered_version.as_deref(),
+            &self.version,
+        ) {
             ResumePath::Nothing => {
-                say(if inspection
-                    .login_item
-                    .is_some_and(|f| f.mark == DisabledMark::Unreadable)
-                {
-                    "the list of switched-off items could not be read; the service stays as it is"
-                } else {
-                    "switched off in Login Items or missing; the service stays as it is"
-                });
+                say(
+                    if inspection
+                        .login_item
+                        .is_some_and(|f| f.mark == DisabledMark::Unreadable)
+                    {
+                        "the list of switched-off items could not be read; the service stays as it is"
+                    } else {
+                        "switched off in Login Items or missing; the service stays as it is"
+                    },
+                );
                 return Ok(false);
             }
             ResumePath::Repair => {}

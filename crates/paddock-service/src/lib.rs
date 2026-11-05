@@ -55,10 +55,13 @@
 //! # Ok::<(), ServiceError>(())
 //! ```
 
+#[cfg(target_os = "macos")]
+pub mod apple_event;
 pub mod backend;
 pub mod control;
 mod error;
 pub mod hardening;
+pub mod launch;
 pub mod launchctl;
 pub mod login;
 pub mod manager;
@@ -113,9 +116,9 @@ mod golden;
 #[cfg(test)]
 mod readback_tests;
 #[cfg(test)]
-mod resume_tests;
-#[cfg(test)]
 mod recorded_tests;
+#[cfg(test)]
+mod resume_tests;
 #[cfg(test)]
 mod scenarios;
 

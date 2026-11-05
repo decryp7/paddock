@@ -99,6 +99,20 @@ pub enum Job {
     Failed(LastExit),
 }
 
+impl Job {
+    /// What the OS said, in words for a failure message (what it said, never a guessed reason).
+    pub fn describe(self) -> String {
+        match self {
+            Job::Absent => "the OS does not know the job".into(),
+            Job::Running => "running".into(),
+            Job::NotRunning => "not running".into(),
+            Job::Refused => "not running, the OS refuses to start it (spawn failed, exit code 78 or a stale launch constraint)".into(),
+            Job::Unknown => "the OS did not say".into(),
+            Job::Failed(exit) => format!("not running, it stopped with {exit}"),
+        }
+    }
+}
+
 /// How the job's last process ended, as the OS reports it (typed, never free text).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LastExit {

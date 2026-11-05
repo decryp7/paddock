@@ -13,9 +13,9 @@
 //! - **Never install unasked:** nothing registered stays unregistered until the user asks.
 //! - Where every change needs an OS prompt (a Windows service from the app), a repair is offered, never started.
 
-use crate::backend::{Capabilities, DisabledMark, Inspection, Job, Registration};
 #[cfg(test)]
 use crate::backend::LoginItemFacts;
+use crate::backend::{Capabilities, DisabledMark, Inspection, Job, Registration};
 use crate::port::AppServiceStatus;
 use std::cmp::Ordering;
 
@@ -241,6 +241,21 @@ pub fn resume_path(
         ResumePath::Light
     } else {
         ResumePath::Repair
+    }
+}
+
+/// Whether the app has registered the service, whatever the user did with it since: registered or waiting for approval
+/// (macOS reports an item the user switched off as waiting). A switched-off item that was never registered is not installed.
+pub fn installed(i: &Inspection) -> bool {
+    match &i.login_item {
+        Some(f) => matches!(
+            f.status,
+            AppServiceStatus::Enabled | AppServiceStatus::RequiresApproval
+        ),
+        None => !matches!(
+            i.registration,
+            Registration::Absent | Registration::Unavailable(_)
+        ),
     }
 }
 
@@ -490,11 +505,7 @@ mod tests {
 
     // ---- resume after a stop on request (ported from Dyno's service_repair.rs, blocker B4 and the 2026-11-05 Quit rules)
 
-    fn item(
-        status: AppServiceStatus,
-        mark: DisabledMark,
-        job: Job,
-    ) -> Inspection {
+    fn item(status: AppServiceStatus, mark: DisabledMark, job: Job) -> Inspection {
         let registration = match status {
             AppServiceStatus::RequiresApproval => Registration::NeedsApproval,
             _ if mark == DisabledMark::Disabled => Registration::SwitchedOff,
@@ -510,24 +521,52 @@ mod tests {
     }
 
     #[test]
-    fn a_resume_never_touches_an_item_the_user_switched_off_or_cannot_be_read_and_never_hides_a_version_change() {
+    fn a_resume_never_touches_an_item_the_user_switched_off_or_cannot_be_read_and_never_hides_a_version_change()
+     {
         use AppServiceStatus as S;
         use DisabledMark as D;
         let path = |s, d, rec, cur| resume_path(&item(s, d, Job::Absent), rec, cur);
-        assert_eq!(path(S::RequiresApproval, D::NotListed, Some("1"), "1"), ResumePath::Nothing);
-        assert_eq!(path(S::Enabled, D::Disabled, Some("1"), "1"), ResumePath::Nothing);
-        assert_eq!(path(S::NotRegistered, D::Disabled, Some("1"), "1"), ResumePath::Nothing);
-        assert_eq!(path(S::NotFound, D::Enabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(
+            path(S::RequiresApproval, D::NotListed, Some("1"), "1"),
+            ResumePath::Nothing
+        );
+        assert_eq!(
+            path(S::Enabled, D::Disabled, Some("1"), "1"),
+            ResumePath::Nothing
+        );
+        assert_eq!(
+            path(S::NotRegistered, D::Disabled, Some("1"), "1"),
+            ResumePath::Nothing
+        );
+        assert_eq!(
+            path(S::NotFound, D::Enabled, Some("1"), "1"),
+            ResumePath::Nothing
+        );
         assert_eq!(
             path(S::Enabled, D::Unreadable, Some("1"), "1"),
             ResumePath::Nothing,
             "a failed look is not 'switched on'"
         );
-        assert_eq!(path(S::Enabled, D::Enabled, Some("0"), "1"), ResumePath::Repair);
-        assert_eq!(path(S::Enabled, D::NotListed, None, "1"), ResumePath::Repair);
-        assert_eq!(path(S::Enabled, D::NotListed, Some("1"), "1"), ResumePath::Light);
-        assert_eq!(path(S::Enabled, D::Enabled, Some("1"), "1"), ResumePath::Light);
-        assert_eq!(path(S::NotRegistered, D::NotListed, Some("1"), "1"), ResumePath::Repair);
+        assert_eq!(
+            path(S::Enabled, D::Enabled, Some("0"), "1"),
+            ResumePath::Repair
+        );
+        assert_eq!(
+            path(S::Enabled, D::NotListed, None, "1"),
+            ResumePath::Repair
+        );
+        assert_eq!(
+            path(S::Enabled, D::NotListed, Some("1"), "1"),
+            ResumePath::Light
+        );
+        assert_eq!(
+            path(S::Enabled, D::Enabled, Some("1"), "1"),
+            ResumePath::Light
+        );
+        assert_eq!(
+            path(S::NotRegistered, D::NotListed, Some("1"), "1"),
+            ResumePath::Repair
+        );
     }
 
     #[test]
@@ -536,16 +575,61 @@ mod tests {
             registration,
             ..Inspection::absent()
         };
-        assert_eq!(resume_path(&with(Registration::Registered), Some("1"), "1"), ResumePath::Light);
-        assert_eq!(resume_path(&with(Registration::Registered), Some("0"), "1"), ResumePath::Repair);
-        assert_eq!(resume_path(&with(Registration::Absent), Some("1"), "1"), ResumePath::Repair);
+        assert_eq!(
+            resume_path(&with(Registration::Registered), Some("1"), "1"),
+            ResumePath::Light
+        );
+        assert_eq!(
+            resume_path(&with(Registration::Registered), Some("0"), "1"),
+            ResumePath::Repair
+        );
+        assert_eq!(
+            resume_path(&with(Registration::Absent), Some("1"), "1"),
+            ResumePath::Repair
+        );
         for held in [
             Registration::SwitchedOff,
             Registration::NeedsApproval,
             Registration::Unavailable("x".into()),
         ] {
-            assert_eq!(resume_path(&with(held), Some("1"), "1"), ResumePath::Nothing);
+            assert_eq!(
+                resume_path(&with(held), Some("1"), "1"),
+                ResumePath::Nothing
+            );
         }
+    }
+
+    #[test]
+    fn installed_means_registered_or_waiting_for_approval() {
+        use AppServiceStatus as S;
+        use DisabledMark as D;
+        for (status, want) in [
+            (S::Enabled, true),
+            (S::RequiresApproval, true),
+            (S::NotRegistered, false),
+            (S::NotFound, false),
+        ] {
+            assert_eq!(
+                installed(&item(status, D::NotListed, Job::Absent)),
+                want,
+                "{status:?}"
+            );
+        }
+        // The two views disagree (enabled, but launchd's database says off): still registered.
+        assert!(installed(&item(S::Enabled, D::Disabled, Job::Absent)));
+        // Not registered and switched off in launchd's database is not installed.
+        assert!(!installed(&item(
+            S::NotRegistered,
+            D::Disabled,
+            Job::Absent
+        )));
+        let plain = |registration| Inspection {
+            registration,
+            ..Inspection::absent()
+        };
+        assert!(installed(&plain(Registration::Registered)));
+        assert!(installed(&plain(Registration::SwitchedOff)));
+        assert!(!installed(&plain(Registration::Absent)));
     }
 
     #[test]
@@ -559,7 +643,11 @@ mod tests {
         // Enabled for SMAppService but off in Login Items (launchd's override database): nothing runs the agent.
         assert!(!supervises(&item(S::Enabled, D::Disabled, loaded)));
         // Waiting for approval, not registered, not found: launchd runs nothing.
-        assert!(!supervises(&item(S::RequiresApproval, D::NotListed, loaded)));
+        assert!(!supervises(&item(
+            S::RequiresApproval,
+            D::NotListed,
+            loaded
+        )));
         assert!(!supervises(&item(S::NotRegistered, D::NotListed, loaded)));
         assert!(!supervises(&item(S::NotFound, D::NotListed, loaded)));
         // Enabled, but launchd dropped the job (or `launchctl print` could not be read): it starts nothing.

@@ -240,8 +240,9 @@ pub fn replace(
             t.max_cycles + 1
         ),
         None => format!(
-            "The OS still refuses the service after {} full re-registrations. {NEXT_STEPS}",
-            t.max_cycles + 1
+            "The OS still refuses the service after {} full re-registrations (observed: {}). {NEXT_STEPS}",
+            t.max_cycles + 1,
+            b.inspect().job.describe()
         ),
     };
     say(Step::Note(why.clone()));

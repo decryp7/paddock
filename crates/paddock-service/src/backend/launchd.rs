@@ -15,13 +15,13 @@ use super::{
     Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError, as_written,
     with_failure,
 };
-use crate::stop::StopMechanism;
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
 use crate::port::{AppService, AppServiceStatus, RegisterError, System};
 use crate::render::{LaunchdProgram, launchd_plist};
 use crate::spec::ServiceSpec;
+use crate::stop::StopMechanism;
 use std::path::PathBuf;
 use std::time::Duration;
 

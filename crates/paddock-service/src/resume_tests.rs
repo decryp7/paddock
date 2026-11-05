@@ -36,10 +36,11 @@ struct World {
     /// A `register` brings the job after this many `launchctl print` asks (`None`: it never comes).
     job_after_asks: Option<u32>,
     asks_since_register: u32,
-    registered_once: bool,
     register_error: Option<RegisterError>,
     /// `bootout` leaves the job in place this many `print` asks.
     lingers: u32,
+    /// launchd refuses the job whatever is registered (the stale constraint survives).
+    refuses_always: bool,
     booted_out: bool,
     calls: Vec<String>,
 }
@@ -53,9 +54,9 @@ fn world(status: AppServiceStatus, mark: DisabledMark, job: Held) -> Sim {
         job,
         job_after_asks: Some(0),
         asks_since_register: 0,
-        registered_once: true,
         register_error: None,
         lingers: 0,
+        refuses_always: false,
         booted_out: false,
         calls: Vec::new(),
     }))
@@ -107,6 +108,9 @@ fn wire(sim: &Sim, sys: &FakeSystem) {
         {
             w.job = Held::Running;
         }
+        if w.refuses_always {
+            return Ok(Output::ok(SPAWN_FAILED));
+        }
         if w.booted_out && w.lingers > 0 {
             w.lingers -= 1;
             return Ok(Output::ok(RUNNING));
@@ -125,9 +129,15 @@ fn wire(sim: &Sim, sys: &FakeSystem) {
     sys.on("/bin/launchctl print-disabled", move |_, _| {
         let w = s.lock().unwrap();
         match w.mark {
-            DisabledMark::Disabled => Ok(Output::ok(&format!("disabled services = {{\n\t\"{LABEL}\" => disabled\n}}\n"))),
-            DisabledMark::Enabled => Ok(Output::ok(&format!("disabled services = {{\n\t\"{LABEL}\" => enabled\n}}\n"))),
-            DisabledMark::NotListed => Ok(Output::ok("disabled services = {\n\t\"other\" => enabled\n}\n")),
+            DisabledMark::Disabled => Ok(Output::ok(&format!(
+                "disabled services = {{\n\t\"{LABEL}\" => disabled\n}}\n"
+            ))),
+            DisabledMark::Enabled => Ok(Output::ok(&format!(
+                "disabled services = {{\n\t\"{LABEL}\" => enabled\n}}\n"
+            ))),
+            DisabledMark::NotListed => Ok(Output::ok(
+                "disabled services = {\n\t\"other\" => enabled\n}\n",
+            )),
             DisabledMark::Unreadable => Err(RunError::TimedOut("/bin/launchctl".into())),
         }
     });
@@ -144,12 +154,19 @@ fn wire(sim: &Sim, sys: &FakeSystem) {
 }
 
 fn spec() -> ServiceSpec {
-    ServiceSpec::builder(LABEL, "Dyno", "dyno-agent").build().unwrap()
+    ServiceSpec::builder(LABEL, "Dyno", "dyno-agent")
+        .build()
+        .unwrap()
 }
 
 fn manager(sim: &Sim, sys: &FakeSystem, dir: &Path, version: &str) -> Manager {
     wire(sim, sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
     Manager::new("Dyno", Box::new(backend), dir, LABEL, version, || false).with_timings(Timings {
         start_wait: Duration::from_secs(6),
         ..Timings::default()
@@ -199,17 +216,29 @@ fn a_resume_calls_nothing_for_an_item_switched_off_unreadable_or_missing() {
         let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
         let (r, said) = resume(&mut m);
         assert_eq!(r.unwrap(), false, "{status:?} {mark:?}");
-        assert!(calls(&sim).is_empty(), "{status:?} {mark:?}: {:?}", calls(&sim));
+        assert!(
+            calls(&sim).is_empty(),
+            "{status:?} {mark:?}: {:?}",
+            calls(&sim)
+        );
         assert!(no_changes(&sys));
-        assert!(said.iter().any(|s| s.contains("stays as it is")), "{said:?}");
+        assert!(
+            said.iter().any(|s| s.contains("stays as it is")),
+            "{said:?}"
+        );
     }
 }
 
 #[test]
-fn the_light_path_registers_the_enabled_item_once_and_waits_for_the_job_without_removing_anything() {
+fn the_light_path_registers_the_enabled_item_once_and_waits_for_the_job_without_removing_anything()
+{
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = Some(4);
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
@@ -218,7 +247,10 @@ fn the_light_path_registers_the_enabled_item_once_and_waits_for_the_job_without_
     // Registering an already registered item is what brings the job back; unregister or bootout would make macOS
     // announce a new background item ("Background Items Added") again.
     assert_eq!(calls(&sim), ["register"]);
-    assert!(said.iter().any(|s| s.contains("holds the job again")), "{said:?}");
+    assert!(
+        said.iter().any(|s| s.contains("holds the job again")),
+        "{said:?}"
+    );
     assert!(sys.now() > Duration::ZERO, "it waited between looks");
 }
 
@@ -226,12 +258,20 @@ fn the_light_path_registers_the_enabled_item_once_and_waits_for_the_job_without_
 fn a_version_change_goes_to_the_full_repair_and_never_the_light_path() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "0.9.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::Enabled, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::Enabled,
+        Held::Nothing,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let (r, _) = resume(&mut m);
     assert_eq!(r.unwrap(), true);
-    assert_eq!(calls(&sim), ["unregister", "bootout", "register"], "the first change is the removal, not a light register");
+    assert_eq!(
+        calls(&sim),
+        ["unregister", "bootout", "register"],
+        "the first change is the removal, not a light register"
+    );
     assert_eq!(m.recorded().registered_version.as_deref(), Some("1.0.0"));
 }
 
@@ -239,7 +279,11 @@ fn a_version_change_goes_to_the_full_repair_and_never_the_light_path() {
 fn a_failed_light_path_falls_back_to_the_repair_and_says_why() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().register_error = Some(RegisterError::Other("denied".into()));
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
@@ -247,15 +291,27 @@ fn a_failed_light_path_falls_back_to_the_repair_and_says_why() {
     // Every register fails, so the repair cannot bring it back either: the error is the repair's.
     assert!(matches!(r, Err(ServiceError::Failed(_))), "{r:?}");
     assert_eq!(calls(&sim)[0], "register");
-    assert!(calls(&sim).contains(&"unregister".to_string()), "{:?}", calls(&sim));
-    assert!(said.iter().any(|s| s.contains("failed (denied)") && s.contains("full repair")), "{said:?}");
+    assert!(
+        calls(&sim).contains(&"unregister".to_string()),
+        "{:?}",
+        calls(&sim)
+    );
+    assert!(
+        said.iter()
+            .any(|s| s.contains("failed (denied)") && s.contains("full repair")),
+        "{said:?}"
+    );
 }
 
 #[test]
 fn a_light_path_that_loads_no_job_is_bounded_and_falls_back_to_the_repair() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = None;
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
@@ -264,39 +320,74 @@ fn a_light_path_that_loads_no_job_is_bounded_and_falls_back_to_the_repair() {
     let c = calls(&sim);
     assert_eq!(c[0], "register");
     assert_eq!(&c[1..4], ["unregister", "bootout", "register"], "{c:?}");
-    let prints = sys.commands().iter().filter(|c| c.contains("launchctl print gui")).count();
-    assert!(prints >= LIGHT_LOOKS as usize, "the light path looked {LIGHT_LOOKS} times first: {prints}");
+    let prints = sys
+        .commands()
+        .iter()
+        .filter(|c| c.contains("launchctl print gui"))
+        .count();
+    assert!(
+        prints >= LIGHT_LOOKS as usize,
+        "the light path looked {LIGHT_LOOKS} times first: {prints}"
+    );
 }
 
 #[test]
 fn the_background_resume_never_opens_login_items_even_when_the_repair_meets_an_approval() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().register_error = Some(RegisterError::NeedsApproval);
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let (r, _) = resume(&mut m);
-    assert_eq!(r.unwrap(), false, "waiting for the user's approval is theirs to give");
-    assert!(!calls(&sim).contains(&"openLoginItems".to_string()), "{:?}", calls(&sim));
+    assert_eq!(
+        r.unwrap(),
+        false,
+        "waiting for the user's approval is theirs to give"
+    );
+    assert!(
+        !calls(&sim).contains(&"openLoginItems".to_string()),
+        "{:?}",
+        calls(&sim)
+    );
 }
 
 #[test]
 fn only_a_job_the_os_holds_can_be_stopped_and_a_stop_is_judged_by_reading_the_os_back() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = None;
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
-    assert_eq!(m.stop_mechanism(), None, "nothing to stop when launchd holds no job");
+    assert_eq!(
+        m.stop_mechanism(),
+        None,
+        "nothing to stop when launchd holds no job"
+    );
     sim.lock().unwrap().job = Held::Running;
     let mechanism = m.stop_mechanism().unwrap();
-    assert_eq!(mechanism, StopMechanism::Launchd { target: TARGET.into() });
+    assert_eq!(
+        mechanism,
+        StopMechanism::Launchd {
+            target: TARGET.into()
+        }
+    );
     // bootout reports success but launchd keeps the job: not stopped.
     sim.lock().unwrap().lingers = u32::MAX;
     let mut s = sys.clone();
-    let timings = StopTimings { gone_wait: Duration::from_secs(2), poll: Duration::from_millis(500) };
+    let timings = StopTimings {
+        gone_wait: Duration::from_secs(2),
+        poll: Duration::from_millis(500),
+    };
     assert!(stop(&mut s, &mechanism, timings).is_err());
     // launchd drops it: stopped, and the registration was never touched.
     sim.lock().unwrap().lingers = 0;
@@ -314,10 +405,30 @@ fn only_a_job_the_os_holds_can_be_stopped_and_a_stop_is_judged_by_reading_the_os
 fn supervision_needs_an_enabled_item_that_is_not_switched_off_and_a_job_launchd_holds() {
     let dir = tempfile::tempdir().unwrap();
     let cases = [
-        (AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running, true),
-        (AppServiceStatus::Enabled, DisabledMark::Disabled, Held::Running, false),
-        (AppServiceStatus::RequiresApproval, DisabledMark::NotListed, Held::Running, false),
-        (AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing, false),
+        (
+            AppServiceStatus::Enabled,
+            DisabledMark::NotListed,
+            Held::Running,
+            true,
+        ),
+        (
+            AppServiceStatus::Enabled,
+            DisabledMark::Disabled,
+            Held::Running,
+            false,
+        ),
+        (
+            AppServiceStatus::RequiresApproval,
+            DisabledMark::NotListed,
+            Held::Running,
+            false,
+        ),
+        (
+            AppServiceStatus::Enabled,
+            DisabledMark::NotListed,
+            Held::Nothing,
+            false,
+        ),
     ];
     for (status, mark, job, want) in cases {
         let sim = world(status, mark, job);
@@ -332,14 +443,63 @@ fn supervision_needs_an_enabled_item_that_is_not_switched_off_and_a_job_launchd_
 fn an_update_replaces_the_registration_once_and_a_downgrade_leaves_a_newer_one_alone() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "0.9.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let started = m.on_start(&never());
-    assert!(matches!(started, crate::manager::Started::Repaired(Reason::VersionChanged, _)), "{started:?}");
+    assert!(
+        matches!(
+            started,
+            crate::manager::Started::Repaired(Reason::VersionChanged, _)
+        ),
+        "{started:?}"
+    );
     sim.lock().unwrap().calls.clear();
-    assert_eq!(m.on_start(&never()), crate::manager::Started::Left(Hold::Healthy));
+    assert_eq!(
+        m.on_start(&never()),
+        crate::manager::Started::Left(Hold::Healthy)
+    );
     assert!(calls(&sim).is_empty());
     recorded(dir.path(), "2.0.0");
-    assert_eq!(m.on_start(&never()), crate::manager::Started::Left(Hold::NewerOwner("2.0.0".into())));
+    assert_eq!(
+        m.on_start(&never()),
+        crate::manager::Started::Left(Hold::NewerOwner("2.0.0".into()))
+    );
+}
+
+#[test]
+fn a_registration_launchd_keeps_refusing_fails_with_what_launchd_said_not_a_guess() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "0.9.0");
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::Enabled,
+        Held::Refused,
+    );
+    // The refusal survives every bootout (the job lingers) and every register.
+    {
+        let mut w = sim.lock().unwrap();
+        w.refuses_always = true;
+        w.job_after_asks = None;
+    }
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
+    let (r, _) = resume(&mut m);
+    let Err(ServiceError::Failed(why)) = r else {
+        panic!("{r:?}")
+    };
+    assert!(
+        why.contains("observed:") && why.contains("refuses to start it"),
+        "{why}"
+    );
+    assert!(why.contains("Login Items"), "the next step is named: {why}");
+    assert_eq!(
+        m.recorded().registered_version.as_deref(),
+        Some("0.9.0"),
+        "a failed repair keeps the old version"
+    );
 }
