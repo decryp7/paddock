@@ -55,7 +55,7 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   checks.push({ ok: icons.length > 0, detail: icons.length ? `${icons.length} Dyno tray icon(s) on the taskbar${promoted ? ' (only after promoting them)' : ''}` : 'no Dyno icon found on the taskbar through UI Automation' });
   checks.push(...click);
   const keep = menu.find((m) => /Keep awake/i.test(m.name));
-  checks.push({ ok: Boolean(keep), detail: keep ? `the menu has "${keep.name}"` : 'the menu has no Keep awake entry' });
+  checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: Boolean(keep), detail: keep ? `the menu has "${keep.name}"` : 'the menu has no Keep awake entry' });
   if (keep) {
     await actor.send(`click ${keep.at}`); await sleep(1500);
     const sub = items(await actor.send('menu'));
@@ -65,7 +65,7 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   }
   const { menu: menu2 } = await openMenu(actor);
   const wake = menu2.find((m) => /Wake device|Wake/i.test(m.name));
-  checks.push({ ok: Boolean(wake), detail: wake ? `the menu has "${wake.name}"` : 'the menu has no Wake device entry' });
+  checks.push({ ...(menu2.length ? {} : { kind: 'check' }), ok: Boolean(wake), detail: wake ? `the menu has "${wake.name}"` : 'the menu has no Wake device entry' });
   if (wake) { await actor.send(`click ${wake.at}`); await sleep(1500); evidence.push(`Wake device submenu: ${items(await actor.send('menu')).map((m) => m.name).join(' | ')}`); }
   await closeMenus(actor);
   await actor.shot('tray-menu');
@@ -82,11 +82,11 @@ export async function trayCountdownStep(actor, { idleRuleSeeded = true } = {}) {
   if (!running) return result('Windows: tray menu during an idle countdown (Cancel, Snooze)', checks, evidence);
   const { menu } = await openMenu(actor);
   evidence.push(`menu: ${menu.map((m) => m.name).join(' | ')}`);
-  checks.push({ ok: menu.some((m) => /Will sleep in|Counting down/i.test(m.name)), detail: 'the menu shows the countdown line ("Will sleep in ...")' });
+  checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: menu.some((m) => /Will sleep in|Counting down/i.test(m.name)), detail: 'the menu shows the countdown line ("Will sleep in ...")' });
   const snooze = menu.find((m) => /Snooze/i.test(m.name));
   const cancel = menu.find((m) => /^Cancel/i.test(m.name));
-  checks.push({ ok: Boolean(snooze), detail: snooze ? `the menu has "${snooze.name}"` : 'the menu has no Snooze entry' });
-  checks.push({ ok: Boolean(cancel), detail: cancel ? `the menu has "${cancel.name}"` : 'the menu has no Cancel entry' });
+  checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: Boolean(snooze), detail: snooze ? `the menu has "${snooze.name}"` : 'the menu has no Snooze entry' });
+  checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: Boolean(cancel), detail: cancel ? `the menu has "${cancel.name}"` : 'the menu has no Cancel entry' });
   if (cancel) {
     await actor.send(`click ${cancel.at}`); await sleep(3000);
     const after = ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String');
