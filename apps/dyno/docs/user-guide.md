@@ -110,7 +110,7 @@ per app), *GPU*, *Files* (large and duplicate files in a folder you choose), *In
 why. In *Files*, Dyno lists duplicates and where they are; it removes nothing.
 
 **Backup health** shows whether your backups ran: Time Machine, Windows Backup, File History, restic and Borg. It never starts or
-changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) raises an alarm. For restic
+changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) shows "Out of date" and raises an alarm. File History also shows "Backup failed", with an alarm, when its own log reports an error after its last good backup; "Not set up" means it never ran on this PC and raises nothing. For restic
 and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
 is a normal answer.
 

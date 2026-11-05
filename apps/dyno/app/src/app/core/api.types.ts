@@ -2134,7 +2134,7 @@ export interface MaintenanceStatus {
 
 export type BackupTool = 'timeMachine' | 'windowsBackup' | 'fileHistory' | 'restic' | 'borg' | 'duplicati';
 
-export type BackupState = 'healthy' | 'stale' | 'noBackupYet' | 'notConfigured' | 'cannotCheck';
+export type BackupState = 'healthy' | 'stale' | 'noBackupYet' | 'failed' | 'notConfigured' | 'cannotCheck';
 
 export interface BackupStatus {
   tool: BackupTool;

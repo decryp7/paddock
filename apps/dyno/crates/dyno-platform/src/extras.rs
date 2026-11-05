@@ -358,8 +358,9 @@ fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, zone: &dyn Lo
             let args: Vec<String> = [
                 "qe",
                 "Microsoft-Windows-FileHistory-Core/WHC",
-                "/q:*[System[(EventID=201)]]",
-                "/c:5",
+                // The finished backups and the errors, newest first: an error after the last good backup means it failed.
+                "/q:*[System[(EventID=201) or (Level=1 or Level=2)]]",
+                "/c:20",
                 "/rd:true",
                 "/f:xml",
             ]
@@ -367,10 +368,7 @@ fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, zone: &dyn Lo
             .map(|s| s.to_string())
             .collect();
             match r.run("wevtutil", &args, SLOW) {
-                Ok(t) => match backup::parse_event_log_latest(&t) {
-                    Some((at, _)) => backup::judged(tool, at, now, stale),
-                    None => backup::no_backup(tool, "File History has not recorded a finished backup."),
-                },
+                Ok(t) => backup::file_history_status(backup::parse_file_history_events(&t), now, stale),
                 Err(e) => file_history_problem(tool, &e),
             }
         }
@@ -482,7 +480,7 @@ fn windows_backup(r: &dyn ToolRunner, now: Timestamp, stale: u32) -> BackupStatu
 
 /// Whether a status needs attention (used to decide if the check should raise an alarm).
 pub fn needs_attention(s: &BackupStatus) -> bool {
-    matches!(s.state, BackupState::Stale | BackupState::NoBackupYet)
+    matches!(s.state, BackupState::Stale | BackupState::NoBackupYet | BackupState::Failed)
 }
 
 #[cfg(test)]
@@ -675,6 +673,85 @@ mod tests {
         let s = backup_statuses(&broken, "windows", NOW, &FixedZone::UTC, 48);
         assert_eq!(s[0].state, BackupState::CannotCheck);
         assert!(s[0].next_step.as_deref().is_some_and(|n| n.contains("Check now")), "{s:#?}");
+    }
+
+    /// One File History event as `wevtutil qe /f:xml` prints it.
+    fn fh_event(id: u32, level: u8, at: &str) -> String {
+        format!("<Event xmlns='x'><System><EventID Qualifiers='0'>{id}</EventID><Level>{level}</Level><TimeCreated SystemTime='{at}'/></System></Event>")
+    }
+
+    fn file_history(events: &[String]) -> BackupStatus {
+        let e = env(
+            &[BackupTool::FileHistory],
+            vec![(BackupTool::FileHistory, vec![ok(&events.concat())])],
+        );
+        backup_statuses(&e, "windows", NOW, &FixedZone::UTC, 48).remove(0)
+    }
+
+    #[test]
+    fn file_history_is_healthy_stale_or_failed_in_words_and_only_the_last_two_raise_an_alarm() {
+        // A finished backup an hour ago: healthy, no alarm.
+        let healthy = file_history(&[fh_event(201, 4, "2026-10-23T07:00:00.000000000Z")]);
+        assert_eq!(healthy.state, BackupState::Healthy, "{healthy:#?}");
+        assert!(healthy.summary.contains("1 hour ago"), "{}", healthy.summary);
+        assert!(!needs_attention(&healthy) && !backup::observation(&healthy).unwrap().active);
+        // Set up, but the last finished backup is 5 days old and the limit is 2 days: stale, in words, with an alarm.
+        let stale = file_history(&[fh_event(201, 4, "2026-10-18T08:00:00.000000000Z")]);
+        assert_eq!(stale.state, BackupState::Stale, "{stale:#?}");
+        assert!(
+            stale.summary.contains("5 days ago") && stale.summary.contains("2 days you allow"),
+            "{}",
+            stale.summary
+        );
+        assert!(needs_attention(&stale));
+        assert!(backup::observation(&stale).is_some_and(|o| o.active && o.title.contains("File History")));
+        // The log reports an error after the last good backup: failed, whatever the age, and it says so.
+        let failed = file_history(&[
+            fh_event(203, 2, "2026-10-23T06:00:00.000000000Z"),
+            fh_event(201, 4, "2026-10-23T01:00:00.000000000Z"),
+        ]);
+        assert_eq!(failed.state, BackupState::Failed, "{failed:#?}");
+        assert!(
+            failed.summary.contains("error") && failed.summary.contains("2 hours ago"),
+            "{}",
+            failed.summary
+        );
+        assert!(failed.next_step.as_deref().is_some_and(|n| n.contains("File History")));
+        assert!(needs_attention(&failed));
+        let alarm = backup::observation(&failed).unwrap();
+        assert!(alarm.active && alarm.title == "File History backup failed", "{alarm:?}");
+        // An error older than the last good backup is history: healthy again, and the alarm clears.
+        let recovered = file_history(&[
+            fh_event(201, 4, "2026-10-23T07:00:00.000000000Z"),
+            fh_event(203, 2, "2026-10-22T06:00:00.000000000Z"),
+        ]);
+        assert_eq!(recovered.state, BackupState::Healthy, "{recovered:#?}");
+        assert!(!backup::observation(&recovered).unwrap().active);
+        // An error and no finished backup at all is also failed; no event at all keeps the old words.
+        assert_eq!(
+            file_history(&[fh_event(203, 1, "2026-10-23T06:00:00.000000000Z")]).state,
+            BackupState::Failed
+        );
+        assert_eq!(file_history(&[]).state, BackupState::NoBackupYet);
+    }
+
+    #[test]
+    fn file_history_asks_the_log_for_finished_backups_and_for_errors() {
+        struct Spy(std::sync::Mutex<Vec<String>>);
+        impl ToolRunner for Spy {
+            fn run_tool(&self, t: &crate::runner::Tool, _: Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                self.0.lock().unwrap().push(t.args.join(" "));
+                Ok(crate::runner::ToolOutput {
+                    ok: true,
+                    stdout: String::new(),
+                    error: String::new(),
+                })
+            }
+        }
+        let spy = Spy(Default::default());
+        check_one(&spy, BackupTool::FileHistory, NOW, &FixedZone::UTC, 48);
+        let q = spy.0.lock().unwrap().remove(0);
+        assert!(q.contains("EventID=201") && q.contains("Level=1") && q.contains("Level=2"), "{q}");
     }
 
     #[test]

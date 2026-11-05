@@ -82,6 +82,8 @@ pub enum BackupState {
     Stale,
     /// The tool is set up but has no backup yet.
     NoBackupYet,
+    /// The tool's own log reports that the last backup attempt failed, and no backup has finished since.
+    Failed,
     /// The tool is installed but nothing is set up to back up.
     NotConfigured,
     /// Dyno could not read the tool's state (reason in the detail).
@@ -371,6 +373,77 @@ pub fn parse_event_log_latest(xml: &str) -> Option<(Timestamp, bool)> {
     best
 }
 
+/// What File History's own log says: when the newest backup finished (event 201) and when the newest error was logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FileHistoryEvents {
+    /// The newest finished backup.
+    pub last_success: Option<Timestamp>,
+    /// The newest event of level error or critical.
+    pub last_error: Option<Timestamp>,
+}
+
+/// The finished-backup event of `Microsoft-Windows-FileHistory-Core/WHC`.
+pub const FILE_HISTORY_SUCCESS_EVENT: u32 = 201;
+
+/// Reads `wevtutil qe ... /f:xml` events of the File History log: the newest finished backup and the newest error.
+pub fn parse_file_history_events(xml: &str) -> FileHistoryEvents {
+    let mut out = FileHistoryEvents::default();
+    for ev in xml.split("<Event ").skip(1).take(64) {
+        let time = ev
+            .split("SystemTime='")
+            .nth(1)
+            .and_then(|r| r.split('\'').next())
+            .and_then(|t| parse_rfc3339(t, &FixedZone::UTC));
+        let id = ev
+            .split("<EventID")
+            .nth(1)
+            .and_then(|r| r.split_once('>'))
+            .and_then(|(_, r)| r.split('<').next())
+            .and_then(|n| n.trim().parse::<u32>().ok());
+        let level = ev
+            .split("<Level>")
+            .nth(1)
+            .and_then(|r| r.split('<').next())
+            .and_then(|l| l.trim().parse::<u8>().ok());
+        let Some(t) = time else { continue };
+        if id == Some(FILE_HISTORY_SUCCESS_EVENT) && out.last_success.is_none_or(|b| t > b) {
+            out.last_success = Some(t);
+        }
+        if matches!(level, Some(1 | 2)) && out.last_error.is_none_or(|b| t > b) {
+            out.last_error = Some(t);
+        }
+    }
+    out
+}
+
+/// File History's status: failed when the log has an error newer than the last finished backup (or an error and no finished
+/// backup), else healthy or stale by `stale_after_hours`, else no backup yet. Pure over the clock it is given.
+pub fn file_history_status(events: FileHistoryEvents, now: Timestamp, stale_after_hours: u32) -> BackupStatus {
+    let tool = BackupTool::FileHistory;
+    match (events.last_success, events.last_error) {
+        (success, Some(error)) if success.is_none_or(|s| error > s) => BackupStatus {
+            tool,
+            name: tool.name().into(),
+            state: BackupState::Failed,
+            last_backup: success,
+            summary: match success {
+                Some(s) => format!(
+                    "File History reported an error {}, after its last good backup {}.",
+                    age_sentence(now.since(error).max(0)),
+                    age_sentence(now.since(s).max(0))
+                ),
+                None => format!(
+                    "File History reported an error {} and has not finished a backup.",
+                    age_sentence(now.since(error).max(0))
+                ),
+            },
+            next_step: Some("Open Control Panel > File History to see what it reports, fix that, and run a backup.".into()),
+        },
+        (Some(at), _) => judged(tool, at, now, stale_after_hours),
+        (None, _) => no_backup(tool, "File History has not recorded a finished backup."),
+    }
+}
+
 /// `restic snapshots --json --latest 1`: the newest snapshot's `time`.
 pub fn parse_restic_latest(json: &str) -> Option<Timestamp> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
@@ -475,10 +548,10 @@ pub fn cannot_check(tool: BackupTool, why: &str) -> BackupStatus {
     }
 }
 
-/// The alarm for a status that needs attention (a stale backup or none at all), or `None` when it is fine. One alarm per
+/// The alarm for a status that needs attention (a stale or failed backup, or none at all), or `None` when it is fine. One alarm per
 /// tool, cleared (`active: false`) when the backup is healthy again.
 pub fn observation(status: &BackupStatus) -> Option<Observation> {
-    let needs = matches!(status.state, BackupState::Stale | BackupState::NoBackupYet);
+    let needs = matches!(status.state, BackupState::Stale | BackupState::NoBackupYet | BackupState::Failed);
     let healthy = status.state == BackupState::Healthy;
     if !needs && !healthy {
         return None;
@@ -490,6 +563,7 @@ pub fn observation(status: &BackupStatus) -> Option<Observation> {
         severity: Severity::Warning,
         title: match status.state {
             BackupState::NoBackupYet => format!("{} has no backup yet", status.name),
+            BackupState::Failed => format!("{} backup failed", status.name),
             _ => format!("{} backup is out of date", status.name),
         },
         detail: status.summary.clone(),
@@ -587,6 +661,37 @@ mod tests {
         assert_eq!(at, Timestamp(NOW.0 - HOUR));
         assert!(error);
         assert_eq!(parse_event_log_latest("none"), None);
+    }
+
+    #[test]
+    fn file_history_events_are_read_for_the_newest_success_and_the_newest_error() {
+        let ev = |id: &str, level: &str, at: &str| {
+            format!("<Event xmlns='x'><System><EventID Qualifiers='0'>{id}</EventID><Level>{level}</Level><TimeCreated SystemTime='{at}'/></System></Event>")
+        };
+        let xml = [
+            ev("201", "4", "2026-10-23T01:00:00.000000000Z"),
+            ev("201", "4", "2026-10-23T05:00:00.000000000Z"),
+            ev("203", "2", "2026-10-23T03:00:00.000000000Z"),
+            ev("203", "3", "2026-10-23T07:00:00.000000000Z"),
+        ]
+        .concat();
+        let e = parse_file_history_events(&xml);
+        assert_eq!(e.last_success, Some(Timestamp(NOW.0 - 3 * HOUR)));
+        assert_eq!(
+            e.last_error,
+            Some(Timestamp(NOW.0 - 5 * HOUR)),
+            "a warning (level 3) is not an error"
+        );
+        for junk in ["", "none", "<Event ", "<Event <EventID", "<Event <EventID>x"] {
+            assert_eq!(parse_file_history_events(junk), FileHistoryEvents::default(), "{junk}");
+        }
+        // The same inputs always give the same verdict for a given clock.
+        assert_eq!(
+            file_history_status(e, NOW, 48).state,
+            BackupState::Healthy,
+            "the success is newer than the error"
+        );
+        assert_eq!(file_history_status(e, NOW.plus(5 * DAY), 48).state, BackupState::Stale);
     }
 
     #[test]
