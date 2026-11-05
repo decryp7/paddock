@@ -86,6 +86,30 @@ fn untrusted(_: &Path) -> Option<String> {
     None
 }
 
+/// Makes the list's folder private: created 0700 when missing (whatever the umask: 002 would make 0775, which is then refused as
+/// writable by the group), and made 0700 when this user owns it and group or others can write to it without a sticky bit. A folder
+/// that someone else owns is left alone and judged by [`distrust`].
+#[cfg(unix)]
+fn secure_folder(path: &Path) {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) else {
+        return;
+    };
+    let _ = std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir);
+    if let Ok(meta) = std::fs::metadata(dir) {
+        let mode = meta.permissions().mode();
+        if meta.uid() == paddock_proc::effective_uid() && mode & 0o022 != 0 && mode & 0o1000 == 0 {
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn secure_folder(_: &Path) {}
+
 impl FileKeys {
     /// The key list in `path` (for example `dirs.config().join("mcp-keys.json")`).
     pub fn new(path: impl Into<PathBuf>) -> FileKeys {
@@ -115,6 +139,7 @@ impl FileKeys {
 
     /// The saved list as [`KeyListStore::load`] reports it, without changing what this store knows.
     fn read_list(&self) -> KeysLoad {
+        secure_folder(&self.path);
         if let Some(why) = untrusted(&self.path) {
             return KeysLoad {
                 entries: Vec::new(),
@@ -175,6 +200,7 @@ impl KeyListStore for FileKeys {
     }
 
     fn save(&self, entries: &[KeyEntry]) -> Result<(), String> {
+        secure_folder(&self.path);
         // A list put there by hand (restored, or fixed with chmod) is never overwritten, however often this is tried.
         if self.changed_by_hand() {
             return Err(RESTART.into());

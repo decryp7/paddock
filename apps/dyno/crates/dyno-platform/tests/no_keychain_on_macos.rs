@@ -129,7 +129,7 @@ fn tree_has(krate: &str, target: &str) -> Option<bool> {
         "--offline",
         "--locked",
         "--invert",
-        "keyring",
+        krate,
         "--prefix",
         "none",
         "--target",

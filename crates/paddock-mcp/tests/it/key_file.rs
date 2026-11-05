@@ -390,34 +390,50 @@ fn a_plain_write_failure_says_what_failed_not_that_the_file_changed() {
 
 #[cfg(unix)]
 #[test]
-fn a_list_in_a_folder_that_others_can_change_is_not_trusted_unless_the_folder_is_sticky() {
+fn a_folder_left_group_writable_by_a_umask_of_002_is_made_private_and_the_keys_survive_a_restart() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+    let (dir, path) = keys_file();
+    // What `create_dir_all` makes under umask 002 (Ubuntu and Fedora desktops): 0775.
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+    let key = control(&path).issue_key("Pitwall").unwrap();
+    assert_eq!(
+        mode(dir.path()),
+        0o700,
+        "the folder is private after the first save"
+    );
+    assert_eq!(
+        control(&path).keys().verify(&key.key).as_deref(),
+        Some("Pitwall"),
+        "the key survives a restart"
+    );
+    // A folder left 0775 by an older run is fixed when it is read, so the list is not refused.
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+    let again = control(&path);
+    assert_eq!(again.keys().verify(&key.key).as_deref(), Some("Pitwall"));
+    assert_eq!(again.get().keys_problem, None);
+    assert_eq!(mode(dir.path()), 0o700);
+    // A folder that has to be made is private whatever the umask.
+    let nested = dir.path().join("a").join("b").join("mcp-keys.json");
+    control(&nested).issue_key("x").unwrap();
+    assert_eq!(mode(nested.parent().unwrap()), 0o700);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sticky_shared_folder_is_left_alone() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, path) = keys_file();
     let key = control(&path).issue_key("Pitwall").unwrap();
-    let mode =
-        |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
-    for m in [0o777, 0o770, 0o722] {
-        mode(m);
-        let c = control(&path);
-        assert_eq!(
-            c.keys().verify(&key.key),
-            None,
-            "folder mode {m:o} is refused"
-        );
-        assert!(
-            c.get()
-                .keys_problem
-                .unwrap_or_default()
-                .contains("folder that other users can change")
-        );
-    }
-    for m in [0o1777, 0o700, 0o755] {
-        mode(m);
-        assert_eq!(
-            control(&path).keys().verify(&key.key).as_deref(),
-            Some("Pitwall"),
-            "folder mode {m:o} is accepted"
-        );
-    }
-    mode(0o700);
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+    assert_eq!(
+        control(&path).keys().verify(&key.key).as_deref(),
+        Some("Pitwall")
+    );
+    assert_eq!(
+        std::fs::metadata(dir.path()).unwrap().permissions().mode() & 0o7777,
+        0o1777,
+        "a /tmp-like folder is not chmodded"
+    );
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
 }
