@@ -11,7 +11,7 @@ only: no cloud, no account, no telemetry.
 The foundation has two layers (decided 2026-10-24, [ADR 0012](adr/0012-paddock-app-shell.md) and [ADR 0013](adr/0013-paddock-workbench.md)). The **App shell** is what every app gets: startup protection with crash recovery and
 safe mode, Report a problem, background services and login items, notifications and service health, dialogs as real windows,
 jobs and progress, Settings, About and updates, the Storage page, undo, and the theme (shell 0.3.0); Pitcrew, Pitwall,
-Spotter and Dyno are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
+Spotter, Dyno and Recce (planned) are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
 Sighter: docked panes with the layout planner, the activity bar, the Explorer, the command palette and the AI pane.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
