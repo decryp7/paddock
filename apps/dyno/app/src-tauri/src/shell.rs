@@ -333,6 +333,17 @@ impl<R: Runtime> ShellOf<R> {
         link.call(request).map_err(|e| e.message)
     }
 
+    /// The newest live update the agent pushed, for an MCP reading tool (the same values the window and the tray draw), or the
+    /// words for the client when the agent is not connected or has sent none yet.
+    pub fn newest_live(&self) -> Result<LiveUpdate, String> {
+        if lock(&self.link).is_none() {
+            return Err("Dyno is not connected to its agent; try again in a moment.".into());
+        }
+        lock(&self.last_live)
+            .clone()
+            .ok_or_else(|| "Dyno has not received readings from its agent yet; try again in a moment.".to_string())
+    }
+
     /// A Wake entry of the tray menu was chosen: wake the computer (a job the agent runs) or open the Power page.
     pub fn wol_menu_chosen(&self, id: &str) {
         let Some(action) = crate::wol_menu::action_of(id) else {
