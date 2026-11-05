@@ -143,6 +143,11 @@ async function main(argv) {
     if (scp(exe, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe`).code !== 0) throw new Error('copying the installer failed');
     if (existsSync(`${exe}.sig`)) scp(`${exe}.sig`, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe.sig`);
     if (scp(join(HERE, 'win-suite.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-suite.ps1`).code !== 0) throw new Error('copying win-suite.ps1 failed');
+    // A script that does not parse never starts (no run.log, no steps.json) and the poll below would wait 40 minutes: parse it in the guest first.
+    {
+      const parse = clean(ssh(`$e = $null; $t = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${GUEST}\\win-suite.ps1', [ref]$t, [ref]$e); foreach ($x in $e) { "line $($x.Extent.StartLineNumber): $($x.Message)" }; 'PARSED'`, 60_000).stdout).trim();
+      if (parse !== 'PARSED') throw new Error(`win-suite.ps1 does not parse in the guest: ${parse.replace(/\s*PARSED$/, '').slice(0, 400)}`);
+    }
     log('running the suite in the interactive session (bounded 40 min)');
     ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot ? ' -KeepRunning' : ''}${o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
     let done = false;
@@ -192,6 +197,10 @@ async function main(argv) {
     mkdirSync(dest);
     scp('-r', `paddock-test@${ip}:C:/paddock-test/vmcheck/out/*`, dest);
     const stepsFile = join(dest, 'steps.json');
+    if (!existsSync(stepsFile)) {
+      const listing = clean(ssh(`Get-ChildItem ${GUEST}\\out -Name; '--- run.log'; Get-Content ${GUEST}\\out\\run.log -Tail 15 -ErrorAction SilentlyContinue`, 60_000).stdout);
+      log(`no steps.json; the guest's out folder:\n${listing}`);
+    }
     if (!existsSync(stepsFile)) throw new Error('the suite wrote no steps.json (see run.log: ' + (existsSync(join(dest, 'run.log')) ? readFileSync(join(dest, 'run.log'), 'utf8').slice(-300) : 'absent') + ')');
     const raw = JSON.parse(readFileSync(stepsFile, 'utf8').replace(/^\uFEFF/, ''));
     let steps = (Array.isArray(raw) ? raw : [raw]).map((s) => ({ ...s, checks: s.checks ?? [], evidence: [].concat(s.evidence ?? []).map(String) }));
