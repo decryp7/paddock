@@ -102,7 +102,7 @@ type Field = 'name' | 'time' | 'repeat' | 'then';
               <span>Add one to wake this computer at a set time and keep it awake, wake other computers or run a job. A computer that is shut down is not woken.</span>
             </div>
           } @else if (v.rows.length > 0) {
-            <pd-table [toolbar]="false" label="Scheduled wakes" [rows]="v.rows" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="56" [rowActions]="actions" (rowActivate)="edit($event)" (action)="run($event)">
+            <pd-table height="window" [toolbar]="false" label="Scheduled wakes" [rows]="v.rows" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="56" [rowActions]="actions" (rowActivate)="edit($event)" (action)="run($event)">
               <ng-template pdCell="name" let-r><strong class="nm" [attr.title]="r.entry.name">{{ r.entry.name }}</strong></ng-template>
               <ng-template pdCell="when" let-r><span class="muted">{{ clock(r.entry.minuteOfDay) }}, {{ repeatText(r.entry.repeat) }}</span></ng-template>
               <ng-template pdCell="then" let-r><span class="wrap" [attr.title]="then(r)">{{ then(r) }}</span></ng-template>

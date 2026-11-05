@@ -36,7 +36,7 @@ interface ChangeLine extends Change {
             <span>No installs, updates, start-up items or setting changes were recorded. {{ watching() }}</span>
           </div>
         } @else {
-          <pd-table #pdgrid [toolbar]="false" label="What changed" [rows]="rows()" [columns]="columns" [rowKey]="changeKey" [filterable]="false" [maxHeight]="620" groupBy="day">
+          <pd-table #pdgrid [toolbar]="false" label="What changed" [rows]="rows()" [columns]="columns" [rowKey]="changeKey" [filterable]="false" height="window" groupBy="day">
             <ng-template pdCell="kind" let-c><span class="dot" [attr.data-tone]="tone(c.kind)" aria-hidden="true"></span>{{ kindLabel(c.kind) }}</ng-template>
           </pd-table>
         }

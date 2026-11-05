@@ -127,3 +127,16 @@ export function demoBundlePreview(): BundlePreview {
   ];
   return { files, totalBytes: files.reduce((a, f) => a + f.bytes, 0), redactions: { homePaths: 12, profilePaths: 3, machineNames: 5, userNames: 9, emails: 0, ipAddresses: 41 } };
 }
+
+/** The demo alarms followed by copies with other ids and titles, up to `total` (`?rows=many`: a list taller than the window). */
+export function manyAlarms(base: Alarm[], total: number): Alarm[] {
+  const first = base[0];
+  if (!first) return base;
+  const extra = Array.from({ length: Math.max(0, total - base.length) }, (_, i): Alarm => ({
+    ...first,
+    id: 100 + i,
+    key: `${first.key}:copy-${i}`,
+    title: `Sample alarm ${i + 1}`,
+  }));
+  return [...base, ...extra];
+}

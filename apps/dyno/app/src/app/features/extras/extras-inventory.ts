@@ -49,7 +49,7 @@ import { MatMenuModule } from '@angular/material/menu';
               <button type="button" matButton="outlined" (click)="store.loadSoftware()">Refresh</button>
             </p>
           }
-          <pd-table label="Installed software" [rows]="numberedRows()" [columns]="columns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620">
+          <pd-table label="Installed software" [rows]="numberedRows()" [columns]="columns" [rowKey]="rowNo" [filterable]="false" height="window">
             <ng-template pdCell="name" let-i><span class="app"><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm">{{ i.name }}</span></span></ng-template>
           </pd-table>
           @if (inv.truncated) { <p class="note" role="status"><dy-icon name="info" /><span>This system has more packages than Dyno lists; the first {{ inv.items.length }} are shown.</span></p> }

@@ -132,6 +132,8 @@ export class MockIntel {
 
   /** `?geo=many`: a destination in every country (to see 250 arcs). */
   many = false;
+  /** `?rows=many`: sixty firewall rules instead of three. */
+  manyRules = false;
 
   constructor(private readonly now: () => number = () => NOW_FALLBACK) {}
 
@@ -286,6 +288,16 @@ export class MockIntel {
   }
 
   firewall(): FirewallView {
+    const view = this.firewallView();
+    const first = view.sources[0];
+    if (!this.manyRules || !first || first.rulesHidden) return view;
+    const template = first.rules[0];
+    if (!template) return view;
+    const rules = [...first.rules, ...Array.from({ length: 57 }, (_, i) => ({ ...template, name: `Sample rule ${i + 1}`, program: `/Applications/Sample ${i + 1}.app` }))];
+    return { ...view, sources: [{ ...first, rules, ruleCount: rules.length }, ...view.sources.slice(1)] };
+  }
+
+  private firewallView(): FirewallView {
     return {
       os: 'macos',
       sources: [

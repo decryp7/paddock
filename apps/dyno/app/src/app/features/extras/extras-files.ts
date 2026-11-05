@@ -66,7 +66,7 @@ interface FileLine {
             </div>
           } @else {
             <div class="bar"><dy-tree-actions what="groups" (expandAll)="gridRef()?.expandAllGroups()" (collapseAll)="gridRef()?.collapseAllGroups()" /></div>
-            <pd-table #pdgrid [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="620" groupBy="group" [groupSummary]="groupSummary">
+            <pd-table #pdgrid [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" height="window" groupBy="group" [groupSummary]="groupSummary">
               <ng-template pdCell="file" let-f><span class="fcell"><strong class="fname">{{ base(f.file.path) }}</strong><span class="dir path">{{ short(dir(f.file.path), 56) }}</span></span></ng-template>
             </pd-table>
             <p class="faint muted">{{ scanned() }} @if (r.duplicates.length > 0) { Copies are listed oldest first. }</p>

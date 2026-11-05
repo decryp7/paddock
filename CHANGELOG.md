@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `pd-table` `height` (`fit`, `fill`, `window`)
+- New input `height` on `pd-table`, also exported as the type `PdTableHeight`. `fit` (default, unchanged): the body is as tall as its rows up to `maxHeight`, so no other app's table changes. `fill`: the table takes the height its container gives it (a flex column or a grid cell with `min-height: 0`), never less than 240 px; for the one main table of a page that fills the window. `window`: as tall as its rows up to the height of the nearest scrolling ancestor less the table's own toolbar and header, measured with a ResizeObserver and updated live (the window's height when nothing scrolls, `maxHeight` until measured); for a page that scrolls once and stacks tables; the wheel passes to the ancestor at the end of the rows.
+- New exports `PD_TABLE_FILL_MIN` (240) and `windowBodyMax`. The host has a `data-height` attribute. The gallery's Data page has a `height="fill"` demo.
+
 ### `paddock-service`: registrations are read back; `service_main` is the one service entry point (ADR 0054)
 - `Backend::register` and `replace_in_one_step` return the `Inspection` read back after the write; a read-back that disagrees is `RegisterError::NotAsWritten(Inspection)`, never `Ok`. A `LaunchdBundled` registration that reads back "needs approval" is now `RegisterError::NeedsApproval` at `register` (it was found at the next `inspect`). An implementation of `Backend` returns the inspection; a match on `RegisterError` handles `NotAsWritten`.
 - `Inspection` has `last_exit`, `restarts` and `unit`; `Job` has `Failed(LastExit)`. A stop by SIGHUP, SIGINT, SIGPIPE or SIGTERM, systemd's `Result=success` and a Windows service that has not started since boot (1077) are not failures.

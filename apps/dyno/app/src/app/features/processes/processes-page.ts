@@ -1,6 +1,6 @@
 import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree, type PdSort } from '@decryp7/paddock-ui/table';
 import { FullTextTip } from '../../shared/full-text-tip';
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input, linkedSignal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { CommandError } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
@@ -21,9 +21,6 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { SearchField } from '../../shared/search-field';
 import { TreeActions } from '../../shared/tree-actions';
 import { MatMenuModule } from '@angular/material/menu';
-
-/** What the table spends around its rows: its header and its frame. */
-const TABLE_CHROME = 28 + 2 + 16 + 8;
 
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
@@ -60,7 +57,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
       <div class="source" data-testid="processes-source"><dy-reading-source [via]="store.via()?.processes" [canRetry]="true" (retry)="retry()" /></div>
 
       <div class="body" [class.open]="!!store.selected()">
-        <section class="table card" #frame>
+        <section class="table card">
           @if (agentError(); as e) {
             <dy-async [loaded]="false" [error]="e" what="processes" (retry)="retry()" />
           } @else {
@@ -74,7 +71,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
             [rowKey]="rowKey"
             [filterable]="false"
             [state]="store.connected() ? 'ready' : 'loading'"
-            [maxHeight]="bodyMax()"
+            height="fill"
             [rowActions]="actions"
             [sortClearable]="false"
             [sort]="pdSort()"
@@ -155,7 +152,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
     .body.open { grid-template-columns: minmax(0, 1fr) 380px; }
     /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. */
     @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(240px, 45%); } }
-    .table { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-2); }
+    .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-2); }
     .nm-cell { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
     .nm { min-width: 0; }
     .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -220,10 +217,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   /** The highlighted row follows the open details panel (a click on a group folds it and leaves the highlight where it was). */
   protected readonly selectedKey = linkedSignal<string | null>(() => this.rows().find((r) => this.isSelected(r))?.key ?? null);
   private readonly rows = this.store.rows;
-  private readonly frame = viewChild<ElementRef<HTMLElement>>('frame');
-  private readonly frameHeight = signal(0);
-  /** The rows scroll inside the table, which fills the pane: what is left under the table's own toolbar and header. */
-  protected readonly bodyMax = computed(() => Math.max(160, this.frameHeight() - TABLE_CHROME));
   /** The row actions; "Other users" is one row for many accounts and has none. */
   protected readonly actions = (r: Row): PdRowAction[] => {
     if (r.kind === 'other') return [];
@@ -235,12 +228,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   };
 
   constructor() {
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => this.frameHeight.set(Math.round(entries[0]?.contentRect.height ?? 0)));
-    afterNextRender(() => {
-      const el = this.frame()?.nativeElement;
-      if (el) observer?.observe(el);
-    });
-    inject(DestroyRef).onDestroy(() => observer?.disconnect());
     effect(() => {
       const q = this.q();
       if (q !== undefined) this.store.setQuery(q);

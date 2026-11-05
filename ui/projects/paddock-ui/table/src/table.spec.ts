@@ -131,6 +131,26 @@ class PlainHost {
   readonly chosen: string[] = [];
 }
 
+
+/** A table in a page area that scrolls (the frame's main region): the height modes read this scroller. */
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdTable],
+  template: `
+    <div class="scroller" style="overflow-y: auto">
+      <pd-table [toolbar]="toolbar()" [rows]="rows()" [columns]="columns" [rowKey]="key" label="Sized" [height]="mode()" [maxHeight]="300" />
+    </div>
+  `,
+})
+class SizedHost {
+  readonly rows = signal<{ id: string }[]>([]);
+  readonly mode = signal<'fit' | 'fill' | 'window'>('fit');
+  readonly toolbar = signal(false);
+  readonly columns: PdColumn<{ id: string }>[] = [{ key: 'id', header: 'Id', value: (r) => r.id }];
+  readonly key = (r: { id: string }): string => r.id;
+}
+const many = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i}` }));
+
 /** Waits for the table to settle: change detection, then the frame in which the CDK table draws the rows of the viewport's range. */
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
   await f.whenStable();
@@ -1185,5 +1205,140 @@ describe('pd-table', () => {
     expect((document.activeElement as HTMLElement).classList.contains('pd-group')).toBe(true);
     expect((document.activeElement as HTMLElement).dataset['index']).toBe('0');
   });
-});
 
+  describe('height modes', () => {
+    /** Fakes ResizeObserver so a test can fire a resize of any watched element. */
+    function fakeObservers() {
+      const watched: { target: Element; cb: ResizeObserverCallback }[] = [];
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private readonly cb: ResizeObserverCallback) {}
+          observe(target: Element): void {
+            watched.push({ target, cb: this.cb });
+          }
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      return {
+        fire: (target: Element) => watched.filter((w) => w.target === target).forEach((w) => w.cb([{ target, contentRect: { width: 400, height: 0 } } as ResizeObserverEntry], {} as ResizeObserver)),
+        watches: (target: Element) => watched.some((w) => w.target === target),
+      };
+    }
+    async function sized(mode: 'fit' | 'fill' | 'window', rows: number, scrollerHeight?: number) {
+      const ro = fakeObservers();
+      TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+      const f = TestBed.createComponent(SizedHost);
+      const scroller = f.nativeElement.querySelector('.scroller') as HTMLElement;
+      if (scrollerHeight !== undefined) Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: scrollerHeight });
+      document.body.appendChild(f.nativeElement);
+      f.componentInstance.rows.set(many(rows));
+      f.componentInstance.mode.set(mode);
+      await settle(f);
+      const body = () => f.nativeElement.querySelector('.pd-body') as HTMLElement;
+      return { f, ro, scroller, body, grid: () => f.nativeElement.querySelector('.pd-grid') as HTMLElement, table: () => f.nativeElement.querySelector('pd-table') as HTMLElement };
+    }
+
+    it('fit (the default) keeps the old rule: as tall as the rows, up to maxHeight', async () => {
+      const t = await sized('fit', 50);
+      expect(t.table().getAttribute('data-height')).toBe('fit');
+      expect(t.body().style.height).toBe('300px');
+      expect(t.grid().classList.contains('pd-fill')).toBe(false);
+      t.f.componentInstance.rows.set(many(2));
+      await settle(t.f);
+      expect(t.body().style.height).toBe('64px');
+    });
+
+    it('fill leaves the height to the container: no inline height, a minimum, the grid grows', async () => {
+      const t = await sized('fill', 50);
+      expect(t.table().getAttribute('data-height')).toBe('fill');
+      expect(t.body().style.height).toBe('');
+      expect(t.body().style.minHeight).toBe('240px');
+      expect(t.grid().classList.contains('pd-fill')).toBe(true);
+      // One row still fills (the container decides); no rows: the empty message sits under the header, nothing grows.
+      t.f.componentInstance.rows.set(many(1));
+      await settle(t.f);
+      expect(t.grid().classList.contains('pd-fill')).toBe(true);
+      t.f.componentInstance.rows.set([]);
+      await settle(t.f);
+      expect(t.grid().classList.contains('pd-fill')).toBe(false);
+      expect(t.body().style.minHeight).toBe('');
+    });
+
+    it('fill: PageDown moves by the rows of the body the container gave (at least the minimum)', async () => {
+      const t = await sized('fill', 50);
+      const first = t.f.nativeElement.querySelector('.pd-body [role=row][data-index="0"]') as HTMLElement;
+      first.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true }));
+      await settle(t.f);
+      // 240 px of 32 px rows is 7 rows, so a page is 6.
+      expect(t.f.nativeElement.querySelector('.pd-body [role=row][tabindex="0"]')?.getAttribute('data-index')).toBe('6');
+    });
+
+    it('window: as tall as the rows, up to the scroll area minus the table chrome, and follows the area', async () => {
+      const t = await sized('window', 50, 700);
+      expect(t.ro.watches(t.scroller)).toBe(true);
+      // The chrome (everything of the table that is not the body) is measured, not guessed.
+      const host = t.table();
+      host.getBoundingClientRect = () => ({ height: 28 + 1000 }) as DOMRect;
+      t.body().getBoundingClientRect = () => ({ height: 1000 }) as DOMRect;
+      t.ro.fire(t.scroller);
+      await settle(t.f);
+      expect(t.body().style.height).toBe('672px');
+      // The area grows with the window: the table follows, live.
+      Object.defineProperty(t.scroller, 'clientHeight', { configurable: true, value: 1000 });
+      t.ro.fire(t.scroller);
+      await settle(t.f);
+      expect(t.body().style.height).toBe('972px');
+      // A small area never cuts the table below the minimum.
+      Object.defineProperty(t.scroller, 'clientHeight', { configurable: true, value: 100 });
+      t.ro.fire(t.scroller);
+      await settle(t.f);
+      expect(t.body().style.height).toBe('240px');
+    });
+
+    it('window: a short table is as tall as its rows; an empty one has no body height', async () => {
+      const t = await sized('window', 3, 900);
+      expect(t.body().style.height).toBe('96px');
+      t.f.componentInstance.rows.set([]);
+      await settle(t.f);
+      expect(t.body().style.height).toBe('0px');
+      t.f.componentInstance.rows.set(many(1));
+      await settle(t.f);
+      expect(t.body().style.height).toBe('32px');
+    });
+
+    it('window: with no scroll area measured (not laid out) the table keeps maxHeight, and with none at all it uses the window', async () => {
+      const t = await sized('window', 50, 0);
+      expect(t.body().style.height).toBe('300px');
+      TestBed.resetTestingModule();
+      document.body.innerHTML = '';
+      fakeObservers();
+      TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+      const f = TestBed.createComponent(SizedHost);
+      const scroller = f.nativeElement.querySelector('.scroller') as HTMLElement;
+      scroller.style.overflowY = 'visible';
+      document.body.appendChild(f.nativeElement);
+      f.componentInstance.rows.set(many(80));
+      f.componentInstance.mode.set('window');
+      await settle(f);
+      expect((f.nativeElement.querySelector('.pd-body') as HTMLElement).style.height).toBe(`${Math.max(240, window.innerHeight)}px`);
+      vi.stubGlobal('innerHeight', 500);
+      window.dispatchEvent(new Event('resize'));
+      await settle(f);
+      expect((f.nativeElement.querySelector('.pd-body') as HTMLElement).style.height).toBe('500px');
+    });
+
+    it('window: a mode change away from window stops following the area, and reduced motion changes nothing', async () => {
+      const t = await sized('window', 50, 700);
+      document.documentElement.setAttribute('data-motion', 'reduce');
+      t.ro.fire(t.scroller);
+      await settle(t.f);
+      expect(t.body().style.height).toBe('700px');
+      t.f.componentInstance.mode.set('fit');
+      await settle(t.f);
+      expect(t.body().style.height).toBe('300px');
+      document.documentElement.removeAttribute('data-motion');
+    });
+  });
+});

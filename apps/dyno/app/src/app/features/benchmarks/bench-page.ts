@@ -280,7 +280,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 <p class="note">The two runs share no finished measurements.</p>
               } @else {
                 <div class="tablewrap">
-                  <pd-table [toolbar]="false" label="Before and after" [rows]="c.deltas" [columns]="deltaColumns" [rowKey]="deltaKey" [filterable]="false" [maxHeight]="420">
+                  <pd-table [toolbar]="false" label="Before and after" [rows]="c.deltas" [columns]="deltaColumns" [rowKey]="deltaKey" [filterable]="false" height="window">
                     <ng-template pdCell="label" let-d>{{ d.label }}{{ ' ' }}<span class="faint">({{ title(d.kind) }})</span></ng-template>
                     <ng-template pdCell="before" let-d><span class="num">{{ metric(d.before) }} <small>{{ d.unit }}</small></span></ng-template>
                     <ng-template pdCell="after" let-d><span class="num">{{ metric(d.after) }} <small>{{ d.unit }}</small></span></ng-template>
@@ -305,7 +305,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <p class="note">No runs yet. Choose what to measure above and click Run benchmarks.</p>
             } @else {
               <div class="tablewrap">
-                <pd-table [toolbar]="false" label="Saved runs" [rows]="o.runs" [columns]="runColumns" [rowKey]="runKey" [filterable]="false" [maxHeight]="420">
+                <pd-table [toolbar]="false" label="Saved runs" [rows]="o.runs" [columns]="runColumns" [rowKey]="runKey" [filterable]="false" height="window">
                   <ng-template pdCell="pick" let-r><mat-checkbox [checked]="picked().includes(r.id)" [aria-label]="'Select ' + r.label" (change)="pick(r.id)" /></ng-template>
                   <ng-template pdCell="run" let-r><span class="runcell"><span class="slot">@if (r.phase) { <span class="badge outline">{{ r.phase === 'before' ? 'Before' : 'After' }}</span> }</span><span class="ell" [matTooltip]="r.label">{{ r.label }}</span></span></ng-template>
                   <ng-template pdCell="kinds" let-r><span class="wrap" [matTooltip]="kindsOf(r)">{{ kindsOf(r) }}</span></ng-template>

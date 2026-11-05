@@ -58,7 +58,7 @@ import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } 
               </div>
               @if (d.episodes.length) {
                 <div class="scroll">
-                  <pd-table [toolbar]="false" label="Times the CPU was slowed down in the last 30 days" [rows]="d.episodes" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [maxHeight]="420" [(sort)]="sort">
+                  <pd-table [toolbar]="false" label="Times the CPU was slowed down in the last 30 days" [rows]="d.episodes" [columns]="columns" [rowKey]="rowKey" [filterable]="false" height="window" [(sort)]="sort">
                     <ng-template pdCell="cause" let-e><span class="dot" [attr.data-tone]="causeToneOf(e)" aria-hidden="true"></span><span class="ell" [dyFullText]="causeLabelOf(e)">{{ causeLabelOf(e) }}</span></ng-template>
                   </pd-table>
                 </div>
