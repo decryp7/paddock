@@ -4,6 +4,7 @@
 // a place to click.
 import { spawnSync } from 'node:child_process';
 import { makeResult } from './verdict.mjs';
+import { judgeTrayClick, rightClicksInLog } from './win-judges.mjs';
 import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog } from './win-tray-icons.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
@@ -30,14 +31,24 @@ async function openMenu(actor) {
   return { icons, menu: items(await actor.send('menu')), promoted, metrics };
 }
 
-export async function trayMenuStep(actor) {
+export async function trayMenuStep(actor, { browser = null } = {}) {
   const checks = [];
   const evidence = [];
+  // The probe must be able to see a native menu (ER-33): close the dialogs that cover the shell, give the shell the foreground, count the app's own "tray click: Right Up" lines
+  // before and after, and take a screenshot while the menu is open.
+  if (browser) for (const p of browser.contexts().flatMap((c) => c.pages())) if (p.url().includes('dialog?id=')) await p.close().catch(() => {});
+  await actor.send('fg Dyno').catch(() => {});
+  await sleep(1000);
+  const logBefore = rightClicksInLog(ssh(APP_LOG_PS));
   const { icons, menu, promoted, metrics } = await openMenu(actor);
+  const logAfter = rightClicksInLog(ssh(APP_LOG_PS));
+  const menuShot = await actor.shot('tray-menu-open');
+  evidence.push(`app log "tray click: Right Up": ${logBefore} before, ${logAfter} after the right click`, `screenshot with the menu open: ${menuShot ?? 'not taken'}`);
+  const click = judgeTrayClick({ logBefore, logAfter, menuItems: menu.length });
   evidence.push(`taskbar icons: ${icons.map((i) => i.name).join(' | ') || '(none found)'}${promoted ? ' (found only after promoting them)' : ''}`, `menu: ${menu.map((m) => m.name).join(' | ') || '(none)'}`);
   checks.push(...(metrics.length ? [] : [{ ok: false, kind: 'check', detail: 'the app log names no tray icon it created (metrics = 0), so the icons cannot be recognised' }]));
   checks.push({ ok: icons.length > 0, detail: icons.length ? `${icons.length} Dyno tray icon(s) on the taskbar${promoted ? ' (only after promoting them)' : ''}` : 'no Dyno icon found on the taskbar through UI Automation' });
-  checks.push({ ok: menu.length > 0, detail: menu.length ? 'right-click opened a menu' : 'right-click opened no menu' });
+  checks.push(...click);
   const keep = menu.find((m) => /Keep awake/i.test(m.name));
   checks.push({ ok: Boolean(keep), detail: keep ? `the menu has "${keep.name}"` : 'the menu has no Keep awake entry' });
   if (keep) {

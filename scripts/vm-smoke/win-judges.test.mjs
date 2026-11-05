@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from './win-judges.mjs';
+import { rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from "./win-judges.mjs";
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -127,4 +127,14 @@ test('dead state: a failed or half install does not pass; a planted leftover sti
   assert.equal(judgeKilledInstall({ killed: true, key: 'yes', app: 'yes' })[0].kind, 'check');
   assert.equal(bad(judgeKilledInstall({ killed: true, key: 'no', app: 'no' })).length, 0);
   assert.equal(bad(judgeKilledInstall({ killed: true, key: 'yes', app: 'no' })).length, 1);
+});
+
+test('dead state: a right click with no log line, or a log line with no menu, is a broken probe, never a pass and never a product fail', () => {
+  assert.equal(rightClicksInLog('a tray click: Right Up b tray click: Right Up'), 2);
+  const none = judgeTrayClick({ logBefore: 1, logAfter: 1, menuItems: 3 });
+  assert.equal(none.length, 1);
+  assert.equal(none[0].kind, 'check');
+  const blind = judgeTrayClick({ logBefore: 1, logAfter: 2, menuItems: 0 });
+  assert.equal(blind.find((c) => !c.ok).kind, 'check');
+  assert.equal(bad(judgeTrayClick({ logBefore: 1, logAfter: 2, menuItems: 4 })).length, 0);
 });

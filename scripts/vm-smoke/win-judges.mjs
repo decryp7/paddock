@@ -188,3 +188,19 @@ export function judgeKilledInstall({ killed, key, app }) {
   if (key === 'yes' && app === 'yes') return [chk(false, 'the install had completed before the kill: nothing was interrupted', 'check')];
   return [chk(key === 'no', key === 'no' ? 'after the kill the machine-wide uninstall entry is absent: the product reads as Not installed' : 'after the kill an uninstall entry exists without a complete install: a half-installed product is presented as installed')];
 }
+
+/** Occurrences of the product's info-level tray log line for a right click in the app log text. */
+export const rightClicksInLog = (log) => (String(log ?? '').match(/tray click: Right Up/g) ?? []).length;
+
+/**
+ * The tray right-click probe (ER-33): the click is proven to have REACHED the tray icon only by the app's own log line `tray click: Right Up` (one more than before the
+ * click); the menu is read through UI Automation. A log line without a menu is a probe that cannot see a native menu unless a screenshot shows it: reported as a broken
+ * check (the screenshot is saved for a person), never as a product failure; no log line means the click did not arrive at all, also a broken check.
+ * @param {{logBefore:number, logAfter:number, menuItems:number}} f
+ */
+export function judgeTrayClick({ logBefore, logAfter, menuItems }) {
+  const arrived = logAfter > logBefore;
+  if (!arrived) return [chk(false, 'the app logged no "tray click: Right Up": the right click did not reach the tray icon (the probe, not the product, is not working)', 'check')];
+  if (menuItems === 0) return [chk(true, 'the app logged "tray click: Right Up"'), chk(false, 'the click arrived but UI Automation sees no menu: either the menu did not open or this probe cannot see a native menu; see the screenshot taken while it was open', 'check')];
+  return [chk(true, 'the app logged "tray click: Right Up"'), chk(true, `the right click opened a menu (${menuItems} item(s) read)`)];
+}

@@ -8,6 +8,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
+/** Windows's own firewall rule names (`@{MicrosoftWindows.Client.OOBE_1000...}`) are printed unchanged in the Firewall page's name column: not a Dyno raw identifier (friendly names come in 1.1.1). */
+const SCREENSHOT_OPTIONS = { allow: [/@\{[^}]+\}/] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Page-level checks beyond screenshotProblems: each is `async (page) => string[]` (problems). Add the shared layout checks here when they land. */
 export const EXTRA_CHECKS = [
@@ -26,7 +28,7 @@ export const EXTRA_CHECKS = [
 const slug = (s) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40);
 
 async function problemsOf(mod, page) {
-  const out = (await mod.screenshotProblems(page).catch((e) => [`check failed: ${e.message}`])).slice();
+  const out = (await mod.screenshotProblems(page, SCREENSHOT_OPTIONS).catch((e) => [`check failed: ${e.message}`])).slice();
   for (const extra of EXTRA_CHECKS) out.push(...(await extra(page).catch((e) => [`extra check failed: ${e.message}`])));
   return out;
 }

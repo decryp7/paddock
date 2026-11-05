@@ -12,6 +12,8 @@ import { trayCountdownStep, trayMenuStep } from './win-tray.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
+/** Windows's own firewall rule names (`@{MicrosoftWindows.Client.OOBE_1000...}`) are printed unchanged in the Firewall page's name column: not a Dyno raw identifier (friendly names come in 1.1.1). */
+const SCREENSHOT_OPTIONS = { allow: [/@\{[^}]+\}/] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ssh = (cmd, ms = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encoding: 'utf8', timeout: ms }).stdout.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 const result = (title, checks, evidence = [], pass = '') => {
@@ -26,7 +28,7 @@ export async function domScreenCheck(browser, { open = [] } = {}) {
   const checks = [];
   for (const p of browser.contexts().flatMap((c) => c.pages())) {
     const name = (await p.title()) || p.url();
-    const problems = await mod.screenshotProblems(p).catch((e) => [`check failed: ${e.message}`]);
+    const problems = await mod.screenshotProblems(p, SCREENSHOT_OPTIONS).catch((e) => [`check failed: ${e.message}`]);
     checks.push({ ok: problems.length === 0, detail: problems.length ? `${name}: ${problems.slice(0, 3).join('; ')}` : `${name}: clean (no clipped text, raw identifiers, mock text or colour-only chips)` });
   }
   void open;
@@ -66,7 +68,7 @@ export async function runUiPhase({ log = console.error, extra = [], after = [] }
     steps.push(result('Windows: Aero snap announces Manual (form and viewer dialog, Win+Left)', snaps.map((s) => ({ ok: s.ok, detail: `${s.label}: ${s.detail}` })), [], 'both dialogs announced Manual after Win+Left'));
     const tour = await domTour(browser, { shotDir: process.env.PADDOCK_WIN_SHOTS ?? null, log });
     steps.push(result('Windows: shared screenshot check on every page and dialog of the real WebView2 DOM', tour.checks, tour.evidence, `${tour.checks.length} pages and dialogs clean`));
-    steps.push(await trayMenuStep(actor).catch((e) => result('Windows: tray right-click menu', [{ ok: false, detail: e.message }])));
+    steps.push(await trayMenuStep(actor, { browser }).catch((e) => result('Windows: tray right-click menu', [{ ok: false, detail: e.message }])));
     steps.push(await trayCountdownStep(actor).catch((e) => result('Windows: tray menu during an idle countdown', [{ ok: false, detail: e.message }])));
     // Extension point: one function per wired helper reading (each `async ({ browser, actor }) => step`), run before Quit.
     for (const fn of extra) steps.push(await fn({ browser, actor }));

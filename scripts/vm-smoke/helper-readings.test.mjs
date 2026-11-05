@@ -72,3 +72,10 @@ test('a control that cannot run makes the step check-broken, not a product fail,
   assert.equal((await readingStep(by('firewall'), 'linux', d2)).status, 'pass');
   assert.deepEqual(calls, ['nft-rule']);
 });
+
+test('Backup is judged per row: "Not set up" for File History passes, Windows Backup or a real tool failure still fails', async () => {
+  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health Windows Backup has 3 versions File History Not set up. Turn it on in Settings. Read by the administrator helper'))).status, 'pass');
+  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health no backup of this PC File History Not set up. Read by the administrator helper'))).status, 'pass');
+  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health Windows Backup could not check. Try again. File History Not set up. Read by the administrator helper'))).status, 'fail');
+  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Dyno could not check 2 backup tools Read by the administrator helper'))).status, 'fail');
+});

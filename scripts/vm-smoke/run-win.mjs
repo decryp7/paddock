@@ -214,6 +214,7 @@ async function main(argv) {
     steps.push(...uiSteps);
     steps.push({ title: 'Tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });
     const started_ = new Date().toISOString();
+    const appLogText = ssh(`Get-ChildItem "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | Sort-Object Name | Select-Object -Last 2 | ForEach-Object { "@@ $($_.FullName)"; Get-Content $_.FullName -Tail 600 }`, 90_000).stdout;
     const allSteps = withBuildStep(steps, buildStep({ expected, found: buildProbe }));
     const required = requiredSteps({ os: 'windows', ui: Boolean(o.ui), reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
     const { file, exit } = finalizeRun({
@@ -221,6 +222,7 @@ async function main(argv) {
       run: { app: 'Dyno', version: steps[0]?.evidence?.find((e) => /^version \d/.test(e))?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial, required, guest: `VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot ${SNAPSHOT}), interactive session, x64 installer under emulation`, started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
     });
     mkdirSync(join(dirname(file), 'evidence'), { recursive: true });
+    writeFileSync(join(dirname(file), 'evidence', `${started_.replace(/[:.]/g, '-')}-win-app-log.txt`), appLogText); // the app log of every run, pass or fail
     for (const f of readdirSync(dest)) if (f.endsWith('.png') || /^setup-log-.*\.txt$|^run\.log$/.test(f)) writeFileSync(join(dirname(file), 'evidence', `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
     log(`result: ${file}`);
     console.log(file);

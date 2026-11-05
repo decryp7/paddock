@@ -30,7 +30,8 @@ export const READINGS = [
     value: { windows: [/Keeping this computer awake\s+[1-9]\d* programs?/i, /Program\s+It prevents[\s\S]*\bDyno\b/i] } },
   { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup', fullText: 4000,
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i],
-    value: { windows: [/no backup of this PC|Windows Backup has \d+ versions?/i] } },
+    // Per row (fix/dyno-vm-findings-1, efe366863): a File History log that never ran reads "Not set up" with a next step, which is right in a VM; "Could not check" is for a real tool failure. A build before that commit still says "Could not check 2 backup tools" and keeps failing.
+    value: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|Not set up/i] }, allowNotSetUp: true },
   { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Boot|Start-?up', fullText: 4000,
     expect: { macos: [/Login items|Background items/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
@@ -93,9 +94,11 @@ export async function readingStep(reading, os, driver) {
     for (const re of reading.expect[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page says ${re}` : `the page does not say ${re}` });
     for (const re of reading.value?.[os] ?? []) checks.push({ ok: re.test(text), detail: re.test(text) ? `the page shows a value (${re})` : `the page shows no value: nothing matches ${re}` });
     for (const re of reading.none ?? []) checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page still says ${re} (the reading is not wired through the helper)` : `the page does not say ${re}` });
+    // `allowNotSetUp`: sentences about File History that say "Not set up" are not a failure of the reading; everything else is still judged.
+    const judged = reading.allowNotSetUp ? text.split(/(?<=[.!?])\s+/).filter((s) => !(/File History/i.test(s) && /Not set up/i.test(s))).join(' ') : text;
     for (const re of FAILURE_WORDING) {
       if ((reading.allow ?? []).some((a) => a.source === re.source) || (reading.none ?? []).some((n) => n.source === re.source)) continue;
-      checks.push({ ok: !re.test(text), detail: re.test(text) ? `the page says ${re}: the helper did not take the reading` : `the page does not say ${re}` });
+      checks.push({ ok: !re.test(judged), detail: re.test(judged) ? `the page says ${re}: the helper did not take the reading` : `the page does not say ${re}` });
     }
   } finally {
     if (control && driver.cleanup) await Promise.resolve(driver.cleanup(control)).catch(() => {});
@@ -131,11 +134,9 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
       if (tab) { const t = main.getByRole('tab', { name: new RegExp(`^${tab}`) }).or(main.getByRole('radio', { name: new RegExp(`^${tab}`) })).or(main.getByRole('button', { name: new RegExp(`^${tab}`) })); if (!(await t.count())) return false; await t.first().click(); await new Promise((r) => setTimeout(r, 1500)); }
       if (reading.showAll) { const all = main.getByRole('button', { name: /^All$/ }).or(main.getByRole('radio', { name: /^All$/ })).or(main.getByRole('tab', { name: /^All$/ })); if (await all.count()) { await all.first().click(); await new Promise((r) => setTimeout(r, 2500)); } }
       if (reading.groupBy) {
-        const sel = main.getByRole('combobox', { name: /Group by/i }).or(main.getByLabel(/Group by/i));
-        if (!(await sel.count())) { this.why = 'no "Group by" combobox; controls on the page: ' + (await main.evaluate(() => [...document.querySelectorAll('select, [role=combobox], mat-select, [role=tab], [role=radio], button')].map((e) => `${e.tagName.toLowerCase()}:${(e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40)}`).filter((x) => !x.endsWith(':')).slice(0, 40).join(' | '))); return false; }
-        await sel.first().click(); await new Promise((r) => setTimeout(r, 500));
-        const opt = main.getByRole('option', { name: new RegExp(`^${reading.groupBy}`) });
-        if (!(await opt.count())) { this.why = 'no option "' + reading.groupBy + '" after opening Group by'; return false; }
+        // "Group by" is a segmented control (network-page.ts), not a combobox: the options are radios or buttons named None, Program and, on the Connections tab, a remote-host one.
+        const opt = main.getByRole('radio', { name: new RegExp(`^${reading.groupBy}`) }).or(main.getByRole('button', { name: new RegExp(`^${reading.groupBy}`) })).or(main.getByRole('tab', { name: new RegExp(`^${reading.groupBy}`) }));
+        if (!(await opt.count())) { this.why = `no "${reading.groupBy}" option in the Group by control; controls on the page: ` + (await main.evaluate(() => [...document.querySelectorAll('[role=radio], [role=tab], [role=radiogroup], button')].map((e) => `${e.getAttribute('role') ?? e.tagName.toLowerCase()}:${(e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40)}`).filter((x) => !x.endsWith(':')).slice(0, 40).join(' | '))); return false; }
         await opt.first().click(); await new Promise((r) => setTimeout(r, 2500));
       }
       return true;
