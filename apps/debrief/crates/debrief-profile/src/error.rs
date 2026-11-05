@@ -70,6 +70,11 @@ pub enum ProfileError {
     #[error("{0}")]
     NotAvailable(String),
 
+    /// The memory the app may keep for open captures and documents is used up (MEM-2); the message names the document and
+    /// what to do.
+    #[error("{message}")]
+    Budget { message: String },
+
     /// An error of an importer in the profiling plugin's process, with its code (ADR 0017).
     #[error("{message}")]
     Remote { code: ErrorCode, message: String },
@@ -97,7 +102,7 @@ impl ProfileError {
     /// The error's [`ErrorCode`].
     pub fn code(&self) -> ErrorCode {
         match self {
-            ProfileError::LimitExceeded { .. } => ErrorCode::Limit,
+            ProfileError::LimitExceeded { .. } | ProfileError::Budget { .. } => ErrorCode::Limit,
             ProfileError::Unsupported { .. } | ProfileError::NotAvailable(_) => ErrorCode::Unsupported,
             ProfileError::Unrecognised(..) => ErrorCode::NotACapture,
             ProfileError::UnknownCapture(_) => ErrorCode::NotFound,

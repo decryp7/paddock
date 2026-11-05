@@ -53,14 +53,28 @@ impl ProfilingSlot {
     }
 
     /// A store using the importers plugins contributed to `profiling.importers`.
+    #[cfg(test)]
     pub(crate) fn from_registry(registry: &debrief_core::PluginRegistry) -> ProfilingSlot {
-        let importers = registry
+        ProfilingSlot::from_registry_within(registry, None)
+    }
+
+    /// [`from_registry`](Self::from_registry) with its captures kept within the app-wide memory `budget`.
+    pub(crate) fn from_registry_within(
+        registry: &debrief_core::PluginRegistry,
+        budget: Option<Arc<debrief_budget::MemoryBudget>>,
+    ) -> ProfilingSlot {
+        let importers: Vec<Arc<dyn CaptureImporter>> = registry
             .contributions::<dyn CaptureImporter>(debrief_profile::IMPORTERS_POINT)
             .into_iter()
             .filter_map(GuardedImporter::new)
             .map(|g| Arc::new(g) as Arc<dyn CaptureImporter>)
             .collect();
-        ProfilingSlot::new(importers)
+        match budget {
+            Some(b) => ProfilingSlot {
+                store: Arc::new(RwLock::new(Box::new(Captures::new(importers, Limits::default()).with_budget(b)))),
+            },
+            None => ProfilingSlot::new(importers),
+        }
     }
 }
 

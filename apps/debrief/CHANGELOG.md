@@ -8,6 +8,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 ### Added
 
 - **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
+- **Memory:** Settings ▸ Performance ▸ "Memory for open documents": how much memory the profiles, heap snapshots and dumps you have open may use together in all windows (Automatic: a quarter of the computer's memory, 512 MB to 8 GB). When it is used up, the captures opened longest ago are released and read again from their files when you use them, and a dump or pasted capture that does not fit is refused with a message that names it and says what to close. Before, 32 per window could be open however large they were
 
 ### Fixed
 

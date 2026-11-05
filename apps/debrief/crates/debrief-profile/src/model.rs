@@ -270,6 +270,27 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// About how many bytes the profile holds in memory (the sizes of its tables; strings counted by length). An estimate
+    /// for the memory budget, not an allocator measurement.
+    pub fn approx_bytes(&self) -> u64 {
+        use std::mem::size_of;
+        let strings: usize = self
+            .frames
+            .iter()
+            .map(|f| f.function.len() + f.module.as_ref().map_or(0, String::len) + f.file.as_ref().map_or(0, String::len))
+            .sum::<usize>()
+            + self.notes.iter().map(String::len).sum::<usize>();
+        (self.frames.len() * size_of::<Frame>()
+            + self.stacks.len() * size_of::<StackNode>()
+            + self.threads.len() * size_of::<Thread>()
+            + self.events.len() * size_of::<ProfileEvent>()
+            + self.samples.stack.len() * size_of::<u32>()
+            + self.samples.thread.len() * size_of::<u32>()
+            + self.samples.time.len() * size_of::<u64>()
+            + self.samples.values.len() * size_of::<u64>()
+            + strings) as u64
+    }
+
     /// Position of a metric in the per-sample values.
     pub fn metric_index(&self, id: MetricId) -> Option<usize> {
         self.metrics.iter().position(|m| m.id == id)

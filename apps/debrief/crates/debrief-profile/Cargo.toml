@@ -9,6 +9,9 @@ publish = false
 description = "Debrief profiling engine: the common profile model (CPU, allocation, wall clock, heap snapshots) and every analysis over it"
 
 [dependencies]
+# The app-wide memory budget the open captures are kept within, and released from (MEM-2).
+debrief-budget = { path = "../debrief-budget" }
+log.workspace = true
 # The capture on the wire from the profiling plugin's process (`wire`, ADR 0017).
 postcard.workspace = true
 regex.workspace = true

@@ -67,7 +67,27 @@ pub struct HeapSnapshot {
     pub notes: Vec<String>,
 }
 
+impl ObjectGraph {
+    /// About how many bytes the graph holds in memory (an estimate for the memory budget).
+    pub fn approx_bytes(&self) -> u64 {
+        (self.type_of.len() * 4
+            + self.size.len() * 4
+            + self.edge_start.len() * 8
+            + self.edge_to.len() * 4
+            + self.edge_label.len() * 4
+            + self.roots.len() * 4
+            + self.labels.iter().map(|l| l.len() + 24).sum::<usize>()) as u64
+    }
+}
+
 impl HeapSnapshot {
+    /// About how many bytes the snapshot holds in memory (an estimate for the memory budget).
+    pub fn approx_bytes(&self) -> u64 {
+        self.graph.as_ref().map_or(0, ObjectGraph::approx_bytes)
+            + (self.types.len() * std::mem::size_of::<TypeStat>()) as u64
+            + self.notes.iter().map(|n| n.len() as u64).sum::<u64>()
+    }
+
     pub fn total_bytes(&self) -> u64 {
         self.types.iter().map(|t| t.bytes).sum()
     }
