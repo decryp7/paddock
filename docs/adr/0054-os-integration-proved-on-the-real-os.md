@@ -840,3 +840,41 @@ re-review approves it with these deferrals, each a dated deviation from the text
 - **Event 7024.** Windows prints a small service-specific code as Win32 message text, so the event reads as a misleading
   error text; the code itself is exact in `sc query` (`SERVICE_EXIT_CODE`). A later wire change (a code table the event text
   can use) is deferred.
+
+## Amendment 2 (2026-11-05): a check counts only with a verified precondition and a probe that has seen the thing
+
+Trigger: the retracted Dyno 1.1.0 tray diagnosis (a VM with no menu bar gave a false "confirmed" cause in 12 of 12 runs;
+a tray count matched the app's own window buttons) and the audit that followed. The audit found the Windows autostart
+judge passing on the agent alone, Lifespan passing on "helper did not answer", a reading row passing on a dead helper and
+`renderResult` printing PASS on zero steps. The user asked why iStat Menus did not have the problem, which exposed it.
+This extends V-2 and adds one planned check. It follows [rule 71](../rules.md) and ER-33, adopted by the user on
+2026-11-05 (rule 71 is on `origin/docs/rule-check-preconditions`; 68 to 70 stay this ADR's proposals).
+
+**V-2 widened.** Its positive controls cover every step of every `scripts/vm-smoke` suite, not only the lifecycle checks:
+`run-win`, `win-helper`, `win-reboot`, `helper-readings`, `mac-tour` and `run-linux`. A step has a precondition probe
+(the menu bar exists, the helper answers, the agent and the helper are both running) and a positive control (the same
+probe finds a thing known to be there, in the same run), and its result carries both.
+
+1. **Required-step manifest.** Each suite declares the steps it must run, per OS, in a manifest beside it
+   (`scripts/vm-smoke/<suite>.steps.json`). The judge compares the steps that ran with the manifest.
+2. **Derived verdict.** The verdict is computed from the step results, never written by a step or the renderer. A suite
+   with a manifest step missing, or with zero steps, is `INCOMPLETE` (not PASS). Order of severity: FAIL, `INCOMPLETE`,
+   `NOT MEASURED`, PASS. `renderResult` prints PASS only for a derived PASS and prints the missing steps otherwise.
+3. **Three-state reads.** A read of the guest returns `seen`, `absent` (the probe ran, its positive control passed, the
+   thing is not there) or `not measured` (precondition false or control failed). Only `absent` can support a
+   product failure; `not measured` and a broken control are reported as `not measured` and `check broken` and the release
+   does not pass. A cause is called confirmed only with a positive control and, where one exists, a known-good peer.
+
+**C98 (planned), a source check over `scripts/vm-smoke`** (next free number after C97), in `./dev check`, no build. It
+fails on:
+- a literal `ok: true` (or an equivalent constant verdict) inside a check;
+- a `detail` string shared by the pass and the fail branch of one check;
+- a reading row whose expectations are only negative or heading-level (it must name a positive value it expects to read);
+- fixtures not captured from a real guest (each fixture records its capture: guest, OS build, date, command).
+
+It is report-only until V-2's widening lands, then blocking; the tag gate of rule 54 (d) reads its result. Its own tests
+use one fixture per failure class.
+
+**Dyno.** `test/dyno-release-vm-checks-v2` implements the first part for Dyno (menu-bar and tray steps report
+`NOT MEASURED` without a menu-bar window; the gap for smartmontools is `NOT MEASURED`); the manifest, the derived verdict
+and C98 are still to do, in V-2.
