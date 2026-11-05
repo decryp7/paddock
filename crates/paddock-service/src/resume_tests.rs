@@ -1101,3 +1101,60 @@ fn a_held_service_is_not_supervised_and_a_completed_resume_clears_its_marker() {
     assert!(!resume(&mut m).0.unwrap());
     assert!(calls(&sim).is_empty(), "{:?}", calls(&sim));
 }
+
+// ---- the uncovered paths of the new entry points
+
+#[test]
+fn the_apps_own_agent_covers_a_refused_job_and_a_removal_nobody_took_back_is_finished() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.1.0");
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_cover(|| true);
+    assert_eq!(m.on_start(&never()), Started::Left(Hold::Healthy));
+    assert!(calls(&sim).is_empty());
+    // An app that does not say what its switch is finishes a removal that was begun.
+    RecordFile::new(dir.path(), LABEL).set_state(crate::record::State::Removing).unwrap();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert_eq!(m.on_start(&never()), Started::Removed);
+}
+
+#[test]
+fn a_request_that_cannot_record_or_finds_the_tracker_busy_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, sys, m) = unanswered(dir.path(), "1.1.0");
+    let record = RecordFile::memory();
+    record.memory_handle().unwrap().fail_writes(true);
+    let mut m = m.with_record(record);
+    assert!(matches!(m.repair(&never()), Err(ServiceError::Failed(w)) if w.contains("cannot be saved")));
+    assert!(matches!(m.uninstall(), Err(ServiceError::Failed(_))));
+    assert!(calls(&sim).is_empty() && no_changes(&sys));
+    let dir = tempfile::tempdir().unwrap();
+    let (_sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
+    assert!(m.tracker().start(std::time::Instant::now()));
+    assert!(matches!(m.repair(&never()), Err(ServiceError::Busy)));
+    assert!(matches!(m.install_unattended(&never()), Err(ServiceError::Busy)));
+}
+
+#[test]
+fn a_removal_and_an_install_wait_for_the_lock_like_a_start_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
+    let held = RecordFile::new(dir.path(), LABEL).lock().unwrap();
+    assert!(matches!(m.uninstall_patient(2, Duration::from_secs(5)), Err(ServiceError::Busy)));
+    assert!(sys.now() >= Duration::from_secs(10), "{:?}", sys.now());
+    assert!(matches!(m.install_patient(&never(), false, 1, Duration::from_secs(5)), Err(ServiceError::Busy)));
+    drop(held);
+    assert!(m.uninstall_patient(2, Duration::from_secs(5)).is_ok());
+    assert!(m.install_patient(&never(), false, 1, Duration::from_secs(5)).is_ok());
+}
+
+#[test]
+fn a_resume_that_the_plan_offers_or_that_finishes_a_removal_leaves_the_service_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    RecordFile::new(dir.path(), LABEL).set_state(crate::record::State::Removing).unwrap();
+    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_app_state(|| Some(true), || false, || true);
+    assert!(resume(&mut m).0.is_ok());
+}

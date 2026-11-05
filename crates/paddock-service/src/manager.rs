@@ -241,11 +241,7 @@ impl Manager {
         // Only this version's own `Registering` is a free finish (a crash after the removal, before the call): another
         // version's attempts are not this one's, so this version starts its own count.
         let finishing = before.phase_of(&self.version) == Some(Phase::Registering);
-        let allowed = if requested {
-            self.timings.max_cycles + 1
-        } else {
-            MAX_ATTEMPTS.saturating_sub(attempts0) + u32::from(finishing)
-        };
+        let allowed = allowed_registers(requested, self.timings.max_cycles, attempts0, finishing);
         if allowed == 0 {
             return Ran::Outcome(RepairOutcome::Failed(format!(
                 "The service was registered {attempts0} times and did not start; it is not registered again by itself."
@@ -340,8 +336,9 @@ impl Manager {
             }
             // Accepted and waiting: the state already says so, and the next start gives it time instead of replacing it.
             RepairOutcome::Registered => {
+                let tried = self.record.load().attempts_of(&self.version);
                 log::warn!(
-                    attempts = self.record.load().attempts_of(&self.version);
+                    attempts = tried;
                     "the service was registered but did not answer; the next start gives it time and looks again"
                 );
                 Ok(())
@@ -396,13 +393,14 @@ impl Manager {
                 lock = Some(l);
                 p = self.decide(waited, resuming).2;
             }
+            let recorded_now = self.record.load();
             log::info!(
                 plan:? = p,
                 registration:? = inspection.registration,
                 job:? = inspection.job,
                 login_item:? = inspection.login_item,
                 answers = answers,
-                recorded:? = self.record.load(),
+                recorded:? = recorded_now,
                 current = self.version.as_str(),
                 waited = waited;
                 "service start: what the OS and the record show, and the plan"
@@ -583,6 +581,16 @@ impl Manager {
     }
 }
 
+/// How many register calls a replace may make: a request runs its cycles, an unattended one gets what is left of the attempts
+/// (plus the free finish of a crashed registration).
+fn allowed_registers(requested: bool, max_cycles: u32, attempts: u32, finishing: bool) -> u32 {
+    if requested {
+        max_cycles + 1
+    } else {
+        MAX_ATTEMPTS.saturating_sub(attempts) + u32::from(finishing)
+    }
+}
+
 /// Why a requested repair is not done.
 fn refusal(r: Refusal) -> ServiceError {
     match r {
@@ -609,6 +617,14 @@ fn outcome_result(o: RepairOutcome) -> Result<RepairOutcome, ServiceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_runs_its_cycles_and_an_unattended_replace_gets_what_is_left_of_the_attempts() {
+        assert_eq!(allowed_registers(true, 3, 9, false), 4);
+        assert_eq!(allowed_registers(false, 3, 1, false), MAX_ATTEMPTS - 1);
+        assert_eq!(allowed_registers(false, 3, MAX_ATTEMPTS, false), 0);
+        assert_eq!(allowed_registers(false, 3, MAX_ATTEMPTS, true), 1, "the free finish");
+    }
 
     #[test]
     fn every_hold_and_outcome_maps_to_what_the_user_is_told() {

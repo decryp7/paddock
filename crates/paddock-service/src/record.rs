@@ -523,6 +523,28 @@ mod tests {
     }
 
     #[test]
+    fn a_file_that_cannot_be_used_is_reported_damaged_and_a_write_clears_a_memory_flag() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("service-net.a.b.json");
+        let r = RecordFile::new(d.path(), "net.a.b");
+        std::fs::create_dir(&path).unwrap();
+        assert!(r.peek().1, "unreadable");
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, r#"{"version": 2, "state": 5}"#).unwrap();
+        assert!(r.peek().1, "the wrong shape");
+        std::fs::write(&path, "[1]").unwrap();
+        assert!(r.peek().1, "format 1 that is not an object");
+        std::fs::write(&path, r#"{"version": 1}"#).unwrap();
+        assert!(!r.peek().1);
+        assert!(r.memory_handle().is_none());
+        let m = RecordFile::memory();
+        m.memory_handle().unwrap().set_damaged(true);
+        assert!(m.peek().1);
+        m.save("1.0.0", None).unwrap();
+        assert!(!m.peek().1, "a write replaces the damaged record");
+    }
+
+    #[test]
     fn a_memory_store_that_cannot_be_written_says_so() {
         let m = RecordFile::memory();
         m.memory_handle().unwrap().fail_writes(true);

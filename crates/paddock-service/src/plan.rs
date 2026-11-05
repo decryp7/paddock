@@ -354,15 +354,17 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         return fix(Reason::Moved);
     }
     if f.recorded_version != Some(f.current_version) {
-        if accepted && f.caps.pinned_identity && f.caps.automatic {
-            // This version registered it already: removing a job that is only slow to start would replace a working
-            // service (and announce it again). Given time first; replaced only if the wait ran out, and held at the cap.
-            // With the switch unreadable nothing is registered or replaced, so there is nothing to wait for either: `fix` holds.
-            return if f.waited || f.wanted.is_none() {
-                fix(Reason::VersionChanged)
-            } else {
-                Plan::Await(Reason::VersionChanged)
-            };
+        if accepted && f.caps.automatic {
+            // This version registered it already: removing a job that is only slow to start would replace a working service
+            // (and announce it again). Given time first. When the wait ran out (or nothing may be changed because the switch is
+            // unreadable) a pinned build is replaced, held at the cap; a definition that is current needs no replacement.
+            if !f.waited && f.wanted.is_some() {
+                return Plan::Await(Reason::VersionChanged);
+            }
+            if !f.caps.pinned_identity && i.definition_current == Some(true) {
+                return Plan::MarkCurrent;
+            }
+            return fix(Reason::VersionChanged);
         }
         let current =
             i.definition_current == Some(true) && i.registration == Registration::Registered;
@@ -699,6 +701,10 @@ mod tests {
             Reason::VersionChanged,
             Reason::ProgramMissing,
             Reason::Moved,
+            Reason::Interrupted,
+            Reason::Stopped,
+            Reason::Wanted,
+            Reason::Unwanted,
         ] {
             assert!(!r.describe().is_empty());
         }

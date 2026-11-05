@@ -1033,6 +1033,25 @@ mod tests {
         }
 
         #[test]
+        fn a_registration_that_is_awaited_is_pending_for_the_link_and_one_that_is_up_or_used_up_is_not() {
+            use paddock_service::record::{Phase, RecordFile, Recorded, State};
+            let rig = Rig::new();
+            let mut s = rig.service();
+            s.install().unwrap();
+            assert!(!s.pending(), "the unit is up: nothing to wait for");
+            rig.ctl.user_stops();
+            let record = RecordFile::new(rig.data.path(), dyno_agent::service::LABEL);
+            let awaiting = |attempts| Recorded {
+                state: State::Attempting { version: "1.1.0".into(), attempts, phase: Phase::Awaiting },
+                ..Recorded::default()
+            };
+            record.store(&awaiting(1)).unwrap();
+            assert!(s.pending(), "registered and not up yet: the link neither starts nor retires an agent");
+            record.store(&awaiting(paddock_service::plan::MAX_ATTEMPTS)).unwrap();
+            assert!(!s.pending(), "the attempts are used up: nothing is coming, so the app starts its own agent");
+        }
+
+        #[test]
         fn the_repair_at_start_replaces_a_stale_unit_and_leaves_a_missing_or_disabled_one_alone() {
             let rig = Rig::new();
             let mut s = rig.service();
