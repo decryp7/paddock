@@ -32,6 +32,9 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
             }
           </div>
           <p class="msg" data-testid="helper-message">{{ store.action() ? sentence(store.action()!) : s.message }}</p>
+          @if (store.stillStarting() && !store.action()) {
+            <p class="note" role="status" data-testid="helper-still-starting"><dy-icon name="info" /> Still starting. This is taking longer than usual; use Check again in a moment.</p>
+          }
 
           @if (!store.action() && s.readings.length && (s.state === 'off' || s.state === 'ready')) {
             <p class="lead">{{ s.state === 'off' ? 'Turning it on adds:' : 'Dyno now also shows:' }}</p>

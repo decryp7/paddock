@@ -13,7 +13,6 @@ function setup(helper: MockHelperVariant, fail: string[] = []) {
 describe('HelperStore', () => {
   it.each<[MockHelperVariant, string]>([
     ['off', 'off'],
-    ['silent', 'notRunning'],
     ['foreign', 'foreign'],
     ['outdated', 'outdated'],
     ['ready', 'ready'],
@@ -26,6 +25,19 @@ describe('HelperStore', () => {
     expect(store.status()?.state).toBe(state);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(store.error()).toBeNull();
+  });
+
+  it.each<[MockHelperVariant, string]>([
+    ['silent', 'notRunning'],
+    ['starting', 'starting'],
+  ])('reads %s as %s and reads again whenever the card is shown again', async (variant, state) => {
+    const { store, mock } = setup(variant);
+    const spy = vi.spyOn(mock, 'helperStatus');
+    await store.ensure();
+    await store.ensure();
+    expect(store.status()?.state).toBe(state);
+    expect(spy).toHaveBeenCalledTimes(2);
+    store.stopPolling();
   });
 
   it('keeps a failed read as an error with Retry and recovers', async () => {
@@ -114,6 +126,31 @@ describe('HelperStore', () => {
       await store.load();
       await vi.advanceTimersByTimeAsync(2000);
       expect(spy).toHaveBeenCalledTimes(total + 2);
+    });
+
+    it('a booting PC reads Starting (no Repair) until the helper answers', async () => {
+      const { store, spy } = answers('starting', 'starting', 'ready');
+      await store.ensure();
+      expect(store.status()?.state).toBe('starting');
+      expect(store.stillStarting()).toBe(false);
+      await vi.advanceTimersByTimeAsync(2000 + 4000);
+      expect(store.status()?.state).toBe('ready');
+      expect(spy).toHaveBeenCalledTimes(3);
+    });
+
+    it('says Still starting after the bound while it is still starting, and then Repair once the service is really down', async () => {
+      const { store, spy } = answers('starting');
+      await store.ensure();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(store.status()?.state).toBe('starting');
+      expect(store.stillStarting()).toBe(true);
+      // Checking again finds the service really down: the card offers Repair, with the reason.
+      spy.mockResolvedValue({ ...mockHelperStatus('silent', 'windows'), detail: 'the service stopped with its own exit code 3' });
+      await store.load();
+      expect(store.status()?.state).toBe('notRunning');
+      expect(store.stillStarting()).toBe(false);
+      expect(store.status()?.detail).toContain('exit code 3');
+      store.stopPolling();
     });
 
     it('never reads on a timer for a helper that is off, not included, or answering', async () => {

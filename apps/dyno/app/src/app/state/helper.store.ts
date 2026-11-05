@@ -19,6 +19,8 @@ interface HelperState {
   actionError: string | null;
   /** The last action was cancelled before it finished. */
   cancelled: boolean;
+  /** The timed reads ran out while the helper was still starting: the card says "Still starting" and waits for the person (ER-19: no deadline on the job). */
+  pollsExhausted: boolean;
 }
 
 /** The waits between timed reads while the helper is not answering (ms); the last one repeats. */
@@ -31,7 +33,7 @@ export const HELPER_POLL_LIMIT_MS = 180_000;
  * limit is used up. `waited` is the sum of the waits so far.
  */
 export function nextHelperPoll(status: HelperStatus | null, step: number, waited: number): number | null {
-  if (status?.state !== 'notRunning') return null;
+  if (status?.state !== 'notRunning' && status?.state !== 'starting') return null;
   const wait = HELPER_POLL_STEPS_MS[Math.min(step, HELPER_POLL_STEPS_MS.length - 1)] ?? HELPER_POLL_LIMIT_MS;
   return waited + wait > HELPER_POLL_LIMIT_MS ? null : wait;
 }
@@ -43,10 +45,12 @@ export function nextHelperPoll(status: HelperStatus | null, step: number, waited
  */
 export const HelperStore = signalStore(
   { providedIn: 'root' },
-  withState<HelperState>({ status: null, loading: false, error: null, action: null, jobId: null, actionError: null, cancelled: false }),
-  withComputed(({ jobId }, jobs = inject(JobsStore)) => ({
+  withState<HelperState>({ status: null, loading: false, error: null, action: null, jobId: null, actionError: null, cancelled: false, pollsExhausted: false }),
+  withComputed(({ jobId, status, pollsExhausted }, jobs = inject(JobsStore)) => ({
     /** The running action's phase, count and whether it has been quiet long enough to say "Still working". */
     job: computed(() => progressOf(jobs, jobId())),
+    /** The helper is still coming up after all timed reads: "Still starting", never a Repair. */
+    stillStarting: computed(() => status()?.state === 'starting' && pollsExhausted()),
   })),
   withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter)) => {
     let run: JobRun | null = null;
@@ -63,7 +67,10 @@ export const HelperStore = signalStore(
       stopPolling();
       if (store.action() !== null) return;
       const wait = nextHelperPoll(store.status(), step, waited);
-      if (wait === null) return;
+      if (wait === null) {
+        patchState(store, { pollsExhausted: true });
+        return;
+      }
       step++;
       waited += wait;
       timer = setTimeout(() => void poll(), wait);
@@ -82,7 +89,7 @@ export const HelperStore = signalStore(
       stopPolling();
       step = 0;
       waited = 0;
-      patchState(store, { loading: true, error: null });
+      patchState(store, { loading: true, error: null, pollsExhausted: false });
       try {
         patchState(store, { status: await backend.helperStatus(), loading: false });
       } catch (e) {
@@ -92,9 +99,11 @@ export const HelperStore = signalStore(
     }
     return {
       load,
-      /** Reads the state the first time the card shows. */
+      /** Reads the state the first time the card shows, and again whenever it shows while the helper was not yet answering. */
       async ensure(): Promise<void> {
-        if (store.status() === null && !store.loading()) await load();
+        const s = store.status()?.state;
+        if (store.loading()) return;
+        if (s === undefined || s === 'starting' || s === 'notRunning') await load();
       },
       /** Runs `action` as a job; the state is the job's output when it finished. */
       async start(action: HelperAction): Promise<void> {

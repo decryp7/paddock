@@ -284,6 +284,9 @@ pub enum HelperState {
     Off,
     /// Installed but not answering (stopped, or switched off in Login Items on macOS).
     NotRunning,
+    /// Installed and starting (just after Windows started, or just started by Dyno): not a fault and no Repair; Dyno
+    /// looks again by itself.
+    Starting,
     /// Something is wrong with the installation (damaged, a file missing or not protected): Repair.
     Missing,
     /// Another program answers where the helper should be: Dyno does not trust it and sends it nothing. Repair takes the place back.
@@ -510,7 +513,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             Some(why),
         ),
         Probe::Starting(why) => status(
-            HelperState::NotRunning,
+            HelperState::Starting,
             "The helper is starting. This takes a moment after Windows starts; Dyno looks again by itself.".into(),
             None,
             vec![],
@@ -988,7 +991,7 @@ mod tests {
             Probe::Starting("the service is StartPending".into()),
             "1.1.0",
         );
-        assert_eq!(s.state, HelperState::NotRunning);
+        assert_eq!(s.state, HelperState::Starting);
         assert!(s.message.contains("starting") && !s.message.contains("Repair"), "{}", s.message);
         assert_eq!(s.detail.as_deref(), Some("the service is StartPending"));
         let silent = assess(HelperHost::Windows, Ok(()), Probe::Silent("x".into()), "1.1.0");
