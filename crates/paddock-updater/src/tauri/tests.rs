@@ -3,7 +3,7 @@
 //! update server is an in-memory transport: no network.
 
 use super::*;
-use crate::{UpdatePhase, WhatsNewDecision};
+use crate::{Package, UpdatePhase, WhatsNewDecision};
 use ::tauri::ipc::{CallbackFn, InvokeBody};
 use ::tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
@@ -64,7 +64,7 @@ impl Transport for Server {
 struct FakeInstaller(Mutex<Vec<bool>>);
 
 impl Installer for FakeInstaller {
-    fn install(&self, _file: &Path, _manifest: &Value, relaunch: bool) -> Result<(), UpdateError> {
+    fn install(&self, _package: &Package<'_>, relaunch: bool) -> Result<(), UpdateError> {
         self.0.lock().unwrap().push(relaunch);
         Ok(())
     }
@@ -576,7 +576,7 @@ fn a_download_whose_job_cannot_start_is_abandoned_and_a_failed_install_is_logged
 struct FailingInstaller;
 
 impl Installer for FailingInstaller {
-    fn install(&self, _file: &Path, _manifest: &Value, _relaunch: bool) -> Result<(), UpdateError> {
+    fn install(&self, _package: &Package<'_>, _relaunch: bool) -> Result<(), UpdateError> {
         Err(UpdateError::InstallFailed {
             detail: "read-only volume".into(),
         })

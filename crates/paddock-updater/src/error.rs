@@ -49,6 +49,14 @@ pub enum UpdateError {
     InstallFailed {
         detail: String,
     },
+    /// The per-machine hand-off ended without installing: the sentence of `paddock-setup`'s exit code (ADR 0053 section 4.1).
+    NotInstalled {
+        reason: String,
+    },
+    /// The Windows permission prompt (UAC) of a per-machine update was declined.
+    Declined,
+    /// "Install when the app quits" asked for a copy installed for all users.
+    PerMachine,
     /// The request does not fit what the updater is doing now (e.g. downloading twice).
     Busy {
         detail: String,
@@ -86,6 +94,9 @@ pub enum UpdateErrorKind {
     DiskFull,
     Storage,
     InstallFailed,
+    NotInstalled,
+    Declined,
+    PerMachine,
     Busy,
     Invalid,
 }
@@ -105,6 +116,9 @@ impl UpdateError {
             UpdateError::DiskFull { .. } => K::DiskFull,
             UpdateError::Storage { .. } => K::Storage,
             UpdateError::InstallFailed { .. } => K::InstallFailed,
+            UpdateError::NotInstalled { .. } => K::NotInstalled,
+            UpdateError::Declined => K::Declined,
+            UpdateError::PerMachine => K::PerMachine,
             UpdateError::Busy { .. } => K::Busy,
             UpdateError::Invalid { .. } => K::Invalid,
         }
@@ -134,6 +148,9 @@ impl UpdateError {
             UpdateError::DiskFull { .. } => "There is not enough disk space for the update.".into(),
             UpdateError::Storage { .. } => "The update could not be saved.".into(),
             UpdateError::InstallFailed { .. } => "The update could not be installed.".into(),
+            UpdateError::NotInstalled { reason } => format!("Not installed: {reason}"),
+            UpdateError::Declined => format!("Not installed: {}.", crate::install::DECLINED),
+            UpdateError::PerMachine => crate::install::PER_MACHINE_NO_QUIT_INSTALL.into(),
             UpdateError::Busy { detail } | UpdateError::Invalid { detail } => detail.clone(),
         }
     }
@@ -167,6 +184,13 @@ impl UpdateError {
             UpdateError::InstallFailed { .. } => {
                 "Try again, or install the new version from the releases page."
             }
+            UpdateError::NotInstalled { .. } => {
+                "Click Install to try again. If it keeps failing, install the new version from the releases page."
+            }
+            UpdateError::Declined => {
+                "Click Install again and choose Yes in the Windows prompt. A standard user needs an administrator's name and password."
+            }
+            UpdateError::PerMachine => "Click Install when the update is ready.",
             UpdateError::Busy { .. } => "Wait for the current step to finish.",
             UpdateError::Invalid { .. } => "Choose one of the options offered.",
         }

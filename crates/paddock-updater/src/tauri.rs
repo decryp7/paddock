@@ -27,13 +27,16 @@
 mod native;
 #[cfg(feature = "install")]
 pub use native::PluginInstaller;
+#[cfg(all(windows, feature = "install"))]
+pub use native::{ShellElevator, is_administrator};
 
 #[cfg(doc)]
 use crate::UpdatePhase;
 use crate::{
-    About, AboutInfo, CancelOutcome, Channel, ExitAction, Installer, Preferences, RecordStore,
-    STATUS_EVENT, ServiceHooks, ServicesOutcome, Target, UpdateError, UpdateErrorDto, UpdateKey,
-    UpdateStatus, Updater, UpdaterConfig, WhatsNew, WhatsNewDecision,
+    About, AboutInfo, CancelOutcome, Channel, ExitAction, INSTALLER_WAIT_BOUND, InstallScope,
+    Installer, InstallerLock, Preferences, RecordStore, STATUS_EVENT, ServiceHooks,
+    ServicesOutcome, Target, UpdateError, UpdateErrorDto, UpdateKey, UpdateStatus, Updater,
+    UpdaterConfig, WhatsNew, WhatsNewDecision,
 };
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -133,6 +136,10 @@ pub struct UpdatesBuilder {
     hooks: Option<Arc<dyn ServiceHooks>>,
     installer: Option<Arc<dyn Installer>>,
     installer_kind: Option<String>,
+    scope: InstallScope,
+    install_dir: Option<PathBuf>,
+    administrator: Option<bool>,
+    installer_lock: Option<Arc<dyn InstallerLock>>,
     max_download_bytes: Option<u64>,
     auto_check_delay_secs: Option<u64>,
     downloader: Option<Arc<Downloader>>,
@@ -155,6 +162,10 @@ impl UpdatesBuilder {
             hooks: None,
             installer: None,
             installer_kind: None,
+            scope: InstallScope::PerUser,
+            install_dir: None,
+            administrator: None,
+            installer_lock: None,
             max_download_bytes: None,
             auto_check_delay_secs: None,
             downloader: None,
@@ -212,6 +223,27 @@ impl UpdatesBuilder {
 
     pub fn installer(mut self, installer: Arc<dyn Installer>) -> Self {
         self.installer = Some(installer);
+        self
+    }
+
+    /// Where the app is installed (default per user). A per-machine app (ADR 0053): updates install only when the user clicks
+    /// Install (the installer is the app's [`ElevatedHandoff`]), `install_dir` is its folder (the texts name its
+    /// `updates\setup.log`), `administrator` says whether this account may approve the prompt itself.
+    pub fn install_scope(
+        mut self,
+        scope: InstallScope,
+        install_dir: Option<PathBuf>,
+        administrator: Option<bool>,
+    ) -> Self {
+        self.scope = scope;
+        self.install_dir = install_dir;
+        self.administrator = administrator;
+        self
+    }
+
+    /// The installer lock of a per-machine app: at start the updater waits on it, bounded, while another user's install runs.
+    pub fn installer_lock(mut self, lock: Arc<dyn InstallerLock>) -> Self {
+        self.installer_lock = Some(lock);
         self
     }
 
@@ -335,6 +367,9 @@ pub fn install<R: Runtime>(
     if let Some(delay) = b.auto_check_delay_secs {
         config.auto_check_delay_secs = delay;
     }
+    config.scope = b.scope;
+    config.install_dir = b.install_dir.clone();
+    config.administrator = b.administrator;
     let handle = app.clone();
     let mut updater = Updater::new(
         config,
@@ -349,6 +384,9 @@ pub fn install<R: Runtime>(
     }
     if let Some(h) = b.hooks {
         updater = updater.with_service_hooks(h);
+    }
+    if let Some(l) = b.installer_lock {
+        updater = updater.with_installer_lock(l);
     }
     let available = updater.available();
     let mut about = About::new(&b.app_name, &version, records)
@@ -385,6 +423,11 @@ pub fn install<R: Runtime>(
 /// it is due (looked at every `poll`) until [`Updates::stop`].
 pub fn background(updates: Arc<Updates>, poll: Duration) -> Option<std::thread::JoinHandle<()>> {
     let spawned = std::thread::Builder::new().name("paddock-updates".into()).spawn(move || {
+        // First: while another user's installer runs, nothing else starts (ADR 0053 section 4.1 step 4).
+        let began = std::time::Instant::now();
+        if updates.updater.settle_handoff(INSTALLER_WAIT_BOUND) {
+            log::warn!(Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "The installer of a newer version stopped before it finished; shown in the Updates dialog");
+        }
         match updates.updater.on_start() {
             ServicesOutcome::Unchanged => {}
             ServicesOutcome::Registered { previous } => {
