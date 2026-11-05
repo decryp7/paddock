@@ -450,9 +450,10 @@ impl NativeIcon {
                 .with_inner_tray_icon(|t| {
                     let (n, last) = t.taskbar_restarts();
                     format!(
-                        "shell holds the icon {}; TaskbarCreated seen {n} time(s), last re-add outcome {}",
+                        "shell holds the icon {}; TaskbarCreated seen {n} time(s), last re-add outcome {}; steps: {}",
                         t.is_added(),
-                        last.map_or_else(|| "none".to_string(), |s| format!("{s:?}"))
+                        last.map_or_else(|| "none".to_string(), |s| format!("{s:?}")),
+                        t.recovery_trace()
                     )
                 })
                 .unwrap_or_else(|e| format!("the icon could not be asked: {e}"))
@@ -528,8 +529,8 @@ impl NativeIcon {
         #[cfg(windows)]
         {
             let guid = tray_identity::guid_text(tray_identity::guid_for(item));
-            match self.icon.with_inner_tray_icon(|t| t.guid_status()) {
-                Ok(status) => format!("GUID {guid}: {status:?}"),
+            match self.icon.with_inner_tray_icon(|t| (t.guid_status(), t.recovery_trace())) {
+                Ok((status, steps)) => format!("GUID {guid}: {status:?} (steps: {steps})"),
                 Err(e) => format!("GUID {guid}: status unknown ({e})"),
             }
         }
@@ -605,8 +606,8 @@ pub trait IconOps {
     /// Whether the OS shows the icon of item `id` now (a made icon the OS dropped, or never took, is not shown).
     fn shown(&mut self, id: &str) -> Shown;
     /// Whether a check may remove and make again an icon that is not shown. Windows and Linux: yes (the shell or host dropped the
-    /// add). macOS: never, a new status item made after ControlCenter is up stays off screen until the app is active, so a re-make
-    /// only hides it again (and crashed the app once).
+    /// add). macOS: never. The check reads the local window, which can be wrong while the menu bar or ControlCenter is not ready, and
+    /// a re-make was followed by one crash of the app in a test run.
     fn remakes_unshown(&self) -> bool;
     /// Platform facts about item `id` for the log (macOS: the window server's view of the item; Windows: whether the shell holds it
     /// and the `TaskbarCreated` re-adds).
@@ -809,8 +810,8 @@ fn verify<O: IconOps>(ops: &mut O, state: &TrayState, pass: u32) -> usize {
             continue;
         };
         if present && !ops.remakes_unshown() {
-            // macOS: a status item made after ControlCenter is up stays off screen until the app is active; making it again only
-            // hides the new one too (and crashed the app once). The check reports and leaves it.
+            // macOS: the check can be wrong while the menu bar or ControlCenter is not ready (it called a good login "not shown"), and a
+            // re-make was followed by one crash of the app in a test run. The check reports and leaves the icon.
             missing += 1;
             logging::info(&format!(
                 "tray check #{pass}: icon {} is not shown ({why}); not made again on this platform",
@@ -1341,14 +1342,14 @@ mod tests {
         let mut ops = FakeOps::new();
         ops.remake = false;
         sync(&mut ops, &state, 4).unwrap();
-        // ControlCenter parks the items off screen: the shown test says No for every one, at every check.
+        // The shown test says No for every item at every check (as when the menu bar is not ready).
         ops.not_shown.extend(ops.live.clone());
         for pass in 0..3 {
             apply(&mut ops, &state, TrayCommand::Verify { pass }).unwrap();
         }
         assert_eq!(
             ops.removed, 0,
-            "a re-make after ControlCenter is up hides the item again; macOS only reports"
+            "a re-make is followed by a crash in one test run, and the check can be wrong; macOS only reports"
         );
         assert_eq!(ops.made, 4, "no icon is made again");
         assert_eq!(ops.live.len(), 4);

@@ -37,7 +37,10 @@ mod mac {
     /// What the log needs to explain a missing item: whether the session has a menu bar at all, ControlCenter's pid and start time
     /// (seconds since the epoch) and how long after it Dyno started.
     pub fn context() -> String {
-        let bar = on_screen_windows().map_or_else(|e| format!("menu bar unknown ({e})"), |w| crate::tray_shown::menubar(&w).describe());
+        let bar = on_screen_windows().map_or_else(
+            |e| format!("menu bar unknown ({e})"),
+            |w| crate::tray_shown::menubar(&w, std::process::id() as i32).describe(),
+        );
         let own = start_secs(std::process::id() as i32);
         let cc = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str("com.apple.controlcenter"));
         let cc = cc.firstObject();
@@ -99,6 +102,7 @@ mod mac {
             });
             out.push(Window {
                 owner_pid: owner_pid as i32,
+                layer: number_of(&dict, "kCGWindowLayer").unwrap_or(0.0) as i32,
                 name: string_of(&dict, "kCGWindowName"),
                 width,
                 height,

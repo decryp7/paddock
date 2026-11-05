@@ -188,7 +188,7 @@ fn diagnostics_setup() -> Result<paddock_diag::tauri::Setup, Box<dyn std::error:
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
     let mut setup = paddock_diag::tauri::Setup::new(info, dirs)
         .settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE)
-        .section(Arc::new(crash_reports::CrashReports::new(crash_reports::default_dir())));
+        .section(Arc::new(crash_reports::CrashReports::new(crash_reports::default_folders())));
     if let Some(handle) = logging::handle() {
         setup = setup.log(handle);
     }
@@ -439,8 +439,8 @@ pub fn run() {
     if let Some(handle) = &_log {
         logging::set_handle(handle.clone());
     }
-    crash_reports::log_at_start(
-        crash_reports::default_dir().as_deref(),
+    crash_reports::log_at_start_in_background(
+        crash_reports::default_folders(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
