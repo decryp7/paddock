@@ -289,12 +289,16 @@ fn a_failed_light_path_falls_back_to_the_repair_and_says_why() {
         DisabledMark::NotListed,
         Held::Nothing,
     );
-    sim.lock().unwrap().register_error = Some(RegisterError::Other("denied".into()));
+    {
+        let mut w = sim.lock().unwrap();
+        w.register_error = Some(RegisterError::Other("denied".into()));
+        w.job_after_asks = None;
+    }
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let (r, said) = resume(&mut m);
     // Every register fails, so the repair cannot bring it back either: the error is the repair's.
-    assert!(matches!(r, Err(ServiceError::Failed(_))), "{r:?}");
+    assert!(matches!(r, Err(ServiceError::Failed(_))), "{r:?} {said:?}");
     assert_eq!(calls(&sim)[0], "register");
     assert!(
         calls(&sim).contains(&"unregister".to_string()),
@@ -723,7 +727,7 @@ fn a_busy_start_looks_again_a_bounded_number_of_times() {
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     let held = RecordFile::new(dir.path(), LABEL)
-        .lock(crate::manager::unix_now_for_tests())
+        .lock()
         .unwrap();
     let started = m.on_start_patient(&never(), 3, Duration::from_secs(5));
     assert_eq!(started, Started::Busy);
@@ -908,7 +912,13 @@ fn a_first_run_then_the_start_repair_waits_for_a_slow_job_and_registers_once() {
 fn a_registration_that_is_slow_but_healthy_settles_without_any_removal() {
     let dir = tempfile::tempdir().unwrap();
     let (sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
-    RecordFile::new(dir.path(), LABEL).attempt("1.1.0").unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: crate::record::Phase::Awaiting,
+        })
+        .unwrap();
     {
         let mut w = sim.lock().unwrap();
         w.status = AppServiceStatus::Enabled;
@@ -963,7 +973,13 @@ fn a_registration_that_never_comes_up_is_tried_a_few_times_per_version_and_then_
 fn a_refused_job_is_still_replaced_when_this_version_already_tried() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    RecordFile::new(dir.path(), LABEL).attempt("1.1.0").unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: crate::record::Phase::Awaiting,
+        })
+        .unwrap();
     let sim = world(
         AppServiceStatus::Enabled,
         DisabledMark::NotListed,
@@ -982,7 +998,7 @@ fn a_first_run_that_loses_the_lock_waits_and_then_registers() {
     let dir = tempfile::tempdir().unwrap();
     let (sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
     let held = RecordFile::new(dir.path(), LABEL)
-        .lock(crate::manager::unix_now_for_tests())
+        .lock()
         .unwrap();
     let r = m.install_patient(&never(), true, 3, Duration::from_secs(5));
     assert!(matches!(r, Err(ServiceError::Busy)));

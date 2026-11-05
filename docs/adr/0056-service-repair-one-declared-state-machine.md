@@ -1,6 +1,6 @@
 # 56. Service repair as one declared state machine
 
-- Status: Proposed (2026-11-05; user decision to redesign before the Dyno 1.1.0 tag; revision 2 answers the first independent review: P1-1 to P1-7 and its P2s)
+- Status: Proposed (2026-11-05; user decision to redesign before the Dyno 1.1.0 tag; revision 4 answers the second review (N1 to N3, R1 to R7) on top of revision 3 (Linux included) and revision 2 (the first review))
 - Date: 2026-11-05
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-17 to ER-19 (long operations: off the UI thread,
   labelled progress, no timeouts of running jobs), ER-27 (logs explain every failure), rule 53 (reusable OS names; held
@@ -174,22 +174,66 @@ back while a registration is pending.
 (measured: 20 to 40 over 8 starts), and (once the store port exists to run it fast) the crash cases P1-1, P2-2, P2-3, P2-4
 and the lock that outlives its holder. Each reproduced finding is listed in the report.
 
-### 8. Work packages (honest estimate)
+### 8. Amendments of revision 4 (these override anything above that disagrees)
+
+**N1. A failed register is its own phase.** `Phase` gains `RegisterFailed(kind)` (`Other | NotAsWritten`), written when `register`
+fails. `Registering` + absent (a crash) stays a free finish with no new attempt; `RegisterFailed` + absent retries only under
+the cap, and at the cap the hold is `Hold::RegisterFailed(n)`. `NeedsApproval`, `Unavailable`, `Declined` and `NeedsElevation` are
+user or OS states, not attempts: the record returns to the state before the replace and the registration state says the rest.
+
+**N2. `pending` comes from the transition.** `Manager::pending()` is true only when the plan for a start is `Await`, or a
+replace is under way (phase `RemovingOld`, `Registering`, `Awaiting` or `RegisterFailed` under the cap). It is false for
+`SwitchedOff`, `NeedsApproval`, a refused location, the cap, a lost lock and `wanted = Some(false)`, so the link starts an agent
+of its own then. It covers `RemovingOld` (the job is absent for up to 20 s and `supervises` is false), so the link does not start
+an agent on an ordinary update. The invariant is stated that way: the link never falls back while `pending()` is true, and
+`pending()` is false in every state with no way forward.
+
+**N3. The Settings switch returns at once.** `Install` asked runs on a worker; `settings_changed` returns with the busy state
+(ER-17). On `Install` asked, the app's own agent is retired first (the existing `link/machine.rs` handover is kept: the link
+refreshes the service before the wait, not after), then the wait runs. The wait is cancelled by Quit and by a newer event.
+
+**R1.** `Looked(answers | refused | settled)` is an event for a look during a wait, and a failed `unregister` or `evict` is an
+event too. **R2.** Settling by `Running` needs the same pid and start time on two looks of a process that started after the
+register; `Registering` is entered only on a confirmed `Unregistered` or `GoneTimedOut` (recorded which). **R3.** `wanted` is
+`Option<bool>`: `None` (a damaged settings file) never registers unattended and lets `Removing` finish; it is read again under
+the lock. **R4.** `StopFailed` clears `resume_pending`. **R5.** The app's own login item gets an observation; where the OS
+cannot be read, a repeat of `set` is safe (VM row: it does not announce the item again). **R6.** The fixed point saturates
+`attempts` past the cap and keeps `resume_pending`, `now` and the versions out of the state key; the lock is a port too
+(`InstanceLock::claim` waits about 400 ms when held; one test uses it for real, one kills a real child). **R7.** The cap is for
+unattended registers (Repair and Install asked run past it); the invariants have named exceptions for `Uninstall`, reconcile
+`Remove` and Install asked.
+
+**Linux.** `resume_pending` lives in the record on Linux too (the marker file is gone, or peek-then-remove); the switch check at
+first sight goes through reconcile; `pending()` defaults to false where nothing waits; shared Dyno code builds and tests on Linux.
+
+**Cuts that keep the guarantee.** WP1 builds no store port on the old code: the named crash traces are replayed on `c612dbfa6`
+with its real file (ER-11 holds). The identity of a copy (`points_here`, `program_exists`) comes from `registered_program`
+against this copy's path plus a file check, written with `RemovingOld`; `program =` from `launchctl print` is parsed for the log
+only. Tests that the explorer covers are deleted, not rewritten, if the explorer counts towards the 99% gate (rule 43).
+
+### 9. Work packages (honest estimate, revision 4)
 
 | WP | What | Days |
 | --- | --- | --- |
-| 1 | `RecordStore` port, simulator in `testing`, fixed-point explorer, alphabet, red on `c612dbfa6` | 2.5 |
+| 0 | Freeze of the types, `Facts`/`Observation`, hold and phase names (this change, first) | 0.25 |
+| 1 | Store and lock ports, simulator in `testing`, fixed-point explorer, alphabet; named traces red on `c612dbfa6` | 2 |
 | 2 | `State`, format 2, migration under the lock, read-only queries, `InstanceLock` | 1.25 |
-| 3 | `transition`, stepwise executor (`repair.rs`), caps, attempts per register | 2 |
+| 3 | `transition`, stepwise executor (`repair.rs`), `OsResult` events, caps, attempts per register | 2.25 |
 | 4 | Manager entry points, reconcile (`wanted`), `resume_pending`, cancel, lock release during waits | 1.5 |
-| 5 | Signals split, `pending`, link fallback and its model, `supervises` | 1.5 |
-| 6 | Two-copy identity (`program =`, `points_here`, `with_program`) | 1 |
-| 7 | Dyno: `login.rs`, `quit.rs`, `lib.rs`, `shell.rs` reconcile, Settings busy state | 1.5 |
-| 8 | Rewrite the 56 tests of `scenarios.rs` and `resume_tests.rs` against the 99% gate, `control.rs`, shell-demo, paddock-shell tests, README, redraw `uml-state-service` (ER-23) | 2 |
-| 9 | Dyno on Linux: `CliService`, `dyno_agent::service`, the `dyno-agent` verbs onto `Manager` + `Systemd`, their tests and docs, Linux scenarios in the model | 1.25 |
+| 5 | Signals, `pending`, link fallback, its model, `supervises` | 1.5 |
+| 6 | Copy identity from `registered_program`, `with_program` | 0.5 |
+| 7 | Dyno macOS: `login.rs`, `quit.rs`, `lib.rs`, `shell.rs` reconcile, the Settings switch on a worker with a busy state | 2 |
+| 8 | Delete what the explorer covers, rewrite the rest, `control.rs`, shell-demo, paddock-shell tests, README, redraw `uml-state-service` (ER-23) | 1.5 |
+| 9 | Dyno on Linux: `CliService`, `dyno_agent::service`, the verbs onto `Manager` + `Systemd`, tests, docs, Linux scenarios | 1.5 |
 | 10 | Rules, lessons, docs | 0.25 |
 
-About 15 days, plus a VM round of 2 days (macOS and the systemd rows). The Dyno 1.1.0 tag waits for WP 1 to 9. WP 9 can start as soon as WP 3 (the transition and the `Manager` entry points) has landed, and can run in parallel with WP 4 to 8 by another agent from this ADR and a brief naming `crates/paddock-service/src/backend/systemd.rs`, `apps/dyno/app/src-tauri/src/login.rs` and `apps/dyno/agent` (`service`, `cli.rs`).
+About 14.5 days of work, 8 to 9 days of calendar with the parallel pieces below, plus a VM round of 2.5 days. The Dyno 1.1.0
+tag waits for WP 0 to 9.
+
+**Parallel after the freeze (WP 0).** WP 1 (`crates/paddock-service/src/testing/`, `tests/it/model.rs`); WP 6 (`backend/launchd.rs`,
+`launch.rs`); WP 9 (`backend/systemd.rs`, `apps/dyno/app/src-tauri/src/login.rs` Linux part, `apps/dyno/agent` service and
+`cli.rs`), once WP 3 has landed; WP 5's link fallback (`apps/dyno/app/src-tauri/src/link/`) once N2's `pending()` is in; WP 8's
+`control.rs`, shell-demo, README and the diagram. The serial core is WP 2, 3, 4, 7 and the rest of 8.
 
 **VM rows** (left for the VM round): `SMAppService` lag and real start time; the number of Background Items Added notices per
 path; EX_CONFIG after a real update; a register with the old job lingering; a kill in each phase; a disk image and a

@@ -134,6 +134,17 @@ pub fn compose(s: Seen<'_>) -> ServiceStatus {
                     s.app
                 )),
             ),
+            (_, Plan::Leave(Hold::Unanswered(n) | Hold::Refused(n) | Hold::RegisterFailed(n))) => (
+                Condition::NotRunning,
+                Some(format!(
+                    "{}'s background service was registered {n} times and did not start, so {} stops trying until it is updated. Switch the service off and on again in {}'s settings, press Repair where there is one, or restart the computer.",
+                    s.app, s.app, s.app
+                )),
+            ),
+            (_, Plan::Leave(Hold::RecordUnavailable(why))) => (
+                Condition::Unavailable,
+                Some(format!("{} cannot save its service state, so it changes nothing: {why}", s.app)),
+            ),
             _ if i.job == Job::Refused => (
                 Condition::Refused,
                 Some("The system refused to start the background service (the app was updated and the old registration is still held). Repair replaces it.".to_string()),

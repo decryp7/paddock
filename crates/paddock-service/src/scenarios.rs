@@ -336,19 +336,25 @@ fn a_bootout_that_hangs_is_bounded_and_ends_with_next_steps() {
         t.worst_case()
     );
     let registers = changes(&sys).iter().filter(|c| *c == "register").count();
-    assert_eq!(registers, t.max_cycles as usize + 1);
+    assert_eq!(
+        registers,
+        crate::plan::MAX_ATTEMPTS as usize,
+        "an unattended repair registers at most what is left of the attempts"
+    );
     assert_eq!(
         m.recorded().registered_version,
         None,
         "a failed repair is tried again at the next start"
     );
     assert!(m.status().can_repair);
-    // launchd lets go later: the next start repairs it.
+    // The attempts of this version are used up: the next start holds instead of registering again without limit ...
     sim.lock().unwrap().bootout_hangs = false;
     assert_eq!(
         m.on_start(&no_cancel()),
-        Started::Repaired(Reason::Refused, RepairOutcome::Recovered)
+        Started::Left(Hold::Refused(crate::plan::MAX_ATTEMPTS))
     );
+    // ... and the user's Repair, once launchd lets go, goes through.
+    assert!(matches!(m.repair(&no_cancel()), Ok(RepairOutcome::Recovered)));
 }
 
 #[test]
@@ -460,9 +466,9 @@ fn a_second_copy_repairing_at_the_same_time_is_told_to_wait() {
     let d = tempfile::tempdir().unwrap();
     let sim = launchd(2, Some(1));
     let sys = FakeSystem::new();
-    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_clock(|| 1_000);
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
     let other = crate::record::RecordFile::new(d.path(), LABEL);
-    let held = other.lock(1_000).unwrap();
+    let held = other.lock().unwrap();
     assert_eq!(m.on_start(&no_cancel()), Started::Busy);
     assert!(matches!(m.repair(&no_cancel()), Err(ServiceError::Busy)));
     assert!(matches!(m.uninstall(), Err(ServiceError::Busy)));
@@ -1645,10 +1651,13 @@ fn manager_contract_details() {
     )
     .unwrap();
     let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
+    // Nothing is changed that cannot be recorded (no OS call without a durable write): the start says so and holds.
     assert!(matches!(
         m.on_start(&no_cancel()),
-        Started::Repaired(Reason::Refused, RepairOutcome::Recovered)
+        Started::Left(Hold::RecordUnavailable(_))
     ));
+    // The user's own request goes on (loudly) without a record.
+    assert!(matches!(m.repair(&no_cancel()), Ok(RepairOutcome::Recovered)));
     assert!(
         std::fs::read_to_string(d.path().join(format!("service-{LABEL}.json")))
             .unwrap()

@@ -408,7 +408,7 @@ fn repair_result(started: paddock_service::manager::Started) -> Result<bool, Str
             RepairOutcome::NeedsElevation | RepairOutcome::Declined => Err("the agent service could not be registered again".into()),
         },
         Started::Busy => Err("another registration or repair kept running; it is tried again at the next start".into()),
-        Started::Left(_) | Started::Marked | Started::Offered(_) => Ok(false),
+        Started::Left(_) | Started::Marked | Started::Offered(_) | Started::Removed => Ok(false),
     }
 }
 
@@ -492,9 +492,11 @@ mod mac {
             dirs.root(),
             LABEL,
             env!("CARGO_PKG_VERSION"),
-            // The app may have started an agent of its own meanwhile; launchd running the job counts too.
-            move || agent_answers() || paddock_service::launchctl::job_running(&mut system(), &target),
+            // The service's own signal only: launchd running the job. The app's own agent, which the link may have started
+            // meanwhile, is `cover`: it keeps a refused job from being replaced, but never settles a registration.
+            move || paddock_service::launchctl::job_running(&mut system(), &target),
         )
+        .with_cover(move || agent_answers())
         .with_timings(timings))
     }
 
@@ -517,8 +519,9 @@ mod mac {
     }
 
     impl LoginService for SmService {
-        /// Registers the agent and returns at once: the link waits for it and falls back to an agent of its own (the switch
-        /// must not block for the two minutes a service may need to start).
+        /// Registers the agent without waiting for it to answer (`install_timings`): the link waits for it and falls back to an
+        /// agent of its own. This call itself can still take long (a lost lock is waited for up to 30 s, and each registration
+        /// cycle about 24 s), so the Settings switch must show it as busy.
         fn install(&mut self) -> Result<(), String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
             let quiet = install_is_quiet(self.first_run, opened_marker().exists());
@@ -538,7 +541,10 @@ mod mac {
         }
 
         fn uninstall(&mut self) -> Result<(), String> {
-            quiet_manager()?.uninstall().map_err(|e| e.to_string())
+            // Another registration or repair may hold the lock: wait for it as the install does.
+            quiet_manager()?
+                .uninstall_patient(6, std::time::Duration::from_secs(5))
+                .map_err(|e| e.to_string())
         }
     }
 

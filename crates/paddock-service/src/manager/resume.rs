@@ -6,11 +6,12 @@
 //! tell (the list of switches could not be read) or one the OS has no record of; a version change goes through the
 //! full repair (the pinned build identity is new); and it never opens System Settings, whatever the repair meets.
 
-use super::{Manager, outcome_result, refusal};
+use super::{Manager, Ran, outcome_result, refusal};
 use crate::backend::{DisabledMark, Job};
 use crate::error::ServiceError;
 use crate::manager::Started;
 use crate::plan::{ResumePath, installed, request, resume_path, supervises};
+use crate::record::Phase;
 use crate::port::RegisterError;
 use crate::repair::RepairOutcome;
 use crate::stop::StopMechanism;
@@ -54,11 +55,15 @@ impl Manager {
     ) -> Result<bool, ServiceError> {
         let inspection = self.backend.inspect();
         let recorded = self.record.load();
-        match resume_path(
-            &inspection,
-            recorded.registered_version.as_deref(),
-            &self.version,
-        ) {
+        if matches!(recorded.state, crate::record::State::Removing) || (self.wanted)() == Some(false) {
+            say("the user's switch is off (or a removal was begun); the service stays as it is");
+            return Ok(false);
+        }
+        if !self.backend.capabilities().automatic {
+            say("registering needs the user's permission here; the service stays as it is");
+            return Ok(false);
+        }
+        match resume_path(&inspection, &recorded, &self.version) {
             ResumePath::Nothing => {
                 say(
                     if inspection
@@ -105,50 +110,25 @@ impl Manager {
                 }
             }
         }
-        // The full repair, on the user's behalf but unasked in the foreground: what the user switched is left alone and
+        // The full repair goes through the same plan as a start (so a version change, a hold and a registration that is
+        // still coming up are judged the same way), unasked in the foreground: what the user switched is left alone and
         // Login Items is never opened (the background never opens a window).
-        let inspection = self.backend.inspect();
-        let reason = match request(&inspection) {
-            Ok(reason) => reason,
-            Err(refused) => {
-                say(&format!("the repair is not done: {}", refusal(refused)));
-                return Ok(false);
-            }
-        };
-        match self.run_replace(reason, cancel) {
-            None => Err(ServiceError::Busy),
-            Some(RepairOutcome::Registered) => {
+        match self.start_with(cancel, true) {
+            Started::Busy => Err(ServiceError::Busy),
+            Started::Repaired(_, RepairOutcome::Registered) => {
                 say("the full repair registered the service, but it did not start in time");
                 Err(ServiceError::Failed(
                     "The background service was registered again but did not start. It is tried again at the next start."
                         .to_string(),
                 ))
             }
-            Some(outcome) => outcome_result(outcome).map(|o| o.registered()),
-        }
-    }
-
-    /// Waits up to `start_wait` for a registration this version made earlier to come up (the service answers or the OS
-    /// runs the job), removing nothing. `true`: it did. `false`: it did not in time, or the OS now refuses the job or the
-    /// wait was cancelled, so it is to be replaced.
-    pub(super) fn await_start(&mut self, cancel: &AtomicBool) -> bool {
-        let mut waited = Duration::ZERO;
-        loop {
-            if (self.answers)() {
-                return true;
+            Started::Repaired(_, outcome) => outcome_result(outcome).map(|o| o.registered()),
+            Started::Marked => Ok(true),
+            Started::Left(h) => {
+                say(&format!("the service is left as it is: {h:?}"));
+                Ok(false)
             }
-            match self.backend.inspect().job {
-                Job::Running => return true,
-                Job::Refused => return false,
-                _ => {}
-            }
-            if waited >= self.timings.start_wait
-                || cancel.load(std::sync::atomic::Ordering::Relaxed)
-            {
-                return false;
-            }
-            self.backend.pause(self.timings.start_poll);
-            waited += self.timings.start_poll;
+            Started::Offered(_) | Started::Removed => Ok(false),
         }
     }
 
@@ -205,7 +185,8 @@ impl Manager {
     }
 
     /// [`Manager::install`] for a start nobody asked for (first run): the same registration, but System Settings is
-    /// never opened for a switch or an approval the user has to give.
+    /// never opened for a switch or an approval the user has to give, and a registration this version already made (or is
+    /// waiting for) is never removed.
     ///
     /// # Errors
     /// [`ServiceError`], as [`Manager::install`].
@@ -215,9 +196,31 @@ impl Manager {
     ) -> Result<RepairOutcome, ServiceError> {
         let inspection = self.backend.inspect();
         let reason = request(&inspection).map_err(refusal)?;
-        match self.run_replace(reason, cancel) {
-            None => Err(ServiceError::Busy),
-            Some(outcome) => outcome_result(outcome),
+        let recorded = self.record.load();
+        if matches!(recorded.state, crate::record::State::Removing) {
+            // The user switched it on again: an unfinished removal is not to be finished.
+            if let Err(e) = self.record.set_state(crate::record::State::Idle) {
+                log::warn!(error:% = e; "the unfinished removal could not be cancelled");
+            }
+        }
+        let here = recorded.registered_version.as_deref() == Some(self.version.as_str())
+            || matches!(
+                recorded.phase_of(&self.version),
+                Some(Phase::Registering | Phase::Awaiting)
+            );
+        if here && inspection.registration == crate::backend::Registration::Registered {
+            if (self.answers)() || inspection.job == Job::Running {
+                self.remember();
+                return Ok(RepairOutcome::Recovered);
+            }
+            return Ok(RepairOutcome::Registered);
+        }
+        let Some(_lock) = self.locked() else {
+            return Err(ServiceError::Busy);
+        };
+        match self.run_replace_locked(reason, true, cancel) {
+            Ran::Busy | Ran::Unrecorded(_) => Err(ServiceError::Busy),
+            Ran::Outcome(outcome) => outcome_result(outcome),
         }
     }
 }

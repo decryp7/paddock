@@ -17,6 +17,7 @@
 use crate::backend::LoginItemFacts;
 use crate::backend::{Capabilities, DisabledMark, Inspection, Job, Registration};
 use crate::port::AppServiceStatus;
+use crate::record::{Phase, Recorded, State};
 use std::cmp::Ordering;
 
 /// Why the registration is replaced.
@@ -32,6 +33,14 @@ pub enum Reason {
     ProgramMissing,
     /// The registered program is another copy's.
     Moved,
+    /// A replace was interrupted (a crash, a quit) after the old registration was removed: register again.
+    Interrupted,
+    /// The service was stopped on request and is brought back.
+    Stopped,
+    /// The user's switch is on and nothing is registered.
+    Wanted,
+    /// The user's switch is off and the service is still registered.
+    Unwanted,
 }
 
 impl Reason {
@@ -43,6 +52,10 @@ impl Reason {
             Reason::VersionChanged => "the app was updated",
             Reason::ProgramMissing => "the registered program is gone",
             Reason::Moved => "the registration points at another copy of the app",
+            Reason::Interrupted => "an earlier replacement was interrupted after the old registration was removed",
+            Reason::Stopped => "the service was stopped on request",
+            Reason::Wanted => "the switch is on and nothing is registered",
+            Reason::Unwanted => "the switch is off and the service is still registered",
         }
     }
 }
@@ -64,6 +77,12 @@ pub enum Hold {
     NewerOwner(String),
     /// This version registered it this many times and the service never answered: held, not replaced again.
     Unanswered(u32),
+    /// This version registered it this many times and the OS refused to start it every time: held, not replaced again.
+    Refused(u32),
+    /// This version called `register` this many times and the OS said it failed every time: held, not retried by itself.
+    RegisterFailed(u32),
+    /// The record cannot be written, so nothing was changed (no OS call without a durable write); the text says why.
+    RecordUnavailable(String),
 }
 
 /// What to do.
@@ -80,6 +99,8 @@ pub enum Plan {
     Await(Reason),
     /// A replacement is needed but needs an OS prompt: offer Repair.
     Offer(Reason),
+    /// An uninstall was begun and not finished: finish removing, never register.
+    Remove,
 }
 
 /// What [`plan`] looks at.
@@ -87,28 +108,31 @@ pub enum Plan {
 pub struct Facts<'a> {
     /// The backend's look at the registration.
     pub inspection: &'a Inspection,
-    /// The service answers (its own health check).
+    /// The service itself answers (its own health check; never the app's own agent).
     pub answers: bool,
-    /// The version that registered it last, from the state file.
+    /// The app's own agent holds the data folder: it only keeps a refused job from being replaced.
+    pub covered: bool,
+    /// The version that saw the service come up last, from the state file.
     pub recorded_version: Option<&'a str>,
+    /// What is in progress, from the state file.
+    pub state: &'a State,
     /// This app's version.
     pub current_version: &'a str,
     /// What the backend allows.
     pub caps: Capabilities,
-    /// The version that registered it without the service answering afterwards, and how often.
-    pub attempted: Option<Attempt<'a>>,
+    /// The wait for an accepted registration ran out.
+    pub waited: bool,
+    /// The service was stopped on request and is being brought back.
+    pub resuming: bool,
+    /// The user's switch as the app stores it (`None`: it could not be read, so nothing is registered unattended).
+    pub wanted: Option<bool>,
+    /// The first run has been done (so a switch that is on with nothing registered is put right).
+    pub first_run_done: bool,
+    /// The app runs from a place it can register from (not a disk image or a translocated copy).
+    pub location_ok: bool,
 }
 
-/// A registration the OS accepted that the service never answered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Attempt<'a> {
-    /// The app version that registered it.
-    pub version: &'a str,
-    /// How many times it did.
-    pub count: u32,
-}
-
-/// How many registrations of one version that never answer are tried before the service is held.
+/// How many register calls are allowed per version before the service is held.
 pub const MAX_ATTEMPTS: u32 = 3;
 
 /// Compares two versions (`1.2.3`, `1.2.3-beta.1`, a leading `v`): numeric parts first, a pre-release is older than
@@ -173,12 +197,64 @@ pub fn request(i: &Inspection) -> Result<Reason, Refusal> {
     }
 }
 
-/// Decides what happens without the user asking (at start); see the module documentation for the rules.
+/// Decides what happens without the user asking (at start, first run, resume); see the module documentation. Every
+/// unattended action goes through here, and a hold is derived: `attempts >= MAX_ATTEMPTS` for this version.
 pub fn plan(f: &Facts<'_>) -> Plan {
     let i = f.inspection;
     if let Err(r) = request(i) {
         return Plan::Leave(r.into());
     }
+    let remove = || {
+        if !i.present() {
+            Plan::Leave(Hold::NotInstalled)
+        } else if f.caps.automatic {
+            Plan::Remove
+        } else {
+            Plan::Offer(Reason::Unwanted)
+        }
+    };
+    if matches!(f.state, State::Removing) {
+        return remove();
+    }
+    if !f.location_ok {
+        return Plan::Leave(Hold::Unavailable(
+            "the app runs from a place it cannot register the background service from; move it to the Applications folder and open it there"
+                .to_string(),
+        ));
+    }
+    if f.wanted == Some(false) {
+        return remove();
+    }
+    let (tries, phase) = match f.state {
+        State::Attempting {
+            version,
+            attempts,
+            phase,
+        } if version == f.current_version => (*attempts, Some(*phase)),
+        _ => (0, None),
+    };
+    let capped = tries >= MAX_ATTEMPTS;
+    let held = || {
+        if i.job == Job::Refused {
+            Hold::Refused(tries)
+        } else {
+            Hold::Unanswered(tries)
+        }
+    };
+    // Accepted by the OS (or, for a removal that began on this version's own settled registration, still ours).
+    let accepted = matches!(
+        phase,
+        Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true })
+    );
+    let fix = |r: Reason| {
+        if !f.caps.automatic {
+            Plan::Offer(r)
+        } else if capped {
+            Plan::Leave(held())
+        } else {
+            Plan::Replace(r)
+        }
+    };
     if i.registration == Registration::Absent {
         // macOS has no record of the item, yet a job is held (the app was opened from a place it cannot register from,
         // such as a disk image): replacing would remove the job and fail to register it again. Left alone.
@@ -191,48 +267,85 @@ pub fn plan(f: &Facts<'_>) -> Plan {
                     .to_string(),
             ));
         }
-        // Nothing registered, and the OS either holds no job or could not be asked: not installed, never install unasked.
+        if f.wanted.is_none() {
+            return Plan::Leave(Hold::NotInstalled);
+        }
+        // A replace that was interrupted after the old registration went (the job may linger): finish it, whoever began
+        // it, because the user wanted the service. `Registering` adds no attempt; the bound is the attempts counted.
+        if let State::Attempting {
+            phase: Phase::RemovingOld { .. } | Phase::Registering,
+            ..
+        } = f.state
+        {
+            return if f.caps.automatic {
+                Plan::Replace(Reason::Interrupted)
+            } else {
+                Plan::Offer(Reason::Interrupted)
+            };
+        }
+        // A register that failed is retried only while attempts are left; at the cap it is a hold.
+        if let State::Attempting {
+            phase: Phase::RegisterFailed(_),
+            ..
+        } = f.state
+        {
+            return if !f.caps.automatic {
+                Plan::Offer(Reason::Interrupted)
+            } else if capped {
+                Plan::Leave(Hold::RegisterFailed(tries))
+            } else {
+                Plan::Replace(Reason::Interrupted)
+            };
+        }
         if matches!(i.job, Job::Absent | Job::Unknown) {
+            // The switch is on, the first run is done and nothing is registered: put it right.
+            if f.wanted == Some(true) && f.first_run_done {
+                return fix(Reason::Wanted);
+            }
+            // Nothing registered, and the OS either holds no job or could not be asked: not installed, never install unasked.
             return Plan::Leave(Hold::NotInstalled);
         }
     }
-    let fix = |r: Reason| {
-        if f.caps.automatic {
-            Plan::Replace(r)
-        } else {
-            Plan::Offer(r)
-        }
-    };
+    // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
+    if accepted && (f.answers || i.job == Job::Running) {
+        return Plan::MarkCurrent;
+    }
     if i.program_exists == Some(false) {
         return fix(Reason::ProgramMissing);
     }
     // A job the OS refuses while the service is silent is repaired whatever version registered it: leaving it would keep
-    // the service down (a downgrade, or a recorded version nobody can verify).
-    if i.job == Job::Refused && !f.answers {
+    // the service down (a downgrade, or a recorded version nobody can verify). The app's own agent covers a refused job.
+    if i.job == Job::Refused && !f.answers && !f.covered {
         return fix(Reason::Refused);
     }
-    // Another copy's registration is left to that copy only when its program is known to exist.
+    // Another copy's registration is left to that copy only when its program is known to exist; a newer version that is
+    // part-way through registering counts as the newer owner.
+    let newer = |v: &str| compare_versions(v, f.current_version) == Some(Ordering::Greater);
     if let Some(recorded) = f.recorded_version
-        && compare_versions(recorded, f.current_version) == Some(Ordering::Greater)
+        && newer(recorded)
         && i.points_here == Some(false)
         && i.program_exists == Some(true)
     {
         return Plan::Leave(Hold::NewerOwner(recorded.to_string()));
     }
+    if let State::Attempting { version, .. } = f.state
+        && newer(version)
+        && i.program_exists != Some(false)
+    {
+        return Plan::Leave(Hold::NewerOwner(version.clone()));
+    }
     if i.points_here == Some(false) {
         return fix(Reason::Moved);
     }
     if f.recorded_version != Some(f.current_version) {
-        if let Some(a) = f.attempted.filter(|a| a.version == f.current_version) {
-            // This version registered it already: removing a job that runs, or that is only slow to start, would replace a
-            // working service (and announce it again). Settled when it runs; given time otherwise; held after a few tries.
-            if f.answers || i.job == Job::Running {
-                return Plan::MarkCurrent;
-            }
-            if a.count >= MAX_ATTEMPTS {
-                return Plan::Leave(Hold::Unanswered(a.count));
-            }
-            return Plan::Await(Reason::VersionChanged);
+        if accepted && f.caps.pinned_identity && f.caps.automatic {
+            // This version registered it already: removing a job that is only slow to start would replace a working
+            // service (and announce it again). Given time first; replaced only if the wait ran out, and held at the cap.
+            return if f.waited {
+                fix(Reason::VersionChanged)
+            } else {
+                Plan::Await(Reason::VersionChanged)
+            };
         }
         let current =
             i.definition_current == Some(true) && i.registration == Registration::Registered;
@@ -241,6 +354,9 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         } else {
             fix(Reason::VersionChanged)
         };
+    }
+    if f.resuming && !(f.answers || i.job == Job::Running) {
+        return fix(Reason::Stopped);
     }
     Plan::Leave(Hold::Healthy)
 }
@@ -259,12 +375,9 @@ pub enum ResumePath {
     Repair,
 }
 
-/// Decides the path of a resume before anything is called (pure, like [`plan`]). What cannot be read is left alone.
-pub fn resume_path(
-    i: &Inspection,
-    recorded_version: Option<&str>,
-    current_version: &str,
-) -> ResumePath {
+/// Decides the path of a resume before anything is called (pure, like [`plan`]). What cannot be read is left alone. A
+/// version that registered the service and is waiting for it counts as having registered it.
+pub fn resume_path(i: &Inspection, rec: &Recorded, current_version: &str) -> ResumePath {
     let (enabled, left_alone) = match &i.login_item {
         Some(f) => (
             f.status == AppServiceStatus::Enabled,
@@ -282,9 +395,14 @@ pub fn resume_path(
             ),
         ),
     };
+    let registered_here = rec.registered_version.as_deref() == Some(current_version)
+        || matches!(
+            rec.phase_of(current_version),
+            Some(Phase::Registering | Phase::Awaiting)
+        );
     if left_alone {
         ResumePath::Nothing
-    } else if recorded_version != Some(current_version) {
+    } else if !registered_here {
         ResumePath::Repair
     } else if enabled {
         ResumePath::Light
@@ -316,7 +434,7 @@ pub fn supervises(i: &Inspection) -> bool {
         Some(f) => f.status == AppServiceStatus::Enabled && !f.switched_off(),
         None => i.registration == Registration::Registered,
     };
-    allowed && !matches!(i.job, Job::Absent | Job::Unknown)
+    allowed && !matches!(i.job, Job::Absent | Job::Unknown | Job::Refused)
 }
 
 #[cfg(test)]
@@ -339,6 +457,15 @@ mod tests {
         login_items: false,
     };
 
+    fn rec_of(v: Option<&str>) -> Recorded {
+        Recorded {
+            registered_version: v.map(str::to_string),
+            ..Recorded::default()
+        }
+    }
+
+    const IDLE: State = State::Idle;
+
     fn registered(job: Job) -> Inspection {
         Inspection {
             registration: Registration::Registered,
@@ -351,10 +478,16 @@ mod tests {
         Facts {
             inspection: i,
             answers: false,
+            covered: false,
             recorded_version: recorded,
+            state: &IDLE,
             current_version: "1.0.4",
             caps,
-            attempted: None,
+            waited: false,
+            resuming: false,
+            wanted: Some(true),
+            first_run_done: false,
+            location_ok: true,
         }
     }
 
@@ -575,46 +708,46 @@ mod tests {
      {
         use AppServiceStatus as S;
         use DisabledMark as D;
-        let path = |s, d, rec, cur| resume_path(&item(s, d, Job::Absent), rec, cur);
+        let path = |s, d, rec: &Recorded, cur| resume_path(&item(s, d, Job::Absent), rec, cur);
         assert_eq!(
-            path(S::RequiresApproval, D::NotListed, Some("1"), "1"),
+            path(S::RequiresApproval, D::NotListed, &rec_of(Some("1")), "1"),
             ResumePath::Nothing
         );
         assert_eq!(
-            path(S::Enabled, D::Disabled, Some("1"), "1"),
+            path(S::Enabled, D::Disabled, &rec_of(Some("1")), "1"),
             ResumePath::Nothing
         );
         assert_eq!(
-            path(S::NotRegistered, D::Disabled, Some("1"), "1"),
+            path(S::NotRegistered, D::Disabled, &rec_of(Some("1")), "1"),
             ResumePath::Nothing
         );
         assert_eq!(
-            path(S::NotFound, D::Enabled, Some("1"), "1"),
+            path(S::NotFound, D::Enabled, &rec_of(Some("1")), "1"),
             ResumePath::Nothing
         );
         assert_eq!(
-            path(S::Enabled, D::Unreadable, Some("1"), "1"),
+            path(S::Enabled, D::Unreadable, &rec_of(Some("1")), "1"),
             ResumePath::Nothing,
             "a failed look is not 'switched on'"
         );
         assert_eq!(
-            path(S::Enabled, D::Enabled, Some("0"), "1"),
+            path(S::Enabled, D::Enabled, &rec_of(Some("0")), "1"),
             ResumePath::Repair
         );
         assert_eq!(
-            path(S::Enabled, D::NotListed, None, "1"),
+            path(S::Enabled, D::NotListed, &Recorded::default(), "1"),
             ResumePath::Repair
         );
         assert_eq!(
-            path(S::Enabled, D::NotListed, Some("1"), "1"),
+            path(S::Enabled, D::NotListed, &rec_of(Some("1")), "1"),
             ResumePath::Light
         );
         assert_eq!(
-            path(S::Enabled, D::Enabled, Some("1"), "1"),
+            path(S::Enabled, D::Enabled, &rec_of(Some("1")), "1"),
             ResumePath::Light
         );
         assert_eq!(
-            path(S::NotRegistered, D::NotListed, Some("1"), "1"),
+            path(S::NotRegistered, D::NotListed, &rec_of(Some("1")), "1"),
             ResumePath::Repair
         );
     }
@@ -626,15 +759,15 @@ mod tests {
             ..Inspection::absent()
         };
         assert_eq!(
-            resume_path(&with(Registration::Registered), Some("1"), "1"),
+            resume_path(&with(Registration::Registered), &rec_of(Some("1")), "1"),
             ResumePath::Light
         );
         assert_eq!(
-            resume_path(&with(Registration::Registered), Some("0"), "1"),
+            resume_path(&with(Registration::Registered), &rec_of(Some("0")), "1"),
             ResumePath::Repair
         );
         assert_eq!(
-            resume_path(&with(Registration::Absent), Some("1"), "1"),
+            resume_path(&with(Registration::Absent), &rec_of(Some("1")), "1"),
             ResumePath::Repair
         );
         for held in [
@@ -643,7 +776,7 @@ mod tests {
             Registration::Unavailable("x".into()),
         ] {
             assert_eq!(
-                resume_path(&with(held), Some("1"), "1"),
+                resume_path(&with(held), &rec_of(Some("1")), "1"),
                 ResumePath::Nothing
             );
         }
@@ -723,7 +856,13 @@ mod tests {
                 recorded_version: rec,
                 current_version: "1.1.0",
                 caps: MAC,
-                attempted: None,
+                covered: false,
+                state: &IDLE,
+                waited: false,
+                resuming: false,
+                wanted: Some(true),
+                first_run_done: false,
+                location_ok: true,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -775,55 +914,168 @@ mod tests {
     }
 
     #[test]
-    fn a_version_that_registered_it_already_is_given_time_not_replaced_and_held_after_a_few_tries()
-    {
-        let healthy = |job| Inspection {
+    fn a_version_that_registered_it_already_is_given_time_not_replaced_and_held_after_a_few_tries() {
+        let reg = |job| Inspection {
             registration: Registration::Registered,
             job,
             ..Inspection::absent()
         };
-        let with = |i: &Inspection, answers, version, count| {
-            let a = Attempt { version, count };
+        let attempting = |version: &str, attempts, phase| State::Attempting {
+            version: version.to_string(),
+            attempts,
+            phase,
+        };
+        let with = |i: &Inspection, answers, state: State, waited| {
             plan(&Facts {
                 inspection: i,
                 answers,
+                covered: false,
                 recorded_version: Some("1.0.0"),
+                state: &state,
                 current_version: "1.0.4",
                 caps: MAC,
-                attempted: Some(a),
+                waited,
+                resuming: false,
+                wanted: Some(true),
+                first_run_done: false,
+                location_ok: true,
             })
         };
+        let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
         // It runs, or answers: settled, nothing removed.
+        assert_eq!(with(&reg(Job::Running), false, awaiting(1), false), Plan::MarkCurrent);
+        assert_eq!(with(&reg(Job::NotRunning), true, awaiting(2), false), Plan::MarkCurrent);
+        // Not up yet: wait, no removal; once the wait ran out: replaced while attempts are left, held at the cap.
         assert_eq!(
-            with(&healthy(Job::Running), false, "1.0.4", 1),
-            Plan::MarkCurrent
-        );
-        assert_eq!(
-            with(&healthy(Job::NotRunning), true, "1.0.4", 2),
-            Plan::MarkCurrent
-        );
-        // Not up yet: wait, no removal; after MAX_ATTEMPTS: held.
-        assert_eq!(
-            with(&healthy(Job::NotRunning), false, "1.0.4", 1),
+            with(&reg(Job::NotRunning), false, awaiting(1), false),
             Plan::Await(Reason::VersionChanged)
         );
         assert_eq!(
-            with(&healthy(Job::Absent), false, "1.0.4", MAX_ATTEMPTS - 1),
-            Plan::Await(Reason::VersionChanged)
-        );
-        assert_eq!(
-            with(&healthy(Job::NotRunning), false, "1.0.4", MAX_ATTEMPTS),
-            Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
-        );
-        // Another version's attempts do not count; a refusal is always replaced.
-        assert_eq!(
-            with(&healthy(Job::NotRunning), false, "1.0.3", 9),
+            with(&reg(Job::NotRunning), false, awaiting(1), true),
             Plan::Replace(Reason::VersionChanged)
         );
         assert_eq!(
-            with(&healthy(Job::Refused), false, "1.0.4", 9),
+            with(&reg(Job::NotRunning), false, awaiting(MAX_ATTEMPTS), true),
+            Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
+        );
+        // A call that may have landed is waited for, never removed; a removal that began is carried on, and an old job
+        // that runs does not settle a version whose replace has not registered anything yet.
+        let phase = |ph| attempting("1.0.4", 1, ph);
+        assert_eq!(
+            with(&reg(Job::NotRunning), false, phase(Phase::Registering), false),
+            Plan::Await(Reason::VersionChanged)
+        );
+        assert_eq!(
+            with(&reg(Job::Running), false, phase(Phase::RemovingOld { ours: false }), false),
+            Plan::Replace(Reason::VersionChanged)
+        );
+        // Another version's attempts do not count.
+        assert_eq!(
+            with(&reg(Job::NotRunning), false, attempting("1.0.3", 9, Phase::Awaiting), false),
+            Plan::Replace(Reason::VersionChanged)
+        );
+        // A refusal is replaced while attempts are left and held at the cap (never without limit).
+        assert_eq!(
+            with(&reg(Job::Refused), false, awaiting(1), false),
             Plan::Replace(Reason::Refused)
         );
+        assert_eq!(
+            with(&reg(Job::Refused), false, awaiting(MAX_ATTEMPTS), false),
+            Plan::Leave(Hold::Refused(MAX_ATTEMPTS))
+        );
+        // A crash between the removal and the registration finishes the job, at the cap too.
+        for ph in [Phase::RemovingOld { ours: true }, Phase::RemovingOld { ours: false }, Phase::Registering] {
+            assert_eq!(
+                with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, ph), false),
+                Plan::Replace(Reason::Interrupted)
+            );
+        }
+        // A register that failed is retried under the cap and held at it.
+        let failed = |n| attempting("1.0.4", n, Phase::RegisterFailed(crate::record::FailKind::Other));
+        assert_eq!(
+            with(&Inspection::absent(), false, failed(1), false),
+            Plan::Replace(Reason::Interrupted)
+        );
+        assert_eq!(
+            with(&Inspection::absent(), false, failed(MAX_ATTEMPTS), false),
+            Plan::Leave(Hold::RegisterFailed(MAX_ATTEMPTS))
+        );
+    }
+
+    #[test]
+    fn a_mechanism_that_needs_a_prompt_or_has_no_pinned_identity_never_awaits_or_replaces_unattended() {
+        let reg = Inspection {
+            registration: Registration::Registered,
+            job: Job::NotRunning,
+            definition_current: Some(true),
+            ..Inspection::absent()
+        };
+        let state = State::Attempting {
+            version: "1.0.4".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        };
+        let with = |caps| {
+            plan(&Facts {
+                inspection: &reg,
+                answers: false,
+                covered: false,
+                recorded_version: Some("1.0.0"),
+                state: &state,
+                current_version: "1.0.4",
+                caps,
+                waited: true,
+                resuming: false,
+                wanted: Some(true),
+                first_run_done: false,
+                location_ok: true,
+            })
+        };
+        assert_eq!(with(UAC), Plan::MarkCurrent, "a current definition needs no replacement");
+        assert_eq!(with(LINUX), Plan::MarkCurrent, "a current definition needs no replacement");
+        let stale = Inspection {
+            definition_current: Some(false),
+            ..reg.clone()
+        };
+        let stale_with = |caps| {
+            plan(&Facts {
+                inspection: &stale,
+                answers: false,
+                covered: false,
+                recorded_version: Some("1.0.0"),
+                state: &State::Idle,
+                current_version: "1.0.4",
+                caps,
+                waited: true,
+                resuming: false,
+                wanted: Some(true),
+                first_run_done: false,
+                location_ok: true,
+            })
+        };
+        assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));
+        assert_eq!(stale_with(LINUX), Plan::Replace(Reason::VersionChanged));
+    }
+
+    #[test]
+    fn the_app_s_own_decisions_are_inputs_to_the_plan() {
+        let reg = registered(Job::Running);
+        let with = |wanted, first_run_done, location_ok, i: &Inspection| {
+            plan(&Facts {
+                wanted,
+                first_run_done,
+                location_ok,
+                ..facts(i, MAC, Some("1.0.4"))
+            })
+        };
+        assert_eq!(with(Some(false), true, true, &reg), Plan::Remove);
+        assert_eq!(with(Some(false), true, true, &Inspection::absent()), Plan::Leave(Hold::NotInstalled));
+        assert!(matches!(with(Some(true), true, false, &reg), Plan::Leave(Hold::Unavailable(_))));
+        // Nothing registered with the switch on after the first run: put it right; before it: never installed unasked.
+        assert_eq!(with(Some(true), true, true, &Inspection::absent()), Plan::Replace(Reason::Wanted));
+        assert_eq!(with(Some(true), false, true, &Inspection::absent()), Plan::Leave(Hold::NotInstalled));
+        // An unreadable switch registers nothing unattended.
+        assert_eq!(with(None, true, true, &Inspection::absent()), Plan::Leave(Hold::NotInstalled));
     }
 
     #[test]

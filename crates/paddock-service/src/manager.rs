@@ -7,15 +7,15 @@ mod resume;
 
 use crate::backend::{Backend, Inspection, Mechanism};
 use crate::error::ServiceError;
-use crate::plan::{Attempt, Facts, Hold, Plan, Reason, Refusal, plan};
-use crate::record::{RecordFile, Recorded};
-use crate::repair::{RepairOutcome, Timings, replace};
+use crate::plan::{Facts, Hold, MAX_ATTEMPTS, Plan, Reason, Refusal, plan};
+use crate::record::{Phase, RecordFile, Recorded, State};
+use crate::repair::{RepairOutcome, Step, Timings, replace_bounded};
 use crate::status::{Seen, ServiceStatus, compose};
 use crate::tracker::RepairTracker;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 /// What [`Manager::on_start`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,20 +30,19 @@ pub enum Started {
     Offered(Reason),
     /// Another registration or repair is running.
     Busy,
-}
-
-#[cfg(test)]
-pub(crate) fn unix_now_for_tests() -> u64 {
-    unix_now()
-}
-
-fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    /// An uninstall that was begun is finished.
+    Removed,
 }
 
 pub use resume::{LIGHT_LOOKS, LIGHT_POLL};
+
+/// What a replace run came to (the lock was already held).
+enum Ran {
+    Outcome(RepairOutcome),
+    Busy,
+    /// The record could not be written, so nothing was changed.
+    Unrecorded(String),
+}
 
 /// The background service of an app.
 pub struct Manager {
@@ -55,13 +54,16 @@ pub struct Manager {
     timings: Timings,
     tracker: Arc<RepairTracker>,
     answers: Box<dyn FnMut() -> bool + Send>,
-    clock: fn() -> u64,
+    cover: Box<dyn FnMut() -> bool + Send>,
+    wanted: Box<dyn FnMut() -> Option<bool> + Send>,
+    first_run_done: Box<dyn FnMut() -> bool + Send>,
+    location_ok: Box<dyn FnMut() -> bool + Send>,
 }
 
 impl Manager {
     /// The service of the app called `app` (for messages), registered through `backend`, remembered in `data_dir` under
-    /// `label`; `version` is this app's version (`env!("CARGO_PKG_VERSION")`), `answers` asks the service itself
-    /// whether it is up (its own health check, bounded).
+    /// `label`; `version` is this app's version (`env!("CARGO_PKG_VERSION")`), `answers` asks **the service itself**
+    /// whether it is up (its own health check, bounded; never the app's own agent, which is [`Manager::with_cover`]).
     pub fn new(
         app: &str,
         backend: Box<dyn Backend>,
@@ -79,8 +81,42 @@ impl Manager {
             timings: Timings::default(),
             tracker: Arc::new(RepairTracker::new()),
             answers: Box::new(answers),
-            clock: unix_now,
+            cover: Box::new(|| false),
+            wanted: Box::new(|| Some(true)),
+            first_run_done: Box::new(|| false),
+            location_ok: Box::new(|| true),
         }
+    }
+
+    /// Another record (the memory store of the model test).
+    #[must_use]
+    pub fn with_record(mut self, record: RecordFile) -> Self {
+        self.record = record;
+        self
+    }
+
+    /// Asks whether the app's own agent holds the data folder: it keeps a refused job from being replaced while the app
+    /// measures, and never settles a registration (only the service's own answer does).
+    #[must_use]
+    pub fn with_cover(mut self, cover: impl FnMut() -> bool + Send + 'static) -> Self {
+        self.cover = Box::new(cover);
+        self
+    }
+
+    /// The app's own decisions as inputs to the plan (ADR 0056): the user's switch (`None`: unreadable, so nothing is
+    /// registered unattended), whether the first run is done, and whether the app runs from a place it can register from.
+    /// Without them the switch counts as on, the first run as not done and the location as good.
+    #[must_use]
+    pub fn with_app_state(
+        mut self,
+        wanted: impl FnMut() -> Option<bool> + Send + 'static,
+        first_run_done: impl FnMut() -> bool + Send + 'static,
+        location_ok: impl FnMut() -> bool + Send + 'static,
+    ) -> Self {
+        self.wanted = Box::new(wanted);
+        self.first_run_done = Box::new(first_run_done);
+        self.location_ok = Box::new(location_ok);
+        self
     }
 
     /// Other waits (tests, or a service that takes longer to start).
@@ -94,13 +130,6 @@ impl Manager {
     #[must_use]
     pub fn with_program(mut self, program: &str) -> Self {
         self.program = Some(program.to_string());
-        self
-    }
-
-    /// Another clock for the repair lock (seconds since the Unix epoch).
-    #[must_use]
-    pub fn with_clock(mut self, clock: fn() -> u64) -> Self {
-        self.clock = clock;
         self
     }
 
@@ -126,30 +155,31 @@ impl Manager {
         self.record.load()
     }
 
-    fn decide(&mut self) -> (Inspection, bool, Plan) {
+    fn decide(&mut self, waited: bool, resuming: bool) -> (Inspection, bool, Plan) {
         let answers = (self.answers)();
+        let covered = (self.cover)();
         let inspection = self.backend.inspect();
         let recorded = self.record.load();
         let p = plan(&Facts {
             inspection: &inspection,
             answers,
+            covered,
             recorded_version: recorded.registered_version.as_deref(),
+            state: &recorded.state,
             current_version: &self.version,
             caps: self.backend.capabilities(),
-            attempted: recorded
-                .attempted_version
-                .as_deref()
-                .map(|version| Attempt {
-                    version,
-                    count: recorded.attempts,
-                }),
+            waited,
+            resuming,
+            wanted: (self.wanted)(),
+            first_run_done: (self.first_run_done)(),
+            location_ok: (self.location_ok)(),
         });
         (inspection, answers, p)
     }
 
     /// How the service is doing, for the UI and [`ServiceStatus::health`].
     pub fn status(&mut self) -> ServiceStatus {
-        let (inspection, answers, p) = self.decide();
+        let (inspection, answers, p) = self.decide(false, false);
         compose(Seen {
             mechanism: self.backend.mechanism(),
             caps: self.backend.capabilities(),
@@ -163,7 +193,20 @@ impl Manager {
 
     /// What [`Manager::on_start`] would do now, without doing it.
     pub fn check(&mut self) -> Plan {
-        self.decide().2
+        self.decide(false, false).2
+    }
+
+    /// Whether this app is waiting for the service to come up, or is about to register it: the plan for a start is `Await`
+    /// or a replace that is under way. It is false when nothing is going to happen (the user's switch is off, approval is
+    /// pending, the location is refused, the attempts are used up), so the app starts an agent of its own then. The
+    /// link neither starts nor retires an agent of its own while this is true.
+    pub fn pending(&mut self) -> bool {
+        let in_progress = matches!(self.record.load().state, State::Attempting { .. });
+        match self.decide(false, false).2 {
+            Plan::Await(_) => true,
+            Plan::Replace(_) => in_progress,
+            _ => false,
+        }
     }
 
     fn remember(&self) {
@@ -172,103 +215,232 @@ impl Manager {
         }
     }
 
-    fn run_replace(&mut self, reason: Reason, cancel: &AtomicBool) -> Option<RepairOutcome> {
-        let _lock = self.record.lock((self.clock)())?;
-        if !self.tracker.start(Instant::now()) {
-            return None;
+    fn write_state(&self, state: State) -> Result<(), ServiceError> {
+        self.record.set_state(state)
+    }
+
+    /// Replaces the registration; the caller holds the lock. The record is written before each OS step (phase
+    /// `RemovingOld`, `Registering`, `Awaiting`), so a crash or a quit at any point leaves what is safe next. An unattended
+    /// run gets what is left of this version's attempts; a requested one (the user pressed it) runs past the cap.
+    fn run_replace_locked(&mut self, reason: Reason, requested: bool, cancel: &AtomicBool) -> Ran {
+        let before = self.record.load();
+        let attempts0 = before.attempts_of(&self.version);
+        // Only this version's own `Registering` is a free finish (a crash after the removal, before the call): another
+        // version's attempts are not this one's, so this version starts its own count.
+        let finishing = before.phase_of(&self.version) == Some(Phase::Registering);
+        let allowed = if requested {
+            self.timings.max_cycles + 1
+        } else {
+            MAX_ATTEMPTS.saturating_sub(attempts0) + u32::from(finishing)
+        };
+        if allowed == 0 {
+            return Ran::Outcome(RepairOutcome::Failed(format!(
+                "The service was registered {attempts0} times and did not start; it is not registered again by itself."
+            )));
         }
-        log::info!(reason = reason.describe(), mechanism:? = self.backend.mechanism(); "replacing the background service's registration");
+        // What is replaced is this version's own when it saw the service come up or registered it and waits for it.
+        let ours = before.registered_version.as_deref() == Some(self.version.as_str())
+            || matches!(
+                before.phase_of(&self.version),
+                Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true })
+            );
+        let removing = Phase::RemovingOld { ours };
+        let first = State::Attempting {
+            version: self.version.clone(),
+            attempts: attempts0,
+            phase: if finishing { Phase::Registering } else { removing },
+        };
+        if let Err(e) = self.write_state(first) {
+            if !requested {
+                return Ran::Unrecorded(e.to_string());
+            }
+            log::warn!(error:% = e; "the repair goes on without a durable record, because it was asked for");
+        }
+        if !self.tracker.start(Instant::now()) {
+            return Ran::Busy;
+        }
+        log::info!(reason = reason.describe(), mechanism:? = self.backend.mechanism(), attempts = attempts0, allowed = allowed; "replacing the background service's registration");
         let tracker = self.tracker.clone();
+        let record = &self.record;
+        let version = self.version.clone();
         let answers = &mut self.answers;
-        let outcome = replace(
+        let mut attempts = attempts0;
+        let mut free_register = finishing;
+        let mut register_failed = false;
+        let outcome = replace_bounded(
             self.backend.as_mut(),
             &mut || answers(),
             cancel,
             &self.timings,
+            allowed,
             &mut |step| {
                 log::info!(step:% = step; "service repair");
                 tracker.step(&step);
+                let phase = match step {
+                    Step::Removing => Some(removing),
+                    Step::Registering => {
+                        if free_register {
+                            free_register = false;
+                        } else {
+                            attempts += 1;
+                        }
+                        Some(Phase::Registering)
+                    }
+                    Step::WaitingForStart => Some(Phase::Awaiting),
+                    Step::RegisterFailed(_) => {
+                        register_failed = true;
+                        Some(Phase::RegisterFailed(crate::record::FailKind::Other))
+                    }
+                    _ => None,
+                };
+                if let Some(phase) = phase
+                    && let Err(e) = record.set_state(State::Attempting {
+                        version: version.clone(),
+                        attempts,
+                        phase,
+                    })
+                {
+                    log::warn!(error:% = e; "the service repair's step could not be recorded");
+                }
             },
         );
         self.tracker.finish(&outcome, Instant::now());
         log::info!(outcome:? = outcome; "service repair finished");
-        // Only a service that answered (or whose job runs) is remembered as registered by this version: a registration the
-        // OS accepted but that never answered would otherwise hide a dead service until the next version. Not remembered,
-        // the next start looks again.
-        if matches!(outcome, RepairOutcome::Recovered) {
-            self.remember();
-        } else if outcome.registered() {
-            match self.record.attempt(&self.version) {
-                Ok(count) => log::warn!(
-                    count = count;
-                    "the service was registered but did not answer; the version is not remembered as done, so the next start gives it time and looks again"
-                ),
-                Err(e) => {
-                    log::warn!(error:% = e; "the unanswered registration could not be remembered")
-                }
+        let settled = match &outcome {
+            RepairOutcome::Recovered => {
+                self.remember();
+                Ok(())
             }
+            // Accepted and waiting: the state already says so, and the next start gives it time instead of replacing it.
+            RepairOutcome::Registered => {
+                log::warn!(
+                    attempts = self.record.load().attempts_of(&self.version);
+                    "the service was registered but did not answer; the next start gives it time and looks again"
+                );
+                Ok(())
+            }
+            // Nothing came up: not trusted as accepted, so the next start replaces (until the attempts are used).
+            RepairOutcome::Failed(_) => self.write_state(State::Attempting {
+                version: self.version.clone(),
+                attempts,
+                phase: if register_failed {
+                    Phase::RegisterFailed(crate::record::FailKind::Other)
+                } else {
+                    removing
+                },
+            }),
+            // Nothing was counted: back to what it was.
+            _ => self.write_state(before.state.clone()),
+        };
+        if let Err(e) = settled {
+            log::warn!(error:% = e; "the outcome of the service repair could not be recorded");
         }
-        Some(outcome)
+        Ran::Outcome(outcome)
     }
 
-    /// Keeps the registration right at every start (rule 24): replaces a stale registration while the service is
-    /// down, and once after every version change where the OS pins the build (unregister → bootout → wait → register);
-    /// re-points a registration whose program is gone or is another, older copy's; never installs unasked, never
-    /// touches what the user switched off, never prompts. Call it on a background thread soon after start (and again
-    /// later: the service may only fail when it restarts itself onto the new binary).
+    /// The lock, or `None` after saying why.
+    fn locked(&self) -> Option<crate::record::RepairLock> {
+        let lock = self.record.lock();
+        if lock.is_none() {
+            log::info!("another registration or repair holds the service lock");
+        }
+        lock
+    }
+
+    /// Keeps the registration right at every start (rule 24): decides through [`plan`] on what the OS and the record
+    /// show (read again under the lock before anything changes), gives a registration this version already made the time
+    /// a start takes, replaces a stale one, and holds the service after [`MAX_ATTEMPTS`] register calls that never came up.
+    /// Never installs unasked, never touches what the user switched off, never prompts. Call it on a background thread
+    /// soon after start (and again later: the service may only fail when it restarts itself onto the new binary).
     pub fn on_start(&mut self, cancel: &AtomicBool) -> Started {
-        let (inspection, answers, p) = self.decide();
-        log::info!(
-            plan:? = p,
-            registration:? = inspection.registration,
-            job:? = inspection.job,
-            login_item:? = inspection.login_item,
-            answers = answers,
-            recorded:? = self.record.load(),
-            current = self.version.as_str();
-            "service start: what the OS and the record show, and the plan"
-        );
-        match p {
-            Plan::Leave(h) => {
-                if let Hold::Unanswered(n) = &h {
-                    log::warn!(count = *n; "this version registered the service {n} times and it never answered; it is held, not replaced again. Repair or a restart of the computer may help");
+        self.start_with(cancel, false)
+    }
+
+    pub(crate) fn start_with(&mut self, cancel: &AtomicBool, resuming: bool) -> Started {
+        let mut waited = false;
+        for _ in 0..3 {
+            let (inspection, answers, mut p) = self.decide(waited, resuming);
+            let mut lock = None;
+            if matches!(p, Plan::Replace(_) | Plan::Remove) {
+                // Read everything again under the lock: another copy may have changed it while this one decided.
+                let Some(l) = self.locked() else {
+                    return Started::Busy;
+                };
+                lock = Some(l);
+                p = self.decide(waited, resuming).2;
+            }
+            log::info!(
+                plan:? = p,
+                registration:? = inspection.registration,
+                job:? = inspection.job,
+                login_item:? = inspection.login_item,
+                answers = answers,
+                recorded:? = self.record.load(),
+                current = self.version.as_str(),
+                waited = waited;
+                "service start: what the OS and the record show, and the plan"
+            );
+            match p {
+                Plan::Leave(h) => {
+                    match &h {
+                        Hold::Unanswered(n) | Hold::Refused(n) => log::warn!(count = *n; "this version registered the service {n} times and it did not come up; it is held and not registered again by itself. Switching start at login off and on, an update, or a restart of the computer tries again"),
+                        _ => {}
+                    }
+                    return Started::Left(h);
                 }
-                Started::Left(h)
-            }
-            Plan::MarkCurrent => {
-                self.remember();
-                Started::Marked
-            }
-            Plan::Offer(r) => Started::Offered(r),
-            Plan::Await(r) => {
-                // This version registered it already: give the service the time a start takes before removing anything.
-                if self.await_start(cancel) {
+                Plan::MarkCurrent => {
                     self.remember();
                     return Started::Marked;
                 }
-                match self.run_replace(r, cancel) {
-                    Some(o) => Started::Repaired(r, o),
-                    None => Started::Busy,
+                Plan::Offer(r) => return Started::Offered(r),
+                Plan::Await(_) => {
+                    // This version registered it already: give the service the time a start takes before removing anything.
+                    if self.await_start(cancel) {
+                        self.remember();
+                        return Started::Marked;
+                    }
+                    waited = true;
+                }
+                Plan::Remove => {
+                    let _held = lock;
+                    return match self.uninstall_locked() {
+                        Ok(()) => Started::Removed,
+                        Err(e) => {
+                            log::warn!(error:% = e; "the unfinished removal could not be finished");
+                            Started::Left(Hold::Unavailable(e.to_string()))
+                        }
+                    };
+                }
+                Plan::Replace(r) => {
+                    let _held = lock;
+                    return match self.run_replace_locked(r, false, cancel) {
+                        Ran::Outcome(o) => Started::Repaired(r, o),
+                        Ran::Busy => Started::Busy,
+                        Ran::Unrecorded(why) => {
+                            log::warn!(why = why.as_str(); "the service state cannot be written, so nothing is changed");
+                            Started::Left(Hold::RecordUnavailable(why))
+                        }
+                    };
                 }
             }
-            Plan::Replace(r) => match self.run_replace(r, cancel) {
-                Some(o) => Started::Repaired(r, o),
-                None => Started::Busy,
-            },
         }
+        Started::Busy
     }
 
-    /// The user pressed Repair (or Install): replaces the registration now. What the user switched off is not touched;
-    /// Login Items is opened for them instead where there is one.
+    /// The user pressed Repair (or Install): replaces the registration now, past the cap. What the user switched off is
+    /// not touched; Login Items is opened for them instead where there is one.
     pub fn repair(&mut self, cancel: &AtomicBool) -> Result<RepairOutcome, ServiceError> {
         let inspection = self.backend.inspect();
         let reason = match crate::plan::request(&inspection) {
             Ok(r) => r,
             Err(refused) => return Err(self.opened(refusal(refused))),
         };
-        match self.run_replace(reason, cancel) {
-            None => Err(ServiceError::Busy),
-            Some(o) => outcome_result(o).map_err(|e| self.opened(e)),
+        let Some(_lock) = self.locked() else {
+            return Err(ServiceError::Busy);
+        };
+        match self.run_replace_locked(reason, true, cancel) {
+            Ran::Busy | Ran::Unrecorded(_) => Err(ServiceError::Busy),
+            Ran::Outcome(o) => outcome_result(o).map_err(|e| self.opened(e)),
         }
     }
 
@@ -286,24 +458,51 @@ impl Manager {
         self.repair(cancel)
     }
 
-    /// Stops and removes the registration and forgets the version; removing what is not there succeeds.
+    /// Stops and removes the registration and forgets the version; removing what is not there succeeds. The record says
+    /// `Removing` first, so a crash half-way is finished by the next start and never brings the service back.
     pub fn uninstall(&mut self) -> Result<(), ServiceError> {
-        let _lock = self.record.lock((self.clock)()).ok_or(ServiceError::Busy)?;
+        let _lock = self.locked().ok_or(ServiceError::Busy)?;
+        self.uninstall_locked()
+    }
+
+    /// [`Manager::uninstall`] that waits for another registration or repair to finish, up to `tries` more looks.
+    pub fn uninstall_patient(&mut self, tries: u32, pause: Duration) -> Result<(), ServiceError> {
+        let mut result = self.uninstall();
+        for _ in 0..tries {
+            if !matches!(result, Err(ServiceError::Busy)) {
+                break;
+            }
+            self.backend.pause(pause);
+            result = self.uninstall();
+        }
+        result
+    }
+
+    fn uninstall_locked(&mut self) -> Result<(), ServiceError> {
         if self.tracker.working() {
             return Err(ServiceError::Busy);
+        }
+        let before = self.record.load().state;
+        if let Err(e) = self.write_state(State::Removing) {
+            log::warn!(error:% = e; "the removal goes on without a durable record, because it was asked for");
         }
         let unregistered = self.backend.unregister();
         if let Err(e) = self.backend.evict() {
             log::info!(error:% = e; "removing the service's job did not succeed");
         }
-        let mut waited = Duration::ZERO;
-        while !self.backend.job_gone() && waited < self.timings.gone_wait {
+        let mut polled = Duration::ZERO;
+        let began = Instant::now();
+        while !self.backend.job_gone() && polled.max(began.elapsed()) < self.timings.gone_wait {
             self.backend.pause(self.timings.gone_poll);
-            waited += self.timings.gone_poll;
+            polled += self.timings.gone_poll;
         }
         if let Err(e) = unregistered
             && self.backend.inspect().present()
         {
+            // Not removed (declined, failed): back to what it was, so the next start does not finish a removal that never was.
+            if let Err(w) = self.write_state(before) {
+                log::warn!(error:% = w; "the state before the removal could not be restored");
+            }
             return Err(ServiceError::Failed(format!(
                 "The background service could not be removed: {e}"
             )));
@@ -320,6 +519,34 @@ impl Manager {
     /// The definition this copy registers (`print-unit`, `print-plist`), when the mechanism has a file.
     pub fn definition(&self) -> Option<String> {
         self.backend.definition()
+    }
+
+    /// Waits up to `start_wait` (real time counts, not only the polls) for a registration this version made earlier to come
+    /// up (the service answers or the OS runs the job), removing nothing and holding no lock. `true`: it did. `false`: it
+    /// did not in time, the OS now refuses the job, or the wait was cancelled, so the plan is made again.
+    pub(super) fn await_start(&mut self, cancel: &AtomicBool) -> bool {
+        let began = Instant::now();
+        let mut polled = Duration::ZERO;
+        let (up, why) = loop {
+            if (self.answers)() {
+                break (true, "the service answers");
+            }
+            match self.backend.inspect().job {
+                crate::backend::Job::Running => break (true, "the OS runs the job"),
+                crate::backend::Job::Refused => break (false, "the OS refuses the job"),
+                _ => {}
+            }
+            if cancel.load(Ordering::Relaxed) {
+                break (false, "the wait was cancelled");
+            }
+            if polled.max(began.elapsed()) >= self.timings.start_wait {
+                break (false, "the time a start takes ran out");
+            }
+            self.backend.pause(self.timings.start_poll);
+            polled += self.timings.start_poll;
+        };
+        log::info!(up = up, why = why, waited_ms = u64::try_from(polled.max(began.elapsed()).as_millis()).unwrap_or(u64::MAX); "waited for a registration this version made");
+        up
     }
 }
 

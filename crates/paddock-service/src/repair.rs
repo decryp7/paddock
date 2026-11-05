@@ -81,6 +81,8 @@ pub enum Step {
     WaitingForStart,
     /// The service answers.
     Answers,
+    /// `register` failed (nothing was registered); the repair goes on while cycles are left.
+    RegisterFailed(String),
     /// A step did not succeed and the repair goes on.
     Note(String),
 }
@@ -100,6 +102,7 @@ impl std::fmt::Display for Step {
                 f.write_str("Registered; waiting for the service to start (this can take a minute)")
             }
             Step::Answers => f.write_str("The service answers again"),
+            Step::RegisterFailed(why) => write!(f, "Registering failed: {why}"),
             Step::Note(text) => f.write_str(text),
         }
     }
@@ -155,12 +158,15 @@ fn wait_for_answer(
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
     say(Step::WaitingForStart);
-    let mut waited = Duration::ZERO;
+    let began = std::time::Instant::now();
+    let mut polled = Duration::ZERO;
     loop {
         if answers() {
             say(Step::Answers);
             return RepairOutcome::Recovered;
         }
+        // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too).
+        let waited = polled.max(began.elapsed());
         if waited >= t.start_wait || cancel.load(Ordering::Relaxed) {
             say(Step::Note(format!(
                 "The service is registered but did not answer within {} seconds; it may still start.",
@@ -169,7 +175,7 @@ fn wait_for_answer(
             return RepairOutcome::Registered;
         }
         b.pause(t.start_poll);
-        waited += t.start_poll;
+        polled += t.start_poll;
     }
 }
 
@@ -181,6 +187,19 @@ pub fn replace(
     answers: &mut dyn FnMut() -> bool,
     cancel: &AtomicBool,
     t: &Timings,
+    say: &mut dyn FnMut(Step),
+) -> RepairOutcome {
+    replace_bounded(b, answers, cancel, t, t.max_cycles + 1, say)
+}
+
+/// [`replace`] with at most `allowed` cycles (each cycle registers once): an unattended replace gets what is left of the
+/// version's attempts, so a refused job costs at most [`crate::plan::MAX_ATTEMPTS`] registrations across all starts.
+pub fn replace_bounded(
+    b: &mut dyn Backend,
+    answers: &mut dyn FnMut() -> bool,
+    cancel: &AtomicBool,
+    t: &Timings,
+    allowed: u32,
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
     if cancel.load(Ordering::Relaxed) {
@@ -195,7 +214,8 @@ pub fn replace(
         };
     }
     let mut last_error = None;
-    for cycle in 0..=t.max_cycles {
+    let cycles = allowed.min(t.max_cycles + 1);
+    for cycle in 0..cycles {
         if cycle > 0 && cancel.load(Ordering::Relaxed) {
             // The previous cycle registered (possibly refused); nothing is left half-removed.
             return RepairOutcome::Cancelled;
@@ -233,7 +253,7 @@ pub fn replace(
                     say(Step::Note(format!("Registering stopped: {e}")));
                     return stop;
                 }
-                say(Step::Note(format!("Registering failed: {e}")));
+                say(Step::RegisterFailed(e.to_string()));
                 last_error = Some(e.to_string());
             }
         }
@@ -246,12 +266,10 @@ pub fn replace(
     }
     let why = match last_error {
         Some(e) => format!(
-            "Registering failed {} times ({e}). {NEXT_STEPS}",
-            t.max_cycles + 1
+            "Registering failed {cycles} times ({e}). {NEXT_STEPS}"
         ),
         None => format!(
-            "The OS still refuses the service after {} full re-registrations (observed: {}). {NEXT_STEPS}",
-            t.max_cycles + 1,
+            "The OS still refuses the service after {cycles} full re-registrations (observed: {}). {NEXT_STEPS}",
             b.inspect().job.describe()
         ),
     };
