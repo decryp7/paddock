@@ -1,4 +1,4 @@
-import { CdkDrag, CdkDragHandle, CdkDragPlaceholder, CdkDropList, type CdkDragDrop } from '@angular/cdk/drag-drop';
+import { CdkDrag, CdkDragHandle, CdkDropList, type CdkDragDrop } from '@angular/cdk/drag-drop';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import { NgTemplateOutlet } from '@angular/common';
 import {
@@ -62,7 +62,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   selector: 'pd-widget-chooser',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatLabel, MatInput, PdGlyph, PdStatusGlyph],
+  imports: [CdkDropList, CdkDrag, CdkDragHandle, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatLabel, MatInput, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-chooser' },
   template: `
     <div class="pd-wc" [class.pd-wc--preview]="preview()">
@@ -118,7 +118,6 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                   </button>
                 }
               </div>
-              <div *cdkDragPlaceholder class="pd-wc-item pd-wc-placeholder"></div>
             </li>
           }
         </ul>
@@ -227,7 +226,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-txt { display: grid; min-width: 0; flex: 1; }
     /* A shown row is two columns: the lead (grip and kind icon, --pd-wc-text-inset wide) and the body, a wrapping line of the
        description, the app's controls and "more". A wrapped line starts at the body's edge, so it is never left of the text. */
-    .pd-widget-chooser { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-more-size: 40px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
+    /* The CDK preview is a clone of the row moved to the body, outside .pd-widget-chooser: it carries the sizes itself. */
+    .pd-widget-chooser, .cdk-drag-preview.pd-wc-row { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-more-size: 40px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
     .pd-wc-row { display: grid; grid-template-columns: var(--pd-wc-text-inset) minmax(0, 1fr); align-items: center; column-gap: 0; }
     .pd-wc-lead { display: flex; align-items: center; gap: var(--pd-space-2); height: var(--pd-control-height); align-self: start; }
     .pd-wc-body { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
@@ -250,8 +250,14 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-more[aria-expanded='true'] { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-addedlabel pd-status-glyph { color: var(--pd-success); }
-    .pd-wc-placeholder { background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; min-height: 48px; }
-    .cdk-drag-preview.pd-wc-item { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
+    /* The placeholder is the row's own clone (the CDK's default), so it keeps the row's height whatever the row holds; its content is hidden. */
+    .pd-wc-item.cdk-drag-placeholder { opacity: 1; background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; }
+    .pd-wc-item.cdk-drag-placeholder > * { visibility: hidden; }
+    /* The ghost leaves the kind icon out (its column stays, so the title keeps the row's offset). */
+    .cdk-drag-preview.pd-wc-row .pd-wc-kicon { visibility: hidden; }
+    /* The ghost sits in the body, outside the list: it is its own container, so the rows' wrapping follows the ghost's width (the
+       row's), and it is raised (a raised surface and an accent edge, so it also lifts in the dark theme). */
+    .cdk-drag-preview.pd-wc-item { container-type: inline-size; background: var(--pd-surface-3); border: 1px solid var(--pd-accent); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
     .cdk-drag-animating { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     .pd-wc-list.cdk-drop-list-dragging .pd-wc-item:not(.cdk-drag-placeholder) { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     @media (prefers-reduced-motion: reduce) { :root:not([data-motion='full']) .cdk-drag-animating, :root:not([data-motion='full']) .pd-wc-list .pd-wc-item { transition: none !important; } }
