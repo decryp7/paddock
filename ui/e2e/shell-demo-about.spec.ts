@@ -105,7 +105,8 @@ test('a build without an update key says updates are not available, with nothing
 });
 
 /** The engine's updater status (`updates_status`) with `phase`, as `paddock-updater` reports it. */
-const status = (phase: unknown) => ({
+const PER_USER = { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null };
+const status = (phase: unknown, install: unknown = PER_USER) => ({
   currentVersion: VERSION,
   phase,
   lastChecked: null,
@@ -114,6 +115,7 @@ const status = (phase: unknown) => ({
   channels: [{ id: 'stable', label: 'Stable' }],
   endpointHost: 'updates.test',
   releasesPage: null,
+  install,
 });
 const INFO = { version: '99.0.0', currentVersion: VERSION, notes: 'From the fake server.', pubDate: null, size: 1_000 };
 
@@ -160,4 +162,37 @@ test('over Tauri: the Updates window follows the engine’s events and shows its
   const calls = await ipc.names();
   expect(calls).toEqual(expect.arrayContaining(['window_ready', 'updates_status', 'updates_check', 'updates_download']));
   expect(calls.filter((c) => c.startsWith('updates_') || c.startsWith('about_')).every((c) => ['updates_status', 'updates_check', 'updates_download'].includes(c))).toBe(true);
+});
+
+test('over Tauri: a per-machine copy shows Install, the administrator text and no install on quit, and a declined prompt offers Install again', async ({ app, page }) => {
+  const notice = "An administrator must install this update. Windows will ask for an administrator's name and password.";
+  const perMachine = { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: notice };
+  const ipc = await installTauriFake(page, {
+    otherwise: 'null',
+    replies: {
+      updates_status: status({ kind: 'ready', info: INFO, installOnQuit: false }, perMachine),
+      dialog_take_input: { dialogId: 'pd.updates', title: 'Updates', kind: 'tool', modality: 'modeless', requiredChoice: false, input: {} },
+    },
+  });
+  await app.dialogs.openWindow('pd.updates');
+  await expect(page.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
+  await expect(page.getByTestId('updates-administrator')).toHaveText(notice);
+  await expect(page.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+  await expect(page.getByText('Install when the app quits')).toHaveCount(0);
+  // The old version starts again after a declined prompt and says so.
+  await ipc.emit(
+    'paddock://updates',
+    status(
+      {
+        kind: 'failed',
+        info: null,
+        error: { kind: 'declined', message: 'Not installed: Windows permission was declined.', nextStep: 'Click Install again and choose Yes in the Windows prompt.', detail: null },
+      },
+      perMachine,
+    ),
+  );
+  await expect(page.getByTestId('updates-error')).toContainText('Windows permission was declined');
+  await expect(page.getByRole('button', { name: 'Install again' })).toBeVisible();
+  await ipc.emit('paddock://updates', status({ kind: 'installerRunning', version: '99.0.0' }, perMachine));
+  await expect(page.getByTestId('updates-installer-running')).toContainText('An update is being installed');
 });
