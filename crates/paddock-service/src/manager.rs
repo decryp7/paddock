@@ -357,7 +357,13 @@ impl Manager {
                 },
             }),
             // Nothing was counted: back to what it was.
-            _ => self.write_state(before.state.clone()),
+            RepairOutcome::Cancelled => self.write_state(before.state.clone()),
+            // The replace removed what an attempt of another version made: that attempt is over, so it is not restored (a
+            // downgrade would otherwise take it for its own and settle a registration it did not make).
+            _ => self.write_state(match &before.state {
+                State::Attempting { version, .. } if *version != self.version => State::Idle,
+                other => other.clone(),
+            }),
         };
         if let Err(e) = settled {
             log::warn!(error:% = e; "the outcome of the service repair could not be recorded");

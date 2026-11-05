@@ -230,7 +230,11 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         return remove();
     }
     // A record that cannot be used says nothing about the version: a service that is up is adopted, never replaced.
-    if f.record_damaged && (f.answers || i.job == Job::Running) {
+    // (Unless the OS says the definition is not this version's: then it is replaced as after an update.)
+    if f.record_damaged
+        && (f.answers || i.job == Job::Running)
+        && i.definition_current != Some(false)
+    {
         return Plan::MarkCurrent;
     }
     let (tries, phase) = match f.state {
@@ -320,6 +324,11 @@ pub fn plan(f: &Facts<'_>) -> Plan {
             }
             // Nothing registered, and the OS either holds no job or could not be asked: not installed, never install unasked.
             return Plan::Leave(Hold::NotInstalled);
+        }
+        // The registration is gone but the OS still holds a job (a removal that was interrupted, or a registration that was
+        // dropped): the user's switch is on, so register again instead of calling the job healthy.
+        if !accepted && i.job != Job::Refused && f.recorded_version == Some(f.current_version) {
+            return fix(Reason::Interrupted);
         }
     }
     // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
@@ -412,11 +421,14 @@ pub fn resume_path(i: &Inspection, rec: &Recorded, current_version: &str) -> Res
             ),
         ),
     };
-    let registered_here = rec.registered_version.as_deref() == Some(current_version)
-        || matches!(
-            rec.phase_of(current_version),
-            Some(Phase::Registering | Phase::Awaiting)
-        );
+    // Another version's attempt (a newer copy part-way through registering) is not this version's registration.
+    let other_attempt = matches!(&rec.state, State::Attempting { version, .. } if version != current_version);
+    let registered_here = !other_attempt
+        && (rec.registered_version.as_deref() == Some(current_version)
+            || matches!(
+                rec.phase_of(current_version),
+                Some(Phase::Registering | Phase::Awaiting)
+            ));
     if left_alone {
         ResumePath::Nothing
     } else if !registered_here {
@@ -530,6 +542,42 @@ mod tests {
         assert_eq!(compare_versions("1.0.0", "1.x"), None);
         assert_eq!(compare_versions("", "1"), None);
         assert_eq!(compare_versions("1.2.3.4.5", "1"), None);
+    }
+
+    #[test]
+    fn a_job_without_a_registration_is_registered_again_and_a_stale_definition_is_not_adopted() {
+        let i = Inspection {
+            registration: Registration::Absent,
+            job: Job::Running,
+            ..Inspection::absent()
+        };
+        assert_eq!(
+            plan(&facts(&i, MAC, Some("1.0.4"))),
+            Plan::Replace(Reason::Interrupted)
+        );
+        let mut stale = registered(Job::Running);
+        stale.definition_current = Some(false);
+        let mut f = facts(&stale, LINUX, None);
+        f.record_damaged = true;
+        f.answers = true;
+        assert_eq!(plan(&f), Plan::Replace(Reason::VersionChanged));
+    }
+
+    #[test]
+    fn a_resume_does_not_register_over_a_newer_versions_attempt() {
+        use AppServiceStatus as S;
+        use DisabledMark as D;
+        let rec = Recorded {
+            registered_version: Some("1".into()),
+            state: State::Attempting {
+                version: "2".into(),
+                attempts: 1,
+                phase: Phase::Registering,
+            },
+            ..Recorded::default()
+        };
+        let look = item(S::Enabled, D::NotListed, Job::NotRunning);
+        assert_eq!(resume_path(&look, &rec, "1"), ResumePath::Repair);
     }
 
     #[test]
