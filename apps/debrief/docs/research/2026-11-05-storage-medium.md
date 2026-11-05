@@ -273,7 +273,7 @@ never panics. The check took 39 ms with the pages already in memory. It touches 
 [DuckDB 2 note](../../../../docs/research/2026-10-duckdb-2-and-large-data.md) refused mmap for input files. Here the file is ours and immutable, but the map must still live **outside the UI process**, as
 MEM-6 proposes. Windows cannot delete a mapped file; reuse the store's `trash` approach.
 
-**MEM-6 recommendation:** approve the ADR and measurement (3 days), on these two formats. The 8 to 12 day build stays the user's call after the numbers, as already decided.
+**MEM-6:** the user has accepted these formats for the ADR and measurement (3 days). The 8 to 12 day build stays the user's call after the numbers, as already decided.
 MEM-1 and MEM-2 are still needed first: they stop the crash risk regardless.
 
 ## 7. Audit findings
@@ -331,11 +331,12 @@ New days: about 17.5 to 18.5 (ST-1, 2, 3, 5, 6), up from 12.5. ST-1, ST-2 and ST
 
 ## 11. Decisions for the user
 
-Settled 2026-11-05: 1B is a real 1.2 target; exact positions below about 100M with estimates above; a view holds about 200 rows; the bundle must open; DuckLake is out of 1.2.
+Settled 2026-11-05: 1B is a real 1.2 target; exact positions below about 100M with estimates above; a view holds about 200 rows; the bundle must open; DuckLake is out of 1.2; the MEM-6 formats above are accepted.
+
+Paused: the 1B runs and the same-window rerun at 7,630 files are paused until after the Dyno tag, so they stay not measured.
 
 1. Accept "keep Parquet, catalogue and Tantivy, prune by the histogram, replace deep `OFFSET`" and add ST-1, 2, 3, 5 and 6 to Debrief 1.2 (about 18 days)?
 2. The 100M threshold breaks the 768 MB import budget (905 MiB). Lower the threshold, raise the budget for this one step, or have ST-3's ADR look for a cheaper ordering first? Suggested: the last, with a lower threshold as the fallback.
-3. MEM-6: ADR and measurement on Parquet for samples and an Arrow IPC or plain array cache for heap graphs, as above?
 
 ## 12. Sources
 
