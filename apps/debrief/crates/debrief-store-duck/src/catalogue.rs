@@ -56,12 +56,16 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 }
 
 /// Reads one source into a tally: entities of the text of its events, then the values of its low-cardinality fields.
-fn build(conn: &Connection, source: u32) -> Result<(Vec<Entry>, u64, u64)> {
+fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64)> {
     let mut tally = Tally::default();
     {
         let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
         let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
         while let Some(r) = rows.next()? {
+            // The process is exiting: stop reading (the source is catalogued again next time).
+            if crate::shutdown::down() {
+                anyhow::bail!("the process is exiting");
+            }
             let (id, ts): (u64, Option<i64>) = (r.get(0)?, r.get(1)?);
             let message: String = r.get(2)?;
             let exception: Option<String> = r.get(3)?;
@@ -81,6 +85,9 @@ r AS (SELECT g.k, g.v, g.n, row_number() OVER (PARTITION BY g.k ORDER BY g.n DES
 SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
         debrief_core::entities::MAX_NAME_CHARS
     );
+    // The aggregate holds a hash table of the source's fields: never beside an import's ordering (the store's `heavy`
+    // lock), so the catalogue cannot starve it of the memory limit.
+    let _heavy = lock(heavy);
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(params![source])?;
     while let Some(r) = rows.next()? {
@@ -153,6 +160,8 @@ struct Shared {
     failed: Mutex<HashSet<u32>>,
     /// Rows committed since the last checkpoint (see [`settle`]); the catalogue counts as built only once they are saved.
     unsaved: AtomicBool,
+    /// The store's lock of heavy DuckDB work (`Inner::heavy`).
+    heavy: Arc<Mutex<()>>,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -162,14 +171,16 @@ pub(crate) struct CatalogueService {
 }
 
 impl CatalogueService {
-    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>) -> Result<CatalogueService> {
+    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>, heavy: Arc<Mutex<()>>) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
+            heavy,
         });
+        crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let handle = std::thread::Builder::new()
             .name("debrief-catalogue".into())
@@ -203,6 +214,10 @@ impl Drop for CatalogueService {
 
 /// One turn: tidy, then build the next source. True when a source was built (go on at once).
 fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
+    // Counted by the exit handler like a borrowed connection (see `fts::step`).
+    let Some(_running) = crate::shutdown::Active::enter() else {
+        return Ok(false);
+    };
     let todo = {
         let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
         conn.execute_batch(
@@ -216,7 +231,7 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
     let Some(&source) = todo.first() else { return Ok(false) };
-    let built = match build(conn, source) {
+    let built = match build(conn, source, &s.heavy) {
         Ok(b) => b,
         Err(e) => {
             // A source whose events cannot be read now (compaction swapped its files) is tried again later.
@@ -228,6 +243,9 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     // The write lock is taken without waiting for an import: the next turn tries again.
     let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
     s.unsaved.store(true, Ordering::SeqCst);
+    if crate::shutdown::down() {
+        return Ok(false);
+    }
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
     Ok(true)
