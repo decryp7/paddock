@@ -26,9 +26,19 @@ export const settingsJson = (allowedActions = []) => JSON.stringify({ version: 1
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // POSIX single quote
 const psq = (s) => `'${String(s).replace(/'/g, "''")}'`; // PowerShell single quote
 
-/** The shell command that stores the key entry in the OS credential store for the user of the session. */
-export function storeEntryCommand(os, entries) {
-  if (os === 'macos') return `security add-generic-password -U -s ${KEY_SERVICE} -a ${sq(KEY_ACCOUNT)} -w ${sq(entries)}`;
+/**
+ * The shell command that stores the key entry in the OS credential store for the user of the session.
+ * macOS: an entry made by /usr/bin/security gets the partition `apple-tool:` only, which the app (another signing identity) is not in, so the app blocks
+ * on the keychain ("Dyno wants to use your confidential information") before it shows a window. Measured in a clone of the macOS image, 2026-11-05, with the
+ * ad-hoc 1.1.0 build: `-T` alone, an empty partition list, `apple-tool:,apple:` and `...,unsigned:` (each with `-A` too) all still blocked (no window in 30 s);
+ * `apple-tool:,apple:,cdhash:<the app's CDHash>` after the add opened the window in 4 s (with `-T <bundle>`) and 8 s (with `-A`). So the app's own CDHash is
+ * read from the installed bundle in the guest and put into the partition list, with the login keychain password of the throw-away guest (`password`).
+ * The product's own case (a key made by one build blocking another) is NOT covered by this: it is the release-rows.mjs measurement `keychainOtherBuild`.
+ */
+export function storeEntryCommand(os, entries, password = 'admin', bundle = '/Applications/Dyno.app') {
+  if (os === 'macos') {
+    return `H=$(codesign -dvvv ${sq(bundle)} 2>&1 | sed -n 's/^CDHash=//p'); [ -n "$H" ] && security add-generic-password -U -T ${sq(bundle)} -s ${KEY_SERVICE} -a ${sq(KEY_ACCOUNT)} -w ${sq(entries)} && security set-generic-password-partition-list -S "apple-tool:,apple:,cdhash:$H" -s ${KEY_SERVICE} -a ${sq(KEY_ACCOUNT)} -k ${sq(password)} >/dev/null`;
+  }
   if (os === 'linux') return `printf %s ${sq(entries)} | secret-tool store --label=${KEY_SERVICE} service ${KEY_SERVICE} username ${sq(KEY_ACCOUNT)}`;
   // Windows Credential Manager: cmdkey refuses a network (SSH) logon ("Credentials cannot be saved from this logon session"), so it runs in the test user's
   // console session through a scheduled task (/it); the entry is passed base64 so no quoting can damage it, and the task's own output is read back.
@@ -74,7 +84,7 @@ export function makeMcpGuest(p) {
       const { key, entries } = makeKey();
       await p.stopApp();
       await must('writing mcp.json', writeSettingsCommand(p.os, dir, settingsJson()));
-      await must('storing the key entry in the credential store', storeEntryCommand(p.os, entries));
+      await must('storing the key entry in the credential store', storeEntryCommand(p.os, entries, p.password));
       await p.startApp();
       return key;
     },

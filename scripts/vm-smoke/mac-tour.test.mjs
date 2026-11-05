@@ -24,3 +24,16 @@ test('menu bar: a guest without a menu bar is not measured, with a screenshot as
   assert.match(s.summary, /not measured/);
   assert.match(s.evidence[0], /01-menu-bar\.png/);
 });
+
+test('dashboard relaunch is a plain open: no reset of the supervised agent, and a failed open is a failed check', async () => {
+  const calls = [];
+  const check = { quit: async () => ({}), reset: async () => { calls.push('reset'); }, startAndJudge: async () => { calls.push('startAndJudge'); }, start: async () => { calls.push('start'); return { code: 1, stdout: '', stderr: 'no such app' }; } };
+  const orders = [['Health', 'CPU', 'Memory'], ['CPU', 'Health', 'Memory']]; let n = 0;
+  const g = { app: 'Dyno', shot: async () => 's.png', press: async () => true, has: async () => true, waitFor: async (fn) => ({ ok: true, value: await fn() }),
+    texts: async () => orders[Math.min(n++, 1)].map((text) => ({ role: 'AXGroup', text })) };
+  const tour = new MacTour({ exec: async () => ({ code: 0, stdout: '1,1', stderr: '' }), now: () => 0, sleep: async () => {} }, g, {}, { check });
+  const s = await tour.dashboard();
+  assert.deepEqual(calls, ['start']);
+  assert.ok(s.checks.some((c) => !c.ok && /open failed \(exit 1\)/.test(c.detail)));
+  assert.equal(s.status, 'fail');
+});

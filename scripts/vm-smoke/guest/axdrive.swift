@@ -28,6 +28,16 @@ func label(_ e: AXUIElement) -> String {
   return parts.filter { !$0.isEmpty }.joined(separator: " | ")
 }
 
+/// The texts a regex is tried against: the whole label, and the title and the description on their own. A system sheet's button has
+/// the label "Always Allow | _NS:21" (title plus identifier), so `^Always Allow$` never matched the joined label although the button was
+/// on screen (2026-11-05); anchoring on the title alone is what the callers mean.
+func candidates(_ e: AXUIElement) -> [String] {
+  [label(e), str(e, kAXTitleAttribute), str(e, kAXDescriptionAttribute)].filter { !$0.isEmpty }
+}
+func matches(_ re: NSRegularExpression, _ e: AXUIElement) -> Bool {
+  candidates(e).contains { re.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+}
+
 func pidFor(_ app: String) -> pid_t? {
   if let p = Int32(app) { return p }
   let apps = NSWorkspace.shared.runningApplications
@@ -76,7 +86,7 @@ case "tree", "press", "has":
     _ = walk(root, depth: 0, maxDepth: 30, path: "") { e, p, _ in
       guard str(e, kAXRoleAttribute) == role else { return false }
       let l = label(e)
-      if re.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil { found = e; where_ = "\(p)  [\(l)]"; return true }
+      if matches(re, e) { found = e; where_ = "\(p)  [\(l)]"; return true }
       return false
     }
     guard let el = found else { print("not found"); exit(1) }
@@ -106,7 +116,7 @@ case "center":
   var found: AXUIElement?
   _ = walk(AXUIElementCreateApplication(pid), depth: 0, maxDepth: 30, path: "") { e, _, _ in
     guard str(e, kAXRoleAttribute) == args[4] else { return false }
-    let l = label(e); if re.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil { found = e; return true }; return false
+    if matches(re, e) { found = e; return true }; return false
   }
   guard let el = found, let pv = attr(el, kAXPositionAttribute), let sv = attr(el, kAXSizeAttribute) else { print("not found"); exit(1) }
   var p = CGPoint.zero, s = CGSize.zero

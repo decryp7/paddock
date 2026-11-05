@@ -92,8 +92,10 @@ export class MacTour {
     // Relaunch: the layout is the one the person left.
     if (this.check) {
       await this.check.quit('Quit before the layout relaunch');
-      const s = await this.check.startAndJudge({ title: 'Relaunch for the layout check' });
-      void s; // the start judgement is its own step elsewhere; here only the layout matters
+      // A plain open, not startAndJudge: its reset() would end the supervised agent and delete its discovery file before the app opens, and
+      // the start judgement is its own step elsewhere. The open itself is a check here, so a failed open is reported, not thrown away.
+      const opened = await this.check.start();
+      checks.push({ ok: opened.code === 0, detail: opened.code === 0 ? 'reopened Dyno for the layout check (a plain open)' : `open failed (exit ${opened.code}): ${(opened.stderr || '').trim().slice(0, 120)}` });
       await g.waitFor(() => g.has(g.app, '^Dashboard$', 'AXLink'), 60_000);
       await g.press(g.app, '^Dashboard$', 'AXLink');
       const kept = await g.waitFor(async () => { const o = await this.widgetOrder(); return o.length ? o : null; }, 30_000);

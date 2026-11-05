@@ -68,7 +68,9 @@ export class Check {
   /**
    * Ends the app's own leftover processes. Each is ended only if its pid, its start time (`ps -o lstart=`) and its command line
    * still match in the same guest command (rule 53). Returns what could not be cleaned: a step that starts from a dirty guest is
-   * not trustworthy, so the callers fail on it.
+   * not trustworthy, so the callers fail on it. A discovery file is deleted only when the helper it names really ended: a helper that
+   * is still alive (launchd restarts a supervised agent, or the kill did not match) keeps its file, so it can still be found; the
+   * helpers that survived are returned in `kept`.
    */
   async reset() {
     const procs = await this.snapshot();
@@ -76,15 +78,23 @@ export class Check {
     const stillThere = async () => { const now = await this.snapshot(); return left.filter((p) => now.some((q) => q.pid === p.pid && q.command === p.command)); };
     const end = async (p, signal) => {
       if (!p.lstart) return; // no recorded start time: the identity cannot be checked, so nothing is ended
-      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(p.lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
+      // `ps -o lstart= -p` pads its text with trailing blanks on macOS (the -axww listing the snapshot parses does not), so both sides are trimmed.
+      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid} | sed -e 's/ *$//')" = ${sq(p.lstart.trim())} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
     };
     for (const p of left) await end(p, '-TERM');
     // An agent that ignores TERM (the orphan of the 7207 run did) is ended with KILL, after the same identity check.
     await this.until(async () => (await stillThere()).length === 0, 8_000);
     for (const p of await stillThere()) await end(p, '-KILL');
     const gone = await this.until(async () => (await stillThere()).length === 0, 12_000);
-    for (const f of this.config.stateFiles ?? []) await this.g.exec(`rm -f ${sq(await this.path(f.path))}`);
-    return { ended: left.length, gone: gone.ok };
+    const survivors = await stillThere();
+    const specOf = (p) => p.command.split(/\s/)[0].split('/').at(-1); // a login-item agent shows as a bare `dyno-agent run`
+    const kept = [];
+    for (const f of this.config.stateFiles ?? []) {
+      const spec = this.config.processes.find((x) => x.name === f.helper);
+      if (spec && survivors.some((p) => specOf(p) === spec.name)) { kept.push(f.path); continue; }
+      await this.g.exec(`rm -f ${sq(await this.path(f.path))}`);
+    }
+    return { ended: left.length, gone: gone.ok, kept };
   }
 
   async start({ hidden = false } = {}) {

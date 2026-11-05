@@ -38,6 +38,47 @@ export function judgeMacReopen(f) {
   return checks;
 }
 
+/**
+ * MEASUREMENT, not a release row: a key the app made itself in build A (so the item's partition names A's signing identity), then build B installed over it:
+ * does B show a window, and how soon? Today B blocks on the keychain before any window (measured 2026-11-05: no window within 45 s, the main thread in
+ * SecKeychainFindGenericPassword, a "Dyno wants to use your confidential information" sheet). That is a PRODUCT bug whose fix is coming separately.
+ * The step is therefore always `not-measured` with the numbers in `summary` and in info checks: it is never `pass` (nothing may read a measured delay as a
+ * verdict) and never `fail` (a fail would turn every run red before the fix lands); it is NOT in manifest.mjs, so the verdict ignores it. When the product
+ * fix lands, its owner turns this into a judged row (pass = a window within the limit they name) and adds it to the manifest.
+ * `p`: { windowSeen: boolean|null (null: the probe could not look), windowMs: number|null, sheetSeen: boolean|null, guardMs }.
+ */
+export function judgeKeychainOtherBuild(p) {
+  const title = ROW_TITLES.keychainOtherBuild;
+  if (p.windowSeen === null || p.windowSeen === undefined) return { title, status: 'not-measured', cls: 'check', summary: 'not measured: the window probe could not look (check broken)', checks: [{ ok: false, kind: 'check', detail: 'the window probe returned no answer' }], evidence: [] };
+  const said = p.windowSeen ? `a window appeared after ${(p.windowMs / 1000).toFixed(1)} s` : `no window within the ${(p.guardMs / 1000).toFixed(0)} s guard`;
+  const sheet = p.sheetSeen === null || p.sheetSeen === undefined ? 'the keychain sheet was not looked for' : `the keychain sheet ${p.sheetSeen ? 'WAS' : 'was not'} on screen`;
+  return {
+    title, status: 'not-measured', cls: 'check', summary: `measured, not judged until the product fix lands: build B over a key made by build A: ${said}; ${sheet}`,
+    checks: [{ ok: true, info: true, detail: `window: ${said}` }, { ok: true, info: true, detail: sheet }], evidence: [],
+  };
+}
+
+/**
+ * Drives the measurement through guest primitives (the caller installs the builds): `createKeyInBuildA()`, `installBuildB()`, `openApp()`, `windowVisible()`
+ * (boolean), `sheetVisible()` (boolean), `now()`, `sleep(ms)`. Any primitive that throws makes the step "check broken", never a result about the product.
+ */
+export async function keychainOtherBuildStep(p, guardMs = 45_000) {
+  try {
+    await p.createKeyInBuildA();
+    await p.installBuildB();
+    await p.openApp();
+    const t0 = p.now();
+    let windowMs = null;
+    while (p.now() - t0 < guardMs) {
+      if (await p.windowVisible()) { windowMs = p.now() - t0; break; }
+      await p.sleep(1000);
+    }
+    return judgeKeychainOtherBuild({ windowSeen: windowMs !== null, windowMs, sheetSeen: await p.sheetVisible(), guardMs });
+  } catch (e) {
+    return { title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${String(e.message ?? e).slice(0, 160)} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(e.message ?? e).slice(0, 200) }], evidence: [] };
+  }
+}
+
 /** The step of a driven judge. */
 export const rowStep = (title, checks, pass) => makeResult(title, checks, [], pass);
 
@@ -51,6 +92,7 @@ export const ROW_TITLES = {
   secondUser: 'Release row: a second user\'s session sees "An update is being installed"',
   killInstaller: 'Release row: killing the installer on the fixed build gives "Not installed"',
   installAgain: 'Release row: install again works',
+  keychainOtherBuild: 'Measurement (not a release row, not in the manifest): a key made by build A, build B installed over it, does B show a window',
 };
 
 /** The reasons rows cannot be driven yet (kept in one place so the hand-off and the results say the same). */

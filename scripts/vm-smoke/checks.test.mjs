@@ -64,7 +64,7 @@ function fakeGuest({ bug = null } = {}) {
       return app ? ok() : { code: 1, stdout: '', stderr: 'not running' };
     }
     if (cmd.startsWith('ps -o lstart= -p')) return ok('Fri Oct 30 14:25:12 2026\n');
-    const kill = /^\[ "\$\(ps -o lstart= -p (\d+)\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill (-TERM|-KILL) \d+$/.exec(cmd);
+    const kill = /^\[ "\$\(ps -o lstart= -p (\d+) \| sed -e 's\/ \*\$\/\/'\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill (-TERM|-KILL) \d+$/.exec(cmd);
     if (kill && bug === 'ignore-term' && kill[2] === '-TERM') return ok();
     if (kill) { procs = procs.filter((p) => p.pid !== Number(kill[1])); return ok(); }
     if (cmd.includes('dyno-agent') && cmd.includes('status') && !cmd.includes('service')) return procs.some((p) => p.command.includes('dyno-agent')) ? ok('running') : { code: 1, stdout: '', stderr: '' };
@@ -114,7 +114,7 @@ test('an agent left running after Quit is reported as an orphan of launchd, and 
   const q = byTitle(r, /Quit with a window open/);
   assert.equal(q.status, 'fail');
   assert.ok(q.checks.some((c) => /an orphan of launchd/.test(c.detail)), JSON.stringify(q.checks));
-  assert.ok(r.calls.some((c) => /^\[ "\$\(ps -o lstart= -p \d+\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill -(TERM|KILL) \d+$/.test(c)), 'pid, start time and command line checked in the same guest command as the kill');
+  assert.ok(r.calls.some((c) => /^\[ "\$\(ps -o lstart= -p \d+ \| sed -e 's\/ \*\$\/\/'\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill -(TERM|KILL) \d+$/.test(c)), 'pid, start time and command line checked in the same guest command as the kill');
 });
 
 test('an app that never starts fails on the guard instead of passing', async () => {
@@ -186,7 +186,7 @@ test('the kill compares the start time recorded in the snapshot, not one read ju
   await c.quit('q');
   const kills = f.calls.filter((x) => / kill -TERM \d+$/.test(x));
   assert.ok(kills.length >= 1);
-  for (const k of kills) assert.match(k, /^\[ "\$\(ps -o lstart= -p \d+\)" = 'Fri Oct 30 14:\d\d:\d\d 2026' \]/);
+  for (const k of kills) assert.match(k, /^\[ "\$\(ps -o lstart= -p \d+ \| sed -e 's\/ \*\$\/\/'\)" = 'Fri Oct 30 14:\d\d:\d\d 2026' \]/);
   assert.equal(f.calls.filter((x) => x.startsWith('ps -o lstart=')).length, 0, 'no separate lstart read');
 });
 

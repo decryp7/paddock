@@ -280,6 +280,7 @@ async function main(argv) {
           const cfg = '$HOME/Library/Application Support/Dyno';
           const mg = makeMcpGuest({
             os: 'macos', dyno: `${bundle}/Contents/MacOS/dyno`, sh: async (c) => { const r = await exec(c); return { code: r.code, stdout: r.stdout }; },
+            password: pw,
             configDir: async () => ((await exec(`cd "${cfg}" 2>/dev/null && pwd`)).stdout.trim() || null),
             stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
             startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },

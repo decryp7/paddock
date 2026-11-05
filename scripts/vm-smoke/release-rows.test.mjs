@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { btmEnabled, NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, judgeLinuxHelperLogDir, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { btmEnabled, judgeKeychainOtherBuild, keychainOtherBuildStep, NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, judgeLinuxHelperLogDir, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
 import { deriveVerdict } from './verdict.mjs';
 
 const bad = (c) => c.filter((x) => !x.ok);
@@ -39,4 +39,29 @@ test('btmEnabled reads the Dyno entry of sfltool dumpbtm; no entry is null', () 
   assert.equal(btmEnabled(' #1:\n   Name: Dyno\n   Disposition: [disabled, allowed, visible, notified]'), false);
   assert.equal(btmEnabled(' #1:\n   Name: Other\n   Disposition: [enabled]'), null);
   assert.equal(btmEnabled(''), null);
+});
+
+test('keychain other-build measurement: records the delay or the missing window, is never a pass or a fail, and is not in any manifest', async () => {
+  const blocked = judgeKeychainOtherBuild({ windowSeen: false, windowMs: null, sheetSeen: true, guardMs: 45_000 });
+  assert.equal(blocked.status, 'not-measured');
+  assert.match(blocked.summary, /no window within the 45 s guard.*sheet WAS on screen/);
+  const fine = judgeKeychainOtherBuild({ windowSeen: true, windowMs: 3000, sheetSeen: false, guardMs: 45_000 });
+  assert.equal(fine.status, 'not-measured', 'even a good number is not a pass until the product fix lands and an owner names the limit');
+  assert.match(fine.summary, /window appeared after 3\.0 s/);
+  assert.equal(judgeKeychainOtherBuild({ windowSeen: null }).checks[0].kind, 'check');
+  const { readFileSync } = await import('node:fs');
+  assert.ok(!/keychainOtherBuild|Measurement \(not a release row/.test(readFileSync(new URL('./manifest.mjs', import.meta.url), 'utf8')), 'not required by any run');
+  assert.equal(deriveVerdict({ steps: [blocked], required: [] }).failed.length, 0);
+});
+test('keychain other-build driver: steps run in order, the window is polled, and a throwing primitive is a broken check, not a result', async () => {
+  let t = 0; const log = [];
+  const p = { now: () => t, sleep: async (ms) => { t += ms; }, createKeyInBuildA: async () => log.push('A'), installBuildB: async () => log.push('B'), openApp: async () => log.push('open'), windowVisible: async () => t >= 3000, sheetVisible: async () => false };
+  const s = await keychainOtherBuildStep(p);
+  assert.deepEqual(log, ['A', 'B', 'open']);
+  assert.match(s.summary, /window appeared after 3\.0 s/);
+  const never = await keychainOtherBuildStep({ ...p, windowVisible: async () => false, sheetVisible: async () => true }, 5000);
+  assert.match(never.summary, /no window within the 5 s guard/);
+  const broken = await keychainOtherBuildStep({ ...p, installBuildB: async () => { throw new Error('dmg missing'); } });
+  assert.equal(broken.checks[0].kind, 'check');
+  assert.match(broken.summary, /dmg missing/);
 });

@@ -15,7 +15,7 @@ test('the key is the product format and its entry holds only the SHA-256, never 
 });
 test('credential-store commands name service Dyno and account mcp:keys on every OS; the key goes in the environment, not an argument', () => {
   const { entries, key } = makeKey(Buffer.alloc(32, 1), 1);
-  assert.match(storeEntryCommand('macos', entries), /security add-generic-password -U -s Dyno -a 'mcp:keys'/);
+  assert.match(storeEntryCommand('macos', entries), /security add-generic-password -U -T '[^']*' -s Dyno -a 'mcp:keys'/);
   assert.match(storeEntryCommand('linux', entries), /secret-tool store --label=Dyno service Dyno username 'mcp:keys'/);
   assert.match(storeEntryCommand('windows', entries), /schtasks \/create \/tn DynoStoreKey[^;]*\/it /);
   assert.match(storeEntryCommand('windows', entries), /FromBase64String/);
@@ -26,6 +26,17 @@ test('credential-store commands name service Dyno and account mcp:keys on every 
   assert.match(writeSettingsCommand('macos', "/Users/a b/Library", '{}'), /> '\/Users\/a b\/Library\/mcp\.json'/);
   assert.deepEqual(splitExit('hello\nEXIT=1\n'), { code: 1, out: 'hello' });
   assert.equal(splitExit('nothing').code, null);
+});
+test('macOS: the seeded key entry has its partition list opened right after it is made, so the app does not block on the keychain', () => {
+  const { entries } = makeKey(Buffer.alloc(32, 2), 1);
+  const cmd = storeEntryCommand('macos', entries, 'pw with space');
+  const add = cmd.indexOf('security add-generic-password');
+  const open = cmd.indexOf('security set-generic-password-partition-list');
+  assert.ok(add >= 0 && open > add, 'the partition list is set after the entry exists');
+  assert.match(cmd, /^H=\$\(codesign -dvvv '\/Applications\/Dyno\.app' 2>&1 \| sed -n 's\/\^CDHash=\/\/p'\); \[ -n "\$H" \] && security add-generic-password -U -T '\/Applications\/Dyno\.app' /, 'the app\'s own CDHash is read from the bundle; an unreadable one stops the seed');
+  assert.match(cmd, /&& security set-generic-password-partition-list -S "apple-tool:,apple:,cdhash:\$H" -s Dyno -a 'mcp:keys' -k 'pw with space'/, 'chained: a failed add skips it, and a failed partition call fails the whole store (a broken seed is not a pass); apple-tool: alone, apple: and an empty list were measured to still block the app');
+  assert.match(storeEntryCommand('macos', entries), /-k 'admin'/, 'the image\'s admin password is the default');
+  assert.doesNotMatch(storeEntryCommand('linux', entries), /partition/);
 });
 test('dead state: a leftover discovery file naming a live pid is live, a dead pid fails verification, no file is gone', () => {
   assert.equal(discoveryState('', () => true), 'gone');

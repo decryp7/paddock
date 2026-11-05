@@ -97,6 +97,8 @@ export class MacGui {
     const words = badge.ok ? 'On' : (await this.texts()).filter((t) => /^(Off|Update available|Not running|Needs repair|Not trusted|Turning on)$|helper version|cannot use/.test(t.text)).map((t) => t.text).join(' / ');
     checks.push({ ok: badge.ok, detail: badge.ok ? 'the card reads "On"' : `the card never read "On": it says ${words || 'nothing recognisable'}` });
     evidence.push(`screenshot: ${await this.shot('helper-on')}`);
+    // The Settings window is a second window over the main one: left open it covers the Power, Schedule and Wake pages of the next steps (steps 5-9 of the 2026-11-05 run).
+    await this.closeSettings();
     return this.finish(title, checks, evidence, 'password sheet answered, card "On", launchd job and file present');
   }
 
