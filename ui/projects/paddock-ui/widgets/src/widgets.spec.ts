@@ -208,7 +208,7 @@ describe('pd-widget-frame', () => {
     expect(getComputedStyle(button).color).not.toContain('pd-text-muted');
   });
 
-  it('dims segmented controls, toggles and checkboxes in an inert body, and keeps the chosen label readable', async () => {
+  it('keeps segmented controls, toggles and checkboxes at full strength in an inert body (no opacity: a card must not look dim), with the chosen label muted', async () => {
     const f = await setup();
     f.componentInstance.state.set(ready('182 GB'));
     await settle(f);
@@ -218,8 +218,8 @@ describe('pd-widget-frame', () => {
     expect(getComputedStyle(group).opacity).toBe('1');
     f.componentInstance.inert.set(true);
     await settle(f);
-    expect(getComputedStyle(group).opacity).toBe('0.7');
-    expect(getComputedStyle(box).opacity).toBe('0.7');
+    expect(getComputedStyle(group).opacity).toBe('1');
+    expect(getComputedStyle(box).opacity).toBe('1');
     expect(getComputedStyle(label).color).toContain('pd-text-muted');
     f.componentInstance.inert.set(false);
     await settle(f);
