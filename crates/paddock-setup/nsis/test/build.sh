@@ -8,6 +8,6 @@ mkdir -p "$out"
 cp "$here/../paddock-per-machine.nsh" "$here/harness-hooks.nsh" "$here/harness.nsi" "$here/harness.txt" "$here/stub-setup.nsi" "$out/"
 printf '!define PADDOCK_STOP_IMAGES "harness.exe,harness-agent.exe"\n' > "$out/paddock-per-machine.generated.nsh"
 cd "$out"
-makensis -V2 stub-setup.nsi
+if [ -n "${SETUP_EXE:-}" ]; then cp "$SETUP_EXE" paddock-setup.exe; else makensis -V2 stub-setup.nsi; fi
 makensis -V2 harness.nsi
 echo "built in $out"

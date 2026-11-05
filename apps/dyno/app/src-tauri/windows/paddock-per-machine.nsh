@@ -11,9 +11,8 @@
 ;   NSIS_HOOK_PREUNINSTALL    PADDOCK_INSTALLING, PADDOCK_REINSTALL_AS_UPDATE, PADDOCK_STOP_ALL, <app steps>,
 ;                             PADDOCK_CLEAN_RUN_VALUES, PADDOCK_REMOVE_PROGRAM_FILES
 ;
-; Registers: the macros use $0 to $5 and $R3 to $R5, $R8 and $R9, and nothing else (the template's pages use $R0 to $R7 but do
-; not run inside a section; its CheckIfAppIsRunning uses $R0 to $R3 and runs after these macros). The test harness also uses
-; $R6 and $R7. $PaddockHaveSetup (1 or 0) says whether paddock-setup.exe was available to this run.
+; Registers: the macros use $0 to $3 and $R4 to $R9, and nothing else ($R6 and $R7 also by the test harness's log lines). The
+; template's pages use $R0 to $R7 but do not run inside a section; its CheckIfAppIsRunning uses $R0 to $R3. $PaddockHaveSetup (1 or 0) says whether paddock-setup.exe was available to this run.
 ;
 ; Where paddock-setup.exe runs from: the installer extracts its embedded copy to $PLUGINSDIR; the uninstaller cannot `File`, so
 ; it copies the installed one to $PLUGINSDIR. Both run it from there, never from $INSTDIR: stop-all then never has to end its own
@@ -44,7 +43,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "1"
+!define PADDOCK_INCLUDE_VERSION "2"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -67,11 +66,15 @@
   !error "paddock-per-machine.generated.nsh must !define PADDOCK_STOP_IMAGES (comma-separated file names); run PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine"
 !endif
 
-; Error levels of a refusal ($INSTDIR\updates\setup.log has the detail).
-!define PADDOCK_LEVEL_PER_USER 2
-!define PADDOCK_LEVEL_BAD_DIR 3
-!define PADDOCK_LEVEL_STILL_RUNNING 4
-!define PADDOCK_LEVEL_TOOL_FAILED 5
+; Error levels of a refusal. The reason is also written to $INSTDIR\updates\setup.log through `paddock-setup note` (nothing is ever
+; written to %TEMP% while elevated: it can be user-writable); for a refused folder (level 41) there is no safe folder, so the
+; message and the level are all there is.
+; Their own numbers: NSIS itself ends with 1 (cancelled) and 2 (aborted or failed), and `paddock-setup apply-update` has its own
+; refusal codes from 20 up, so a silent /S run (or a log) can tell the causes apart.
+!define PADDOCK_LEVEL_PER_USER 40
+!define PADDOCK_LEVEL_BAD_DIR 41
+!define PADDOCK_LEVEL_STILL_RUNNING 42
+!define PADDOCK_LEVEL_TOOL_FAILED 43
 
 !define PADDOCK_SETUP "$PLUGINSDIR\paddock-setup.exe"
 
@@ -304,11 +307,28 @@ Var PaddockHaveSetup
 !macroend
 
 ; Every refusal: the message, the clean-up of ADR 2.3, the restart of 4.3 or 5, the error level, Quit.
-;   _MSG      the message (an NSIS string, may use registers other than $R8 and $R9)
+;   _MSG      the message (an NSIS string; it is shown before any register above is written, so it may use $0 to $3)
 ;   _LEVEL    the error level (PADDOCK_LEVEL_*)
 ;   _RESTART  the full path of a program to start again as the desktop user, or "" (only used with /UPDATE and /R)
 !macro PADDOCK_ABORT _MSG _LEVEL _RESTART
   DetailPrint "${PRODUCTNAME}: ${_MSG}"
+  ; The reason survives the installer in $INSTDIR\updates\setup.log, written by the tool through its checked log (a refused fresh
+  ; install removes only an empty $INSTDIR, and the folder holding the log stays). Not for a refused folder (nothing safe to
+  ; write to) and not without the tool. Never a path under %TEMP% from this elevated process.
+  !if ${_LEVEL} != ${PADDOCK_LEVEL_BAD_DIR}
+    ${If} $PaddockHaveSetup == 1
+      !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
+      !if ${_LEVEL} == ${PADDOCK_LEVEL_PER_USER}
+        nsExec::ExecToLog '"${PADDOCK_SETUP}" note --dir "$R5" --text "refused (level ${_LEVEL}): an older per-user copy blocks the install"'
+      !else if ${_LEVEL} == ${PADDOCK_LEVEL_STILL_RUNNING}
+        nsExec::ExecToLog '"${PADDOCK_SETUP}" note --dir "$R5" --text "refused (level ${_LEVEL}): a listed program still runs"'
+      !else
+        nsExec::ExecToLog '"${PADDOCK_SETUP}" note --dir "$R5" --text "refused (level ${_LEVEL}): the tool failed"'
+      !endif
+      Pop $R7
+      DetailPrint "The reason is also in $INSTDIR\updates\setup.log (note exit code $R7)"
+    ${EndIf}
+  !endif
   !insertmacro _PADDOCK_TEST_LOG "ABORT level ${_LEVEL}: ${_MSG}"
   !ifndef __UNINSTALL__
     ; A refusal during a fresh install removes the empty folder (not recursive; the setup.log stays on purpose).

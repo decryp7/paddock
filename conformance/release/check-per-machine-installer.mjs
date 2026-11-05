@@ -56,7 +56,7 @@ const SEVEN_ZIP_FALLBACK = 'C:\\Program Files\\7-Zip\\7z.exe';
 
 /** The 7z to use: on PATH, then the standard install folder; otherwise one error that says how to get it. */
 export function find7z({ probe = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8', timeout: 20000 }) } = {}) {
-  for (const cmd of ['7z', SEVEN_ZIP_FALLBACK]) {
+  for (const cmd of ['7z', '7zz', SEVEN_ZIP_FALLBACK]) {
     const r = probe(cmd, ['i']);
     if (!r.error && r.status === 0) return { cmd };
   }
@@ -78,6 +78,48 @@ export function checkSignatureName({ sig, file, product, version }) {
   const named = /(?:^|\t)file:(\S+)/.exec(comment)?.[1];
   if (named === undefined) return [`${file}.sig's trusted comment has no file: name (${comment})`];
   return named === file ? [] : [`${file}.sig's trusted comment names ${named}, expected ${file}: every update would be refused`];
+}
+
+/** The Subsystem of a PE file's optional header (2 GUI, 3 console); throws a message that says what is wrong. */
+export function subsystemOf(bytes) {
+  const b = Buffer.from(bytes);
+  if (b.length < 0x40 || b.readUInt16LE(0) !== 0x5a4d) throw new Error('not a Windows program (no MZ header)');
+  const pe = b.readUInt32LE(0x3c);
+  if (pe + 24 + 70 > b.length || b.readUInt32LE(pe) !== 0x4550) throw new Error('not a Windows program (no PE header)');
+  return b.readUInt16LE(pe + 24 + 68);
+}
+
+/** paddock-setup.exe is started by the installer on every user's PC: a console-subsystem build opens a command prompt. */
+export function checkSetupSubsystem({ bytes, name }) {
+  if (!bytes) return [`${name}: paddock-setup.exe could not be extracted to check its subsystem`];
+  try {
+    const s = subsystemOf(bytes);
+    return s === 2 ? [] : [`${name}: paddock-setup.exe has PE subsystem ${s}, expected 2 (GUI): a console program shows a command prompt window during install, update and uninstall`];
+  } catch (e) {
+    return [`${name}: paddock-setup.exe is ${e.message}`];
+  }
+}
+
+const NSIS_MIN = [3, 12];
+
+/** The NSIS version that made an installer, from the stub's default branding string ("Nullsoft Install System v3.13", ANSI or
+ * UTF-16), or null when the string is not there (an app that sets its own BrandingText). */
+export function nsisVersionOf(bytes) {
+  const b = Buffer.from(bytes);
+  for (const enc of ['latin1', 'utf16le']) {
+    const m = /Nullsoft Install System v(\d+\.\d+(?:\.\d+)?)/.exec(b.toString(enc));
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** NSIS before 3.12 can run elevated code out of a $PLUGINSDIR a standard user could prepare (3.11: restricted $PLUGINSDIR; 3.12: low-IL
+ * temp when elevated; both per NSIS's own changelog). The Tauri bundler picks the NSIS version, so the built installer is read. */
+export function checkNsisVersion({ bytes, name }) {
+  const v = nsisVersionOf(bytes);
+  if (v === null) return [`${name}: the NSIS version was not measured (no "Nullsoft Install System vX.Y" string in the installer), so the NSIS 3.12 minimum is not shown; do not release until it is`];
+  const [maj, min] = v.split('.').map(Number);
+  return maj > NSIS_MIN[0] || (maj === NSIS_MIN[0] && min >= NSIS_MIN[1]) ? [] : [`${name} was made by NSIS ${v}, below ${NSIS_MIN.join('.')}: a $PLUGINSDIR privilege escalation fixed in 3.11 and 3.12 (NSIS changelog) is present. Use a Tauri CLI whose bundler downloads NSIS ${NSIS_MIN.join('.')} or later`];
 }
 
 /** What the embedded program's `self-test` must say: the app's identifier, and `stop_all=present` (a build without the stopper
@@ -137,13 +179,22 @@ function main(argv) {
     } catch {
       if (!o['no-sig']) problems.push(`${name}.sig is missing: the release is signed by the bundle step`);
     }
+    problems.push(...checkNsisVersion({ bytes: readFileSync(path), name }));
     problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name }));
-    if (process.platform === 'win32' && files) {
+    if (files) {
       const tmp = mkdtempSync(join(tmpdir(), 'pm-gate-'));
-      const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
-      const run = ex.status === 0 ? spawnSync(join(tmp, 'paddock-setup.exe'), ['self-test'], { encoding: 'utf8', timeout: 60000 }) : null;
-      rmSync(tmp, { recursive: true, force: true });
-      problems.push(...checkSelfTest({ stdout: run?.stdout, status: run?.status, identifier: conf.identifier, name }));
+      try {
+        const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
+        const exe = join(tmp, 'paddock-setup.exe');
+        problems.push(...checkSetupSubsystem({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
+        // Running it needs Windows. Its output is read through pipes: a GUI-subsystem program still writes to inherited handles.
+        if (process.platform === 'win32' && ex.status === 0) {
+          const run = spawnSync(exe, ['self-test'], { encoding: 'utf8', timeout: 60000 });
+          problems.push(...checkSelfTest({ stdout: run.stdout, status: run.status, identifier: conf.identifier, name }));
+        }
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     }
     for (const p of problems) console.error(`::error::${p}`);
     if (problems.length === 0) console.log(`${name}: administrator level, paddock-setup.exe inside, include version ${expectVersion}`);

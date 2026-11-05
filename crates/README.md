@@ -1624,6 +1624,11 @@ resource `PADDOCK_SETUP_PRODUCT` and `PADDOCK_SETUP_VERSION`: `FileDescription` 
   `check-dir`, `same-folder`, `stop-all` (over `paddock_proc::installed::stop_all_here`), `clean-run`,
   `clean-staging`, `apply-update --file <local drive-letter path> --signature <base64 text, at most 1 KiB> --version <v> [--size <n>] --restart` (the elevated hand-off, trust model of ADR section 4.2; a path that is not a plain local drive-letter path is exit 4 before anything is opened), `hold-installing` (the installer
   include's `Global\<identifier>.setup` mutex with its explicit descriptor), `self-test` (the ADR 0039 gate reads it).
+- **No console window.** `paddock-setup.exe` is a GUI-subsystem program (`windows_subsystem = "windows"`): the installer, the
+  uninstaller and the updater start it, and a console program opens a command prompt there. Redirected standard handles
+  (`nsExec`, a pipe, a file, the release gate's `spawnSync`) still carry its output; run by hand it attaches to the terminal's
+  console (`paddock_proc::console`); started without either it prints nothing, and `setup.log` is the record. The release gate
+  fails a staged program whose PE subsystem is not 2.
 - **Pure core:** `args` (typed command line), `guard` (`decide` over `InstallFacts`, `per_user_copy` for the app's own start),
   `checkdir` (the install-folder and `updates\` rules), `samefolder`, `runvalues`, `staging`, `apply` (the sequence over
   `UpdatePort`, `Refusal` with exit codes and sentences, `Layout`), `handoff` (the mutex name, its descriptor, the owner rule against squatting
