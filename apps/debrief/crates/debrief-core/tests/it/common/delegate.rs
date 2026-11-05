@@ -31,6 +31,8 @@ pub struct Delegating<'a, S> {
     pages: std::sync::atomic::AtomicUsize,
     /// Makes `check_query` fail with this error instead of checking anything.
     pub check_query_error: Option<StoreError>,
+    /// Replaces the coverage of `patterns`, `exception_groups`, `overview` and `moment` (a partial analysis).
+    pub coverage: Option<Coverage>,
 }
 
 impl<'a, S> Delegating<'a, S> {
@@ -43,6 +45,7 @@ impl<'a, S> Delegating<'a, S> {
             run_query_error: None,
             pages: Default::default(),
             check_query_error: None,
+            coverage: None,
         }
     }
 
@@ -163,12 +166,21 @@ impl<S: Positions> Positions for Delegating<'_, S> {
     }
 }
 
+impl<S> Delegating<'_, S> {
+    fn covered<T>(&self, mut a: Analyzed<T>) -> Analyzed<T> {
+        if let Some(c) = &self.coverage {
+            a.coverage = c.clone();
+        }
+        a
+    }
+}
+
 impl<S: Analysis> Analysis for Delegating<'_, S> {
     fn patterns(&self, req: &QueryRequest) -> StoreResult<Analyzed<Vec<Pattern>>> {
-        self.inner.patterns(req)
+        self.inner.patterns(req).map(|a| self.covered(a))
     }
     fn exception_groups(&self, req: &QueryRequest) -> StoreResult<Analyzed<Vec<ExceptionGroup>>> {
-        self.inner.exception_groups(req)
+        self.inner.exception_groups(req).map(|a| self.covered(a))
     }
     fn anomalies(&self, req: &QueryRequest) -> StoreResult<Analyzed<Vec<Anomaly>>> {
         self.inner.anomalies(req)
@@ -186,10 +198,10 @@ impl<S: Analysis> Analysis for Delegating<'_, S> {
         self.inner.requests(req)
     }
     fn moment(&self, req: &MomentRequest) -> StoreResult<Analyzed<MomentSummary>> {
-        self.inner.moment(req)
+        self.inner.moment(req).map(|a| self.covered(a))
     }
     fn overview(&self, req: &QueryRequest) -> StoreResult<Analyzed<Vec<Finding>>> {
-        self.inner.overview(req)
+        self.inner.overview(req).map(|a| self.covered(a))
     }
     fn runs(&self, req: &debrief_core::spans::RunsRequest) -> StoreResult<debrief_core::spans::RunsReply> {
         self.inner.runs(req)

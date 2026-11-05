@@ -7,7 +7,7 @@ use super::proposals::Proposal;
 use crate::access::StoreRef;
 use crate::llm::ToolSpec;
 use debrief_core::api::{ContextRequest, FieldStatsRequest, MomentRequest, QueryRequest};
-use debrief_core::ports::Store;
+use debrief_core::ports::{Analyzed, Coverage, Store};
 use debrief_core::ports::{EventsRequest, StoreError};
 use debrief_core::ql::QlResult;
 use debrief_core::query::Query;
@@ -305,25 +305,25 @@ impl<'a> EngineTools<'a> {
             ),
             spec(
                 "patterns",
-                "Most frequent message templates (variable parts masked as <*>), optionally filtered by a query.",
+                "Most frequent message templates (variable parts masked as <*>), optionally filtered by a query. Its coverage says how many matching events were analysed; state it when partial.",
                 json!({"ql": ql, "limit": {"type": "integer"}}),
                 &[],
             ),
             spec(
                 "exception_groups",
-                "Exceptions grouped by fingerprint with counts, first/last time and sample event ids.",
+                "Exceptions grouped by fingerprint with counts, first/last time and sample event ids. Its coverage says how many matching events were analysed; state it when partial.",
                 json!({"ql": ql}),
                 &[],
             ),
             spec(
                 "overview",
-                "The automatic health check: the most important findings first.",
+                "The automatic health check: the most important findings first. Its coverage says how many matching events were analysed; state it when partial.",
                 json!({}),
                 &[],
             ),
             spec(
                 "moment",
-                "What happened between two times (epoch milliseconds): levels, instances, metrics, anomalies.",
+                "What happened between two times (epoch milliseconds): levels, instances, metrics, anomalies. Its coverage says how many matching events were analysed; state it when partial.",
                 json!({"from": {"type": "integer"}, "to": {"type": "integer"}}),
                 &["from", "to"],
             ),
@@ -595,13 +595,13 @@ impl EngineTools<'_> {
             }
             "patterns" => {
                 let a = parse!(OptQl);
-                match s.patterns(&QueryRequest { query: query_of(&a.ql) }).map(|a| a.result) {
-                    Ok(p) => {
+                match s.patterns(&QueryRequest { query: query_of(&a.ql) }) {
+                    Ok(Analyzed { result: p, coverage }) => {
                         let n = p.len();
                         let top: Vec<_> = p.into_iter().take(a.limit.unwrap_or(15).clamp(1, 30)).collect();
                         self.finish(
-                            json!({"total": n, "patterns": top}),
-                            format!("{n} patterns"),
+                            json!({"total": n, "patterns": top, "coverage": coverage_json(&coverage)}),
+                            with_coverage(format!("{n} patterns"), &coverage),
                             vec![a.ql].into_iter().filter(|q| !q.is_empty()).collect(),
                         )
                     }
@@ -610,38 +610,43 @@ impl EngineTools<'_> {
             }
             "exception_groups" => {
                 let a = parse!(OptQl);
-                match s.exception_groups(&QueryRequest { query: query_of(&a.ql) }).map(|a| a.result) {
-                    Ok(g) => {
+                match s.exception_groups(&QueryRequest { query: query_of(&a.ql) }) {
+                    Ok(Analyzed { result: g, coverage }) => {
                         let n = g.len();
-                        self.finish(json!({"total": n, "groups": g}), format!("{n} exception groups"), vec![])
+                        self.finish(
+                            json!({"total": n, "groups": g, "coverage": coverage_json(&coverage)}),
+                            with_coverage(format!("{n} exception groups"), &coverage),
+                            vec![],
+                        )
                     }
                     Err(e) => ToolOutcome::err(format!("{e:#}")),
                 }
             }
-            "overview" => match s.overview(&QueryRequest { query: Query::default() }).map(|a| a.result) {
-                Ok(f) => {
+            "overview" => match s.overview(&QueryRequest { query: Query::default() }) {
+                Ok(Analyzed { result: f, coverage }) => {
                     let n = f.len();
-                    self.finish(json!({"findings": f}), format!("{n} findings"), vec![])
+                    self.finish(
+                        json!({"findings": f, "coverage": coverage_json(&coverage)}),
+                        with_coverage(format!("{n} findings"), &coverage),
+                        vec![],
+                    )
                 }
                 Err(e) => ToolOutcome::err(format!("{e:#}")),
             },
             "moment" => {
                 let a = parse!(MomentArg);
-                match s
-                    .moment(&MomentRequest {
-                        query: Query::default(),
-                        from: a.from,
-                        to: a.to,
-                    })
-                    .map(|a| a.result)
-                {
-                    Ok(m) => {
+                match s.moment(&MomentRequest {
+                    query: Query::default(),
+                    from: a.from,
+                    to: a.to,
+                }) {
+                    Ok(Analyzed { result: m, coverage }) => {
                         let total = m.total;
-                        self.finish(
-                            serde_json::to_value(&m).unwrap_or(Value::Null),
-                            format!("{total} events in the window"),
-                            vec![],
-                        )
+                        let mut value = serde_json::to_value(&m).unwrap_or(Value::Null);
+                        if let Value::Object(o) = &mut value {
+                            o.insert("coverage".into(), coverage_json(&coverage));
+                        }
+                        self.finish(value, with_coverage(format!("{total} events in the window"), &coverage), vec![])
                     }
                     Err(e) => ToolOutcome::err(format!("{e:#}")),
                 }
@@ -685,5 +690,20 @@ impl EngineTools<'_> {
             }
             other => ToolOutcome::err(format!("unknown tool '{other}'")),
         }
+    }
+}
+
+/// How much of the matching data an analysis looked at, for the model: above the engine's cap it reads the oldest
+/// events only, and the answer must say so (engine review finding 16: no silent caps).
+fn coverage_json(c: &Coverage) -> Value {
+    json!({"matched": c.matched, "analysed": c.analysed, "partial": !c.complete(), "limits": c.limits})
+}
+
+/// The tool's one-line summary (shown to the user), with the coverage when the analysis was partial.
+fn with_coverage(summary: String, c: &Coverage) -> String {
+    if c.complete() {
+        summary
+    } else {
+        format!("{summary} (from {} of {} matching events)", c.analysed, c.matched)
     }
 }

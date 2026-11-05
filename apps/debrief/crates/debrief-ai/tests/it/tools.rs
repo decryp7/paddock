@@ -196,3 +196,50 @@ fn citations_are_rechecked_by_content_after_the_store_changed() {
     assert!(c[..2].iter().all(|c| matches!(c, Citation::Record { verified: false, .. })));
     assert!(matches!(c[2], Citation::Query { .. }));
 }
+
+/// The store's own delegate (debrief-core's test helper), so a test can make an analysis report a partial coverage.
+#[path = "../../../debrief-core/tests/it/common/delegate.rs"]
+mod delegate;
+
+/// Above the analysis cap the engine reports `matched > analysed`; the tool output must say so, or neither the
+/// model nor the user learns that the numbers come from the oldest events only (B2).
+#[test]
+fn analysis_tools_report_a_partial_coverage() {
+    use debrief_core::ports::Coverage;
+    use debrief_core::{Profile, Workspace};
+    let text = std::fs::read_to_string(samples().join("profiles/orderservice.debriefprofile.toml")).unwrap();
+    let mut ws = Workspace::new(Profile::from_toml(&text).unwrap()).unwrap();
+    ws.open(&[samples()]).unwrap();
+    let inner = debrief_core::workspace::WorkspaceStore::new(ws);
+    let mut d = delegate::Delegating::new(&inner);
+    d.coverage = Some(Coverage {
+        matched: 10_000_000,
+        analysed: 2_000_000,
+        limits: vec!["analysis: the oldest 2,000,000 events".into()],
+    });
+    let mut tools = EngineTools::new(&d as &dyn debrief_core::ports::Store, ToolLimits::for_context(8192));
+    for (name, input) in [
+        ("patterns", json!({})),
+        ("exception_groups", json!({})),
+        ("overview", json!({})),
+        ("moment", json!({"from": ms(10, 30, 0), "to": ms(10, 50, 0)})),
+    ] {
+        let o = tools.call(name, &input);
+        assert!(!o.is_error, "{name}: {}", o.text);
+        let v = parsed(&o);
+        let c = &v["coverage"];
+        assert_eq!(
+            (c["matched"].as_u64(), c["analysed"].as_u64()),
+            (Some(10_000_000), Some(2_000_000)),
+            "{name}: {}",
+            o.text
+        );
+        assert_eq!(c["partial"], true, "{name}");
+        assert!(c["limits"][0].as_str().unwrap().contains("oldest"), "{name}");
+    }
+}
+
+#[test]
+fn the_analyst_is_told_to_state_a_partial_coverage() {
+    assert!(ANALYST_SYSTEM.contains("coverage") && ANALYST_SYSTEM.contains("analysed"));
+}
