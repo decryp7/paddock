@@ -92,6 +92,9 @@ impl BatchedSource {
 }
 
 /// Collects one source's parsed events, runs the ingest pipeline per batch and writes the batches.
+/// A batch is also written once its events hold this much text, so a few wide events do not fill memory.
+const BATCH_BYTES: usize = 32 << 20;
+
 pub struct RecordBatcher<'a> {
     profile: &'a CompiledProfile,
     source: SourceId,
@@ -100,6 +103,8 @@ pub struct RecordBatcher<'a> {
     cancel: &'a AtomicBool,
     records: Vec<Record>,
     metas: Vec<Meta>,
+    /// Rough size of the collected events' text, to flush wide events before `BATCH_ROWS`.
+    bytes: usize,
     builder: EventBatchBuilder,
     out: BatchedSource,
     window: Option<super::ImportWindow>,
@@ -122,6 +127,7 @@ impl<'a> RecordBatcher<'a> {
             cancel,
             records: Vec::with_capacity(BATCH_ROWS),
             metas: Vec::with_capacity(BATCH_ROWS),
+            bytes: 0,
             builder: EventBatchBuilder::new(schema),
             out: BatchedSource::default(),
             window: None,
@@ -191,6 +197,7 @@ impl<'a> RecordBatcher<'a> {
             self.sink.write(self.builder.finish())?;
         }
         self.metas.clear();
+        self.bytes = 0;
         Ok(())
     }
 
@@ -221,13 +228,21 @@ impl EventSink for RecordBatcher<'_> {
             }
         }
         self.out.parsed += 1;
+        self.bytes += ev.raw.len() * 2 + ev.record.message.len();
         self.records.push(ev.record);
         self.metas.push(Meta {
             raw: ev.raw,
             byte_offset: ev.byte_offset,
         });
-        if self.records.len() >= BATCH_ROWS {
+        if self.records.len() >= BATCH_ROWS || self.bytes >= BATCH_BYTES {
             self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn check(&mut self) -> Result<()> {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(ImportCancelled.into());
         }
         Ok(())
     }

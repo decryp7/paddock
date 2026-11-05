@@ -229,7 +229,7 @@ impl<R: Read> ReaderChunks<R> {
         }
         let at = out.text.len();
         self.encoding.decode_into(bytes, &mut out.text);
-        if out.text.ends_with('\r') {
+        if out.text[at..].ends_with('\r') {
             out.text.pop();
         }
         out.lines.push(LineSpan {
@@ -449,6 +449,16 @@ mod tests {
 
     fn texts(lines: &[OwnedLine]) -> Vec<&str> {
         lines.iter().map(|l| l.text.as_str()).collect()
+    }
+
+    #[test]
+    fn a_carriage_return_before_the_break_and_an_empty_line_after_it_lose_nothing() {
+        let text = "a\r\r\n\nb\n";
+        for block in [1, 2, 3, 64] {
+            let mut src = ReaderChunks::with_limits(text.as_bytes(), Encoding::Utf8, 0, block, 100);
+            let (lines, _) = all_lines(&mut src);
+            assert_eq!(texts(&lines), ["a\r", "", "b"], "block {block}");
+        }
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! Streaming import of delimited text (plan package 3.5): the cases a chunked read can get wrong, through the
 //! public import path (plan, chunk reader, row folding, batcher). Data is invented and written to a temp folder.
 
+mod common;
+
 use debrief_core::batch::{PendingBatch, SourceId};
 use debrief_core::ingest::{self, BatchSink, ImportEnv, NewSource, Outcome, SourceReport};
 use debrief_core::Profile;
@@ -40,9 +42,13 @@ impl BatchSink for Count<'_> {
 }
 
 fn import(path: &Path, cancel_after: Option<usize>) -> (Count<'static>, Vec<Outcome>) {
+    import_with(&Profile::default_profile(), path, cancel_after)
+}
+
+fn import_with(profile: &Profile, path: &Path, cancel_after: Option<usize>) -> (Count<'static>, Vec<Outcome>) {
     let registry = debrief_core::PluginRegistry::new();
     let parsers = registry
-        .compile_parsers(&Profile::default_profile(), &debrief_core::parser::ParserSetup::builtins())
+        .compile_parsers(profile, &debrief_core::parser::ParserSetup::builtins())
         .unwrap();
     let profile = parsers.base().clone();
     let progress = Box::leak(Box::new(debrief_core::workspace::ImportProgress::default()));
@@ -155,4 +161,58 @@ fn cancel_in_the_middle_of_a_file_stops_it_and_imports_nothing_of_it() {
     assert!(c.reports.is_empty());
     assert!(matches!(&out[0], Outcome::Unrecognized(_)), "{out:?}");
     std::fs::remove_dir_all(d).ok();
+}
+
+#[test]
+fn the_day_order_is_decided_on_the_first_rows_even_when_they_are_long() {
+    // About 1.5 KB a row: the 1 MiB head holds only some 700 of them, and the first row that can only be a day (25/04) is past it.
+    let d = dir("longrows");
+    let pad = "p".repeat(1500);
+    let mut text = String::from("timestamp,level,service,message\n");
+    text.push_str(&format!("03/04/2026 10:00:00,INFO,svc,{pad}\n"));
+    for n in 0..1000 {
+        text.push_str(&format!("{:02}/04/2026 10:30:00,INFO,svc,{pad}\n", 5 + n % 7));
+    }
+    text.push_str(&format!("25/04/2026 11:00:00,INFO,svc,{pad}\n"));
+    std::fs::write(d.join("a.csv"), &text).unwrap();
+    let (c, _) = import(&d.join("a.csv"), None);
+    let (from, to) = (c.reports[0].from.unwrap(), c.reports[0].to.unwrap());
+    // 3 April 10:00 to 25 April 11:00; read month first, 03/04 would be 4 March and 25/04 would not be a date.
+    assert_eq!(to - from, (22 * 24 * 3600 + 3600) * 1000);
+    std::fs::remove_dir_all(&d).ok();
+}
+
+#[test]
+fn a_file_with_a_byte_order_mark_and_no_header_reads_its_first_row() {
+    let d = dir("bom-headerless");
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    for n in 0..30 {
+        bytes.extend_from_slice(row(n).as_bytes());
+    }
+    std::fs::write(d.join("a.csv"), &bytes).unwrap();
+    let (c, _) = import(&d.join("a.csv"), None);
+    assert_eq!(c.events, 30);
+    std::fs::remove_dir_all(&d).ok();
+}
+
+#[test]
+fn a_48_mib_csv_is_read_in_a_bounded_amount_of_memory() {
+    // The whole-file path held about 11 times the file (3.5 GB for 300 MiB); streaming holds a fixed amount.
+    let d = dir("memory");
+    let mut text = String::from("timestamp,level,service,message\n");
+    let mut n = 0u64;
+    while text.len() < 48 << 20 {
+        text.push_str(&row(n));
+        n += 1;
+    }
+    std::fs::write(d.join("a.csv"), &text).unwrap();
+    drop(text);
+    let base = common::rss() >> 20;
+    let peak = common::Peak::start();
+    let (c, _) = import(&d.join("a.csv"), None);
+    let mb = peak.mb();
+    eprintln!("48 MiB CSV: physical footprint {base} MB before, peak {mb} MB");
+    assert_eq!(c.events as u64, n);
+    assert!(mb.saturating_sub(base) < 160, "peak {mb} MB over {base} MB for a 48 MiB file");
+    std::fs::remove_dir_all(&d).ok();
 }

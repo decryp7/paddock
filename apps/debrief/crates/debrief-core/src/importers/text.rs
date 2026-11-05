@@ -14,7 +14,7 @@ pub struct TextImporter;
 
 pub(crate) const SNIFF_LINES: usize = 200;
 /// Most text one event collects from continuation lines; the next line starts a new event.
-pub const MAX_EVENT_BYTES: usize = 1 << 20;
+pub const MAX_EVENT_BYTES: usize = crate::ingest::MAX_EVENT_BYTES;
 /// Most continuation lines one event collects; the next line starts a new event.
 pub const MAX_EVENT_LINES: usize = 10_000;
 /// Field of an event that continues an event cut at [`MAX_EVENT_BYTES`] or [`MAX_EVENT_LINES`]: the line
@@ -241,9 +241,12 @@ mod tests {
         assert_eq!((rest.ts, rest.level), (first.ts, first.level));
         assert_eq!(rest.line as usize, MAX_EVENT_LINES + 2);
         assert!(!out.records[2].fields.contains_key(CONTINUED_FIELD));
-        // By size: continuation lines of 600 KB, so each one after the first starts a new event.
+        // By size: continuation lines of 600 KB, so every 13th starts a new event.
         let big = "x".repeat(600 << 10);
-        let content = format!("2026-10-14 08:00:00.000 +00:00 [INF] start\n{big}\n{big}\n{big}\n");
+        let mut content = String::from("2026-10-14 08:00:00.000 +00:00 [INF] start\n");
+        for _ in 0..30 {
+            content.push_str(&format!("{big}\n"));
+        }
         let out = import(profile, &content);
         assert_eq!(out.records.len(), 3);
         assert!(out.records.iter().all(|r| r.message.len() <= MAX_EVENT_BYTES + 64));

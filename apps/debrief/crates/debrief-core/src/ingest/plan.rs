@@ -194,14 +194,27 @@ pub fn plan_with(importers: &Importers, ctx: &ImportCtx, head: &[u8], whole: boo
     })
 }
 
-/// The decoded head of a file the plan was made from: its first [`HEAD_BYTES`] from after the byte-order mark, cut
-/// after the last line unless that is the whole file. Equal to the text the plan decided from.
-pub(super) fn plan_head_text<R: Read + std::io::Seek>(reader: &mut R, plan: &FilePlan, size: u64) -> std::io::Result<String> {
-    reader.seek(std::io::SeekFrom::Start(0))?;
-    let mut head = Vec::new();
-    reader.take(HEAD_BYTES as u64).read_to_end(&mut head)?;
-    let whole = size <= HEAD_BYTES as u64;
-    Ok(decode_head(&head, plan.encoding, plan.data_start as usize, whole))
+/// The decoded head of a file the plan was made from: its first [`HEAD_BYTES`] from after the byte-order mark, cut after
+/// the last line unless that is the whole file. A head that holds fewer than `rows` lines is read further (doubling, up
+/// to `max` bytes), so a file with long rows is still sampled over its first `rows` rows.
+pub(super) fn plan_head_text_rows<R: Read + std::io::Seek>(
+    reader: &mut R,
+    plan: &FilePlan,
+    size: u64,
+    rows: usize,
+    max: u64,
+) -> std::io::Result<String> {
+    let mut limit = HEAD_BYTES as u64;
+    loop {
+        reader.seek(std::io::SeekFrom::Start(0))?;
+        let mut head = Vec::new();
+        reader.take(limit).read_to_end(&mut head)?;
+        let whole = size <= limit;
+        if whole || limit >= max || head.iter().filter(|&&b| b == b'\n').count() > rows {
+            return Ok(decode_head(&head, plan.encoding, plan.data_start as usize, whole));
+        }
+        limit *= 2;
+    }
 }
 
 /// The JSON shape, decided as the in-memory JSON importer decides it from the whole file.

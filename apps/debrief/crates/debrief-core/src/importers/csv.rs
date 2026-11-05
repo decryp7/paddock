@@ -184,6 +184,20 @@ pub(crate) struct Layout {
 }
 
 impl Layout {
+    /// Column count, column roles and day order, as indexes (no content), for the log.
+    pub(crate) fn summary(&self) -> String {
+        format!(
+            "columns {}, timestamp {:?}, time {:?}, level {:?}, message {:?}, message last {:?}, day first {:?}",
+            self.headers.len(),
+            self.ts_col,
+            self.time_col,
+            self.level_col,
+            self.message_col,
+            self.message_last,
+            self.parser.day_first()
+        )
+    }
+
     fn new(ctx: &ImportCtx, delim: u8, headers: Option<Vec<String>>, rows: &Rows) -> Layout {
         let cfg = &ctx.profile.format.csv;
         let has_header = headers.is_some();
@@ -401,6 +415,11 @@ pub(crate) enum CsvFolded {
     Continued,
     /// The row starts a new event; the event before it, if any, is finished.
     Started(Option<Record>),
+}
+
+/// A head with carriage returns and no line feed: the csv reader ends rows at a lone `\r`, the line reader does not.
+pub(crate) fn is_cr_only(head: &str) -> bool {
+    head.contains('\r') && !head.contains('\n')
 }
 
 /// What a streaming read needs from the head of a delimited file.

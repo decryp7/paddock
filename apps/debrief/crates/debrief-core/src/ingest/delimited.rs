@@ -18,11 +18,19 @@ use super::MAX_EVENT_BYTES;
 use crate::importers::{CsvFold, CsvFolded, CsvStreamHead};
 use anyhow::Result;
 use csv_core::{ReadRecordResult, Reader, ReaderBuilder, Terminator};
+use std::time::Instant;
 
 /// Reads the rows of a delimited file into `sink`; returns the number of lines skipped.
 pub fn import_delimited(head: CsvStreamHead, lines: &mut LineReader, sink: &mut dyn EventSink) -> Result<usize> {
+    let started = Instant::now();
     let CsvStreamHead { delim, has_header, layout } = head;
-    let mut reader: Reader = ReaderBuilder::new().delimiter(delim).terminator(Terminator::Any(b'\n')).build();
+    log::debug!(
+        "delimited import: delimiter byte {delim}, header {has_header}, {}",
+        layout.summary()
+    );
+    let mut seen = 0u32;
+    let mut dropped = 0usize;
+    let mut reader = new_reader(delim);
     let mut rows = Rows::default();
     let mut fold = CsvFold::default();
     let mut cells = csv::StringRecord::new();
@@ -33,9 +41,20 @@ pub fn import_delimited(head: CsvStreamHead, lines: &mut LineReader, sink: &mut 
     let mut header_pending = has_header;
 
     while let Some(l) = lines.next_line()? {
+        seen += 1;
+        if seen.is_multiple_of(CANCEL_EVERY) {
+            sink.check()?;
+        }
         if l.too_long {
             skipped += 1;
             sink.problem(ProblemKind::LineTooLong, l.number);
+            if rows.open {
+                // The row cannot be finished without this line: drop it and start again on the next one.
+                drop_row(&rows, sink, &mut skipped);
+                dropped += 1;
+                reader = new_reader(delim);
+                rows.reset();
+            }
             continue;
         }
         let was_open = rows.open;
@@ -56,15 +75,21 @@ pub fn import_delimited(head: CsvStreamHead, lines: &mut LineReader, sink: &mut 
             rows.push_text(l.text, was_open);
             if rows.raw.len() > MAX_EVENT_BYTES {
                 // A row this large is an unclosed quote: drop it and start again on the next line.
-                sink.problem(ProblemKind::EventTooLarge, rows.line);
-                skipped += 1;
-                reader = ReaderBuilder::new().delimiter(delim).terminator(Terminator::Any(b'\n')).build();
+                drop_row(&rows, sink, &mut skipped);
+                dropped += 1;
+                reader = new_reader(delim);
                 rows.reset();
             }
             continue;
         }
         rows.push_text(l.text, was_open);
         rows.open = false;
+        if rows.wide {
+            drop_row(&rows, sink, &mut skipped);
+            dropped += 1;
+            rows.reset();
+            continue;
+        }
         rows.fill(&mut cells);
         if header_pending {
             header_pending = false;
@@ -110,7 +135,28 @@ pub fn import_delimited(head: CsvStreamHead, lines: &mut LineReader, sink: &mut 
     if let Some(rec) = layout.finish(&mut fold) {
         emit(rec, &mut event_raw, event_offset, sink)?;
     }
+    log::debug!(
+        "delimited import: {seen} lines in {} ms, {skipped} skipped, {dropped} rows dropped",
+        started.elapsed().as_millis()
+    );
     Ok(skipped)
+}
+
+/// How often (in lines) the import looks at the cancel flag.
+const CANCEL_EVERY: u32 = 1024;
+/// Most cells a row may have; a wider row is dropped.
+const MAX_CELLS: usize = 4096;
+
+fn new_reader(delim: u8) -> Reader {
+    ReaderBuilder::new().delimiter(delim).terminator(Terminator::Any(b'\n')).build()
+}
+
+/// Reports every line of a row that is dropped.
+fn drop_row(rows: &Rows, sink: &mut dyn EventSink, skipped: &mut usize) {
+    for i in 0..rows.lines {
+        sink.problem(ProblemKind::EventTooLarge, rows.line + i);
+    }
+    *skipped += rows.lines as usize;
 }
 
 fn push_capped(raw: &mut String, line: &str) {
@@ -135,6 +181,8 @@ fn emit(record: crate::model::Record, raw: &mut String, byte_offset: u64, sink: 
 struct Rows {
     open: bool,
     line: u32,
+    lines: u32,
+    wide: bool,
     offset: u64,
     raw: String,
     out: Vec<u8>,
@@ -146,6 +194,8 @@ struct Rows {
 impl Rows {
     fn begin(&mut self, line: u32, offset: u64) {
         self.line = line;
+        self.lines = 0;
+        self.wide = false;
         self.offset = offset;
         self.raw.clear();
         self.out_len = 0;
@@ -158,12 +208,15 @@ impl Rows {
 
     fn reset(&mut self) {
         self.open = false;
+        self.lines = 0;
+        self.wide = false;
         self.raw.clear();
         self.out_len = 0;
         self.ends_len = 0;
     }
 
     fn push_text(&mut self, text: &str, continued: bool) {
+        self.lines += 1;
         if continued {
             self.raw.push('\n');
         }
@@ -174,7 +227,8 @@ impl Rows {
 
     /// Feeds one line and its line break; true when a row ended with it.
     fn feed(&mut self, reader: &mut Reader, text: &str) -> bool {
-        let first = self.run(reader, text.as_bytes());
+        // An empty `run` is the end of the input to csv_core, which would end a row inside a quote.
+        let first = !text.is_empty() && self.run(reader, text.as_bytes());
         self.run(reader, b"\n") || first
     }
 
@@ -195,6 +249,12 @@ impl Rows {
                 ReadRecordResult::OutputFull => {
                     let n = self.out.len() * 2;
                     self.out.resize(n, 0);
+                }
+                ReadRecordResult::OutputEndsFull if self.ends.len() >= MAX_CELLS => {
+                    // Too many cells: keep reading to the row's end but keep none of them.
+                    self.wide = true;
+                    self.out_len = 0;
+                    self.ends_len = 0;
                 }
                 ReadRecordResult::OutputEndsFull => {
                     let n = self.ends.len() * 2;
@@ -296,7 +356,12 @@ mod tests {
         ("[format.csv]\nhas_header = false", "WEB01,2026-10-14 10:00:00,5\nWEB02,2026-10-14 10:01:00,7\n,,\n"),
         ("", "Timestamp;Level;Machine;Cpu;Message\n14/10/2026 10:00:00;Warning;WEB01;71.5;\"High CPU; throttling\"\n15/10/2026 10:00:00;Information;WEB02;12;ok\n"),
         ("[format.csv]\ndelimiter = '\\t'", "time\tmsg\n2026-10-14 10:00:00\tb\n2026-10-14 10:00:01\tc\n"),
-    ];
+    // A blank line inside a quoted field, then a field after the quote (LF and CRLF).
+    ("", "Timestamp,Level,Message,Extra\n2026-10-14 10:00:00,Info,\"a\n\nb\",x\n2026-10-14 10:00:01,Info,ok,y\n"),
+    ("", "Timestamp,Level,Message,Extra\r\n2026-10-14 10:00:00,Info,\"a\r\n\r\nb\",x\r\n2026-10-14 10:00:01,Info,ok,y\r\n"),
+    // Spaces around the cells are not part of the values.
+    ("", "Timestamp,Level,Message\n2026-10-14 10:00:00 , Info ,  padded  \n2026-10-14 10:00:01,Info,x\n"),
+];
 
     #[test]
     fn streaming_gives_the_events_of_the_in_memory_importer() {
@@ -308,6 +373,7 @@ mod tests {
             let mut want = whole(extra, text);
             for e in &mut want.events {
                 e.raw = e.raw.replace("\r\n", "\n");
+                e.record.message = e.record.message.replace("\r\n", "\n");
             }
             assert_eq!(view(&got), view(&want), "{extra:?} {text:?}");
         }
@@ -379,5 +445,139 @@ mod tests {
         assert_eq!(got.events.len(), 1);
         assert_eq!(got.events[0].record.message, "only");
         assert_eq!(got.events[0].raw, "2026-10-14 10:00:00,Info,only");
+    }
+
+    /// A sink whose cancel check fails the first time it is asked.
+    #[derive(Default)]
+    struct Cancelling {
+        events: usize,
+    }
+
+    impl EventSink for Cancelling {
+        fn event(&mut self, _ev: ParsedEvent) -> Result<()> {
+            self.events += 1;
+            Ok(())
+        }
+        fn check(&mut self) -> Result<()> {
+            anyhow::bail!("cancelled")
+        }
+        fn problem(&mut self, _kind: ProblemKind, _line: u32) {}
+    }
+
+    fn row_text(rows: usize) -> String {
+        let mut text = String::from("Timestamp,Level,Message\n");
+        for n in 0..rows {
+            text.push_str(&format!("2026-10-14 10:00:00,Info,row {n}\n"));
+        }
+        text
+    }
+
+    #[test]
+    fn the_cancel_flag_is_looked_at_every_so_many_lines_not_only_per_event_batch() {
+        let text = row_text(5000);
+        let p = profile("");
+        let head = csv_stream_head(&ctx(&p), &text).unwrap();
+        let mut chunks = ReaderChunks::with_limits(
+            Cursor::new(text.as_bytes().to_vec()),
+            Encoding::Utf8,
+            0,
+            1 << 16,
+            crate::importers::MAX_LINE_LEN,
+        );
+        let mut lines = LineReader::new(&mut chunks);
+        let mut sink = Cancelling::default();
+        assert!(import_delimited(head, &mut lines, &mut sink).is_err());
+        assert!(sink.events <= 2 * CANCEL_EVERY as usize, "{} events before the stop", sink.events);
+    }
+
+    #[test]
+    fn a_blank_line_inside_quotes_is_part_of_the_field() {
+        let text = "Timestamp,Level,Message,Extra\n2026-10-14 10:00:00,Info,\"a\n\nb\",x\n2026-10-14 10:00:01,Info,ok,y\n";
+        let (got, _) = streamed("", text, 7, crate::importers::MAX_LINE_LEN);
+        assert_eq!(got.events.len(), 2);
+        assert_eq!(got.events[0].record.message, "a\n\nb");
+        assert_eq!(got.events[1].record.message, "ok");
+    }
+
+    #[test]
+    fn an_event_keeps_its_own_text_and_no_other_rows() {
+        let text = "Timestamp,Level,Message\n2026-10-14 10:00:00,Info,\"a\nb\"\n2026-10-14 10:00:01,Info,c\n2026-10-14 10:00:02,Info,d\n";
+        let (got, _) = streamed("", text, 5, crate::importers::MAX_LINE_LEN);
+        let raws: Vec<&str> = got.events.iter().map(|e| e.raw.as_str()).collect();
+        assert_eq!(
+            raws,
+            [
+                "2026-10-14 10:00:00,Info,\"a\nb\"",
+                "2026-10-14 10:00:01,Info,c",
+                "2026-10-14 10:00:02,Info,d"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_row_open_at_the_end_of_the_file_is_flushed() {
+        let text = "Timestamp,Level,Message\n2026-10-14 10:00:00,Info,\"never closed at the end";
+        let (got, _) = streamed("", text, 16, crate::importers::MAX_LINE_LEN);
+        assert_eq!(got.events.len(), 1);
+        assert!(
+            got.events[0].record.message.contains("never closed at the end"),
+            "{:?}",
+            got.events[0].record.message
+        );
+    }
+
+    #[test]
+    fn the_rows_after_a_dropped_row_are_read_from_a_fresh_reader() {
+        let mut text = String::from("Timestamp,Level,Message\n2026-10-14 10:00:00,Info,\"never closed\n");
+        let filler = "y".repeat(1 << 16);
+        for _ in 0..(MAX_EVENT_BYTES >> 16) + 2 {
+            text.push_str(&filler);
+            text.push('\n');
+        }
+        text.push_str("2026-10-14 10:00:01,Info,after one\n2026-10-14 10:00:02,Info,after two\n");
+        let (got, skipped) = streamed("", &text, CHUNK_FOR_TESTS, crate::importers::MAX_LINE_LEN);
+        let messages: Vec<&str> = got.events.iter().map(|e| e.record.message.as_str()).collect();
+        assert_eq!(messages.last(), Some(&"after two"), "{}", messages.len());
+        assert!(messages.contains(&"after one"));
+        let lines_reported = got.problems.iter().filter(|(k, _)| *k == ProblemKind::EventTooLarge).count();
+        assert!(
+            lines_reported > 1 && lines_reported <= skipped,
+            "{lines_reported} lines reported, {skipped} skipped"
+        );
+    }
+
+    #[test]
+    fn a_line_over_the_limit_inside_quotes_drops_the_open_row_and_the_reader_starts_over() {
+        let long = "z".repeat(200);
+        let text = format!("Timestamp,Level,Message\n2026-10-14 10:00:00,Info,\"open\n{long}\nmore\"\n2026-10-14 10:00:01,Info,after\n");
+        let (got, _) = streamed("", &text, CHUNK_FOR_TESTS, 100);
+        let messages: Vec<&str> = got.events.iter().map(|e| e.record.message.as_str()).collect();
+        assert_eq!(messages.last(), Some(&"after"), "{messages:?}");
+        assert!(!messages.iter().any(|m| m.contains("open")), "{messages:?}");
+        assert!(
+            got.problems.iter().any(|(k, n)| *k == ProblemKind::LineTooLong && *n == 3),
+            "{:?}",
+            got.problems
+        );
+        assert!(
+            got.problems.iter().any(|(k, n)| *k == ProblemKind::EventTooLarge && *n == 2),
+            "{:?}",
+            got.problems
+        );
+    }
+
+    #[test]
+    fn a_row_with_too_many_cells_is_dropped_and_reported() {
+        let wide = ",x".repeat(MAX_CELLS * 2);
+        let text = format!("Timestamp,Level,Message\n2026-10-14 10:00:00,Info,wide{wide}\n2026-10-14 10:00:01,Info,after\n");
+        let (got, skipped) = streamed("", &text, CHUNK_FOR_TESTS, crate::importers::MAX_LINE_LEN * 8);
+        let messages: Vec<&str> = got.events.iter().map(|e| e.record.message.as_str()).collect();
+        assert_eq!(messages, ["after"]);
+        assert_eq!(skipped, 1);
+        assert!(
+            got.problems.iter().any(|(k, n)| *k == ProblemKind::EventTooLarge && *n == 2),
+            "{:?}",
+            got.problems
+        );
     }
 }

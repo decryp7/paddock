@@ -10,9 +10,8 @@ use debrief_core::ingest::{self, BatchSink, ImportEnv, NewSource, SourceReport};
 use debrief_core::Profile;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 const MB: u64 = 1 << 20;
 const GIB: u64 = 1 << 30;
@@ -34,46 +33,8 @@ impl Drop for TempDir {
     }
 }
 
-/// Resident memory of this process in bytes (0 when the OS cannot tell).
-fn rss() -> u64 {
-    let pid = sysinfo::Pid::from_u32(std::process::id());
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes_specifics(
-        sysinfo::ProcessesToUpdate::Some(&[pid]),
-        true,
-        sysinfo::ProcessRefreshKind::nothing().with_memory(),
-    );
-    sys.process(pid).map_or(0, |p| p.memory())
-}
-
-/// Polls the process's resident memory while a test runs and keeps the peak.
-struct Peak {
-    peak: Arc<AtomicU64>,
-    stop: Arc<AtomicBool>,
-}
-impl Peak {
-    fn start() -> Peak {
-        let peak = Arc::new(AtomicU64::new(rss()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (p, s) = (peak.clone(), stop.clone());
-        std::thread::spawn(move || {
-            while !s.load(Ordering::Relaxed) {
-                p.fetch_max(rss(), Ordering::Relaxed);
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        });
-        Peak { peak, stop }
-    }
-    fn mb(&self) -> u64 {
-        self.peak.fetch_max(rss(), Ordering::Relaxed);
-        self.peak.load(Ordering::Relaxed) >> 20
-    }
-}
-impl Drop for Peak {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
-}
+mod common;
+use common::{rss, Peak};
 
 /// A CSV of invented rows (`timestamp,level,service,message`) of at least `bytes` bytes.
 fn generate_csv(path: &Path, bytes: u64) -> u64 {
@@ -148,6 +109,7 @@ fn a_3_gib_csv_imports_under_the_worker_cap() {
     let events = parse_only(std::slice::from_ref(&path));
     let mb = peak.mb();
     assert_eq!(events as u64, rows, "every row of the CSV was imported");
+    eprintln!("peak {mb} MB (physical footprint) while importing {} MB of CSV", 3 * GIB / MB);
     assert!(
         mb <= IMPORT_BUDGET_MB,
         "peak RSS {mb} MB while importing a {} MB CSV is over the import budget of {IMPORT_BUDGET_MB} MB",

@@ -21,6 +21,11 @@ pub struct ParsedEvent {
 /// Where an importer puts what it reads.
 pub trait EventSink {
     fn event(&mut self, ev: ParsedEvent) -> Result<()>;
+
+    /// Fails when the import was cancelled; importers call it now and then between events.
+    fn check(&mut self) -> Result<()> {
+        Ok(())
+    }
     /// Something on `line` could not be read as it should.
     fn problem(&mut self, kind: ProblemKind, line: u32);
     /// Problems an importer that does not stream already aggregated (`Imported::problems`). Sinks that keep

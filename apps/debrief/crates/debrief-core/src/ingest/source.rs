@@ -315,6 +315,35 @@ fn import_source<R: Read + Seek>(
     })
 }
 
+/// Reads a whole file as text and hands it to its importer, for the importers that need all of it.
+fn import_whole<R: Read + Seek>(
+    env: &ImportEnv,
+    ctx: &ImportCtx,
+    plan: &FilePlan,
+    reader: &mut R,
+    batcher: &mut RecordBatcher,
+) -> Result<usize> {
+    reader.seek(SeekFrom::Start(0))?;
+    let t = std::time::Instant::now();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    log::debug!("legacy read: {} bytes read in {} ms", bytes.len(), t.elapsed().as_millis());
+    let t = std::time::Instant::now();
+    let content = decode(&bytes).ok_or_else(|| anyhow!("binary file"))?;
+    drop(bytes);
+    log::debug!("legacy read: decoded to {} bytes in {} ms", content.len(), t.elapsed().as_millis());
+    let importer = env
+        .importers
+        .find(&plan.importer)
+        .ok_or_else(|| anyhow!("importer {} is not installed", plan.importer))?;
+    legacy::import_text_whole(importer, ctx, &content, plan.data_start, batcher)
+}
+
+/// Rows the head of a delimited file holds at least, when the file has them: the day order is decided on them.
+const CSV_SAMPLE_ROWS: usize = 2000;
+/// The most of a delimited file read as its head, for files with very long rows.
+const CSV_HEAD_MAX: u64 = 16 << 20;
+
 /// Streams the events of one planned source into the sink; returns them and the importer's skipped count.
 #[allow(clippy::too_many_arguments)]
 fn read_events<R: Read + Seek>(
@@ -353,30 +382,21 @@ fn read_events<R: Read + Seek>(
             json::import_json(ctx, shape, size.saturating_sub(plan.data_start), &mut lines, &mut batcher)?
         }
         PlanKind::Csv => {
-            let head = super::plan::plan_head_text(reader, plan, size)?;
-            let csv_head = crate::importers::csv_stream_head(ctx, &head)?;
-            drop(head);
-            reader.seek(SeekFrom::Start(plan.data_start))?;
-            let mut chunks = ReaderChunks::new(reader, plan.encoding, plan.data_start);
-            let mut lines = LineReader::new(&mut chunks);
-            super::delimited::import_delimited(csv_head, &mut lines, &mut batcher)?
+            let head = super::plan::plan_head_text_rows(reader, plan, size, CSV_SAMPLE_ROWS, CSV_HEAD_MAX)?;
+            if crate::importers::csv_is_cr_only(&head) {
+                // The line reader splits at line feeds only; the whole-file reader also ends rows at a lone `\r`.
+                drop(head);
+                import_whole(env, ctx, plan, reader, &mut batcher)?
+            } else {
+                let csv_head = crate::importers::csv_stream_head(ctx, &head)?;
+                drop(head);
+                reader.seek(SeekFrom::Start(plan.data_start))?;
+                let mut chunks = ReaderChunks::new(reader, plan.encoding, plan.data_start);
+                let mut lines = LineReader::new(&mut chunks);
+                super::delimited::import_delimited(csv_head, &mut lines, &mut batcher)?
+            }
         }
-        PlanKind::Legacy => {
-            reader.seek(SeekFrom::Start(0))?;
-            let t = std::time::Instant::now();
-            let mut bytes = Vec::new();
-            reader.read_to_end(&mut bytes)?;
-            log::debug!("legacy read: {} bytes read in {} ms", bytes.len(), t.elapsed().as_millis());
-            let t = std::time::Instant::now();
-            let content = decode(&bytes).ok_or_else(|| anyhow!("binary file"))?;
-            drop(bytes);
-            log::debug!("legacy read: decoded to {} bytes in {} ms", content.len(), t.elapsed().as_millis());
-            let importer = env
-                .importers
-                .find(&plan.importer)
-                .ok_or_else(|| anyhow!("importer {} is not installed", plan.importer))?;
-            legacy::import_text_whole(importer, ctx, &content, plan.data_start, &mut batcher)?
-        }
+        PlanKind::Legacy => import_whole(env, ctx, plan, reader, &mut batcher)?,
     };
     Ok((batcher.finish()?, skipped))
 }
@@ -450,6 +470,31 @@ mod tests {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
         u64::from_le_bytes(b)
+    }
+
+    #[test]
+    fn a_csv_with_an_explicit_delimiter_and_rows_ending_at_a_lone_carriage_return_is_still_read() {
+        let dir = temp();
+        let (importers, _) = env_parts();
+        let parsers = ParserSet::of_compiled(crate::parser::testing::compiled("[format.csv]\ndelimiter = ','"));
+        let cancel = AtomicBool::new(false);
+        let env = ImportEnv {
+            encodings: &Default::default(),
+            importers: &importers,
+            parsers: &parsers,
+            schema: Arc::new(EventSchema::plain()),
+            cancel: &cancel,
+            window: None,
+        };
+        let mut text = String::from("Time,Level,Message\r");
+        for n in 0..40 {
+            text.push_str(&format!("2026-10-14 10:00:{n:02},Info,row {n}\r"));
+        }
+        let csv = write(&dir, "a.csv", text.as_bytes());
+        let mut sink = Memory::default();
+        let r = imported(import_path(&env, &csv, "a.csv", &HashSet::new(), &mut sink));
+        assert_eq!((r.importer.as_str(), r.events), ("csv", 40));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
