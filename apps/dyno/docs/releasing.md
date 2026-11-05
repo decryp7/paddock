@@ -97,7 +97,7 @@ In this order, on one commit:
 
 ## Cutting the release
 
-1. *Before tagging* is done on the commit to release.
+1. *Before tagging* is done on the commit to release. It includes the branch audit: `node scripts/branch-audit.mjs --app dyno --ref <release branch>` lists remote branches updated since the last `dyno-v*` tag with commits on `apps/dyno/` that are not in the ref (the same patch or the same added lines count as present). Each `::error::` line is a branch to merge, or to list with a reason in `apps/dyno/docs/branch-audit-allow.txt`; the tag waits until none is left.
 2. Tag it, from `main`, and push the tag:
 
    ```sh
