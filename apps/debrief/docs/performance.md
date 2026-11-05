@@ -83,6 +83,33 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, P3: bounded catalogue read and catalogue status (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base ee2a13899 (D-0) against the P3 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 9-10 during the run; other agents running
+- **Build:** release; libduckdb 2.0.0; the store's default 192 MB memory limit
+- **Corpus:** `/samples` imported (38 sources), then its catalogue replaced by 1,600,000 invented rows (42,105 path-like
+  names over the 38 sources); synthetic
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --no-capture -E 'test(a_1_6_million_row_catalogue)'`
+- **Runs:** one run per side (the base failure was recorded with the P0 tests, debug build, the same message in a debug run)
+- **Numbers:**
+
+  | Measure | Base | P3 | Budget | Verdict |
+  |---|---|---|---|---|
+  | `catalogue(all)` over 1.6 M rows at the 192 MB limit | Out of Memory (183.0/183.1 MiB used) | 42,106 names in 0.88 s | answers within the limit | pass |
+  | Reads of the whole catalogue in 20 refreshes while it is not built | 20 | 0 | 0 | pass |
+  | A status call with `after` set, with the catalogue being built again | n/a (new) | returns at the first commit, in under 10 s of a 10 s wait | wakes on commit | pass |
+
+- **Memory measure:** DuckDB's own limit (the query fails or not); RSS not measured
+- **Notes:** the query now totals every name with sums and a time range only, keeps the top 50,000, and lists each
+  kept name's sources from the same rows afterwards, so no hash table holds a source list per name. The research's
+  estimate of a stored per-source `catalogue_totals` table was not needed for this size; at much larger catalogues the
+  hash table of the totals would grow again (it holds about 100 bytes per name) and that table is the next step. The
+  base of the status call is `Names::refresh`, which asks `catalogue_status` before it reads the names, so the
+  watcher's 500 ms ticks are one small statement while an import is catalogued. The watcher itself (`names.rs`) still
+  ticks every 500 ms; making it block on the status call belongs to NR1, which owns that file.
+
 ### 2026-11-05, D-0: the catalogue's unsaved rows (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base c0642f80c (P2) against the D-0 change on top of it

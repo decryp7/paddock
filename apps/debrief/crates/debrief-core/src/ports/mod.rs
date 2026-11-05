@@ -183,6 +183,17 @@ pub trait Query: Send + Sync {
     fn catalogue(&self, _req: &crate::catalogue::CatalogueRequest) -> StoreResult<crate::catalogue::CatalogueReply> {
         Ok(crate::catalogue::CatalogueReply::default())
     }
+    /// How far the catalogue is, without its names; blocks for news when asked to (see
+    /// [`CatalogueStatusRequest`](crate::catalogue::CatalogueStatusRequest)). The default answers at once from
+    /// [`catalogue`](Self::catalogue) with an empty lookup.
+    fn catalogue_status(&self, _req: &crate::catalogue::CatalogueStatusRequest) -> StoreResult<crate::catalogue::CatalogueStatus> {
+        let reply = self.catalogue(&crate::catalogue::CatalogueRequest::default())?;
+        Ok(crate::catalogue::CatalogueStatus {
+            built: reply.built,
+            pending: reply.pending,
+            generation: 0,
+        })
+    }
 }
 
 /// Time-order positions of all events (unfiltered): position `p` is the `p`-th event in time order

@@ -9,7 +9,7 @@ use super::group::{group, look_alikes, merge_cooccurring, NameGroup};
 use super::normalise::{file_name, strip_extension};
 use super::resolve::NameSettings;
 use super::segment::{split_raw, Vocabulary};
-use crate::catalogue::{Candidate, CatalogueRequest};
+use crate::catalogue::{Candidate, CatalogueRequest, CatalogueStatusRequest};
 use crate::find::{self, NameLayer, Resolved};
 use crate::ports::{Filter, PageQuery, StoreResult};
 use crate::query::TextMode;
@@ -101,6 +101,13 @@ impl Names {
     /// Rebuilds the table from the store's catalogue (when it is built) and returns the number of groups. The
     /// store is read once, off the lock; AI aliases and user facts are kept.
     pub fn refresh(&self, store: &(impl SearchSource + ?Sized)) -> StoreResult<usize> {
+        // The cheap question first: the whole catalogue is read only once it is built (the watcher asks every 500 ms
+        // while an import is still being catalogued).
+        let status = store.catalogue_status(&CatalogueStatusRequest::default())?;
+        self.built.store(status.built, Ordering::Relaxed);
+        if !status.built {
+            return Ok(self.read(|b, _| b.groups().len()));
+        }
         let reply = store.catalogue(&CatalogueRequest {
             all: true,
             ..CatalogueRequest::default()
@@ -241,11 +248,10 @@ mod tests {
             Err(crate::ports::StoreError::Invalid("not part of the fixture".into()))
         }
         fn catalogue(&self, req: &CatalogueRequest) -> StoreResult<CatalogueReply> {
-            assert!(req.all);
             Ok(CatalogueReply {
                 built: self.1,
                 pending: 0,
-                candidates: self.0.clone(),
+                candidates: if req.all { self.0.clone() } else { Vec::new() },
             })
         }
     }

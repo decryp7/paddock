@@ -204,7 +204,6 @@ impl SearchSource for Unbuilt {
 /// H2: the import watcher asks every 500 ms whether the catalogue is built, and each ask read the whole catalogue.
 /// While it is not built, a refresh asks the cheap status question and never for the names.
 #[test]
-#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P3, catalogue status): 20 refreshes of an unbuilt catalogue read the whole catalogue 20 times"]
 fn a_refresh_while_the_catalogue_is_not_built_reads_no_names() {
     let store = Unbuilt(Default::default());
     let names = debrief_core::names::Names::default();
