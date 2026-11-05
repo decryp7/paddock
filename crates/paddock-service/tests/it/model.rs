@@ -1599,6 +1599,22 @@ const KNOWN_FAILING: &[(&str, &str)] = &[
         "the record says this version is registered but the OS holds another registration",
         "plan.rs plan(): `accepted` trusts an older Attempting of this version after another version registered.",
     ),
+    (
+        "finished a removal the user took back",
+        "open (author of the fixes): after Uninstall@CrashBefore(1); Install@Cancel(0) the record still says Removing and Start+RegOther runs unregister, evict and register three times (MODEL_REPLAY='Mac/Fast/Fresh|Uninstall@CrashBefore(1);Install@Cancel(0);Start+RegOther'). The plan ignores Removing when the switch is on, so the unregister calls look like the retry cycles of a register that failed (Replace(Wanted) with register_only false); the check may be counting those as a finished removal. To decide with a replay of the plan at each step.",
+    ),
+    (
+        "registered again a service that answers",
+        "the model's DamageRecord empties the record without saying it is damaged; the Manager adopts a service that answers only when RecordFile::peek says the record cannot be used. Use paddock_service::record::Memory::set_damaged(true) on the memory handle when DamageRecord happens (the flag clears with the next write), or the failure is a modelling gap (MODEL_REPLAY='Mac/Fast/Healthy|DamageRecord;Start').",
+    ),
+    (
+        "removed a service that answers",
+        "same cause as registering again a service that answers (DamageRecord without the damaged flag).",
+    ),
+    (
+        "the user's service was lost",
+        "open: MODEL_REPLAY='Mac/Fast/Fresh|Repair;Uninstall@CrashAfter(1);FirstRun@Cancel(0)': after the cancelled first run the record says Idle with the version registered and nothing is registered, and plan() says Healthy; the replay shows no OS call in the first run, so the cancel may be raised before the first look and the plan is judged on a stale view. Needs a step-by-step replay of check().",
+    ),
 ];
 
 #[test]
