@@ -1,4 +1,5 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { PdViewportFollowsSize } from './viewport-follows-size';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -137,6 +138,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     NgTemplateOutlet,
     CdkVirtualScrollViewport,
     CdkFixedSizeVirtualScroll,
+    PdViewportFollowsSize,
     MatTable,
     MatColumnDef,
     MatHeaderCellDef,
@@ -224,7 +226,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
         }
         <mat-header-row *matHeaderRowDef="displayed()" class="pd-header" aria-rowindex="1" />
       </mat-table>
-      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [style.min-height.px]="fillMin()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
+      <cdk-virtual-scroll-viewport pdViewportFollowsSize class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [style.min-height.px]="fillMin()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
         <!-- A row group only while it has rows anyone can read: not when empty (the state is said below) or loading (placeholders are hidden). -->
         <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
           @for (c of columns2(); track c.key; let k = $index) {
@@ -673,13 +675,11 @@ export class PdTable<T> {
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
     // The header keeps the width of the body's scrollbar: measured when the body resizes (a scrollbar appearing changes its
     // content box), not on every render of the app.
-    // The CDK viewport measures its own height at start and on a window resize only: a body that changes height later (a frame
-    // that resizes, rows arriving after a skeleton) must be measured again, or only the rows its old height covers are drawn
-    // and the rest of the body stays blank.
+    // The CDK viewport is measured again when the body resizes by `pdViewportFollowsSize` on it (a frame that resizes, rows
+    // arriving after a skeleton), so the rows reach the bottom of the body.
     const bodyObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
       this.measureGutter();
       this.measureChrome();
-      this.viewport().checkViewportSize();
     });
     afterNextRender(() => {
       const body = this.host.querySelector<HTMLElement>('.pd-body');

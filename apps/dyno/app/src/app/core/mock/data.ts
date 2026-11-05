@@ -171,6 +171,24 @@ export function demoActivity(now: number): ActivityEntry[] {
   ];
 }
 
+/** How many extra rows `?lists=long` adds to each list (more than any widget shows without scrolling). */
+export const LONG_LIST_ROWS = 60;
+
+/** `?lists=long`: a long activity log, so the Recent events widget has to scroll. */
+export function longActivity(now: number, n = LONG_LIST_ROWS): ActivityEntry[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `act-long-${i}`, at: now - (i + 1) * 7 * MIN, kind: 'system' as const, title: `Dyno note ${i + 1}`, detail: `Invented note number ${i + 1} for a long list.` }));
+}
+
+/** `?lists=long`: a long alert log. */
+export function longAlerts(now: number, n = LONG_LIST_ROWS): Alert[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `al-long-${i}`, at: now - (i + 1) * 11 * MIN, kind: 'longHighCpu' as const, severity: 'info' as const, title: `Invented process ${i + 1} used over 50% CPU`, detail: 'It stayed busy for a while.' }));
+}
+
+/** `?lists=long`: many unusual things found, so the Issues widget has to scroll. */
+export function longAnomalies(now: number, n = 50): Anomaly[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `long-${i}`, kind: 'memoryGrowth' as const, app: `Invented app ${i + 1}`, since: now - (i + 1) * HOUR, title: `Invented app ${i + 1} memory keeps growing`, explanation: 'Its memory grew without dropping back.', evidence: [] }));
+}
+
 export function demoPlugins(): PluginInfo[] {
   return [
     { id: 'dyno-plugin-example', name: 'Example plugin', version: '0.1.0', state: 'running', error: null, contributes: ['Sensor: uptime'] },

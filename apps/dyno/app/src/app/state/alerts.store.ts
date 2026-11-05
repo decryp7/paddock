@@ -1,6 +1,7 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
 import type { Alert, CommandError } from '../core/api.types';
+import { EVENTS_KEPT } from './events-kept';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 
@@ -12,7 +13,7 @@ interface AlertsState {
 }
 
 /** Puts a pushed alert on top of the list (replacing one with its id), newest first, capped. */
-export function mergeAlert(alerts: readonly Alert[], alert: Alert, limit = 100): Alert[] {
+export function mergeAlert(alerts: readonly Alert[], alert: Alert, limit = EVENTS_KEPT): Alert[] {
   return [alert, ...alerts.filter((a) => a.id !== alert.id)].sort((a, b) => b.at - a.at).slice(0, limit);
 }
 

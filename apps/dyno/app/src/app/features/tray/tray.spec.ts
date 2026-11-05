@@ -1,3 +1,5 @@
+import { CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
@@ -33,6 +35,27 @@ describe('dy-tray', () => {
     expect(text[1]).toContain('Macintosh HD');
     expect(text[2]).toContain('CPU and memory');
     expect(titles(el).length).toBeGreaterThanOrEqual(0);
+  });
+
+  it('lists every alarm and volume the engine sends, scrolling inside the popover and never ending in "+N more"', async () => {
+    const { f, el } = await make({ longLists: true });
+    const text = el.textContent ?? '';
+    expect(text).not.toMatch(/\+\d+ more/);
+    const alarms = el.querySelector<HTMLElement>('[aria-label="Active alarms"]')!;
+    expect(alarms.tagName.toLowerCase()).toBe('cdk-virtual-scroll-viewport');
+    expect(alarms.getAttribute('tabindex')).toBe('0');
+    const viewport = f.debugElement.query(By.directive(CdkVirtualScrollViewport)).componentInstance as CdkVirtualScrollViewport;
+    expect(viewport.getDataLength()).toBe(200);
+    // The engine's bound cuts the list, and the popover says so honestly, with the way to the full page.
+    expect(text).toContain('Showing the 200 most severe of 205.');
+    expect([...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Open alarms')).toBe(true);
+    const volumes = el.querySelector<HTMLElement>('ul[aria-label="Volumes"]')!;
+    expect(volumes.getAttribute('tabindex')).toBe('0');
+    expect(volumes.querySelectorAll('li')).toHaveLength(30);
+    // The virtual rows say where they are in the whole list.
+    const first = alarms.querySelector('[role="listitem"]')!;
+    expect(first.getAttribute('aria-setsize')).toBe('200');
+    expect(first.getAttribute('aria-posinset')).toBe('1');
   });
 
   it('follows a change of the layout made elsewhere, keeping the engine order', async () => {

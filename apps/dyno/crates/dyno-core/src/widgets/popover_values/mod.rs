@@ -18,10 +18,11 @@ use crate::time::{Timestamp, DAY};
 use paddock_widgets::{PlacementId, PlacementState, Progress, SurfaceNotice, SurfaceValues, Tone, WidgetAction, WidgetState};
 use serde::{Deserialize, Serialize};
 
-/// Alarm rows shown before "+N more".
-pub const ALARM_ROWS: usize = 1;
-/// Volume rows shown by one disk space widget before "+N more".
-pub const VOLUME_ROWS: usize = 2;
+/// The most alarm rows one Active alarms widget sends. The popup lists them all and scrolls; when the bound cuts the list, `more`
+/// counts the rest and the popup says "Showing the latest 200 of N" with a button to the Alarms page.
+pub const ALARM_ROWS: usize = 200;
+/// The most volume rows one Disk space widget sends. The popup lists them all and scrolls; `more` counts what the bound cuts.
+pub const VOLUME_ROWS: usize = 200;
 /// Pinned counters shown.
 pub const COUNTER_ROWS: usize = 4;
 /// Busiest apps shown.

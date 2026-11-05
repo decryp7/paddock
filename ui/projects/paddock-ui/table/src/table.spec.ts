@@ -728,8 +728,8 @@ describe('pd-table', () => {
     await settle(f);
     expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-gutter')).not.toBe('15px');
     // The body's resize does.
-    const entry = watched.find((w) => w.target === body)!;
-    entry.cb([{ target: body, contentRect: { width: 400 } } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    // (The viewport's own observer, `pdViewportFollowsSize`, watches it too.)
+    for (const entry of watched.filter((w) => w.target === body)) entry.cb([{ target: body, contentRect: { width: 400 } } as unknown as ResizeObserverEntry], {} as ResizeObserver);
     await settle(f);
     expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-gutter')).toBe('15px');
   });
