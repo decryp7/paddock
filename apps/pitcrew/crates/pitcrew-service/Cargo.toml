@@ -26,6 +26,8 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 # The IPC server (named pipe / Unix socket) only; supervision runs on plain threads.
 tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "signal"] }
 # Child processes, machine metrics and disk space without platform FFI.
+# Identity-checked process control (pid plus start time), never a bare pid (ADR 0033).
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
 # Release discovery and downloads: HTTPS with the OS certificate store.
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
@@ -56,6 +58,7 @@ nix = { version = "0.31", default-features = false, features = ["signal", "proce
 libc = "0.2"
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.
 ctrlc = { version = "3.5", features = ["termination"] }
 

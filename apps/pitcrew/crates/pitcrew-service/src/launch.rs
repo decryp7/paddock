@@ -10,6 +10,7 @@
 use crate::process::quiet_command;
 #[cfg(windows)]
 use crate::process::run_with_timeout;
+use paddock_proc::ProcessId;
 use pitcrew_core::logline::MAX_LINE_LEN;
 use std::io::Read;
 use std::path::PathBuf;
@@ -49,46 +50,55 @@ pub trait RunnerProcess: Send {
 
 /// Reads `stream` line by line on a thread until it closes.
 pub fn read_lines(stream: impl Read + Send + 'static, sink: LineSink) {
-    let spawned = std::thread::Builder::new().name("runner-output".into()).spawn(move || {
-        let mut stream = stream;
-        let mut buf = [0u8; 8192];
-        let mut line: Vec<u8> = Vec::with_capacity(256);
-        let mut overflow = false;
-        let flush = |line: &mut Vec<u8>, overflow: &mut bool| {
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            sink(String::from_utf8_lossy(line).into_owned());
-            line.clear();
-            *overflow = false;
-        };
-        loop {
-            let n = match stream.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => n,
-            };
-            for &b in &buf[..n] {
-                if b == b'\n' {
-                    flush(&mut line, &mut overflow);
-                } else if line.len() < MAX_LINE_LEN {
-                    line.push(b);
-                } else {
-                    overflow = true;
-                }
-            }
-        }
-        if !line.is_empty() || overflow {
-            flush(&mut line, &mut overflow);
-        }
-    });
+    let spawned = std::thread::Builder::new()
+        .name("runner-output".into())
+        .spawn(move || pump_lines(stream, &*sink));
     // A thread that cannot be spawned only loses output; the process itself is still supervised.
     drop(spawned);
+}
+
+/// Cuts `stream` into lines for `sink`, on the calling thread, until it closes. Lines longer than `MAX_LINE_LEN` are cut; bytes
+/// that are not UTF-8 are replaced.
+fn pump_lines(stream: impl Read, sink: &(dyn Fn(String) + Send + Sync)) {
+    let mut stream = stream;
+    let mut buf = [0u8; 8192];
+    let mut line: Vec<u8> = Vec::with_capacity(256);
+    let mut overflow = false;
+    let flush = |line: &mut Vec<u8>, overflow: &mut bool| {
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        sink(String::from_utf8_lossy(line).into_owned());
+        line.clear();
+        *overflow = false;
+    };
+    loop {
+        let n = match stream.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        for &b in &buf[..n] {
+            if b == b'\n' {
+                flush(&mut line, &mut overflow);
+            } else if line.len() < MAX_LINE_LEN {
+                line.push(b);
+            } else {
+                overflow = true;
+            }
+        }
+    }
+    if !line.is_empty() || overflow {
+        flush(&mut line, &mut overflow);
+    }
 }
 
 /// A runner started as an ordinary child of the service (service account, or the user's own session when the
 /// service runs as that user: macOS, development).
 pub struct ChildProcess {
     child: Started,
+    /// The runner by identity (pid plus start time), read right after the start while nothing could have reaped it; what is
+    /// signalled afterwards is first checked to still be this process (ADR 0033).
+    id: Option<ProcessId>,
 }
 
 /// How the process was started: `std::process` everywhere, `posix_spawn` with the responsibility disclaim on macOS
@@ -140,25 +150,15 @@ impl Started {
         }
     }
 
-    // The bare-pid kill exists only in the macOS `Spawned` arm, so the expectation is fulfilled only there.
-    #[cfg_attr(
-        target_os = "macos",
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6: kills a spawned runner without the reaped guard; use paddock_proc"
-        )
-    )]
+    /// Ends the child itself (the tree goes through [`kill_tree`] by identity). A `Spawned` one is ended there only: without
+    /// its identity there is nothing safe to signal.
     fn kill(&mut self) {
         match self {
             Started::Std(c) => {
                 let _ = c.kill();
             }
             #[cfg(target_os = "macos")]
-            Started::Spawned { pid, .. } => {
-                if let Ok(p) = i32::try_from(*pid) {
-                    let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
-                }
-            }
+            Started::Spawned { .. } => {}
         }
     }
 }
@@ -183,11 +183,10 @@ pub fn spawn_child(spec: &LaunchSpec, sink: LineSink) -> Result<ChildProcess, St
         let s = crate::disclaim::spawn(&spec.program, &spec.args, &spec.dir, &spec.env, crate::disclaim::find_disclaim())?;
         read_lines(s.stdout, sink.clone());
         read_lines(s.stderr, sink);
+        let pid = u32::try_from(s.pid).unwrap_or(0);
         Ok(ChildProcess {
-            child: Started::Spawned {
-                pid: u32::try_from(s.pid).unwrap_or(0),
-                reaped: false,
-            },
+            child: Started::Spawned { pid, reaped: false },
+            id: ProcessId::of(pid),
         })
     }
     #[cfg(not(target_os = "macos"))]
@@ -221,8 +220,10 @@ fn spawn_std(spec: &LaunchSpec, sink: LineSink) -> Result<ChildProcess, String> 
     if let Some(err) = child.stderr.take() {
         read_lines(err, sink);
     }
+    let id = ProcessId::of(child.id());
     Ok(ChildProcess {
         child: Started::Std(child),
+        id,
     })
 }
 
@@ -241,11 +242,16 @@ impl RunnerProcess for ChildProcess {
     }
 
     fn stop_gracefully(&mut self) -> Result<(), String> {
-        graceful_stop(self.child.id(), None)
+        match self.id {
+            Some(id) => graceful_stop(id, None),
+            None => Err("the runner's start time could not be read, so it cannot be told from another process".into()),
+        }
     }
 
     fn kill(&mut self) {
-        kill_tree(self.child.id());
+        if let Some(id) = self.id {
+            kill_tree(id);
+        }
         self.child.kill();
     }
 }
@@ -257,24 +263,25 @@ pub fn set_stop_helper(exe: PathBuf) {
     let _ = STOP_HELPER.set(exe);
 }
 
-/// Asks process `pid` (a group leader) to stop. On Windows `session` is the user session it runs in, if any.
-#[cfg_attr(
-    unix,
-    expect(
-        clippy::disallowed_methods,
-        reason = "ADR 0033 WP-6: kill_tree signals a recorded pid (adopted runners); kill by ProcessId"
-    )
-)]
-pub fn graceful_stop(pid: u32, session: Option<u32>) -> Result<(), String> {
+/// Asks the runner `id` to stop, if its pid still belongs to it. On Unix it is SIGTERM to the runner itself
+/// ([`paddock_proc::ask`]): the runner stops polling and finishes a running job. On Windows `session` is the user session it
+/// runs in, if any.
+pub fn graceful_stop(id: ProcessId, session: Option<u32>) -> Result<(), String> {
     #[cfg(unix)]
     {
         let _ = session;
-        let pid = i32::try_from(pid).map_err(|_| "process id out of range".to_string())?;
-        nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGTERM)
-            .map_err(|e| format!("the stop signal could not be sent: {e}"))
+        if paddock_proc::ask(id) {
+            Ok(())
+        } else {
+            Err("the stop signal could not be sent: the runner is gone or its process id belongs to another process now".into())
+        }
     }
     #[cfg(windows)]
     {
+        if !id.is_alive() {
+            return Err("the runner is gone or its process id belongs to another process now".into());
+        }
+        let pid = id.pid();
         let exe = match STOP_HELPER.get() {
             Some(p) => p.clone(),
             None => std::env::current_exe().map_err(|e| format!("the service's own program cannot be found: {e}"))?,
@@ -296,32 +303,15 @@ pub fn graceful_stop(pid: u32, session: Option<u32>) -> Result<(), String> {
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (pid, session);
+        let _ = (id, session);
         Err("stopping runners is not supported on this platform".into())
     }
 }
 
-/// Ends `pid` and every process it started.
-#[cfg_attr(
-    unix,
-    expect(
-        clippy::disallowed_methods,
-        reason = "ADR 0033 WP-6: kill_tree signals a recorded pid (adopted runners); kill by ProcessId"
-    )
-)]
-pub fn kill_tree(pid: u32) {
-    #[cfg(unix)]
-    {
-        if let Ok(p) = i32::try_from(pid) {
-            let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
-        }
-    }
-    #[cfg(windows)]
-    {
-        let mut cmd = quiet_command(&crate::process::taskkill_exe());
-        cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
-        let _ = run_with_timeout(cmd, Duration::from_secs(20));
-    }
+/// Ends the runner `id` and every process it started, each by identity (a process whose pid was handed on since is left
+/// alone; Windows ends them through handles, never `taskkill /T`).
+pub fn kill_tree(id: ProcessId) {
+    paddock_proc::kill_tree(id);
 }
 
 #[cfg(test)]
@@ -358,6 +348,24 @@ mod tests {
         assert_eq!(lines[1], "two");
         assert_eq!(lines[2].len(), MAX_LINE_LEN);
         assert_eq!(lines[3], "last \u{fffd}");
+    }
+
+    #[test]
+    fn the_line_pump_never_panics_on_hostile_output() {
+        paddock_testkit::assert_never_panics(
+            &[
+                b"one\r\ntwo\nlast \xff",
+                b"time=\"2026-10-22T12:10:00+00:00\" level=info msg=\"x\"\n",
+            ],
+            |bytes| {
+                let lines = Mutex::new(0usize);
+                pump_lines(std::io::Cursor::new(bytes.to_vec()), &|l: String| {
+                    assert!(l.len() <= MAX_LINE_LEN * 3);
+                    *lines.lock().unwrap() += 1;
+                });
+                lines.into_inner().unwrap()
+            },
+        );
     }
 
     #[test]

@@ -441,13 +441,14 @@ impl Supervisor {
         let bin = self.binary(&runner.cfg);
         self.probe.refresh_processes();
         if let (Some(pid), Some(last)) = (self.probe.running_binary(&bin.path, None), st.pid) {
-            if pid == last {
+            // By identity, from the fresh look at the process table just taken (its executable is the runner's binary).
+            if let (true, Some(id)) = (pid == last, paddock_proc::ProcessId::of(pid)) {
                 runner.log.supervisor(
                     now,
                     &format!("adopted the runner left running by the previous service (pid {pid}); its output is visible again after its next restart"),
                 );
                 runner.ctl.handle(Input::Tick, now);
-                runner.process = Some(Box::new(Adopted { pid }));
+                runner.process = Some(Box::new(Adopted { id }));
                 runner.launched_as = Some(LaunchTarget::ServiceAccount);
                 runner.ctl.handle(Input::Launched, now);
                 runner.ctl.handle(Input::Log(RunnerLogEvent::Declared), now);
@@ -2026,19 +2027,17 @@ pub fn load_config(dir: &Path) -> Result<config::Loaded, crate::error::Error> {
 /// A runner the previous service instance started, watched by its process id only (its output went to the old
 /// service). Pitcrew restarts it between jobs to get its output back.
 struct Adopted {
-    pid: u32,
+    id: paddock_proc::ProcessId,
 }
 
 impl RunnerProcess for Adopted {
     fn pid(&self) -> u32 {
-        self.pid
+        self.id.pid()
     }
 
     fn try_wait(&mut self) -> Option<Option<i32>> {
-        let mut sys = sysinfo::System::new();
-        let pid = sysinfo::Pid::from_u32(self.pid);
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-        if sys.process(pid).is_some() {
+        // Gone, or its pid belongs to another process now (ADR 0033).
+        if self.id.is_alive() {
             None
         } else {
             Some(None)
@@ -2046,10 +2045,10 @@ impl RunnerProcess for Adopted {
     }
 
     fn stop_gracefully(&mut self) -> Result<(), String> {
-        graceful_stop(self.pid, None)
+        graceful_stop(self.id, None)
     }
 
     fn kill(&mut self) {
-        kill_tree(self.pid);
+        kill_tree(self.id);
     }
 }

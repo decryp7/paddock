@@ -82,6 +82,7 @@ impl Probe {
                 pgid: process_group(pid.as_u32()),
                 cpu_time_ms: p.accumulated_cpu_time(),
                 rss_bytes: p.memory(),
+                started_s: p.start_time(),
             })
             .collect()
     }
@@ -123,7 +124,8 @@ impl Probe {
 
     /// Whether the process `pid` (started at `started_ms` when known) still runs. A zombie that nobody has reaped
     /// yet does not count: it is dead, only its entry is left.
-    // ADR 0033 WP-6: a missing start time counts as a match; compare start times or use paddock_proc::ProcessId
+    ///
+    /// Without a start time to compare, nothing says it is that process: it does not count (ADR 0033).
     pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> bool {
         let id = Pid::from_u32(pid);
         self.sys
@@ -136,17 +138,19 @@ impl Probe {
                 }
                 let start = p.start_time().saturating_mul(1000);
                 // The same process: start times are whole seconds, so allow rounding.
-                started_ms.is_none_or(|s| start == 0 || s.abs_diff(start) <= 1500)
+                started_ms.is_some_and(|s| start != 0 && s.abs_diff(start) <= 1500)
             }
         }
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
-    // ADR 0033 WP-6: children found by parent pid without start times; use paddock_proc::descendants
+    ///
+    /// A child that started before the present holder of its parent pid is not that holder's child (the pid was handed on).
     pub fn has_job_children(&self, pid: u32) -> bool {
         let parent = Pid::from_u32(pid);
+        let parent_started = self.sys.process(parent).map_or(0, sysinfo::Process::start_time);
         self.processes()
-            .any(|(_, p)| p.parent() == Some(parent) && is_job_process(&p.name().to_string_lossy()))
+            .any(|(_, p)| p.parent() == Some(parent) && p.start_time() >= parent_started && is_job_process(&p.name().to_string_lossy()))
     }
 
     /// A running process (other than `except`) whose executable is `exe`.

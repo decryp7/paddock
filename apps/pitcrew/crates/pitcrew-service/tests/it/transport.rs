@@ -1,6 +1,5 @@
 //! The real transport end to end: the service host creates the named pipe (with its ACL) or the Unix socket, and a
 //! client says hello, asks for the status, subscribes and gets a pushed status.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use pitcrew_core::protocol::{read_frame, write_frame, Request, Response, ServiceEvent, PROTOCOL_VERSION};
 use std::io::{Read, Write};
