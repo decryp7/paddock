@@ -123,6 +123,18 @@ const HOSTILE: &[(&str, &str, &str, Verdict)] = &[
         Removed,
     ),
     (
+        "bare MCP key",
+        "pasted pmk_Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRg into a chat",
+        "Zm9vYmFyYmF6",
+        Removed,
+    ),
+    (
+        "MCP key in an environment line",
+        "DYNO_MCP_KEY=pmk_Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRg",
+        "Zm9vYmFyYmF6",
+        Removed,
+    ),
+    (
         "bare GitHub token",
         "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
         "ghp_abcdefgh",
