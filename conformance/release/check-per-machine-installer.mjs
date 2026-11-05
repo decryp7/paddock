@@ -100,6 +100,28 @@ export function checkSetupSubsystem({ bytes, name }) {
   }
 }
 
+const NSIS_MIN = [3, 12];
+
+/** The NSIS version that made an installer, from the stub's default branding string ("Nullsoft Install System v3.13", ANSI or
+ * UTF-16), or null when the string is not there (an app that sets its own BrandingText). */
+export function nsisVersionOf(bytes) {
+  const b = Buffer.from(bytes);
+  for (const enc of ['latin1', 'utf16le']) {
+    const m = /Nullsoft Install System v(\d+\.\d+(?:\.\d+)?)/.exec(b.toString(enc));
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** NSIS before 3.12 can run elevated code out of a $PLUGINSDIR a standard user could prepare (3.11: restricted $PLUGINSDIR; 3.12: low-IL
+ * temp when elevated; both per NSIS's own changelog). The Tauri bundler picks the NSIS version, so the built installer is read. */
+export function checkNsisVersion({ bytes, name }) {
+  const v = nsisVersionOf(bytes);
+  if (v === null) return [`${name}: the NSIS version was not measured (no "Nullsoft Install System vX.Y" string in the installer), so the NSIS 3.12 minimum is not shown; do not release until it is`];
+  const [maj, min] = v.split('.').map(Number);
+  return maj > NSIS_MIN[0] || (maj === NSIS_MIN[0] && min >= NSIS_MIN[1]) ? [] : [`${name} was made by NSIS ${v}, below ${NSIS_MIN.join('.')}: a $PLUGINSDIR privilege escalation fixed in 3.11 and 3.12 (NSIS changelog) is present. Use a Tauri CLI whose bundler downloads NSIS ${NSIS_MIN.join('.')} or later`];
+}
+
 /** What the embedded program's `self-test` must say: the app's identifier, and `stop_all=present` (a build without the stopper
  * would fail `stop-all` at install time). */
 export function checkSelfTest({ stdout, status, identifier, name }) {
@@ -157,6 +179,7 @@ function main(argv) {
     } catch {
       if (!o['no-sig']) problems.push(`${name}.sig is missing: the release is signed by the bundle step`);
     }
+    problems.push(...checkNsisVersion({ bytes: readFileSync(path), name }));
     problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name }));
     if (files) {
       const tmp = mkdtempSync(join(tmpdir(), 'pm-gate-'));

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -105,4 +105,18 @@ test('paddock-setup.exe must be a GUI-subsystem program: a console one flashes a
   assert.match(checkSetupSubsystem({ bytes: pe(3), name: 'a-setup.exe' }).join(), /subsystem 3.*command prompt/s);
   assert.match(checkSetupSubsystem({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /not a Windows program/);
   assert.match(checkSetupSubsystem({ bytes: null, name: 'a-setup.exe' }).join(), /could not be extracted/);
+});
+
+const brand = (v, wide = false) => Buffer.concat([Buffer.from('MZ....'), wide ? Buffer.from(`Nullsoft Install System v${v}`, 'utf16le') : Buffer.from(`Nullsoft Install System v${v}`)]);
+
+test('the installer must be made by NSIS 3.12 or later (3.11 and earlier can run elevated code from a shared $PLUGINSDIR)', () => {
+  assert.equal(nsisVersionOf(brand('3.13')), '3.13');
+  assert.equal(nsisVersionOf(brand('3.12', true)), '3.12', 'UTF-16 too');
+  assert.equal(nsisVersionOf(Buffer.from('MZ no branding')), null);
+  assert.deepEqual(checkNsisVersion({ bytes: brand('3.13'), name: 'a-setup.exe' }), []);
+  assert.deepEqual(checkNsisVersion({ bytes: brand('3.12'), name: 'a-setup.exe' }), []);
+  assert.deepEqual(checkNsisVersion({ bytes: brand('4.0'), name: 'a-setup.exe' }), []);
+  assert.match(checkNsisVersion({ bytes: brand('3.11'), name: 'a-setup.exe' }).join(), /NSIS 3\.11.*3\.12/s);
+  assert.match(checkNsisVersion({ bytes: brand('3.08'), name: 'a-setup.exe' }).join(), /NSIS 3\.08/);
+  assert.match(checkNsisVersion({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /NSIS version was not measured/, 'no branding: not measured, so not passed (ER-33)');
 });
