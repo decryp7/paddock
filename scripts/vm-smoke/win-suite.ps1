@@ -68,12 +68,15 @@ $uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Dyno'
 $installed = Wait-Until { if ((Test-Path (Join-Path $prog 'dyno-app.exe')) -and (Test-Path $uk) -and -not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { $true } } 300 2000
 $code = try { $p.ExitCode } catch { 'unreadable' }
 # A UAC prompt that was cancelled (or answered wrongly) ends Start-Process with an error and no installer process; the host answered it, so say which it was.
+if ("$code" -eq '20' -or "$code" -eq '2') { [void]$s.checks.Add(@{ ok = $false; kind = $(if ($pu.Count) { 'check' } else { $null }); detail = "installer refused (exit $code): $(if ($pu.Count) { 'a per-user Dyno is in this snapshot' } else { 'no per-user Dyno was found by the precondition, so this is the installer\'s own refusal (see the evidence)' })" }) }
 if ($startErr) { Check $s $false "the installer did not start: $startErr (a cancelled or refused UAC prompt)"; $s.checks[$s.checks.Count - 1].kind = 'check' }
 # Evidence of WHY an install ends the way it does, kept also when the folder is gone: setup.log (the installer's own log), the NSIS exit meaning, recent errors.
 $logs = @("$prog\updates\setup.log", "$env:TEMP\setup.log", "$env:LOCALAPPDATA\Dyno\setup.log", "$env:LOCALAPPDATA\Dyno\updates\setup.log") | Where-Object { Test-Path $_ }
 if ($logs) { foreach ($l in $logs) { Copy-Item $l (Join-Path $Out ('setup-log-' + ($l -replace '[^A-Za-z0-9]', '_') + '.txt')) -Force -ErrorAction SilentlyContinue; [void]$s.evidence.Add("--- $l (last 40 lines)"); Get-Content $l -Tail 40 | ForEach-Object { [void]$s.evidence.Add($_) } } }
 else { [void]$s.evidence.Add('--- no setup.log found in: C:\Program Files\Dyno\updates, %TEMP%, %LOCALAPPDATA%\Dyno (a guard refusal may log nowhere)') }
-$nsisReason = switch ("$code") { '0' { 'success' } '1' { 'installation aborted by the user (cancelled)' } '2' { 'installation aborted by the script (a guard such as the per-user check refused, or Abort was called)' } default { "exit code $code" } }
+$nsisReason = switch ("$code") { '0' { 'success' } '1' { 'installation aborted by the user (cancelled)' } '2' { 'installation aborted by the script (the older-copy guard or another Abort)' } '20' { 'refused: an older per-user copy of the app is installed (uninstall it first)' } '21' { 'refused: the install folder is not allowed' } '22' { 'refused: a program of the app is still running' } '23' { 'refused: the tool failed' } default { "exit code $code" } }
+# Each refusal appends its reason to %TEMP%\<product>-setup-refused.log (the include's own log): keep every such file.
+foreach ($r in (Get-ChildItem $env:TEMP -Filter '*-setup-refused.log' -ErrorAction SilentlyContinue)) { Copy-Item $r.FullName (Join-Path $Out ('setup-log-refused-' + $r.Name + '.txt')) -Force -ErrorAction SilentlyContinue; [void]$s.evidence.Add("--- $($r.FullName)"); Get-Content $r.FullName -Tail 20 | ForEach-Object { [void]$s.evidence.Add($_) } }
 [void]$s.evidence.Add("NSIS exit: $code = $nsisReason")
 Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1,2; StartTime = (Get-Date).AddMinutes(-10) } -MaxEvents 8 -ErrorAction SilentlyContinue | ForEach-Object { [void]$s.evidence.Add("event $($_.TimeCreated.ToString('s')) $($_.ProviderName): $((($_.Message -split '\n')[0]))") }
 
