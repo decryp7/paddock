@@ -154,13 +154,38 @@ describe('VideoView with videos', () => {
   });
 
   it('describes a frame and all frames, and describes again', async () => {
-    const { fixture, store } = await mount({ open: both.slice(0, 1) });
+    const { fixture, store, dialogs } = await mount({ open: both.slice(0, 1) });
     await click(fixture, 'video-frame-describe');
     expect(testId(fixture, 'video-frame-description').textContent).toContain('shop home page');
     expect(testId(fixture, 'video-frame-describe').textContent).toContain('Describe again');
     await click(fixture, 'video-describe-all');
+    await answer(fixture, dialogs, true);
     expect(store.active()!.record.frames.every((f) => f.description)).toBe(true);
     expect((testId(fixture, 'video-describe-all') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('asks before describing every frame, with the count, and sends nothing on No', async () => {
+    const { fixture, store, dialogs } = await mount({ open: both.slice(0, 1) });
+    const undescribed = store.active()!.record.frames.filter((f) => !f.description).length;
+    const spy = vi.spyOn(store, 'describe');
+    await click(fixture, 'video-describe-all');
+    const shown = dialogs.stack().at(-1)!;
+    expect(JSON.stringify(shown.inputs ?? {})).toContain(String(undescribed));
+    expect(spy).not.toHaveBeenCalled();
+    await answer(fixture, dialogs, false);
+    expect(spy).not.toHaveBeenCalled();
+    expect(store.busy()).toBeNull();
+  });
+
+  it('names the time in the confirmation only once earlier runs measured it', async () => {
+    const { fixture, t, dialogs } = await mount({ open: both.slice(0, 1) });
+    await click(fixture, 'video-describe-all');
+    expect(JSON.stringify(dialogs.stack().at(-1)!.inputs)).not.toContain(' min ');
+    await answer(fixture, dialogs, false);
+    (t.backend as MockVideoBackend).describeSeconds = 120;
+    await click(fixture, 'video-describe-all');
+    expect(JSON.stringify(dialogs.stack().at(-1)!.inputs)).toContain(' min ');
+    await answer(fixture, dialogs, false);
   });
 
   it('shows a model that cannot see inline, with the way to Settings ▸ AI', async () => {

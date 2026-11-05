@@ -50,6 +50,7 @@ describe('TauriVideoBackend', () => {
     await b.removeFrame(frame);
     await b.setNote({ key: 'k', index: 2, note: 'n' });
     await b.generateDescriptions({ key: 'k', indices: [], redo: false });
+    await b.describePlan({ key: 'k', indices: [], redo: false });
     await b.explainFrames({ key: 'k', indices: [1] });
     await b.frameToImage(frame);
     await b.setAlignment({ key: 'k', alignment: { kind: 'auto' } });
@@ -71,6 +72,7 @@ describe('TauriVideoBackend', () => {
       'video_remove_frame',
       'video_set_note',
       'video_describe',
+      'video_describe_plan',
       'video_explain',
       'video_frame_to_image',
       'video_set_alignment',
@@ -83,7 +85,7 @@ describe('TauriVideoBackend', () => {
     expect(calls[9]![1]).toEqual({ key: 'k' });
     expect(calls[11]![1]).toEqual({ frame });
     expect(calls[14]![1]).toEqual({ request: { key: 'k', index: 2, note: 'n' } });
-    expect(calls[19]![1]).toEqual({ frame });
+    expect(calls[20]![1]).toEqual({ frame });
   });
 
   it('resolves the job-starting commands with the job value and rejects when the job fails or is cancelled', async () => {

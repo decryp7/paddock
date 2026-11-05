@@ -18,6 +18,7 @@
 //! - The commit payload names the catalog's `fts_epoch`; an index that is missing, damaged or from another
 //!   epoch is recreated and every segment indexed again.
 
+use crate::turns::{wait_after, Turn};
 use crate::segments::SEGMENTS_DIR;
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
@@ -32,7 +33,6 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::Duration;
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
 use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST, INDEXED};
@@ -727,12 +727,12 @@ fn stages(cancel: &AtomicBool) -> Stages<'_> {
 }
 
 /// Indexes the next segments (up to [`SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
-/// some; true when it did.
-fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<bool> {
+/// some.
+fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<Turn> {
     // Counted by the exit handler like a borrowed connection: no step starts once the process exits, and a running
     // one is waited for (a step's statement during exit crashed DuckDB in its static destructors).
     let Some(_running) = crate::shutdown::Active::enter() else {
-        return Ok(false);
+        return Ok(Turn::Idle);
     };
     let Ok(_writing) = write_lock.try_lock() else {
         // An import holds the store, with its own memory budget: the index writer's heaps are given back now, so the
@@ -740,12 +740,12 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         if s.bulk_import.load(Ordering::SeqCst) {
             drop_writer(s);
         }
-        return Ok(false);
+        return Ok(Turn::Blocked);
     };
     let (files, ready) = todo(conn)?;
     s.pending.store(files.len() as u64, Ordering::SeqCst);
     if files.is_empty() {
-        return Ok(false);
+        return Ok(Turn::Idle);
     }
     let batch = &files[..files.len().min(SEGMENTS_PER_STEP)];
     let mut slot = crate::lock(&s.writer);
@@ -760,7 +760,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     if let Err(e) = result {
         let _ = w.rollback();
         if s.stop.load(Ordering::SeqCst) {
-            return Ok(false);
+            return Ok(Turn::Idle);
         }
         // Not retried in a loop: a segment that cannot be indexed stays unsearchable and the failure is reported;
         // the others of the batch are tried again.
@@ -772,7 +772,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     // unindexed, so they are indexed again next time).
     if crate::shutdown::down() {
         let _ = w.rollback();
-        return Ok(false);
+        return Ok(Turn::Idle);
     }
     s.fts.commit(w, epoch)?;
     // One statement (one commit, one write-ahead-log sync) for the step's segments, not one per segment.
@@ -782,7 +782,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         duckdb::params_from_iter(batch.iter()),
     )?;
     s.pending.store(total - batch.len() as u64, Ordering::SeqCst);
-    Ok(true)
+    Ok(Turn::Worked)
 }
 
 /// The segment a failure names (its message holds the file name), when it does.
@@ -819,27 +819,26 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
     let seg_dir = dir.join(SEGMENTS_DIR);
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
-        match step(s, &seg_dir, conn, write_lock, epoch) {
-            Ok(true) => continue,
-            Ok(false) => {}
+        let turn = match step(s, &seg_dir, conn, write_lock, epoch) {
+            Ok(Turn::Worked) => continue,
+            Ok(t) => t,
             Err(e) => {
                 log::warn!("full-text indexing failed: {e:#}");
                 *crate::lock(&s.failure) = Some(format!("{e:#}"));
                 *crate::lock(&s.writer) = None;
+                Turn::Blocked
             }
-        }
+        };
         // Idle: free the writer's heap and wait for news (or retry a busy lock soon).
         if s.pending.load(Ordering::SeqCst) == 0 {
             drop_writer(s);
         }
+        // A turn that found nothing waits for a wake-up; a blocked or failed one tries again soon.
+        let wait = wait_after(if turn == Turn::Idle && s.pending.load(Ordering::SeqCst) != 0 { Turn::Blocked } else { turn })
+            .unwrap_or_default();
         let mut woken = crate::lock(&s.wake.0);
         if !*woken {
-            woken = s
-                .wake
-                .1
-                .wait_timeout(woken, Duration::from_millis(500))
-                .map(|r| r.0)
-                .unwrap_or_else(|p| p.into_inner().0);
+            woken = s.wake.1.wait_timeout(woken, wait).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0);
         }
         *woken = false;
     }
