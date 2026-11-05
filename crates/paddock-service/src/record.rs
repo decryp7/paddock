@@ -136,17 +136,35 @@ fn migrate_1(mut v: serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 /// The in-memory store: the model test's "disk" (cheap, deterministic, shared between the "processes" of one run).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Memory {
     value: Mutex<Recorded>,
     held: AtomicBool,
     fail_writes: AtomicBool,
+    /// Writes still allowed before every write fails (negative: no limit).
+    writes_left: std::sync::atomic::AtomicI64,
+}
+
+impl Default for Memory {
+    fn default() -> Self {
+        Self {
+            value: Mutex::default(),
+            held: AtomicBool::new(false),
+            fail_writes: AtomicBool::new(false),
+            writes_left: std::sync::atomic::AtomicI64::new(-1),
+        }
+    }
 }
 
 impl Memory {
     /// Makes every write fail (a full disk, a read-only folder).
     pub fn fail_writes(&self, fail: bool) {
         self.fail_writes.store(fail, Ordering::SeqCst);
+    }
+
+    /// Lets `n` more writes through, then fails every write (a disk that fills up part-way).
+    pub fn fail_writes_after(&self, n: i64) {
+        self.writes_left.store(n, Ordering::SeqCst);
     }
 }
 
@@ -263,6 +281,12 @@ impl RecordFile {
                 ServiceError::Failed(format!("The service state could not be saved: {e}"))
             }),
             Store::Memory(m) => {
+                let left = m.writes_left.load(Ordering::SeqCst);
+                if left == 0 {
+                    m.fail_writes.store(true, Ordering::SeqCst);
+                } else if left > 0 {
+                    m.writes_left.store(left - 1, Ordering::SeqCst);
+                }
                 if m.fail_writes.load(Ordering::SeqCst) {
                     return Err(ServiceError::Failed(
                         "The service state could not be saved: the disk refused".into(),

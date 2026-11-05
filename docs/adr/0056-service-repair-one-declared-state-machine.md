@@ -57,7 +57,7 @@ State = Idle
   held for unattended events until the service answers or the version changes), and its registers are not counted by the
   invariant "at most 3 per version".
 - `Recovered` (the service answers) writes `Idle` and `registered_version`, clearing `attempts`. `Mark` on Linux and Windows
-  (a current definition, no answer needed) writes the version only. Uninstall writes `Removing` before the first OS step.
+  (a current definition, no answer needed) writes the version only. Uninstall writes `Removing` before the first OS step, and `Idle` with no registered version when the removal is done; a removal that failed or was declined returns the record to the state before it.
   `Removing` is read only when the app has no other word on the switch (below).
 - Migration, once: format 1 `{registeredVersion, registeredProgram}` becomes the same with `Idle`; format 1 with
   `attemptedVersion` and `attempts` becomes `Attempting { Awaiting }` with those attempts. A Dyno 1.0.0 install has no
@@ -202,6 +202,13 @@ cannot be read, a repeat of `set` is safe (VM row: it does not announce the item
 (`InstanceLock::claim` waits about 400 ms when held; one test uses it for real, one kills a real child). **R7.** The cap is for
 unattended registers (Repair and Install asked run past it); the invariants have named exceptions for `Uninstall`, reconcile
 `Remove` and Install asked.
+
+**Unattended install (the first run).** `Install { unattended: true }` never removes anything: with something registered (any
+version's, up or not) it changes nothing and leaves the registration to the start's plan; with nothing registered (no
+registration and no job) it registers once, with no removal step first (the phase written is `Registering`), within the
+attempts left (past the cap it fails with the reason), only with a record that can be written, and only where no OS prompt is
+needed (`automatic: false` refuses with a message). `Install { unattended: false }` (the user pressed it) is the Repair path
+and may replace. The model checks that a first run never removes before it registers.
 
 **Linux.** `resume_pending` lives in the record on Linux too (the marker file is gone, or peek-then-remove); the switch check at
 first sight goes through reconcile; `pending()` defaults to false where nothing waits; shared Dyno code builds and tests on Linux.

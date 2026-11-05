@@ -871,12 +871,12 @@ fn the_settings_switch_then_the_next_start_registers_once() {
     )
     .with_timings(Timings::default().without_start_wait());
     assert!(m.install(&never()).is_ok());
-    assert_eq!(calls(&sim), ["unregister", "bootout", "register"]);
+    assert_eq!(calls(&sim), ["register"], "nothing was registered, so nothing is removed first");
     // ... and the next start, with launchd's agent running, removes nothing and records the version.
     let mut next = manager(&sim, &sys, dir.path(), "1.1.0");
     assert_eq!(next.on_start(&never()), Started::Marked);
     assert_eq!(count(&sim, "register"), 1, "{:?}", calls(&sim));
-    assert_eq!(count(&sim, "unregister"), 1);
+    assert_eq!(count(&sim, "unregister"), 0);
     assert_eq!(next.recorded().registered_version.as_deref(), Some("1.1.0"));
 }
 
@@ -906,7 +906,7 @@ fn a_first_run_then_the_start_repair_waits_for_a_slow_job_and_registers_once() {
         "no second register: {:?}",
         calls(&sim)
     );
-    assert_eq!(count(&sim, "unregister"), 1);
+    assert_eq!(count(&sim, "unregister"), 0);
 }
 
 #[test]
@@ -1010,4 +1010,94 @@ fn a_first_run_that_loses_the_lock_waits_and_then_registers() {
         m.install_patient(&never(), true, 3, Duration::from_secs(5))
             .is_ok()
     );
+}
+
+// ---- the model's findings: a first run removes nothing and is bounded; a held service is not supervised; no OS change
+// without a durable write; a resume that is done clears its marker
+
+#[test]
+fn a_first_run_removes_nothing_that_is_registered_and_registers_what_is_not_once_within_the_attempts() {
+    // Something is registered (any version's, up or not): a first run leaves it to the start's plan.
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(matches!(m.install_unattended(&never()), Ok(RepairOutcome::Recovered)));
+    assert!(calls(&sim).is_empty(), "{:?}", calls(&sim));
+    assert_eq!(m.recorded().registered_version.as_deref(), Some("1.0.0"), "another version's service is not claimed");
+    // Nothing registered: registered once, with nothing removed first.
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
+    assert!(m.install_unattended(&never()).is_ok());
+    assert_eq!(calls(&sim), ["register"], "no removal first");
+    // Past the attempts it does not register again at every start.
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
+    sim.lock().unwrap().register_error = Some(RegisterError::Other("denied".into()));
+    for _ in 0..4 {
+        let _ = m.install_unattended(&never());
+    }
+    assert_eq!(count(&sim, "register"), crate::plan::MAX_ATTEMPTS as usize, "{:?}", calls(&sim));
+}
+
+#[test]
+fn a_first_run_that_cannot_record_or_needs_a_prompt_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, sys, m) = unanswered(dir.path(), "1.1.0");
+    let record = RecordFile::memory();
+    record.memory_handle().unwrap().fail_writes(true);
+    let mut m = m.with_record(record);
+    assert!(matches!(m.install_unattended(&never()), Err(ServiceError::Failed(_))));
+    assert!(calls(&sim).is_empty() && no_changes(&sys), "no OS call without a durable write");
+}
+
+#[test]
+fn a_write_that_fails_part_way_stops_the_replace_before_the_next_os_call() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    record.save("1.0.0", None).unwrap();
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_record(record);
+    let started = m.on_start(&never());
+    assert!(
+        matches!(started, Started::Repaired(_, RepairOutcome::Failed(_))),
+        "{started:?}"
+    );
+    assert!(calls(&sim).is_empty(), "nothing was removed or registered: {:?}", calls(&sim));
+}
+
+#[test]
+fn a_held_service_is_not_supervised_and_a_completed_resume_clears_its_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    sim.lock().unwrap().job_after_asks = None;
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    let mut last = Started::Busy;
+    for _ in 0..4 {
+        last = m.on_start(&never());
+    }
+    assert_eq!(last, Started::Left(Hold::Unanswered(crate::plan::MAX_ATTEMPTS)));
+    assert!(!m.pending(), "no way forward: the link must not wait");
+    assert!(!m.supervises(), "nothing will start it, so the app must not wait for it");
+    // The marker of a stop on request: a resume that is done clears it, in the record.
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.1.0");
+    RecordFile::new(dir.path(), LABEL).set_resume_pending(Some(5)).unwrap();
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::Enabled, Held::Nothing);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(resume(&mut m).0.is_ok());
+    assert_eq!(RecordFile::new(dir.path(), LABEL).resume_pending(), None);
+    // An unreadable switch registers nothing on a resume and still clears nothing it did not do... it is left alone on purpose.
+    RecordFile::new(dir.path(), LABEL).set_resume_pending(Some(6)).unwrap();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_app_state(|| None, || true, || true);
+    sim.lock().unwrap().calls.clear();
+    assert!(!resume(&mut m).0.unwrap());
+    assert!(calls(&sim).is_empty(), "{:?}", calls(&sim));
 }

@@ -107,6 +107,7 @@ impl Resp {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // `Unavailable` is part of the OS alphabet; no scenario reaches it yet
 enum Reg {
     Absent,
     Registered,
@@ -585,6 +586,7 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
 
 /// What the entry point returned, for the invariants.
 #[derive(Debug)]
+#[allow(dead_code)] // the entry points' results are kept for a replay and for the next invariants
 enum Out {
     Started(Started),
     Install(Result<RepairOutcome, ServiceError>),

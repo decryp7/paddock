@@ -9,7 +9,7 @@ use crate::backend::{Backend, Inspection, Mechanism};
 use crate::error::ServiceError;
 use crate::plan::{Facts, Hold, MAX_ATTEMPTS, Plan, Reason, Refusal, plan};
 use crate::record::{Phase, RecordFile, Recorded, State};
-use crate::repair::{RepairOutcome, Step, Timings, replace_bounded};
+use crate::repair::{Bounds, RepairOutcome, Step, Timings, replace_bounded};
 use crate::status::{Seen, ServiceStatus, compose};
 use crate::tracker::RepairTracker;
 use std::path::Path;
@@ -204,9 +204,11 @@ impl Manager {
     /// link neither starts nor retires an agent of its own while this is true.
     pub fn pending(&mut self) -> bool {
         let in_progress = matches!(self.record.peek().0.state, State::Attempting { .. });
+        // Past the attempts the wait ends in a hold, so nothing is coming: not pending.
+        let used_up = self.record.peek().0.attempts_of(&self.version) >= MAX_ATTEMPTS;
         match self.decide(false, false).2 {
-            Plan::Await(_) => true,
-            Plan::Replace(_) => in_progress,
+            Plan::Await(_) => !used_up,
+            Plan::Replace(_) => in_progress && !used_up,
             _ => false,
         }
     }
@@ -247,10 +249,16 @@ impl Manager {
                 Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true })
             );
         let removing = Phase::RemovingOld { ours };
+        // Nothing registered and no job held: there is nothing to remove, so the first step is the registration.
+        let nothing_to_remove = {
+            let i = self.backend.inspect();
+            i.registration == crate::backend::Registration::Absent
+                && matches!(i.job, crate::backend::Job::Absent | crate::backend::Job::Unknown)
+        };
         let first = State::Attempting {
             version: self.version.clone(),
             attempts: attempts0,
-            phase: if finishing { Phase::Registering } else { removing },
+            phase: if finishing || nothing_to_remove { Phase::Registering } else { removing },
         };
         if let Err(e) = self.record.set_state_and_program(first, self.program.as_deref()) {
             if !requested {
@@ -269,12 +277,18 @@ impl Manager {
         let mut attempts = attempts0;
         let mut free_register = finishing;
         let mut register_failed = false;
+        let abort = AtomicBool::new(false);
+        let bounds = Bounds {
+            cancel,
+            abort: &abort,
+            allowed,
+            register_only: nothing_to_remove,
+        };
         let outcome = replace_bounded(
             self.backend.as_mut(),
             &mut || answers(),
-            cancel,
+            &bounds,
             &self.timings,
-            allowed,
             &mut |step| {
                 log::info!(step:% = step; "service repair");
                 tracker.step(&step);
@@ -303,6 +317,10 @@ impl Manager {
                     })
                 {
                     log::warn!(error:% = e; "the service repair's step could not be recorded");
+                    // No OS call that changes anything without a durable write; what the user asked for goes on, loudly.
+                    if !requested {
+                        abort.store(true, Ordering::Relaxed);
+                    }
                 }
             },
         );

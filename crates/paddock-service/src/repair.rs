@@ -271,6 +271,15 @@ impl Stepper {
         }
     }
 
+    /// The first action when nothing is registered and no job is held: register, removing nothing.
+    pub fn start_register_only(&mut self) -> Next {
+        self.stage = Stage::Registering;
+        Next {
+            say: vec![Step::Cycle(self.cycle), Step::Registering],
+            action: Action::Register,
+        }
+    }
+
     /// Where a replace that registered in one step goes: straight to waiting for the service.
     pub fn registered_in_one_step(&mut self) -> Next {
         self.stage = Stage::Waiting;
@@ -444,24 +453,43 @@ pub fn replace(
     t: &Timings,
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
-    replace_bounded(b, answers, cancel, t, t.max_cycles + 1, say)
+    let abort = AtomicBool::new(false);
+    let bounds = Bounds {
+        cancel,
+        abort: &abort,
+        allowed: t.max_cycles + 1,
+        register_only: false,
+    };
+    replace_bounded(b, answers, &bounds, t, say)
 }
 
-/// [`replace`] with at most `allowed` cycles (each cycle registers once): an unattended replace gets what is left of the
-/// version's attempts, so a refused job costs at most [`crate::plan::MAX_ATTEMPTS`] registrations across all starts. This is
-/// the executor of a [`Stepper`]: it performs each action and feeds back what the OS answered.
+/// How far a replace may go.
+pub struct Bounds<'a> {
+    /// The caller asked to cancel.
+    pub cancel: &'a AtomicBool,
+    /// Set by the step reporter when a step could not be recorded: no OS call that changes anything follows (no OS call
+    /// without a durable write).
+    pub abort: &'a AtomicBool,
+    /// At most this many cycles (each registers once): an unattended replace gets what is left of the version's attempts,
+    /// so a refused job costs at most [`crate::plan::MAX_ATTEMPTS`] registrations across all starts.
+    pub allowed: u32,
+    /// Nothing is registered and no job is held: register without removing anything first.
+    pub register_only: bool,
+}
+
+/// [`replace`] within `bounds`: the executor of a [`Stepper`], which performs each action and feeds back what the OS answered.
 pub fn replace_bounded(
     b: &mut dyn Backend,
     answers: &mut dyn FnMut() -> bool,
-    cancel: &AtomicBool,
+    bounds: &Bounds<'_>,
     t: &Timings,
-    allowed: u32,
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
+    let cancel = bounds.cancel;
     if cancel.load(Ordering::Relaxed) {
         return RepairOutcome::Cancelled;
     }
-    let mut stepper = Stepper::new(t, allowed);
+    let mut stepper = Stepper::new(t, bounds.allowed);
     let mut next = if let Some(result) = b.replace_in_one_step() {
         match result {
             Ok(_) => stepper.registered_in_one_step(),
@@ -471,6 +499,8 @@ pub fn replace_bounded(
                     .unwrap_or_else(|| RepairOutcome::Failed(format!("{e}. {NEXT_STEPS}")));
             }
         }
+    } else if bounds.register_only {
+        stepper.start_register_only()
     } else {
         stepper.start()
     };
@@ -481,6 +511,14 @@ pub fn replace_bounded(
                 waiting_since = Some(std::time::Instant::now());
             }
             say(step);
+        }
+        if bounds.abort.load(Ordering::Relaxed)
+            && matches!(next.action, Action::Unregister | Action::Evict | Action::Register)
+        {
+            return RepairOutcome::Failed(
+                "The service state could not be written, so nothing more was changed. Check that the data folder is writable, then try again."
+                    .to_string(),
+            );
         }
         let result = match next.action {
             Action::Done(outcome) => return outcome,

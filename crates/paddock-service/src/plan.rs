@@ -283,6 +283,10 @@ pub fn plan(f: &Facts<'_>) -> Plan {
             ..
         } = f.state
         {
+            // A new removal cycle is a new register call: not past the cap. `Registering` is the free finish.
+            if capped && matches!(f.state, State::Attempting { phase: Phase::RemovingOld { .. }, .. }) && f.caps.automatic {
+                return Plan::Leave(held());
+            }
             return if f.caps.automatic {
                 Plan::Replace(Reason::Interrupted)
             } else {
@@ -992,10 +996,19 @@ mod tests {
             with(&reg(Job::Refused), false, awaiting(MAX_ATTEMPTS), false),
             Plan::Leave(Hold::Refused(MAX_ATTEMPTS))
         );
-        // A crash between the removal and the registration finishes the job, at the cap too.
-        for ph in [Phase::RemovingOld { ours: true }, Phase::RemovingOld { ours: false }, Phase::Registering] {
+        // A crash between the removal and the registration finishes the job at the cap only when the registration itself was
+        // next (`Registering`: no new attempt); another removal cycle would be a new register call past the cap: held.
+        assert_eq!(
+            with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::Registering), false),
+            Plan::Replace(Reason::Interrupted)
+        );
+        for ours in [true, false] {
             assert_eq!(
-                with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, ph), false),
+                with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours }), false),
+                Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
+            );
+            assert_eq!(
+                with(&Inspection::absent(), false, attempting("1.0.4", 1, Phase::RemovingOld { ours }), false),
                 Plan::Replace(Reason::Interrupted)
             );
         }

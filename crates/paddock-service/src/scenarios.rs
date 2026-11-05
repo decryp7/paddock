@@ -1136,7 +1136,7 @@ fn a_run_entry_is_added_started_switched_off_by_the_user_and_removed() {
     assert_eq!(
         changes(&sys),
         [
-            format!("reg delete {RUN} /v Dyno /f"),
+            // Nothing was registered, so nothing is removed first.
             format!("reg add {RUN} /v Dyno /t REG_SZ /d {value} /f"),
             format!("spawn {DYNO_EXE} run")
         ]

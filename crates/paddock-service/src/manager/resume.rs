@@ -33,7 +33,25 @@ impl Manager {
     /// Whether the OS starts the job now and restarts it, so the app must wait for it instead of running its own agent
     /// ([`supervises`]).
     pub fn supervises(&mut self) -> bool {
-        supervises(&self.backend.inspect())
+        let inspection = self.backend.inspect();
+        if !supervises(&inspection) {
+            return false;
+        }
+        // Attempts used up and nothing answers: held. The wait that remains ends in a hold, so nothing will start it.
+        if self.record.peek().0.attempts_of(&self.version) >= crate::plan::MAX_ATTEMPTS
+            && !((self.answers)() || inspection.job == Job::Running)
+        {
+            return false;
+        }
+        // A held service (its attempts are used up) is not supervised: nothing will start it, so the app must not wait.
+        !matches!(
+            self.check(),
+            crate::plan::Plan::Leave(
+                crate::plan::Hold::Unanswered(_)
+                    | crate::plan::Hold::Refused(_)
+                    | crate::plan::Hold::RegisterFailed(_)
+            )
+        )
     }
 
     /// The job a stop can name, while the OS holds it. The registration is not touched by the stop
@@ -53,10 +71,33 @@ impl Manager {
         cancel: &AtomicBool,
         say: &mut dyn FnMut(&str),
     ) -> Result<bool, ServiceError> {
+        let result = self.resume_inner(cancel, say);
+        // A resume that was done (the service is back, or left alone on purpose) clears the "stopped on request" marker; one
+        // that failed keeps it, so the next start tries again.
+        if result.is_ok() {
+            self.clear_resume_pending();
+        }
+        result
+    }
+
+    fn clear_resume_pending(&self) {
+        if self.record.resume_pending().is_some()
+            && let Err(e) = self.record.set_resume_pending(None)
+        {
+            log::warn!(error:% = e; "the stop marker could not be cleared");
+        }
+    }
+
+    fn resume_inner(
+        &mut self,
+        cancel: &AtomicBool,
+        say: &mut dyn FnMut(&str),
+    ) -> Result<bool, ServiceError> {
         let inspection = self.backend.inspect();
         let recorded = self.record.load();
-        if matches!(recorded.state, crate::record::State::Removing) || (self.wanted)() == Some(false) {
-            say("the user's switch is off (or a removal was begun); the service stays as it is");
+        if matches!(recorded.state, crate::record::State::Removing) || (self.wanted)() != Some(true) {
+            say("the user's switch is off or unknown (or a removal was begun); the service stays as it is");
+            self.clear_resume_pending();
             return Ok(false);
         }
         if !self.backend.capabilities().automatic {
@@ -187,42 +228,59 @@ impl Manager {
         result
     }
 
-    /// [`Manager::install`] for a start nobody asked for (first run): the same registration, but System Settings is
-    /// never opened for a switch or an approval the user has to give, and a registration this version already made (or is
-    /// waiting for) is never removed.
+    /// [`Manager::install`] for a start nobody asked for (first run): never removes anything and is bounded like a start. A
+    /// registration that is there (any version's) is left to [`Manager::on_start`]'s plan; nothing registered is registered
+    /// once, under the attempts left, with a record that can be written, and only where no prompt is needed.
     ///
     /// # Errors
-    /// [`ServiceError`], as [`Manager::install`].
+    /// [`ServiceError`], as [`Manager::install`]; [`ServiceError::Failed`] when the attempts are used up or the state cannot be
+    /// written.
     pub fn install_unattended(
         &mut self,
         cancel: &AtomicBool,
     ) -> Result<RepairOutcome, ServiceError> {
         let inspection = self.backend.inspect();
         let reason = request(&inspection).map_err(refusal)?;
-        let recorded = self.record.load();
-        if matches!(recorded.state, crate::record::State::Removing) {
+        let recorded = self.record.peek().0;
+        if matches!(recorded.state, crate::record::State::Removing)
+            && let Err(e) = self.record.set_state(crate::record::State::Idle)
+        {
             // The user switched it on again: an unfinished removal is not to be finished.
-            if let Err(e) = self.record.set_state(crate::record::State::Idle) {
-                log::warn!(error:% = e; "the unfinished removal could not be cancelled");
-            }
+            log::warn!(error:% = e; "the unfinished removal could not be cancelled");
         }
         let here = recorded.registered_version.as_deref() == Some(self.version.as_str())
             || matches!(
                 recorded.phase_of(&self.version),
                 Some(Phase::Registering | Phase::Awaiting)
             );
-        if here && inspection.registration == crate::backend::Registration::Registered {
-            if (self.answers)() || inspection.job == Job::Running {
+        let present = inspection.registration != crate::backend::Registration::Absent
+            || !matches!(inspection.job, Job::Absent | Job::Unknown);
+        if present {
+            // Something is registered: a first run removes nothing. Up (and this version's): remembered; otherwise the
+            // start's plan decides what the registration needs.
+            let up = (self.answers)() || inspection.job == Job::Running;
+            if up && here {
                 self.remember();
-                return Ok(RepairOutcome::Recovered);
             }
-            return Ok(RepairOutcome::Registered);
+            return Ok(if up { RepairOutcome::Recovered } else { RepairOutcome::Registered });
+        }
+        if !self.backend.capabilities().automatic {
+            return Err(ServiceError::Unavailable(
+                "registering the service needs the user's permission here; use Repair".to_string(),
+            ));
         }
         let Some(_lock) = self.locked() else {
             return Err(ServiceError::Busy);
         };
-        match self.run_replace_locked(reason, true, cancel) {
-            Ran::Busy | Ran::Unrecorded(_) => Err(ServiceError::Busy),
+        if recorded.attempts_of(&self.version) >= crate::plan::MAX_ATTEMPTS {
+            return Err(ServiceError::Failed(format!(
+                "The service was registered {} times and did not start; it is not registered again by itself.",
+                recorded.attempts_of(&self.version)
+            )));
+        }
+        match self.run_replace_locked(reason, false, cancel) {
+            Ran::Busy => Err(ServiceError::Busy),
+            Ran::Unrecorded(why) => Err(ServiceError::Failed(why)),
             Ran::Outcome(outcome) => outcome_result(outcome),
         }
     }
