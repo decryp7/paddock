@@ -60,6 +60,20 @@ createdMs: number,
  */
 revoked: boolean, };
 
+export type ListenerView = { "kind": "unavailable" } | { "kind": "off" } | { "kind": "noKey" } | { "kind": "listening", 
+/**
+ * The loopback port.
+ */
+port: number, 
+/**
+ * The discovery file a client reads to find the port.
+ */
+discoveryFile: string, } | { "kind": "failed", 
+/**
+ * The cause and the next step.
+ */
+message: string, };
+
 export type McpView = { 
 /**
  * The saved settings.
@@ -76,7 +90,11 @@ keys: Array<KeyInfo>,
 /**
  * Most keys that can be issued.
  */
-maxKeys: number, };
+maxKeys: number, 
+/**
+ * Whether and where the loopback listener serves.
+ */
+listener: ListenerView, };
 
 export type IssuedKey = { 
 /**

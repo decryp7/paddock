@@ -34,6 +34,7 @@ describe('the AI access store', () => {
     expect(store.audit()).toEqual([]);
     expect(store.atKeyLimit()).toBe(false);
     expect(store.maxKeys()).toBe(MAX_KEYS);
+    expect(store.listener()).toEqual({ kind: 'off' });
   });
 
   it('turns it on, switches a tool off and allows an action, each saved at once', async () => {
@@ -221,6 +222,7 @@ describe('the Tauri backend', () => {
     tools: [{ name: 'a', title: null, description: 'd', action: false, exposed: true }],
     keys: [{ id: 1, client: 'Pitwall', createdMs: 5, revoked: false }],
     maxKeys: 16,
+    listener: { kind: 'unavailable' },
   };
 
   it('names the engine’s commands and parses what comes back', async () => {
@@ -267,8 +269,10 @@ describe('parsing at the edge', () => {
     for (const bad of [null, [], { enabled: 'yes' }, { enabled: true, resources: true, disabledTools: [1], allowedActions: [] }]) expect(parseSettings(bad)).toBeNull();
     const tool = { name: 'a', title: 'A', description: 'd', action: true, exposed: false };
     const key = { id: 1, client: 'c', createdMs: 1, revoked: true };
-    const ok = { settings: { enabled: false, resources: true, disabledTools: [], allowedActions: [] }, tools: [tool], keys: [key], maxKeys: 4 };
+    const ok = { settings: { enabled: false, resources: true, disabledTools: [], allowedActions: [] }, tools: [tool], keys: [key], maxKeys: 4, listener: { kind: 'off' } };
     expect(parseMcpView(ok)).toEqual(ok);
+    for (const l of [{ kind: 'noKey' }, { kind: 'listening', port: 49152, discoveryFile: 'mcp-listener.json' }, { kind: 'failed', message: 'x' }]) expect(parseMcpView({ ...ok, listener: l })?.listener).toEqual(l);
+    for (const bad of [undefined, 3, { kind: 'listening', port: -1, discoveryFile: 'f' }, { kind: 'failed' }, { kind: 'weird' }]) expect(parseMcpView({ ...ok, listener: bad })?.listener).toEqual({ kind: 'unavailable' });
     for (const bad of [null, { ...ok, tools: [{ ...tool, action: 1 }] }, { ...ok, tools: [{ ...tool, title: 3 }] }, { ...ok, keys: [{ ...key, id: -1 }] }, { ...ok, maxKeys: 'x' }, { ...ok, settings: 3 }, { ...ok, tools: 3 }]) expect(parseMcpView(bad)).toBeNull();
     expect(parseIssuedKey({ id: 1, client: 'c', key: '' })).toBeNull();
     expect(parseIssuedKey(null)).toBeNull();

@@ -20,11 +20,13 @@
 //! part of MCP and are refused. A tool panicking or hanging cannot take the server down.
 
 pub mod audit;
+pub mod bridge;
 pub mod client;
 mod control;
 pub mod jsonrpc;
 mod keys;
 mod lines;
+pub mod listener;
 mod loopback;
 pub mod page;
 mod registry;
