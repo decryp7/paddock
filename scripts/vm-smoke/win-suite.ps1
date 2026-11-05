@@ -68,7 +68,7 @@ $uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Dyno'
 $installed = Wait-Until { if ((Test-Path (Join-Path $prog 'dyno-app.exe')) -and (Test-Path $uk) -and -not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { $true } } 300 2000
 $code = try { $p.ExitCode } catch { 'unreadable' }
 # A UAC prompt that was cancelled (or answered wrongly) ends Start-Process with an error and no installer process; the host answered it, so say which it was.
-if ("$code" -eq '20' -or "$code" -eq '2') { [void]$s.checks.Add(@{ ok = $false; kind = $(if ($pu.Count) { 'check' } else { $null }); detail = "installer refused (exit $code): $(if ($pu.Count) { 'a per-user Dyno is in this snapshot' } else { 'no per-user Dyno was found by the precondition, so this is the installer\'s own refusal (see the evidence)' })" }) }
+if ("$code" -eq '20' -or "$code" -eq '2') { [void]$s.checks.Add(@{ ok = $false; kind = $(if ($pu.Count) { 'check' } else { $null }); detail = "installer refused (exit $code): $(if ($pu.Count) { 'a per-user Dyno is in this snapshot' } else { 'no per-user Dyno was found by the precondition, so this is the installer''s own refusal (see the evidence)' })" }) }
 if ($startErr) { Check $s $false "the installer did not start: $startErr (a cancelled or refused UAC prompt)"; $s.checks[$s.checks.Count - 1].kind = 'check' }
 # Evidence of WHY an install ends the way it does, kept also when the folder is gone: setup.log (the installer's own log), the NSIS exit meaning, recent errors.
 $logs = @("$prog\updates\setup.log", "$env:TEMP\setup.log", "$env:LOCALAPPDATA\Dyno\setup.log", "$env:LOCALAPPDATA\Dyno\updates\setup.log") | Where-Object { Test-Path $_ }
