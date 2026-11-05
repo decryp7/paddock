@@ -160,8 +160,22 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     if let Err(r) = request(i) {
         return Plan::Leave(r.into());
     }
-    if !i.present() {
-        return Plan::Leave(Hold::NotInstalled);
+    if i.registration == Registration::Absent {
+        // macOS has no record of the item, yet a job is held (the app was opened from a place it cannot register from,
+        // such as a disk image): replacing would remove the job and fail to register it again. Left alone.
+        if i.login_item
+            .is_some_and(|f| f.status == AppServiceStatus::NotFound)
+            && !matches!(i.job, Job::Absent | Job::Unknown)
+        {
+            return Plan::Leave(Hold::Unavailable(
+                "macOS has no record of the background item although a job runs; open the app from the Applications folder"
+                    .to_string(),
+            ));
+        }
+        // Nothing registered, and the OS either holds no job or could not be asked: not installed, never install unasked.
+        if matches!(i.job, Job::Absent | Job::Unknown) {
+            return Plan::Leave(Hold::NotInstalled);
+        }
     }
     let fix = |r: Reason| {
         if f.caps.automatic {
@@ -173,13 +187,18 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     if i.program_exists == Some(false) {
         return fix(Reason::ProgramMissing);
     }
-    if let Some(recorded) = f.recorded_version
-        && compare_versions(recorded, f.current_version) == Some(Ordering::Greater)
-    {
-        return Plan::Leave(Hold::NewerOwner(recorded.to_string()));
-    }
+    // A job the OS refuses while the service is silent is repaired whatever version registered it: leaving it would keep
+    // the service down (a downgrade, or a recorded version nobody can verify).
     if i.job == Job::Refused && !f.answers {
         return fix(Reason::Refused);
+    }
+    // Another copy's registration is left to that copy only when its program is known to exist.
+    if let Some(recorded) = f.recorded_version
+        && compare_versions(recorded, f.current_version) == Some(Ordering::Greater)
+        && i.points_here == Some(false)
+        && i.program_exists == Some(true)
+    {
+        return Plan::Leave(Hold::NewerOwner(recorded.to_string()));
     }
     if i.points_here == Some(false) {
         return fix(Reason::Moved);
@@ -660,5 +679,66 @@ mod tests {
             ..Inspection::absent()
         };
         assert!(supervises(&plain));
+    }
+
+    #[test]
+    fn nothing_is_installed_unasked_when_the_os_could_not_be_asked_or_has_no_record() {
+        use AppServiceStatus as S;
+        use DisabledMark as D;
+        fn facts<'a>(i: &'a Inspection, rec: Option<&'a str>) -> Facts<'a> {
+            Facts {
+                inspection: i,
+                answers: false,
+                recorded_version: rec,
+                current_version: "1.1.0",
+                caps: MAC,
+            }
+        }
+        // (a) not registered, `launchctl print` timed out, no record: not installed.
+        let a = item(S::NotRegistered, D::NotListed, Job::Unknown);
+        assert_eq!(plan(&facts(&a, None)), Plan::Leave(Hold::NotInstalled));
+        // (b) neither the switch list nor the job could be read: still not installed (never re-enables a switched-off item).
+        let b = item(S::NotRegistered, D::Unreadable, Job::Unknown);
+        assert_eq!(
+            plan(&facts(&b, Some("1.0.0"))),
+            Plan::Leave(Hold::NotInstalled)
+        );
+        // (c) macOS has no record but a job runs: left alone, not replaced.
+        for job in [Job::Running, Job::NotRunning, Job::Refused] {
+            let c = item(S::NotFound, D::NotListed, job);
+            assert!(
+                matches!(
+                    plan(&facts(&c, Some("1.0.0"))),
+                    Plan::Leave(Hold::Unavailable(_))
+                ),
+                "{job:?}"
+            );
+        }
+        // A fresh install (no record, no job) stays "not installed".
+        let fresh = item(S::NotFound, D::NotListed, Job::Absent);
+        assert_eq!(plan(&facts(&fresh, None)), Plan::Leave(Hold::NotInstalled));
+    }
+
+    #[test]
+    fn a_refused_job_is_repaired_after_a_downgrade_and_a_recorded_version_nobody_can_verify() {
+        let refused = Inspection {
+            registration: Registration::Registered,
+            job: Job::Refused,
+            ..Inspection::absent()
+        };
+        for recorded in ["1.2.0", "999.0.0"] {
+            assert_eq!(
+                plan(&facts(&refused, MAC, Some(recorded))),
+                Plan::Replace(Reason::Refused),
+                "{recorded}"
+            );
+        }
+        // A healthy job registered by a newer version, with no other copy's program known, is not pinned either way:
+        // the bundled registration belongs to whichever copy runs.
+        let healthy = registered(Job::Running);
+        assert_eq!(
+            plan(&facts(&healthy, MAC, Some("1.2.0"))),
+            Plan::Replace(Reason::VersionChanged)
+        );
     }
 }

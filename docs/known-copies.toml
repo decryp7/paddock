@@ -38,7 +38,7 @@ version = 1
 id = "launchd-job-report"
 title = "Reading launchd's job report and replacing a stale registration (catalogue R03, rule 24)"
 canonical = "paddock-service"
-paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan.rs", "crates/paddock-service/src/repair.rs"]
+paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan.rs", "crates/paddock-service/src/repair.rs", "crates/paddock-service/src/manager/resume.rs"]
 status = "built"
 
   [[mechanism.copy]]
@@ -74,7 +74,7 @@ status = "built"
 id = "launch-at-login"
 title = "The launch-at-login switch: the app's own login item and the start reason (login item, restored at login)"
 canonical = "paddock-service"
-paths = ["crates/paddock-service/src/login.rs"]
+paths = ["crates/paddock-service/src/login.rs", "crates/paddock-service/src/launch.rs", "crates/paddock-service/src/apple_event.rs"]
 status = "built"
 adr = "0034"
 

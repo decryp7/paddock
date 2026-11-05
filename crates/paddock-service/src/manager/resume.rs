@@ -9,7 +9,10 @@
 use super::{Manager, outcome_result, refusal};
 use crate::backend::DisabledMark;
 use crate::error::ServiceError;
+use crate::manager::Started;
 use crate::plan::{ResumePath, installed, request, resume_path, supervises};
+use crate::port::RegisterError;
+use crate::repair::{RepairOutcome, Timings};
 use crate::stop::StopMechanism;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -70,21 +73,37 @@ impl Manager {
                 return Ok(false);
             }
             ResumePath::Repair => {}
-            ResumePath::Light => match self.backend.register() {
-                Ok(_) => {
+            ResumePath::Light => {
+                // A register that reads back wrong may only be the OS lagging: look for the job before replacing anything
+                // (a removal and a second registration would announce the item again).
+                let registered = match self.backend.register() {
+                    Ok(_) => true,
+                    Err(RegisterError::NotAsWritten(_)) => {
+                        say(
+                            "registering the enabled item read back unexpectedly; looking for the job first",
+                        );
+                        true
+                    }
+                    Err(e) => {
+                        say(&format!(
+                            "registering the enabled item failed ({e}); running the full repair"
+                        ));
+                        false
+                    }
+                };
+                if registered {
                     for _ in 0..LIGHT_LOOKS {
                         if self.backend.job_found() {
-                            say("the OS holds the job again after registering the enabled item");
+                            say(
+                                "the OS holds the job again after registering the enabled item (it may not run yet)",
+                            );
                             return Ok(true);
                         }
                         self.backend.pause(LIGHT_POLL);
                     }
                     say("registering the enabled item loaded no job; running the full repair");
                 }
-                Err(e) => say(&format!(
-                    "registering the enabled item failed ({e}); running the full repair"
-                )),
-            },
+            }
         }
         // The full repair, on the user's behalf but unasked in the foreground: what the user switched is left alone and
         // Login Items is never opened (the background never opens a window).
@@ -98,7 +117,64 @@ impl Manager {
         };
         match self.run_replace(reason, cancel) {
             None => Err(ServiceError::Busy),
+            Some(RepairOutcome::Registered) => {
+                say("the full repair registered the service, but it did not start in time");
+                Err(ServiceError::Failed(
+                    "The background service was registered again but did not start. It is tried again at the next start."
+                        .to_string(),
+                ))
+            }
             Some(outcome) => outcome_result(outcome).map(|o| o.registered()),
+        }
+    }
+
+    /// [`Manager::on_start`] that waits for another registration or repair to finish (`Busy`) up to `tries` looks, `pause`
+    /// apart, instead of giving up on the first one: a start that gave up leaves no record, and the next start would
+    /// replace a registration that was fine.
+    pub fn on_start_patient(
+        &mut self,
+        cancel: &AtomicBool,
+        tries: u32,
+        pause: Duration,
+    ) -> Started {
+        let mut started = self.on_start(cancel);
+        for _ in 0..tries {
+            if !matches!(started, Started::Busy) {
+                break;
+            }
+            log::info!("another registration or repair is running; looking again shortly");
+            self.backend.pause(pause);
+            started = self.on_start(cancel);
+        }
+        started
+    }
+
+    /// [`Manager::install`] for a start nobody asked for (first run): the same registration, but System Settings is
+    /// never opened for a switch or an approval the user has to give.
+    ///
+    /// # Errors
+    /// [`ServiceError`], as [`Manager::install`].
+    pub fn install_unattended(
+        &mut self,
+        cancel: &AtomicBool,
+    ) -> Result<RepairOutcome, ServiceError> {
+        let inspection = self.backend.inspect();
+        let reason = request(&inspection).map_err(refusal)?;
+        match self.run_replace(reason, cancel) {
+            None => Err(ServiceError::Busy),
+            Some(outcome) => outcome_result(outcome),
+        }
+    }
+}
+
+impl Timings {
+    /// The same waits, but a registration the OS accepted is not waited on for the service to answer: for a caller that
+    /// must return at once (the Settings switch) and watches the service by other means.
+    #[must_use]
+    pub fn without_start_wait(self) -> Timings {
+        Timings {
+            start_wait: Duration::ZERO,
+            ..self
         }
     }
 }

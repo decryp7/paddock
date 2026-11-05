@@ -163,7 +163,7 @@ pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate:
         crate::logging::info("first run: no data folder, start at login not applied");
         return;
     };
-    let mut service = platform_service();
+    let mut service = first_run_service();
     let mut autostart = platform_autostart(app);
     let marker = paddock_service::login::FirstRunMarker::new(data.join(FIRST_RUN_MARKER));
     let mut sys = paddock_service::RealSystem::new();
@@ -367,20 +367,51 @@ mod mac {
     use dyno_agent::service::LABEL;
     use paddock_service::login::{LoginService, MainAppItem};
     use paddock_service::manager::Started;
-    use paddock_service::repair::RepairOutcome;
+    use paddock_service::repair::{RepairOutcome, Timings};
     use paddock_service::{Manager, ServiceError, ServiceSpec};
     use std::sync::atomic::AtomicBool;
 
-    /// The bundled launch agent.
-    pub struct SmService;
+    /// The bundled launch agent. `first_run` is the unasked registration at the first sight of the settings: it opens System
+    /// Settings (Login Items) for an approval or a switch at most once, where the Settings switch always does.
+    pub struct SmService {
+        first_run: bool,
+    }
+
+    impl SmService {
+        /// The service for what the user asks (Settings switch, repair at start, resume, stop).
+        pub const fn asked() -> SmService {
+            SmService { first_run: false }
+        }
+
+        /// The service for the first run (no one asked): Login Items is opened at most once.
+        pub const fn first_run() -> SmService {
+            SmService { first_run: true }
+        }
+    }
 
     /// The login items have no cancel button; a repair runs to its bounds.
     fn never() -> AtomicBool {
         AtomicBool::new(false)
     }
 
+    /// The marker that Login Items has been opened for the first run once.
+    fn opened_marker() -> PathBuf {
+        dyno_agent::paths::Dirs::current().root().join("login-items-opened")
+    }
+
+    /// Dyno 1.1.0 records the registered version with the shared service record; the 1.0.0 file is of no use any more.
+    fn forget_old_version_file(root: &std::path::Path) {
+        let old = root.join("service-registered-version");
+        match std::fs::remove_file(&old) {
+            Ok(()) => crate::logging::info("removed the 1.0.0 registered-version file (the service record replaces it)"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => crate::logging::warn(&format!("the 1.0.0 registered-version file could not be removed: {e}")),
+        }
+    }
+
     /// The service of the agent: its spec, the real `SMAppService` and `launchctl` (5 s per call), Dyno's data folder.
-    fn manager(agent_answers: AnswerFn) -> Result<Manager, String> {
+    /// `agent_answers` says whether the agent answers; `timings` are the waits of a repair.
+    fn manager(agent_answers: AnswerFn, timings: Timings) -> Result<Manager, String> {
         let spec = ServiceSpec::builder(LABEL, "Dyno", "dyno-agent")
             .build()
             .map_err(|e| format!("the agent's service definition is wrong: {e}"))?;
@@ -393,30 +424,34 @@ mod mac {
             Box::new(paddock_service::native::SmAppService::new(&spec)),
             Box::new(system()),
         );
+        let dirs = dyno_agent::paths::Dirs::current();
+        forget_old_version_file(dirs.root());
         Ok(Manager::new(
             "Dyno",
             Box::new(backend),
-            dyno_agent::paths::Dirs::current().root(),
+            dirs.root(),
             LABEL,
             env!("CARGO_PKG_VERSION"),
             // The app may have started an agent of its own meanwhile; launchd running the job counts too.
             move || agent_answers() || paddock_service::launchctl::job_running(&mut system(), &target),
-        ))
+        )
+        .with_timings(timings))
     }
 
     /// A manager that is only asked what it sees or told to stop or resume: nothing waits for an agent.
     fn quiet_manager() -> Result<Manager, String> {
-        manager(std::sync::Arc::new(|| false))
+        manager(std::sync::Arc::new(|| false), Timings::default())
     }
 
-    /// What a failed registration tells the user.
-    fn registration_words(e: &ServiceError) -> String {
+    /// What a failed registration tells the user. `opened`: System Settings was opened for them.
+    fn registration_words(e: &ServiceError, opened: bool) -> String {
+        let shown = if opened { " (opened for you)" } else { "" };
         match e {
             ServiceError::NeedsApproval => {
-                "macOS needs your approval: allow Dyno in System Settings > General > Login Items (opened for you)".into()
+                format!("macOS needs your approval: allow Dyno in System Settings > General > Login Items{shown}")
             }
             ServiceError::SwitchedOff => {
-                "Dyno is switched off in System Settings > General > Login Items (opened for you): switch it on there".into()
+                format!("Dyno is switched off in System Settings > General > Login Items{shown}: switch it on there")
             }
             other => other.to_string(),
         }
@@ -436,8 +471,23 @@ mod mac {
     }
 
     impl LoginService for SmService {
+        /// Registers the agent and returns at once: the link waits for it and falls back to an agent of its own (the switch
+        /// must not block for the two minutes a service may need to start).
         fn install(&mut self) -> Result<(), String> {
-            quiet_manager()?.install(&never()).map(drop).map_err(|e| registration_words(&e))
+            let mut m = manager(std::sync::Arc::new(|| false), Timings::default().without_start_wait())?;
+            let quiet = self.first_run && opened_marker().exists();
+            let result = if quiet {
+                m.install_unattended(&never())
+            } else {
+                m.install(&never())
+            };
+            let needs_user = matches!(result, Err(ServiceError::NeedsApproval | ServiceError::SwitchedOff));
+            if self.first_run && needs_user && !quiet {
+                if let Err(e) = std::fs::write(opened_marker(), "opened\n") {
+                    crate::logging::warn(&format!("the Login Items marker could not be written: {e}"));
+                }
+            }
+            result.map(drop).map_err(|e| registration_words(&e, !quiet))
         }
 
         fn uninstall(&mut self) -> Result<(), String> {
@@ -461,21 +511,29 @@ mod mac {
         /// not answer, and once after every version change. What the user switched off in Login Items is left alone, and
         /// nothing is registered that the user never turned on.
         fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String> {
-            let mut m = manager(agent_answers)?;
-            match m.on_start(&never()) {
+            // From a disk image or a translocated path the bundle cannot register the agent: replacing would remove a job
+            // that runs and fail to put it back.
+            super::current_location()?;
+            let mut m = manager(agent_answers, Timings::default())?;
+            // Another registration or repair (the first run, a second copy) may hold the lock: wait for it a while.
+            match m.on_start_patient(&never(), 6, std::time::Duration::from_secs(5)) {
                 Started::Repaired(reason, outcome) => {
                     crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
                     match outcome {
-                        RepairOutcome::Recovered | RepairOutcome::Registered => Ok(true),
+                        RepairOutcome::Recovered => Ok(true),
+                        RepairOutcome::Registered => {
+                            Err("the agent service was registered again but did not answer; it is tried again at the next start".into())
+                        }
                         RepairOutcome::Cancelled => Ok(false),
-                        RepairOutcome::NeedsApproval => Err(registration_words(&ServiceError::NeedsApproval)),
+                        RepairOutcome::NeedsApproval => Err(registration_words(&ServiceError::NeedsApproval, false)),
                         RepairOutcome::Failed(why) | RepairOutcome::Unavailable(why) => Err(why),
                         RepairOutcome::NeedsElevation | RepairOutcome::Declined => {
                             Err("the agent service could not be registered again".into())
                         }
                     }
                 }
-                Started::Left(_) | Started::Marked | Started::Offered(_) | Started::Busy => Ok(false),
+                Started::Busy => Err("another registration or repair kept running; it is tried again at the next start".into()),
+                Started::Left(_) | Started::Marked | Started::Offered(_) => Ok(false),
             }
         }
 
@@ -491,9 +549,10 @@ mod mac {
         /// an enabled item of this version is registered again without removal, which macOS would announce as a new item).
         /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
         fn resume(&mut self) -> Result<bool, String> {
+            super::current_location()?;
             quiet_manager()?
                 .resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}")))
-                .map_err(|e| registration_words(&e))
+                .map_err(|e| registration_words(&e, false))
         }
     }
 }
@@ -501,7 +560,19 @@ mod mac {
 /// The platform's agent service.
 #[cfg(target_os = "macos")]
 pub fn platform_service() -> Box<dyn AgentService> {
-    Box::new(SmService)
+    Box::new(SmService::asked())
+}
+
+/// The agent service for the first run, which nobody asked for: System Settings is opened at most once.
+#[cfg(target_os = "macos")]
+pub fn first_run_service() -> Box<dyn AgentService> {
+    Box::new(SmService::first_run())
+}
+
+/// The agent service for the first run (the same as [`platform_service`] off macOS).
+#[cfg(not(target_os = "macos"))]
+pub fn first_run_service() -> Box<dyn AgentService> {
+    platform_service()
 }
 
 /// The platform's agent service.

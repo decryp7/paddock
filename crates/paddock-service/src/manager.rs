@@ -32,6 +32,11 @@ pub enum Started {
     Busy,
 }
 
+#[cfg(test)]
+pub(crate) fn unix_now_for_tests() -> u64 {
+    unix_now()
+}
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -180,8 +185,15 @@ impl Manager {
         );
         self.tracker.finish(&outcome, Instant::now());
         log::info!(outcome:? = outcome; "service repair finished");
-        if outcome.registered() {
+        // Only a service that answered (or whose job runs) is remembered as registered by this version: a registration the
+        // OS accepted but that never answered would otherwise hide a dead service until the next version. Not remembered,
+        // the next start looks again.
+        if matches!(outcome, RepairOutcome::Recovered) {
             self.remember();
+        } else if outcome.registered() {
+            log::warn!(
+                "the service was registered but did not answer; the version is not remembered, so the next start looks again"
+            );
         }
         Some(outcome)
     }
@@ -192,7 +204,18 @@ impl Manager {
     /// touches what the user switched off, never prompts. Call it on a background thread soon after start (and again
     /// later: the service may only fail when it restarts itself onto the new binary).
     pub fn on_start(&mut self, cancel: &AtomicBool) -> Started {
-        match self.decide().2 {
+        let (inspection, answers, p) = self.decide();
+        log::info!(
+            plan:? = p,
+            registration:? = inspection.registration,
+            job:? = inspection.job,
+            login_item:? = inspection.login_item,
+            answers = answers,
+            recorded:? = self.record.load().registered_version,
+            current = self.version.as_str();
+            "service start: what the OS and the record show, and the plan"
+        );
+        match p {
             Plan::Leave(h) => Started::Left(h),
             Plan::MarkCurrent => {
                 self.remember();
