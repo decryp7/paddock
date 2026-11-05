@@ -161,6 +161,8 @@ Apply these deliberately. They are not decoration:
 - Commit only complete, owned work. Never commit a workspace `Cargo.toml` listing crates whose sources aren't
   committed. After committing, verify the committed tree in isolation (`git archive HEAD`, then build and test) before
   pushing larger changes.
+- Before pushing a merge, run `node scripts/merge-regression-check.mjs <merge-commit>` (or `--branch <b> --target <t>`): it flags files
+  where the result goes backwards against the first parent, such as a stale-tree branch commit reverting fixes without a conflict.
 - Windows-only and macOS-only code is checked and tested on its own CI runner; code that needs no platform SDK must at
   least type-check for the other targets (`cargo check --target x86_64-pc-windows-msvc`).
 

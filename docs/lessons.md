@@ -1245,3 +1245,17 @@ peer. **Lesson (class: a check that cannot fail):** before calling a cause confi
 precondition (the menu bar exists, the helper runs, at least one step ran), give the probe a positive control (show it sees
 a thing known to be there), and compare with a known-good peer. Otherwise the result is `not measured` or `check broken`
 and the release does not pass (rule 71, ER-33).
+
+## Two research notes overstated a gain (2026-11-05)
+One note compared two different queries and reported "100x"; the same query on both sides gave about 6x. The other measured
+at a size the product never uses and on a form it had not chosen. Both were recorded as results blocks, so the gap was in
+what was compared, not in the record. **Lesson (class: a comparison that does not compare like with like):** rule 48 now
+also asks for the same operation on both sides, the product's real path and size, cold and warm runs, the real alternative
+as baseline, memory as physical footprint, and an independent check of a headline number before it is quoted (ER-34).
+
+## A branch commit built on a stale tree reverted fixes with no conflict (2026-11-05)
+Commit `b48df1818` had the fixed tree as its parent but its own tree came from an older one, so merging it silently
+reverted a memory fix, a redaction and test fixes; git saw no conflict and the merge `da47e3c7e` was kept to 9 files by
+hand. **Lesson (class: a clean merge that goes backwards):** after merging, run `node scripts/merge-regression-check.mjs
+<merge-commit>` (or `--branch <b> --target <t>` before merging); it lists files the merge changed that the branch never
+touched, and files where the result removes most of what one earlier commit added. Read each flagged file's diff.

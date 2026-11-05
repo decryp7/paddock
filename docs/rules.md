@@ -152,8 +152,13 @@ changes here, every app's copy is updated in the same change.
     pull request or lesson. The block gives date, commit, machine, load, build, synthetic corpus and generator, the exact
     command with env vars, the number and kind of runs, the numbers with the budget and verdict, and the memory measure
     (physical footprint, rule 26). The quoting document links to the block. A number without a block is not evidence for a
-    decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
-    machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
+    decision or a budget. A comparison is honest only if: both sides run the same query or operation; it uses the
+    product's real path (or says plainly that it does not); it runs at the size the product really uses; it reports cold
+    and warm runs, not only hot-loop medians; the baseline is the real alternative, named; and memory is the physical
+    footprint (rule 26). A headline number is not quoted to the user or in a decision until an independent review has
+    checked it (ER-34). *Why:* results were scattered across ADRs, branches and expiring job logs, often without
+    machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted; and on
+    2026-11-05 two research notes overstated gains (see [lessons.md](lessons.md)).
 
 ## Test isolation (user, 2026-10-29)
 49. **Specs never wait a fixed number of event-loop turns and never leave a patch behind.** Specs of one bundle share a
